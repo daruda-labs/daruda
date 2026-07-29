@@ -8,7 +8,6 @@
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
 use super::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
-use crate::ui::highlighter::LanguageRegistry;
 use crate::ui::theme as dt_theme;
 
 /// Capture names recognised by bundled queries. Duplicated because
@@ -141,17 +140,13 @@ pub(in crate::workspace) fn highlight_raw_rows(
 // ----------------------------------------------------------------
 
 /// Build a configured tree-sitter highlight configuration for the language
-/// resolved from `ext` (the registry resolves short names / extensions,
-/// e.g. `"rs"` → Rust). Returns `None` for unknown languages or invalid
-/// queries — the caller then leaves the text un-highlighted.
+/// resolved from `ext`. Returns `None` for unknown languages or invalid
+/// queries — the caller then leaves the text un-highlighted (the renderer
+/// uses the row's default colour) instead of emitting a default-coloured
+/// span per line.
 fn build_config(ext: &str) -> Option<HighlightConfiguration> {
-    let lang = LanguageRegistry::singleton().language(ext)?;
-    // Unknown extensions resolve to a "plain" language with no highlight
-    // query; leave that text un-highlighted (renderer uses the row's
-    // default colour) instead of emitting a default-coloured span per line.
-    if lang.highlights.trim().is_empty() {
-        return None;
-    }
+    let lang = daruda_core::language::from_extension(ext)
+        .and_then(crate::ui::highlighter::highlightable_config)?;
     let mut config = HighlightConfiguration::new(
         lang.language.clone(),
         lang.name.to_string(),
@@ -313,6 +308,31 @@ mod tests {
     }
 
     #[test]
+    fn highlight_raw_rows_colours_java_and_aliased_extensions() {
+        use super::super::{VisualRow, VisualRowKind};
+        let make = |content: &str| VisualRow {
+            kind: VisualRowKind::Plain,
+            line_no_left: String::new(),
+            line_no_right: String::new(),
+            content: content.to_owned(),
+            header_context: String::new(),
+            spans: Vec::new(),
+            word_changes: Vec::new(),
+        };
+
+        // `java` is a registry language name; `hpp` only resolves through
+        // the shared alias table. Both must reach a real highlight query.
+        for (ext, source) in [("java", "class A { int x = 1; }"), ("hpp", "int x = 1;")] {
+            let mut rows = vec![make(source)];
+            highlight_raw_rows(&mut rows, ext, "daruda", false);
+            assert!(
+                !rows[0].spans.is_empty(),
+                "{ext} should be highlighted, got no spans"
+            );
+        }
+    }
+
+    #[test]
     fn highlight_raw_rows_unknown_ext_is_plain() {
         use super::super::{VisualRow, VisualRowKind};
         let mut rows = vec![VisualRow {
@@ -431,6 +451,50 @@ mod tests {
             colored > 0,
             "gpui_component SyntaxHighlighter produced no coloured spans for \
              rust (raw editor path is broken): {styles:?}"
+        );
+    }
+
+    /// End-to-end reproduction of the reported bug: a `.java` file opened
+    /// in the **raw** file viewer showed no colour while `.rs` did. Drives
+    /// the exact chain the pane builds — resolve the extension, hand the
+    /// name to gpui_component's editor highlighter — for both, so a
+    /// regression in either the resolver or the registry fails here.
+    #[test]
+    fn raw_editor_highlighter_colours_java_like_rust() {
+        let cases = [
+            ("java", "class A {\n    int x = 1;\n}\n"),
+            ("rs", "fn main() {\n    let x = 1;\n}\n"),
+        ];
+        for (ext, code) in cases {
+            let language = crate::ui::highlighter::language_for_extension(ext);
+            let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(&language);
+            highlighter.update(None, &gpui_component::Rope::from_str(code));
+
+            let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+            let styles = highlighter.styles(&(0..code.len()), &theme);
+            let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
+            assert!(
+                colored > 0,
+                ".{ext} resolved to {language:?} but the raw editor path \
+                 produced no coloured spans"
+            );
+        }
+
+        // The defect itself: `.java` used to resolve to the empty string and
+        // the pane opened it as `PLAIN_LANGUAGE`, whose query is empty. Pin
+        // that down so the assertions above stay meaningful.
+        let (_, java) = cases[0];
+        let mut plain = gpui_component::highlighter::SyntaxHighlighter::new(
+            crate::ui::highlighter::PLAIN_LANGUAGE,
+        );
+        plain.update(None, &gpui_component::Rope::from_str(java));
+        let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+        assert!(
+            plain
+                .styles(&(0..java.len()), &theme)
+                .iter()
+                .all(|(_, s)| s.color.is_none()),
+            "the plain language must not colour anything"
         );
     }
 

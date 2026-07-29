@@ -312,27 +312,10 @@ pub(in crate::workspace) struct DiffStat {
 }
 
 /// Language id for an editor's syntax tree, from the diff's file extension.
-/// Empty when unknown (the editor falls back to `"text"`).
-pub(in crate::workspace) fn diff_editor_language(diff: &DiffView) -> &'static str {
-    match diff.path.extension_str() {
-        "rs" => "rust",
-        "js" | "mjs" | "cjs" => "javascript",
-        "ts" | "mts" | "cts" => "typescript",
-        "jsx" => "jsx",
-        "tsx" => "tsx",
-        "py" => "python",
-        "go" => "go",
-        "toml" => "toml",
-        "json" | "jsonc" => "json",
-        "yaml" | "yml" => "yaml",
-        "md" | "markdown" => "markdown",
-        "html" | "htm" => "html",
-        "css" => "css",
-        "sh" | "bash" | "zsh" => "bash",
-        "c" | "h" => "c",
-        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
-        _ => "",
-    }
+/// Resolves through the shared registry-backed resolver, so it never names a
+/// language the highlighter cannot load.
+pub(in crate::workspace) fn diff_editor_language(diff: &DiffView) -> gpui::SharedString {
+    crate::ui::highlighter::language_for_extension(diff.path.extension_str())
 }
 
 /// Convert a tool-call [`DiffView`] into the editor inputs the shared
@@ -424,15 +407,15 @@ pub(in crate::workspace) fn create_diff_editor(
             // — the diff body reads it to size the (parent-height-less) editor
             // to its full content instead of a collapsed single line.
             let rows = model.decorations.len().max(1);
+            // `language` selects CodeEditor mode (gutter, indent guides), not
+            // the colours: `set_highlight_override` below short-circuits the
+            // tree-sitter path entirely, because a synthetic +/- diff buffer
+            // is not valid source for any grammar.
             let mut state = gpui_component::input::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false);
-            state = if language.is_empty() {
-                state.code_editor("text")
-            } else {
-                state.code_editor(&language)
-            };
-            state = state.rows(rows);
+                .soft_wrap(false)
+                .code_editor(language)
+                .rows(rows);
             state.set_value(model.text, window, cx_state);
             state.set_disabled(true, cx_state);
             state.set_line_decorations(model.decorations, cx_state);

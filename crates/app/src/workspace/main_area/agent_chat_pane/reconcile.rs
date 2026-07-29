@@ -78,7 +78,8 @@ impl AgentChatView {
 
         // Collect the pure work first; entity creation re-enters the window,
         // which can't happen while the immutable `items` borrow is live.
-        let mut pending: Vec<(String, u64, String, DiffEditorModel, DiffStat)> = Vec::new();
+        let mut pending: Vec<(String, u64, gpui::SharedString, DiffEditorModel, DiffStat)> =
+            Vec::new();
         // A diff that converged to no hunks since its editor was built (the
         // rare reverted-mid-stream case) needs that stale editor dropped so
         // the body falls back to the "no changes" / inline render instead of
@@ -102,7 +103,7 @@ impl AgentChatView {
                     }
                     continue;
                 };
-                let language = diff_editor_language(diff).to_owned();
+                let language = diff_editor_language(diff);
                 pending.push((key, fingerprint, language, model, stat));
             }
         }

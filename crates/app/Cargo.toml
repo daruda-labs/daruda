@@ -21,6 +21,7 @@ path = "src/main.rs"
 screenshot = ["gpui/test-support", "gpui_macos/test-support"]
 
 [dependencies]
+daruda_core = { path = "../daruda_core" }
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

@@ -5,35 +5,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use super::file_view_pane::{CharPos, FileViewMode, PaneFileContent, PaneFileView, SelectionDrag};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
+use crate::path_ext::PathExt as _;
 use crate::workspace::Workspace;
-
-fn ext_to_language(path: &std::path::Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "rs" => "rust",
-        "js" | "mjs" | "cjs" => "javascript",
-        "ts" | "mts" | "cts" => "typescript",
-        "jsx" => "jsx",
-        "tsx" => "tsx",
-        "py" => "python",
-        "go" => "go",
-        "toml" => "toml",
-        "json" | "jsonc" => "json",
-        "yaml" | "yml" => "yaml",
-        "md" | "markdown" => "markdown",
-        "html" | "htm" => "html",
-        "css" => "css",
-        "sh" | "bash" | "zsh" => "bash",
-        "c" | "h" => "c",
-        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
-        _ => "",
-    }
-}
 
 impl Workspace {
     // ---- Focused-pane file-viewer accessors ----
@@ -200,17 +173,12 @@ impl Workspace {
         );
 
         let focus_handle = cx.focus_handle();
-        let language = ext_to_language(&path);
+        let language = crate::ui::highlighter::language_for_extension(path.extension_str());
         let editor_state = cx.new(|cx_state| {
-            let mut state = gpui_component::input::InputState::new(window, cx_state)
+            gpui_component::input::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false);
-            state = if language.is_empty() {
-                state.code_editor("text")
-            } else {
-                state.code_editor(language)
-            };
-            state
+                .soft_wrap(false)
+                .code_editor(language)
         });
         Pane {
             id: pane_id,

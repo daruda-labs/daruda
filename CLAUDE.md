@@ -13,6 +13,7 @@ daruda/
 ├── crates/
 │   ├── app/                  # main app binary (workspace, agent, ui, lane, surface)
 │   ├── daruda_acp/           # Agent Client Protocol client core (GPUI-free)
+│   ├── daruda_core/          # shared dependency-free utilities + core logic
 │   ├── daruda_config/        # config system (live reload)
 │   ├── daruda_store/         # persistence + observability (NDJSON log)
 │   ├── daruda_claude/        # Claude integration
@@ -244,7 +245,8 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_config     →  daruda_store
              →  daruda_store
              →  daruda_claude     →  daruda_store
-             →  daruda_acp                          # GPUI-free ACP client core
+             →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
+             →  daruda_core                         # shared, dependency-free
              →  daruda_update
              →  gpui, gpui_component, portable-pty
 ```
@@ -252,6 +254,8 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
 `gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above).
 
 `daruda_config` and `daruda_claude` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
+
+`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow and enforced by review, not tooling (a "core" name otherwise becomes a junk drawer): **no dependencies, two or more consumers, pure** (no I/O, no globals, background-executor safe). Anything failing one of those belongs in its own crate. Current contents: `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
 
 ### Cross-profile data isolation
 

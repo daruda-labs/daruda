@@ -1505,6 +1505,7 @@ dependencies = [
  "daruda_acp",
  "daruda_claude",
  "daruda_config",
+ "daruda_core",
  "daruda_store",
  "daruda_terminal",
  "daruda_update",
@@ -1556,6 +1557,7 @@ version = "0.2.7"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
+ "daruda_core",
  "futures",
  "semver",
  "serde",
@@ -1598,6 +1600,10 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
 ]
+
+[[package]]
+name = "daruda_core"
+version = "0.2.7"
 
 [[package]]
 name = "daruda_store"

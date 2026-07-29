@@ -30,41 +30,11 @@ pub(crate) fn output_language(
     }
     let path = raw_input.as_ref()?.get("file_path")?.as_str()?;
     let ext = path.rsplit_once('.').map(|(_, e)| e)?;
-    ext_to_language(ext)
-}
-
-/// Map a file extension to a highlight language token recognized by the
-/// client's syntax registry. `None` for unknown extensions.
-fn ext_to_language(ext: &str) -> Option<&'static str> {
-    let lang = match ext.to_ascii_lowercase().as_str() {
-        "rs" => "rust",
-        "py" | "pyi" => "python",
-        "js" | "jsx" | "mjs" | "cjs" => "javascript",
-        "ts" => "typescript",
-        "tsx" => "tsx",
-        "go" => "go",
-        "c" | "h" => "c",
-        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
-        "cs" => "csharp",
-        "java" => "java",
-        "rb" => "ruby",
-        "swift" => "swift",
-        "scala" => "scala",
-        "ex" | "exs" => "elixir",
-        "zig" => "zig",
-        "sh" | "bash" => "bash",
-        "sql" => "sql",
-        "html" | "htm" => "html",
-        "css" | "scss" => "css",
-        "json" | "jsonc" => "json",
-        "yaml" | "yml" => "yaml",
-        "toml" => "toml",
-        "md" | "markdown" | "mdx" => "markdown",
-        "proto" => "proto",
-        "graphql" | "gql" => "graphql",
-        _ => return None,
-    };
-    Some(lang)
+    // Shared with the app so the fence token and the file viewer agree on
+    // what a given extension is. Whether the client can actually colour
+    // that language is the client's call, not this crate's — an unknown
+    // token renders as an untagged block, the same as emitting none.
+    daruda_core::language::from_extension(ext)
 }
 
 /// Rewrite one tool-output text block so its leading bare ``` ``` ``` fence

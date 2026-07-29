@@ -58,7 +58,7 @@ ui/
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
 ├── disclosure.rs   # disclosure(id, is_open) — stateless chevron toggle (ChevronDown open / ChevronRight closed; .color()/.size()/.on_toggle()); caller owns fold state
 ├── group_box.rs    # group_box() factory over gpui_component::GroupBox (.outline()/.fill()/title)
-├── highlighter.rs  # LanguageRegistry / LanguageConfig re-export (tree-sitter language data; GPUI-free, used by the file-viewer highlighter)
+├── highlighter.rs  # LanguageRegistry / LanguageConfig re-export + `language_for_extension` — the one extension→language resolver for every highlighting surface. Layers registry *capability* (non-empty highlight query) over the extension→language *identity* in `daruda_core::language`; unresolvable → `PLAIN_LANGUAGE`
 ├── divider.rs      # Divider re-export
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
 ├── markdown.rs     # markdown(id, text) — rendered, drag-selectable/copyable markdown over gpui_component::text::TextView (RenderOnce; .selectable()/.color()/.text_size()/.full_width())
