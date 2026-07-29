@@ -1,0 +1,105 @@
+--- a/crates/gpui_component/src/input/state.rs
++++ b/crates/gpui_component/src/input/state.rs
+@@ -2324,6 +2324,80 @@ impl InputState {
+     }
+ }
+ 
++fn selected_range_for_marked_text(
++    marked_range: Range<usize>,
++    new_text: &str,
++    new_selected_range_utf16: Option<&Range<usize>>,
++) -> Range<usize> {
++    // AppKit's selectedRange for setMarkedText is relative to the marked string.
++    let Some(new_selected_range_utf16) = new_selected_range_utf16 else {
++        return marked_range.end..marked_range.end;
++    };
++
++    let start = utf16_offset_to_byte_offset(new_text, new_selected_range_utf16.start, Bias::Left);
++    let end = utf16_offset_to_byte_offset(new_text, new_selected_range_utf16.end, Bias::Right);
++    marked_range.start + start..marked_range.start + end
++}
++
++fn utf16_offset_to_byte_offset(text: &str, offset_utf16: usize, bias: Bias) -> usize {
++    let mut current_utf16 = 0;
++    for (byte_offset, ch) in text.char_indices() {
++        if offset_utf16 == current_utf16 {
++            return byte_offset;
++        }
++
++        let next_utf16 = current_utf16 + ch.len_utf16();
++        if offset_utf16 < next_utf16 {
++            return if bias == Bias::Left {
++                byte_offset
++            } else {
++                byte_offset + ch.len_utf8()
++            };
++        }
++        current_utf16 = next_utf16;
++    }
++
++    text.len()
++}
++
++#[cfg(test)]
++mod ime_tests {
++    use super::*;
++
++    #[test]
++    fn ascii_marked_selection_uses_relative_offsets() {
++        assert_eq!(
++            selected_range_for_marked_text(10..12, "ab", Some(&(1..1))),
++            11..11
++        );
++        assert_eq!(
++            selected_range_for_marked_text(10..12, "ab", Some(&(1..2))),
++            11..12
++        );
++    }
++
++    #[test]
++    fn hangul_marked_selection_uses_utf8_width_not_document_utf16_offset() {
++        assert_eq!(
++            selected_range_for_marked_text(140..143, "음", Some(&(1..1))),
++            143..143
++        );
++    }
++
++    #[test]
++    fn cjk_marked_selection_uses_relative_offsets() {
++        assert_eq!(
++            selected_range_for_marked_text(20..26, "中文", Some(&(1..2))),
++            23..26
++        );
++    }
++
++    #[test]
++    fn missing_marked_selection_defaults_to_end_of_marked_text() {
++        assert_eq!(selected_range_for_marked_text(5..8, "나", None), 8..8);
++    }
++}
++
+ impl EntityInputHandler for InputState {
+     fn text_for_range(
+         &mut self,
+@@ -2494,13 +2568,14 @@ impl EntityInputHandler for InputState {
+             self.selected_range = (range.start..range.start).into();
+             self.ime_marked_range = None;
+         } else {
+-            self.ime_marked_range = Some((range.start..range.start + new_text.len()).into());
+-            self.selected_range = new_selected_range_utf16
+-                .as_ref()
+-                .map(|range_utf16| self.range_from_utf16(range_utf16))
+-                .map(|new_range| new_range.start + range.start..new_range.end + range.end)
+-                .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len())
+-                .into();
++            let marked_range = range.start..range.start + new_text.len();
++            self.ime_marked_range = Some(marked_range.clone().into());
++            self.selected_range = selected_range_for_marked_text(
++                marked_range,
++                new_text,
++                new_selected_range_utf16.as_ref(),
++            )
++            .into();
+         }
+         self.mode.update_auto_grow(&self.text_wrapper);
+         self.history.start_grouping();

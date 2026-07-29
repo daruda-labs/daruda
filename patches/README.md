@@ -20,6 +20,25 @@ Patch contents: route non-ASCII `key_char` (Korean jamo, Japanese
 kana, …) through macOS IME-first dispatch (PATH A) so composition
 works during IMK Mach Port initialization delays.
 
+## `gpui-component-input-state-ime-selection.patch`
+
+Targets the **vendored `crates/gpui_component/src/input/state.rs`**
+inside this repository. This patch is **already applied** to the file
+on disk and records daruda's IME selection-range fix for re-vendoring.
+After replacing `state.rs` from upstream, re-apply it from the repo
+root:
+
+```bash
+git apply patches/gpui-component-input-state-ime-selection.patch
+```
+
+Patch contents: treat AppKit's `selectedRange` for `setMarkedText` as
+relative to the marked string, convert those UTF-16 offsets inside the
+new marked text to UTF-8 byte offsets, then store the resulting
+document-relative selection. This keeps Korean/CJK IME composition
+inside the document at non-zero offsets instead of feeding relative
+UTF-16 offsets through the document-wide converter.
+
 ## `gpui-component-root.patch`
 
 Targets the **vendored `crates/gpui_component/src/root.rs`** inside
