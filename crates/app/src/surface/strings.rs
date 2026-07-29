@@ -3711,6 +3711,24 @@ pub fn annotation_dialog_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
 
+/// Why a branch name was rejected, for the inline label under the field.
+/// One arm per `daruda_core::git::BranchNameRule` so a new rule is a
+/// compile error here rather than a silently unlabelled failure.
+pub fn branch_rule_reason(rule: daruda_core::git::BranchNameRule) -> String {
+    use daruda_core::git::BranchNameRule as R;
+    match rule {
+        // `Empty` never reaches here — the form treats a blank field as
+        // "derive from the title", not as an error.
+        R::Empty => rust_i18n::t!("create_lane.err_branch_required").into_owned(),
+        R::DoubleDot => rust_i18n::t!("branch_rule.double_dot").into_owned(),
+        R::EdgeSlash => rust_i18n::t!("branch_rule.edge_slash").into_owned(),
+        R::EdgeDot => rust_i18n::t!("branch_rule.edge_dot").into_owned(),
+        R::ControlChar => rust_i18n::t!("branch_rule.control_char").into_owned(),
+        R::Space => rust_i18n::t!("branch_rule.space").into_owned(),
+        R::Reserved(ch) => rust_i18n::t!("branch_rule.reserved", ch = ch).into_owned(),
+    }
+}
+
 pub fn create_lane_err_branch_required() -> String {
     rust_i18n::t!("create_lane.err_branch_required").into_owned()
 }

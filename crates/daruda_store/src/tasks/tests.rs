@@ -11,7 +11,6 @@ use super::prompt_file::{
     PROMPT_DIR_NAME, build_claude_command, render_task_prompt, task_prompt_file_path,
     write_prompt_file,
 };
-use super::sanitize::sanitize_branch_name;
 use super::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
     TaskState, TasksState,
@@ -514,42 +513,6 @@ fn derive_branch_name_handles_korean_title() {
     // CJK characters. Truncation must be character-based, not byte-based.
     let b = derive_branch_name("한글-제목-입니다", "01HXabcd");
     assert_eq!(b, "한글-제목-입니다-01hx");
-}
-
-// ---------------------------------------------------------------------------
-// sanitize parity (a subset of lane_ops::sanitize_branch_name cases)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn sanitize_branch_name_rejects_obvious_bad_inputs() {
-    assert_eq!(sanitize_branch_name(""), None);
-    assert_eq!(sanitize_branch_name("   "), None);
-    assert_eq!(sanitize_branch_name("foo bar"), None); // space
-    assert_eq!(sanitize_branch_name("foo:bar"), None);
-    assert_eq!(sanitize_branch_name("foo~bar"), None);
-    assert_eq!(sanitize_branch_name("foo^bar"), None);
-    assert_eq!(sanitize_branch_name("foo?bar"), None);
-    assert_eq!(sanitize_branch_name("foo*bar"), None);
-    assert_eq!(sanitize_branch_name("foo[bar"), None);
-    assert_eq!(sanitize_branch_name("foo\\bar"), None);
-    assert_eq!(sanitize_branch_name("foo\u{0007}"), None); // control
-    assert_eq!(sanitize_branch_name("foo..bar"), None);
-    assert_eq!(sanitize_branch_name("/foo"), None);
-    assert_eq!(sanitize_branch_name("foo/"), None);
-    assert_eq!(sanitize_branch_name(".foo"), None);
-    assert_eq!(sanitize_branch_name("foo."), None);
-}
-
-#[test]
-fn sanitize_branch_name_accepts_typical_kebab() {
-    assert_eq!(
-        sanitize_branch_name("fix-auth-bug").as_deref(),
-        Some("fix-auth-bug"),
-    );
-    assert_eq!(
-        sanitize_branch_name("feature/login").as_deref(),
-        Some("feature/login"),
-    );
 }
 
 // ---------------------------------------------------------------------------

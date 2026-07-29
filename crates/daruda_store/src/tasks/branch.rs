@@ -6,7 +6,7 @@
 //! reserved characters), fall back to `task-<ulid8>` so we always have
 //! a usable branch name.
 
-use super::sanitize::sanitize_branch_name;
+use daruda_core::git::sanitize_branch_name;
 
 /// Maximum length of the title segment before the ULID suffix.
 const MAX_TITLE_CHARS: usize = 40;

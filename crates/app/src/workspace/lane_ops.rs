@@ -865,34 +865,6 @@ fn resolved_lane_base_ref(
     requested.or_else(|| base_branch.or(default_branch).map(str::to_owned))
 }
 
-/// Minimal branch-name guard — blocks the obvious foot-guns that git
-/// itself would reject (spaces, path-reserved characters, `..`,
-/// leading/trailing slash, control chars). Git's full rule set is
-/// richer; this is a preflight filter so the modal can surface a
-/// helpful error before shelling out.
-pub(in crate::workspace) fn sanitize_branch_name(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    // git-check-ref-format rules we preflight here: no `..`, no
-    // leading/trailing `/`, no leading `.` (rule 6), no shell-hostile
-    // or protocol-reserved characters, no control chars.
-    if trimmed.contains("..")
-        || trimmed.starts_with('/')
-        || trimmed.ends_with('/')
-        || trimmed.starts_with('.')
-        || trimmed.ends_with('.')
-    {
-        return None;
-    }
-    let bad = [' ', ':', '~', '^', '?', '*', '[', '\\'];
-    if trimmed.chars().any(|c| bad.contains(&c) || c.is_control()) {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::resolved_lane_base_ref;

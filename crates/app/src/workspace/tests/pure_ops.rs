@@ -229,7 +229,7 @@ fn test_adjust_divider_changes_ratios() {
 
 #[test]
 fn test_sanitize_branch_name_rejects_bad_inputs() {
-    use super::super::lane_ops::sanitize_branch_name;
+    use daruda_core::git::sanitize_branch_name;
     assert!(sanitize_branch_name("").is_none());
     assert!(sanitize_branch_name("   ").is_none());
     assert!(sanitize_branch_name("..").is_none());

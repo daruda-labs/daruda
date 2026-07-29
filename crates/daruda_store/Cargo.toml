@@ -10,6 +10,7 @@ description = "Domain data models and persistence for daruda — panels, project
 workspace = true
 
 [dependencies]
+daruda_core = { path = "../daruda_core" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 dirs = "6"
 serde = { version = "1", features = ["derive"] }

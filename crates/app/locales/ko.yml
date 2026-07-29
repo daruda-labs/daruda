@@ -884,6 +884,16 @@ code_block:
   copy: "코드 복사"
   copied: "복사됨"
 
+# Why a branch name was rejected — rendered under the TaskEdit branch field.
+# Mirrors daruda_core::git::BranchNameRule.
+branch_rule:
+  double_dot: "'..'를 포함할 수 없습니다"
+  edge_slash: "'/'로 시작하거나 끝날 수 없습니다"
+  edge_dot: "'.'로 시작하거나 끝날 수 없습니다"
+  control_char: "제어 문자가 포함되어 있습니다"
+  space: "공백을 포함할 수 없습니다"
+  reserved: "'%{ch}'를 포함할 수 없습니다"
+
 # Create lane modal validation errors
 create_lane:
   err_branch_required: "브랜치 이름을 입력해 주세요."

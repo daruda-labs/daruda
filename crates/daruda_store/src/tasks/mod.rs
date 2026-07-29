@@ -18,7 +18,9 @@
 pub mod branch;
 pub mod persistence;
 pub mod prompt_file;
-pub mod sanitize;
+/// Branch-name rules live in `daruda_core::git` — shared with the app so a
+/// form's diagnostics and this crate's silent filter cannot drift apart.
+pub use daruda_core::git::sanitize_branch_name;
 pub mod task;
 
 #[cfg(test)]

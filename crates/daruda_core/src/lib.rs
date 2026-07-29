@@ -28,5 +28,6 @@
 //! guard, and they are enforced by review rather than tooling: if a
 //! proposed addition fails one of them, it belongs elsewhere.
 
+pub mod git;
 pub mod language;
 pub mod text;

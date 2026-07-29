@@ -884,6 +884,16 @@ code_block:
   copy: "Copy code"
   copied: "Copied"
 
+# Why a branch name was rejected — rendered under the TaskEdit branch field.
+# Mirrors daruda_core::git::BranchNameRule.
+branch_rule:
+  double_dot: "cannot contain '..'"
+  edge_slash: "cannot start or end with '/'"
+  edge_dot: "cannot start or end with '.'"
+  control_char: "contains a control character"
+  space: "cannot contain spaces"
+  reserved: "cannot contain '%{ch}'"
+
 # Create lane modal validation errors
 create_lane:
   err_branch_required: "Branch name is required."

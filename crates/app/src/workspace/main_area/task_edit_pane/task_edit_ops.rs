@@ -5,12 +5,10 @@
 //! module owns the *operations* (open, save, validate, find existing)
 //! that the renderer + status_pill + Tasks-tab row click dispatch into.
 //!
-//! Branch validation mirrors `daruda_store::tasks::sanitize_branch_name`
-//! but returns a `BranchValidation` enum with the specific failure
-//! reason so the form can display "cannot contain space" etc. inline.
-//! The two implementations must stay in sync — `sanitize_branch_name`
-//! is the source of truth for "what git accepts" and `validate_branch`
-//! is the user-facing diagnostic surface.
+//! Branch validation runs the shared `daruda_core::git` rule walk and
+//! renders the rule it broke, so the form's inline diagnostic and the
+//! silent filter behind `sanitize_branch_name` can never disagree on what
+//! git accepts.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -26,50 +24,17 @@ use crate::workspace::main_area::pane::{
 };
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
-/// Validate a branch-input string against the same rules as
-/// `daruda_store::tasks::sanitize_branch_name`, but report which
-/// rule was violated so the form can show a precise red label.
+/// Validate a branch-input string, reporting which rule it broke so the
+/// form can show a precise red label. An empty field is not an error — Save
+/// derives the branch from the title at submit time.
 pub(in crate::workspace) fn validate_branch(text: &str) -> BranchValidation {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return BranchValidation::Empty;
+    match daruda_core::git::validate_branch_name(text) {
+        Ok(_) => BranchValidation::Valid,
+        Err(daruda_core::git::BranchNameRule::Empty) => BranchValidation::Empty,
+        Err(rule) => BranchValidation::Invalid {
+            reason: SharedString::from(crate::surface::strings::branch_rule_reason(rule)),
+        },
     }
-    if trimmed.contains("..") {
-        return BranchValidation::Invalid {
-            reason: "cannot contain '..'".into(),
-        };
-    }
-    if trimmed.starts_with('/') || trimmed.ends_with('/') {
-        return BranchValidation::Invalid {
-            reason: "cannot start or end with '/'".into(),
-        };
-    }
-    if trimmed.starts_with('.') || trimmed.ends_with('.') {
-        return BranchValidation::Invalid {
-            reason: "cannot start or end with '.'".into(),
-        };
-    }
-    for c in trimmed.chars() {
-        if c.is_control() {
-            return BranchValidation::Invalid {
-                reason: "contains a control character".into(),
-            };
-        }
-        match c {
-            ' ' => {
-                return BranchValidation::Invalid {
-                    reason: "cannot contain spaces".into(),
-                };
-            }
-            ':' | '~' | '^' | '?' | '*' | '[' | '\\' => {
-                return BranchValidation::Invalid {
-                    reason: SharedString::from(format!("cannot contain '{c}'")),
-                };
-            }
-            _ => {}
-        }
-    }
-    BranchValidation::Valid
 }
 
 impl Workspace {
