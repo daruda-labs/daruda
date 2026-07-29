@@ -48,10 +48,19 @@ pub struct PaneRef {
     pub pane: u64,
 }
 
-/// The host's decision on a permission request — deliberately not
-/// `daruda_acp::session::PermissionDecision` (this file must not depend
-/// on `daruda_acp`). The poll-loop task converts it into the real ACP
-/// type at `AcpSessionHandle::respond_permission`.
+/// What a phone button press means: the option the user picked, and which
+/// way they picked it.
+///
+/// Narrower than `daruda_acp::PermissionDecision` on purpose, and not merely
+/// because this file avoids depending on `daruda_acp`. That type is the
+/// answer sent back to the agent, so it also carries `Cancelled` — nobody
+/// decided, the turn died. A button press is always a decision, so giving
+/// this enum a `Cancelled` variant would make an unreachable state
+/// constructible here.
+///
+/// `Workspace::respond_bot_permission` maps this to an option id plus a
+/// `PermissionKindView` and routes it through the pane, which is what builds
+/// the ACP-side decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionDecision {
     Allow(String),
