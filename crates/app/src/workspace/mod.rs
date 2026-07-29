@@ -791,7 +791,7 @@ impl Workspace {
         // Layer the project-local override (currently `[shell]` only)
         // on top of the user-global config so the workspace boots with
         // the right shell program for its project.
-        let effective = config_ops::effective_config_for(project.as_ref(), config);
+        let effective = config_ops::effective_config_for(project.as_ref(), config, &data_dir);
         let config = &effective;
 
         // Ensure app-wide Globals exist before any constructor code

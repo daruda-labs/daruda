@@ -119,64 +119,42 @@ mod word_range_tests {
     }
 
     #[test]
-    fn word_range_ascii_word() {
-        let s = "hello world";
-        assert_eq!(word(s, 0).as_deref(), Some("hello"));
-        assert_eq!(word(s, 4).as_deref(), Some("hello"));
-        assert_eq!(word(s, 6).as_deref(), Some("world"));
-    }
-
-    #[test]
-    fn word_range_underscore_connects() {
-        let s = "foo_bar baz";
-        assert_eq!(word(s, 2).as_deref(), Some("foo_bar"));
-        assert_eq!(word(s, 7).as_deref(), Some(" "));
-        assert_eq!(word(s, 8).as_deref(), Some("baz"));
-    }
-
-    #[test]
-    fn word_range_punctuation_is_single() {
-        let s = "a.b[c]";
-        assert_eq!(word(s, 1).as_deref(), Some("."));
-        assert_eq!(word(s, 3).as_deref(), Some("["));
-        assert_eq!(word(s, 5).as_deref(), Some("]"));
-    }
-
-    #[test]
-    fn word_range_multibyte_cjk() {
-        // "中文" — 3 bytes each; both are letters so they form one word.
-        let s = "中文";
-        assert_eq!(word(s, 0).as_deref(), Some("中文"));
-        assert_eq!(word(s, 3).as_deref(), Some("中文"));
-    }
-
-    #[test]
-    fn word_range_hangul_double_click() {
-        // The regression: double-clicking Hangul must select the whole word,
-        // not one syllable and not nothing. Space-delimited so it stops there.
-        let s = "한글 테스트";
-        assert_eq!(word(s, 0).as_deref(), Some("한글"));
-        assert_eq!(word(s, 3).as_deref(), Some("한글")); // second syllable
-        assert_eq!(word(s, 7).as_deref(), Some("테스트"));
-    }
-
-    #[test]
-    fn word_range_out_of_bounds_is_none() {
-        let s = "hi";
-        assert_eq!(word(s, 2), None); // offset == len
-        assert_eq!(word(s, 99), None);
+    fn word_range_cases() {
+        for (text, offset, expected) in [
+            ("hello world", 0, Some("hello")),
+            ("hello world", 4, Some("hello")),
+            ("hello world", 6, Some("world")),
+            ("foo_bar baz", 2, Some("foo_bar")),
+            ("foo_bar baz", 7, Some(" ")),
+            ("foo_bar baz", 8, Some("baz")),
+            ("a.b[c]", 1, Some(".")),
+            ("a.b[c]", 3, Some("[")),
+            ("a.b[c]", 5, Some("]")),
+            ("中文", 0, Some("中文")),
+            ("中文", 3, Some("中文")),
+            ("한글 테스트", 0, Some("한글")),
+            ("한글 테스트", 3, Some("한글")),
+            ("한글 테스트", 7, Some("테스트")),
+            ("hi", 2, None),
+            ("hi", 99, None),
+        ] {
+            assert_eq!(word(text, offset).as_deref(), expected, "{text}:{offset}");
+        }
     }
 
     #[test]
     fn char_type_classification() {
-        assert_eq!(CharType::from_char('a'), CharType::Word);
-        assert_eq!(CharType::from_char('_'), CharType::Word);
-        assert_eq!(CharType::from_char(' '), CharType::Whitespace);
-        assert_eq!(CharType::from_char('\n'), CharType::Newline);
-        assert_eq!(CharType::from_char('.'), CharType::Other);
-        // CJK / Hangul are letters → Word (so double-click selects them).
-        assert_eq!(CharType::from_char('中'), CharType::Word);
-        assert_eq!(CharType::from_char('글'), CharType::Word);
+        for (ch, expected) in [
+            ('a', CharType::Word),
+            ('_', CharType::Word),
+            (' ', CharType::Whitespace),
+            ('\n', CharType::Newline),
+            ('.', CharType::Other),
+            ('中', CharType::Word),
+            ('글', CharType::Word),
+        ] {
+            assert_eq!(CharType::from_char(ch), expected, "{ch}");
+        }
     }
 }
 
@@ -193,26 +171,19 @@ mod text_view_select_mode_tests {
         s[byte_offset..].chars().next()
     }
 
-    /// SelectMode variants must match their click counts.
-    /// Calls the real `select_mode_for_click_count` production function.
     #[test]
-    fn select_mode_from_click_count() {
-        assert_eq!(select_mode_for_click_count(1), SelectMode::Character);
-        assert_eq!(select_mode_for_click_count(2), SelectMode::Word);
-        assert_eq!(select_mode_for_click_count(3), SelectMode::Line);
-        assert_eq!(select_mode_for_click_count(4), SelectMode::All);
-        assert_eq!(select_mode_for_click_count(10), SelectMode::All);
-    }
-
-    /// Word/Line/All modes signal "has selection" even without a drag.
-    /// Verified via select_mode_for_click_count — same mapping used at runtime.
-    #[test]
-    fn word_line_all_expand_without_drag() {
-        let expands = |n: usize| !matches!(select_mode_for_click_count(n), SelectMode::Character);
-        assert!(!expands(1)); // Character — only expands on drag
-        assert!(expands(2)); // Word
-        assert!(expands(3)); // Line
-        assert!(expands(4)); // All
+    fn select_mode_cases() {
+        for (clicks, expected, expands) in [
+            (1, SelectMode::Character, false),
+            (2, SelectMode::Word, true),
+            (3, SelectMode::Line, true),
+            (4, SelectMode::All, true),
+            (10, SelectMode::All, true),
+        ] {
+            let mode = select_mode_for_click_count(clicks);
+            assert_eq!(mode, expected, "{clicks}");
+            assert_eq!(!matches!(mode, SelectMode::Character), expands, "{clicks}");
+        }
     }
 
     /// Word expansion: raw byte range is expanded to word boundaries.
@@ -240,33 +211,24 @@ mod text_view_select_mode_tests {
         assert_eq!(&text[r], " ");
     }
 
-    /// Logical line range: `logical_line_range` returns the full newline-
-    /// delimited line containing `offset`.  Calls the real production function.
     #[test]
-    fn logical_line_range_returns_correct_line() {
+    fn logical_line_range_cases() {
         let text = "hello\nworld\nfoo";
         let char_at = |i: usize| str_char_at(text, i);
         let len = text.len();
 
-        // Offset 2 in "hello" → line 0..5.
-        assert_eq!(logical_line_range(len, char_at, 2), 0..5);
-        // Offset 0 (start of text) → line 0..5.
-        assert_eq!(logical_line_range(len, char_at, 0), 0..5);
-        // Offset 7 in "world" → line 6..11.
-        assert_eq!(logical_line_range(len, char_at, 7), 6..11);
-        // Offset 12 in "foo" → line 12..15.
-        assert_eq!(logical_line_range(len, char_at, 12), 12..15);
-        // End of text (last line, no trailing newline) → line 12..15.
-        assert_eq!(logical_line_range(len, char_at, 14), 12..15);
-    }
+        for (offset, expected) in [(2, 0..5), (0, 0..5), (7, 6..11), (12, 12..15), (14, 12..15)] {
+            assert_eq!(
+                logical_line_range(len, char_at, offset),
+                expected,
+                "{offset}"
+            );
+        }
 
-    /// On text with no newlines `logical_line_range` always returns 0..len.
-    #[test]
-    fn logical_line_range_single_line_text() {
-        let text = "hello world";
-        let char_at = |i: usize| str_char_at(text, i);
-        assert_eq!(logical_line_range(text.len(), char_at, 0), 0..11);
-        assert_eq!(logical_line_range(text.len(), char_at, 5), 0..11);
+        let single_line = "hello world";
+        let char_at = |i: usize| str_char_at(single_line, i);
+        assert_eq!(logical_line_range(single_line.len(), char_at, 0), 0..11);
+        assert_eq!(logical_line_range(single_line.len(), char_at, 5), 0..11);
     }
 
     /// Line drag union: dragging from one line into another extends the

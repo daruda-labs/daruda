@@ -43,6 +43,11 @@ impl ProjectConfig {
         Self::load_from(&path)
     }
 
+    /// Read the project layer using an explicit profile data directory.
+    pub fn load_in(data_dir: &Path, repo_root: &Path) -> Self {
+        Self::load_from(&project_config_path_in(data_dir, repo_root))
+    }
+
     /// Read from an explicit path. Useful for tests that don't go
     /// through `dirs::config_dir()`.
     pub fn load_from(path: &Path) -> Self {
@@ -73,13 +78,28 @@ pub fn project_id(repo_root: &Path) -> String {
 /// infallible (it falls back to `./daruda` with a logged warning rather
 /// than failing).
 pub fn project_config_dir(repo_root: &Path) -> Option<PathBuf> {
-    let base = daruda_store::persistence::default_data_dir().join("projects");
-    Some(base.join(project_dir_name(repo_root)))
+    Some(project_config_dir_in(
+        &daruda_store::persistence::default_data_dir(),
+        repo_root,
+    ))
 }
 
 /// `<project_config_dir>/config.toml`.
 pub fn project_config_path(repo_root: &Path) -> Option<PathBuf> {
-    Some(project_config_dir(repo_root)?.join("config.toml"))
+    Some(project_config_path_in(
+        &daruda_store::persistence::default_data_dir(),
+        repo_root,
+    ))
+}
+
+/// `<profile-scoped data dir>/projects/<basename>-<hash>/`.
+pub fn project_config_dir_in(data_dir: &Path, repo_root: &Path) -> PathBuf {
+    data_dir.join("projects").join(project_dir_name(repo_root))
+}
+
+/// `<project_config_dir_in>/config.toml`.
+pub fn project_config_path_in(data_dir: &Path, repo_root: &Path) -> PathBuf {
+    project_config_dir_in(data_dir, repo_root).join("config.toml")
 }
 
 /// Return `<safe-basename>-<hash>` with non-alphanumeric basename

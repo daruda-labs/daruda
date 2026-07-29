@@ -12,7 +12,7 @@ impl Workspace {
         let proj = self
             .active_project()
             .map(|p| daruda_store::project::Project::from_path(p.root.clone()));
-        let effective = effective_config_for(proj.as_ref(), user);
+        let effective = effective_config_for(proj.as_ref(), user, &self.data_dir);
         self.apply_config(&effective, cx);
     }
 
@@ -347,9 +347,10 @@ impl Workspace {
 pub(in crate::workspace) fn effective_config_for(
     project: Option<&daruda_store::project::Project>,
     user: &daruda_config::Config,
+    data_dir: &std::path::Path,
 ) -> daruda_config::Config {
     let project_cfg = project
-        .map(|p| daruda_config::ProjectConfig::load_for(&p.root))
+        .map(|p| daruda_config::ProjectConfig::load_in(data_dir, &p.root))
         .unwrap_or_default();
     user.clone().resolve(&project_cfg)
 }

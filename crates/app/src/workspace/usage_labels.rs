@@ -73,39 +73,21 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_windows_keep_the_labels_they_had_before_the_duration_switch() {
-        assert_eq!(window_label(&window(5 * HOUR, WindowScope::Overall)), "5h");
-        assert_eq!(window_label(&window(7 * DAY, WindowScope::Overall)), "7d");
-        assert_eq!(
-            window_label(&window(7 * DAY, WindowScope::Opus)),
-            "7d · Opus"
-        );
-    }
-
-    /// Codex reports its monthly window as 2_628_000 s — a hair under a mean
-    /// month, and not a whole number of days.
-    #[test]
-    fn the_codex_monthly_window_labels_as_one_month() {
-        assert_eq!(
-            window_label(&window(2_628_000, WindowScope::Overall)),
-            "1mo"
-        );
-    }
-
-    #[test]
-    fn sub_hour_windows_label_in_minutes() {
-        assert_eq!(
-            window_label(&window(30 * MINUTE, WindowScope::Overall)),
-            "30m"
-        );
-        // Floored at one unit rather than reading "0m".
-        assert_eq!(window_label(&window(5, WindowScope::Overall)), "1m");
-    }
-
-    #[test]
-    fn four_weeks_is_the_last_length_counted_in_days() {
-        assert_eq!(window_label(&window(28 * DAY, WindowScope::Overall)), "28d");
-        assert_eq!(window_label(&window(29 * DAY, WindowScope::Overall)), "1mo");
+    fn window_labels_cover_duration_and_scope_boundaries() {
+        for (secs, scope, expected) in [
+            (5, WindowScope::Overall, "1m"),
+            (30 * MINUTE, WindowScope::Overall, "30m"),
+            (5 * HOUR, WindowScope::Overall, "5h"),
+            (7 * DAY, WindowScope::Overall, "7d"),
+            (7 * DAY, WindowScope::Opus, "7d · Opus"),
+            (28 * DAY, WindowScope::Overall, "28d"),
+            (29 * DAY, WindowScope::Overall, "1mo"),
+            // Codex reports its monthly window as a hair under a mean month,
+            // not a whole number of days.
+            (2_628_000, WindowScope::Overall, "1mo"),
+        ] {
+            assert_eq!(window_label(&window(secs, scope)), expected, "{secs}");
+        }
     }
 
     #[test]

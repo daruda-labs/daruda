@@ -10,6 +10,8 @@ use daruda_store::accounts::{AccountId, AccountSelection};
 use daruda_store::project::PaneCwd;
 
 /// An Agent chat pane pinned to `selection`, pushed onto the active runtime.
+/// These account tests inspect host-side routing only; no cwd keeps the pane
+/// offline so account switches don't spawn a live ACP reconnect.
 fn seed_agent_pane(
     ws: &mut Workspace,
     selection: AccountSelection,
@@ -17,7 +19,7 @@ fn seed_agent_pane(
     cx: &mut Context<Workspace>,
 ) -> PaneId {
     let mut pane = ws.create_agent_chat_pane(
-        Some(PaneCwd::Local(std::env::temp_dir())),
+        None,
         None,
         daruda_config::AgentDefinition::claude_default().id,
         None,

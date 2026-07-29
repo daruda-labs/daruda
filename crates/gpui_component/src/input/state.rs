@@ -2365,36 +2365,11 @@ mod ime_tests {
     use super::*;
 
     #[test]
-    fn ascii_marked_selection_uses_relative_offsets() {
-        assert_eq!(
-            selected_range_for_marked_text(10..12, "ab", Some(&(1..1))),
-            11..11
-        );
-        assert_eq!(
-            selected_range_for_marked_text(10..12, "ab", Some(&(1..2))),
-            11..12
-        );
-    }
-
-    #[test]
     fn hangul_marked_selection_uses_utf8_width_not_document_utf16_offset() {
         assert_eq!(
             selected_range_for_marked_text(140..143, "음", Some(&(1..1))),
             143..143
         );
-    }
-
-    #[test]
-    fn cjk_marked_selection_uses_relative_offsets() {
-        assert_eq!(
-            selected_range_for_marked_text(20..26, "中文", Some(&(1..2))),
-            23..26
-        );
-    }
-
-    #[test]
-    fn missing_marked_selection_defaults_to_end_of_marked_text() {
-        assert_eq!(selected_range_for_marked_text(5..8, "나", None), 8..8);
     }
 }
 

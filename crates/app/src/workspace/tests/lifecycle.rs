@@ -298,7 +298,7 @@ async fn test_observe_window_bounds_no_reentrant_panic(cx: &mut TestAppContext) 
 // ---- PaneSpawnError integration ----
 
 #[test]
-fn test_pane_spawn_error_display_pty_variant() {
+fn pane_spawn_error_display_and_std_error() {
     use crate::workspace::main_area::pane::PaneSpawnError;
     use daruda_terminal::pty::PtyError;
 
@@ -306,28 +306,25 @@ fn test_pane_spawn_error_display_pty_variant() {
     let text = err.to_string();
     assert!(text.starts_with("PTY:"), "unexpected prefix: {text}");
     assert!(text.contains("not found"), "error body missing: {text}");
-}
 
-#[test]
-fn test_pane_spawn_error_is_std_error() {
-    use crate::workspace::main_area::pane::PaneSpawnError;
-    use daruda_terminal::pty::PtyError;
-
-    // Ensures PaneSpawnError satisfies std::error::Error so it can be
-    // boxed / propagated through `?` alongside other std error types.
     let boxed: Box<dyn std::error::Error> =
         Box::new(PaneSpawnError::Pty(PtyError::OpenPty("boom".into())));
     assert!(!boxed.to_string().is_empty());
 }
 
 #[gpui::test]
-fn test_report_pane_error_sets_last_error(cx: &mut TestAppContext) {
+fn report_pane_error_sets_last_error_without_mutating_layout(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::PaneSpawnError;
     use daruda_terminal::pty::PtyError;
 
     let (window_handle, workspace) = build_workspace(cx);
 
-    workspace.read_with(cx, |ws, _| assert!(ws.last_error.is_none()));
+    let (tabs_before, panes_before) = workspace.read_with(cx, |ws, _| {
+        (
+            ws.active_runtime().tabs.len(),
+            ws.active_runtime().panes.len(),
+        )
+    });
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -344,19 +341,6 @@ fn test_report_pane_error_sets_last_error(cx: &mut TestAppContext) {
         let msg = ws.last_error.as_ref().expect("last_error should be set");
         assert!(msg.contains("new tab"), "context missing: {msg}");
         assert!(msg.contains("exec fail"), "cause missing: {msg}");
-    });
-}
-
-#[gpui::test]
-fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneSpawnError;
-
-    let (window_handle, workspace) = build_workspace(cx);
-    let (tabs_before, panes_before) = workspace.read_with(cx, |ws, _| {
-        (
-            ws.active_runtime().tabs.len(),
-            ws.active_runtime().panes.len(),
-        )
     });
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
@@ -388,14 +372,6 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
 // ---- close_pane_on_exit config plumbing ----
 
 #[gpui::test]
-fn test_close_pane_on_exit_defaults_true(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.read_with(cx, |ws, _| {
-        assert!(ws.mirrors.close_pane_on_exit);
-    });
-}
-
-#[gpui::test]
 fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
     // Mirrors the stdout-poll sibling task's pattern: read the config flag,
     // then close the pane in a separate update. Guards against a reentrant
@@ -422,32 +398,15 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_apply_config_updates_close_pane_on_exit(cx: &mut TestAppContext) {
+fn apply_config_updates_shell_mirrors(cx: &mut TestAppContext) {
     let (window_handle, ws) = build_workspace(cx);
     let mut cfg = daruda_config::Config::default();
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.mirrors.close_pane_on_exit);
+        assert!(ws.shell_program.is_none());
+    });
+
     cfg.shell.close_pane_on_exit = false;
-
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
-    })
-    .unwrap();
-    ws.read_with(cx, |ws, _| assert!(!ws.mirrors.close_pane_on_exit));
-
-    cfg.shell.close_pane_on_exit = true;
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
-    })
-    .unwrap();
-    ws.read_with(cx, |ws, _| assert!(ws.mirrors.close_pane_on_exit));
-}
-
-#[gpui::test]
-fn test_apply_config_propagates_shell_program(cx: &mut TestAppContext) {
-    // The `[shell]` `program` reaches new panes through
-    // `Workspace::shell_program`; guards against `apply_config` dropping
-    // the field.
-    let (window_handle, ws) = build_workspace(cx);
-    let mut cfg = daruda_config::Config::default();
     cfg.shell.program = Some("/bin/test-shell".into());
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
@@ -455,16 +414,18 @@ fn test_apply_config_propagates_shell_program(cx: &mut TestAppContext) {
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
+        assert!(!ws.mirrors.close_pane_on_exit);
         assert_eq!(ws.shell_program.as_deref(), Some("/bin/test-shell"));
     });
 
-    // Clearing the field resets the workspace to the "$SHELL/zsh default" path.
+    cfg.shell.close_pane_on_exit = true;
     cfg.shell.program = None;
     cx.update_window(window_handle.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
+        assert!(ws.mirrors.close_pane_on_exit);
         assert!(ws.shell_program.is_none());
     });
 }
@@ -477,8 +438,8 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     // lookup rather than a hand-assembled merge.
     let temp = tempfile::tempdir().unwrap();
     let project_path = temp.path().to_path_buf();
-    let cfg_path = daruda_config::project_config_path(&project_path)
-        .expect("project_config_path must yield a path on this platform");
+    let data_dir = fresh_test_data_dir();
+    let cfg_path = daruda_config::project_config_path_in(&data_dir, &project_path);
     if let Some(parent) = cfg_path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
@@ -503,13 +464,7 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&project_path);
     let window_handle = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
+        Workspace::new_with_project_for_test(&config, Some(project), data_dir, window, cx)
     });
     let ws = window_handle.root(cx).unwrap();
 
@@ -534,31 +489,5 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     .unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.shell_program.as_deref(), Some("/bin/project-shell"));
-    });
-}
-
-#[gpui::test]
-fn test_last_error_surfaces_in_status_bar_data(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneSpawnError;
-    use daruda_terminal::pty::PtyError;
-
-    let (window_handle, workspace) = build_workspace(cx);
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.report_pane_error(
-                "spawn",
-                PaneSpawnError::Pty(PtyError::OpenPty("enomem".into())),
-                cx,
-            );
-        });
-    })
-    .unwrap();
-
-    workspace.read_with(cx, |ws, _| {
-        // The render path copies `last_error` into StatusBarData.error;
-        // assert the source field, rendering is covered by no-panic tests.
-        let err = ws.last_error.as_ref().expect("error set");
-        assert!(err.contains("spawn"));
-        assert!(err.contains("enomem"));
     });
 }

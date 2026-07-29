@@ -872,12 +872,9 @@ fn add_worktree_with_explicit_base_ref() {
 
 #[test]
 fn run_git_returns_timeout_error_when_child_runs_past_deadline() {
-    // Use `git ls-remote` against a non-routable address — the
-    // resolver/connect blocks for several seconds, well past our
-    // tight test deadline. We don't depend on any specific network
-    // condition: any CI environment where `git` exists will trip
-    // the deadline. If git itself can't be launched the test
-    // skips (consistent with other tests in this module).
+    // Drive a slow child through `git` itself without relying on
+    // network routing. The shell alias sleeps well past the tight
+    // deadline, so the only behaviour under test is our timeout path.
     if !has_git() {
         return;
     }
@@ -885,7 +882,7 @@ fn run_git_returns_timeout_error_when_child_runs_past_deadline() {
     let started = Instant::now();
     let result = run_git_with_timeout(
         &dir,
-        ["ls-remote", "https://10.255.255.1/nonexistent.git"],
+        ["-c", "alias.sleep=!sleep 1", "sleep"],
         Duration::from_millis(200),
     );
     let elapsed = started.elapsed();

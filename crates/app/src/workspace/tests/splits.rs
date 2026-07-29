@@ -4,7 +4,7 @@ use crate::workspace::main_area::pane::PaneContent;
 // ---- Split tests ----
 
 #[gpui::test]
-async fn test_split_right(cx: &mut TestAppContext) {
+async fn split_directions_and_close_restore_single_pane(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     workspace.read_with(cx, |ws, _| {
@@ -35,11 +35,22 @@ async fn test_split_right(cx: &mut TestAppContext) {
             }
         ));
     });
-}
 
-#[gpui::test]
-async fn test_split_down(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.close_focused_pane(window, cx);
+        });
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().panes.len(), 1);
+        assert!(matches!(
+            ws.active_runtime().tabs[0].layout,
+            PaneLayout::Pane(_)
+        ));
+    });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -61,45 +72,26 @@ async fn test_split_down(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn test_close_pane_in_split(cx: &mut TestAppContext) {
+async fn detach_pane_noops_for_single_leaf_and_succeeds_from_split(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane_kind(
-                NewPaneKind::Terminal,
-                SplitDirection::Horizontal,
-                window,
-                cx,
-            );
-        });
-    })
-    .unwrap();
+    let only_pane = workspace.read_with(cx, |ws, _| ws.active_runtime().panes[0].id);
+    let detached = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.detach_pane_to_new_tab(only_pane, 1, window, cx)
+            })
+        })
+        .unwrap();
 
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().panes.len(), 2);
-    });
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.close_focused_pane(window, cx);
-        });
-    })
-    .unwrap();
-
+    assert!(
+        !detached,
+        "detaching the only pane in a tab must be a no-op"
+    );
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
         assert_eq!(ws.active_runtime().panes.len(), 1);
-        assert!(matches!(
-            ws.active_runtime().tabs[0].layout,
-            PaneLayout::Pane(_)
-        ));
     });
-}
-
-#[gpui::test]
-async fn test_detach_pane_to_new_tab(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -154,30 +146,6 @@ async fn test_detach_pane_to_new_tab(cx: &mut TestAppContext) {
         // The new tab was activated and holds keyboard focus.
         assert_eq!(ws.active_runtime().active_tab_index, 1);
         assert_eq!(ws.active_runtime().focused_pane_id, pane_b);
-    });
-}
-
-#[gpui::test]
-async fn test_detach_pane_noop_when_tab_has_single_pane(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    let pane_id = workspace.read_with(cx, |ws, _| ws.active_runtime().panes[0].id);
-
-    let detached = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                ws.detach_pane_to_new_tab(pane_id, 1, window, cx)
-            })
-        })
-        .unwrap();
-
-    assert!(
-        !detached,
-        "detaching the only pane in a tab must be a no-op"
-    );
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().panes.len(), 1);
     });
 }
 

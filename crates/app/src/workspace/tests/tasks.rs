@@ -109,31 +109,23 @@ fn bump_for_unowned_session_is_ignored(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn session_end_clears_failure_counter(cx: &mut TestAppContext) {
+fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
-    let _task_id = seed_running_task(&workspace, cx, "sess-1");
+    let _task_id = seed_running_task(&workspace, cx, "sess-end");
 
     workspace.update(cx, |ws, cx| {
-        ws.bump_tool_use_failure("sess-1", cx);
-        ws.bump_tool_use_failure("sess-1", cx);
-        assert_eq!(ws.claude.tool_use_failure_counts.get("sess-1"), Some(&2));
+        ws.bump_tool_use_failure("sess-end", cx);
+        ws.bump_tool_use_failure("sess-end", cx);
+        assert_eq!(ws.claude.tool_use_failure_counts.get("sess-end"), Some(&2));
 
-        // Simulate a graceful session end. `apply_task_session_ended`
-        // itself must wipe the counter — no manual remove from the
-        // test (otherwise we'd be asserting against our own cleanup).
-        ws.apply_task_session_ended("sess-1", SessionEndReason::Stop, cx);
+        ws.apply_task_session_ended("sess-end", SessionEndReason::Stop, cx);
         assert!(
-            !ws.claude.tool_use_failure_counts.contains_key("sess-1"),
+            !ws.claude.tool_use_failure_counts.contains_key("sess-end"),
             "apply_task_session_ended must drop the failure counter"
         );
     });
-}
 
-#[gpui::test]
-fn cancel_task_clears_failure_counter(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
     let task_id = seed_running_task(&workspace, cx, "sess-cancel");
-
     workspace.update(cx, |ws, cx| {
         ws.bump_tool_use_failure("sess-cancel", cx);
         ws.bump_tool_use_failure("sess-cancel", cx);
@@ -150,13 +142,8 @@ fn cancel_task_clears_failure_counter(cx: &mut TestAppContext) {
             "cancel_task must drop the failure counter"
         );
     });
-}
 
-#[gpui::test]
-fn reopen_task_clears_failure_counter(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
     let task_id = seed_running_task(&workspace, cx, "sess-reopen");
-
     workspace.update(cx, |ws, cx| {
         ws.bump_tool_use_failure("sess-reopen", cx);
         ws.bump_tool_use_failure("sess-reopen", cx);
@@ -168,13 +155,8 @@ fn reopen_task_clears_failure_counter(cx: &mut TestAppContext) {
             "reopen_task must drop the failure counter"
         );
     });
-}
 
-#[gpui::test]
-fn delete_task_clears_failure_counter(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
     let task_id = seed_running_task(&workspace, cx, "sess-delete");
-
     workspace.update(cx, |ws, cx| {
         ws.bump_tool_use_failure("sess-delete", cx);
         ws.delete_task(&task_id, cx);
@@ -251,79 +233,78 @@ fn apply_task_session_ended_with_error_uses_session_error_message(cx: &mut TestA
     });
 }
 
-/// A `Running` AgentChat-surfaced task (no hook session id — ACP sessions never
-/// write the status files) reconciles by lane cwd: a completed turn moves it to
-/// `Done`, keyed by `worktree_path == cwd`.
-#[gpui::test]
-fn apply_agent_chat_task_ended_completes_running_task_by_cwd(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let id = workspace.update(cx, |_ws, cx| {
+fn seed_agent_chat_running_task(
+    workspace: &gpui::Entity<crate::workspace::Workspace>,
+    cx: &mut TestAppContext,
+    worktree_path: &str,
+) -> String {
+    workspace.update(cx, |_ws, cx| {
         let mut task = Task::new("acp-task".into(), "".into(), None);
         task.state = TaskState::Running {
-            worktree_path: PathBuf::from("/tmp/acp-wt"),
+            worktree_path: PathBuf::from(worktree_path),
         };
-        // No session_ids: an AgentChat task never gets a hook session.
         let id = task.id.clone();
         cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
             g.add(task);
         });
         id
-    });
+    })
+}
+
+/// `Running` AgentChat-surfaced tasks (no hook session ids — ACP sessions never
+/// write status files) reconcile by lane cwd and terminal reason.
+#[gpui::test]
+fn apply_agent_chat_task_ended_matches_cwd_and_maps_reason(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    let done_id = seed_agent_chat_running_task(&workspace, cx, "/tmp/acp-wt-done");
+    let error_id = seed_agent_chat_running_task(&workspace, cx, "/tmp/acp-wt-error");
 
     workspace.update(cx, |ws, cx| {
         // A non-matching cwd is a no-op — the task stays Running.
         ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/other"), SessionEndReason::Stop, cx);
         assert!(matches!(
             cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                .get(&id)
+                .get(&done_id)
                 .unwrap()
                 .state,
             TaskState::Running { .. }
         ));
 
         // The matching cwd with a completion reason → Done.
-        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Stop, cx);
+        ws.apply_agent_chat_task_ended(
+            &PathBuf::from("/tmp/acp-wt-done"),
+            SessionEndReason::Stop,
+            cx,
+        );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&id).unwrap();
+        let t = g.get(&done_id).unwrap();
         match &t.state {
             TaskState::Done { end_reason, .. } => assert_eq!(*end_reason, SessionEndReason::Stop),
             other => panic!("expected Done, got {other:?}"),
         }
         assert!(t.finished_at.is_some(), "completion stamps finished_at");
-    });
-}
 
-/// A terminal ACP error / connect failure moves a `Running` AgentChat task to
-/// `Error`, keyed by cwd (mirrors the session-id-keyed Error mapping).
-#[gpui::test]
-fn apply_agent_chat_task_ended_errors_on_error_reason(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let id = workspace.update(cx, |_ws, cx| {
-        let mut task = Task::new("acp-task".into(), "".into(), None);
-        task.state = TaskState::Running {
-            worktree_path: PathBuf::from("/tmp/acp-wt"),
-        };
-        let id = task.id.clone();
-        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
-            g.add(task);
-        });
-        id
-    });
-
-    workspace.update(cx, |ws, cx| {
-        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Error, cx);
+        ws.apply_agent_chat_task_ended(
+            &PathBuf::from("/tmp/acp-wt-error"),
+            SessionEndReason::Error,
+            cx,
+        );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        match &g.get(&id).unwrap().state {
+        match &g.get(&error_id).unwrap().state {
             TaskState::Error { message, .. } => assert_eq!(message, "session error"),
             other => panic!("expected Error, got {other:?}"),
         }
 
         // Idempotent: a second call finds no Running task and no-ops (stays
         // Error, not overwritten).
-        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Stop, cx);
+        ws.apply_agent_chat_task_ended(
+            &PathBuf::from("/tmp/acp-wt-error"),
+            SessionEndReason::Stop,
+            cx,
+        );
         assert!(matches!(
             cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                .get(&id)
+                .get(&error_id)
                 .unwrap()
                 .state,
             TaskState::Error { .. }
@@ -352,7 +333,7 @@ fn seed_backlog_task(
 }
 
 #[gpui::test]
-fn add_subtask_appends_and_skips_empty(cx: &mut TestAppContext) {
+fn subtask_ops_add_toggle_rename_and_delete(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
     let task_id = seed_backlog_task(&workspace, cx);
 
@@ -367,24 +348,14 @@ fn add_subtask_appends_and_skips_empty(cx: &mut TestAppContext) {
         assert_eq!(t.subtasks[0].title, "first");
         assert_eq!(t.subtasks[1].title, "second");
         assert!(t.subtasks.iter().all(|s| s.source_session_id.is_none()));
-    });
-}
 
-#[gpui::test]
-fn toggle_subtask_round_trips(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_backlog_task(&workspace, cx);
+        let (first_id, second_id) = {
+            let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+            let t = g.get(&task_id).unwrap();
+            (t.subtasks[0].id.clone(), t.subtasks[1].id.clone())
+        };
 
-    workspace.update(cx, |ws, cx| {
-        ws.add_subtask(&task_id, "a".into(), cx);
-        let sid = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .get(&task_id)
-            .unwrap()
-            .subtasks[0]
-            .id
-            .clone();
-        ws.toggle_subtask(&task_id, &sid, cx);
+        ws.toggle_subtask(&task_id, &first_id, cx);
         assert!(
             cx.global::<crate::agent::tasks_global::GlobalTasks>()
                 .get(&task_id)
@@ -392,7 +363,7 @@ fn toggle_subtask_round_trips(cx: &mut TestAppContext) {
                 .subtasks[0]
                 .completed
         );
-        ws.toggle_subtask(&task_id, &sid, cx);
+        ws.toggle_subtask(&task_id, &first_id, cx);
         assert!(
             !cx.global::<crate::agent::tasks_global::GlobalTasks>()
                 .get(&task_id)
@@ -400,67 +371,33 @@ fn toggle_subtask_round_trips(cx: &mut TestAppContext) {
                 .subtasks[0]
                 .completed
         );
-    });
-}
 
-#[gpui::test]
-fn delete_subtask_drops_only_matching_id(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_backlog_task(&workspace, cx);
-
-    workspace.update(cx, |ws, cx| {
-        ws.add_subtask(&task_id, "keep".into(), cx);
-        ws.add_subtask(&task_id, "drop".into(), cx);
-        let drop_id = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .get(&task_id)
-            .unwrap()
-            .subtasks[1]
-            .id
-            .clone();
-        ws.delete_subtask(&task_id, &drop_id, cx);
-
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 1);
-        assert_eq!(t.subtasks[0].title, "keep");
-    });
-}
-
-#[gpui::test]
-fn rename_subtask_updates_title_and_ignores_empty(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_backlog_task(&workspace, cx);
-
-    workspace.update(cx, |ws, cx| {
-        ws.add_subtask(&task_id, "old".into(), cx);
-        let sid = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .get(&task_id)
-            .unwrap()
-            .subtasks[0]
-            .id
-            .clone();
-        ws.rename_subtask(&task_id, &sid, "  new title  ".into(), cx);
+        ws.rename_subtask(&task_id, &second_id, "  new title  ".into(), cx);
         assert_eq!(
             cx.global::<crate::agent::tasks_global::GlobalTasks>()
                 .get(&task_id)
                 .unwrap()
-                .subtasks[0]
+                .subtasks[1]
                 .title,
             "new title",
             "rename trims whitespace"
         );
-        ws.rename_subtask(&task_id, &sid, "   ".into(), cx);
+        ws.rename_subtask(&task_id, &second_id, "   ".into(), cx);
         assert_eq!(
             cx.global::<crate::agent::tasks_global::GlobalTasks>()
                 .get(&task_id)
                 .unwrap()
-                .subtasks[0]
+                .subtasks[1]
                 .title,
             "new title",
             "empty rename is ignored"
         );
+
+        ws.delete_subtask(&task_id, &first_id, cx);
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        let t = g.get(&task_id).unwrap();
+        assert_eq!(t.subtasks.len(), 1);
+        assert_eq!(t.subtasks[0].title, "new title");
     });
 }
 

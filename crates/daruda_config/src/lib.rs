@@ -56,7 +56,10 @@ pub use logs::LogsConfig;
 pub use notifications::NotificationsConfig;
 pub use panels::PanelsConfig;
 pub use ports::PortsConfig;
-pub use project::{ProjectConfig, project_config_dir, project_config_path, project_id};
+pub use project::{
+    ProjectConfig, project_config_dir, project_config_dir_in, project_config_path,
+    project_config_path_in, project_id,
+};
 pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use settings_section::{BuiltinSection, SettingsSection};

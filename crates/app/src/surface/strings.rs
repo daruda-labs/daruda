@@ -3764,238 +3764,125 @@ mod tests {
     }
 
     #[test]
-    fn telegram_reply_ack_is_non_empty() {
+    fn telegram_notification_labels_are_non_empty() {
         assert!(!super::agent_notification_telegram_reply_ack().is_empty());
-    }
-
-    #[test]
-    fn telegram_reply_queued_is_non_empty() {
         assert!(!super::agent_notification_telegram_reply_queued().is_empty());
-    }
-
-    #[test]
-    fn telegram_first_tool_ack_is_non_empty() {
         assert!(!super::agent_notification_telegram_first_tool_ack().is_empty());
     }
 
     #[test]
-    fn format_byte_size_below_512_rounds_down_to_0_kb() {
+    fn byte_size_and_media_labels_cover_boundaries() {
         // `{:.0}` rounds a KB fraction to the nearest integer, so everything
         // below the 512-byte half-KB midpoint (inclusive, round-half-to-even)
         // reads "0 KB" rather than "1 KB".
-        assert_eq!(format_byte_size(0), "0 KB");
-        assert_eq!(format_byte_size(511), "0 KB");
-        assert_eq!(format_byte_size(512), "0 KB");
-        assert_eq!(format_byte_size(513), "1 KB");
-    }
+        for (bytes, expected) in [
+            (0, "0 KB"),
+            (511, "0 KB"),
+            (512, "0 KB"),
+            (513, "1 KB"),
+            (2 * 1024 * 1024, "2.0 MB"),
+        ] {
+            assert_eq!(format_byte_size(bytes), expected, "{bytes}");
+        }
 
-    #[test]
-    fn format_byte_size_mb_range_shows_one_decimal() {
-        assert_eq!(format_byte_size(2 * 1024 * 1024), "2.0 MB");
-    }
-
-    #[test]
-    fn tool_media_label_empty_mime_has_no_stray_separator() {
-        // An empty `mime` (the source omitted it) must not render through the
-        // `mime`-carrying key, which would leave a stray leading space and
-        // middot ("[ · 128 KB]").
         let label = agent_chat_tool_media_label("", 1024);
         assert_eq!(label, "[1 KB]");
         assert!(!label.contains('·'));
     }
 
     #[test]
-    fn duration_below_minute_renders_seconds() {
-        assert_eq!(format_duration_compact(Duration::from_secs(0)), "0s");
-        assert_eq!(format_duration_compact(Duration::from_secs(42)), "42s");
-        assert_eq!(format_duration_compact(Duration::from_secs(59)), "59s");
+    fn compact_duration_labels_cover_thresholds() {
+        for (secs, expected) in [
+            (0, "0s"),
+            (42, "42s"),
+            (59, "59s"),
+            (60, "1m 00s"),
+            (63, "1m 03s"),
+            (3_599, "59m 59s"),
+            (3_600, "1h 00m"),
+            (8_115, "2h 15m"),
+        ] {
+            assert_eq!(
+                format_duration_compact(Duration::from_secs(secs)),
+                expected,
+                "{secs}"
+            );
+        }
     }
 
     #[test]
-    fn duration_under_hour_renders_minutes_and_seconds() {
-        assert_eq!(format_duration_compact(Duration::from_secs(60)), "1m 00s");
-        assert_eq!(format_duration_compact(Duration::from_secs(63)), "1m 03s");
-        assert_eq!(
-            format_duration_compact(Duration::from_secs(3_599)),
-            "59m 59s"
-        );
+    fn reset_countdown_labels_cover_thresholds() {
+        for (secs, expected) in [
+            (0, "Resets now"),
+            (1, "Resets in <1m"),
+            (30, "Resets in <1m"),
+            (59, "Resets in <1m"),
+            (60, "Resets in 1m"),
+            (59 * 60, "Resets in 59m"),
+            (3_600, "Resets in 1h 0m"),
+            (2 * 3_600 + 14 * 60, "Resets in 2h 14m"),
+            (23 * 3_600 + 59 * 60, "Resets in 23h 59m"),
+            (24 * 3_600, "Resets in 1d 0h"),
+            (3 * 24 * 3_600 + 7 * 3_600, "Resets in 3d 7h"),
+        ] {
+            assert_eq!(
+                format_reset_countdown(Duration::from_secs(secs)),
+                expected,
+                "{secs}"
+            );
+        }
     }
 
     #[test]
-    fn duration_over_hour_renders_hours_and_minutes() {
-        assert_eq!(
-            format_duration_compact(Duration::from_secs(3_600)),
-            "1h 00m"
-        );
-        assert_eq!(
-            format_duration_compact(Duration::from_secs(8_115)),
-            "2h 15m"
-        );
+    fn service_status_labels_cover_description_policy() {
+        use daruda_claude::{ServiceStatus, StatusIndicator};
+
+        for (indicator, description, expected) in [
+            (StatusIndicator::None, "stale message", "Operational"),
+            (
+                StatusIndicator::Minor,
+                "Increased 4xx errors on /messages",
+                "Increased 4xx errors on /messages",
+            ),
+            (StatusIndicator::Major, "", "Partial outage"),
+            (StatusIndicator::Critical, "", "Major outage"),
+            (StatusIndicator::Unknown, "garbage", "Status unavailable"),
+        ] {
+            let status = ServiceStatus {
+                indicator,
+                description: description.into(),
+                fetched_at: None,
+            };
+            assert_eq!(service_status_label(&status), expected);
+        }
     }
 
     #[test]
-    fn reset_countdown_zero_renders_now() {
-        assert_eq!(format_reset_countdown(Duration::from_secs(0)), "Resets now");
-    }
-
-    #[test]
-    fn reset_countdown_sub_minute_renders_lt1m() {
-        // 1..59 seconds collapses to "<1m" so the user doesn't see
-        // "Resets in 0m" linger for a whole minute right before
-        // the rolling window resets.
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(1)),
-            "Resets in <1m"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(30)),
-            "Resets in <1m"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(59)),
-            "Resets in <1m"
-        );
-    }
-
-    #[test]
-    fn reset_countdown_under_hour_renders_minutes() {
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(60)),
-            "Resets in 1m"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(59 * 60)),
-            "Resets in 59m"
-        );
-    }
-
-    #[test]
-    fn reset_countdown_under_day_renders_hours_and_minutes() {
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(3_600)),
-            "Resets in 1h 0m"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(2 * 3_600 + 14 * 60)),
-            "Resets in 2h 14m"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(23 * 3_600 + 59 * 60)),
-            "Resets in 23h 59m"
-        );
-    }
-
-    #[test]
-    fn reset_countdown_over_day_renders_days_and_hours() {
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(24 * 3_600)),
-            "Resets in 1d 0h"
-        );
-        assert_eq!(
-            format_reset_countdown(Duration::from_secs(3 * 24 * 3_600 + 7 * 3_600)),
-            "Resets in 3d 7h"
-        );
-    }
-
-    #[test]
-    fn service_status_label_operational_ignores_description() {
-        let s = daruda_claude::ServiceStatus {
-            indicator: daruda_claude::StatusIndicator::None,
-            description: "stale message".into(),
-            fetched_at: None,
-        };
-        assert_eq!(service_status_label(&s), "Operational");
-    }
-
-    #[test]
-    fn service_status_label_uses_description_for_incidents() {
-        let s = daruda_claude::ServiceStatus {
-            indicator: daruda_claude::StatusIndicator::Minor,
-            description: "Increased 4xx errors on /messages".into(),
-            fetched_at: None,
-        };
-        assert_eq!(
-            service_status_label(&s),
-            "Increased 4xx errors on /messages"
-        );
-    }
-
-    #[test]
-    fn service_status_label_falls_back_to_default_when_description_empty() {
-        let s = daruda_claude::ServiceStatus {
-            indicator: daruda_claude::StatusIndicator::Major,
-            description: String::new(),
-            fetched_at: None,
-        };
-        assert_eq!(service_status_label(&s), "Partial outage");
-        let s = daruda_claude::ServiceStatus {
-            indicator: daruda_claude::StatusIndicator::Critical,
-            description: String::new(),
-            fetched_at: None,
-        };
-        assert_eq!(service_status_label(&s), "Major outage");
-    }
-
-    #[test]
-    fn service_status_label_unknown_ignores_description() {
-        let s = daruda_claude::ServiceStatus {
-            indicator: daruda_claude::StatusIndicator::Unknown,
-            description: "garbage".into(),
-            fetched_at: None,
-        };
-        assert_eq!(service_status_label(&s), "Status unavailable");
-    }
-
-    // ----------------------------------------------------------------
-    // bottom_input_placeholder_for_context
-    // ----------------------------------------------------------------
-
-    #[test]
-    fn placeholder_terminal_pane() {
-        // Terminal focus always returns the terminal placeholder regardless
-        // of the modifier-to-send flag.
-        assert_eq!(
-            bottom_input_placeholder_for_context(false, None, false),
-            bottom_input_placeholder(),
-        );
-        assert_eq!(
-            bottom_input_placeholder_for_context(false, None, true),
-            bottom_input_placeholder(),
-        );
-        // mode_name is ignored for terminal panes.
-        assert_eq!(
-            bottom_input_placeholder_for_context(false, Some("Auto"), false),
-            bottom_input_placeholder(),
-        );
-        assert_eq!(
-            bottom_input_placeholder_for_context(false, Some("Auto"), true),
-            bottom_input_placeholder(),
-        );
-    }
-
-    #[test]
-    fn placeholder_agent_no_modes() {
-        // Agent focus without mode info: hint the submit key only.
-        assert_eq!(
-            bottom_input_placeholder_for_context(true, None, false),
-            bottom_input_agent_placeholder(),
-        );
-        assert_eq!(
-            bottom_input_placeholder_for_context(true, None, true),
-            bottom_input_agent_modifier_placeholder(),
-        );
-    }
-
-    #[test]
-    fn placeholder_agent_with_mode() {
-        // Agent focus with an active mode: hint mode name + submit key.
-        assert_eq!(
-            bottom_input_placeholder_for_context(true, Some("Auto"), false),
-            bottom_input_agent_mode_placeholder("Auto"),
-        );
-        assert_eq!(
-            bottom_input_placeholder_for_context(true, Some("Auto"), true),
-            bottom_input_agent_mode_modifier_placeholder("Auto"),
-        );
+    fn bottom_input_placeholders_cover_terminal_and_agent_contexts() {
+        for (agent, mode, modifier, expected) in [
+            (false, None, false, bottom_input_placeholder()),
+            (false, None, true, bottom_input_placeholder()),
+            (false, Some("Auto"), false, bottom_input_placeholder()),
+            (false, Some("Auto"), true, bottom_input_placeholder()),
+            (true, None, false, bottom_input_agent_placeholder()),
+            (true, None, true, bottom_input_agent_modifier_placeholder()),
+            (
+                true,
+                Some("Auto"),
+                false,
+                bottom_input_agent_mode_placeholder("Auto"),
+            ),
+            (
+                true,
+                Some("Auto"),
+                true,
+                bottom_input_agent_mode_modifier_placeholder("Auto"),
+            ),
+        ] {
+            assert_eq!(
+                bottom_input_placeholder_for_context(agent, mode, modifier),
+                expected
+            );
+        }
     }
 }
