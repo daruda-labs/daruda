@@ -2,6 +2,7 @@
 name = "daruda_core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 license.workspace = true
 description = "Shared utilities and core logic for daruda — dependency-free, usable from both the GPUI app and the GPUI-free protocol crates"

@@ -2,6 +2,7 @@
 name = "daruda"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 license.workspace = true
 description = "Loop Terminal — Dev loop accelerator for Claude Code"

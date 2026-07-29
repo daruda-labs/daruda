@@ -12,11 +12,7 @@ pub(crate) fn step_char_left(text: &str, byte: usize) -> usize {
     if byte == 0 {
         return 0;
     }
-    let mut prev = byte - 1;
-    while prev > 0 && !text.is_char_boundary(prev) {
-        prev -= 1;
-    }
-    prev
+    text.floor_char_boundary(byte - 1)
 }
 
 /// Move `byte` right by one character in `text`, clamped to `text.len()`.
@@ -28,11 +24,7 @@ pub(crate) fn step_char_right(text: &str, byte: usize) -> usize {
     if byte == len {
         return len;
     }
-    let mut next = byte + 1;
-    while next < len && !text.is_char_boundary(next) {
-        next += 1;
-    }
-    next
+    text.ceil_char_boundary(byte + 1)
 }
 
 /// Round `byte` *down* to the nearest UTF-8 char boundary in `text`.
@@ -43,14 +35,8 @@ pub(crate) fn step_char_right(text: &str, byte: usize) -> usize {
 /// string may land mid-codepoint in the other. `ShapedLine::
 /// x_for_index` panics on a non-boundary, so this helper rounds down
 /// to the nearest valid boundary.
-pub(crate) fn clamp_to_char_boundary(text: &str, mut byte: usize) -> usize {
-    if byte > text.len() {
-        return text.len();
-    }
-    while byte > 0 && !text.is_char_boundary(byte) {
-        byte -= 1;
-    }
-    byte
+pub(crate) fn clamp_to_char_boundary(text: &str, byte: usize) -> usize {
+    text.floor_char_boundary(byte)
 }
 
 #[cfg(test)]

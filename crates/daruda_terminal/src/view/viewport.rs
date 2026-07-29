@@ -36,13 +36,7 @@ pub(crate) fn word_range_in_viewport(
     if line.is_empty() {
         return (pos, pos);
     }
-    let local = byte.min(line.len().saturating_sub(1));
-    // Walk back to the nearest valid UTF-8 char boundary (floor_char_boundary
-    // is only stable since 1.91, so we replicate the logic inline).
-    let local = (0..=local)
-        .rev()
-        .find(|&i| line.is_char_boundary(i))
-        .unwrap_or(0);
+    let local = line.floor_char_boundary(byte.min(line.len().saturating_sub(1)));
 
     fn is_word_char(ch: char) -> bool {
         ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' || ch == '/'

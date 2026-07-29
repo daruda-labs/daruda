@@ -125,51 +125,51 @@ impl TerminalView {
         // Scrollbar thumb drag — must be checked before the general
         // selection path so a click on the thumb doesn't start a
         // text selection.
-        if event.button == MouseButton::Left {
-            if let Some(thumb) = self.state.scrollbar_thumb_bounds {
-                if thumb.contains(&event.position) {
-                    let bounds = self.state.last_bounds.unwrap_or(thumb);
-                    // Store the cursor's offset from the thumb top so the
-                    // thumb doesn't jump on the first move event.
-                    let cursor_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
-                    let thumb_top = f32::from(thumb.origin.y) - f32::from(bounds.origin.y);
-                    let click_offset = cursor_y - thumb_top;
-                    self.state.mouse_drag = MouseDragState::ScrollbarDrag {
-                        offset: click_offset,
-                    };
-                    cx.notify();
-                    return;
-                }
-                // Click on the track (outside thumb): jump to that fraction.
+        if event.button == MouseButton::Left
+            && let Some(thumb) = self.state.scrollbar_thumb_bounds
+        {
+            if thumb.contains(&event.position) {
                 let bounds = self.state.last_bounds.unwrap_or(thumb);
-                let track_right = f32::from(bounds.right());
-                let click_x = f32::from(event.position.x);
-                if click_x
-                    >= track_right
-                        - (crate::ux::theme::TERMINAL_SCROLLBAR_W
-                            + crate::ux::theme::TERMINAL_SCROLLBAR_MARGIN)
-                    && click_x <= track_right
-                {
-                    let track_height = f32::from(bounds.size.height);
-                    let click_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
-                    let fraction = (click_y / track_height).clamp(0.0, 1.0);
-                    let total = self.session.total_rows();
-                    let rows = self.session.rows() as u32;
-                    let scrollable = total.saturating_sub(rows);
-                    let offset = (fraction * scrollable as f32).round() as i32;
-                    let current = self.session.viewport_row_offset() as i32;
-                    let delta = offset - current;
-                    if delta != 0 {
-                        // Same settle path as the wheel: reanchor (unlock at
-                        // the live edge) + selection-preserving repaint. Using
-                        // `refresh_viewport` here would clear the selection and
-                        // strand the hovered-URL underline, unlike every other
-                        // user-scroll path.
-                        self.scroll_viewport_and_sync(delta);
-                        self.reanchor_and_refresh(cx);
-                    }
-                    return;
+                // Store the cursor's offset from the thumb top so the
+                // thumb doesn't jump on the first move event.
+                let cursor_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
+                let thumb_top = f32::from(thumb.origin.y) - f32::from(bounds.origin.y);
+                let click_offset = cursor_y - thumb_top;
+                self.state.mouse_drag = MouseDragState::ScrollbarDrag {
+                    offset: click_offset,
+                };
+                cx.notify();
+                return;
+            }
+            // Click on the track (outside thumb): jump to that fraction.
+            let bounds = self.state.last_bounds.unwrap_or(thumb);
+            let track_right = f32::from(bounds.right());
+            let click_x = f32::from(event.position.x);
+            if click_x
+                >= track_right
+                    - (crate::ux::theme::TERMINAL_SCROLLBAR_W
+                        + crate::ux::theme::TERMINAL_SCROLLBAR_MARGIN)
+                && click_x <= track_right
+            {
+                let track_height = f32::from(bounds.size.height);
+                let click_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
+                let fraction = (click_y / track_height).clamp(0.0, 1.0);
+                let total = self.session.total_rows();
+                let rows = self.session.rows() as u32;
+                let scrollable = total.saturating_sub(rows);
+                let offset = (fraction * scrollable as f32).round() as i32;
+                let current = self.session.viewport_row_offset() as i32;
+                let delta = offset - current;
+                if delta != 0 {
+                    // Same settle path as the wheel: reanchor (unlock at
+                    // the live edge) + selection-preserving repaint. Using
+                    // `refresh_viewport` here would clear the selection and
+                    // strand the hovered-URL underline, unlike every other
+                    // user-scroll path.
+                    self.scroll_viewport_and_sync(delta);
+                    self.reanchor_and_refresh(cx);
                 }
+                return;
             }
         }
 
@@ -200,14 +200,13 @@ impl TerminalView {
         }
 
         if event.button == MouseButton::Left && event.modifiers.platform {
-            if let Some((col, row)) = self.mouse_position_to_cell(event.position, window) {
-                if let Some(link) = self.link_at_cell(col, row)
-                    && link.openable
-                {
-                    cx.open_url(&link.url);
-                    cx.write_to_clipboard(ClipboardItem::new_string(link.url));
-                    return;
-                }
+            if let Some((col, row)) = self.mouse_position_to_cell(event.position, window)
+                && let Some(link) = self.link_at_cell(col, row)
+                && link.openable
+            {
+                cx.open_url(&link.url);
+                cx.write_to_clipboard(ClipboardItem::new_string(link.url));
+                return;
             }
 
             if let Some(pos) = self.mouse_position_to_screen_pos(event.position, window)
@@ -516,10 +515,10 @@ impl TerminalView {
             && event.pressed_button != Some(MouseButton::Left)
         {
             self.end_mouse_drag();
-            if let Some(sel) = self.state.selection {
-                if sel.is_empty() {
-                    self.state.selection = None;
-                }
+            if let Some(sel) = self.state.selection
+                && sel.is_empty()
+            {
+                self.state.selection = None;
             }
             cx.notify();
             return;

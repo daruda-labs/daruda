@@ -2,7 +2,7 @@
 name = "daruda_terminal"
 version.workspace = true
 edition.workspace = true
-rust-version = "1.86"
+rust-version.workspace = true
 publish = false
 license.workspace = true
 

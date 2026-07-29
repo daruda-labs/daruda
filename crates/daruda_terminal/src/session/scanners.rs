@@ -445,7 +445,7 @@ pub(super) fn build_xtgettcap_response(body: &[u8]) -> Vec<u8> {
 
 fn decode_hex_cap_name(hex: &str) -> String {
     let bytes = hex.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return hex.to_string();
     }
     let mut out = Vec::with_capacity(bytes.len() / 2);

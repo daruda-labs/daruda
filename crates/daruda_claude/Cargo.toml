@@ -2,6 +2,7 @@
 name = "daruda_claude"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 license.workspace = true
 description = "Claude Code session status detection — hook event FSM + JSONL fallback parser (GPUI-free)"

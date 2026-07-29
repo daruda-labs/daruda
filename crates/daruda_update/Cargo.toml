@@ -2,6 +2,7 @@
 name = "daruda_update"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 license.workspace = true
 description = "Self-update logic for the daruda macOS app — release checking, download, and bundle swap (GPUI-free)"

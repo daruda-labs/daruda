@@ -187,19 +187,19 @@ impl ScreenPos {
         let cell_cols = session.cols();
         let lb = session.line_buffer();
         let lb_rows = lb.wrapped_row_count(cell_cols);
-        if abs_screen_row < lb_rows && cell_cols > 0 {
-            if let Some((pos, _sub_row, sub_col_origin)) =
+        if abs_screen_row < lb_rows
+            && cell_cols > 0
+            && let Some((pos, _sub_row, sub_col_origin)) =
                 lb.position_for_visual_row(abs_screen_row, cell_cols)
-            {
-                let within_row = cell_col.saturating_sub(1);
-                let cumulative = sub_col_origin.saturating_add(within_row);
-                return Self {
-                    anchor: PosAnchor::Scrollback {
-                        pos,
-                        cell_col: cumulative,
-                    },
-                };
-            }
+        {
+            let within_row = cell_col.saturating_sub(1);
+            let cumulative = sub_col_origin.saturating_add(within_row);
+            return Self {
+                anchor: PosAnchor::Scrollback {
+                    pos,
+                    cell_col: cumulative,
+                },
+            };
         }
         // Live viewport row — fall back to byte-offset storage.
         // SILENT-OK: anchor_at's only production caller

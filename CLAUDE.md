@@ -32,7 +32,7 @@ daruda/
 
 ## Requirements
 
-- **Rust**: 2024 edition (1.95.0+)
+- **Rust**: 2024 edition (1.95.0+). The floor is declared once in `[workspace.package]` and every first-party crate inherits it with `rust-version.workspace = true`, so clippy's `incompatible_msrv` catches a newer std API at the call site. CI pins the toolchain to exactly 1.95, which is what actually enforces the floor — develop on a newer toolchain freely. The three vendored `gpui_component*` crates deliberately stay undeclared to keep the re-vendor diff a file copy.
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS; on Linux install manually and set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
 - **Linux**: builds and tests pass; GUI runtime (window/menu/tray) not yet verified on a real desktop. Needs system `libfontconfig`/`libxcb`.
