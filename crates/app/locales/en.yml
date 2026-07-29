@@ -807,6 +807,7 @@ usage:
   limit_opus_suffix: " · Opus"
   stale_marker: "⚠"
   no_provider: "Sign in to Claude or Codex to see plan usage."
+  no_domain_provider: "Sign in to %{domain} to see its plan usage."
   limit_unavailable: "Unavailable"
   limits_section_label: "PLAN USAGE"
   section_7day: "LAST 7 DAYS"

@@ -17,6 +17,7 @@ pub(in crate::workspace) mod task_workflow_ops;
 pub(in crate::workspace) mod tasks;
 pub(in crate::workspace) mod tools;
 pub(in crate::workspace) mod usage;
+pub(in crate::workspace) mod usage_ops;
 pub(in crate::workspace) mod view_tabs;
 
 /// Shared scaffold for a right-dock tab body: a vertical flex column

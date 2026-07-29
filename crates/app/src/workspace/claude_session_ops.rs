@@ -218,6 +218,16 @@ pub(in crate::workspace) struct ClaudeContext {
     /// domain's Usage-tab section back to its ambient login every frame.
     pub(in crate::workspace) sticky_focus_by_recipe:
         HashMap<AccountRecipeId, crate::workspace::main_area::pane::FocusedAccount>,
+
+    /// User's manual pick for which domain's section the Usage tab shows when
+    /// the focused pane doesn't name one exactly (a terminal, or an agent
+    /// daruda can't resolve a domain for). Ignored while the focused pane
+    /// does name one — auto mode always wins there. Volatile: not part of
+    /// persisted `WorkspaceState`, and never explicitly cleared — a pick for
+    /// a domain that later signs out (or was never signed in) just stops
+    /// matching anything in `usage_sections`, and the resolver falls through
+    /// to its default.
+    pub(in crate::workspace) usage_domain_override: Option<AccountRecipeId>,
 }
 
 // ---- Workspace methods that own the claude field ----

@@ -311,6 +311,15 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// order. Empty when no provider is signed in, which the renderer replaces
     /// with a single notice.
     pub usage: Vec<UsageSectionSnapshot>,
+    /// The focused pane's agent domain. `Exactly(recipe)` scopes the tab to
+    /// one section automatically; `Any`/`Unsupported` (terminal, unresolved
+    /// agent) falls back to `usage_domain_override` + a switcher. Computed
+    /// once per snapshot build by `AccountDomain::for_pane` and reused here
+    /// rather than recomputed in the renderer.
+    pub focused_agent_domain: crate::workspace::main_area::pane::AccountDomain,
+    /// Mirrors `ClaudeContext::usage_domain_override` — the switcher's last
+    /// manual pick, read-only from this side.
+    pub usage_domain_override: Option<daruda_store::accounts::AccountRecipeId>,
     /// Locally aggregated activity (7-day turns + tokens charts), one entry
     /// per domain in `usage` that has any — a domain with no activity log
     /// (or none aggregated yet) is simply absent, not zeroed.
@@ -410,6 +419,8 @@ impl RightDockSnapshot {
     pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
         self.right_dock_view != prev.right_dock_view
             || self.usage != prev.usage
+            || self.focused_agent_domain != prev.focused_agent_domain
+            || self.usage_domain_override != prev.usage_domain_override
             || self.activity != prev.activity
             || self.usage_refresh_in_flight != prev.usage_refresh_in_flight
             || self.skills != prev.skills

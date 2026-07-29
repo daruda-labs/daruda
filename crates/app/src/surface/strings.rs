@@ -648,6 +648,13 @@ pub fn usage_limit_unavailable() -> String {
 pub fn usage_no_provider() -> String {
     rust_i18n::t!("usage.no_provider").into_owned()
 }
+/// Body shown when the focused pane's own domain isn't signed in — even
+/// though another domain might be. Names `recipe` specifically rather than
+/// the generic [`usage_no_provider`] notice, which would misleadingly claim
+/// nobody is signed into anything.
+pub fn usage_no_domain_provider(recipe: daruda_store::accounts::AccountRecipeId) -> String {
+    rust_i18n::t!("usage.no_domain_provider", domain => account_recipe_label(recipe)).into_owned()
+}
 
 // ----------------------------------------------------------------
 // Activity dashboard (recent-turns chart + token-usage chart)

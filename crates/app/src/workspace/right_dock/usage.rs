@@ -15,45 +15,68 @@ use crate::ui::theme;
 use daruda_claude::activity::{ActivityStats, DayActivity};
 use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
 use daruda_claude::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
-use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use daruda_store::accounts::AccountRecipeId;
+use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
+use super::super::layout::snap::UsageSectionSnapshot;
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
-    button, group_box,
+    button, group_box, tab, tab_bar,
 };
+use crate::workspace::Workspace;
+use crate::workspace::main_area::pane::AccountDomain;
 
-/// Render the Usage tab body: the refresh header, then one block per signed-in
-/// auth domain.
+/// Render the Usage tab body: the refresh header, then the one section
+/// relevant to the focused pane — a single agent-chat pane is always scoped
+/// to exactly one domain, so stacking every signed-in domain regardless of
+/// focus was clutter. `resolve_displayed_domain` picks which one; a domain
+/// switcher only appears when focus doesn't already say which (a terminal
+/// pane, or an agent daruda can't resolve a domain for) and there is more
+/// than one to choose from.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     if snap.usage.is_empty() {
         return no_provider_body(cx);
     }
+    let Some(displayed) = resolve_displayed_domain(
+        snap.focused_agent_domain,
+        snap.usage_domain_override,
+        &snap.usage,
+    ) else {
+        return no_provider_body(cx);
+    };
+    // `Exactly(recipe)` names a domain unconditionally — only reachable here
+    // when that domain isn't actually signed in (this pane's own domain has
+    // no section). Another domain might still be signed in, so this names
+    // the specific missing one instead of the generic "nobody is signed in
+    // anywhere" notice.
+    let Some(section) = snap.usage.iter().find(|s| s.recipe == displayed) else {
+        return no_provider_body_for_domain(displayed, cx);
+    };
+    let activity = snap
+        .activity
+        .iter()
+        .find(|(recipe, _)| *recipe == section.recipe)
+        .map(|(_, stats)| stats);
+
     let body = crate::workspace::right_dock::right_panel_body()
-        // One badge for the whole tab: the button refreshes every domain, so a
-        // per-section copy would be N buttons doing the same thing. The age
-        // shown is the oldest section's — the one that says how fresh the
-        // *dashboard* is.
+        // One badge for the whole tab: the button refreshes every domain, so
+        // clicking it isn't scoped to the visible section alone. But the age
+        // it displays must be — only one section is on screen, so the badge
+        // reports *its* freshness, not some other, hidden domain's.
         .child(usage_section_header(
-            snap.usage
-                .iter()
-                .filter_map(|section| section.outcome.snapshot()?.fetched_at)
-                .min(),
+            section.outcome.snapshot().and_then(|u| u.fetched_at),
             snap.usage_refresh_in_flight,
             &snap.workspace,
         ));
-    snap.usage
-        .iter()
-        .fold(body, |body, section| {
-            let activity = snap
-                .activity
-                .iter()
-                .find(|(recipe, _)| *recipe == section.recipe)
-                .map(|(_, stats)| stats);
-            body.child(provider_section(section, activity, cx))
-        })
+    let body = if show_domain_switcher(snap.focused_agent_domain, snap.usage.len()) {
+        body.child(domain_switcher(&snap.usage, displayed, &snap.workspace))
+    } else {
+        body
+    };
+    body.child(provider_section(section, activity, cx))
         .into_any_element()
 }
 
@@ -67,6 +90,63 @@ fn no_provider_body(cx: &gpui::App) -> AnyElement {
                 .text_color(theme::current(cx).text_subtle),
         )
         .into_any_element()
+}
+
+/// Body when the focused pane's own domain isn't signed in, even though
+/// another domain might be — names `recipe` specifically rather than
+/// [`no_provider_body`]'s generic notice, which would misleadingly claim
+/// nobody is signed into anything.
+fn no_provider_body_for_domain(recipe: AccountRecipeId, cx: &gpui::App) -> AnyElement {
+    crate::workspace::right_dock::right_panel_body()
+        .child(
+            crate::ui::placeholder_text(strings::usage_no_domain_provider(recipe))
+                .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+                .text_color(theme::current(cx).text_subtle),
+        )
+        .into_any_element()
+}
+
+// ----------------------------------------------------------------
+// Domain switcher (ambiguous focus only)
+// ----------------------------------------------------------------
+
+/// Whether the domain switcher tab row should render: only while the
+/// focused pane doesn't already name a domain exactly (a terminal pane, or
+/// an agent daruda can't resolve a domain for), and only when there is more
+/// than one signed-in domain to switch between — a lone section needs no
+/// picker even in that state.
+fn show_domain_switcher(pane_domain: AccountDomain, section_count: usize) -> bool {
+    !matches!(pane_domain, AccountDomain::Exactly(_)) && section_count > 1
+}
+
+/// The switcher tab row: one tab per signed-in domain (never a hardcoded
+/// pair), driving `Workspace::set_usage_domain_override` on click. Reused
+/// `tab_bar`/`tab` widget, same as the right dock's own view switcher.
+fn domain_switcher(
+    sections: &[UsageSectionSnapshot],
+    selected: AccountRecipeId,
+    workspace: &WeakEntity<Workspace>,
+) -> impl IntoElement {
+    let recipes: Vec<AccountRecipeId> = sections.iter().map(|s| s.recipe).collect();
+    let active_ix = recipes.iter().position(|r| *r == selected).unwrap_or(0);
+    let workspace = workspace.clone();
+
+    tab_bar("usage-domain-switcher")
+        .w_full()
+        .selected_index(active_ix)
+        .children(
+            recipes
+                .iter()
+                .map(|recipe| tab(strings::account_recipe_label(*recipe))),
+        )
+        .on_click(move |ix, _window, cx| {
+            let Some(recipe) = recipes.get(*ix).copied() else {
+                return;
+            };
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.set_usage_domain_override(recipe, cx));
+            }
+        })
 }
 
 /// One auth domain's block: header (icon + name + plan badge), account label,
@@ -514,6 +594,26 @@ fn indicator_color(indicator: StatusIndicator, cx: &gpui::App) -> Hsla {
 
 // ---- Pure display logic (GPUI-free, unit-tested) ----
 
+/// Which domain's section the Usage tab shows this frame. `Exactly(recipe)`
+/// always wins — a single agent-chat pane never has a second domain worth
+/// showing. Otherwise (a terminal pane, or an agent daruda can't resolve a
+/// domain for) the switcher's last manual pick wins if it still names a
+/// signed-in domain; a pick for a domain that has since signed out (or was
+/// never signed in) is silently ignored rather than tracked/cleared
+/// separately, falling through to the first signed-in section.
+fn resolve_displayed_domain(
+    pane_domain: AccountDomain,
+    override_: Option<AccountRecipeId>,
+    sections: &[UsageSectionSnapshot],
+) -> Option<AccountRecipeId> {
+    if let AccountDomain::Exactly(recipe) = pane_domain {
+        return Some(recipe);
+    }
+    override_
+        .filter(|r| sections.iter().any(|s| s.recipe == *r))
+        .or_else(|| sections.first().map(|s| s.recipe))
+}
+
 /// Cache-age bucket for the refresh badge. Pure so the bucket
 /// boundaries are tested without touching i18n or the clock.
 #[derive(Debug, PartialEq, Eq)]
@@ -599,6 +699,90 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daruda_claude::UsageOutcome;
+
+    fn section(recipe: AccountRecipeId) -> UsageSectionSnapshot {
+        UsageSectionSnapshot {
+            recipe,
+            account_label: "System".into(),
+            outcome: UsageOutcome::Pending,
+            service_status: None,
+        }
+    }
+
+    #[test]
+    fn exactly_wins_over_any_override_or_section_list() {
+        let sections = [section(AccountRecipeId::Codex)];
+        assert_eq!(
+            resolve_displayed_domain(
+                AccountDomain::Exactly(AccountRecipeId::Claude),
+                Some(AccountRecipeId::Codex),
+                &sections,
+            ),
+            Some(AccountRecipeId::Claude),
+            "auto mode always wins, even when it names a domain absent from `sections`"
+        );
+    }
+
+    #[test]
+    fn ambiguous_focus_respects_a_valid_override() {
+        let sections = [
+            section(AccountRecipeId::Claude),
+            section(AccountRecipeId::Codex),
+        ];
+        assert_eq!(
+            resolve_displayed_domain(AccountDomain::Any, Some(AccountRecipeId::Codex), &sections),
+            Some(AccountRecipeId::Codex)
+        );
+    }
+
+    #[test]
+    fn ambiguous_focus_falls_back_to_the_first_section_on_a_stale_override() {
+        // The override names a domain that has since signed out (absent from
+        // `sections`) — it must not be tracked/cleared separately, just
+        // ignored in favor of the default.
+        let sections = [section(AccountRecipeId::Claude)];
+        assert_eq!(
+            resolve_displayed_domain(AccountDomain::Any, Some(AccountRecipeId::Codex), &sections),
+            Some(AccountRecipeId::Claude)
+        );
+    }
+
+    #[test]
+    fn ambiguous_focus_falls_back_to_the_first_section_with_no_override() {
+        let sections = [section(AccountRecipeId::Codex)];
+        assert_eq!(
+            resolve_displayed_domain(AccountDomain::Unsupported, None, &sections),
+            Some(AccountRecipeId::Codex)
+        );
+    }
+
+    #[test]
+    fn no_sections_is_no_domain_regardless_of_focus() {
+        assert_eq!(
+            resolve_displayed_domain(AccountDomain::Any, None, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn switcher_hidden_when_focus_names_a_domain_exactly() {
+        assert!(!show_domain_switcher(
+            AccountDomain::Exactly(AccountRecipeId::Claude),
+            2
+        ));
+    }
+
+    #[test]
+    fn switcher_hidden_with_only_one_signed_in_domain() {
+        assert!(!show_domain_switcher(AccountDomain::Any, 1));
+    }
+
+    #[test]
+    fn switcher_shown_when_focus_is_ambiguous_and_multiple_domains_are_signed_in() {
+        assert!(show_domain_switcher(AccountDomain::Any, 2));
+        assert!(show_domain_switcher(AccountDomain::Unsupported, 2));
+    }
 
     #[test]
     fn chart_heights_normalize_to_max() {

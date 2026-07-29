@@ -4,9 +4,10 @@
 use super::agent_chat::agent_view;
 use super::*;
 use crate::workspace::claude_session_ops::UsageKey;
+use crate::workspace::main_area::pane::AccountDomain;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::ChatItem;
-use daruda_store::accounts::{AccountId, AccountSelection};
+use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
 use daruda_store::project::PaneCwd;
 
 /// An Agent chat pane pinned to `selection`, pushed onto the active runtime.
@@ -29,6 +30,23 @@ fn seed_agent_pane(
     pane.agent_chat_content_mut().unwrap().account = selection;
     let id = pane.id;
     ws.active_runtime_mut().panes.push(pane);
+    id
+}
+
+/// An agent-chat pane running `agent_id`, pushed onto the active runtime
+/// *and* focused — unlike `seed_agent_pane`, this needs to be the actually
+/// focused pane so `AccountDomain::for_pane` (read by
+/// `prepare_right_dock_snapshot` via `focused_account_pane`) resolves it.
+fn seed_and_focus_agent_pane(
+    ws: &mut Workspace,
+    agent_id: String,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> PaneId {
+    let pane = ws.create_agent_chat_pane(None, None, agent_id, None, window, cx);
+    let id = pane.id;
+    ws.active_runtime_mut().panes.push(pane);
+    ws.active_runtime_mut().focused_pane_id = id;
     id
 }
 
@@ -808,6 +826,61 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
             },
         );
         assert_eq!(ws.prepare_right_dock_snapshot(cx).activity.len(), 1);
+    });
+}
+
+/// `prepare_right_dock_snapshot` threads the focused pane's resolved
+/// `AccountDomain` and the switcher's manual override straight through — the
+/// Usage tab renderer (`right_dock::usage::resolve_displayed_domain`) has
+/// nowhere else to read either from.
+#[gpui::test]
+async fn right_dock_snapshot_threads_focused_domain_and_override(cx: &mut TestAppContext) {
+    // The default test `Config` only carries Claude in its agent catalog
+    // (`daruda_config::default_agents`) — Codex needs to be present too, or
+    // `agent_launch_for` can't resolve the seeded pane's agent id and its
+    // domain reads back as `Unsupported` instead of `Exactly(Codex)`.
+    let config = daruda_config::Config {
+        agents: vec![
+            daruda_config::AgentDefinition::claude_default(),
+            daruda_config::AgentDefinition::codex_default(),
+        ],
+        ..Default::default()
+    };
+    let (window_handle, workspace) = build_workspace_with(cx, &config, None);
+    cx.run_until_parked();
+
+    // A fresh workspace boots on its default terminal tab — no agent-chat
+    // pane focused, so the domain is ambiguous and the override starts unset.
+    workspace.update(cx, |ws, cx| {
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        assert_eq!(snap.focused_agent_domain, AccountDomain::Any);
+        assert_eq!(snap.usage_domain_override, None);
+
+        ws.set_usage_domain_override(AccountRecipeId::Codex, cx);
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        assert_eq!(snap.usage_domain_override, Some(AccountRecipeId::Codex));
+    });
+
+    // Focusing a Codex agent-chat pane resolves the domain exactly.
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            seed_and_focus_agent_pane(
+                ws,
+                daruda_config::AgentDefinition::codex_default().id,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        assert_eq!(
+            snap.focused_agent_domain,
+            AccountDomain::Exactly(AccountRecipeId::Codex)
+        );
     });
 }
 

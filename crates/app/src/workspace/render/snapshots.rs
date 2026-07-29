@@ -388,6 +388,8 @@ impl Workspace {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
             usage: usage_sections,
+            focused_agent_domain: pane_domain,
+            usage_domain_override: self.claude.usage_domain_override,
             activity,
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
