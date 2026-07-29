@@ -2695,6 +2695,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "core-text",
+ "daruda_core",
  "enum-iterator",
  "gpui",
  "gpui_component_macros",

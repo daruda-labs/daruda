@@ -49,7 +49,6 @@ pub mod tab;
 pub mod table;
 pub mod tag;
 pub mod text;
-pub mod text_selection;
 pub mod theme;
 pub mod tooltip;
 pub mod tree;

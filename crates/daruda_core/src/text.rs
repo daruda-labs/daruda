@@ -1,8 +1,22 @@
-/// Shared text-selection primitives used by both the input widget
-/// (ropey::Rope, byte offsets) and future plain-text consumers (&str).
-///
-/// **Scope**: word-boundary and logical-line-range logic.  SelectMode, mouse
-/// branching, drag extension, and selection state remain per-widget.
+//! UTF-8 text navigation shared across the GPUI boundary.
+//!
+//! Byte-offset word and line expansion, plus the selection hit-test that
+//! turns a pixel span into "is this cell selected". Everything here takes
+//! `&str`-shaped input through a `char_at` closure rather than a concrete
+//! string type, so a `ropey::Rope`-backed editor and a plain `&str` reader
+//! share one implementation.
+//!
+//! Deliberately *not* here: what counts as a word. The editor treats
+//! `foo/bar.txt` as three tokens while the terminal treats it as one path,
+//! and both are right for their surface. [`CharType`] is the editor policy;
+//! a caller wanting different rules walks with its own predicate.
+//!
+//! For plain char-boundary rounding reach for std's
+//! `str::{floor_char_boundary, ceil_char_boundary}` (stable since 1.91) —
+//! this module used to carry stand-ins for them, which are no longer needed.
+//! A crate whose `rust-version` predates 1.91 cannot call them; `daruda_terminal`
+//! still declares 1.86 and keeps its own `text_edit` helpers for that reason.
+
 use std::ops::Range;
 
 /// Category of a character for word-boundary detection.
@@ -54,11 +68,11 @@ impl From<char> for CharType {
 /// Return the byte range of the word/run that contains `offset`.
 ///
 /// # Parameters
-/// - `len`     – total byte length of the text.
-/// - `char_at` – closure that maps a byte offset to the `char` that *starts*
-///               at that offset, or `None` when the offset is past the end or
-///               is not a UTF-8 character boundary.
-/// - `offset`  – byte offset of the character to expand from.
+/// - `len` – total byte length of the text.
+/// - `char_at` – closure that maps a byte offset to the `char` that *starts* at
+///   that offset, or `None` when the offset is past the end or is not a UTF-8
+///   character boundary.
+/// - `offset` – byte offset of the character to expand from.
 ///
 /// Returns `None` when `offset >= len` or `char_at(offset)` is `None`.
 ///
@@ -128,11 +142,11 @@ pub fn word_range(
 /// contains `offset`.
 ///
 /// # Parameters
-/// - `len`     – total byte length of the text.
-/// - `char_at` – closure that maps a byte offset to the `char` starting
-///               there, or `None` when the offset is out of range or not a
-///               UTF-8 character boundary.
-/// - `offset`  – byte offset inside the line to locate.
+/// - `len` – total byte length of the text.
+/// - `char_at` – closure that maps a byte offset to the `char` starting there,
+///   or `None` when the offset is out of range or not a UTF-8 character
+///   boundary.
+/// - `offset` – byte offset inside the line to locate.
 ///
 /// Always returns a valid `Range<usize>` within `0..len`.  When the text
 /// has no newlines the whole range `0..len` is returned.
@@ -162,36 +176,6 @@ pub fn logical_line_range(
         .find(|&i| char_at(i) == Some('\n'))
         .unwrap_or(len);
     start..end
-}
-
-/// The byte offset of the UTF-8 char boundary at or **before** `offset`
-/// (clamped to `0..=len`). Reach for this instead of `offset - 1` when stepping
-/// a byte index backward: `offset - 1` lands inside a multi-byte glyph
-/// (Hangul/CJK are 3 bytes), splitting it and breaking any downstream
-/// `is_char_boundary` / slice / `char_at` lookup. Stable stand-in for the
-/// unstable `str::floor_char_boundary`.
-pub fn floor_char_boundary(text: &str, offset: usize) -> usize {
-    let mut i = offset.min(text.len());
-    while i > 0 && !text.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-/// The byte offset of the UTF-8 char boundary at or **after** `offset` (clamped
-/// to `0..=len`). Reach for this instead of `offset + 1` when stepping a byte
-/// index forward past a glyph whose length you don't have in hand. Stable
-/// stand-in for the unstable `str::ceil_char_boundary`. (When you already hold
-/// the `char`, `offset + c.len_utf8()` is equivalent and clearer.)
-pub fn ceil_char_boundary(text: &str, offset: usize) -> usize {
-    if offset >= text.len() {
-        return text.len();
-    }
-    let mut i = offset;
-    while i < text.len() && !text.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 /// Whether a character occupying the horizontal cell `[cell_left, cell_left +
@@ -238,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_ascii() {
+    fn word_boundary_ascii() {
         let s = "hello world";
         assert_eq!(word(s, 0), Some("hello".into()));
         assert_eq!(word(s, 4), Some("hello".into()));
@@ -248,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_underscore() {
+    fn word_boundary_underscore() {
         let s = "foo_bar baz";
         assert_eq!(word(s, 0), Some("foo_bar".into()));
         assert_eq!(word(s, 6), Some("foo_bar".into()));
@@ -257,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_punctuation() {
+    fn word_boundary_punctuation() {
         let s = "a.b[c]";
         assert_eq!(word(s, 0), Some("a".into()));
         assert_eq!(word(s, 1), Some(".".into()));
@@ -268,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_newline() {
+    fn word_boundary_newline() {
         let s = "foo\nbar";
         assert_eq!(word(s, 0), Some("foo".into()));
         assert_eq!(word(s, 3), Some("\n".into()));
@@ -276,14 +260,14 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_out_of_bounds() {
+    fn word_boundary_out_of_bounds() {
         let s = "hi";
         assert_eq!(word(s, 2), None); // offset == len
         assert_eq!(word(s, 99), None);
     }
 
     #[test]
-    fn test_word_boundary_multibyte() {
+    fn word_boundary_multibyte() {
         // "中文" — each char is 3 bytes. Both are alphanumeric letters, so they
         // form one connectable word (the point of treating CJK/Hangul as Word).
         let s = "中文";
@@ -292,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn test_word_boundary_hangul() {
+    fn word_boundary_hangul() {
         // Hangul is 3 bytes/char; a run is one word, stopping at the space.
         let s = "한글 테스트";
         assert_eq!(word(s, 0), Some("한글".into()));
@@ -302,22 +286,27 @@ mod tests {
     }
 
     #[test]
-    fn test_char_boundary_helpers() {
-        // "한A" — 한 is bytes 0..3, A is byte 3.
-        let s = "한A";
-        // floor rounds a mid-glyph index down to the glyph start.
-        assert_eq!(floor_char_boundary(s, 1), 0);
-        assert_eq!(floor_char_boundary(s, 2), 0);
-        assert_eq!(floor_char_boundary(s, 3), 3);
-        assert_eq!(floor_char_boundary(s, 99), s.len());
-        // ceil rounds a mid-glyph index up to the next boundary.
-        assert_eq!(ceil_char_boundary(s, 1), 3);
-        assert_eq!(ceil_char_boundary(s, 3), 3);
-        assert_eq!(ceil_char_boundary(s, 99), s.len());
+    fn logical_line_range_splits_on_newlines() {
+        let s = "one\ntwo\nthree";
+        let range = |o| logical_line_range(s.len(), |i| str_char_at(s, i), o);
+        assert_eq!(&s[range(0)], "one");
+        assert_eq!(&s[range(3)], "one"); // the '\n' itself belongs to the line before it
+        assert_eq!(&s[range(4)], "two");
+        assert_eq!(&s[range(9)], "three");
+        assert_eq!(&s[range(99)], "three"); // clamped past the end
     }
 
     #[test]
-    fn test_char_type_from_char() {
+    fn logical_line_range_without_newlines_is_whole_text() {
+        let s = "single line";
+        assert_eq!(
+            logical_line_range(s.len(), |i| str_char_at(s, i), 4),
+            0..s.len()
+        );
+    }
+
+    #[test]
+    fn char_type_classifies_by_script_not_ascii() {
         assert_eq!(CharType::from_char('a'), CharType::Word);
         assert_eq!(CharType::from_char('Z'), CharType::Word);
         assert_eq!(CharType::from_char('0'), CharType::Word);
@@ -332,5 +321,16 @@ mod tests {
         assert_eq!(CharType::from_char('글'), CharType::Word);
         // Symbols / emoji stay Other.
         assert_eq!(CharType::from_char('😀'), CharType::Other);
+    }
+
+    #[test]
+    fn char_cell_hit_x_uses_center_for_drag_and_containment_for_click() {
+        // Drag span: the cell's center must fall inside it.
+        assert!(char_cell_hit_x(10.0, 8.0, 0.0, 20.0)); // center 14 in 0..20
+        assert!(!char_cell_hit_x(10.0, 8.0, 0.0, 12.0)); // center 14 outside
+        // Degenerate span (a click): the cell must contain the point.
+        assert!(char_cell_hit_x(10.0, 8.0, 10.0, 10.0));
+        assert!(char_cell_hit_x(10.0, 8.0, 17.9, 17.9));
+        assert!(!char_cell_hit_x(10.0, 8.0, 18.0, 18.0)); // exclusive right edge
     }
 }

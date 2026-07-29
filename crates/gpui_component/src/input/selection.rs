@@ -4,7 +4,8 @@ use gpui::{Context, Window};
 use ropey::Rope;
 use sum_tree::Bias;
 
-use crate::{RopeExt as _, input::InputState, text_selection};
+use crate::{RopeExt as _, input::InputState};
+use daruda_core::text;
 
 impl InputState {
     /// Select the word at the given offset on double-click.
@@ -30,14 +31,14 @@ impl TextSelector {
     /// Returns the start and end byte offsets of the selected word.
     pub fn word_range(text: &Rope, offset: usize) -> Option<Range<usize>> {
         let offset = text.clip_offset(offset, Bias::Left);
-        text_selection::word_range(text.len(), |i| text.char_at(i), offset)
+        text::word_range(text.len(), |i| text.char_at(i), offset)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text_selection::CharType;
+    use daruda_core::text::CharType;
     use ropey::Rope;
 
     #[test]

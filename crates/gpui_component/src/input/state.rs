@@ -1282,7 +1282,7 @@ impl InputState {
     /// Return the byte range of the word at `offset`, or `None` if the offset
     /// is past the end of the text.
     pub(super) fn word_range_at(&self, offset: usize) -> Option<std::ops::Range<usize>> {
-        crate::text_selection::word_range(self.text.len(), |i| self.text.char_at(i), offset)
+        daruda_core::text::word_range(self.text.len(), |i| self.text.char_at(i), offset)
     }
 
     /// Return the byte range of the logical (newline-delimited) line that
@@ -1291,7 +1291,7 @@ impl InputState {
         if self.mode.is_single_line() {
             return 0..self.text.len();
         }
-        crate::text_selection::logical_line_range(self.text.len(), |i| self.text.char_at(i), offset)
+        daruda_core::text::logical_line_range(self.text.len(), |i| self.text.char_at(i), offset)
     }
 
     /// Get start line of selection start or end (The min value).

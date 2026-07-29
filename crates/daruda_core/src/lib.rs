@@ -29,3 +29,4 @@
 //! proposed addition fails one of them, it belongs elsewhere.
 
 pub mod language;
+pub mod text;

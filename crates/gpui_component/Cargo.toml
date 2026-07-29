@@ -67,6 +67,7 @@ tree-sitter-languages = [
 ]
 
 [dependencies]
+daruda_core = { path = "../daruda_core" }
 gpui = { workspace = true }
 gpui_macros = { workspace = true }
 sum_tree = { workspace = true }

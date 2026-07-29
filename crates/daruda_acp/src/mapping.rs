@@ -522,10 +522,7 @@ fn bounded_text(s: String) -> ToolOutputBlock {
         };
     }
     let original_len = s.len();
-    let mut boundary = cap;
-    while !s.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
+    let boundary = s.floor_char_boundary(cap);
     let mut text = s;
     text.truncate(boundary);
     ToolOutputBlock::Text {

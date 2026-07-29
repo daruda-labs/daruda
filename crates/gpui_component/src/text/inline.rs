@@ -12,13 +12,10 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme,
-    global_state::GlobalState,
-    input::Selection,
-    text::node::LinkMark,
+    ActiveTheme, global_state::GlobalState, input::Selection, text::node::LinkMark,
     text::text_view::SelectMode,
-    text_selection::{char_cell_hit_x, floor_char_boundary, word_range},
 };
+use daruda_core::text::{char_cell_hit_x, word_range};
 
 /// A inline element used to render a inline text and support selectable.
 ///
@@ -202,7 +199,7 @@ impl Inline {
                 // exclusive, so `raw_end - 1` would land inside a multi-byte
                 // glyph (Hangul/CJK) and `word_range` would bail (char_at at a
                 // non-boundary is None) — leaving the word end unexpanded.
-                let last_char_start = floor_char_boundary(text, raw_end.saturating_sub(1));
+                let last_char_start = text.floor_char_boundary(raw_end.saturating_sub(1));
                 let end = word_range(text.len(), char_at, last_char_start)
                     .map(|r| r.end)
                     .unwrap_or(raw_end);
@@ -219,7 +216,7 @@ impl Inline {
                     .unwrap_or_default();
                 // Floor to a char boundary: `raw_end - 1` is mid-glyph for
                 // multi-byte text, which `position_for_index` can't resolve.
-                let raw_last = floor_char_boundary(&self.text, raw_end.saturating_sub(1));
+                let raw_last = self.text.floor_char_boundary(raw_end.saturating_sub(1));
                 let raw_bottom = text_layout
                     .position_for_index(raw_last)
                     .map(|p| p.y + line_height)
