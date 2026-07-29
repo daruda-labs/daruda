@@ -7,9 +7,18 @@
 //!
 //! # What belongs here
 //!
-//! - **No dependencies.** Adding one makes this crate a transitive burden
-//!   on every consumer, including the deliberately dependency-light
-//!   protocol core.
+//! Every consumer points here and this crate points at none of them, so
+//! the dependency question is directional, not a matter of count:
+//!
+//! - **Nothing from `daruda_*`.** Reaching back into the workspace inverts
+//!   the layering. External crates sit below all of it, so those are fine.
+//! - **Never `gpui`.** Not a weight judgment: this crate exists so the
+//!   GPUI-free crates can share knowledge with the app, and a GPUI
+//!   dependency would put it back out of their reach.
+//! - **Weigh anything else.** Every consumer inherits it and `daruda_acp`
+//!   is deliberately dependency-light, so prefer what they already carry.
+//!   Today only `serde` would qualify, and it stays out until something
+//!   here actually needs it.
 //! - **Two or more consumers.** Code used by exactly one crate belongs in
 //!   that crate; moving it here only makes it harder to find.
 //! - **Pure.** No I/O, no globals, no environment. `&str`/value in,
