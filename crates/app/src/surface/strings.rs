@@ -655,6 +655,14 @@ pub fn usage_no_provider() -> String {
 pub fn usage_no_domain_provider(recipe: daruda_store::accounts::AccountRecipeId) -> String {
     rust_i18n::t!("usage.no_domain_provider", domain => account_recipe_label(recipe)).into_owned()
 }
+/// Heading above the recent-sessions table.
+pub fn usage_recent_sessions_section() -> String {
+    rust_i18n::t!("usage.recent_sessions_section").into_owned()
+}
+/// Button label that restores a past session into a new pane.
+pub fn usage_session_restore() -> String {
+    rust_i18n::t!("usage.session_restore").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Activity dashboard (recent-turns chart + token-usage chart)

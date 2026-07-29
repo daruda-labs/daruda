@@ -29,6 +29,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,11 +43,34 @@ pub struct DayActivity {
     pub tokens: u64,
 }
 
+/// One session found while scanning — enough to render a recent-sessions
+/// row and restore it into a new pane. Built from whichever `user`/
+/// `assistant` records a session's file actually carried, so a session
+/// with no such record yet (freshly created, still empty) never appears.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub session_id: String,
+    /// The session's originating working directory, as Claude Code wrote
+    /// it into the JSONL — an absolute path, not yet matched against any
+    /// daruda Lane.
+    pub cwd: PathBuf,
+    /// Explicit `custom-title` first, else the most recent `ai-title`
+    /// seen (Claude Code regenerates it as the conversation evolves),
+    /// else `None`.
+    pub title: Option<String>,
+    pub last_active: SystemTime,
+}
+
 /// Aggregate of all activity found under the projects root.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivityStats {
     /// Ascending by date.
     pub daily: Vec<DayActivity>,
+    /// Unsorted, uncapped — every session this scan resolved a `cwd` +
+    /// `session_id` for. Filtering to a caller's open Lanes and capping
+    /// to a display count is the caller's job; this module has no
+    /// concept of a Lane.
+    pub recent_sessions: Vec<SessionSummary>,
 }
 
 /// Failure surface for [`update_activity`]. Per-file races (a session
@@ -80,7 +104,12 @@ pub enum ActivityError {
 /// v2: `FileDayCounts` switched from `{messages, tool_calls, session_ids}`
 /// to `{turns, tokens}` — an old v1 cache would deserialize with the wrong
 /// field names, so the version bump forces a full rebuild instead.
-const CACHE_VERSION: u32 = 2;
+///
+/// v3: `FileEntry` gained `session_id`/`cwd`/`title`/`title_is_custom`/
+/// `last_active_ms` for [`ActivityStats::recent_sessions`] — a v2 cache
+/// has none of these, so it must rebuild rather than silently report an
+/// empty recent-sessions list forever.
+const CACHE_VERSION: u32 = 3;
 
 /// On-disk incremental cache. Plain serde JSON; corruption or version
 /// mismatch is never an error — the cache is a pure derivative of the
@@ -115,6 +144,18 @@ struct FileEntry {
     size: u64,
     /// Counts keyed by local date `"YYYY-MM-DD"`.
     days: BTreeMap<String, FileDayCounts>,
+    /// This file's session id, captured once from its first `user`/
+    /// `assistant` record — stable for the file's lifetime.
+    session_id: Option<String>,
+    /// This session's originating cwd, captured the same way.
+    cwd: Option<PathBuf>,
+    /// Best available title — see [`SessionSummary::title`].
+    title: Option<String>,
+    /// Set once a `custom-title` record is seen, so a later `ai-title`
+    /// can't clobber the user's explicit choice.
+    title_is_custom: bool,
+    /// Latest `user`/`assistant` timestamp seen, epoch milliseconds.
+    last_active_ms: Option<i64>,
 }
 
 /// One file's contribution to one day.
@@ -251,7 +292,7 @@ fn refresh_file(
             break;
         }
         entry.consumed_offset += read as u64;
-        count_record(&line, &mut entry.days);
+        count_record(&line, &mut entry);
     }
 
     entry.size = size;
@@ -259,24 +300,62 @@ fn refresh_file(
     Ok(Some(entry))
 }
 
-/// Classify one JSONL line and fold it into the per-day counts.
-/// Malformed JSON and records without a parseable timestamp are
-/// skipped silently — session logs routinely contain entry kinds we
-/// don't model.
-fn count_record(line: &[u8], days: &mut BTreeMap<String, FileDayCounts>) {
+/// Classify one JSONL line and fold it into `entry`. Malformed JSON and
+/// records without a parseable timestamp are skipped silently — session
+/// logs routinely contain entry kinds we don't model.
+///
+/// `ai-title`/`custom-title` records carry no `timestamp` field at all
+/// (confirmed against real Claude Code session logs), so title capture is
+/// handled before the timestamp gate below applies to everything else.
+fn count_record(line: &[u8], entry: &mut FileEntry) {
     let Ok(record) = serde_json::from_slice::<Value>(line) else {
-        return;
-    };
-    let Some(date) = record
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(local_date)
-    else {
         return;
     };
     let Some(kind) = record.get("type").and_then(Value::as_str) else {
         return;
     };
+
+    match kind {
+        "ai-title" => {
+            if !entry.title_is_custom
+                && let Some(title) = record.get("aiTitle").and_then(Value::as_str)
+            {
+                entry.title = Some(title.to_string());
+            }
+            return;
+        }
+        "custom-title" => {
+            if let Some(title) = record.get("customTitle").and_then(Value::as_str) {
+                entry.title = Some(title.to_string());
+                entry.title_is_custom = true;
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let Some(timestamp) = record.get("timestamp").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(date) = local_date(timestamp) else {
+        return;
+    };
+
+    if matches!(kind, "user" | "assistant") {
+        if entry.session_id.is_none()
+            && let Some(sid) = record.get("sessionId").and_then(Value::as_str)
+        {
+            entry.session_id = Some(sid.to_string());
+        }
+        if entry.cwd.is_none()
+            && let Some(cwd) = record.get("cwd").and_then(Value::as_str)
+        {
+            entry.cwd = Some(PathBuf::from(cwd));
+        }
+        if let Some(ms) = epoch_millis(timestamp) {
+            entry.last_active_ms = Some(entry.last_active_ms.map_or(ms, |prev| prev.max(ms)));
+        }
+    }
 
     match kind {
         "user" => {
@@ -292,7 +371,7 @@ fn count_record(line: &[u8], days: &mut BTreeMap<String, FileDayCounts>) {
                         .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
                 });
             if !is_tool_result {
-                days.entry(date).or_default().turns += 1;
+                entry.days.entry(date).or_default().turns += 1;
             }
         }
         "assistant" => {
@@ -306,7 +385,7 @@ fn count_record(line: &[u8], days: &mut BTreeMap<String, FileDayCounts>) {
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             if input + output > 0 {
-                days.entry(date).or_default().tokens += input + output;
+                entry.days.entry(date).or_default().tokens += input + output;
             }
         }
         _ => {}
@@ -319,6 +398,13 @@ fn local_date(timestamp: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(timestamp)
         .ok()
         .map(|dt| dt.with_timezone(&chrono::Local).date_naive().to_string())
+}
+
+/// RFC 3339 timestamp → epoch milliseconds, for [`FileEntry::last_active_ms`].
+fn epoch_millis(timestamp: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
 }
 
 fn mtime_millis(meta: &fs::Metadata) -> u64 {
@@ -357,14 +443,26 @@ struct DayAccum {
     tokens: u64,
 }
 
-/// Fold the per-file day counts into the public stats.
+/// Fold the per-file day counts (and per-file session summaries) into the
+/// public stats.
 fn aggregate(cache: &ActivityCache) -> ActivityStats {
     let mut per_day: BTreeMap<&str, DayAccum> = BTreeMap::new();
+    let mut recent_sessions = Vec::new();
     for entry in cache.files.values() {
         for (date, counts) in &entry.days {
             let day = per_day.entry(date.as_str()).or_default();
             day.turns += counts.turns;
             day.tokens += counts.tokens;
+        }
+        if let (Some(session_id), Some(cwd), Some(last_active_ms)) =
+            (&entry.session_id, &entry.cwd, entry.last_active_ms)
+        {
+            recent_sessions.push(SessionSummary {
+                session_id: session_id.clone(),
+                cwd: cwd.clone(),
+                title: entry.title.clone(),
+                last_active: UNIX_EPOCH + Duration::from_millis(last_active_ms.max(0) as u64),
+            });
         }
     }
 
@@ -379,7 +477,10 @@ fn aggregate(cache: &ActivityCache) -> ActivityStats {
         })
         .collect();
 
-    ActivityStats { daily }
+    ActivityStats {
+        daily,
+        recent_sessions,
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +532,25 @@ mod tests {
 
     fn plain_line(kind: &str, ts: &str) -> String {
         json!({"type": kind, "timestamp": ts}).to_string() + "\n"
+    }
+
+    fn user_line_with_cwd(ts: &str, sid: &str, cwd: &str) -> String {
+        json!({"type": "user", "timestamp": ts, "sessionId": sid, "cwd": cwd,
+               "message": {"role": "user", "content": "hi"}})
+        .to_string()
+            + "\n"
+    }
+
+    /// `ai-title`/`custom-title` records carry no `timestamp` field on
+    /// real Claude Code session logs — the fixtures deliberately omit one
+    /// too, so a regression that requires a timestamp for these types is
+    /// caught.
+    fn ai_title_line(sid: &str, title: &str) -> String {
+        json!({"type": "ai-title", "sessionId": sid, "aiTitle": title}).to_string() + "\n"
+    }
+
+    fn custom_title_line(sid: &str, title: &str) -> String {
+        json!({"type": "custom-title", "sessionId": sid, "customTitle": title}).to_string() + "\n"
     }
 
     /// `projects_root/<project>/<name>.jsonl` ← `content`.
@@ -662,5 +782,120 @@ mod tests {
         };
         assert!(err.to_string().contains("/nope/projects"));
         assert!(err.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn a_session_with_no_user_or_assistant_record_has_no_recent_session() {
+        let (_tmp, projects, cache) = fixture();
+        // Only a title record, no cwd/session_id ever gets captured since
+        // that only happens on `user`/`assistant` lines.
+        write_log(&projects, "p", "a", &ai_title_line("s1", "Some title"));
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert!(stats.recent_sessions.is_empty());
+    }
+
+    #[test]
+    fn a_session_with_cwd_and_session_id_appears_in_recent_sessions() {
+        let (_tmp, projects, cache) = fixture();
+        write_log(
+            &projects,
+            "p",
+            "a",
+            &user_line_with_cwd(D1, "s1", "/Users/x/proj"),
+        );
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(stats.recent_sessions.len(), 1);
+        let s = &stats.recent_sessions[0];
+        assert_eq!(s.session_id, "s1");
+        assert_eq!(s.cwd, PathBuf::from("/Users/x/proj"));
+        assert_eq!(s.title, None);
+    }
+
+    #[test]
+    fn ai_title_sets_the_session_title() {
+        let (_tmp, projects, cache) = fixture();
+        let body =
+            user_line_with_cwd(D1, "s1", "/Users/x/proj") + &ai_title_line("s1", "Fix the bug");
+        write_log(&projects, "p", "a", &body);
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(
+            stats.recent_sessions[0].title.as_deref(),
+            Some("Fix the bug")
+        );
+    }
+
+    #[test]
+    fn a_later_ai_title_overwrites_an_earlier_one() {
+        let (_tmp, projects, cache) = fixture();
+        let body = user_line_with_cwd(D1, "s1", "/Users/x/proj")
+            + &ai_title_line("s1", "First guess")
+            + &ai_title_line("s1", "Better guess");
+        write_log(&projects, "p", "a", &body);
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(
+            stats.recent_sessions[0].title.as_deref(),
+            Some("Better guess")
+        );
+    }
+
+    #[test]
+    fn an_explicit_custom_title_wins_over_a_later_ai_title() {
+        let (_tmp, projects, cache) = fixture();
+        let body = user_line_with_cwd(D1, "s1", "/Users/x/proj")
+            + &custom_title_line("s1", "My chosen title")
+            + &ai_title_line("s1", "Auto-generated guess");
+        write_log(&projects, "p", "a", &body);
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(
+            stats.recent_sessions[0].title.as_deref(),
+            Some("My chosen title")
+        );
+    }
+
+    #[test]
+    fn last_active_tracks_the_latest_user_or_assistant_timestamp() {
+        let (_tmp, projects, cache) = fixture();
+        let body = user_line_with_cwd(D1, "s1", "/Users/x/proj")
+            + &user_line_with_cwd(D2, "s1", "/Users/x/proj");
+        write_log(&projects, "p", "a", &body);
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        let expected = chrono::DateTime::parse_from_rfc3339(D2)
+            .unwrap()
+            .timestamp_millis();
+        let actual = stats.recent_sessions[0]
+            .last_active
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn cache_version_bump_forces_a_recent_sessions_rebuild() {
+        let (_tmp, projects, cache) = fixture();
+        write_log(
+            &projects,
+            "p",
+            "a",
+            &user_line_with_cwd(D1, "s1", "/Users/x/proj"),
+        );
+        update_activity(&projects, &cache).unwrap();
+
+        // Simulate a stale v2 cache (no session_id/cwd/title fields at
+        // all) sitting at the current file's offset — the version gate
+        // must discard it wholesale rather than deserialize partially.
+        let raw = fs::read_to_string(&cache).unwrap();
+        let mut v: Value = serde_json::from_str(&raw).unwrap();
+        v["version"] = json!(2);
+        fs::write(&cache, v.to_string()).unwrap();
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(stats.recent_sessions.len(), 1);
     }
 }

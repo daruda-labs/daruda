@@ -384,6 +384,88 @@ impl Workspace {
                     .map(|stats| (section.recipe, stats))
             })
             .collect();
+        // Every Lane's cwd across every open Project — no existing call
+        // site needs "every lane across every project" today, every other
+        // `.lanes.iter()` walk is scoped to one project at a time.
+        let open_lanes: Vec<(daruda_store::project::LaneRef, std::path::PathBuf)> = self
+            .projects
+            .iter()
+            .flat_map(|p| {
+                p.lanes.iter().map(move |l| {
+                    (
+                        daruda_store::project::LaneRef {
+                            project: p.id,
+                            lane: l.id,
+                        },
+                        l.path.clone(),
+                    )
+                })
+            })
+            .collect();
+        // Session ids already open as a live pane, in any lane (not just
+        // the active one) — such a session isn't "past" any more, and
+        // `restore_session` would just focus the existing pane anyway, so
+        // it doesn't belong in a list of things to restore.
+        let open_session_ids: std::collections::HashSet<String> = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .filter_map(|p| p.agent_chat_content()?.view.read(cx).session_id.clone())
+            .collect();
+        // Up to 10 most-recent sessions per section, restricted to
+        // sessions whose cwd matches an open Lane — a session belonging to
+        // a project this window doesn't have open can't be restored
+        // without a Project-open detour this feature doesn't attempt.
+        let recent_sessions: Vec<(
+            daruda_store::accounts::AccountRecipeId,
+            Vec<crate::workspace::layout::snap::RestorableSession>,
+        )> = usage_sections
+            .iter()
+            .filter_map(|section| {
+                let account = crate::workspace::sync::limits::usage_account(
+                    section.recipe,
+                    &self.claude.sticky_focus_by_recipe,
+                );
+                let raw = self.claude.usage_by_account.activity(
+                    crate::workspace::claude_session_ops::UsageKey {
+                        recipe: section.recipe,
+                        account,
+                    },
+                )?;
+                // Restore always launches under the domain's configured
+                // default agent — the original session's exact agent
+                // variant isn't tracked. A domain with no default agent
+                // configured has nothing to restore into.
+                let agent_id = self
+                    .agents
+                    .iter()
+                    .find(|a| a.launch.account_recipe() == Some(section.recipe))?
+                    .id
+                    .clone();
+                let mut matched: Vec<crate::workspace::layout::snap::RestorableSession> = raw
+                    .recent_sessions
+                    .iter()
+                    .filter_map(|s| {
+                        if open_session_ids.contains(&s.session_id) {
+                            return None;
+                        }
+                        let (lane_ref, _) = open_lanes.iter().find(|(_, path)| path == &s.cwd)?;
+                        Some(crate::workspace::layout::snap::RestorableSession {
+                            session_id: s.session_id.clone(),
+                            agent_id: agent_id.clone(),
+                            lane_ref: *lane_ref,
+                            title: s.title.clone().map(Into::into),
+                            cwd: s.cwd.clone(),
+                            last_active: s.last_active,
+                        })
+                    })
+                    .collect();
+                matched.sort_by_key(|s| std::cmp::Reverse(s.last_active));
+                matched.truncate(10);
+                (!matched.is_empty()).then_some((section.recipe, matched))
+            })
+            .collect();
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
@@ -391,6 +473,7 @@ impl Workspace {
             focused_agent_domain: pane_domain,
             usage_domain_override: self.claude.usage_domain_override,
             activity,
+            recent_sessions,
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()

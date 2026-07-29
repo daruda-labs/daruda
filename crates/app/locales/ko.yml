@@ -808,6 +808,8 @@ usage:
   stale_marker: "⚠"
   no_provider: "Claude 또는 Codex에 로그인하면 플랜 사용량이 표시됩니다."
   no_domain_provider: "%{domain}에 로그인하면 플랜 사용량이 표시됩니다."
+  recent_sessions_section: "최근 세션"
+  session_restore: "복원"
   limit_unavailable: "사용 불가"
   limits_section_label: "플랜 사용량"
   section_7day: "7일간 활동"

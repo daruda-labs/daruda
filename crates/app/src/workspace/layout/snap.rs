@@ -327,6 +327,14 @@ pub(in crate::workspace) struct RightDockSnapshot {
         daruda_store::accounts::AccountRecipeId,
         daruda_claude::ActivityStats,
     )>,
+    /// Up to 10 recent past sessions per domain, restricted to sessions
+    /// whose cwd matches a Lane already open in this workspace window —
+    /// one entry per domain in `usage` that has any match, most-recent
+    /// first. See [`RestorableSession`].
+    pub recent_sessions: Vec<(
+        daruda_store::accounts::AccountRecipeId,
+        Vec<RestorableSession>,
+    )>,
     /// Whether a manual usage refresh is in flight, so the ⟳ button can
     /// render a disabled / spinning state.
     pub usage_refresh_in_flight: bool,
@@ -411,6 +419,22 @@ pub struct UsageSectionSnapshot {
     pub service_status: Option<daruda_claude::ServiceStatus>,
 }
 
+/// A past session resolved against a Lane already open in this workspace
+/// window, ready to restore into a new pane. `agent_id` is the domain's
+/// configured default agent — the session's original exact agent variant
+/// isn't tracked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RestorableSession {
+    pub session_id: String,
+    pub agent_id: String,
+    pub lane_ref: daruda_store::project::LaneRef,
+    /// Best available human title, or `None` when the renderer should fall
+    /// back to the cwd's last path component.
+    pub title: Option<gpui::SharedString>,
+    pub cwd: std::path::PathBuf,
+    pub last_active: std::time::SystemTime,
+}
+
 impl RightDockSnapshot {
     /// Notify-on-change diff, like [`LeftDockSnapshot::content_differs`].
     /// Excludes GPUI handles, the per-frame `now` (refreshed by the
@@ -422,6 +446,7 @@ impl RightDockSnapshot {
             || self.focused_agent_domain != prev.focused_agent_domain
             || self.usage_domain_override != prev.usage_domain_override
             || self.activity != prev.activity
+            || self.recent_sessions != prev.recent_sessions
             || self.usage_refresh_in_flight != prev.usage_refresh_in_flight
             || self.skills != prev.skills
             || self.skill_search_query != prev.skill_search_query

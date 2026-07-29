@@ -823,6 +823,7 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
                     turns: 1,
                     tokens: 2,
                 }],
+                recent_sessions: Vec::new(),
             },
         );
         assert_eq!(ws.prepare_right_dock_snapshot(cx).activity.len(), 1);
@@ -881,6 +882,251 @@ async fn right_dock_snapshot_threads_focused_domain_and_override(cx: &mut TestAp
             snap.focused_agent_domain,
             AccountDomain::Exactly(AccountRecipeId::Codex)
         );
+    });
+}
+
+/// `prepare_right_dock_snapshot`'s `recent_sessions` only surfaces sessions
+/// whose cwd matches a Lane already open in this workspace, most-recent
+/// first, capped at 10 — the Usage tab table has nowhere else to get this
+/// filtering/ordering from.
+#[gpui::test]
+async fn recent_sessions_are_scoped_to_open_lanes_sorted_and_capped(cx: &mut TestAppContext) {
+    let temp = tempfile::tempdir().unwrap();
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(temp.path());
+    let (_wh, ws) = build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    ws.update(cx, |ws, cx| {
+        let key = UsageKey {
+            recipe: AccountRecipeId::Claude,
+            account: AccountSelection::SystemDefault,
+        };
+        ws.claude.usage_by_account.advance_usage(
+            key,
+            Ok(daruda_claude::ProviderUsage::new(
+                AccountRecipeId::Claude,
+                Vec::new(),
+                None,
+            )),
+        );
+
+        let open_lane_cwd = ws.projects[0].lanes[0].path.clone();
+        let unrelated_cwd = std::path::PathBuf::from("/does/not/match/any/open/lane");
+
+        let mut sessions = vec![
+            daruda_claude::activity::SessionSummary {
+                session_id: "matched-older".to_string(),
+                cwd: open_lane_cwd.clone(),
+                title: Some("Older session".to_string()),
+                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000),
+            },
+            daruda_claude::activity::SessionSummary {
+                session_id: "matched-newest".to_string(),
+                cwd: open_lane_cwd.clone(),
+                title: Some("Newest session".to_string()),
+                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000),
+            },
+            daruda_claude::activity::SessionSummary {
+                session_id: "unmatched".to_string(),
+                cwd: unrelated_cwd,
+                title: None,
+                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(3_000),
+            },
+        ];
+        // Pad past the cap so truncation is actually exercised.
+        for i in 0..8 {
+            sessions.push(daruda_claude::activity::SessionSummary {
+                session_id: format!("pad-{i}"),
+                cwd: open_lane_cwd.clone(),
+                title: None,
+                last_active: std::time::UNIX_EPOCH,
+            });
+        }
+
+        ws.claude.usage_by_account.set_activity(
+            key,
+            daruda_claude::ActivityStats {
+                daily: Vec::new(),
+                recent_sessions: sessions,
+            },
+        );
+
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        let (_, restorable) = snap
+            .recent_sessions
+            .iter()
+            .find(|(recipe, _)| *recipe == AccountRecipeId::Claude)
+            .expect("Claude has sessions matching the open lane");
+
+        assert_eq!(restorable.len(), 10, "capped at 10");
+        assert!(
+            restorable.iter().all(|s| s.cwd == open_lane_cwd),
+            "a session whose cwd matches no open lane must be excluded"
+        );
+        assert_eq!(
+            restorable[0].session_id, "matched-newest",
+            "most-recent first"
+        );
+        assert_eq!(
+            restorable[0].agent_id,
+            daruda_config::AgentDefinition::claude_default().id
+        );
+    });
+}
+
+/// `restore_session` must focus an already-open pane for the same session
+/// id rather than opening a duplicate tab.
+///
+/// The existing pane is seeded with `cwd: None` (mirrors `seed_agent_pane`'s
+/// "no cwd keeps the pane offline" trick above) so it parks in `Error`
+/// rather than `Idle` — `restore_session` ends in a real `focus_pane` call,
+/// and `maybe_connect_agent_chat` only skips a live ACP connect attempt for
+/// a non-`Idle` pane. No test in this suite may risk a real subprocess
+/// connect; that's the whole reason `seed_agent_pane` exists.
+#[gpui::test]
+async fn restore_session_focuses_an_already_open_pane_instead_of_duplicating(
+    cx: &mut TestAppContext,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(temp.path());
+    let (window_handle, workspace) = build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    let (lane_ref, existing_pane_id) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    None,
+                    Some("existing-session".to_string()),
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                (ws.active, id)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // `cwd` here is never read — the dedupe match on `session_id` short-
+    // circuits `restore_session` before it would otherwise build a pane
+    // from this field.
+    let session = crate::workspace::layout::snap::RestorableSession {
+        session_id: "existing-session".to_string(),
+        agent_id: daruda_config::AgentDefinition::claude_default().id,
+        lane_ref,
+        title: None,
+        cwd: temp.path().to_path_buf(),
+        last_active: std::time::SystemTime::now(),
+    };
+    let panes_before = workspace.read_with(cx, |ws, _| ws.active_runtime().panes.len());
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.restore_session(session, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active_runtime().panes.len(),
+            panes_before,
+            "must focus the existing pane, not add a duplicate"
+        );
+        assert_eq!(ws.active_runtime().focused_pane_id, existing_pane_id);
+    });
+}
+
+/// `restore_session` activates the session's Lane first when it isn't
+/// already the active one — combined with the dedupe path above (an
+/// offline, `cwd: None` existing pane in the target lane) so the only
+/// `focus_pane` call this test exercises lands on a non-`Idle` pane, same
+/// safety requirement as the sibling test above.
+#[gpui::test]
+async fn restore_session_activates_the_sessions_lane_before_focusing(cx: &mut TestAppContext) {
+    let temp = tempfile::tempdir().unwrap();
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(temp.path());
+    let (window_handle, workspace) = build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    let second_root = tempfile::tempdir().unwrap();
+    let second_lane_id: daruda_store::project::LaneId = 999;
+    let (target, initial_active) = workspace.update(cx, |ws, _| {
+        let project_id = ws.projects[0].id;
+        ws.projects[0]
+            .lanes
+            .push(crate::lane::Lane::default_for_project(
+                second_lane_id,
+                second_root.path().to_path_buf(),
+            ));
+        let target = daruda_store::project::LaneRef {
+            project: project_id,
+            lane: second_lane_id,
+        };
+        (target, ws.active)
+    });
+    assert_ne!(initial_active, target, "the second lane starts inactive");
+
+    let existing_pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.activate_lane(target, window, cx);
+                let pane = ws.create_agent_chat_pane(
+                    None,
+                    Some("existing-session".to_string()),
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.activate_lane(initial_active, window, cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active, initial_active, "back on the original lane");
+    });
+
+    let session = crate::workspace::layout::snap::RestorableSession {
+        session_id: "existing-session".to_string(),
+        agent_id: daruda_config::AgentDefinition::claude_default().id,
+        lane_ref: target,
+        title: None,
+        cwd: second_root.path().to_path_buf(),
+        last_active: std::time::SystemTime::now(),
+    };
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.restore_session(session, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active, target,
+            "restore_session must activate the session's own lane"
+        );
+        assert_eq!(
+            ws.active_runtime().panes.len(),
+            1,
+            "must reuse the pre-existing pane, not add a duplicate"
+        );
+        assert_eq!(ws.active_runtime().focused_pane_id, existing_pane_id);
     });
 }
 

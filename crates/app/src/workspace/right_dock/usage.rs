@@ -20,7 +20,7 @@ use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, WeakEntity, div
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
-use super::super::layout::snap::UsageSectionSnapshot;
+use super::super::layout::snap::{RestorableSession, UsageSectionSnapshot};
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
@@ -76,8 +76,19 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     } else {
         body
     };
-    body.child(provider_section(section, activity, cx))
-        .into_any_element()
+    let body = body.child(provider_section(section, activity, cx));
+    let recent_sessions = snap
+        .recent_sessions
+        .iter()
+        .find(|(recipe, _)| *recipe == displayed)
+        .map(|(_, sessions)| sessions.as_slice());
+    let body = match recent_sessions {
+        Some(sessions) if !sessions.is_empty() => {
+            body.child(recent_sessions_block(sessions, &snap.workspace, cx))
+        }
+        _ => body,
+    };
+    body.into_any_element()
 }
 
 /// Body when no provider is signed in: a single notice rather than gauges stuck
@@ -147,6 +158,82 @@ fn domain_switcher(
                 ws.update(cx, |ws, cx| ws.set_usage_domain_override(recipe, cx));
             }
         })
+}
+
+// ----------------------------------------------------------------
+// Recent sessions (restore into a new pane)
+// ----------------------------------------------------------------
+
+/// Heading + one row per past session, restricted (by the snapshot layer)
+/// to sessions matching a Lane already open in this workspace. Caller
+/// omits this block entirely when the list is empty — no empty-frame
+/// placeholder, matching `chart_block`'s "nothing yet" precedent.
+fn recent_sessions_block(
+    sessions: &[RestorableSession],
+    workspace: &WeakEntity<Workspace>,
+    cx: &gpui::App,
+) -> AnyElement {
+    sessions
+        .iter()
+        .fold(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+                .child(SectionHeader::new(strings::usage_recent_sessions_section())),
+            |block, session| block.child(recent_session_row(session, workspace, cx)),
+        )
+        .into_any_element()
+}
+
+/// One row: title (or the cwd's file name, when no title was captured) +
+/// a relative "last active" label + a trailing Restore button. No row-level
+/// click handler exists to protect against, unlike `tasks.rs::task_row` —
+/// only the button triggers anything, so no `stop_propagation` is needed.
+fn recent_session_row(
+    session: &RestorableSession,
+    workspace: &WeakEntity<Workspace>,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let t = theme::current(cx);
+    let label = session_row_label(session);
+    let time_label = relative_time_label(session.last_active);
+    let workspace = workspace.clone();
+    let session = session.clone();
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(
+            div()
+                .flex_grow()
+                .min_w_0()
+                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                .text_color(t.text_subtle)
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                .text_color(t.text_muted)
+                .child(SharedString::from(time_label)),
+        )
+        .child(
+            button(
+                format!("usage-restore-session-{}", session.session_id),
+                strings::usage_session_restore(),
+            )
+            .ghost()
+            .xsmall()
+            .on_click(move |_, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.restore_session(session.clone(), window, cx));
+                }
+            }),
+        )
 }
 
 /// One auth domain's block: header (icon + name + plan badge), account label,
@@ -614,6 +701,33 @@ fn resolve_displayed_domain(
         .or_else(|| sections.first().map(|s| s.recipe))
 }
 
+/// A recent-session row's label: the captured title, or the cwd's last
+/// path component when no title was found, or the full cwd as a last
+/// resort (an empty/root path has no file name).
+fn session_row_label(session: &RestorableSession) -> SharedString {
+    session.title.clone().unwrap_or_else(|| {
+        session
+            .cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| session.cwd.to_string_lossy().into_owned())
+            .into()
+    })
+}
+
+/// A recent-session row's "last active" label — same bucket boundaries as
+/// the refresh badge's cache age, minus the in-flight/never-fetched
+/// branches that make no sense for a row naming a specific past session.
+fn relative_time_label(last_active: SystemTime) -> String {
+    let age = SystemTime::now().duration_since(last_active).ok();
+    match cache_age_bucket(age) {
+        CacheAge::Never | CacheAge::JustNow => strings::usage_cache_just_now(),
+        CacheAge::Minutes(n) => strings::usage_cache_minutes(n),
+        CacheAge::Hours(n) => strings::usage_cache_hours(n),
+        CacheAge::Days(n) => strings::usage_cache_days(n),
+    }
+}
+
 /// Cache-age bucket for the refresh badge. Pure so the bucket
 /// boundaries are tested without touching i18n or the clock.
 #[derive(Debug, PartialEq, Eq)]
@@ -762,6 +876,57 @@ mod tests {
         assert_eq!(
             resolve_displayed_domain(AccountDomain::Any, None, &[]),
             None
+        );
+    }
+
+    fn restorable_session(
+        title: Option<&str>,
+        cwd: &str,
+        last_active: SystemTime,
+    ) -> RestorableSession {
+        RestorableSession {
+            session_id: "s1".to_string(),
+            agent_id: "claude".to_string(),
+            lane_ref: daruda_store::project::LaneRef::default(),
+            title: title.map(SharedString::from),
+            cwd: std::path::PathBuf::from(cwd),
+            last_active,
+        }
+    }
+
+    #[test]
+    fn session_row_label_prefers_the_captured_title() {
+        let session = restorable_session(Some("Fix the bug"), "/Users/x/proj", SystemTime::now());
+        assert_eq!(session_row_label(&session).as_ref(), "Fix the bug");
+    }
+
+    #[test]
+    fn session_row_label_falls_back_to_the_cwd_file_name() {
+        let session = restorable_session(None, "/Users/x/proj", SystemTime::now());
+        assert_eq!(session_row_label(&session).as_ref(), "proj");
+    }
+
+    #[test]
+    fn session_row_label_falls_back_to_the_full_cwd_when_it_has_no_file_name() {
+        let session = restorable_session(None, "/", SystemTime::now());
+        assert_eq!(session_row_label(&session).as_ref(), "/");
+    }
+
+    #[test]
+    fn relative_time_label_buckets_like_the_refresh_badge() {
+        let now = SystemTime::now();
+        assert_eq!(relative_time_label(now), strings::usage_cache_just_now());
+        assert_eq!(
+            relative_time_label(now - Duration::from_secs(5 * 60)),
+            strings::usage_cache_minutes(5)
+        );
+        assert_eq!(
+            relative_time_label(now - Duration::from_secs(3 * 3_600)),
+            strings::usage_cache_hours(3)
+        );
+        assert_eq!(
+            relative_time_label(now - Duration::from_secs(2 * 86_400)),
+            strings::usage_cache_days(2)
         );
     }
 
