@@ -11,6 +11,7 @@ mod sections;
 mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::ops::RangeBounds;
 
 use crate::ui::theme;
 use daruda_config::BuiltinSection;
@@ -30,8 +31,13 @@ pub struct SettingsWindow {
     base_config: daruda_config::Config,
     /// Section currently rendered by the body.
     active_section: BuiltinSection,
-    /// Per-section first-input focus targets for sidebar/menu jumps.
-    section_focus: HashMap<BuiltinSection, FocusHandle>,
+    /// Per-section input focus handles, in tab-cycle order. `focus_section`
+    /// jumps to the first handle when entering a section from outside the
+    /// window (sidebar click, external open); `focus_next_input` cycles the
+    /// full list on Tab. Single source for both — previously a first-handle
+    /// map plus a separately hand-maintained match in `focus_next_input`,
+    /// which could drift out of sync when a field was added.
+    section_focus_targets: HashMap<BuiltinSection, Vec<FocusHandle>>,
     // ---- form fields ----
     // General page.
     language_select: Entity<SelectState>,
@@ -104,17 +110,6 @@ pub struct SettingsWindow {
     /// Re-created on every copy click so a rapid second click resets
     /// the window, mirrors `ErrorReportModal::_copied_revert_task`.
     _telegram_pair_copy_revert_task: Option<Task<()>>,
-    // Focus handles for Tab cycling (text inputs only)
-    font_size_fh: FocusHandle,
-    vertical_spacing_fh: FocusHandle,
-    horizontal_spacing_fh: FocusHandle,
-    opacity_fh: FocusHandle,
-    scrollback_fh: FocusHandle,
-    inset_x_fh: FocusHandle,
-    inset_y_fh: FocusHandle,
-    clipboard_streaming_fh: FocusHandle,
-    panels_grid_columns_fh: FocusHandle,
-    telegram_token_fh: FocusHandle,
     scroll_handle: gpui::ScrollHandle,
     _input_subscriptions: Vec<Subscription>,
     error: Option<SharedString>,
@@ -223,6 +218,27 @@ impl SettingsWindow {
         )
     }
 
+    /// Build a text-input field, wire it to the standard submit /
+    /// clear-error subscription, and capture its focus handle — one call
+    /// site instead of three separately-located steps (construct, then
+    /// subscribe, then extract the handle) for every bounded text field.
+    fn new_text_field(
+        placeholder: &str,
+        default_value: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        subs: &mut Vec<Subscription>,
+    ) -> (Entity<InputState>, FocusHandle) {
+        let state = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder(placeholder)
+                .default_value(default_value)
+        });
+        subs.push(Self::subscribe_input_state(&state, window, cx));
+        let fh = state.read(cx).focus_handle(cx);
+        (state, fh)
+    }
+
     fn agent_row_from_definition(
         definition: &daruda_config::AgentDefinition,
         window: &mut Window,
@@ -292,26 +308,29 @@ impl SettingsWindow {
         }
     }
 
+    /// Wire one agent-catalog row's inputs to the standard submit /
+    /// clear-error subscription plus the transport-pick repaint, pushing
+    /// each into `subs`. An associated fn (not `&mut self`) so both the
+    /// constructor's initial rows (loaded from config) and rows added at
+    /// runtime via [`Self::add_agent_row`] go through the same wiring —
+    /// keeping them separate previously let the constructor's copy drift
+    /// out of sync and silently drop `default_mode_input`'s subscription.
     fn subscribe_agent_row(
-        &mut self,
         row: &AgentCatalogRow,
         window: &mut Window,
         cx: &mut Context<Self>,
+        subs: &mut Vec<Subscription>,
     ) {
-        self._input_subscriptions
-            .push(Self::subscribe_input_state(&row.id_input, window, cx));
-        self._input_subscriptions
-            .push(Self::subscribe_input_state(&row.name_input, window, cx));
-        self._input_subscriptions
-            .push(Self::subscribe_input_state(&row.command_input, window, cx));
-        self._input_subscriptions
-            .push(Self::subscribe_input_state(&row.host_input, window, cx));
-        self._input_subscriptions.push(Self::subscribe_input_state(
+        subs.push(Self::subscribe_input_state(&row.id_input, window, cx));
+        subs.push(Self::subscribe_input_state(&row.name_input, window, cx));
+        subs.push(Self::subscribe_input_state(&row.command_input, window, cx));
+        subs.push(Self::subscribe_input_state(&row.host_input, window, cx));
+        subs.push(Self::subscribe_input_state(
             &row.container_input,
             window,
             cx,
         ));
-        self._input_subscriptions.push(Self::subscribe_input_state(
+        subs.push(Self::subscribe_input_state(
             &row.default_mode_input,
             window,
             cx,
@@ -319,7 +338,7 @@ impl SettingsWindow {
         // Re-render on transport pick so the row immediately shows/hides the
         // matching host/container field (rows are added/removed at runtime,
         // unlike the fixed global dropdowns wired in `new_with_section`).
-        self._input_subscriptions.push(cx.subscribe_in(
+        subs.push(cx.subscribe_in(
             &row.transport_select,
             window,
             |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
@@ -337,7 +356,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) {
         let row = Self::agent_row_from_definition(&definition, window, cx);
-        self.subscribe_agent_row(&row, window, cx);
+        Self::subscribe_agent_row(&row, window, cx, &mut self._input_subscriptions);
         self.agent_rows.push(row);
         self.error = None;
         cx.notify();
@@ -412,69 +431,148 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&font_family), window, cx)
         });
 
-        let font_size_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 13")
-                .default_value(format!("{}", config.font.size))
-        });
-        let editor_font_size_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 13")
-                .default_value(format!("{}", config.font.editor_size))
-        });
-        let agent_chat_font_size_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 13")
-                .default_value(format!("{}", config.font.agent_chat_size))
-        });
-        let vertical_spacing_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 1.0")
-                .default_value(format!("{}", config.font.vertical_spacing))
-        });
-        let horizontal_spacing_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 1.0")
-                .default_value(format!("{}", config.font.horizontal_spacing))
-        });
-        let opacity_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("0.1 – 1.0")
-                .default_value(format!("{}", config.window.opacity))
-        });
-        let scrollback_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 10000")
-                .default_value(format!("{}", config.scrollback.max_rows))
-        });
-        let inset_x_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 4")
-                .default_value(format!("{}", config.font.inset_x))
-        });
-        let inset_y_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 2")
-                .default_value(format!("{}", config.font.inset_y))
-        });
-        let clipboard_streaming_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("e.g. 10485760")
-                .default_value(format!("{}", config.clipboard.streaming_max_bytes))
-        });
-        let panels_grid_columns_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state)
-                .placeholder("1 – 16")
-                .default_value(format!("{}", config.panels.grid_columns))
-        });
-        // Never pre-filled with the real token (`default_value`) — a
-        // stored secret is never re-displayed in a text field. The
-        // "Token configured" status line covers presence instead.
+        // Collected as each field below is built, instead of assembled in one
+        // block after the fact — keeps "construct → subscribe → focus handle
+        // → section jump target" together per field. `section_focus_targets`
+        // is the single source for both `focus_section` (first handle) and
+        // `focus_next_input` (full per-section cycle order).
+        let mut input_subscriptions: Vec<Subscription> = Vec::new();
+        let mut section_focus_targets: HashMap<BuiltinSection, Vec<FocusHandle>> = HashMap::new();
+
+        let (font_size_input, font_size_fh) = Self::new_text_field(
+            "e.g. 13",
+            format!("{}", config.font.size),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(font_size_fh);
+        // Not wired into the Font tab cycle (kept out of
+        // `section_focus_targets`) — only font_size/vertical/horizontal
+        // spacing are, matching the pre-existing cycle order.
+        let (editor_font_size_input, _) = Self::new_text_field(
+            "e.g. 13",
+            format!("{}", config.font.editor_size),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        let (agent_chat_font_size_input, _) = Self::new_text_field(
+            "e.g. 13",
+            format!("{}", config.font.agent_chat_size),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        let (vertical_spacing_input, vertical_spacing_fh) = Self::new_text_field(
+            "e.g. 1.0",
+            format!("{}", config.font.vertical_spacing),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(vertical_spacing_fh);
+        let (horizontal_spacing_input, horizontal_spacing_fh) = Self::new_text_field(
+            "e.g. 1.0",
+            format!("{}", config.font.horizontal_spacing),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(horizontal_spacing_fh);
+        let (opacity_input, opacity_fh) = Self::new_text_field(
+            "0.1 – 1.0",
+            format!("{}", config.window.opacity),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Window)
+            .or_default()
+            .push(opacity_fh);
+        let (scrollback_input, scrollback_fh) = Self::new_text_field(
+            "e.g. 10000",
+            format!("{}", config.scrollback.max_rows),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Terminal)
+            .or_default()
+            .push(scrollback_fh);
+        let (inset_x_input, inset_x_fh) = Self::new_text_field(
+            "e.g. 4",
+            format!("{}", config.font.inset_x),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Terminal)
+            .or_default()
+            .push(inset_x_fh);
+        let (inset_y_input, inset_y_fh) = Self::new_text_field(
+            "e.g. 2",
+            format!("{}", config.font.inset_y),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Terminal)
+            .or_default()
+            .push(inset_y_fh);
+        let (clipboard_streaming_input, clipboard_streaming_fh) = Self::new_text_field(
+            "e.g. 10485760",
+            format!("{}", config.clipboard.streaming_max_bytes),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Clipboard)
+            .or_default()
+            .push(clipboard_streaming_fh);
+        let (panels_grid_columns_input, panels_grid_columns_fh) = Self::new_text_field(
+            "1 – 16",
+            format!("{}", config.panels.grid_columns),
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Panels)
+            .or_default()
+            .push(panels_grid_columns_fh);
+        // Never pre-filled with the real token (`default_value`) — a stored
+        // secret is never re-displayed in a text field, so this field can't
+        // go through `new_text_field` (which always sets a default value).
+        // The "Token configured" status line covers presence instead.
         let telegram_token_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .placeholder(s::settings_telegram_token_placeholder())
                 .masked(true)
         });
+        input_subscriptions.push(Self::subscribe_input_state(
+            &telegram_token_input,
+            window,
+            cx,
+        ));
+        section_focus_targets
+            .entry(BuiltinSection::Notifications)
+            .or_default()
+            .push(telegram_token_input.read(cx).focus_handle(cx));
         let telegram_token_configured = crate::telegram::keychain::read_token().is_some();
 
         let cursor_style_str: SharedString = match config.cursor.style {
@@ -555,110 +653,60 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&syntax_theme), window, cx)
         });
 
-        let font_size_fh = font_size_input.read(cx).focus_handle(cx);
-        let vertical_spacing_fh = vertical_spacing_input.read(cx).focus_handle(cx);
-        let horizontal_spacing_fh = horizontal_spacing_input.read(cx).focus_handle(cx);
-        let opacity_fh = opacity_input.read(cx).focus_handle(cx);
-        let scrollback_fh = scrollback_input.read(cx).focus_handle(cx);
-        let inset_x_fh = inset_x_input.read(cx).focus_handle(cx);
-        let inset_y_fh = inset_y_input.read(cx).focus_handle(cx);
-        let clipboard_streaming_fh = clipboard_streaming_input.read(cx).focus_handle(cx);
-        let panels_grid_columns_fh = panels_grid_columns_input.read(cx).focus_handle(cx);
-        let telegram_token_fh = telegram_token_input.read(cx).focus_handle(cx);
-
-        let mut _input_subscriptions = vec![
-            Self::subscribe_input_state(&font_size_input, window, cx),
-            Self::subscribe_input_state(&editor_font_size_input, window, cx),
-            Self::subscribe_input_state(&agent_chat_font_size_input, window, cx),
-            Self::subscribe_input_state(&vertical_spacing_input, window, cx),
-            Self::subscribe_input_state(&horizontal_spacing_input, window, cx),
-            Self::subscribe_input_state(&opacity_input, window, cx),
-            Self::subscribe_input_state(&scrollback_input, window, cx),
-            Self::subscribe_input_state(&inset_x_input, window, cx),
-            Self::subscribe_input_state(&inset_y_input, window, cx),
-            Self::subscribe_input_state(&clipboard_streaming_input, window, cx),
-            Self::subscribe_input_state(&panels_grid_columns_input, window, cx),
-            Self::subscribe_input_state(&telegram_token_input, window, cx),
-            // Theme dropdowns apply live on pick (no Save needed): the
-            // commit persists just that one field, and the existing config
-            // fan-out repaints every open editor / diff view / pane.
-            cx.subscribe_in(
-                &syntax_theme_select,
-                window,
-                |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_)) {
-                        this.persist_theme_field(state, |c, v| c.file_viewer.syntax_theme = v, cx);
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &terminal_preset_select,
-                window,
-                |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_)) {
-                        this.persist_theme_field(state, |c, v| c.theme.terminal_preset = v, cx);
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &ui_preset_select,
-                window,
-                |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_)) {
-                        this.persist_theme_field(state, |c, v| c.theme.ui_preset = v, cx);
-                    }
-                },
-            ),
-            // The permission-mode dropdown is persisted on Save (not live), but
-            // the explanatory text below it tracks the selection — repaint the
-            // window on each pick so `render_agent` shows the matching blurb.
-            cx.subscribe_in(
-                &default_permission_mode_select,
-                window,
-                |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_)) {
-                        cx.notify();
-                    }
-                },
-            ),
-        ];
+        // Theme dropdowns apply live on pick (no Save needed): the commit
+        // persists just that one field, and the existing config fan-out
+        // repaints every open editor / diff view / pane.
+        input_subscriptions.push(cx.subscribe_in(
+            &syntax_theme_select,
+            window,
+            |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    this.persist_theme_field(state, |c, v| c.file_viewer.syntax_theme = v, cx);
+                }
+            },
+        ));
+        input_subscriptions.push(cx.subscribe_in(
+            &terminal_preset_select,
+            window,
+            |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    this.persist_theme_field(state, |c, v| c.theme.terminal_preset = v, cx);
+                }
+            },
+        ));
+        input_subscriptions.push(cx.subscribe_in(
+            &ui_preset_select,
+            window,
+            |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    this.persist_theme_field(state, |c, v| c.theme.ui_preset = v, cx);
+                }
+            },
+        ));
+        // The permission-mode dropdown is persisted on Save (not live), but
+        // the explanatory text below it tracks the selection — repaint the
+        // window on each pick so `render_agent` shows the matching blurb.
+        input_subscriptions.push(cx.subscribe_in(
+            &default_permission_mode_select,
+            window,
+            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    cx.notify();
+                }
+            },
+        ));
         for row in &agent_rows {
-            _input_subscriptions.push(Self::subscribe_input_state(&row.id_input, window, cx));
-            _input_subscriptions.push(Self::subscribe_input_state(&row.name_input, window, cx));
-            _input_subscriptions.push(Self::subscribe_input_state(&row.command_input, window, cx));
-            _input_subscriptions.push(Self::subscribe_input_state(&row.host_input, window, cx));
-            _input_subscriptions.push(Self::subscribe_input_state(
-                &row.container_input,
-                window,
-                cx,
-            ));
-            _input_subscriptions.push(cx.subscribe_in(
-                &row.transport_select,
-                window,
-                |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_)) {
-                        cx.notify();
-                    }
-                },
-            ));
+            Self::subscribe_agent_row(row, window, cx, &mut input_subscriptions);
         }
 
-        // Map each section to the focus target it should land on when
-        // jumped to from outside the window. Sections without a text
-        // input (Cursor / Shell / FileViewer / placeholders / …) fall
-        // back to the panel-level focus inside `focus_section`.
-        let mut section_focus: HashMap<BuiltinSection, FocusHandle> = HashMap::new();
-        section_focus.insert(BuiltinSection::Font, font_size_fh.clone());
-        section_focus.insert(BuiltinSection::Window, opacity_fh.clone());
-        section_focus.insert(BuiltinSection::Terminal, scrollback_fh.clone());
-        section_focus.insert(BuiltinSection::Clipboard, clipboard_streaming_fh.clone());
-        section_focus.insert(BuiltinSection::Panels, panels_grid_columns_fh.clone());
-        section_focus.insert(BuiltinSection::Notifications, telegram_token_fh.clone());
+        // First-field jump target for the Agent section (its full tab-cycle
+        // list is dynamic — see `focus_next_input` — since rows are
+        // added/removed at runtime).
         if let Some(row) = agent_rows.first() {
-            section_focus.insert(
-                BuiltinSection::Agent,
-                row.id_input.read(cx).focus_handle(cx),
-            );
+            section_focus_targets
+                .entry(BuiltinSection::Agent)
+                .or_default()
+                .push(row.id_input.read(cx).focus_handle(cx));
         }
 
         let _updater_subscription =
@@ -683,7 +731,7 @@ impl SettingsWindow {
             panel_focus_handle: cx.focus_handle(),
             base_config: config.clone(),
             active_section: active,
-            section_focus,
+            section_focus_targets,
             language_select,
             terminal_preset_select,
             ui_preset_select,
@@ -719,18 +767,8 @@ impl SettingsWindow {
             telegram_pair_code: None,
             telegram_pair_command_copied: false,
             _telegram_pair_copy_revert_task: None,
-            font_size_fh,
-            vertical_spacing_fh,
-            horizontal_spacing_fh,
-            opacity_fh,
-            scrollback_fh,
-            inset_x_fh,
-            inset_y_fh,
-            clipboard_streaming_fh,
-            panels_grid_columns_fh,
-            telegram_token_fh,
             scroll_handle: gpui::ScrollHandle::new(),
-            _input_subscriptions,
+            _input_subscriptions: input_subscriptions,
             error: None,
             plugin_ops_in_flight: std::collections::HashSet::new(),
             plugin_last_error: None,
@@ -784,7 +822,12 @@ impl SettingsWindow {
             // mid-scroll which is confusing.
             self.scroll_handle.set_offset(gpui::point(px(0.), px(0.)));
         }
-        if let Some(fh) = self.section_focus.get(&section).cloned() {
+        if let Some(fh) = self
+            .section_focus_targets
+            .get(&section)
+            .and_then(|handles| handles.first())
+            .cloned()
+        {
             fh.focus(window, cx);
         } else {
             self.panel_focus_handle.focus(window, cx);
@@ -798,6 +841,25 @@ impl SettingsWindow {
 
     fn dismiss(&mut self, window: &mut Window) {
         window.remove_window();
+    }
+
+    /// Read, trim, and parse `input`'s value into `T`, rejecting values
+    /// outside `range`. Collapses the "read → trim → parse → range filter →
+    /// error" pattern repeated for every bounded numeric field below.
+    fn parse_bounded_field<T: std::str::FromStr + PartialOrd>(
+        input: &Entity<InputState>,
+        range: impl RangeBounds<T>,
+        err: impl FnOnce() -> SharedString,
+        cx: &gpui::App,
+    ) -> Result<T, SharedString> {
+        input
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<T>()
+            .ok()
+            .filter(|v| range.contains(v))
+            .ok_or_else(err)
     }
 
     fn validate(&self, cx: &gpui::App) -> Result<daruda_config::Config, SharedString> {
@@ -833,60 +895,36 @@ impl SettingsWindow {
             .map(|s| s.to_string())
             .unwrap_or_else(|| daruda_config::FontConfig::default().family);
 
-        let size_str = self.font_size_input.read(cx).value().trim().to_string();
-        config.font.size = size_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (6.0..=72.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_font_size()))?;
-
-        let editor_size_str = self
-            .editor_font_size_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.font.editor_size = editor_size_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (6.0..=72.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_editor_font_size()))?;
-
-        let agent_chat_size_str = self
-            .agent_chat_font_size_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.font.agent_chat_size = agent_chat_size_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (6.0..=72.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_agent_chat_font_size()))?;
-
-        let vs_str = self
-            .vertical_spacing_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.font.vertical_spacing = vs_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (0.5..=2.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_spacing()))?;
-
-        let hs_str = self
-            .horizontal_spacing_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.font.horizontal_spacing = hs_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (0.5..=2.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_spacing()))?;
+        config.font.size = Self::parse_bounded_field(
+            &self.font_size_input,
+            6.0..=72.0,
+            || SharedString::from(s::settings_err_font_size()),
+            cx,
+        )?;
+        config.font.editor_size = Self::parse_bounded_field(
+            &self.editor_font_size_input,
+            6.0..=72.0,
+            || SharedString::from(s::settings_err_editor_font_size()),
+            cx,
+        )?;
+        config.font.agent_chat_size = Self::parse_bounded_field(
+            &self.agent_chat_font_size_input,
+            6.0..=72.0,
+            || SharedString::from(s::settings_err_agent_chat_font_size()),
+            cx,
+        )?;
+        config.font.vertical_spacing = Self::parse_bounded_field(
+            &self.vertical_spacing_input,
+            0.5..=2.0,
+            || SharedString::from(s::settings_err_spacing()),
+            cx,
+        )?;
+        config.font.horizontal_spacing = Self::parse_bounded_field(
+            &self.horizontal_spacing_input,
+            0.5..=2.0,
+            || SharedString::from(s::settings_err_spacing()),
+            cx,
+        )?;
 
         config.cursor.style = match self
             .cursor_style_select
@@ -980,33 +1018,33 @@ impl SettingsWindow {
 
         config.shell.close_pane_on_exit = self.close_pane_on_exit;
 
-        let op_str = self.opacity_input.read(cx).value().trim().to_string();
-        config.window.opacity = op_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (0.1..=1.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_opacity()))?;
+        config.window.opacity = Self::parse_bounded_field(
+            &self.opacity_input,
+            0.1..=1.0,
+            || SharedString::from(s::settings_err_opacity()),
+            cx,
+        )?;
         config.window.blur = self.window_blur;
 
-        let sb_str = self.scrollback_input.read(cx).value().trim().to_string();
-        config.scrollback.max_rows = sb_str
-            .parse::<usize>()
-            .ok()
-            .filter(|&v| (1_000..=500_000).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_scrollback()))?;
+        config.scrollback.max_rows = Self::parse_bounded_field(
+            &self.scrollback_input,
+            1_000..=500_000,
+            || SharedString::from(s::settings_err_scrollback()),
+            cx,
+        )?;
 
-        let ix_str = self.inset_x_input.read(cx).value().trim().to_string();
-        config.font.inset_x = ix_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (0.0..=32.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_inset()))?;
-        let iy_str = self.inset_y_input.read(cx).value().trim().to_string();
-        config.font.inset_y = iy_str
-            .parse::<f32>()
-            .ok()
-            .filter(|&v| (0.0..=32.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_inset()))?;
+        config.font.inset_x = Self::parse_bounded_field(
+            &self.inset_x_input,
+            0.0..=32.0,
+            || SharedString::from(s::settings_err_inset()),
+            cx,
+        )?;
+        config.font.inset_y = Self::parse_bounded_field(
+            &self.inset_y_input,
+            0.0..=32.0,
+            || SharedString::from(s::settings_err_inset()),
+            cx,
+        )?;
 
         config.left_dock.files_show_hidden = self.files_show_hidden;
         config.left_dock.files_use_gitignore = self.files_use_gitignore;
@@ -1018,29 +1056,19 @@ impl SettingsWindow {
             .map(|s| s.to_string())
             .unwrap_or_else(|| daruda_config::FileViewerConfig::default().syntax_theme);
 
-        let cb_str = self
-            .clipboard_streaming_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.clipboard.streaming_max_bytes = cb_str
-            .parse::<usize>()
-            .ok()
-            .filter(|&v| (4_096..=67_108_864).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_clipboard()))?;
+        config.clipboard.streaming_max_bytes = Self::parse_bounded_field(
+            &self.clipboard_streaming_input,
+            4_096..=67_108_864,
+            || SharedString::from(s::settings_err_clipboard()),
+            cx,
+        )?;
 
-        let pg_str = self
-            .panels_grid_columns_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        config.panels.grid_columns = pg_str
-            .parse::<u8>()
-            .ok()
-            .filter(|&v| (1..=16).contains(&v))
-            .ok_or_else(|| SharedString::from(s::settings_err_grid_columns()))?;
+        config.panels.grid_columns = Self::parse_bounded_field(
+            &self.panels_grid_columns_input,
+            1..=16,
+            || SharedString::from(s::settings_err_grid_columns()),
+            cx,
+        )?;
 
         config.claude_status.enable = self.claude_status_enable;
 
@@ -1115,25 +1143,11 @@ impl SettingsWindow {
         // Cycle only through inputs that belong to the *active* section
         // — Tab on the Font page must not jump into the Window page's
         // opacity input while it is hidden.
-        let handles: Vec<FocusHandle> = match self.active_section {
-            BuiltinSection::Font => vec![
-                self.font_size_fh.clone(),
-                self.vertical_spacing_fh.clone(),
-                self.horizontal_spacing_fh.clone(),
-            ],
-            BuiltinSection::Window => vec![self.opacity_fh.clone()],
-            BuiltinSection::Terminal => {
-                vec![
-                    self.scrollback_fh.clone(),
-                    self.inset_x_fh.clone(),
-                    self.inset_y_fh.clone(),
-                ]
-            }
-            BuiltinSection::Clipboard => vec![self.clipboard_streaming_fh.clone()],
-            BuiltinSection::Panels => vec![self.panels_grid_columns_fh.clone()],
-            BuiltinSection::Notifications => vec![self.telegram_token_fh.clone()],
-            BuiltinSection::Agent => self
-                .agent_rows
+        let handles: Vec<FocusHandle> = if self.active_section == BuiltinSection::Agent {
+            // Dynamic: rows are added/removed at runtime, so this section
+            // can't be precomputed into `section_focus_targets` like the
+            // fixed sections below.
+            self.agent_rows
                 .iter()
                 .flat_map(|row| {
                     [
@@ -1142,16 +1156,15 @@ impl SettingsWindow {
                         row.command_input.read(cx).focus_handle(cx),
                     ]
                 })
-                .collect(),
-            BuiltinSection::General
-            | BuiltinSection::Cursor
-            | BuiltinSection::Shell
-            | BuiltinSection::LeftDock
-            | BuiltinSection::Accounts
-            | BuiltinSection::ClaudeStatus
-            | BuiltinSection::Keymap
-            | BuiltinSection::Plugin
-            | BuiltinSection::About => return,
+                .collect()
+        } else {
+            // Sections with no text input (Cursor / Shell / placeholders /
+            // …) have no entry in the map, so this falls through to the
+            // `n == 0` early-return below.
+            self.section_focus_targets
+                .get(&self.active_section)
+                .cloned()
+                .unwrap_or_default()
         };
         let n = handles.len();
         if n == 0 {

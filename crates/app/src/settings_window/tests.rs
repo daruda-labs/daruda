@@ -188,6 +188,30 @@ fn validate_rejects_invalid_agent_id(cx: &mut TestAppContext) {
     });
 }
 
+/// Regression: constructor-seeded agent rows (loaded from config, unlike
+/// rows added at runtime via `add_agent_row`) must wire up every input's
+/// submit/clear-error subscription through `subscribe_agent_row`, including
+/// `default_mode_input` — a hand-copied duplicate of that wiring in the
+/// constructor once dropped it silently.
+#[gpui::test]
+fn default_mode_input_change_clears_error_for_constructor_seeded_row(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    win.update(cx, |w, cx| {
+        w.error = Some("boom".into());
+        cx.notify();
+    });
+    let default_mode_input = win.read_with(cx, |w, _| w.agent_rows[0].default_mode_input.clone());
+    wh.update(cx, |_root, window, cx| {
+        default_mode_input.update(cx, |i, cx_state| {
+            i.set_value("plan".to_owned(), window, cx_state)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, _| {
+        assert!(w.error.is_none());
+    });
+}
+
 #[gpui::test]
 fn cursor_blinking_toggle(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
