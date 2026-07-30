@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use daruda_claude::pty_link;
+use daruda_agent::pty_link;
 
 /// Pane id mirrored locally to keep this tracker independent of GPUI/workspace.
 pub type PaneId = u64;

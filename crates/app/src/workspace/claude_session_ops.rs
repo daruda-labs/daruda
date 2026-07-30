@@ -42,17 +42,17 @@ pub(in crate::workspace) struct UsageKey {
 /// decide `cx.notify()` (keeps GPUI out of this plain-data type).
 #[derive(Default)]
 pub(in crate::workspace) struct PerAccountUsage {
-    usage: HashMap<UsageKey, daruda_claude::UsageOutcome>,
+    usage: HashMap<UsageKey, daruda_agent::UsageOutcome>,
     /// Keyed the same way `usage` is — a plain `AccountSelection` key would
     /// let Claude's and Codex's `SystemDefault` ambient logins collide on
     /// one slot (see [`UsageKey`]'s own doc).
-    activity: HashMap<UsageKey, daruda_claude::ActivityStats>,
+    activity: HashMap<UsageKey, daruda_agent::ActivityStats>,
 }
 
 impl PerAccountUsage {
     /// What the last poll established for `key`. `Pending` before the first
     /// one lands, so callers never have to treat "absent" separately.
-    pub(in crate::workspace) fn usage(&self, key: UsageKey) -> daruda_claude::UsageOutcome {
+    pub(in crate::workspace) fn usage(&self, key: UsageKey) -> daruda_agent::UsageOutcome {
         self.usage.get(&key).cloned().unwrap_or_default()
     }
 
@@ -60,7 +60,7 @@ impl PerAccountUsage {
     pub(in crate::workspace) fn activity(
         &self,
         key: UsageKey,
-    ) -> Option<&daruda_claude::ActivityStats> {
+    ) -> Option<&daruda_agent::ActivityStats> {
         self.activity.get(&key)
     }
 
@@ -71,7 +71,7 @@ impl PerAccountUsage {
     pub(in crate::workspace) fn advance_usage(
         &mut self,
         key: UsageKey,
-        result: Result<daruda_claude::ProviderUsage, daruda_claude::FetchError>,
+        result: Result<daruda_agent::ProviderUsage, daruda_agent::FetchError>,
     ) -> bool {
         let prev = self.usage(key);
         let next = prev.clone().advance(result);
@@ -86,7 +86,7 @@ impl PerAccountUsage {
     pub(in crate::workspace) fn set_activity(
         &mut self,
         key: UsageKey,
-        activity: daruda_claude::ActivityStats,
+        activity: daruda_agent::ActivityStats,
     ) -> bool {
         if self.activity.get(&key) == Some(&activity) {
             return false;
@@ -123,7 +123,7 @@ pub(in crate::workspace) struct ClaudeContext {
     /// quantity — but not domain-independent: each provider hosts its own
     /// page. Absent before that domain's first fetch lands;
     /// `set_service_status` updates and bumps `cx.notify()`.
-    pub(in crate::workspace) service_status: HashMap<AccountRecipeId, daruda_claude::ServiceStatus>,
+    pub(in crate::workspace) service_status: HashMap<AccountRecipeId, daruda_agent::ServiceStatus>,
 
     /// Guards `refresh_usage_now` against overlapping manual refreshes —
     /// the button's one-shot fetch sets this on entry and clears it when
@@ -134,7 +134,7 @@ pub(in crate::workspace) struct ClaudeContext {
     /// Claude Code session-status mirror — driven by the hook channel
     /// (and Phase B jsonl fallback). Read by the left dock to render the
     /// per-lane Working/NeedsAttention/Idle/Connecting indicator.
-    pub(in crate::workspace) claude_status: daruda_claude::ClaudeStatusStore,
+    pub(in crate::workspace) claude_status: daruda_agent::ClaudeStatusStore,
 
     /// Whether the Claude status feature is enabled in `[claude_status]`
     /// config. False suppresses both the indicator and the install banner.
@@ -247,7 +247,7 @@ impl Workspace {
     ) {
         use crate::hooks::watcher::StatusEvent;
         match event {
-            StatusEvent::Changed(path) => match daruda_claude::hooks::status_file::read(&path) {
+            StatusEvent::Changed(path) => match daruda_agent::hooks::status_file::read(&path) {
                 Ok(Some(file)) => {
                     self.apply_task_session_changed(&file.cwd, &file.session_id, cx);
                     if file.last_event == "PostToolUseFailure" {
@@ -265,7 +265,7 @@ impl Workspace {
                     }
                     // Blocking hook notifications surface as a one-shot
                     // desktop push here rather than latching the lane
-                    // indicator (see `daruda_claude::hooks::fsm`). Called
+                    // indicator (see `daruda_agent::hooks::fsm`). Called
                     // before `update` consumes `file`.
                     self.maybe_push_hook_notification(&file);
                     #[cfg(debug_assertions)]
@@ -332,7 +332,7 @@ impl Workspace {
     /// Raise a transient desktop push for a blocking Claude
     /// `Notification` (permission prompt / idle prompt / elicitation
     /// dialog). These do not latch the lane indicator into a
-    /// persistent `NeedsAttention` (see `daruda_claude::hooks::fsm`), so
+    /// persistent `NeedsAttention` (see `daruda_agent::hooks::fsm`), so
     /// this one-shot push is their only surface.
     ///
     /// Gated by the `hook_notification_enabled` config and the shared
@@ -341,10 +341,10 @@ impl Workspace {
     /// watcher re-delivers does not double-fire.
     fn maybe_push_hook_notification(
         &mut self,
-        file: &daruda_claude::hooks::status_file::StatusFile,
+        file: &daruda_agent::hooks::status_file::StatusFile,
     ) {
         use crate::surface::strings as s;
-        use daruda_claude::hooks::events::NotificationType;
+        use daruda_agent::hooks::events::NotificationType;
 
         let title = match file.notification {
             Some(NotificationType::PermissionPrompt) => s::notification_hook_permission_title(),
@@ -418,7 +418,7 @@ impl Workspace {
     pub(in crate::workspace) fn advance_usage(
         &mut self,
         key: UsageKey,
-        result: Result<daruda_claude::ProviderUsage, daruda_claude::FetchError>,
+        result: Result<daruda_agent::ProviderUsage, daruda_agent::FetchError>,
         cx: &mut Context<Self>,
     ) {
         if self.claude.usage_by_account.advance_usage(key, result) {
@@ -431,7 +431,7 @@ impl Workspace {
     pub(in crate::workspace) fn set_service_status(
         &mut self,
         recipe: AccountRecipeId,
-        status: daruda_claude::ServiceStatus,
+        status: daruda_agent::ServiceStatus,
         cx: &mut Context<Self>,
     ) {
         let prev = self.claude.service_status.get(&recipe);
@@ -453,7 +453,7 @@ impl Workspace {
     pub(in crate::workspace) fn set_activity_stats(
         &mut self,
         key: UsageKey,
-        activity: daruda_claude::ActivityStats,
+        activity: daruda_agent::ActivityStats,
         cx: &mut Context<Self>,
     ) {
         if self.claude.usage_by_account.set_activity(key, activity) {

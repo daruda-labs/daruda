@@ -10,7 +10,7 @@
 //!   user can tell which sibling their terminal is talking to.
 
 use crate::ui::theme;
-use daruda_claude::SessionStatus;
+use daruda_agent::SessionStatus;
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use crate::surface::strings as surface_strings;

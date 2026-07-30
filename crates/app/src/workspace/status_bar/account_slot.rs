@@ -43,7 +43,7 @@ pub(in crate::workspace) enum AddAccountRow {
 fn system_label(domain: AccountDomain) -> String {
     match domain {
         AccountDomain::Exactly(recipe) => crate::surface::strings::status_bar_account_system(
-            daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+            daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
         ),
         AccountDomain::Any | AccountDomain::Unsupported => {
             crate::surface::strings::status_bar_account_system_plain()
@@ -55,7 +55,7 @@ fn system_label(domain: AccountDomain) -> String {
 /// Empty sections are dropped so the menu never shows a bare header.
 fn sections(domain: AccountDomain, accounts: &AccountsState) -> Vec<AccountSection> {
     let recipes: Vec<AccountRecipeId> = match domain {
-        AccountDomain::Any => AccountRecipeId::ALL.to_vec(),
+        AccountDomain::Any => AccountRecipeId::all().collect(),
         AccountDomain::Exactly(recipe) => vec![recipe],
         AccountDomain::Unsupported => Vec::new(),
     };
@@ -93,9 +93,8 @@ fn add_rows(domain: AccountDomain) -> Vec<AddAccountRow> {
         // A terminal may run any adapter, so each domain gets its own named
         // entry — "+ Add account" alone wouldn't say which credentials it
         // signs into.
-        AccountDomain::Any => AccountRecipeId::ALL
-            .iter()
-            .map(|&recipe| {
+        AccountDomain::Any => AccountRecipeId::all()
+            .map(|recipe| {
                 add_row(
                     recipe,
                     crate::surface::strings::settings_accounts_add(&account_recipe_label(recipe)),
@@ -474,7 +473,7 @@ mod tests {
         let sections = sections(AccountDomain::Any, &mixed_state());
         assert_eq!(
             sections.iter().map(|s| s.recipe).collect::<Vec<_>>(),
-            AccountRecipeId::ALL
+            AccountRecipeId::all().collect::<Vec<_>>()
         );
         assert_eq!(emails(&sections[0]), ["alice@x.com", "carol@x.com"]);
         assert_eq!(emails(&sections[1]), ["bob@x.com"]);
@@ -522,10 +521,10 @@ mod tests {
     #[test]
     fn terminal_domain_offers_one_named_add_entry_per_recipe() {
         let rows = add_rows(AccountDomain::Any);
-        assert_eq!(rows.len(), AccountRecipeId::ALL.len());
+        assert_eq!(rows.len(), AccountRecipeId::count());
         // Every domain has a login command (the built-in adapter backs any
         // catalog gap), so a terminal offers each one as clickable.
-        for (row, expected) in rows.iter().zip(AccountRecipeId::ALL) {
+        for (row, expected) in rows.iter().zip(AccountRecipeId::all()) {
             let AddAccountRow::Add { recipe, label } = row else {
                 panic!("every terminal add entry is clickable, got {row:?}");
             };

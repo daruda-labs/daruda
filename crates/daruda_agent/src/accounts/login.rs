@@ -146,7 +146,7 @@ fn tokenize(command: &str) -> Vec<String> {
 /// `/\baccess_denied\b|authorization (?:request )?(?:was )?denied|sign-?in
 /// (?:was )?denied|login (?:was )?denied/i` — as a fixed marker list
 /// instead of a regex, per this task's dependency guidance (no `regex` in
-/// `daruda_claude`).
+/// `daruda_agent`).
 const DENIAL_MARKERS: &[&str] = &[
     "access_denied",
     "authorization denied",

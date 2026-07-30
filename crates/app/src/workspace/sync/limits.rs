@@ -9,7 +9,7 @@
 //! cadence, idle-rechecks when disabled, otherwise dispatches the blocking
 //! `ureq`/disk fetch onto the background executor and forwards the result to a
 //! workspace setter, then sleeps the cadence. Limit fetches forward their
-//! failures too — see [`daruda_claude::UsageOutcome`]; a failed status fetch or
+//! failures too — see [`daruda_agent::UsageOutcome`]; a failed status fetch or
 //! a quiet activity tick leaves the previous value in place.
 //!
 //! Known limitation: the pump is per-`Workspace`, so N project windows fire
@@ -21,9 +21,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_claude::{
-    ActivityStats, ProviderUsage, ServiceStatus, activity, codex_activity, service_status, usage,
-};
+use daruda_agent::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
 use daruda_config::PollConfig;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 use gpui::{Context, Task, WeakEntity};
@@ -43,7 +41,7 @@ const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 /// its loop.
 pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> Vec<Task<()>> {
     let mut pumps = Vec::new();
-    for recipe in AccountRecipeId::ALL {
+    for recipe in AccountRecipeId::all() {
         pumps.push(spawn_loop(cx, Endpoint::Limits(recipe)));
         pumps.push(spawn_loop(cx, Endpoint::Status(recipe)));
         pumps.push(spawn_loop(cx, Endpoint::Activity(recipe)));
@@ -264,10 +262,10 @@ pub(in crate::workspace) struct RefreshRound {
     /// One entry per auth domain, keyed the way the pump keys it. Failures ride
     /// along — which failure it was is what tells a signed-out domain from a
     /// broken refresh.
-    pub limits: Vec<(UsageKey, Result<ProviderUsage, daruda_claude::FetchError>)>,
+    pub limits: Vec<(UsageKey, Result<ProviderUsage, daruda_agent::FetchError>)>,
     pub status: Vec<(
         AccountRecipeId,
-        Result<ServiceStatus, daruda_claude::FetchError>,
+        Result<ServiceStatus, daruda_agent::FetchError>,
     )>,
     /// One entry per domain whose activity aggregation completed. Empty stats
     /// are still forwarded so a manual refresh can clear stale cached charts
@@ -288,7 +286,7 @@ pub(in crate::workspace) fn refresh_round(
     let mut limits = Vec::new();
     let mut status = Vec::new();
     let mut activity = Vec::new();
-    for recipe in AccountRecipeId::ALL {
+    for recipe in AccountRecipeId::all() {
         let account = usage_account(recipe, sticky);
         let config_dir = target_account(Endpoint::Limits(recipe), sticky).and_then(|(_, dir)| dir);
         limits.push((
@@ -313,29 +311,19 @@ pub(in crate::workspace) fn refresh_round(
 fn fetch_limits(
     recipe: AccountRecipeId,
     config_dir: Option<&Path>,
-) -> Result<ProviderUsage, daruda_claude::FetchError> {
+) -> Result<ProviderUsage, daruda_agent::FetchError> {
     usage::source_for(recipe).fetch(config_dir)
 }
 
-fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_claude::FetchError> {
+fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_agent::FetchError> {
     service_status::fetch_service_status(usage::source_for(recipe).status_url())
 }
 
-/// Dispatch one domain's local activity aggregation to its own session-log
-/// format — Claude's flat `<config>/projects/*/*.jsonl`, Codex's nested
-/// `<config>/sessions/<Y>/<M>/<D>/*.jsonl`. `config_dir` is that recipe's
-/// resolved managed-account dir (`None` = system default).
+/// Dispatch one domain's local activity aggregation through the provider
+/// strategy owned by `daruda_agent`. `config_dir` is that recipe's resolved
+/// managed-account dir (`None` = system default).
 fn fetch_activity_in(recipe: AccountRecipeId, config_dir: Option<&Path>) -> Option<ActivityStats> {
-    match recipe {
-        AccountRecipeId::Claude => match config_dir {
-            Some(dir) => fetch_activity_for(dir),
-            None => fetch_activity(),
-        },
-        AccountRecipeId::Codex => match config_dir {
-            Some(dir) => fetch_codex_activity_for(dir),
-            None => fetch_codex_activity(),
-        },
-    }
+    activity::source_for(recipe).fetch(config_dir)
 }
 
 /// Result envelope so every endpoint can share a single
@@ -349,11 +337,11 @@ enum Fetched {
     /// `Endpoint` — pairing the two would make an exhaustive match impossible.
     Limits(
         AccountRecipeId,
-        Result<ProviderUsage, daruda_claude::FetchError>,
+        Result<ProviderUsage, daruda_agent::FetchError>,
     ),
     Status(
         AccountRecipeId,
-        Result<ServiceStatus, daruda_claude::FetchError>,
+        Result<ServiceStatus, daruda_agent::FetchError>,
     ),
     Activity(AccountRecipeId, Option<ActivityStats>),
 }
@@ -371,112 +359,16 @@ fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     }
 }
 
-/// Resolve the system-default Claude activity source + cache paths and run
-/// one incremental aggregation. Returns `None` when the home directory is
-/// unavailable or the aggregation errors (an unreadable projects root,
-/// an I/O failure mid-read) — the caller keeps the previous snapshot.
-///
-/// Blocking (disk I/O over `~/.claude/projects/*/*.jsonl`); only call
-/// from the background executor. Shared by the pump and the Usage tab's
-/// manual-refresh button (`Workspace::refresh_usage_now`).
-pub(in crate::workspace) fn fetch_activity() -> Option<ActivityStats> {
-    let (projects_root, cache_path) = activity_paths()?;
-    activity::update_activity(&projects_root, &cache_path).ok()
-}
-
-/// Like [`fetch_activity`], but aggregates a managed account's own
-/// config-dir-scoped JSONL logs (`activity_paths_for`) instead of the
-/// system-default `~/.claude/projects`.
-pub(in crate::workspace) fn fetch_activity_for(config_dir: &Path) -> Option<ActivityStats> {
-    let (projects_root, cache_path) = activity_paths_for(config_dir)?;
-    activity::update_activity(&projects_root, &cache_path).ok()
-}
-
-/// `(~/.claude/projects, <profile-scoped data dir>/cache/activity.json)`.
-/// `projects_root` is Claude Code's own account-wide JSONL logs — never
-/// profile-scoped, every profile reads the same real source. `cache_path`
-/// is daruda's own derived cache; profile-scoped like every other
-/// on-disk file so a debug/test run recomputes its own cache from that
-/// same source instead of overwriting the release build's.
-fn activity_paths() -> Option<(PathBuf, PathBuf)> {
-    let home = dirs::home_dir()?;
-    let projects_root = home.join(".claude").join("projects");
-    let cache_path = daruda_store::persistence::default_data_dir()
-        .join("cache")
-        .join("activity.json");
-    Some((projects_root, cache_path))
-}
-
-/// `(<config_dir>/projects, <profile-scoped data dir>/cache/activity-<key>.json)`.
-/// Sibling of [`activity_paths`] for a managed account's isolated
-/// `CLAUDE_CONFIG_DIR`: `projects_root` is that account's own JSONL logs
-/// (under its own config dir, not the system default `~/.claude`), and
-/// `cache_path` is keyed by the config dir's final path component — the
-/// account UUID, since `account_config_dir` is `accounts_root/<uuid>` — so
-/// each account's cache stays distinct from the system default and from
-/// every other account's cache. Falls back to the system-default cache
-/// file name when the config dir has no final component (e.g. `/`).
-fn activity_paths_for(config_dir: &Path) -> Option<(PathBuf, PathBuf)> {
-    let projects_root = config_dir.join("projects");
-    let cache_file_name = config_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|key| format!("activity-{key}.json"))
-        .unwrap_or_else(|| "activity.json".to_string());
-    let cache_path = daruda_store::persistence::default_data_dir()
-        .join("cache")
-        .join(cache_file_name);
-    Some((projects_root, cache_path))
-}
-
-/// Resolve the system-default Codex activity source + cache paths and run
-/// one incremental aggregation. Sibling of [`fetch_activity`] for Codex's
-/// `~/.codex/sessions` layout — see `daruda_claude::codex_activity`.
-pub(in crate::workspace) fn fetch_codex_activity() -> Option<ActivityStats> {
-    let home = daruda_claude::accounts::codex::system_codex_home()?;
-    let (sessions_root, cache_path) = codex_activity_paths(&home);
-    codex_activity::update_activity(&sessions_root, &cache_path).ok()
-}
-
-/// Like [`fetch_codex_activity`], but aggregates a managed account's own
-/// config-dir-scoped session logs instead of the system-default
-/// `~/.codex/sessions`.
-pub(in crate::workspace) fn fetch_codex_activity_for(config_dir: &Path) -> Option<ActivityStats> {
-    let (sessions_root, cache_path) = codex_activity_paths(config_dir);
-    codex_activity::update_activity(&sessions_root, &cache_path).ok()
-}
-
-/// `(<codex_home>/sessions, <profile-scoped data dir>/cache/codex-activity[-<key>].json)`.
-/// Mirrors [`activity_paths`]/[`activity_paths_for`]'s account-scoping rule:
-/// the system-default home has no key suffix, a managed account's
-/// (isolated `CODEX_HOME`) is keyed by its final path component so its
-/// cache never collides with the system default or another account's.
-fn codex_activity_paths(codex_home: &Path) -> (PathBuf, PathBuf) {
-    let sessions_root = codex_home.join("sessions");
-    let cache_file_name = codex_home
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| *name != ".codex")
-        .map(|key| format!("codex-activity-{key}.json"))
-        .unwrap_or_else(|| "codex-activity.json".to_string());
-    let cache_path = daruda_store::persistence::default_data_dir()
-        .join("cache")
-        .join(cache_file_name);
-    (sessions_root, cache_path)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::Path;
 
     use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
 
     use crate::workspace::main_area::pane::AccountDomain;
 
     use super::{
-        Endpoint, FocusedAccount, account_scoped, activity_paths_for, codex_activity_paths,
-        observe_focus, target_account, usage_account,
+        Endpoint, FocusedAccount, account_scoped, observe_focus, target_account, usage_account,
     };
 
     #[test]
@@ -579,7 +471,7 @@ mod tests {
     #[test]
     fn a_system_default_pane_reads_the_ambient_login_in_every_domain() {
         let sticky = sticky_after(FocusedAccount::SystemDefault, AccountDomain::Any);
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             let (key, dir) = target_account(Endpoint::Limits(recipe), &sticky)
                 .expect("the ambient login is always readable");
             assert_eq!(key, AccountSelection::SystemDefault);
@@ -593,63 +485,11 @@ mod tests {
     #[test]
     fn a_never_observed_domain_falls_back_to_the_ambient_login() {
         let sticky: HashMap<AccountRecipeId, FocusedAccount> = HashMap::new();
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             assert_eq!(
                 usage_account(recipe, &sticky),
                 AccountSelection::SystemDefault
             );
         }
-    }
-
-    #[test]
-    fn activity_paths_for_scopes_projects_root_and_cache_to_config_dir() {
-        let account_id = "alice-1234";
-        let config_dir = Path::new("/data/claude-accounts").join(account_id);
-
-        let (projects_root, cache_path) = activity_paths_for(&config_dir)
-            .expect("activity_paths_for should always resolve for an explicit config_dir");
-
-        assert_eq!(projects_root, config_dir.join("projects"));
-
-        let cache_file_name = cache_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("cache path should have a file name");
-        assert!(
-            cache_file_name.contains(account_id),
-            "cache file name {cache_file_name:?} should embed the account key {account_id:?}"
-        );
-        assert_ne!(
-            cache_file_name, "activity.json",
-            "account-scoped cache must not collide with the system-default cache file name"
-        );
-    }
-
-    #[test]
-    fn codex_activity_paths_scopes_sessions_root_and_cache_to_config_dir() {
-        let account_id = "alice-1234";
-        let config_dir = Path::new("/data/codex-accounts").join(account_id);
-
-        let (sessions_root, cache_path) = codex_activity_paths(&config_dir);
-
-        assert_eq!(sessions_root, config_dir.join("sessions"));
-        let cache_file_name = cache_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("cache path should have a file name");
-        assert!(cache_file_name.contains(account_id));
-        assert_ne!(cache_file_name, "codex-activity.json");
-    }
-
-    #[test]
-    fn codex_activity_paths_for_the_system_home_uses_the_unkeyed_cache_name() {
-        let system_home = Path::new("/Users/alice/.codex");
-        let (sessions_root, cache_path) = codex_activity_paths(system_home);
-
-        assert_eq!(sessions_root, system_home.join("sessions"));
-        assert_eq!(
-            cache_path.file_name().and_then(|n| n.to_str()),
-            Some("codex-activity.json")
-        );
     }
 }

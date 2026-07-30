@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn every_auth_domain_has_an_icon_in_the_catalog() {
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             let path = icon_for_recipe(recipe);
             assert!(
                 AGENT_ICONS.iter().any(|(_, p)| *p == path),

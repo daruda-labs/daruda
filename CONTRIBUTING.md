@@ -137,7 +137,7 @@ daruda/
 ├── crates/
 │   ├── app/              # binary — GPUI entry, workspace, docks, panels
 │   ├── daruda_terminal/  # TerminalView + TerminalSession
-│   ├── daruda_claude/    # Claude Code hook FSM + JSONL parser (GPUI-free)
+│   ├── daruda_agent/    # agent provider integrations: accounts, usage, activity (GPUI-free)
 │   ├── daruda_config/    # TOML config (GPUI-free)
 │   ├── daruda_store/     # panels, tasks, project state persistence (GPUI-free)
 │   ├── ghostty_vt/       # safe Rust wrapper over libghostty-vt
@@ -150,7 +150,7 @@ daruda/
 
 ```
 app  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
-app  →  daruda_claude
+app  →  daruda_agent
 app  →  daruda_config
 app  →  daruda_store
 ```

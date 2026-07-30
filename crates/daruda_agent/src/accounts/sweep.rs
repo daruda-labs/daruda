@@ -83,7 +83,7 @@ pub fn sweep_orphan_dirs(data_dir: &Path, known: &[AccountId], grace: Duration) 
 /// tolerates an already-removed dir, so the domains that don't own it are
 /// no-ops rather than hazards.
 fn cleanup_unattributed_dir(path: &Path) {
-    for id in AccountRecipeId::ALL {
+    for id in AccountRecipeId::all() {
         let recipe = recipe_for(id);
         if recipe.cleanup_scope() == CleanupScope::DirScoped {
             recipe.cleanup(path);

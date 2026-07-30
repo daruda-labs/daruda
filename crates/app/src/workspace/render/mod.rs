@@ -1058,8 +1058,7 @@ impl Render for Workspace {
         // whether a pill is worth drawing. `prepare_right_dock_snapshot`
         // (called earlier this same render pass) is the sticky map's sole
         // writer — this site only reads what it left behind.
-        let usage: Vec<_> = daruda_store::accounts::AccountRecipeId::ALL
-            .into_iter()
+        let usage: Vec<_> = daruda_store::accounts::AccountRecipeId::all()
             .map(|recipe| {
                 let account = crate::workspace::sync::limits::usage_account(
                     recipe,

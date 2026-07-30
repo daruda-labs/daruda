@@ -43,7 +43,7 @@ SCAN_DIRS=(
     "crates/daruda_store/src"
     "crates/daruda_terminal/src"
     "crates/daruda_config/src"
-    "crates/daruda_claude/src"
+    "crates/daruda_agent/src"
 )
 
 # Match `let _ = <expr>.update*(...)` shapes. Catches:

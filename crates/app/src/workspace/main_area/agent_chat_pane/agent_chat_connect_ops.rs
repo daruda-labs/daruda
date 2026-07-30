@@ -392,7 +392,7 @@ impl Workspace {
                 let prep = cx
                     .background_executor()
                     .spawn(async move {
-                        daruda_claude::accounts::recipe_for(account.recipe)
+                        daruda_agent::accounts::recipe_for(account.recipe)
                             .prepare_dir(&account.config_dir)
                             .map_err(|e| e.to_string())
                     })
@@ -774,7 +774,7 @@ mod tests {
         use daruda_store::accounts::AccountRecipeId;
         use std::path::PathBuf;
 
-        let recipe = daruda_claude::accounts::recipe_for(AccountRecipeId::Claude);
+        let recipe = daruda_agent::accounts::recipe_for(AccountRecipeId::Claude);
         let config_dir = PathBuf::from("/data/acc/alice");
         let prepared = PreparedAccount {
             recipe: AccountRecipeId::Claude,
@@ -791,7 +791,7 @@ mod tests {
 
         // Codex strips nothing, and the System account (no managed account)
         // runs under the user's own environment by definition.
-        let codex = daruda_claude::accounts::recipe_for(AccountRecipeId::Codex);
+        let codex = daruda_agent::accounts::recipe_for(AccountRecipeId::Codex);
         assert!(codex.strip_env().is_empty());
         assert!(account_strip_env(None).is_empty());
     }

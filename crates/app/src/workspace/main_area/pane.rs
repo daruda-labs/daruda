@@ -965,8 +965,8 @@ pub(in crate::workspace) fn resolve_pane_account(
     if matches!(domain, AccountDomain::Exactly(r) if account.recipe != r) {
         return None;
     }
-    let recipe = daruda_claude::accounts::recipe_for(account.recipe);
-    let config_dir = daruda_claude::accounts::account_config_dir(data_dir, id);
+    let recipe = daruda_agent::accounts::recipe_for(account.recipe);
+    let config_dir = daruda_agent::accounts::account_config_dir(data_dir, id);
     let env = daruda_config::account_env(recipe.config_dir_env(), &config_dir, recipe.strip_env());
     Some(PreparedAccount {
         recipe: account.recipe,
@@ -1120,7 +1120,7 @@ impl Workspace {
     /// a shell has uses beyond the agent.
     fn prepare_account_dir(&mut self, prepared: &PreparedAccount, cx: &mut Context<Self>) {
         if let Err(e) =
-            daruda_claude::accounts::recipe_for(prepared.recipe).prepare_dir(&prepared.config_dir)
+            daruda_agent::accounts::recipe_for(prepared.recipe).prepare_dir(&prepared.config_dir)
         {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
@@ -1758,7 +1758,7 @@ mod tests {
         .expect("a Claude account under a Claude-scoped pane resolves");
         assert_eq!(
             resolved.config_dir,
-            daruda_claude::accounts::account_config_dir(data, id)
+            daruda_agent::accounts::account_config_dir(data, id)
         );
         assert!(
             resolved
@@ -1786,7 +1786,7 @@ mod tests {
         // A remote / JSON-stdio / unrecognized adapter can hold no managed
         // account. `Unsupported` must refuse, where "no constraint" would
         // have let every domain through.
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             let (id, st) = accounts_with(recipe);
             assert_eq!(
                 resolve_pane_account(
@@ -1868,7 +1868,7 @@ mod tests {
         assert_eq!(focused.key(), AccountSelection::Managed(id));
         assert_eq!(
             focused.into_config_dir(),
-            Some(daruda_claude::accounts::account_config_dir(data, id))
+            Some(daruda_agent::accounts::account_config_dir(data, id))
         );
     }
 

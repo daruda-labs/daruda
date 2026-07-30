@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use gpui::{Context, Window};
 
-use daruda_claude::accounts::{LoginOutcome, account_config_dir, recipe_for, spawn_login};
+use daruda_agent::accounts::{LoginOutcome, account_config_dir, recipe_for, spawn_login};
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -35,7 +35,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_a
 /// controls the pace of.
 ///
 /// `pub(in crate::workspace)`: `Workspace::new_with_project`'s startup
-/// orphan sweep (`daruda_claude::accounts::sweep_orphan_dirs`) passes this
+/// orphan sweep (`daruda_agent::accounts::sweep_orphan_dirs`) passes this
 /// same constant as its `grace` window, so the two can't drift — see that
 /// call site's comment for why a login's own timeout is exactly the right
 /// sweep grace period.
@@ -243,7 +243,7 @@ impl Workspace {
         finish: LoginFinish,
         cx: &mut Context<Self>,
     ) {
-        let recipe = daruda_claude::accounts::recipe_for(recipe_id);
+        let recipe = daruda_agent::accounts::recipe_for(recipe_id);
         let env =
             daruda_config::account_env(recipe.config_dir_env(), &config_dir, recipe.strip_env());
         let mode = finish.mode();
@@ -869,7 +869,7 @@ pub(in crate::workspace) fn can_start_login(pending: &PendingLogin) -> bool {
 /// inherited PATH already covers it), or the resolve itself fails (a
 /// download/network error) — in every `None` case `spawn_login` still
 /// runs with the inherited PATH, and a genuine "no node" failure surfaces
-/// as an ordinary [`daruda_claude::accounts::LoginError`] through the
+/// as an ordinary [`daruda_agent::accounts::LoginError`] through the
 /// normal failure toast rather than being special-cased here.
 ///
 /// **Blocking** — [`daruda_acp::ensure_node`] may download and extract a
@@ -925,7 +925,7 @@ pub(in crate::workspace) fn find_duplicate(
 /// duplicate dedup, a cancel, or a closed-window race. Each auth domain owns
 /// the removal (Claude also drops a Keychain item; Codex must unlink rather
 /// than follow the symlinks in its home), so this routes through
-/// [`AccountRecipe::cleanup`](daruda_claude::accounts::AccountRecipe::cleanup)
+/// [`AccountRecipe::cleanup`](daruda_agent::accounts::AccountRecipe::cleanup)
 /// instead of hand-rolling the sequence.
 fn cleanup_account_dir(recipe: AccountRecipeId, config_dir: &Path) {
     recipe_for(recipe).cleanup(config_dir);

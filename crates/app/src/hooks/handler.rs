@@ -24,9 +24,9 @@ use std::path::Path;
 
 use fs4::fs_std::FileExt;
 
-use daruda_claude::hooks::events::HookEvent;
-use daruda_claude::hooks::fsm::{self, FsmAction};
-use daruda_claude::hooks::status_file::{
+use daruda_agent::hooks::events::HookEvent;
+use daruda_agent::hooks::fsm::{self, FsmAction};
+use daruda_agent::hooks::status_file::{
     self, Source, StatusFile, default_dir, delete, lock_path_for, path_for, read, write_atomic,
 };
 
@@ -137,7 +137,7 @@ impl Drop for SessionLock {
 /// The notification subtype, present only on `Notification` events.
 /// Recorded into the status file so the app-side ingest can gate a
 /// desktop push without re-reading the hook payload.
-fn notification_type(event: &HookEvent) -> Option<daruda_claude::hooks::events::NotificationType> {
+fn notification_type(event: &HookEvent) -> Option<daruda_agent::hooks::events::NotificationType> {
     match event {
         HookEvent::Notification {
             notification_type, ..

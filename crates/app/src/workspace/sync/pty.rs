@@ -79,8 +79,8 @@ impl Workspace {
             PtyTrackerEvent::DeadSession { session_id } => {
                 self.claude.last_pushed_notification.remove(&session_id);
                 if self.claude.claude_status.remove(&session_id).is_some() {
-                    if let Ok(dir) = daruda_claude::hooks::status_file::default_dir() {
-                        use daruda_claude::hooks::status_file as sf;
+                    if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
+                        use daruda_agent::hooks::status_file as sf;
                         let _ = sf::delete(&sf::path_for(&dir, &session_id));
                         // `claude` is gone (the tracker found no live
                         // descendant), so no NEW hook can spawn for this

@@ -133,14 +133,14 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// `claude_status.enable` config flag is off, no agent session is
     /// running, or the lane has no matching cwd.
     pub agent_status_per_lane:
-        std::collections::HashMap<daruda_store::project::LaneRef, daruda_claude::SessionStatus>,
+        std::collections::HashMap<daruda_store::project::LaneRef, daruda_agent::SessionStatus>,
     /// Per-session statuses for lanes that have ≥ 2 active agent
     /// sessions. Phase D sub-row badges read this. Lanes with 0 or
     /// 1 sessions are absent (the leading indicator covers them).
     /// Keyed by `LaneRef` for the same cross-project reason.
     pub agent_per_session_per_lane: std::collections::HashMap<
         daruda_store::project::LaneRef,
-        Vec<(String, daruda_claude::SessionStatus)>,
+        Vec<(String, daruda_agent::SessionStatus)>,
     >,
     /// `session_id` of the agent process living inside the focused
     /// pane (Phase E). Used by sub-row badge render to highlight the
@@ -307,7 +307,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
     /// `set_right_dock_view` without re-entering the dock context.
     pub workspace: WeakEntity<Workspace>,
-    /// One section per auth domain worth showing, in `AccountRecipeId::ALL`
+    /// One section per auth domain worth showing, in `AccountRecipeId::all()`
     /// order. Empty when no provider is signed in, which the renderer replaces
     /// with a single notice.
     pub usage: Vec<UsageSectionSnapshot>,
@@ -325,11 +325,10 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// (or none aggregated yet) is simply absent, not zeroed.
     pub activity: Vec<(
         daruda_store::accounts::AccountRecipeId,
-        daruda_claude::ActivityStats,
+        daruda_agent::ActivityStats,
     )>,
-    /// Up to 10 recent past sessions per domain, restricted to sessions
-    /// whose cwd matches a Lane already open in this workspace window —
-    /// one entry per domain in `usage` that has any match, most-recent
+    /// Up to 10 recent past sessions per domain, restricted to the active
+    /// Lane — one entry per domain in `usage` that has any match, most-recent
     /// first. See [`RestorableSession`].
     pub recent_sessions: Vec<(
         daruda_store::accounts::AccountRecipeId,
@@ -372,13 +371,13 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// config flag is off.
     #[allow(dead_code)]
     pub claude_status_per_path:
-        std::collections::HashMap<std::path::PathBuf, daruda_claude::SessionStatus>,
+        std::collections::HashMap<std::path::PathBuf, daruda_agent::SessionStatus>,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
     /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
     /// Empty when `claude_status.enable` is off or no session has
     /// reported a status yet.
-    pub claude_status_per_session: std::collections::HashMap<String, daruda_claude::SessionStatus>,
+    pub claude_status_per_session: std::collections::HashMap<String, daruda_agent::SessionStatus>,
     /// Per-session tool-use failure counts mirrored from
     /// `Workspace::claude.tool_use_failure_counts`. Only sessions
     /// with a positive count are present. The Tasks-tab renderer
@@ -413,10 +412,10 @@ pub struct UsageSectionSnapshot {
     /// `Pending` draws a placeholder; a failed refresh keeps the previous
     /// numbers, marked stale. `SignedOut` never reaches here — such a domain
     /// has no section at all.
-    pub outcome: daruda_claude::UsageOutcome,
+    pub outcome: daruda_agent::UsageOutcome,
     /// `None` before this domain's first status fetch lands, which the renderer
     /// maps to a dimmed pill.
-    pub service_status: Option<daruda_claude::ServiceStatus>,
+    pub service_status: Option<daruda_agent::ServiceStatus>,
 }
 
 /// A past session resolved against a Lane already open in this workspace
@@ -427,12 +426,31 @@ pub struct UsageSectionSnapshot {
 pub struct RestorableSession {
     pub session_id: String,
     pub agent_id: String,
+    /// Account the activity cache entry belongs to. Restore must preserve this
+    /// so a managed-account session reloads under the same config dir it came
+    /// from, not the domain default.
+    pub account: daruda_store::accounts::AccountSelection,
     pub lane_ref: daruda_store::project::LaneRef,
     /// Best available human title, or `None` when the renderer should fall
-    /// back to the cwd's last path component.
+    /// back to the prompt preview and then the cwd's last path component.
     pub title: Option<gpui::SharedString>,
+    /// One-line user prompt preview for sessions without a generated title.
+    pub prompt_preview: Option<gpui::SharedString>,
+    /// Git branch captured from the session log, shown as row metadata.
+    pub git_branch: Option<gpui::SharedString>,
     pub cwd: std::path::PathBuf,
     pub last_active: std::time::SystemTime,
+}
+
+impl RestorableSession {
+    /// Best provider-neutral row label before the UI falls back to lane/cwd
+    /// context: captured title first, then latest prompt preview.
+    pub(in crate::workspace) fn display_title(&self) -> Option<&str> {
+        daruda_agent::activity::session_display_title(
+            self.title.as_ref().map(|s| s.as_ref()),
+            self.prompt_preview.as_ref().map(|s| s.as_ref()),
+        )
+    }
 }
 
 impl RightDockSnapshot {
@@ -557,7 +575,7 @@ mod tests {
             b.cached_visible = a.cached_visible.clone();
             b.agent_status_per_lane.insert(
                 daruda_store::project::LaneRef::default(),
-                daruda_claude::SessionStatus::Working,
+                daruda_agent::SessionStatus::Working,
             );
             assert!(
                 a.content_differs(&b),

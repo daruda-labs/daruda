@@ -57,10 +57,7 @@ pub trait AccountRecipe: Send + Sync {
 
 /// Resolve the [`AccountRecipe`] for `id`.
 pub fn recipe_for(id: AccountRecipeId) -> &'static dyn AccountRecipe {
-    match id {
-        AccountRecipeId::Claude => &super::claude::ClaudeRecipe,
-        AccountRecipeId::Codex => &super::codex::CodexRecipe,
-    }
+    crate::providers::integration_for(id).account
 }
 
 /// Best-effort removal of a managed account's config dir, shared by every
@@ -122,7 +119,7 @@ mod tests {
         // The orphan sweep runs every `DirScoped` cleanup against a dir it
         // can't attribute to a domain, so a cleanup that ever reaches further
         // has to declare `External` here to stay out of that path.
-        for id in AccountRecipeId::ALL {
+        for id in AccountRecipeId::all() {
             assert_eq!(recipe_for(id).cleanup_scope(), CleanupScope::DirScoped);
         }
     }

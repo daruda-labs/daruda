@@ -9,7 +9,7 @@
 //! idle windows at zero redraws, and satisfies CLAUDE.md Pitfall #10.
 
 use crate::ui::theme;
-use daruda_claude::SessionStatus;
+use daruda_agent::SessionStatus;
 use gpui::{
     App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px,
 };

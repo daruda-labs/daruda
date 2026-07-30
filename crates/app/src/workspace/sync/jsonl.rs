@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use daruda_claude::hooks::status_file::{Source, StatusFile};
+use daruda_agent::hooks::status_file::{Source, StatusFile};
 use gpui::{Context, Task};
 
 use crate::hooks::jsonl_watcher::{self, JsonlEvent, JsonlWatcherHandle};
@@ -66,7 +66,7 @@ impl Workspace {
         } = event;
 
         let file = StatusFile {
-            schema_version: daruda_claude::hooks::status_file::SCHEMA_VERSION,
+            schema_version: daruda_agent::hooks::status_file::SCHEMA_VERSION,
             session_id,
             cwd,
             transcript_path: Some(jsonl_path),

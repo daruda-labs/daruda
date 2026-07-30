@@ -10,7 +10,7 @@
 //!   strategy ([`ClaudeRecipe`] wraps the functions above behind one
 //!   interface; [`CodexRecipe`] does the same for a `CODEX_HOME`).
 //!
-//! Re-exports every public item flat under `daruda_claude::accounts::*` so
+//! Re-exports every public item flat under `daruda_agent::accounts::*` so
 //! callers don't need to know which submodule each lives in.
 
 pub mod claude;

@@ -36,7 +36,7 @@ pub(crate) fn spawn_all(cx: &mut App) {
 }
 
 fn spawn_claude_status(cx: &mut App) {
-    match daruda_claude::hooks::status_file::default_dir() {
+    match daruda_agent::hooks::status_file::default_dir() {
         Err(e) => {
             LogWriter::log(
                 ErrorReport::new("Claude status watcher disabled — could not resolve status dir")

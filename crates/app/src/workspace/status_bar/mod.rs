@@ -110,10 +110,10 @@ pub(super) struct StatusBarData {
     /// visible for pending, unavailable, and successful-empty scans.
     pub ports_status: PortScanStatus,
     /// One entry per auth domain that has numbers to show, in
-    /// `AccountRecipeId::ALL` order. A domain nobody is signed into — or whose
+    /// `AccountRecipeId::all()` order. A domain nobody is signed into — or whose
     /// first poll hasn't landed — contributes nothing, so the usage area is
     /// empty for a user with no AI provider configured.
-    pub usage: Vec<(AccountRecipeId, daruda_claude::UsageOutcome)>,
+    pub usage: Vec<(AccountRecipeId, daruda_agent::UsageOutcome)>,
     /// Which segments the user has toggled on, via the status bar's
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.

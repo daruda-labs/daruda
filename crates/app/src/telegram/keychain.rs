@@ -1,6 +1,6 @@
 //! OS keyring storage for the Telegram bot token.
 //!
-//! Mirrors `daruda_claude::limits`'s Anthropic OAuth token read: shell out to
+//! Mirrors `daruda_agent::limits`'s Anthropic OAuth token read: shell out to
 //! a CLI (`/usr/bin/security` on macOS, `secret-tool` on Linux) rather than
 //! link a keyring crate. The bot token is a secret and never touches
 //! `config.toml` — see `daruda_config::TelegramConfig` for the non-secret
@@ -78,7 +78,7 @@ pub fn read_token() -> Option<String> {
 /// surrounding whitespace, and treat an empty (or whitespace-only)
 /// result as "no token". Split from `read_token` so the parsing logic
 /// is plain and unit-testable without shelling out to `security` —
-/// mirrors `daruda_claude::limits::parse_keychain_credentials`.
+/// mirrors `daruda_agent::limits::parse_keychain_credentials`.
 fn normalize_token(raw: &[u8]) -> Option<String> {
     let token = std::str::from_utf8(raw).ok()?;
     let trimmed = token.trim();

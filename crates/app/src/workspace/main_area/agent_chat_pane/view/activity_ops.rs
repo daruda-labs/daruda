@@ -11,11 +11,11 @@ use super::{
 };
 
 impl AgentChatView {
-    /// Map to a [`daruda_claude::SessionStatus`] for the lane indicator.
+    /// Map to a [`daruda_agent::SessionStatus`] for the lane indicator.
     /// `None` for states that shouldn't contribute one (dormant `Idle`, dead
     /// `Error`).
-    pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_claude::SessionStatus> {
-        use daruda_claude::SessionStatus;
+    pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_agent::SessionStatus> {
+        use daruda_agent::SessionStatus;
         match &self.status {
             AgentSessionStatus::Idle | AgentSessionStatus::Error(_) => None,
             // Runtime prep and the handshake are both connecting sub-phases —

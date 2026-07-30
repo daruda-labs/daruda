@@ -272,7 +272,7 @@ pub(in crate::workspace) enum CommitMode {
 /// `InProgress` carries the cancel [`LoginProcessHandle`], the `account_id`
 /// the pending login will file under, and the `recipe` it signed into — but
 /// not the config dir, which is a pure function of data already on
-/// `Workspace` (`daruda_claude::accounts::account_config_dir(&self.data_dir,
+/// `Workspace` (`daruda_agent::accounts::account_config_dir(&self.data_dir,
 /// account_id)`). `recipe` is carried because a cancel has to clean that dir
 /// up through the right auth domain, and only the spawning flow knows which
 /// one it launched.
@@ -280,7 +280,7 @@ pub(in crate::workspace) enum CommitMode {
 /// `mode` distinguishes an add-account login (whose `account_id` names a
 /// throwaway config dir that only becomes real on success) from a
 /// reauthenticate login (whose `account_id` names an *existing*
-/// [`daruda_claude::accounts::ManagedAccount`]'s real, permanent config dir
+/// [`daruda_agent::accounts::ManagedAccount`]'s real, permanent config dir
 /// and Keychain item). `Workspace::cancel_pending_login` reads it to decide
 /// whether cancelling is allowed to delete that directory — for `Reauth`
 /// it must not, or cancelling a reauth would delete a good account's
@@ -308,7 +308,7 @@ pub(in crate::workspace) enum PendingLogin {
         recipe: daruda_store::accounts::AccountRecipeId,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
-        handle: daruda_claude::accounts::LoginProcessHandle,
+        handle: daruda_agent::accounts::LoginProcessHandle,
         mode: account_login_ops::LoginMode,
     },
 }
@@ -1016,7 +1016,7 @@ impl Workspace {
         // this, since a login can't still be running past its own timeout.
         let known_account_ids: Vec<daruda_store::accounts::AccountId> =
             accounts.accounts.iter().map(|account| account.id).collect();
-        daruda_claude::accounts::sweep_orphan_dirs(
+        daruda_agent::accounts::sweep_orphan_dirs(
             &data_dir,
             &known_account_ids,
             account_login_ops::LOGIN_TIMEOUT,
@@ -1059,17 +1059,16 @@ impl Workspace {
                     // Cold restore: load any status files that survived a
                     // previous run. TTL cleanup runs at the same time so
                     // orphans from past crashes don't accumulate.
-                    let mut store = daruda_claude::ClaudeStatusStore::new();
+                    let mut store = daruda_agent::ClaudeStatusStore::new();
                     if config.claude_status.enable
-                        && let Ok(dir) = daruda_claude::hooks::status_file::default_dir()
+                        && let Ok(dir) = daruda_agent::hooks::status_file::default_dir()
                     {
                         let policy =
-                            daruda_claude::hooks::cold_restore::ColdRestorePolicy::from_config_secs(
+                            daruda_agent::hooks::cold_restore::ColdRestorePolicy::from_config_secs(
                                 config.claude_status.stale_threshold_secs,
                                 config.claude_status.file_ttl_days,
                             );
-                        if let Ok(initial) = daruda_claude::hooks::cold_restore::run(&dir, &policy)
-                        {
+                        if let Ok(initial) = daruda_agent::hooks::cold_restore::run(&dir, &policy) {
                             store.load_initial(initial);
                         }
                     }

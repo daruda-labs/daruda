@@ -1199,7 +1199,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
             let snap = ws.prepare_left_dock_snapshot(cx);
             assert_eq!(
                 snap.agent_status_per_lane.get(&lane0),
-                Some(&daruda_claude::SessionStatus::Working),
+                Some(&daruda_agent::SessionStatus::Working),
                 "a parked lane's agent Working status must appear in the rendered \
                  left-dock snapshot keyed by its LaneRef"
             );
@@ -1273,7 +1273,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
         assert_eq!(v.activity_state(), ActivityState::Working);
         assert_eq!(
             v.to_session_status(),
-            Some(daruda_claude::SessionStatus::Working)
+            Some(daruda_agent::SessionStatus::Working)
         );
     });
 
@@ -1291,7 +1291,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
         );
         assert_eq!(
             v.to_session_status(),
-            Some(daruda_claude::SessionStatus::Working)
+            Some(daruda_agent::SessionStatus::Working)
         );
     });
 
@@ -1305,7 +1305,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
         assert_eq!(v.activity_state(), ActivityState::AwaitingPermission);
         assert_eq!(
             v.to_session_status(),
-            Some(daruda_claude::SessionStatus::NeedsAttention)
+            Some(daruda_agent::SessionStatus::NeedsAttention)
         );
     });
 
@@ -1336,7 +1336,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
         );
         assert_eq!(
             v.to_session_status(),
-            Some(daruda_claude::SessionStatus::Idle)
+            Some(daruda_agent::SessionStatus::Idle)
         );
     });
 }

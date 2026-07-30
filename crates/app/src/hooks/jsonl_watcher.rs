@@ -21,11 +21,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
 use chrono::{DateTime, Utc};
-use daruda_claude::SessionStatus;
-use daruda_claude::jsonl::fsm::{determine_status, last_meaningful_timestamp};
-use daruda_claude::jsonl::parser::parse_jsonl_entries;
-use daruda_claude::jsonl::permissions::PermissionChecker;
-use daruda_claude::jsonl::tail::read_last_n_lines;
+use daruda_agent::SessionStatus;
+use daruda_agent::jsonl::fsm::{determine_status, last_meaningful_timestamp};
+use daruda_agent::jsonl::parser::parse_jsonl_entries;
+use daruda_agent::jsonl::permissions::PermissionChecker;
+use daruda_agent::jsonl::tail::read_last_n_lines;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;

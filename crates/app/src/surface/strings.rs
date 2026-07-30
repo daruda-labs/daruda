@@ -663,6 +663,22 @@ pub fn usage_recent_sessions_section() -> String {
 pub fn usage_session_restore() -> String {
     rust_i18n::t!("usage.session_restore").into_owned()
 }
+/// Recent-session relative time label for activity within the last minute.
+pub fn usage_session_just_now() -> String {
+    rust_i18n::t!("usage.session_just_now").into_owned()
+}
+/// Recent-session relative time label, `n` whole minutes ago.
+pub fn usage_session_minutes(n: u64) -> String {
+    rust_i18n::t!("usage.session_minutes", n => n).into_owned()
+}
+/// Recent-session relative time label, `n` whole hours ago.
+pub fn usage_session_hours(n: u64) -> String {
+    rust_i18n::t!("usage.session_hours", n => n).into_owned()
+}
+/// Recent-session relative time label, `n` whole days ago.
+pub fn usage_session_days(n: u64) -> String {
+    rust_i18n::t!("usage.session_days", n => n).into_owned()
+}
 
 // ----------------------------------------------------------------
 // Activity dashboard (recent-turns chart + token-usage chart)
@@ -802,8 +818,8 @@ pub fn status_label_unknown() -> String {
 /// indicators prefer the upstream description and fall back to a
 /// canned default when it's empty. `Unknown` ignores description
 /// entirely — a parse miss shouldn't surface garbage strings.
-pub fn service_status_label(status: &daruda_claude::ServiceStatus) -> String {
-    use daruda_claude::StatusIndicator;
+pub fn service_status_label(status: &daruda_agent::ServiceStatus) -> String {
+    use daruda_agent::StatusIndicator;
     match status.indicator {
         StatusIndicator::None => status_label_operational().to_string(),
         StatusIndicator::Unknown => status_label_unknown().to_string(),
@@ -3850,7 +3866,7 @@ mod tests {
 
     #[test]
     fn service_status_labels_cover_description_policy() {
-        use daruda_claude::{ServiceStatus, StatusIndicator};
+        use daruda_agent::{ServiceStatus, StatusIndicator};
 
         for (indicator, description, expected) in [
             (StatusIndicator::None, "stale message", "Operational"),

@@ -1,6 +1,6 @@
 //! Claude Code hook integration — push channel.
 //!
-//! Wires `daruda_claude::hooks::*` (GPUI-free FSM) into the GPUI app:
+//! Wires `daruda_agent::hooks::*` (GPUI-free FSM) into the GPUI app:
 //!
 //! - [`handler`] — implementation of the `daruda --hook <eventType>`
 //!   subcommand that Claude Code spawns for each hook event. Reads

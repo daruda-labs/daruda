@@ -4,7 +4,7 @@
 //! Synchronous (`ureq`) on purpose — both endpoints poll on a 5-minute
 //! cadence at most and the call stack runs from `BackgroundExecutor`
 //! tasks, so an async client would only buy us complexity. Keeping it
-//! sync also means `daruda_claude` does not have to pick an async
+//! sync also means `daruda_agent` does not have to pick an async
 //! runtime, which would conflict with consumers that already use
 //! GPUI's executor.
 //!
@@ -16,7 +16,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-/// Failure surface for the two daruda_claude HTTP endpoints. Each
+/// Failure surface for the two daruda_agent HTTP endpoints. Each
 /// variant carries the upstream error rendered as a string so the
 /// renderer (which only needs to decide between "show data" and
 /// "show placeholder") doesn't have to match against ureq / serde

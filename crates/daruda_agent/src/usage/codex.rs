@@ -313,7 +313,7 @@ mod tests {
     /// on this machine. `#[ignore]`d: it needs network and a signed-in
     /// `~/.codex`, so it is a hand-run check that the URL, headers and parse
     /// still match what ChatGPT serves — the one thing fixtures cannot prove.
-    /// Run with `cargo test -p daruda_claude -- --ignored codex_live`.
+    /// Run with `cargo test -p daruda_agent -- --ignored codex_live`.
     #[test]
     #[ignore = "requires network and a signed-in codex home"]
     fn codex_live_usage_round_trip() {

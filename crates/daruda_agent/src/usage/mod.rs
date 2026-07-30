@@ -249,10 +249,7 @@ pub trait UsageSource: Send + Sync {
 
 /// The usage source for `id`. Total, like `accounts::recipe_for`.
 pub fn source_for(id: AccountRecipeId) -> &'static dyn UsageSource {
-    match id {
-        AccountRecipeId::Claude => &claude::ClaudeUsage,
-        AccountRecipeId::Codex => &codex::CodexUsage,
-    }
+    crate::providers::integration_for(id).usage
 }
 
 #[cfg(test)]

@@ -295,7 +295,7 @@ impl Workspace {
         // the workspace.
         let claude_status_per_session: std::collections::HashMap<
             String,
-            daruda_claude::SessionStatus,
+            daruda_agent::SessionStatus,
         > = self
             .claude
             .claude_status
@@ -331,8 +331,7 @@ impl Workspace {
             pane_domain,
         );
         let usage_sections: Vec<crate::workspace::layout::snap::UsageSectionSnapshot> =
-            daruda_store::accounts::AccountRecipeId::ALL
-                .into_iter()
+            daruda_store::accounts::AccountRecipeId::all()
                 .filter_map(|recipe| {
                     let account = crate::workspace::sync::limits::usage_account(
                         recipe,
@@ -365,7 +364,7 @@ impl Workspace {
         // activity chart either, so it's not worth looking up.
         let activity: Vec<(
             daruda_store::accounts::AccountRecipeId,
-            daruda_claude::ActivityStats,
+            daruda_agent::ActivityStats,
         )> = usage_sections
             .iter()
             .filter_map(|section| {
@@ -384,24 +383,12 @@ impl Workspace {
                     .map(|stats| (section.recipe, stats))
             })
             .collect();
-        // Every Lane's cwd across every open Project — no existing call
-        // site needs "every lane across every project" today, every other
-        // `.lanes.iter()` walk is scoped to one project at a time.
-        let open_lanes: Vec<(daruda_store::project::LaneRef, std::path::PathBuf)> = self
-            .projects
-            .iter()
-            .flat_map(|p| {
-                p.lanes.iter().map(move |l| {
-                    (
-                        daruda_store::project::LaneRef {
-                            project: p.id,
-                            lane: l.id,
-                        },
-                        l.path.clone(),
-                    )
-                })
-            })
-            .collect();
+        // The Usage tab is rendered in the current workspace context, and
+        // recent-session rows do not carry a lane label. Keep the list scoped
+        // to the active Lane so Restore does not jump to another lane from an
+        // unlabelled row; switching lanes naturally swaps the list.
+        let active_lane_ref = self.active_ref();
+        let active_lane_cwd = self.active_lane().map(|l| l.path.clone());
         // Session ids already open as a live pane, in any lane (not just
         // the active one) — such a session isn't "past" any more, and
         // `restore_session` would just focus the existing pane anyway, so
@@ -413,10 +400,10 @@ impl Workspace {
             .flat_map(|rt| rt.panes.iter())
             .filter_map(|p| p.agent_chat_content()?.view.read(cx).session_id.clone())
             .collect();
-        // Up to 10 most-recent sessions per section, restricted to
-        // sessions whose cwd matches an open Lane — a session belonging to
-        // a project this window doesn't have open can't be restored
-        // without a Project-open detour this feature doesn't attempt.
+        // Up to 10 most-recent sessions per section, restricted to the active
+        // Lane. A session belonging to another Lane is restorable after the
+        // user switches there; a session outside this window's Lanes needs a
+        // Project-open detour this feature doesn't attempt.
         let recent_sessions: Vec<(
             daruda_store::accounts::AccountRecipeId,
             Vec<crate::workspace::layout::snap::RestorableSession>,
@@ -450,12 +437,17 @@ impl Workspace {
                         if open_session_ids.contains(&s.session_id) {
                             return None;
                         }
-                        let (lane_ref, _) = open_lanes.iter().find(|(_, path)| path == &s.cwd)?;
+                        if active_lane_cwd.as_ref() != Some(&s.cwd) {
+                            return None;
+                        }
                         Some(crate::workspace::layout::snap::RestorableSession {
                             session_id: s.session_id.clone(),
                             agent_id: agent_id.clone(),
-                            lane_ref: *lane_ref,
+                            account,
+                            lane_ref: active_lane_ref,
                             title: s.title.clone().map(Into::into),
+                            prompt_preview: s.prompt_preview.clone().map(Into::into),
+                            git_branch: s.git_branch.clone().map(Into::into),
                             cwd: s.cwd.clone(),
                             last_active: s.last_active,
                         })
@@ -510,7 +502,7 @@ fn usage_account_label(
 ) -> String {
     crate::workspace::status_bar::account_label(email, None).unwrap_or_else(|| {
         crate::surface::strings::status_bar_account_system(
-            daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+            daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
         )
     })
 }

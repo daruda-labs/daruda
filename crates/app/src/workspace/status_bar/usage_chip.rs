@@ -12,7 +12,7 @@ use crate::ui::{
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::usage::severity_color;
 use crate::workspace::usage_labels::{percent, window_label};
-use daruda_claude::{LimitSeverity, ProviderUsage, UsageWindow};
+use daruda_agent::{LimitSeverity, ProviderUsage, UsageWindow};
 use daruda_store::accounts::AccountRecipeId;
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 use std::time::{Duration, SystemTime};
@@ -25,7 +25,7 @@ struct WindowRow {
     /// Short window name (`"5h"` / `"7d"` / `"7d · Opus"` / `"1mo"`), shared
     /// with the Usage tab's gauge labels.
     label: String,
-    /// `0.0 ..= 100.0`, clamped by the parser in `daruda_claude`.
+    /// `0.0 ..= 100.0`, clamped by the parser in `daruda_agent`.
     utilization: f32,
     /// Time until this window resets. `None` means the API omitted the
     /// reset time; a reset already in the past collapses to zero.
@@ -37,7 +37,7 @@ struct WindowRow {
 /// domain nobody is signed into should leave no trace.
 pub(super) fn render(
     recipe: AccountRecipeId,
-    outcome: &daruda_claude::UsageOutcome,
+    outcome: &daruda_agent::UsageOutcome,
     density: StatusBarDensity,
     workspace: WeakEntity<Workspace>,
     cx: &App,
@@ -248,7 +248,7 @@ fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_claude::WindowScope;
+    use daruda_agent::WindowScope;
     use daruda_store::accounts::AccountRecipeId;
 
     const FIVE_HOURS: u64 = 5 * 3600;

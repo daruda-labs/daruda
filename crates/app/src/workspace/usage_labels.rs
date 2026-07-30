@@ -1,12 +1,12 @@
 //! Display labels for plan-rate windows.
 //!
-//! `daruda_claude` reports a window as a [`Duration`], not a name, so the
+//! `daruda_agent` reports a window as a [`Duration`], not a name, so the
 //! label is derived here — the one place both the status-bar chip and the
 //! Usage tab read it from, so the two can't drift.
 
 use std::time::Duration;
 
-use daruda_claude::{UsageWindow, WindowScope};
+use daruda_agent::{UsageWindow, WindowScope};
 
 use crate::surface::strings;
 

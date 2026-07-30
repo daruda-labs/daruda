@@ -1,11 +1,11 @@
 [package]
-name = "daruda_claude"
+name = "daruda_agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 license.workspace = true
-description = "Claude Code session status detection — hook event FSM + JSONL fallback parser (GPUI-free)"
+description = "Agent-provider integrations: accounts, usage, activity, service status, and session state (GPUI-free)"
 
 [lints]
 workspace = true

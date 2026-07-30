@@ -10,7 +10,7 @@
 use crate::ui::Sizable as _;
 use crate::ui::theme;
 use chrono::{DateTime, Utc};
-use daruda_claude::SessionStatus;
+use daruda_agent::SessionStatus;
 use daruda_store::tasks::{
     SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskFilter, TaskState,
 };

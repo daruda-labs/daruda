@@ -4,7 +4,7 @@
 use super::agent_chat::agent_view;
 use super::*;
 use crate::workspace::claude_session_ops::UsageKey;
-use crate::workspace::main_area::pane::AccountDomain;
+use crate::workspace::main_area::pane::{AccountDomain, FocusedAccount};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::ChatItem;
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
@@ -330,7 +330,7 @@ fn finish_codex_login(
     use crate::workspace::account_login_ops::LoginMode;
     // A real (near-instant) child process is the only way to build a
     // `LoginProcessHandle` — it has no other public constructor.
-    let login = daruda_claude::accounts::spawn_login(
+    let login = daruda_agent::accounts::spawn_login(
         "/usr/bin/true",
         &[],
         &[],
@@ -348,7 +348,7 @@ fn finish_codex_login(
         account_id,
         config_dir,
         daruda_store::accounts::AccountRecipeId::Codex,
-        daruda_claude::accounts::LoginOutcome::Success,
+        daruda_agent::accounts::LoginOutcome::Success,
         cx,
     );
     account_id
@@ -451,13 +451,13 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
         ] {
             // Seed both domains: a deleted account must be pruned from every
             // one of them, not just the domain that happened to be focused.
-            for recipe in daruda_store::accounts::AccountRecipeId::ALL {
+            for recipe in daruda_store::accounts::AccountRecipeId::all() {
                 ws.claude.usage_by_account.advance_usage(
                     UsageKey {
                         recipe,
                         account: key,
                     },
-                    Ok(daruda_claude::ProviderUsage::new(recipe, Vec::new(), None)),
+                    Ok(daruda_agent::ProviderUsage::new(recipe, Vec::new(), None)),
                 );
             }
             ws.claude.usage_by_account.set_activity(
@@ -465,7 +465,7 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
                     recipe: daruda_store::accounts::AccountRecipeId::Claude,
                     account: key,
                 },
-                daruda_claude::ActivityStats::default(),
+                daruda_agent::ActivityStats::default(),
             );
         }
         ws.claude.sticky_focus_by_recipe.insert(
@@ -496,7 +496,7 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
         };
         assert_eq!(
             outcome(AccountSelection::Managed(deleted)),
-            daruda_claude::UsageOutcome::Pending,
+            daruda_agent::UsageOutcome::Pending,
             "a deleted account's usage must be gone, not merely stale"
         );
         assert!(outcome(AccountSelection::Managed(kept)).has_numbers());
@@ -507,7 +507,7 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
                 recipe: daruda_store::accounts::AccountRecipeId::Codex,
                 account: AccountSelection::Managed(deleted),
             }),
-            daruda_claude::UsageOutcome::Pending
+            daruda_agent::UsageOutcome::Pending
         );
 
         let activity_key = |account| UsageKey {
@@ -694,7 +694,7 @@ async fn a_terminal_pane_prepares_its_managed_accounts_config_dir(cx: &mut TestA
     });
 
     let config_dir = workspace.read_with(cx, |ws, _| {
-        daruda_claude::accounts::account_config_dir(&ws.data_dir, id)
+        daruda_agent::accounts::account_config_dir(&ws.data_dir, id)
     });
     // Negative control: nothing before the spawn creates the dir, so its
     // existence afterwards can only come from `prepare_dir`.
@@ -751,7 +751,7 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
         // holding the layout rather than popping in a beat later.
         assert_eq!(
             sections(ws, cx),
-            daruda_store::accounts::AccountRecipeId::ALL.to_vec()
+            daruda_store::accounts::AccountRecipeId::all().collect::<Vec<_>>()
         );
 
         let claude_key = UsageKey {
@@ -765,7 +765,7 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
 
         ws.claude.usage_by_account.advance_usage(
             claude_key,
-            Ok(daruda_claude::ProviderUsage::new(
+            Ok(daruda_agent::ProviderUsage::new(
                 daruda_store::accounts::AccountRecipeId::Claude,
                 Vec::new(),
                 None,
@@ -773,7 +773,7 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
         );
         ws.claude
             .usage_by_account
-            .advance_usage(codex_key, Err(daruda_claude::FetchError::NoToken));
+            .advance_usage(codex_key, Err(daruda_agent::FetchError::NoToken));
 
         assert_eq!(
             sections(ws, cx),
@@ -785,7 +785,7 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
         // a single "no provider" notice.
         ws.claude
             .usage_by_account
-            .advance_usage(claude_key, Err(daruda_claude::FetchError::NoToken));
+            .advance_usage(claude_key, Err(daruda_agent::FetchError::NoToken));
         assert!(sections(ws, cx).is_empty());
     });
 }
@@ -800,7 +800,7 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
         };
         ws.claude.usage_by_account.advance_usage(
             key,
-            Ok(daruda_claude::ProviderUsage::new(
+            Ok(daruda_agent::ProviderUsage::new(
                 daruda_store::accounts::AccountRecipeId::Claude,
                 Vec::new(),
                 None,
@@ -809,7 +809,7 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
 
         ws.claude
             .usage_by_account
-            .set_activity(key, daruda_claude::ActivityStats::default());
+            .set_activity(key, daruda_agent::ActivityStats::default());
         assert!(
             ws.prepare_right_dock_snapshot(cx).activity.is_empty(),
             "empty activity should not render chart headings"
@@ -817,8 +817,8 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
 
         ws.claude.usage_by_account.set_activity(
             key,
-            daruda_claude::ActivityStats {
-                daily: vec![daruda_claude::DayActivity {
+            daruda_agent::ActivityStats {
+                daily: vec![daruda_agent::DayActivity {
                     date: "2026-07-29".to_string(),
                     turns: 1,
                     tokens: 2,
@@ -886,67 +886,102 @@ async fn right_dock_snapshot_threads_focused_domain_and_override(cx: &mut TestAp
 }
 
 /// `prepare_right_dock_snapshot`'s `recent_sessions` only surfaces sessions
-/// whose cwd matches a Lane already open in this workspace, most-recent
-/// first, capped at 10 — the Usage tab table has nowhere else to get this
-/// filtering/ordering from.
+/// whose cwd matches the active Lane, most-recent first, capped at 10 — the
+/// Usage tab table has nowhere else to get this filtering/ordering from.
 #[gpui::test]
-async fn recent_sessions_are_scoped_to_open_lanes_sorted_and_capped(cx: &mut TestAppContext) {
+async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
+    let inactive_temp = tempfile::tempdir().unwrap();
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(temp.path());
     let (_wh, ws) = build_workspace_with(cx, &config, Some(project));
     cx.run_until_parked();
 
     ws.update(cx, |ws, cx| {
+        let managed = AccountId::new();
+        let managed_selection = AccountSelection::Managed(managed);
+        ws.claude.sticky_focus_by_recipe.insert(
+            AccountRecipeId::Claude,
+            FocusedAccount::Managed {
+                id: managed,
+                recipe: AccountRecipeId::Claude,
+                config_dir: temp.path().join("account"),
+            },
+        );
+
         let key = UsageKey {
             recipe: AccountRecipeId::Claude,
-            account: AccountSelection::SystemDefault,
+            account: managed_selection,
         };
         ws.claude.usage_by_account.advance_usage(
             key,
-            Ok(daruda_claude::ProviderUsage::new(
+            Ok(daruda_agent::ProviderUsage::new(
                 AccountRecipeId::Claude,
                 Vec::new(),
                 None,
             )),
         );
 
+        let inactive_lane_id: daruda_store::project::LaneId = 999;
+        ws.projects[0]
+            .lanes
+            .push(crate::lane::Lane::default_for_project(
+                inactive_lane_id,
+                inactive_temp.path().to_path_buf(),
+            ));
         let open_lane_cwd = ws.projects[0].lanes[0].path.clone();
+        let inactive_lane_cwd = inactive_temp.path().to_path_buf();
         let unrelated_cwd = std::path::PathBuf::from("/does/not/match/any/open/lane");
 
         let mut sessions = vec![
-            daruda_claude::activity::SessionSummary {
+            daruda_agent::activity::SessionSummary {
                 session_id: "matched-older".to_string(),
                 cwd: open_lane_cwd.clone(),
                 title: Some("Older session".to_string()),
+                prompt_preview: None,
+                git_branch: None,
                 last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000),
             },
-            daruda_claude::activity::SessionSummary {
+            daruda_agent::activity::SessionSummary {
                 session_id: "matched-newest".to_string(),
                 cwd: open_lane_cwd.clone(),
                 title: Some("Newest session".to_string()),
+                prompt_preview: Some("Newest prompt".to_string()),
+                git_branch: Some("main".to_string()),
                 last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000),
             },
-            daruda_claude::activity::SessionSummary {
+            daruda_agent::activity::SessionSummary {
+                session_id: "inactive-lane-newer".to_string(),
+                cwd: inactive_lane_cwd,
+                title: Some("Other lane".to_string()),
+                prompt_preview: None,
+                git_branch: None,
+                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(3_000),
+            },
+            daruda_agent::activity::SessionSummary {
                 session_id: "unmatched".to_string(),
                 cwd: unrelated_cwd,
                 title: None,
-                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(3_000),
+                prompt_preview: None,
+                git_branch: None,
+                last_active: std::time::UNIX_EPOCH + std::time::Duration::from_secs(4_000),
             },
         ];
         // Pad past the cap so truncation is actually exercised.
         for i in 0..8 {
-            sessions.push(daruda_claude::activity::SessionSummary {
+            sessions.push(daruda_agent::activity::SessionSummary {
                 session_id: format!("pad-{i}"),
                 cwd: open_lane_cwd.clone(),
                 title: None,
+                prompt_preview: None,
+                git_branch: None,
                 last_active: std::time::UNIX_EPOCH,
             });
         }
 
         ws.claude.usage_by_account.set_activity(
             key,
-            daruda_claude::ActivityStats {
+            daruda_agent::ActivityStats {
                 daily: Vec::new(),
                 recent_sessions: sessions,
             },
@@ -962,7 +997,7 @@ async fn recent_sessions_are_scoped_to_open_lanes_sorted_and_capped(cx: &mut Tes
         assert_eq!(restorable.len(), 10, "capped at 10");
         assert!(
             restorable.iter().all(|s| s.cwd == open_lane_cwd),
-            "a session whose cwd matches no open lane must be excluded"
+            "a session outside the active lane must be excluded, even if another open lane matches it"
         );
         assert_eq!(
             restorable[0].session_id, "matched-newest",
@@ -971,6 +1006,12 @@ async fn recent_sessions_are_scoped_to_open_lanes_sorted_and_capped(cx: &mut Tes
         assert_eq!(
             restorable[0].agent_id,
             daruda_config::AgentDefinition::claude_default().id
+        );
+        assert_eq!(restorable[0].prompt_preview.as_deref(), Some("Newest prompt"));
+        assert_eq!(restorable[0].git_branch.as_deref(), Some("main"));
+        assert!(
+            restorable.iter().all(|s| s.account == managed_selection),
+            "restore payload must preserve the account whose activity cache produced it"
         );
     });
 }
@@ -1019,8 +1060,11 @@ async fn restore_session_focuses_an_already_open_pane_instead_of_duplicating(
     let session = crate::workspace::layout::snap::RestorableSession {
         session_id: "existing-session".to_string(),
         agent_id: daruda_config::AgentDefinition::claude_default().id,
+        account: AccountSelection::SystemDefault,
         lane_ref,
         title: None,
+        prompt_preview: None,
+        git_branch: None,
         cwd: temp.path().to_path_buf(),
         last_active: std::time::SystemTime::now(),
     };
@@ -1102,8 +1146,11 @@ async fn restore_session_activates_the_sessions_lane_before_focusing(cx: &mut Te
     let session = crate::workspace::layout::snap::RestorableSession {
         session_id: "existing-session".to_string(),
         agent_id: daruda_config::AgentDefinition::claude_default().id,
+        account: AccountSelection::SystemDefault,
         lane_ref: target,
         title: None,
+        prompt_preview: None,
+        git_branch: None,
         cwd: second_root.path().to_path_buf(),
         last_active: std::time::SystemTime::now(),
     };
@@ -1142,7 +1189,7 @@ async fn a_failed_refresh_keeps_its_usage_section(cx: &mut TestAppContext) {
         };
         ws.claude.usage_by_account.advance_usage(
             key,
-            Ok(daruda_claude::ProviderUsage::new(
+            Ok(daruda_agent::ProviderUsage::new(
                 daruda_store::accounts::AccountRecipeId::Claude,
                 Vec::new(),
                 None,
@@ -1150,7 +1197,7 @@ async fn a_failed_refresh_keeps_its_usage_section(cx: &mut TestAppContext) {
         );
         ws.claude
             .usage_by_account
-            .advance_usage(key, Err(daruda_claude::FetchError::Http("500".into())));
+            .advance_usage(key, Err(daruda_agent::FetchError::Http("500".into())));
 
         let snap = ws.prepare_right_dock_snapshot(cx);
         let claude = snap

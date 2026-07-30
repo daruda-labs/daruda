@@ -11,9 +11,9 @@ use crate::workspace::main_area::pane_tree::PaneLayout;
 
 impl Workspace {
     /// Restore `session` into a new pane, switching to its Lane first if
-    /// it isn't already active. The Lane is guaranteed already open (the
-    /// Usage tab only lists sessions matching an open Lane's cwd), so this
-    /// never needs to open a new Project.
+    /// it isn't already active. The Lane is guaranteed already known to this
+    /// window (the Usage tab only lists sessions matching the active Lane when
+    /// the snapshot was built), so this never needs to open a new Project.
     ///
     /// Focusing the pane triggers `connect_agent_chat`'s lazy ACP
     /// `session/load` resume. Whether the target agent adapter actually
@@ -51,14 +51,25 @@ impl Workspace {
             return;
         }
 
-        let pane = self.create_agent_chat_pane(
-            Some(PaneCwd::Local(session.cwd)),
-            Some(session.session_id),
-            session.agent_id,
-            session.title.map(|t| t.to_string()),
+        let RestorableSession {
+            session_id,
+            agent_id,
+            account,
+            title,
+            cwd,
+            ..
+        } = session;
+        let mut pane = self.create_agent_chat_pane(
+            Some(PaneCwd::Local(cwd)),
+            Some(session_id),
+            agent_id,
+            title.map(|t| t.to_string()),
             window,
             cx,
         );
+        if let Some(content) = pane.agent_chat_content_mut() {
+            content.account = account;
+        }
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);

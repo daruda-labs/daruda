@@ -3,7 +3,7 @@
 //! OAuth account selection actually wins (orca `environment.ts:37-52`).
 //! Which var name to inject and which vars to strip is auth-domain-specific
 //! (owned by the caller's `AccountRecipe`, e.g.
-//! `daruda_claude::accounts::ClaudeRecipe`) — this module only assembles
+//! `daruda_agent::accounts::ClaudeRecipe`) — this module only assembles
 //! the env override set generically.
 
 use std::path::Path;

@@ -11,7 +11,7 @@
 # `.join(".daruda")` instead of calling that function, so a debug or
 # test run silently shared (and could corrupt) a real release install's
 # state: `daruda_config::config_path`, `daruda_config::project::
-# project_config_dir`, `daruda_claude::hooks::status_file::default_dir`,
+# project_config_dir`, `daruda_agent::hooks::status_file::default_dir`,
 # and `workspace::sync::limits::activity_paths`'s cache path. The last
 # one (Telegram's Keychain-stored bot token) additionally caused two
 # profiles to 409-conflict polling Telegram with the same token — see
@@ -72,7 +72,7 @@ SCAN_DIRS=(
     "crates/daruda_store/src"
     "crates/daruda_terminal/src"
     "crates/daruda_config/src"
-    "crates/daruda_claude/src"
+    "crates/daruda_agent/src"
 )
 
 # Portable array population — no `mapfile` (macOS bash 3.2 doesn't ship it).

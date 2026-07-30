@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn cleanup_is_a_noop_when_dir_is_already_gone() {
-        let dir = std::env::temp_dir().join("daruda-claude-recipe-missing-xyz");
+        let dir = std::env::temp_dir().join("daruda-agent-recipe-missing-xyz");
         // Never created — must not panic on a missing dir.
         ClaudeRecipe.cleanup(&dir);
     }

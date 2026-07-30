@@ -12,14 +12,14 @@ use std::collections::HashMap;
 use crate::hooks::pty_tracker::PtyBinding;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
-use daruda_claude::SessionStatus;
+use daruda_agent::SessionStatus;
 
 // `Path` and `Source` are only named by the debug-only transition logger
 // (and `Source` also by the always-compiled test fixtures), so gate the
 // imports to those profiles to avoid an unused-import warning in release
 // non-test builds.
 #[cfg(any(debug_assertions, test))]
-use daruda_claude::hooks::status_file::Source;
+use daruda_agent::hooks::status_file::Source;
 #[cfg(debug_assertions)]
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 #[cfg(debug_assertions)]
@@ -64,7 +64,7 @@ pub(in crate::workspace) type LaneSessionsMap =
 pub(in crate::workspace) fn aggregate_over_panes(
     pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
     bindings: &HashMap<PaneId, PtyBinding>,
-    store: &daruda_claude::ClaudeStatusStore,
+    store: &daruda_agent::ClaudeStatusStore,
     acp_statuses: &[(PaneId, SessionStatus)],
 ) -> (LaneStatusMap, LaneSessionsMap) {
     let mut per_lane: HashMap<daruda_store::project::LaneRef, Vec<(String, SessionStatus)>> =
@@ -121,7 +121,7 @@ pub(in crate::workspace) fn aggregate_over_panes(
 pub(in crate::workspace) fn any_pane_session_animating(
     pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
     bindings: &HashMap<PaneId, PtyBinding>,
-    store: &daruda_claude::ClaudeStatusStore,
+    store: &daruda_agent::ClaudeStatusStore,
     acp_statuses: &[(PaneId, SessionStatus)],
 ) -> bool {
     pane_lane.iter().any(|(pane_id, _)| {
@@ -399,7 +399,7 @@ fn aggregate_transition_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_claude::hooks::status_file::{SCHEMA_VERSION, StatusFile};
+    use daruda_agent::hooks::status_file::{SCHEMA_VERSION, StatusFile};
     use std::path::PathBuf;
 
     fn entry(session_id: &str, cwd: &str, status: SessionStatus) -> StatusFile {
@@ -421,8 +421,8 @@ mod tests {
         }
     }
 
-    fn store_with(entries: Vec<StatusFile>) -> daruda_claude::ClaudeStatusStore {
-        let mut store = daruda_claude::ClaudeStatusStore::new();
+    fn store_with(entries: Vec<StatusFile>) -> daruda_agent::ClaudeStatusStore {
+        let mut store = daruda_agent::ClaudeStatusStore::new();
         for e in entries {
             store.update(e);
         }
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn aggregate_empty_when_no_panes() {
-        let store = daruda_claude::ClaudeStatusStore::new();
+        let store = daruda_agent::ClaudeStatusStore::new();
         let bindings: HashMap<PaneId, PtyBinding> = HashMap::new();
         let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store, &[]);
         assert!(per_lane.is_empty());
@@ -621,7 +621,7 @@ mod tests {
         let lane = lane_ref(1, 1);
         let pane_lane = vec![(10u64, lane), (20u64, lane)];
         let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "ghost")].into_iter().collect();
-        let store = daruda_claude::ClaudeStatusStore::new();
+        let store = daruda_agent::ClaudeStatusStore::new();
         assert!(!any_pane_session_animating(
             &pane_lane,
             &bindings,

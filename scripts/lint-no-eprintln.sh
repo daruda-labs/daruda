@@ -37,7 +37,7 @@ SCAN_DIRS=(
     "crates/daruda_store/src"
     "crates/daruda_terminal/src"
     "crates/daruda_config/src"
-    "crates/daruda_claude/src"
+    "crates/daruda_agent/src"
     "crates/ghostty_vt/src"
     "crates/ghostty_vt_sys/src"
 )

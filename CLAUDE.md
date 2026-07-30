@@ -16,7 +16,7 @@ daruda/
 │   ├── daruda_core/          # shared dependency-free utilities + core logic
 │   ├── daruda_config/        # config system (live reload)
 │   ├── daruda_store/         # persistence + observability (NDJSON log)
-│   ├── daruda_claude/        # Claude integration
+│   ├── daruda_agent/         # agent provider integrations
 │   ├── daruda_terminal/      # terminal emulation + GPUI rendering
 │   ├── daruda_update/        # app update checking
 │   ├── ghostty_vt/           # safe Rust wrapper over libghostty-vt
@@ -54,7 +54,7 @@ cargo build -p daruda
 cargo test
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_claude -p daruda_update --all-targets -- -D warnings
+  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
 scripts/lint-reentrant-reads.sh
@@ -244,7 +244,7 @@ Input:  GPUI KeyDown → TerminalInput → stdin_tx → PTY → Shell
 daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_config     →  daruda_store  →  daruda_core
              →  daruda_store
-             →  daruda_claude     →  daruda_store
+             →  daruda_agent      →  daruda_store
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
@@ -255,7 +255,7 @@ gpui_component  →  daruda_core                         # vendored; shares the 
 
 `gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above).
 
-`daruda_config` and `daruda_claude` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
+`daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 
 `daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow and enforced by review, not tooling (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — today only `serde` would qualify, and it stays out until something here needs it. Beyond dependencies: **two or more consumers, pure** (no I/O, no globals, background-executor safe). Anything failing one of those belongs in its own crate. Current contents: `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
 
@@ -263,7 +263,7 @@ gpui_component  →  daruda_core                         # vendored; shares the 
 
 **Rule: any path or identifier for something daruda itself writes and reads back across restarts must go through `daruda_store::persistence::default_data_dir()`** (or `profile_suffix()` for a non-path identifier, e.g. a Keychain service name) — never a fresh `dirs::config_dir()` / hardcoded `daruda` directory literal.
 
-**Why this is called out explicitly:** four separate places independently re-derived a `daruda`/`.daruda` path instead of calling the shared resolver — `daruda_config::config_path`, `daruda_config::project::project_config_dir`, `daruda_claude::hooks::status_file::default_dir`, and `workspace::sync::limits::activity_paths`'s cache path — so a debug build silently read and overwrote a real release install's `config.toml`, hook-status files, and activity cache. A fifth case (the Telegram bridge's Keychain-stored bot token sharing one service name across profiles) caused two profiles to 409-conflict polling Telegram with the same token, since Telegram's `getUpdates` rejects a second concurrent poller on one token. Each was fixed independently before the pattern was named — this section and the guardrails below exist so the next one is caught before it ships, not after a live incident.
+**Why this is called out explicitly:** four separate places independently re-derived a `daruda`/`.daruda` path instead of calling the shared resolver — `daruda_config::config_path`, `daruda_config::project::project_config_dir`, `daruda_agent::hooks::status_file::default_dir`, and `workspace::sync::limits::activity_paths`'s cache path — so a debug build silently read and overwrote a real release install's `config.toml`, hook-status files, and activity cache. A fifth case (the Telegram bridge's Keychain-stored bot token sharing one service name across profiles) caused two profiles to 409-conflict polling Telegram with the same token, since Telegram's `getUpdates` rejects a second concurrent poller on one token. Each was fixed independently before the pattern was named — this section and the guardrails below exist so the next one is caught before it ships, not after a live incident.
 
 **Enforcement:**
 - `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_store::persistence`'s own two call sites (each marked `#[allow(clippy::disallowed_methods)]` with a comment).

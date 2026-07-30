@@ -250,7 +250,7 @@ daruda/
 │   ├── app/              # binary — GPUI entry point, workspace, docks, panels
 │   ├── daruda_terminal/  # TerminalView + TerminalSession (GPUI rendering + VT parsing glue)
 │   ├── daruda_acp/       # Agent Client Protocol client — agent sessions, models, config options (GPUI-free)
-│   ├── daruda_claude/    # Claude Code hook FSM + JSONL fallback parser (GPUI-free)
+│   ├── daruda_agent/    # agent provider integrations: accounts, usage, activity (GPUI-free)
 │   ├── daruda_config/    # TOML config loader (GPUI-free)
 │   ├── daruda_store/     # panels, project state, tasks persistence (GPUI-free)
 │   ├── ghostty_vt/       # safe Rust wrapper over libghostty-vt

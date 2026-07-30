@@ -12,9 +12,9 @@
 use std::time::{Duration, SystemTime};
 
 use crate::ui::theme;
-use daruda_claude::activity::{ActivityStats, DayActivity};
-use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
-use daruda_claude::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
+use daruda_agent::activity::{ActivityStats, DayActivity};
+use daruda_agent::service_status::{ServiceStatus, StatusIndicator};
+use daruda_agent::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
 use daruda_store::accounts::AccountRecipeId;
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
@@ -165,9 +165,9 @@ fn domain_switcher(
 // ----------------------------------------------------------------
 
 /// Heading + one row per past session, restricted (by the snapshot layer)
-/// to sessions matching a Lane already open in this workspace. Caller
-/// omits this block entirely when the list is empty — no empty-frame
-/// placeholder, matching `chart_block`'s "nothing yet" precedent.
+/// to sessions matching the active Lane. Caller omits this block entirely
+/// when the list is empty — no empty-frame placeholder, matching
+/// `chart_block`'s "nothing yet" precedent.
 fn recent_sessions_block(
     sessions: &[RestorableSession],
     workspace: &WeakEntity<Workspace>,
@@ -186,10 +186,10 @@ fn recent_sessions_block(
         .into_any_element()
 }
 
-/// One row: title (or the cwd's file name, when no title was captured) +
-/// a relative "last active" label + a trailing Restore button. No row-level
-/// click handler exists to protect against, unlike `tasks.rs::task_row` —
-/// only the button triggers anything, so no `stop_propagation` is needed.
+/// One row: title/prompt preview/cwd fallback + compact session metadata +
+/// a hover-revealed Restore button. No row-level click handler exists to
+/// protect against, unlike `tasks.rs::task_row` — only the button triggers
+/// anything, so no `stop_propagation` is needed.
 fn recent_session_row(
     session: &RestorableSession,
     workspace: &WeakEntity<Workspace>,
@@ -197,42 +197,72 @@ fn recent_session_row(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let label = session_row_label(session);
-    let time_label = relative_time_label(session.last_active);
+    let meta_label = session_row_meta_label(session);
+    let row_hover_bg = t.skill_row_hover_bg;
+    let actions_bg = t.skill_row_hover_bg;
+    let row_id = SharedString::from(format!("usage-session-row-{}", session.session_id));
+    let restore_id = SharedString::from(format!("usage-restore-session-{}", session.session_id));
     let workspace = workspace.clone();
     let session = session.clone();
 
     div()
+        .id(row_id)
+        .group("usage-session-row")
+        .relative()
         .flex()
         .flex_row()
         .items_center()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .px(px(theme::SKILL_ROW_PAD_X))
+        .py(px(theme::SKILL_ROW_PAD_Y))
+        .rounded(px(theme::SKILL_ROW_RADIUS))
+        .hover(move |d| d.bg(row_hover_bg))
         .child(
             div()
-                .flex_grow()
+                .flex_1()
                 .min_w_0()
+                .truncate()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.text_subtle)
+                .text_color(t.text_body)
                 .child(label),
         )
         .child(
             div()
-                .flex_none()
+                .flex_shrink()
+                .max_w(gpui::relative(0.45))
+                .min_w_0()
+                .truncate()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                 .text_color(t.text_muted)
-                .child(SharedString::from(time_label)),
+                .child(meta_label),
         )
         .child(
-            button(
-                format!("usage-restore-session-{}", session.session_id),
-                strings::usage_session_restore(),
-            )
-            .ghost()
-            .xsmall()
-            .on_click(move |_, window, cx| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.restore_session(session.clone(), window, cx));
-                }
-            }),
+            div()
+                .absolute()
+                .right(px(theme::SKILL_ROW_PAD_X))
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .bg(actions_bg)
+                .pl(px(theme::SKILL_ROW_PAD_X))
+                .invisible()
+                .group_hover("usage-session-row", |s| s.visible())
+                .child(
+                    button(restore_id, strings::usage_session_restore())
+                        .ghost()
+                        .xsmall()
+                        .on_click(move |_, window, cx| {
+                            if let Some(ws) = workspace.upgrade() {
+                                ws.update(cx, |ws, cx| {
+                                    ws.restore_session(session.clone(), window, cx)
+                                });
+                            }
+                        }),
+                ),
         )
 }
 
@@ -701,30 +731,47 @@ fn resolve_displayed_domain(
         .or_else(|| sections.first().map(|s| s.recipe))
 }
 
-/// A recent-session row's label: the captured title, or the cwd's last
-/// path component when no title was found, or the full cwd as a last
+/// A recent-session row's label: the captured title, the latest prompt
+/// preview, then the cwd's last path component, or the full cwd as a last
 /// resort (an empty/root path has no file name).
 fn session_row_label(session: &RestorableSession) -> SharedString {
-    session.title.clone().unwrap_or_else(|| {
-        session
-            .cwd
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| session.cwd.to_string_lossy().into_owned())
-            .into()
-    })
+    session
+        .display_title()
+        .map(SharedString::from)
+        .unwrap_or_else(|| {
+            session
+                .cwd
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| session.cwd.to_string_lossy().into_owned())
+                .into()
+        })
+}
+
+fn session_row_meta_label(session: &RestorableSession) -> SharedString {
+    let mut parts = Vec::new();
+    if let Some(branch) = session
+        .git_branch
+        .as_ref()
+        .map(|b| b.as_ref().trim())
+        .filter(|b| !b.is_empty())
+    {
+        parts.push(branch.to_string());
+    }
+    parts.push(relative_time_label(session.last_active));
+    SharedString::from(parts.join(" · "))
 }
 
 /// A recent-session row's "last active" label — same bucket boundaries as
-/// the refresh badge's cache age, minus the in-flight/never-fetched
-/// branches that make no sense for a row naming a specific past session.
+/// the refresh badge's cache age, but with row-specific strings so the
+/// refresh glyph stays off this passive timestamp.
 fn relative_time_label(last_active: SystemTime) -> String {
     let age = SystemTime::now().duration_since(last_active).ok();
     match cache_age_bucket(age) {
-        CacheAge::Never | CacheAge::JustNow => strings::usage_cache_just_now(),
-        CacheAge::Minutes(n) => strings::usage_cache_minutes(n),
-        CacheAge::Hours(n) => strings::usage_cache_hours(n),
-        CacheAge::Days(n) => strings::usage_cache_days(n),
+        CacheAge::Never | CacheAge::JustNow => strings::usage_session_just_now(),
+        CacheAge::Minutes(n) => strings::usage_session_minutes(n),
+        CacheAge::Hours(n) => strings::usage_session_hours(n),
+        CacheAge::Days(n) => strings::usage_session_days(n),
     }
 }
 
@@ -813,7 +860,7 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_claude::UsageOutcome;
+    use daruda_agent::UsageOutcome;
 
     fn section(recipe: AccountRecipeId) -> UsageSectionSnapshot {
         UsageSectionSnapshot {
@@ -887,8 +934,11 @@ mod tests {
         RestorableSession {
             session_id: "s1".to_string(),
             agent_id: "claude".to_string(),
+            account: daruda_store::accounts::AccountSelection::SystemDefault,
             lane_ref: daruda_store::project::LaneRef::default(),
             title: title.map(SharedString::from),
+            prompt_preview: None,
+            git_branch: None,
             cwd: std::path::PathBuf::from(cwd),
             last_active,
         }
@@ -896,8 +946,20 @@ mod tests {
 
     #[test]
     fn session_row_label_prefers_the_captured_title() {
-        let session = restorable_session(Some("Fix the bug"), "/Users/x/proj", SystemTime::now());
+        let mut session =
+            restorable_session(Some("Fix the bug"), "/Users/x/proj", SystemTime::now());
+        session.prompt_preview = Some(SharedString::from("Raw prompt"));
         assert_eq!(session_row_label(&session).as_ref(), "Fix the bug");
+    }
+
+    #[test]
+    fn session_row_label_falls_back_to_the_prompt_preview_before_cwd() {
+        let mut session = restorable_session(None, "/Users/x/proj", SystemTime::now());
+        session.prompt_preview = Some(SharedString::from("Improve recent sessions"));
+        assert_eq!(
+            session_row_label(&session).as_ref(),
+            "Improve recent sessions"
+        );
     }
 
     #[test]
@@ -913,20 +975,35 @@ mod tests {
     }
 
     #[test]
-    fn relative_time_label_buckets_like_the_refresh_badge() {
+    fn session_row_meta_label_includes_branch_and_one_relative_time() {
+        let last_active = std::time::UNIX_EPOCH + Duration::from_secs(3_600);
+        let mut session = restorable_session(None, "/Users/x/proj", last_active);
+        session.git_branch = Some(SharedString::from("main"));
+        assert_eq!(
+            session_row_meta_label(&session).as_ref(),
+            format!("main · {}", relative_time_label(last_active))
+        );
+    }
+
+    #[test]
+    fn relative_time_label_buckets_like_the_refresh_badge_without_the_refresh_glyph() {
         let now = SystemTime::now();
-        assert_eq!(relative_time_label(now), strings::usage_cache_just_now());
+        assert_eq!(relative_time_label(now), strings::usage_session_just_now());
+        assert!(
+            !relative_time_label(now).starts_with('\u{21bb}'),
+            "recent-session timestamps must not show the refresh glyph"
+        );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(5 * 60)),
-            strings::usage_cache_minutes(5)
+            strings::usage_session_minutes(5)
         );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(3 * 3_600)),
-            strings::usage_cache_hours(3)
+            strings::usage_session_hours(3)
         );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(2 * 86_400)),
-            strings::usage_cache_days(2)
+            strings::usage_session_days(2)
         );
     }
 

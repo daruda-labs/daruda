@@ -1,6 +1,6 @@
 //! Managed auth-domain accounts: per-account isolated config dir + defaults.
 //! Persisted as `accounts.json`; runtime injection/identity lives in
-//! `daruda_claude::accounts` (this module is pure data).
+//! `daruda_agent::accounts` (this module is pure data).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,7 +14,18 @@ pub use persistence::{load_accounts, load_accounts_in, save_accounts, save_accou
 /// Bump when `AccountsState`'s shape changes incompatibly.
 pub const SCHEMA_VERSION: u32 = 2;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Default,
+    enum_iterator::Sequence,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountRecipeId {
     #[default]
@@ -23,10 +34,14 @@ pub enum AccountRecipeId {
 }
 
 impl AccountRecipeId {
-    /// Every auth domain, in the order the UI lists them — the single place
-    /// to extend when a domain is added, so no call site hand-rolls its own
-    /// array.
-    pub const ALL: [AccountRecipeId; 2] = [Self::Claude, Self::Codex];
+    /// Every auth domain, in enum declaration order — the UI/display order.
+    pub fn all() -> impl Iterator<Item = Self> {
+        enum_iterator::all::<Self>()
+    }
+
+    pub fn count() -> usize {
+        enum_iterator::cardinality::<Self>()
+    }
 }
 
 /// Stable, globally-unique account identifier (see `ProjectUuid` precedent).
@@ -185,16 +200,13 @@ mod tests {
 
     #[test]
     fn all_lists_every_recipe_in_display_order() {
-        // The match is exhaustive, so a new variant is a compile error right
-        // here next to `ALL`'s own list rather than a domain that silently
-        // never reaches the UI.
-        let names: Vec<&str> = AccountRecipeId::ALL
-            .iter()
+        let names: Vec<&str> = AccountRecipeId::all()
             .map(|id| match id {
                 AccountRecipeId::Claude => "claude",
                 AccountRecipeId::Codex => "codex",
             })
             .collect();
         assert_eq!(names, ["claude", "codex"]);
+        assert_eq!(AccountRecipeId::count(), names.len());
     }
 }

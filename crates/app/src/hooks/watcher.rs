@@ -123,8 +123,8 @@ pub fn spawn_status_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_claude::SessionStatus;
-    use daruda_claude::hooks::status_file::{StatusFile, path_for, write_atomic};
+    use daruda_agent::SessionStatus;
+    use daruda_agent::hooks::status_file::{StatusFile, path_for, write_atomic};
     use std::time::{Duration, Instant};
 
     #[test]

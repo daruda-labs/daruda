@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 /// Failure surface for the three Bot API calls. Mirrors
-/// `daruda_claude::http::FetchError`'s transport-vs-parse split:
+/// `daruda_agent::http::FetchError`'s transport-vs-parse split:
 /// `Http` for transport/status failures (including Telegram's own
 /// `"ok": false` API-level errors), `Parse` for JSON decode or
 /// unexpected-shape failures.
@@ -85,7 +85,7 @@ pub struct InlineKeyboard {
     pub buttons: Vec<(String, String)>,
 }
 
-/// Body read cap, mirroring `daruda_claude::http::MAX_BODY_BYTES`.
+/// Body read cap, mirroring `daruda_agent::http::MAX_BODY_BYTES`.
 /// `getUpdates` batches can be larger than a typical status response,
 /// but 1 MiB is still generous for a handful of text messages.
 const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -325,7 +325,7 @@ struct RawCallbackMessage {
 /// Decode a `getUpdates` response body into the recognized subset of
 /// updates. Split out from `get_updates` so tests can exercise it
 /// directly against string fixtures without a network mock (mirrors
-/// `daruda_claude::limits::parse_plan_limits`).
+/// `daruda_agent::limits::parse_plan_limits`).
 ///
 /// A callback query whose `message` is absent (deleted original
 /// message, or an inline-query-originated callback) is skipped rather

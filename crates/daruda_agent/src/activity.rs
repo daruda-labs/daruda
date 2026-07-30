@@ -5,8 +5,8 @@
 //! notice. Instead this module scans the session logs
 //! (`<projects_root>/<encoded-project>/<session>.jsonl`) itself and
 //! keeps an incremental cache at a caller-supplied path (in production
-//! `~/.daruda/cache/activity.json`; path resolution is the app layer's
-//! job — this module is path-agnostic and GPUI-free).
+//! `~/.daruda/cache/activity.json`). Callers can pass explicit paths to
+//! [`update_activity`] or use [`source_for`] for production path resolution.
 //!
 //! JSONL session logs are append-only, so the cache stores a consumed
 //! byte offset per file and each [`update_activity`] call parses only
@@ -25,14 +25,17 @@
 //! - Day attribution: the record's UTC `timestamp` converted to the
 //!   **local** date. Records without a parseable timestamp are skipped.
 
-use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use daruda_store::accounts::AccountRecipeId;
+
+use crate::activity_scan::{
+    FileEntry, SessionLogFormat, epoch_millis, local_date, update_activity as update_jsonl_activity,
+};
 
 /// Aggregated activity for one local calendar day.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +61,34 @@ pub struct SessionSummary {
     /// seen (Claude Code regenerates it as the conversation evolves),
     /// else `None`.
     pub title: Option<String>,
+    /// One-line preview of the user's latest prompt. Used as a display
+    /// fallback for providers that do not persist generated titles.
+    pub prompt_preview: Option<String>,
+    /// Last git branch reported by the session log, when available.
+    pub git_branch: Option<String>,
     pub last_active: SystemTime,
+}
+
+impl SessionSummary {
+    /// Best provider-neutral display title: explicit/generated session title
+    /// first, then a normalized prompt preview. Path fallback remains a UI
+    /// decision because the caller owns lane/project context.
+    pub fn display_title(&self) -> Option<&str> {
+        session_display_title(self.title.as_deref(), self.prompt_preview.as_deref())
+    }
+}
+
+/// Provider-neutral display-title rule shared by agent activity producers and
+/// UI projections: prefer a captured/generated title, then a normalized prompt
+/// preview. Callers still own path/lane fallback because that context is not
+/// part of every activity source.
+pub fn session_display_title<'a>(
+    title: Option<&'a str>,
+    prompt_preview: Option<&'a str>,
+) -> Option<&'a str> {
+    title
+        .and_then(non_blank_trimmed)
+        .or_else(|| prompt_preview.and_then(non_blank_trimmed))
 }
 
 /// Aggregate of all activity found under the projects root.
@@ -97,6 +127,60 @@ pub enum ActivityError {
     },
 }
 
+/// Where one auth domain's local activity comes from. One implementation per
+/// domain, resolved through [`source_for`] so app call sites stay free of
+/// provider-specific session-log branching.
+pub trait ActivitySource: Send + Sync {
+    /// Fetch and parse this domain's local activity. `config_dir` is a managed
+    /// account's isolated home, `None` the ambient system login. Blocking disk
+    /// I/O; call from a background thread.
+    fn fetch(&self, config_dir: Option<&Path>) -> Option<ActivityStats>;
+}
+
+/// The activity source for `id`. Total, like `usage::source_for`.
+pub fn source_for(id: AccountRecipeId) -> &'static dyn ActivitySource {
+    crate::providers::integration_for(id).activity
+}
+
+pub struct ClaudeActivity;
+
+impl ActivitySource for ClaudeActivity {
+    fn fetch(&self, config_dir: Option<&Path>) -> Option<ActivityStats> {
+        let (projects_root, cache_path) = claude_activity_paths(config_dir)?;
+        update_activity(&projects_root, &cache_path).ok()
+    }
+}
+
+/// Resolve Claude's session-log root and profile-scoped cache path.
+///
+/// `None` reads the system default `~/.claude/projects`; `Some(config_dir)`
+/// reads a managed account's isolated `CLAUDE_CONFIG_DIR/projects`. The cache
+/// always lives under daruda's profile-scoped data dir so debug/test/release
+/// profiles do not overwrite each other's derived activity cache.
+fn claude_activity_paths(config_dir: Option<&Path>) -> Option<(PathBuf, PathBuf)> {
+    let (projects_root, cache_file_name) = match config_dir {
+        Some(dir) => {
+            let key = dir.file_name().and_then(|name| name.to_str());
+            (
+                dir.join("projects"),
+                key.map(|k| format!("activity-{k}.json"))
+                    .unwrap_or_else(|| "activity-managed.json".to_string()),
+            )
+        }
+        None => {
+            let home = dirs::home_dir()?;
+            (
+                home.join(".claude").join("projects"),
+                "activity.json".to_string(),
+            )
+        }
+    };
+    let cache_path = daruda_store::persistence::default_data_dir()
+        .join("cache")
+        .join(cache_file_name);
+    Some((projects_root, cache_path))
+}
+
 /// Bumped whenever the cache schema or the counting semantics change.
 /// A loaded cache with any other version is discarded and rebuilt
 /// from the JSONL files, so a version bump is always safe.
@@ -109,61 +193,10 @@ pub enum ActivityError {
 /// `last_active_ms` for [`ActivityStats::recent_sessions`] — a v2 cache
 /// has none of these, so it must rebuild rather than silently report an
 /// empty recent-sessions list forever.
-const CACHE_VERSION: u32 = 3;
-
-/// On-disk incremental cache. Plain serde JSON; corruption or version
-/// mismatch is never an error — the cache is a pure derivative of the
-/// JSONL files and can always be rebuilt.
-#[derive(Debug, Serialize, Deserialize)]
-struct ActivityCache {
-    version: u32,
-    /// Keyed by absolute file path.
-    files: BTreeMap<String, FileEntry>,
-}
-
-impl ActivityCache {
-    fn new() -> Self {
-        Self {
-            version: CACHE_VERSION,
-            files: BTreeMap::new(),
-        }
-    }
-}
-
-/// Per-file parse state plus the per-day counts extracted from it.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct FileEntry {
-    /// Bytes already parsed. Always ends on a line boundary — an
-    /// incomplete final line is left unconsumed and retried on the
-    /// next call.
-    consumed_offset: u64,
-    /// File mtime (ms since epoch) at the last refresh. Detects the
-    /// rare same-size in-place rewrite that the offset check misses.
-    mtime_ms: u64,
-    /// File size at the last refresh.
-    size: u64,
-    /// Counts keyed by local date `"YYYY-MM-DD"`.
-    days: BTreeMap<String, FileDayCounts>,
-    /// This file's session id, captured once from its first `user`/
-    /// `assistant` record — stable for the file's lifetime.
-    session_id: Option<String>,
-    /// This session's originating cwd, captured the same way.
-    cwd: Option<PathBuf>,
-    /// Best available title — see [`SessionSummary::title`].
-    title: Option<String>,
-    /// Set once a `custom-title` record is seen, so a later `ai-title`
-    /// can't clobber the user's explicit choice.
-    title_is_custom: bool,
-    /// Latest `user`/`assistant` timestamp seen, epoch milliseconds.
-    last_active_ms: Option<i64>,
-}
-
-/// One file's contribution to one day.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct FileDayCounts {
-    turns: u64,
-    tokens: u64,
-}
+///
+/// v4: recent sessions gained `prompt_preview` and `git_branch`, so cached
+/// v3 file entries need a rebuild to populate the new display fields.
+const CLAUDE_CACHE_VERSION: u32 = 4;
 
 /// Refresh the activity cache against the session logs under
 /// `projects_root` and return the aggregated stats.
@@ -176,317 +209,220 @@ pub fn update_activity(
     projects_root: &Path,
     cache_path: &Path,
 ) -> Result<ActivityStats, ActivityError> {
-    let old = load_cache(cache_path);
-    let mut cache = ActivityCache::new();
-    for path in list_session_logs(projects_root)? {
-        let key = path.to_string_lossy().into_owned();
-        if let Some(entry) = refresh_file(&path, old.files.get(&key))? {
-            cache.files.insert(key, entry);
-        }
-    }
-    save_cache(cache_path, &cache)?;
-    Ok(aggregate(&cache))
+    update_jsonl_activity::<ClaudeLogFormat>(projects_root, cache_path)
 }
 
-/// Load the cache, treating every failure (missing file, malformed
-/// JSON, version mismatch) as "no cache" so the caller falls back to
-/// a full rebuild.
-fn load_cache(cache_path: &Path) -> ActivityCache {
-    let Ok(bytes) = fs::read(cache_path) else {
-        return ActivityCache::new();
-    };
-    match serde_json::from_slice::<ActivityCache>(&bytes) {
-        Ok(cache) if cache.version == CACHE_VERSION => cache,
-        _ => ActivityCache::new(),
-    }
-}
+struct ClaudeLogFormat;
 
-/// List `projects_root/*/*.jsonl`. A missing root is not an error —
-/// the machine simply has no Claude Code history yet — but any other
-/// listing failure on the root is surfaced. Unreadable child entries
-/// are skipped: one broken project dir must not blank out the stats.
-fn list_session_logs(projects_root: &Path) -> Result<Vec<PathBuf>, ActivityError> {
-    let mut logs = Vec::new();
-    let dirs = match fs::read_dir(projects_root) {
-        Ok(dirs) => dirs,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(logs),
-        Err(e) => {
-            return Err(ActivityError::Scan {
-                path: projects_root.to_path_buf(),
-                source: e,
-            });
-        }
-    };
-    for project_dir in dirs.flatten() {
-        let dir_path = project_dir.path();
-        if !dir_path.is_dir() {
-            continue;
-        }
-        let Ok(entries) = fs::read_dir(&dir_path) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "jsonl") && path.is_file() {
-                logs.push(path);
-            }
-        }
-    }
-    Ok(logs)
-}
+impl SessionLogFormat for ClaudeLogFormat {
+    const CACHE_VERSION: u32 = CLAUDE_CACHE_VERSION;
 
-/// Bring one file's cache entry up to date. Returns `None` when the
-/// file vanished between listing and reading (drop it from the cache).
-///
-/// Change detection, in order:
-/// - fully consumed and mtime unchanged → reuse the entry untouched;
-/// - grown past `consumed_offset` → append-only growth, parse the tail;
-/// - anything else (shrunk = truncate/rewrite, or same size with a
-///   changed mtime = in-place rewrite, or no cache entry) → reparse
-///   from byte 0.
-fn refresh_file(
-    path: &Path,
-    cached: Option<&FileEntry>,
-) -> Result<Option<FileEntry>, ActivityError> {
-    let Ok(meta) = fs::metadata(path) else {
-        return Ok(None);
-    };
-    let size = meta.len();
-    let mtime_ms = mtime_millis(&meta);
-
-    let mut entry = match cached {
-        Some(e) if e.consumed_offset == size && e.mtime_ms == mtime_ms => {
-            return Ok(Some(e.clone()));
-        }
-        Some(e) if size > e.consumed_offset => e.clone(),
-        _ => FileEntry::default(),
-    };
-
-    let Ok(file) = fs::File::open(path) else {
-        return Ok(None);
-    };
-    let mut reader = BufReader::new(file);
-    reader
-        .seek(SeekFrom::Start(entry.consumed_offset))
-        .map_err(|e| ActivityError::Read {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        let read = reader
-            .read_until(b'\n', &mut line)
-            .map_err(|e| ActivityError::Read {
-                path: path.to_path_buf(),
-                source: e,
-            })?;
-        if read == 0 {
-            break;
-        }
-        if line.last() != Some(&b'\n') {
-            // Incomplete final line — the writer is mid-append. Leave
-            // it unconsumed so the next call retries once the rest of
-            // the line (and its newline) has landed.
-            break;
-        }
-        entry.consumed_offset += read as u64;
-        count_record(&line, &mut entry);
-    }
-
-    entry.size = size;
-    entry.mtime_ms = mtime_ms;
-    Ok(Some(entry))
-}
-
-/// Classify one JSONL line and fold it into `entry`. Malformed JSON and
-/// records without a parseable timestamp are skipped silently — session
-/// logs routinely contain entry kinds we don't model.
-///
-/// `ai-title`/`custom-title` records carry no `timestamp` field at all
-/// (confirmed against real Claude Code session logs), so title capture is
-/// handled before the timestamp gate below applies to everything else.
-fn count_record(line: &[u8], entry: &mut FileEntry) {
-    let Ok(record) = serde_json::from_slice::<Value>(line) else {
-        return;
-    };
-    let Some(kind) = record.get("type").and_then(Value::as_str) else {
-        return;
-    };
-
-    match kind {
-        "ai-title" => {
-            if !entry.title_is_custom
-                && let Some(title) = record.get("aiTitle").and_then(Value::as_str)
-            {
-                entry.title = Some(title.to_string());
-            }
-            return;
-        }
-        "custom-title" => {
-            if let Some(title) = record.get("customTitle").and_then(Value::as_str) {
-                entry.title = Some(title.to_string());
-                entry.title_is_custom = true;
-            }
-            return;
-        }
-        _ => {}
-    }
-
-    let Some(timestamp) = record.get("timestamp").and_then(Value::as_str) else {
-        return;
-    };
-    let Some(date) = local_date(timestamp) else {
-        return;
-    };
-
-    if matches!(kind, "user" | "assistant") {
-        if entry.session_id.is_none()
-            && let Some(sid) = record.get("sessionId").and_then(Value::as_str)
-        {
-            entry.session_id = Some(sid.to_string());
-        }
-        if entry.cwd.is_none()
-            && let Some(cwd) = record.get("cwd").and_then(Value::as_str)
-        {
-            entry.cwd = Some(PathBuf::from(cwd));
-        }
-        if let Some(ms) = epoch_millis(timestamp) {
-            entry.last_active_ms = Some(entry.last_active_ms.map_or(ms, |prev| prev.max(ms)));
-        }
-    }
-
-    match kind {
-        "user" => {
-            // A user record whose content array carries a tool_result
-            // block is Claude Code feeding a tool output back in — not
-            // a human turn.
-            let is_tool_result = record
-                .pointer("/message/content")
-                .and_then(Value::as_array)
-                .is_some_and(|blocks| {
-                    blocks
-                        .iter()
-                        .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+    /// List `projects_root/*/*.jsonl`. A missing root is not an error — the
+    /// machine simply has no Claude Code history yet — but any other listing
+    /// failure on the root is surfaced. Unreadable child entries are skipped:
+    /// one broken project dir must not blank out the stats.
+    fn list_logs(projects_root: &Path) -> Result<Vec<PathBuf>, ActivityError> {
+        let mut logs = Vec::new();
+        let dirs = match fs::read_dir(projects_root) {
+            Ok(dirs) => dirs,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(logs),
+            Err(e) => {
+                return Err(ActivityError::Scan {
+                    path: projects_root.to_path_buf(),
+                    source: e,
                 });
-            if !is_tool_result {
-                entry.days.entry(date).or_default().turns += 1;
+            }
+        };
+        for project_dir in dirs.flatten() {
+            let dir_path = project_dir.path();
+            if !dir_path.is_dir() {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(&dir_path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "jsonl") && path.is_file() {
+                    logs.push(path);
+                }
             }
         }
-        "assistant" => {
-            let usage = record.pointer("/message/usage");
-            let input = usage
-                .and_then(|u| u.get("input_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let output = usage
-                .and_then(|u| u.get("output_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            if input + output > 0 {
-                entry.days.entry(date).or_default().tokens += input + output;
-            }
-        }
-        _ => {}
+        Ok(logs)
     }
-}
 
-/// RFC 3339 UTC timestamp → local `"YYYY-MM-DD"`. `None` on any parse
-/// failure so the record is skipped rather than misattributed.
-fn local_date(timestamp: &str) -> Option<String> {
-    chrono::DateTime::parse_from_rfc3339(timestamp)
-        .ok()
-        .map(|dt| dt.with_timezone(&chrono::Local).date_naive().to_string())
-}
+    /// Classify one JSONL object and fold it into `entry`. `ai-title`/
+    /// `custom-title`/`last-prompt` records carry no `timestamp` field at all,
+    /// so title and preview capture runs before the timestamp gate below.
+    fn count_record(record: &Value, entry: &mut FileEntry) {
+        let Some(kind) = record.get("type").and_then(Value::as_str) else {
+            return;
+        };
 
-/// RFC 3339 timestamp → epoch milliseconds, for [`FileEntry::last_active_ms`].
-fn epoch_millis(timestamp: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(timestamp)
-        .ok()
-        .map(|dt| dt.timestamp_millis())
-}
-
-fn mtime_millis(meta: &fs::Metadata) -> u64 {
-    meta.modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Atomic cache write: serialize, write to a temp file in the same
-/// directory, then rename over the target. A crash mid-write leaves
-/// the previous cache intact (or none — both rebuild cleanly).
-fn save_cache(cache_path: &Path, cache: &ActivityCache) -> Result<(), ActivityError> {
-    let write_err = |source: std::io::Error| ActivityError::CacheWrite {
-        path: cache_path.to_path_buf(),
-        source,
-    };
-    let parent = cache_path
-        .parent()
-        .ok_or_else(|| write_err(std::io::Error::other("cache path has no parent directory")))?;
-    fs::create_dir_all(parent).map_err(write_err)?;
-    let bytes = serde_json::to_vec(cache).map_err(|e| write_err(e.into()))?;
-
-    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(write_err)?;
-    tmp.write_all(&bytes).map_err(write_err)?;
-    tmp.flush().map_err(write_err)?;
-    tmp.persist(cache_path).map_err(|e| write_err(e.error))?;
-    Ok(())
-}
-
-/// Accumulator for one day across all files.
-#[derive(Default)]
-struct DayAccum {
-    turns: u64,
-    tokens: u64,
-}
-
-/// Fold the per-file day counts (and per-file session summaries) into the
-/// public stats.
-fn aggregate(cache: &ActivityCache) -> ActivityStats {
-    let mut per_day: BTreeMap<&str, DayAccum> = BTreeMap::new();
-    let mut recent_sessions = Vec::new();
-    for entry in cache.files.values() {
-        for (date, counts) in &entry.days {
-            let day = per_day.entry(date.as_str()).or_default();
-            day.turns += counts.turns;
-            day.tokens += counts.tokens;
+        match kind {
+            "ai-title" => {
+                if !entry.title_is_custom
+                    && let Some(title) = record.get("aiTitle").and_then(Value::as_str)
+                {
+                    entry.title = Some(title.to_string());
+                }
+                return;
+            }
+            "custom-title" => {
+                if let Some(title) = record.get("customTitle").and_then(Value::as_str) {
+                    entry.title = Some(title.to_string());
+                    entry.title_is_custom = true;
+                }
+                return;
+            }
+            "last-prompt" => {
+                if let Some(preview) = record
+                    .get("lastPrompt")
+                    .and_then(Value::as_str)
+                    .and_then(session_prompt_preview)
+                {
+                    entry.prompt_preview = Some(preview);
+                }
+                return;
+            }
+            _ => {}
         }
-        if let (Some(session_id), Some(cwd), Some(last_active_ms)) =
-            (&entry.session_id, &entry.cwd, entry.last_active_ms)
+
+        let Some(timestamp) = record.get("timestamp").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(date) = local_date(timestamp) else {
+            return;
+        };
+
+        if let Some(branch) = record
+            .get("gitBranch")
+            .and_then(Value::as_str)
+            .and_then(non_blank_owned)
         {
-            recent_sessions.push(SessionSummary {
-                session_id: session_id.clone(),
-                cwd: cwd.clone(),
-                title: entry.title.clone(),
-                last_active: UNIX_EPOCH + Duration::from_millis(last_active_ms.max(0) as u64),
-            });
+            entry.git_branch = Some(branch);
+        }
+
+        if matches!(kind, "user" | "assistant") {
+            if entry.session_id.is_none()
+                && let Some(sid) = record.get("sessionId").and_then(Value::as_str)
+            {
+                entry.session_id = Some(sid.to_string());
+            }
+            if entry.cwd.is_none()
+                && let Some(cwd) = record.get("cwd").and_then(Value::as_str)
+            {
+                entry.cwd = Some(PathBuf::from(cwd));
+            }
+            if let Some(ms) = epoch_millis(timestamp) {
+                entry.last_active_ms = Some(entry.last_active_ms.map_or(ms, |prev| prev.max(ms)));
+            }
+        }
+
+        match kind {
+            "user" => {
+                // A user record whose content array carries a tool_result
+                // block is Claude Code feeding a tool output back in — not
+                // a human turn.
+                let is_tool_result = record
+                    .pointer("/message/content")
+                    .and_then(Value::as_array)
+                    .is_some_and(|blocks| {
+                        blocks
+                            .iter()
+                            .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+                    });
+                if !is_tool_result {
+                    entry.days.entry(date).or_default().turns += 1;
+                    if let Some(preview) = record
+                        .pointer("/message/content")
+                        .and_then(prompt_preview_from_message_content)
+                    {
+                        entry.prompt_preview = Some(preview);
+                    }
+                }
+            }
+            "assistant" => {
+                let usage = record.pointer("/message/usage");
+                let input = usage
+                    .and_then(|u| u.get("input_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let output = usage
+                    .and_then(|u| u.get("output_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if input + output > 0 {
+                    entry.days.entry(date).or_default().tokens += input + output;
+                }
+            }
+            _ => {}
         }
     }
+}
 
-    // BTreeMap iterates keys in lexicographic order, which for
-    // "YYYY-MM-DD" strings is chronological order.
-    let daily: Vec<DayActivity> = per_day
-        .into_iter()
-        .map(|(date, accum)| DayActivity {
-            date: date.to_string(),
-            turns: accum.turns,
-            tokens: accum.tokens,
-        })
-        .collect();
+const SESSION_PROMPT_PREVIEW_MAX_CHARS: usize = 240;
 
-    ActivityStats {
-        daily,
-        recent_sessions,
+pub(crate) fn session_prompt_preview(raw: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut pending_space = false;
+    let mut chars = 0;
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            pending_space = true;
+            continue;
+        }
+        if pending_space && !out.is_empty() {
+            out.push(' ');
+        }
+        pending_space = false;
+        out.push(ch);
+        chars += 1;
+        if chars >= SESSION_PROMPT_PREVIEW_MAX_CHARS {
+            break;
+        }
     }
+    (!out.is_empty()).then_some(out)
+}
+
+fn prompt_preview_from_message_content(content: &Value) -> Option<String> {
+    match content {
+        Value::String(s) => session_prompt_preview(s),
+        Value::Array(blocks) => {
+            let mut text = String::new();
+            for block in blocks {
+                if block.get("type").and_then(Value::as_str) != Some("text") {
+                    continue;
+                }
+                if let Some(part) = block.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(part);
+                }
+            }
+            session_prompt_preview(&text)
+        }
+        _ => None,
+    }
+}
+
+fn non_blank_owned(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn non_blank_trimmed(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Write;
+    use std::time::UNIX_EPOCH;
     use tempfile::TempDir;
 
     /// Noon UTC — far enough from both midnights that the local date
@@ -535,8 +471,19 @@ mod tests {
     }
 
     fn user_line_with_cwd(ts: &str, sid: &str, cwd: &str) -> String {
+        user_line_with_cwd_and_message(ts, sid, cwd, "hi")
+    }
+
+    fn user_line_with_cwd_and_message(ts: &str, sid: &str, cwd: &str, message: &str) -> String {
         json!({"type": "user", "timestamp": ts, "sessionId": sid, "cwd": cwd,
-               "message": {"role": "user", "content": "hi"}})
+               "message": {"role": "user", "content": message}})
+        .to_string()
+            + "\n"
+    }
+
+    fn user_line_with_cwd_and_branch(ts: &str, sid: &str, cwd: &str, branch: &str) -> String {
+        json!({"type": "user", "timestamp": ts, "sessionId": sid, "cwd": cwd,
+               "gitBranch": branch, "message": {"role": "user", "content": "hi"}})
         .to_string()
             + "\n"
     }
@@ -553,6 +500,10 @@ mod tests {
         json!({"type": "custom-title", "sessionId": sid, "customTitle": title}).to_string() + "\n"
     }
 
+    fn last_prompt_line(sid: &str, prompt: &str) -> String {
+        json!({"type": "last-prompt", "sessionId": sid, "lastPrompt": prompt}).to_string() + "\n"
+    }
+
     /// `projects_root/<project>/<name>.jsonl` ← `content`.
     fn write_log(root: &Path, project: &str, name: &str, content: &str) -> PathBuf {
         let dir = root.join(project);
@@ -567,6 +518,49 @@ mod tests {
         let projects = tmp.path().join("projects");
         let cache = tmp.path().join("cache").join("activity.json");
         (tmp, projects, cache)
+    }
+
+    #[test]
+    fn display_title_prefers_title_then_prompt_preview() {
+        let mut session = SessionSummary {
+            session_id: "s1".to_string(),
+            cwd: PathBuf::from("/Users/x/proj"),
+            title: Some("  Fix the bug  ".to_string()),
+            prompt_preview: Some("Raw prompt".to_string()),
+            git_branch: None,
+            last_active: std::time::SystemTime::now(),
+        };
+        assert_eq!(session.display_title(), Some("Fix the bug"));
+
+        session.title = Some("  ".to_string());
+        assert_eq!(session.display_title(), Some("Raw prompt"));
+
+        session.prompt_preview = Some("\n\t".to_string());
+        assert_eq!(session.display_title(), None);
+    }
+
+    #[test]
+    fn activity_paths_for_scopes_projects_root_and_cache_to_config_dir() {
+        let account_id = "alice-1234";
+        let config_dir = Path::new("/data/claude-accounts").join(account_id);
+
+        let (projects_root, cache_path) = claude_activity_paths(Some(&config_dir))
+            .expect("claude_activity_paths should resolve for an explicit config_dir");
+
+        assert_eq!(projects_root, config_dir.join("projects"));
+
+        let cache_file_name = cache_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache path should have a file name");
+        assert!(
+            cache_file_name.contains(account_id),
+            "cache file name {cache_file_name:?} should embed the account key {account_id:?}"
+        );
+        assert_ne!(
+            cache_file_name, "activity.json",
+            "account-scoped cache must not collide with the system-default cache file name"
+        );
     }
 
     #[test]
@@ -720,7 +714,7 @@ mod tests {
         // it must be discarded, not trusted.
         let raw = fs::read_to_string(&cache).unwrap();
         let mut v: Value = serde_json::from_str(&raw).unwrap();
-        v["version"] = json!(CACHE_VERSION + 1);
+        v["version"] = json!(CLAUDE_CACHE_VERSION + 1);
         v["files"] = json!({});
         fs::write(&cache, v.to_string()).unwrap();
 
@@ -811,6 +805,8 @@ mod tests {
         assert_eq!(s.session_id, "s1");
         assert_eq!(s.cwd, PathBuf::from("/Users/x/proj"));
         assert_eq!(s.title, None);
+        assert_eq!(s.prompt_preview.as_deref(), Some("hi"));
+        assert_eq!(s.git_branch, None);
     }
 
     #[test]
@@ -854,6 +850,37 @@ mod tests {
         assert_eq!(
             stats.recent_sessions[0].title.as_deref(),
             Some("My chosen title")
+        );
+    }
+
+    #[test]
+    fn last_prompt_sets_the_session_prompt_preview() {
+        let (_tmp, projects, cache) = fixture();
+        let body = user_line_with_cwd(D1, "s1", "/Users/x/proj")
+            + &last_prompt_line("s1", "  fix\n\nrecent session labels  ");
+        write_log(&projects, "p", "a", &body);
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(
+            stats.recent_sessions[0].prompt_preview.as_deref(),
+            Some("fix recent session labels")
+        );
+    }
+
+    #[test]
+    fn git_branch_sets_the_session_branch() {
+        let (_tmp, projects, cache) = fixture();
+        write_log(
+            &projects,
+            "p",
+            "a",
+            &user_line_with_cwd_and_branch(D1, "s1", "/Users/x/proj", "feature/recent-sessions"),
+        );
+
+        let stats = update_activity(&projects, &cache).unwrap();
+        assert_eq!(
+            stats.recent_sessions[0].git_branch.as_deref(),
+            Some("feature/recent-sessions")
         );
     }
 

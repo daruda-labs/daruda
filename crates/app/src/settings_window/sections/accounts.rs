@@ -81,7 +81,7 @@ fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
 fn remove_confirm_body(count: usize, recipe: AccountRecipeId) -> String {
     s::settings_accounts_remove_confirm_body(
         count,
-        daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+        daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
     )
 }
 
@@ -184,7 +184,7 @@ impl SettingsWindow {
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_accounts(), cx));
 
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             let default_id = self.accounts.default_by_recipe.get(&recipe).copied();
             body = body
                 .child(
@@ -213,7 +213,7 @@ impl SettingsWindow {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let slug = recipe_slug(recipe);
-        let home = daruda_claude::accounts::recipe_for(recipe).system_home_hint();
+        let home = daruda_agent::accounts::recipe_for(recipe).system_home_hint();
         let actions = div().flex().flex_row().child(
             button(
                 SharedString::from(format!("settings-accounts-system-default-{slug}")),
@@ -508,7 +508,7 @@ impl SettingsWindow {
         };
         // The account's own auth domain owns the removal — its config dir plus
         // whatever OS credential entry is scoped to it.
-        daruda_claude::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
+        daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
         state.accounts.retain(|a| a.id != account_id);
         state.default_by_recipe.retain(|_, id| *id != account_id);
         if let Err(e) = daruda_store::accounts::save_accounts(&state) {
@@ -581,10 +581,10 @@ mod tests {
 
     #[test]
     fn every_recipe_has_a_label_and_a_system_home_hint() {
-        for recipe in AccountRecipeId::ALL {
+        for recipe in AccountRecipeId::all() {
             assert!(!s::account_recipe_label(recipe).is_empty());
             assert!(
-                daruda_claude::accounts::recipe_for(recipe)
+                daruda_agent::accounts::recipe_for(recipe)
                     .system_home_hint()
                     .starts_with("~/")
             );
