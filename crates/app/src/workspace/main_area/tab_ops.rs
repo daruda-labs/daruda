@@ -956,7 +956,7 @@ impl Workspace {
                     &pane.content,
                     PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
-                Some((id, pane.title(), is_draft))
+                Some((id, pane.title(cx), is_draft))
             })
             .collect();
 
@@ -1044,7 +1044,7 @@ impl Workspace {
                     &pane.content,
                     PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
-                Some((id, pane.title(), is_draft))
+                Some((id, pane.title(cx), is_draft))
             })
             .collect();
 
@@ -1119,7 +1119,7 @@ impl Workspace {
             &pane.content,
             PaneContent::TaskEditPane(te) if te.task_id.is_none()
         );
-        let title = pane.title();
+        let title = pane.title(cx);
         let can_save = pane.can_save(cx);
 
         let heading: String = if is_draft {

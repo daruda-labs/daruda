@@ -361,7 +361,7 @@ impl Render for Workspace {
                             _ => p.display_cwd(),
                         })
                     })
-                    .or_else(|| pane.map(|p| p.title()))
+                    .or_else(|| pane.map(|p| p.title(cx)))
                     .unwrap_or_else(|| "shell".into());
                 // Prefix the dirty dot so the user can spot unsaved
                 // TaskEdit panes in the tab bar at a glance. Terminal /
@@ -993,13 +993,20 @@ impl Render for Workspace {
         // Status bar. Resolve the focused pane's title eagerly into an owned
         // value so the `active_runtime()` borrow doesn't span the
         // `cached_project_config` write below (it borrows all of `self`).
-        let focused_title = self
+        // AgentChat panes suppress this: their own activity bar already shows
+        // the same live title, so repeating it here is redundant
+        // (Terminal/File/TaskEdit have no such in-pane title, so they keep
+        // using this slot).
+        let focused_pane = self
             .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == self.active_runtime().focused_pane_id)
-            .map(|p| p.title())
-            .unwrap_or_else(|| "shell".into());
+            .find(|p| p.id == self.active_runtime().focused_pane_id);
+        let focused_title = match focused_pane {
+            Some(p) if matches!(p.content, PaneContent::AgentChat(_)) => SharedString::default(),
+            Some(p) => p.title(cx),
+            None => "shell".into(),
+        };
         // Same focused-pane lookup for the account slot: Terminal/AgentChat
         // panes carry an `AccountSelection`; File/TaskEdit panes don't track
         // an account at all, so the slot is hidden (`None`) rather than

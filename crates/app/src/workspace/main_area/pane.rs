@@ -275,18 +275,17 @@ impl TaskEditContent {
 /// self-owned [`AgentChatView`] entity (which holds the model + UI state and
 /// renders itself), mirroring how [`TerminalContent`] wraps `TerminalView`.
 ///
-/// The wrapper caches the (static) `cached_title` and the `cwd` so the cx-free
-/// pane accessors (`Pane::title` / `Pane::cwd`) can read them without a `&App`
-/// — the same reason `TerminalContent` caches its OSC-derived title/cwd. The
-/// live session, conversation, and all transient UI state live on the entity;
-/// dropping the view (pane close) tears the connection down.
+/// Unlike `TerminalContent` / `FileContent` / `TaskEditContent`, there is
+/// no cached title here: the view's `session_title` and `items` (first-prompt
+/// fallback) can change from several independent internal paths (event pump,
+/// prompt echo, session reset), so a write-once cache drifts stale — `/clear`
+/// in an existing pane is one repro. `Pane::title()` reads the entity live
+/// via `cx` instead, the same way `Pane::is_dirty` / `Pane::can_save` already
+/// read `f.editor_state` / `te.title_input` live for File / TaskEdit content.
 pub(in crate::workspace) struct AgentChatContent {
     /// The self-owned chat view entity. Embedded by the pane walker via
     /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
     pub(in crate::workspace) view: Entity<AgentChatView>,
-    /// Tab / header title. Static for AgentChat panes; cached here so
-    /// `Pane::title()` stays cx-free.
-    pub(in crate::workspace) cached_title: SharedString,
     /// Lane working directory the agent session is rooted at. `None` when the
     /// pane was opened without a resolvable lane cwd. Cached here (it never
     /// changes after construction) so `Pane::cwd()` stays cx-free and can hand
@@ -359,13 +358,27 @@ impl PaneContent {
 }
 
 impl Pane {
-    /// Title shown in the tab strip, pane header, and status bar.
-    pub(in crate::workspace) fn title(&self) -> SharedString {
+    /// Title shown in the tab strip, pane header, and status bar. AgentChat
+    /// content has no cache to go stale (see [`AgentChatContent`]'s doc
+    /// comment): it reads the live session title, falling back to the first
+    /// prompt, then to "New {agent name}" — the same precedence the in-pane
+    /// activity bar uses (`agent_chat_pane::agent_chat_helpers::activity_bar_title`).
+    pub(in crate::workspace) fn title(&self, cx: &App) -> SharedString {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_title.clone(),
             PaneContent::File(f) => f.cached_title.clone(),
             PaneContent::TaskEditPane(te) => te.cached_title.clone(),
-            PaneContent::AgentChat(ac) => ac.cached_title.clone(),
+            PaneContent::AgentChat(ac) => {
+                let v = ac.view.read(cx);
+                super::agent_chat_pane::agent_chat_helpers::activity_bar_title(
+                    v.session_title.as_deref(),
+                    &v.items,
+                )
+                .map(SharedString::from)
+                .unwrap_or_else(|| {
+                    crate::surface::strings::new_agent_chat_named(&v.agent_name).into()
+                })
+            }
         }
     }
 

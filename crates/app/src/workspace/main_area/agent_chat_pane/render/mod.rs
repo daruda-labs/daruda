@@ -98,16 +98,11 @@ pub(in crate::workspace) fn render(
     // Activity bar: title left, fold buttons right. Title resolves to the
     // session title, else the first prompt, else the configured agent name.
     let title = activity_bar_title(content.session_title.as_deref(), &content.items);
-    let agent_title = if content.agent_name.trim().is_empty() {
-        content.agent_id.as_str()
-    } else {
-        content.agent_name.as_str()
-    };
     let bar = activity_bar(
         ActivityBarProps {
             pane_id,
             agent_id: &content.agent_id,
-            title: title.as_deref().or(Some(agent_title)),
+            title: title.as_deref().or(Some(content.agent_name.as_str())),
             last_active: content.session_updated_at.as_deref(),
             usage: content.session_usage.as_ref(),
             has_items: !content.items.is_empty(),

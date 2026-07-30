@@ -36,7 +36,9 @@ pub(super) fn agent_name_for(agents: &[daruda_config::AgentDefinition], agent_id
     agents
         .iter()
         .find(|a| a.id == agent_id)
-        .map(|a| a.name.clone())
+        .map(|a| a.name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
         .unwrap_or_else(|| agent_id.to_string())
 }
 
@@ -279,17 +281,16 @@ impl Workspace {
             self.agent_launch_for(&agent_id)
                 .and_then(|l| l.account_recipe()),
         );
-        // Seed the tab title from the persisted session title so a restored
-        // dormant pane shows its label before the session loads; else default.
-        let cached_title = match &title {
-            Some(t) if !t.is_empty() => t.clone().into(),
-            _ => s::agent_chat_tab_title().into(),
-        };
+        // `title` seeds the view's `session_title` below (restored dormant
+        // panes show their persisted label before the session loads);
+        // `Pane::title()` reads it live, so there's no separate cache to seed
+        // here.
+        let agent_name = agent_name_for(&self.agents, &agent_id);
         // The view owns its own `cwd` (for connect / persistence); the wrapper
         // caches a copy so `Pane::cwd()` stays cx-free.
         let view = cx.new({
             let cwd = cwd.clone();
-            let agent_name = agent_name_for(&self.agents, &agent_id);
+            let agent_name = agent_name.clone();
             move |cx| {
                 AgentChatView::new(
                     pane_id,
@@ -311,12 +312,7 @@ impl Workspace {
         });
         Pane {
             id: pane_id,
-            content: PaneContent::AgentChat(AgentChatContent {
-                view,
-                cached_title,
-                cwd,
-                account,
-            }),
+            content: PaneContent::AgentChat(AgentChatContent { view, cwd, account }),
         }
     }
 

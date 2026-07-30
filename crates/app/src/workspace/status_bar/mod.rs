@@ -204,15 +204,21 @@ impl RenderOnce for StatusBar {
                             )),
                     )
                 })
-                .when(data.project_branch.is_some(), |el| {
-                    el.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                            .text_color(faint)
-                            .child(SharedString::from("—")),
-                    )
-                })
+                // AgentChat panes leave `title` empty (see `render/mod.rs`);
+                // skip the separator too so it doesn't dangle with nothing
+                // after it.
+                .when(
+                    data.project_branch.is_some() && !data.title.is_empty(),
+                    |el| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+                                .text_color(faint)
+                                .child(SharedString::from("—")),
+                        )
+                    },
+                )
             })
             .child(
                 div()

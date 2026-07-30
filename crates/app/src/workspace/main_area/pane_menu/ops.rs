@@ -55,7 +55,7 @@ impl Workspace {
         } else {
             LaneAccess::Accessible
         };
-        let send_targets = self.send_targets_for(&snapshot.kind);
+        let send_targets = self.send_targets_for(&snapshot.kind, cx);
 
         self.set_menu_target_pane(pane_id, window, cx);
 
@@ -187,7 +187,7 @@ impl Workspace {
             })
     }
 
-    fn send_targets_for(&self, source_kind: &PaneMenuKind) -> Vec<SendTarget> {
+    fn send_targets_for(&self, source_kind: &PaneMenuKind, cx: &App) -> Vec<SendTarget> {
         let wants_agent = matches!(source_kind, PaneMenuKind::Terminal { .. });
         let wants_terminal = matches!(source_kind, PaneMenuKind::AgentChat { .. });
         if !wants_agent && !wants_terminal {
@@ -207,7 +207,7 @@ impl Workspace {
                 let tab_index = self.tab_index_for_pane(pane.id)?;
                 Some(SendTarget {
                     pane_id: pane.id,
-                    label: self.send_target_label(pane.id, tab_index, active_tab),
+                    label: self.send_target_label(pane.id, tab_index, active_tab, cx),
                 })
             })
             .collect()
@@ -225,13 +225,14 @@ impl Workspace {
         pane_id: PaneId,
         tab_index: usize,
         active_tab: usize,
+        cx: &App,
     ) -> SharedString {
         let pane_label = self
             .active_runtime()
             .panes
             .iter()
             .find(|pane| pane.id == pane_id)
-            .map(|pane| pane.title())
+            .map(|pane| pane.title(cx))
             .unwrap_or_else(|| SharedString::from(s::ctx_send_target_pane_fallback(pane_id)));
         if tab_index == active_tab {
             return pane_label;
@@ -239,11 +240,11 @@ impl Workspace {
         SharedString::from(format!(
             "{} - {}",
             pane_label.as_ref(),
-            self.tab_label(tab_index).as_ref()
+            self.tab_label(tab_index, cx).as_ref()
         ))
     }
 
-    fn tab_label(&self, tab_index: usize) -> SharedString {
+    fn tab_label(&self, tab_index: usize, cx: &App) -> SharedString {
         let Some(tab) = self.active_runtime().tabs.get(tab_index) else {
             return SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1));
         };
@@ -254,7 +255,7 @@ impl Workspace {
             .panes
             .iter()
             .find(|pane| pane.id == tab.last_focused_pane)
-            .and_then(|pane| pane.display_cwd().or_else(|| Some(pane.title())))
+            .and_then(|pane| pane.display_cwd().or_else(|| Some(pane.title(cx))))
             .unwrap_or_else(|| SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)))
     }
 

@@ -844,7 +844,7 @@ impl Workspace {
             return;
         };
         let prompt_entity = te.prompt_state.clone();
-        let title = pane.title();
+        let title = pane.title(cx);
         let is_dirty = te.is_dirty(cx);
 
         // If the disk content already matches what's in the editor

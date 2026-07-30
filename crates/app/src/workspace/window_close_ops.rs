@@ -136,7 +136,7 @@ impl Workspace {
                     &p.content,
                     PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
-                Some((p.id, p.title(), is_draft))
+                Some((p.id, p.title(cx), is_draft))
             })
             .collect()
     }

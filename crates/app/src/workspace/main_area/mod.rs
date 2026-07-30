@@ -255,7 +255,7 @@ pub(in crate::workspace) fn render_layout(
                 root = root.child(pane_header(
                     id,
                     is_focused,
-                    pane.title(),
+                    pane.title(cx),
                     basename,
                     is_zoomed,
                     cx,
