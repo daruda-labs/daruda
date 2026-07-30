@@ -215,6 +215,8 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  config_boolean_on: "On"
+  config_boolean_off: "Off"
   tab_title: "Agent"
   idle: "Idle — focus this pane to start the agent."
   connecting: "Connecting…"
@@ -474,6 +476,7 @@ settings:
   section_window: "WINDOW"
   section_theme: "THEME"
   section_terminal: "TERMINAL"
+  section_dock: "DOCK"
   section_sidebar: "SIDEBAR"
   section_general: "GENERAL"
   section_clipboard: "CLIPBOARD"
@@ -540,10 +543,8 @@ settings:
   nav_shell: "Shell"
   nav_window: "Window"
   nav_terminal: "Terminal"
-  nav_sidebar: "Dock"
+  nav_dock: "Dock"
   nav_clipboard: "Clipboard"
-  nav_panels: "Panels"
-  nav_claude_status: "Claude Status"
   nav_notifications: "Notifications"
   nav_keymap: "Keymap"
   nav_plugin: "Plugin"

@@ -962,6 +962,19 @@ pub fn agent_chat_tab_title() -> String {
     rust_i18n::t!("agent_chat.tab_title").into_owned()
 }
 
+/// Enabled state of a boolean session config option (e.g. "Fast mode"), used
+/// as both the chip label and its dropdown entry. The protocol carries only a
+/// `bool`, so the two labels are the host's to supply.
+pub fn agent_chat_config_boolean_on() -> String {
+    rust_i18n::t!("agent_chat.config_boolean_on").into_owned()
+}
+
+/// Disabled state of a boolean session config option — see
+/// [`agent_chat_config_boolean_on`].
+pub fn agent_chat_config_boolean_off() -> String {
+    rust_i18n::t!("agent_chat.config_boolean_off").into_owned()
+}
+
 /// Banner copy for a dormant (restored, not-yet-connected) Agent chat pane.
 /// The session starts on first focus, so this shows only for a visible but
 /// unfocused pane.
@@ -2470,6 +2483,7 @@ pub fn settings_label_inset_y() -> String {
 pub fn settings_err_inset() -> String {
     rust_i18n::t!("settings.err_inset").into_owned()
 }
+/// Subsection header inside the Dock page's left-dock (files) block.
 pub fn settings_section_sidebar() -> String {
     rust_i18n::t!("settings.section_sidebar").into_owned()
 }
@@ -2562,17 +2576,11 @@ pub fn settings_nav_window() -> String {
 pub fn settings_nav_terminal() -> String {
     rust_i18n::t!("settings.nav_terminal").into_owned()
 }
-pub fn settings_nav_sidebar() -> String {
-    rust_i18n::t!("settings.nav_sidebar").into_owned()
+pub fn settings_nav_dock() -> String {
+    rust_i18n::t!("settings.nav_dock").into_owned()
 }
 pub fn settings_nav_clipboard() -> String {
     rust_i18n::t!("settings.nav_clipboard").into_owned()
-}
-pub fn settings_nav_panels() -> String {
-    rust_i18n::t!("settings.nav_panels").into_owned()
-}
-pub fn settings_nav_claude_status() -> String {
-    rust_i18n::t!("settings.nav_claude_status").into_owned()
 }
 pub fn settings_nav_notifications() -> String {
     rust_i18n::t!("settings.nav_notifications").into_owned()
@@ -2590,12 +2598,17 @@ pub fn settings_nav_agent() -> String {
 pub fn settings_section_general() -> String {
     rust_i18n::t!("settings.section_general").into_owned()
 }
+pub fn settings_section_dock() -> String {
+    rust_i18n::t!("settings.section_dock").into_owned()
+}
 pub fn settings_section_clipboard() -> String {
     rust_i18n::t!("settings.section_clipboard").into_owned()
 }
+/// Subsection header inside the Dock page's bottom-dock (macro grid) block.
 pub fn settings_section_panels() -> String {
     rust_i18n::t!("settings.section_panels").into_owned()
 }
+/// Subsection header inside the Agent page's session-status block.
 pub fn settings_section_claude_status() -> String {
     rust_i18n::t!("settings.section_claude_status").into_owned()
 }

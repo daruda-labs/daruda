@@ -551,8 +551,12 @@ impl SettingsWindow {
             cx,
             &mut input_subscriptions,
         );
+        // Second (and last) text input on the merged Dock page — after
+        // the Sidebar subsection's checkboxes (no text input) and before
+        // the Bottom Dock subsection's own fields, so it's simply
+        // appended to the same section's tab-cycle list.
         section_focus_targets
-            .entry(BuiltinSection::Panels)
+            .entry(BuiltinSection::Dock)
             .or_default()
             .push(panels_grid_columns_fh);
         // Never pre-filled with the real token (`default_value`) — a stored

@@ -79,11 +79,6 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
-        id: "open_settings.claude_status",
-        label: "Settings: Claude Status",
-        shortcut: "",
-    },
-    PaletteEntry {
         id: "open_settings.notifications",
         label: "Settings: Notifications",
         shortcut: "",

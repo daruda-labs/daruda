@@ -262,13 +262,17 @@ impl SettingsWindow {
             .into_any_element()
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    /// Left-dock (Sidebar/Files) and bottom-dock (macro grid) settings,
+    /// combined into one page — both read as "dock configuration" to a
+    /// user even though they're separate `Dock` instances internally.
+    pub(super) fn render_dock(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let files_show_hidden = self.files_show_hidden;
         let files_use_gitignore = self.files_use_gitignore;
         div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
+            .child(Self::section_label(s::settings_section_dock(), cx))
             .child(Self::section_label(s::settings_section_sidebar(), cx))
             .child(checkbox_row(
                 checkbox("settings-show-hidden", s::settings_label_show_hidden(), ())
@@ -290,6 +294,11 @@ impl SettingsWindow {
                     cx.notify();
                 })),
             ))
+            .child(Self::section_label(s::settings_section_panels(), cx))
+            .child(field_row(
+                s::settings_label_grid_columns(),
+                crate::ui::input(&self.panels_grid_columns_input, cx, ()),
+            ))
             .into_any_element()
     }
 
@@ -302,19 +311,6 @@ impl SettingsWindow {
             .child(field_row(
                 s::settings_label_clipboard_streaming(),
                 crate::ui::input(&self.clipboard_streaming_input, cx, ()),
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_panels(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_panels(), cx))
-            .child(field_row(
-                s::settings_label_grid_columns(),
-                crate::ui::input(&self.panels_grid_columns_input, cx, ()),
             ))
             .into_any_element()
     }
@@ -444,6 +440,22 @@ impl SettingsWindow {
             body = body.child(self.render_agent_catalog_row(index, row, cx));
         }
 
+        let claude_status_enable = self.claude_status_enable;
+        body = body
+            .child(Self::section_label(s::settings_section_claude_status(), cx))
+            .child(checkbox_row(
+                checkbox(
+                    "settings-claude-status-enable",
+                    s::settings_label_claude_status_enable(),
+                    (),
+                )
+                .checked(claude_status_enable)
+                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                    this.claude_status_enable = *checked;
+                    cx.notify();
+                })),
+            ));
+
         body.into_any_element()
     }
 
@@ -542,28 +554,6 @@ impl SettingsWindow {
         }
 
         body.into_any_element()
-    }
-
-    pub(super) fn render_claude_status(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        let claude_status_enable = self.claude_status_enable;
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_claude_status(), cx))
-            .child(checkbox_row(
-                checkbox(
-                    "settings-claude-status-enable",
-                    s::settings_label_claude_status_enable(),
-                    (),
-                )
-                .checked(claude_status_enable)
-                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.claude_status_enable = *checked;
-                    cx.notify();
-                })),
-            ))
-            .into_any_element()
     }
 
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -670,6 +660,11 @@ impl SettingsWindow {
                         )
                     }),
             )
+            // Starts the pairing flow — comes right after the token is saved,
+            // matching the real procedure (generate a code, then send it to
+            // the bot via Telegram). Previously this button was rendered
+            // *after* the paired-status/Check-Pairing row below, which read
+            // backwards: a "Not paired" status with nothing yet to check.
             .child(
                 div()
                     .flex()
@@ -677,28 +672,15 @@ impl SettingsWindow {
                     .items_center()
                     .gap(px(theme::MODAL_FOOTER_GAP))
                     .child(
-                        div()
-                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                            .text_color(body_color)
-                            .child(match authorized_chat_id {
-                                Some(chat_id) => s::settings_telegram_paired(chat_id),
-                                None => s::settings_telegram_not_paired(),
-                            }),
-                    )
-                    .child(
-                        // The bridge's poll loop pairs a phone in the background
-                        // (via `/pair <code>`) — this section only re-reads
-                        // `authorized_chat_id` when IT re-renders, and nothing
-                        // currently subscribes this window to that background
-                        // change. This button forces a repaint with no state
-                        // mutation of its own, so the status line above picks up
-                        // whatever `SettingsStore`'s live config already has.
                         button(
-                            "settings-telegram-check-pairing",
-                            s::settings_telegram_check_pairing(),
+                            "settings-telegram-generate-code",
+                            s::settings_telegram_generate_code(),
                         )
                         .on_click(cx.listener(
-                            |_this, _: &ClickEvent, _window, cx| {
+                            |this, _: &ClickEvent, _window, cx| {
+                                let code =
+                                    crate::telegram::global::TelegramBridge::generate_pair_code(cx);
+                                this.telegram_pair_code = Some(code);
                                 cx.notify();
                             },
                         )),
@@ -731,6 +713,8 @@ impl SettingsWindow {
                         ),
                 )
             })
+            // Pairing status — sits after the generate/send steps above, not
+            // before them, plus Unpair (only meaningful once paired).
             .child(
                 div()
                     .flex()
@@ -738,15 +722,28 @@ impl SettingsWindow {
                     .items_center()
                     .gap(px(theme::MODAL_FOOTER_GAP))
                     .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(body_color)
+                            .child(match authorized_chat_id {
+                                Some(chat_id) => s::settings_telegram_paired(chat_id),
+                                None => s::settings_telegram_not_paired(),
+                            }),
+                    )
+                    .child(
+                        // The bridge's poll loop pairs a phone in the background
+                        // (via `/pair <code>`) — this section only re-reads
+                        // `authorized_chat_id` when IT re-renders, and nothing
+                        // currently subscribes this window to that background
+                        // change. This button forces a repaint with no state
+                        // mutation of its own, so the status line above picks up
+                        // whatever `SettingsStore`'s live config already has.
                         button(
-                            "settings-telegram-generate-code",
-                            s::settings_telegram_generate_code(),
+                            "settings-telegram-check-pairing",
+                            s::settings_telegram_check_pairing(),
                         )
                         .on_click(cx.listener(
-                            |this, _: &ClickEvent, _window, cx| {
-                                let code =
-                                    crate::telegram::global::TelegramBridge::generate_pair_code(cx);
-                                this.telegram_pair_code = Some(code);
+                            |_this, _: &ClickEvent, _window, cx| {
                                 cx.notify();
                             },
                         )),
