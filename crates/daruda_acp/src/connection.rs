@@ -33,10 +33,14 @@ pub(crate) const ADAPTER_NPM_PACKAGE: &str = "@agentclientprotocol/claude-agent-
 
 /// How to launch the ACP agent adapter.
 ///
-/// `AcpAgent::from_str` accepts either a bash-style command string
-/// (`npx -y <pkg>`) or a JSON stdio config matching the registry
-/// `distribution` shape (`{"type":"stdio","command":..,"args":[..],"env":[..]}`),
+/// Either a bash-style command string (`npx -y <pkg>`) or a JSON launch
+/// config. Two JSON shapes are accepted: the SDK's own `AcpAgentConfig`
+/// (`{"command":..,"args":[..],"env":{..}}`) and the registry `distribution`
+/// shape (`{"type":"stdio","command":..,"args":[..],"env":[{"name":..,"value":..}]}`),
 /// so this newtype stays forward-compatible with registry-driven discovery.
+///
+/// `AcpAgent::from_str` itself only parses the former; the registry shape is
+/// translated in [`crate::launch_env`], which every launch passes through.
 #[derive(Debug, Clone)]
 pub struct AdapterCommand(pub String);
 

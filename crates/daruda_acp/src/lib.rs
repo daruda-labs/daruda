@@ -18,6 +18,7 @@ pub mod model;
 pub mod node;
 pub(crate) mod output_highlight;
 pub mod session;
+pub(crate) mod wire_log;
 
 pub use agent_client_protocol::schema::v1::SessionId;
 pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run_one_shot};
@@ -26,11 +27,11 @@ pub use mapping::{
     finalize_streaming, permission_item, subagent_activity, touched_tool_id,
 };
 pub use model::{
-    ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView, CostView, DiffView,
-    ModeStateView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
-    PlanEntryView, PlanPriority, PlanStatus, SessionCapabilitiesView, SessionModeView,
-    SlashCommand, SlashCommandInput, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
-    UsageView,
+    ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
+    ConfigValueView, CostView, DiffView, ModeStateView, PermissionChoice, PermissionItem,
+    PermissionKindView, PermissionResolution, PlanEntryView, PlanPriority, PlanStatus,
+    SessionCapabilitiesView, SessionModeView, SlashCommand, SlashCommandInput, ToolCallItem,
+    ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
 };
 pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
 pub use session::{

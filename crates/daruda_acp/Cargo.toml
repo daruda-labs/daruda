@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 daruda_core = { path = "../daruda_core" }
-agent-client-protocol = "1.0"
+agent-client-protocol = "2.0"
 anyhow = { workspace = true }
 futures = "0.3"
 semver = "1"

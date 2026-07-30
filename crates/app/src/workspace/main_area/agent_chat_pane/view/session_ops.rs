@@ -210,11 +210,11 @@ impl AgentChatView {
     pub(in crate::workspace) fn set_config_option(
         &mut self,
         config_id: String,
-        value: String,
+        value: daruda_acp::ConfigValueView,
         cx: &mut Context<Self>,
     ) {
         self.session_config
-            .set_option_value_optimistically(&config_id, value.clone());
+            .set_option_value_optimistically(&config_id, &value);
         if let Some(h) = &self.handle {
             h.set_config_option(config_id, value);
         }

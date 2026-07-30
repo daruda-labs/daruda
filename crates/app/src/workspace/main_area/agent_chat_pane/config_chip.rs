@@ -14,7 +14,7 @@
 //! unfamiliar select option (e.g. Codex's `fast-mode` speed toggle) needs no
 //! per-agent UI code.
 
-use daruda_acp::ConfigOptionView;
+use daruda_acp::{ConfigOptionKindView, ConfigOptionView, ConfigValueView};
 use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
@@ -34,23 +34,18 @@ pub(in crate::workspace) fn config_chip(
     option: &ConfigOptionView,
     workspace: WeakEntity<Workspace>,
 ) -> impl IntoElement + use<> {
-    let display_name = option
-        .options
+    // Both kinds collapse to the same shape — an ordered choice list plus which
+    // one is current — so the chip below stays kind-agnostic the way it is
+    // already category-agnostic.
+    let (choices, current) = choices_of(option);
+    let display_name = choices
         .iter()
-        .find(|c| c.value == option.current_value)
-        .map(|c| c.name.as_str())
-        .unwrap_or(option.current_value.as_str())
-        .to_string();
+        .find(|(value, _)| *value == current)
+        .map(|(_, name)| name.clone())
+        .unwrap_or_else(|| current_fallback_label(&current));
 
     let label = SharedString::from(format!("{}{}", display_name, strings::TASK_PILL_CHEVRON));
 
-    // Owned data for the `'static` dropdown closure.
-    let choices: Vec<(String, String)> = option
-        .options
-        .iter()
-        .map(|c| (c.value.clone(), c.name.clone()))
-        .collect();
-    let current = option.current_value.clone();
     let config_id = option.id.clone();
     let option_name = option.name.clone();
 
@@ -76,6 +71,53 @@ pub(in crate::workspace) fn config_chip(
         })
 }
 
+/// The option's choices as `(value, display name)` in menu order, plus the
+/// value currently selected.
+///
+/// A boolean has no protocol-supplied labels — it carries only a `bool` — so
+/// the host names its two states from i18n. On-first ordering matches how the
+/// adapters' `select` fallback lists them, so the menu reads the same whether
+/// the agent sent a native boolean or degraded to a two-value select.
+fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, ConfigValueView) {
+    match &option.kind {
+        ConfigOptionKindView::Select {
+            current_value,
+            options,
+        } => (
+            options
+                .iter()
+                .map(|c| (ConfigValueView::Id(c.value.clone()), c.name.clone()))
+                .collect(),
+            ConfigValueView::Id(current_value.clone()),
+        ),
+        ConfigOptionKindView::Boolean { current_value } => (
+            vec![
+                (
+                    ConfigValueView::Bool(true),
+                    strings::agent_chat_config_boolean_on(),
+                ),
+                (
+                    ConfigValueView::Bool(false),
+                    strings::agent_chat_config_boolean_off(),
+                ),
+            ],
+            ConfigValueView::Bool(*current_value),
+        ),
+    }
+}
+
+/// Chip label when the current value is absent from the choice list — an
+/// adapter transient. A select falls back to the raw id (better than a blank
+/// chip); a boolean always matches one of its two synthetic entries, so its
+/// arm is unreachable in practice and still yields a sensible label.
+fn current_fallback_label(current: &ConfigValueView) -> String {
+    match current {
+        ConfigValueView::Id(id) => id.clone(),
+        ConfigValueView::Bool(true) => strings::agent_chat_config_boolean_on(),
+        ConfigValueView::Bool(false) => strings::agent_chat_config_boolean_off(),
+    }
+}
+
 /// Build the choice popup menu. A non-interactive header names the option
 /// (the chip label only shows the current *value*, e.g. "Off", so the option's
 /// own name — "Fast mode", "Model", … — would otherwise be invisible). One item
@@ -86,8 +128,8 @@ fn build_config_menu(
     pane_id: PaneId,
     config_id: &str,
     option_name: &str,
-    choices: &[(String, String)],
-    current: &str,
+    choices: &[(ConfigValueView, String)],
+    current: &ConfigValueView,
     workspace: &WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
@@ -104,7 +146,7 @@ fn build_config_menu(
         let workspace = workspace.clone();
         let config_id = config_id.to_string();
         let value = value.clone();
-        let is_current = value == current;
+        let is_current = value == *current;
         m.item(
             PopupMenuItem::new(SharedString::from(name.clone()))
                 .checked(is_current)

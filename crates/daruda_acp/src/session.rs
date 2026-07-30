@@ -31,13 +31,15 @@
 //! The permission handler is a separate closure from `main_fn`, so it cannot
 //! reach the command channel's response path directly. It instead parks on a
 //! `oneshot` whose sender lives in a shared map keyed by a request id; the host
-//! resolves it through [`AcpSessionHandle::respond_permission`]. Awaiting in
-//! the handler is safe because the connection keeps pumping concurrently.
+//! resolves it through [`AcpSessionHandle::respond_permission`]. The park runs
+//! in a task spawned off the handler (`connection.spawn`), never inline in it:
+//! the SDK dispatches all incoming messages on one task and holds it until the
+//! handler returns, so an inline await would freeze every queued update for as
+//! long as the permission prompt stays open.
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -48,12 +50,14 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, NewSessionRequest,
-    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
+    BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
+    ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
+    SessionConfigOptionsCapabilities, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TextContent,
 };
-use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
+use agent_client_protocol::{AcpAgent, Agent, Client, ConnectTo, ConnectionTo};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -62,7 +66,7 @@ use futures::future::Either;
 
 use crate::connection::{AcpClientError, AdapterCommand, LaunchSpec};
 use crate::mode_tracker::ModeTracker;
-use crate::model::{ConfigOptionView, ModeStateView, SessionCapabilitiesView};
+use crate::model::{ConfigOptionView, ConfigValueView, ModeStateView, SessionCapabilitiesView};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -241,7 +245,10 @@ enum Command {
     SetMode(String),
     /// Send a `session/set_config_option` request to change a config option
     /// (model / effort / etc.) to the given value.
-    SetConfigOption { config_id: String, value: String },
+    SetConfigOption {
+        config_id: String,
+        value: ConfigValueView,
+    },
 }
 
 /// Host-side handle to a live ACP session. Cloning is intentionally not derived
@@ -288,7 +295,7 @@ impl AcpSessionHandle {
     ///
     /// A send failure means the connection task has already ended; the error is
     /// dropped because the host learns of termination via the event stream.
-    pub fn set_config_option(&self, config_id: String, value: String) {
+    pub fn set_config_option(&self, config_id: String, value: ConfigValueView) {
         let _ = self
             .commands
             .unbounded_send(Command::SetConfigOption { config_id, value });
@@ -309,119 +316,6 @@ impl AcpSessionHandle {
             // the connection dropped); nothing to do in that case.
             let _ = sender.send(decision);
         }
-    }
-}
-
-/// Dev-build ACP wire tap. When the `DARUDA_ACP_WIRE_LOG` environment variable
-/// names a file, every raw JSON-RPC line exchanged with the adapter — client →
-/// adapter (`stdin`), adapter → client (`stdout`), and the adapter's own
-/// `stderr` — is written there with a millisecond timestamp and a direction
-/// marker, so tool-call / subagent traffic can be inspected off-line. The file
-/// is truncated on the first open of each process run and appended to by every
-/// later session in the same run, so a restart starts fresh instead of growing
-/// without bound. Identity
-/// (no tap) when the variable is unset or the file can't be opened, so the
-/// shipping build never touches the wire unless explicitly asked. The app sets
-/// the variable in debug builds (see `bootstrap::init_observability`); it can
-/// also be set by hand to capture from any build.
-///
-/// `agent_id` (the catalog id, e.g. `"claude"` / `"codex"`, empty for a caller
-/// with no such identity like the crate's own examples) is spliced into the
-/// configured file name via [`wire_log_path_for`] so concurrent sessions from
-/// different agents land in separate files instead of interleaving in one.
-fn attach_wire_log(agent: AcpAgent, agent_id: &str) -> AcpAgent {
-    let Some(path) = std::env::var_os("DARUDA_ACP_WIRE_LOG") else {
-        return agent;
-    };
-    let path = wire_log_path_for(Path::new(&path), agent_id);
-    // Start fresh each process run, then accumulate. `attach_wire_log` runs per
-    // ACP session (new chat pane, agent switch, resume) — not per app launch —
-    // so a plain `.truncate(true)` would wipe earlier sessions of the same run.
-    // Truncate only the first time this process opens a given path, so a restart
-    // starts clean while later sessions in the same run append.
-    let truncate = wire_log_first_open(&path);
-    // Open once (append) and share the handle with the debug closure; a per-line
-    // reopen would thrash under streaming turns.
-    let file = match std::fs::OpenOptions::new()
-        .create(true)
-        .append(!truncate)
-        .truncate(truncate)
-        .write(truncate)
-        .open(&path)
-    {
-        Ok(f) => Arc::new(Mutex::new(f)),
-        Err(_) => return agent,
-    };
-    agent.with_debug(move |line, direction| {
-        use std::io::Write as _;
-        let marker = match direction {
-            LineDirection::Stdin => "-> stdin ",
-            LineDirection::Stdout => "<- stdout",
-            LineDirection::Stderr => "!! stderr",
-        };
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        if let Ok(mut f) = file.lock() {
-            let _ = writeln!(f, "{ts} {marker} {line}");
-        }
-    })
-}
-
-/// Whether `path` is being opened for the wire tap for the first time in this
-/// process. The first opener truncates the file (fresh start per app launch);
-/// every later session that reuses the same path appends. Tracked in a
-/// process-global set so restart-vs-same-run is decided by process lifetime, not
-/// by session count.
-fn wire_log_first_open(path: &Path) -> bool {
-    static SEEN: std::sync::OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
-        std::sync::OnceLock::new();
-    let mut seen = match SEEN
-        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
-        .lock()
-    {
-        Ok(guard) => guard,
-        // A poisoned lock only means a prior holder panicked mid-insert; append
-        // (don't truncate) so we never wipe an existing run's log on recovery.
-        Err(_) => return false,
-    };
-    seen.insert(path.to_path_buf())
-}
-
-/// Splice `-<agent_id>` into `base`'s file name, before the extension (e.g.
-/// `acp-wire.log` + `"claude"` → `acp-wire-claude.log`), so each agent's wire
-/// tap lands in its own file instead of every session interleaving into one
-/// shared `DARUDA_ACP_WIRE_LOG` file. `agent_id` empty leaves `base`
-/// untouched — the crate's own examples have no catalog identity to key on.
-/// Non-alphanumeric bytes in `agent_id` (a user-editable catalog field) are
-/// mapped to `_` so it can never escape `base`'s directory or break the file
-/// name.
-fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
-    if agent_id.is_empty() {
-        return base.to_path_buf();
-    }
-    let safe_id: String = agent_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let stem = base
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("acp-wire");
-    let file_name = match base.extension().and_then(|s| s.to_str()) {
-        Some(ext) => format!("{stem}-{safe_id}.{ext}"),
-        None => format!("{stem}-{safe_id}"),
-    };
-    match base.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.join(file_name),
-        _ => PathBuf::from(file_name),
     }
 }
 
@@ -452,7 +346,7 @@ fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
 /// synchronously as an error here, before any task is spawned.
 ///
 /// `agent_id` is the catalog id (e.g. `"claude"` / `"codex"`) used only to key
-/// the dev-build wire-tap file — see [`attach_wire_log`]. Pass `""` when the
+/// the dev-build wire-tap file — see [`crate::wire_log`]. Pass `""` when the
 /// caller has no such identity (the crate's own examples).
 pub fn connect_session(
     command: AdapterCommand,
@@ -464,7 +358,7 @@ pub fn connect_session(
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent = AcpAgent::from_str(&command.0)
         .map_err(|e| AcpClientError::Command(format!("{e:?}")))
-        .map(|agent| attach_wire_log(agent, agent_id))?;
+        .map(|agent| crate::wire_log::attach(agent, agent_id))?;
 
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, event_rx) = unbounded::<AcpEvent>();
@@ -535,6 +429,19 @@ pub fn connect_agent_session(
     connect_session(adapter, cwd, initial_modes, restore_mode, resume, agent_id)
 }
 
+/// What this client advertises at `initialize`.
+///
+/// Capabilities here are strictly opt-in: an agent may only use a feature the
+/// client claims. `session.configOptions.boolean` is what lets an agent send a
+/// native boolean toggle (e.g. Claude's "Fast mode") instead of degrading it to
+/// a two-value select — see [`ConfigOptionKindView::Boolean`]. Advertise a
+/// capability only once the host actually renders it.
+fn client_capabilities() -> ClientCapabilities {
+    ClientCapabilities::new().session(ClientSessionCapabilities::new().config_options(
+        SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
+    ))
+}
+
 /// Wall-clock budget for `initialize` and — on a *fresh* session —
 /// `session/new` and the optional `set_mode`. Without this, a hung adapter
 /// (e.g. an SSH-wrapped remote command stuck on a silent auth prompt, or a
@@ -588,9 +495,14 @@ async fn with_connect_timeout<T>(
 
 /// Drive the whole connection: handshake, session creation, then the prompt /
 /// cancel select loop, until the command channel closes or the protocol fails.
+///
+/// Generic over the transport (production passes the subprocess-spawning
+/// [`AcpAgent`]) so tests can wire an in-process fake agent — an SDK
+/// `Agent.builder()` implements `ConnectTo<Client>` too — and drive this exact
+/// code path deterministically, dispatch semantics included.
 #[allow(clippy::too_many_arguments)] // Internal connection state threaded through one call — bundling wraps callers more than it saves.
 async fn run_connection(
-    agent: AcpAgent,
+    agent: impl ConnectTo<Client> + 'static,
     cwd: PathBuf,
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
@@ -682,7 +594,7 @@ async fn run_connection(
                 let permission_parks = permission_parks.clone();
                 let next_permission_id = next_permission_id.clone();
                 let perm_event_tx = perm_event_tx.clone();
-                async move |request: RequestPermissionRequest, responder, _connection| {
+                async move |request: RequestPermissionRequest, responder, connection| {
                     let id = next_permission_id.fetch_add(1, Ordering::Relaxed);
                     let (decision_tx, decision_rx) = oneshot::channel::<PermissionDecision>();
                     permission_parks
@@ -695,12 +607,20 @@ async fn run_connection(
                         request: Box::new(request),
                     });
 
-                    // Park until the host decides. The connection keeps pumping
-                    // concurrently, so this await does not block other traffic.
+                    // Park in a spawned task, NOT in this handler: the SDK runs
+                    // handlers inline on the connection's single dispatch task
+                    // ("the server will not process new messages until this
+                    // handler returns"), so awaiting the host's decision here
+                    // would freeze every update queued behind the request —
+                    // streaming, tool progress, a second permission request —
+                    // until the user answers. Measured by
+                    // `a_parked_permission_request_does_not_stall_update_dispatch`.
                     // If the sender is dropped (host went away / id reaped on
                     // shutdown), default to Cancelled — deny by absence.
-                    let decision = decision_rx.await.unwrap_or(PermissionDecision::Cancelled);
-                    responder.respond(decision.into_response())
+                    connection.spawn(async move {
+                        let decision = decision_rx.await.unwrap_or(PermissionDecision::Cancelled);
+                        responder.respond(decision.into_response())
+                    })
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -718,7 +638,10 @@ async fn run_connection(
             let (capabilities, resume, fresh) =
                 with_connect_timeout("initialize", CONNECT_HANDSHAKE_TIMEOUT, async {
                     let init = connection
-                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .send_request(
+                            InitializeRequest::new(ProtocolVersion::V1)
+                                .client_capabilities(client_capabilities()),
+                        )
                         .block_task()
                         .await?;
                     let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
@@ -1115,15 +1038,22 @@ async fn send_set_config_option(
     connection: &ConnectionTo<Agent>,
     session_id: &SessionId,
     config_id: String,
-    value: String,
+    value: ConfigValueView,
     event_tx: &UnboundedSender<AcpEvent>,
     mode_tracker: &ModeTracker,
 ) {
+    // The wire form is kind-specific: a select's value id serializes as a bare
+    // string (`ValueId` is the untagged variant), a boolean as a tagged
+    // `{"type":"boolean","value":…}`. Sending the wrong one is rejected.
+    let protocol_value = match &value {
+        ConfigValueView::Id(id) => SessionConfigOptionValue::value_id(id.clone()),
+        ConfigValueView::Bool(b) => SessionConfigOptionValue::boolean(*b),
+    };
     match connection
         .send_request(SetSessionConfigOptionRequest::new(
             session_id.clone(),
             config_id.clone(),
-            value.clone(),
+            protocol_value,
         ))
         .block_task()
         .await
@@ -1137,7 +1067,7 @@ async fn send_set_config_option(
         }
         Err(e) => {
             let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
-                "set_config_option({config_id}={value}) failed — the session keeps its \
+                "set_config_option({config_id}={value:?}) failed — the session keeps its \
                  current value: {e:?}"
             )));
         }
@@ -1222,64 +1152,6 @@ fn resolve_resume(
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::PermissionOptionId;
-
-    #[test]
-    fn wire_log_path_splices_agent_id_before_the_extension() {
-        assert_eq!(
-            wire_log_path_for(Path::new("/logs/acp-wire.log"), "claude"),
-            PathBuf::from("/logs/acp-wire-claude.log")
-        );
-    }
-
-    #[test]
-    fn wire_log_path_handles_no_extension() {
-        assert_eq!(
-            wire_log_path_for(Path::new("/logs/acp-wire"), "codex"),
-            PathBuf::from("/logs/acp-wire-codex")
-        );
-    }
-
-    #[test]
-    fn wire_log_path_leaves_base_untouched_when_agent_id_is_empty() {
-        assert_eq!(
-            wire_log_path_for(Path::new("/logs/acp-wire.log"), ""),
-            PathBuf::from("/logs/acp-wire.log")
-        );
-    }
-
-    #[test]
-    fn wire_log_first_open_truncates_once_then_appends() {
-        // First open of a given path in this process truncates (fresh start on
-        // restart); every later open of the same path appends (same run keeps
-        // accumulating). A different path is independently first-opened.
-        let path_a = PathBuf::from("/logs/acp-wire-first-open-test-a.log");
-        let path_b = PathBuf::from("/logs/acp-wire-first-open-test-b.log");
-        assert!(wire_log_first_open(&path_a), "first open truncates");
-        assert!(!wire_log_first_open(&path_a), "second open appends");
-        assert!(!wire_log_first_open(&path_a), "third open still appends");
-        assert!(
-            wire_log_first_open(&path_b),
-            "a different path truncates once"
-        );
-    }
-
-    #[test]
-    fn wire_log_path_sanitizes_unsafe_agent_id_characters() {
-        // A user-editable catalog id must never let a path separator (or other
-        // filesystem-unsafe byte) escape the configured log directory.
-        assert_eq!(
-            wire_log_path_for(Path::new("/logs/acp-wire.log"), "../evil"),
-            PathBuf::from("/logs/acp-wire-___evil.log")
-        );
-    }
-
-    #[test]
-    fn wire_log_path_handles_a_bare_file_name_with_no_directory() {
-        assert_eq!(
-            wire_log_path_for(Path::new("acp-wire.log"), "claude"),
-            PathBuf::from("acp-wire-claude.log")
-        );
-    }
 
     #[test]
     fn cancelled_is_not_a_normal_completion() {
@@ -1461,7 +1333,11 @@ mod tests {
         let views = config_options_from_protocol(&opts);
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].id, "model");
-        assert_eq!(views[0].current_value, "sonnet");
+        assert!(matches!(
+            &views[0].kind,
+            crate::model::ConfigOptionKindView::Select { current_value, .. }
+                if current_value == "sonnet"
+        ));
         assert_eq!(
             views[0].category,
             crate::model::ConfigOptionCategoryView::Model
@@ -1505,5 +1381,179 @@ mod tests {
         let err = result.expect_err("a never-resolving future must time out");
         assert!(err.message.contains("probe"), "{}", err.message);
         assert!(err.message.contains("timed out"), "{}", err.message);
+    }
+
+    /// Ceiling for each awaited event in the dispatch-concurrency test. Big
+    /// enough that a loaded machine cannot fake a "blocked" verdict — the
+    /// failure mode under measurement is *never*, not *slow* (both endpoints
+    /// live in this process; no subprocess or network is involved).
+    const DISPATCH_TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// The next event, or `None` if none arrives within
+    /// [`DISPATCH_TEST_TIMEOUT`] — so a blocked dispatch loop reads as a test
+    /// failure instead of a hang.
+    async fn next_event_within(rx: &mut UnboundedReceiver<AcpEvent>) -> Option<AcpEvent> {
+        // ALLOW: same rationale as `with_connect_timeout` — this GPUI-free
+        // crate has no BackgroundExecutor to time on. The timer is only the
+        // failure ceiling: on the passing path every awaited event arrives
+        // immediately and the timer is dropped unpolled.
+        #[allow(clippy::disallowed_methods)]
+        let timer = smol::Timer::after(DISPATCH_TEST_TIMEOUT);
+        futures::select! {
+            event = rx.next().fuse() => event,
+            // `Timer` is both a Future and a Stream; pick the Future fuse.
+            _ = futures::FutureExt::fuse(timer) => None,
+        }
+    }
+
+    /// In-process fake agent for the dispatch-concurrency measurement: answers
+    /// the handshake, and on `session/prompt` sends a permission request
+    /// IMMEDIATELY followed by a `session/update` notification — both enqueued
+    /// back to back on one outgoing queue, so the client is guaranteed to
+    /// receive them in that order. The turn ends only after the host's
+    /// permission decision arrives.
+    ///
+    /// The agent's own prompt work runs via `conn.spawn` (not inline in the
+    /// handler) because awaiting the permission decision inside the agent's
+    /// handler would block the agent's *own* dispatch loop — the very defect
+    /// class the client side is being measured for.
+    fn permission_then_update_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{
+            ContentChunk, InitializeResponse, NewSessionResponse, PermissionOption,
+            PermissionOptionKind, PromptResponse, ToolCallUpdate, ToolCallUpdateFields,
+        };
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(InitializeResponse::new(ProtocolVersion::V1))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(NewSessionResponse::new("sess-dispatch-test"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |req: PromptRequest, responder, conn| {
+                    let session_id = req.session_id.clone();
+                    let task_conn = conn.clone();
+                    conn.spawn(async move {
+                        let decision = task_conn.send_request(RequestPermissionRequest::new(
+                            session_id.clone(),
+                            ToolCallUpdate::new("tool-1", ToolCallUpdateFields::default()),
+                            vec![PermissionOption::new(
+                                "allow",
+                                "Allow",
+                                PermissionOptionKind::AllowOnce,
+                            )],
+                        ));
+                        task_conn.send_notification(SessionNotification::new(
+                            session_id,
+                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                ContentBlock::Text(TextContent::new("mid-permission update")),
+                            )),
+                        ))?;
+                        let _ = decision.block_task().await?;
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    })?;
+                    Ok(())
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// Measures the SDK 2.0 dispatch semantics the permission park relies on:
+    /// the handler in `run_connection` awaits the host's decision *inside*
+    /// `on_receive_request`, and its comment claims the connection keeps
+    /// pumping concurrently. If instead the dispatch loop is held until the
+    /// handler returns (as `HandleDispatchFrom`'s "the server will not process
+    /// new messages until this handler returns" warns), the update queued
+    /// right behind the permission request can only surface *after*
+    /// `respond_permission` — streaming would freeze under every permission
+    /// prompt. The `#282` ordered-response barrier is not in play here: it
+    /// arms only via `on_receiving_result`, which this crate never calls.
+    #[test]
+    fn a_parked_permission_request_does_not_stall_update_dispatch() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+        let handle = AcpSessionHandle {
+            commands: command_tx,
+            permission_parks: permission_parks.clone(),
+        };
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                permission_then_update_agent(),
+                PathBuf::from("."),
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            }
+
+            handle.send_prompt("run a tool".to_string());
+
+            let permission_id = loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::PermissionRequested { id, .. }) => break id,
+                    Some(AcpEvent::Update(_)) => {
+                        panic!("update outran the permission request sent before it")
+                    }
+                    Some(_) => {}
+                    None => panic!("permission request never surfaced"),
+                }
+            };
+
+            // THE MEASUREMENT — the permission is still undecided, so this
+            // update only arrives if the parked handler leaves the dispatch
+            // loop free.
+            match next_event_within(&mut event_rx).await {
+                Some(AcpEvent::Update(_)) => {}
+                Some(other) => panic!("expected the queued update, got {other:?}"),
+                None => panic!(
+                    "dispatch loop is blocked by the parked permission handler: the \
+                     session/update queued behind the permission request never surfaced"
+                ),
+            }
+
+            handle.respond_permission(
+                permission_id,
+                PermissionDecision::Allow {
+                    option_id: "allow".to_string(),
+                },
+            );
+
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::TurnEnded {
+                        completed_normally, ..
+                    }) => {
+                        assert!(completed_normally);
+                        break;
+                    }
+                    Some(_) => {}
+                    None => panic!("turn never ended after the permission decision"),
+                }
+            }
+
+            // Closing the command channel ends `prompt_loop`, and with it the
+            // whole connection task.
+            drop(handle);
+            connection.await.expect("connection task ends cleanly");
+        });
     }
 }

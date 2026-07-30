@@ -106,6 +106,7 @@ pub(crate) fn strip_mode_options(options: Vec<ConfigOptionView>) -> Vec<ConfigOp
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ConfigOptionKindView;
     use crate::model::{ConfigChoiceView, SessionModeView};
 
     fn choice(id: &str) -> ConfigChoiceView {
@@ -122,8 +123,10 @@ mod tests {
             name: "Mode".to_string(),
             description: None,
             category: ConfigOptionCategoryView::Mode,
-            current_value: current.to_string(),
-            options: ids.iter().map(|id| choice(id)).collect(),
+            kind: ConfigOptionKindView::Select {
+                current_value: current.to_string(),
+                options: ids.iter().map(|id| choice(id)).collect(),
+            },
         }
     }
 
@@ -133,8 +136,10 @@ mod tests {
             name: "Model".to_string(),
             description: None,
             category: ConfigOptionCategoryView::Model,
-            current_value: "sonnet".to_string(),
-            options: vec![choice("sonnet")],
+            kind: ConfigOptionKindView::Select {
+                current_value: "sonnet".to_string(),
+                options: vec![choice("sonnet")],
+            },
         }
     }
 

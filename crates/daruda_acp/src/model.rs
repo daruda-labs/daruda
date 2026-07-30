@@ -445,12 +445,21 @@ impl ModeStateView {
         let mode = options
             .iter()
             .find(|o| o.category == ConfigOptionCategoryView::Mode)?;
-        if mode.options.is_empty() {
+        // A mode is a choice among named modes, so only the select kind can
+        // describe one; a boolean `Mode` option is malformed and yields no
+        // mode state rather than a bogus two-entry selector.
+        let ConfigOptionKindView::Select {
+            current_value,
+            options: choices,
+        } = &mode.kind
+        else {
+            return None;
+        };
+        if choices.is_empty() {
             return None;
         }
         Some(ModeStateView {
-            available: mode
-                .options
+            available: choices
                 .iter()
                 .map(|c| SessionModeView {
                     id: c.value.clone(),
@@ -458,7 +467,7 @@ impl ModeStateView {
                     description: c.description.clone(),
                 })
                 .collect(),
-            current: mode.current_value.clone(),
+            current: current_value.clone(),
         })
     }
 }
@@ -496,11 +505,45 @@ pub struct ConfigChoiceView {
     pub description: Option<String>,
 }
 
-/// An advertised session config option of the `select` kind (mirror of the
-/// protocol's `SessionConfigOption`). Advertised at connect time in
+/// What control an option renders as, together with the state that kind needs.
+/// One enum rather than a kind tag beside always-present `current_value` /
+/// `options` fields, so "a boolean with a choice list" is unrepresentable.
+///
+/// Boolean carries no labels: they are user-facing text, which must come from
+/// the host's i18n layer (`surface/strings.rs`) and cannot be synthesized in
+/// this GPUI-free crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigOptionKindView {
+    /// Dropdown over a fixed set of value ids.
+    Select {
+        /// `value` of the currently-selected choice.
+        current_value: String,
+        /// The selectable choices, flattened across any protocol grouping.
+        options: Vec<ConfigChoiceView>,
+    },
+    /// On/off toggle.
+    Boolean {
+        /// The current state.
+        current_value: bool,
+    },
+}
+
+/// A value submitted for a config option. Typed so the wire form matches the
+/// option's kind — a boolean must go out as `{"type":"boolean","value":…}`, not
+/// as the bare value id a select uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigValueView {
+    /// The id of a select choice.
+    Id(String),
+    /// A boolean toggle's new state.
+    Bool(bool),
+}
+
+/// An advertised session config option (mirror of the protocol's
+/// `SessionConfigOption`). Advertised at connect time in
 /// `NewSessionResponse.config_options` and replaced wholesale by
-/// `SetSessionConfigOptionResponse`. Non-select kinds (e.g. boolean) are dropped
-/// at the mapping boundary, so this type always describes a dropdown.
+/// `SetSessionConfigOptionResponse`. Kinds this build does not know are dropped
+/// at the mapping boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigOptionView {
     /// Stable identifier used to set this option via `set_config_option`.
@@ -511,41 +554,52 @@ pub struct ConfigOptionView {
     pub description: Option<String>,
     /// Semantic category, used to route the option to the right chip.
     pub category: ConfigOptionCategoryView,
-    /// `value` of the currently-selected choice.
-    pub current_value: String,
-    /// The selectable choices, flattened across any protocol grouping.
-    pub options: Vec<ConfigChoiceView>,
+    /// The control this option renders as, and its current state.
+    pub kind: ConfigOptionKindView,
 }
 
 impl ConfigOptionView {
-    /// Map a protocol `SessionConfigOption` to a view, or `None` when it is not
-    /// a select-kind option daruda renders as a dropdown (boolean / future
-    /// kinds are skipped — forward-compatible with protocol extensions).
+    /// Map a protocol `SessionConfigOption` to a view, or `None` for a kind this
+    /// build does not render (forward-compatible with protocol extensions —
+    /// `SessionConfigKind` is `#[non_exhaustive]`).
+    ///
+    /// A boolean only ever arrives when the host advertised
+    /// `session.configOptions.boolean` at `initialize`; without that opt-in the
+    /// agent degrades the same option to a two-value select.
     pub fn from_protocol(
         o: &agent_client_protocol::schema::v1::SessionConfigOption,
     ) -> Option<Self> {
         use agent_client_protocol::schema::v1::{
             SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
         };
-        let select = match &o.kind {
-            SessionConfigKind::Select(s) => s,
-            // Boolean (unstable) and any future non-select kind aren't
-            // dropdowns — skip. `SessionConfigKind` is `#[non_exhaustive]`.
+        let kind = match &o.kind {
+            SessionConfigKind::Boolean(b) => ConfigOptionKindView::Boolean {
+                current_value: b.current_value,
+            },
+            SessionConfigKind::Select(select) => {
+                let options = match &select.options {
+                    SessionConfigSelectOptions::Ungrouped(opts) => {
+                        opts.iter().map(config_choice).collect()
+                    }
+                    // Grouped options are flattened (daruda's chip is a flat
+                    // dropdown); group headers are dropped. The current adapter
+                    // sends ungrouped.
+                    SessionConfigSelectOptions::Grouped(groups) => groups
+                        .iter()
+                        .flat_map(|g| g.options.iter())
+                        .map(config_choice)
+                        .collect(),
+                    // `SessionConfigSelectOptions` is `#[non_exhaustive]`.
+                    #[allow(unreachable_patterns)]
+                    _ => Vec::new(),
+                };
+                ConfigOptionKindView::Select {
+                    current_value: select.current_value.to_string(),
+                    options,
+                }
+            }
             #[allow(unreachable_patterns)]
             _ => return None,
-        };
-        let options = match &select.options {
-            SessionConfigSelectOptions::Ungrouped(opts) => opts.iter().map(config_choice).collect(),
-            // Grouped options are flattened (daruda's chip is a flat dropdown);
-            // group headers are dropped. The current adapter sends ungrouped.
-            SessionConfigSelectOptions::Grouped(groups) => groups
-                .iter()
-                .flat_map(|g| g.options.iter())
-                .map(config_choice)
-                .collect(),
-            // `SessionConfigSelectOptions` is `#[non_exhaustive]`.
-            #[allow(unreachable_patterns)]
-            _ => Vec::new(),
         };
         let category = match &o.category {
             Some(SessionConfigOptionCategory::Mode) => ConfigOptionCategoryView::Mode,
@@ -562,8 +616,7 @@ impl ConfigOptionView {
             name: o.name.clone(),
             description: o.description.clone(),
             category,
-            current_value: select.current_value.to_string(),
-            options,
+            kind,
         })
     }
 }
@@ -580,6 +633,18 @@ fn config_choice(
 
 #[cfg(test)]
 mod tests {
+
+    /// The select state of `view`, or a panic naming the kind that arrived —
+    /// every assertion below is about a dropdown option.
+    fn select_of(view: &ConfigOptionView) -> (&str, &[ConfigChoiceView]) {
+        match &view.kind {
+            ConfigOptionKindView::Select {
+                current_value,
+                options,
+            } => (current_value, options),
+            other => panic!("expected a select kind, got {other:?}"),
+        }
+    }
     use agent_client_protocol::schema::v1::{
         AvailableCommand, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionMode,
         SessionModeState, UnstructuredCommandInput,
@@ -802,14 +867,53 @@ mod tests {
         assert_eq!(view.id, "model");
         assert_eq!(view.name, "Model");
         assert_eq!(view.category, ConfigOptionCategoryView::Model);
-        assert_eq!(view.current_value, "default");
-        assert_eq!(view.options.len(), 2);
-        assert_eq!(view.options[0].value, "default");
-        assert_eq!(view.options[1].value, "sonnet");
+        let (current, choices) = select_of(&view);
+        assert_eq!(current, "default");
+        assert_eq!(choices.len(), 2);
+        assert_eq!(choices[0].value, "default");
+        assert_eq!(choices[1].value, "sonnet");
         assert_eq!(
-            view.options[1].description.as_deref(),
+            choices[1].description.as_deref(),
             Some("Efficient for routine tasks")
         );
+    }
+
+    #[test]
+    fn config_option_boolean_kind_maps() {
+        // Claude's "Fast mode" arrives as a native boolean once the host
+        // advertises `session.configOptions.boolean` at `initialize`; without
+        // that opt-in the same option degrades to a two-value select.
+        use agent_client_protocol::schema::v1::{SessionConfigOption, SessionConfigOptionCategory};
+        let opt = SessionConfigOption::boolean("fast", "Fast mode", true)
+            .category(SessionConfigOptionCategory::ModelConfig);
+
+        let view = ConfigOptionView::from_protocol(&opt).expect("boolean option maps");
+        assert_eq!(view.id, "fast");
+        assert_eq!(view.name, "Fast mode");
+        assert_eq!(view.category, ConfigOptionCategoryView::ModelConfig);
+        assert_eq!(
+            view.kind,
+            ConfigOptionKindView::Boolean {
+                current_value: true
+            }
+        );
+    }
+
+    #[test]
+    fn mode_state_ignores_a_boolean_mode_option() {
+        // A mode is a choice among named modes, so a boolean carrying the Mode
+        // category is malformed — it must yield no mode state rather than a
+        // bogus two-entry selector.
+        let boolean_mode = ConfigOptionView {
+            id: "mode".to_string(),
+            name: "Mode".to_string(),
+            description: None,
+            category: ConfigOptionCategoryView::Mode,
+            kind: ConfigOptionKindView::Boolean {
+                current_value: true,
+            },
+        };
+        assert!(ModeStateView::from_config_options(&[boolean_mode]).is_none());
     }
 
     #[test]

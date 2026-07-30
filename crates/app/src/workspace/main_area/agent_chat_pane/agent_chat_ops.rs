@@ -461,14 +461,14 @@ impl Workspace {
         self.mutate_durable(cx, |_, _| {});
     }
 
-    /// Change a select config option (model / effort / …). Shim for the
-    /// config chips: routes `(config_id, value)` into the view, which
+    /// Change a config option (model / effort / a boolean toggle / …). Shim
+    /// for the config chips: routes `(config_id, value)` into the view, which
     /// optimistically updates and sends `session/set_config_option`.
     pub(in crate::workspace) fn set_agent_config_option(
         &mut self,
         pane_id: PaneId,
         config_id: String,
-        value: String,
+        value: daruda_acp::ConfigValueView,
         cx: &mut Context<Self>,
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {

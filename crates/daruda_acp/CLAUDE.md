@@ -19,17 +19,31 @@ config-options example below).
 
 ### 1. ACP protocol library (Rust crate)
 
-- Repo: <https://github.com/agentclientprotocol/agent-client-protocol>
-- crates.io: `agent-client-protocol` (pulls in `agent-client-protocol-schema`
-  and `-derive` transitively). Declared in `Cargo.toml`.
-- **Latest as of 2026-06-30**: crate `1.0.1`, schema `1.1.0` (the crate pins
-  `agent-client-protocol-schema = "=1.1.0"`; the schema crate's own latest is
-  `1.2.0`, and the JSON spec tag line is `schema-v1.17.0` — three separate
-  version lines, do not conflate them).
-- Keep current: the bare `"1.0"` in `Cargo.toml` is a default (caret) requirement
-  — Cargo reads it as `>=1.0.0, <2.0.0` — so `cargo update -p agent-client-protocol`
-  already picks up patch and minor releases; edit the version string only when a
-  new major lands.
+**Three separate version lines live here — do not conflate them.** They come
+from two different repos, and each release note names only its own line:
+
+| Line | Where | Latest as of 2026-07-30 | daruda |
+|---|---|---|---|
+| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `2.0.0` | `2.0.0` |
+| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.6.0` | `1.5.0` |
+| JSON spec | same repo (tags `schema-vX.Y.Z`) | `schema-v1.20.0` | `~v1.19.1` |
+
+- The SDK **exact-pins** the schema crate (`= 1.5.0` at SDK 2.0.0), so the
+  schema line cannot be advanced on its own — it moves only when the SDK
+  releases against a newer one. No SDK release consumes schema `1.6.0` /
+  `schema-v1.20.0` yet.
+- Keep current: `"2.0"` in `Cargo.toml` is a caret requirement (`>=2.0.0,
+  <3.0.0`), so `cargo update -p agent-client-protocol` picks up patch and minor
+  releases; edit the version string only when a new major lands.
+
+**Capabilities are opt-in, and silence costs features.** An agent may only use a
+feature the client advertises at `initialize`. `session.configOptions.boolean`
+(schema `1.5.0`, spec `schema-v1.18.0`) is the worked example: both shipping
+adapters check it and *degrade a native boolean toggle to a two-value select*
+when it is absent — so before daruda advertised it, Claude's "Fast mode" arrived
+as a select and the boolean path was simply unreachable. `client_capabilities()`
+in `session.rs` is the single place this is declared; advertise a capability only
+once the host actually renders it.
 
 ### 2. Claude ACP adapter (npm, spawned at runtime)
 
@@ -61,3 +75,24 @@ newest Rust schema (`1.1.0+`) models them as `SessionConfigOption` (category
 `configOptions`, or a schema too old to carry them, makes model and
 reasoning-effort selection invisible to the client — so both sides must be current
 for the feature to work end to end.
+
+## Wire tap — reading a capture
+
+Every raw JSON-RPC line is tapped to a file in debug builds (`wire_log.rs`; the
+app points `DARUDA_ACP_WIRE_LOG` at the log dir in `bootstrap.rs`). It is the
+first diagnostic for "did the adapter actually send that" questions.
+
+Each agent gets a pair of files: `acp-wire-<agent>.log` is the protocol
+skeleton (one valid-JSON line per wire line), and
+`acp-wire-<agent>.payload.jsonl` holds the string bodies that were too fat to
+inline. Payload text is ~93% of a raw capture, so a string over 512 bytes
+becomes a `@@acp-payload:<id>:<bytes>@@` marker in the slim log — measured on a
+real 7.6 MB capture, slim lands at 0.56 MB. Resolve a marker by id:
+
+```bash
+jq 'select(.id == 4821)' acp-wire-codex-acp.payload.jsonl
+```
+
+`DARUDA_ACP_WIRE_LOG_MAX_FIELD=0` restores unelided raw lines;
+`DARUDA_ACP_WIRE_LOG_PAYLOADS=0` drops payloads instead of writing the sidecar.
+Both files truncate on the first session of each process run.

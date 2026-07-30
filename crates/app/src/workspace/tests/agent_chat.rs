@@ -831,12 +831,14 @@ async fn mode_state_updates_replace_and_survive_config_refresh(cx: &mut TestAppC
                         name: "Model".to_string(),
                         description: None,
                         category: ConfigOptionCategoryView::Model,
-                        current_value: "sonnet".to_string(),
-                        options: vec![ConfigChoiceView {
-                            value: "sonnet".to_string(),
-                            name: "Sonnet".to_string(),
-                            description: None,
-                        }],
+                        kind: daruda_acp::ConfigOptionKindView::Select {
+                            current_value: "sonnet".to_string(),
+                            options: vec![ConfigChoiceView {
+                                value: "sonnet".to_string(),
+                                name: "Sonnet".to_string(),
+                                description: None,
+                            }],
+                        },
                     }]),
                     "",
                     false,

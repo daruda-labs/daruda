@@ -18,6 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
+use agent_client_protocol::AcpAgentConfig;
 use agent_client_protocol::schema::v1::McpServer;
 
 use crate::connection::{AdapterCommand, LaunchSpec};
@@ -29,6 +30,11 @@ const ENV_BIN: &str = "/usr/bin/env";
 
 /// `env(1)`'s remove-a-variable flag.
 const ENV_UNSET_FLAG: &str = "-u";
+
+/// Leading character marking an adapter command as a JSON launch config rather
+/// than a shell command line — the same discrimination `AcpAgent::from_str`
+/// makes to pick its parse.
+const JSON_LAUNCH_PREFIX: char = '{';
 
 /// The adapter launch for `launch`: a runtime is provisioned only when the
 /// command needs one, then [`LaunchSpec::strip_env`] is applied to whatever
@@ -46,39 +52,69 @@ pub fn prepare_adapter_command(
     } else {
         AdapterCommand(launch.command.clone())
     };
-    Ok(apply_env_strip(selected, &launch.strip_env))
+    Ok(finalize_command(selected, &launch.strip_env))
 }
 
-/// Remove `strip_env` in whichever of `adapter`'s two shapes: an [`ENV_BIN`]
-/// prefix on a bash-style string, an explicit `env` argv inside a JSON stdio
-/// config. An empty `strip_env` returns `adapter` byte-identical.
+/// The last rewrite before spawn: remove `strip_env`, and put a JSON command
+/// into the one shape `AcpAgent::from_str` accepts.
 ///
-/// A non-stdio transport (HTTP/SSE) or unparseable JSON passes through: no
-/// local child spawns there, so nothing can inherit the vars.
-fn apply_env_strip(adapter: AdapterCommand, strip_env: &[String]) -> AdapterCommand {
-    if strip_env.is_empty() {
-        return adapter;
-    }
-    // Same shape test `AcpAgent::from_str` uses to pick its transport.
-    if !adapter.0.trim_start().starts_with('{') {
+/// A bash-style command only gets an [`ENV_BIN`] prefix, and only when there is
+/// something to strip — an empty `strip_env` returns it byte-identical.
+///
+/// A JSON command is normalized **even with nothing to strip**: `from_str`
+/// deserializes JSON as [`AcpAgentConfig`] (object `env`, `deny_unknown_fields`),
+/// so the registry `distribution` shape daruda accepts — see
+/// [`parse_json_launch`] — has to be translated here or the adapter never
+/// launches. Unparseable JSON passes through so the SDK owns the error message.
+fn finalize_command(adapter: AdapterCommand, strip_env: &[String]) -> AdapterCommand {
+    let trimmed = adapter.0.trim_start();
+    if !trimmed.starts_with(JSON_LAUNCH_PREFIX) {
+        if strip_env.is_empty() {
+            return adapter;
+        }
         return AdapterCommand(prefix_with_env_unsets(&adapter.0, strip_env));
     }
-    let parsed = serde_json::from_str::<McpServer>(adapter.0.trim_start());
-    let Ok(McpServer::Stdio(mut stdio)) = parsed else {
+    let Some(config) = parse_json_launch(trimmed) else {
         return adapter;
     };
+    // The JSON form has no shell to hold an `/usr/bin/env` prefix, so the
+    // unsets have to be real argv entries. `env`'s own map only *sets* vars;
+    // removing an inherited one still needs `-u`.
     let (spawn_command, spawn_args) = with_env_unsets_argv(
-        std::mem::take(&mut stdio.command),
-        std::mem::take(&mut stdio.args),
+        config.command().to_path_buf(),
+        config.arguments().to_vec(),
         strip_env,
     );
-    stdio.command = spawn_command;
-    stdio.args = spawn_args;
+    let normalized = AcpAgentConfig::new(spawn_command)
+        .args(spawn_args)
+        .envs(config.environment().clone());
     // serde can't fail on this owned value.
-    AdapterCommand(
-        serde_json::to_string(&McpServer::Stdio(stdio))
-            .expect("McpServer::Stdio serializes to JSON"),
-    )
+    AdapterCommand(serde_json::to_string(&normalized).expect("AcpAgentConfig serializes to JSON"))
+}
+
+/// The launch config a JSON adapter command describes, in the SDK's own shape.
+///
+/// Two forms are accepted. [`AcpAgentConfig`] itself (`env` as an object) is
+/// what the SDK emits and parses. The agent-registry `distribution` shape
+/// (`{"type":"stdio","name":..,"env":[{"name":..,"value":..}]}`) is what agent
+/// registries publish and what daruda documents in `[[agents]]`; it is an
+/// external format that does not track the Rust SDK, so daruda owns the
+/// translation rather than pushing the churn onto users' configs.
+///
+/// `None` for a non-stdio transport (HTTP/SSE — no local child spawns there)
+/// and for JSON matching neither form.
+fn parse_json_launch(json: &str) -> Option<AcpAgentConfig> {
+    if let Ok(config) = serde_json::from_str::<AcpAgentConfig>(json) {
+        return Some(config);
+    }
+    match serde_json::from_str::<McpServer>(json) {
+        Ok(McpServer::Stdio(stdio)) => Some(
+            AcpAgentConfig::new(stdio.command)
+                .args(stdio.args)
+                .envs(stdio.env.into_iter().map(|e| (e.name, e.value))),
+        ),
+        _ => None,
+    }
 }
 
 /// `-u NAME` pairs for `strip_env`, in order — [`ENV_BIN`]'s argv form of
@@ -165,7 +201,7 @@ mod tests {
         launch: &LaunchSpec,
         install_root: &Path,
     ) -> AdapterCommand {
-        apply_env_strip(
+        finalize_command(
             runtime.wrap_command(&launch.command, install_root),
             &launch.strip_env,
         )
@@ -176,26 +212,36 @@ mod tests {
         prepare_adapter_command(launch, install_root, &mut |_| {}).expect("no runtime needed")
     }
 
-    /// A JSON stdio config — the self-contained transport shape a user's
-    /// `[[agents]]` entry can supply instead of a bash-style command.
+    /// A JSON config config in the agent-registry `distribution` shape — the
+    /// self-contained form a user's `[[agents]]` entry can supply instead of a
+    /// bash-style command. Deliberately *not* the SDK's own shape: this is the
+    /// external format [`parse_json_launch`] has to keep accepting.
     fn json_stdio(command: &str, args: &[&str]) -> String {
         serde_json::to_string(&McpServer::Stdio(
             McpServerStdio::new("acp-agent", command)
                 .args(args.iter().map(|a| (*a).to_string()).collect())
                 .env(vec![EnvVariable::new("EXISTING", "1")]),
         ))
-        .expect("stdio config serializes")
+        .expect("config config serializes")
     }
 
-    /// The stdio transport a wrapped command parses back into.
-    fn stdio_of(command: &AdapterCommand) -> McpServerStdio {
-        match AcpAgent::from_str(&command.0)
+    /// The same launch in the SDK's own shape (object `env`, no `name`/`type`).
+    fn json_sdk(command: &str, args: &[&str]) -> String {
+        serde_json::to_string(
+            &AcpAgentConfig::new(command)
+                .args(args.iter().map(|a| (*a).to_string()))
+                .env("EXISTING", "1"),
+        )
+        .expect("agent config serializes")
+    }
+
+    /// The launch config a finalized command parses back into — through
+    /// `AcpAgent::from_str`, so every assertion below is pinned to what the SDK
+    /// actually accepts rather than to our own re-parse.
+    fn config_of(command: &AdapterCommand) -> AcpAgentConfig {
+        AcpAgent::from_str(&command.0)
             .expect("wrapped command parses")
-            .into_server()
-        {
-            McpServer::Stdio(stdio) => stdio,
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+            .into_config()
     }
 
     #[test]
@@ -219,14 +265,14 @@ mod tests {
         );
         assert!(wrapped.0.ends_with(&cmd), "{}", wrapped.0);
 
-        let stdio = stdio_of(&wrapped);
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/env"));
+        let config = config_of(&wrapped);
+        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
         assert_eq!(
-            &stdio.args[..4],
+            &config.arguments()[..4],
             ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDE_CODE_OAUTH_TOKEN"]
         );
         assert_eq!(
-            &stdio.args[stdio.args.len() - 3..],
+            &config.arguments()[config.arguments().len() - 3..],
             ["npx", "-y", ADAPTER_NPM_PACKAGE]
         );
     }
@@ -261,10 +307,10 @@ mod tests {
             &install_root,
         );
 
-        let stdio = stdio_of(&command);
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/env"));
+        let config = config_of(&command);
+        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
         assert_eq!(
-            stdio.args,
+            config.arguments(),
             vec![
                 "-u".to_string(),
                 "ANTHROPIC_API_KEY".to_string(),
@@ -281,9 +327,14 @@ mod tests {
         );
         // The env list is applied by the downstream spawner via `Command::env`
         // on the `env` process and inherited by the launcher — unaffected.
-        assert!(stdio.env.iter().any(|e| e.name == "PATH"));
-        assert!(stdio.env.iter().any(|e| e.name == "npm_config_cache"
-            && e.value == install_root.join("npx-cache").to_string_lossy()));
+        assert!(config.environment().contains_key("PATH"));
+        assert_eq!(
+            config
+                .environment()
+                .get("npm_config_cache")
+                .map(String::as_str),
+            Some(&*install_root.join("npx-cache").to_string_lossy())
+        );
     }
 
     #[test]
@@ -300,9 +351,9 @@ mod tests {
 
         assert!(!command.0.contains("/usr/bin/env"), "{}", command.0);
         assert!(!command.0.contains("\"-u\""), "{}", command.0);
-        let stdio = stdio_of(&command);
-        assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
-        assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
+        let config = config_of(&command);
+        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
     }
 
     #[test]
@@ -336,10 +387,10 @@ mod tests {
              /usr/local/bin/claude-agent-acp --acp"
         );
 
-        let stdio = stdio_of(&prepared);
-        assert_eq!(stdio.command, PathBuf::from(ENV_BIN));
+        let config = config_of(&prepared);
+        assert_eq!(config.command(), PathBuf::from(ENV_BIN));
         assert_eq!(
-            stdio.args,
+            config.arguments(),
             [
                 "-u",
                 "ANTHROPIC_API_KEY",
@@ -357,11 +408,11 @@ mod tests {
         // shell to hold an `/usr/bin/env` prefix, so the unsets become argv.
         let command = json_stdio("/usr/local/bin/claude-agent-acp", &["--acp"]);
         let launch = spec(&command, &["ANTHROPIC_API_KEY"]);
-        let stdio = stdio_of(&prepared(&launch, &test_install_root()));
+        let config = config_of(&prepared(&launch, &test_install_root()));
 
-        assert_eq!(stdio.command, PathBuf::from(ENV_BIN));
+        assert_eq!(config.command(), PathBuf::from(ENV_BIN));
         assert_eq!(
-            stdio.args,
+            config.arguments(),
             [
                 "-u",
                 "ANTHROPIC_API_KEY",
@@ -370,11 +421,39 @@ mod tests {
             ]
         );
         // The config's own env list is untouched — only the argv is rewritten.
-        assert!(
-            stdio
-                .env
-                .iter()
-                .any(|e| e.name == "EXISTING" && e.value == "1")
+        assert_eq!(
+            config.environment().get("EXISTING").map(String::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn both_accepted_json_shapes_normalize_to_the_same_launch() {
+        // The registry `distribution` shape and the SDK's own shape describe
+        // the same launch, so they must finalize identically — this is what
+        // keeps an existing `[[agents]]` JSON config working under SDK 2.0,
+        // whose `from_str` accepts only the latter.
+        let args = ["--acp"];
+        let root = test_install_root();
+        let registry = prepared(
+            &plain(&json_stdio("/usr/local/bin/claude-agent-acp", &args)),
+            &root,
+        );
+        let sdk = prepared(
+            &plain(&json_sdk("/usr/local/bin/claude-agent-acp", &args)),
+            &root,
+        );
+        assert_eq!(registry.0, sdk.0);
+
+        let config = config_of(&registry);
+        assert_eq!(
+            config.command(),
+            Path::new("/usr/local/bin/claude-agent-acp")
+        );
+        assert_eq!(config.arguments(), ["--acp"]);
+        assert_eq!(
+            config.environment().get("EXISTING").map(String::as_str),
+            Some("1")
         );
     }
 
@@ -386,7 +465,7 @@ mod tests {
         assert_eq!(prepared(&launch, &test_install_root()).0, command);
     }
 
-    /// Every shape a launch can arrive at [`apply_env_strip`] in: both
+    /// Every shape a launch can arrive at [`finalize_command`] in: both
     /// runtimes' node rewrites, plus the no-Node pass-through in its bash and
     /// JSON forms. Structural coverage for "the strip is applied once, after
     /// runtime selection, whatever the branch produced".
@@ -411,26 +490,26 @@ mod tests {
     fn the_strip_reaches_every_shape_a_branch_can_produce() {
         let strip = ["ANTHROPIC_API_KEY".to_string()];
         for produced in every_produced_shape() {
-            let stripped = apply_env_strip(produced, &strip);
-            let stdio = stdio_of(&stripped);
+            let stripped = finalize_command(produced, &strip);
+            let config = config_of(&stripped);
             assert_eq!(
-                stdio.command,
+                config.command(),
                 PathBuf::from(ENV_BIN),
                 "unstripped launch: {}",
                 stripped.0
             );
-            assert_eq!(&stdio.args[..2], ["-u", "ANTHROPIC_API_KEY"]);
+            assert_eq!(&config.arguments()[..2], ["-u", "ANTHROPIC_API_KEY"]);
         }
     }
 
     /// Shell probe that exits 0 only when `ANTHROPIC_API_KEY` is absent.
     const STRIP_PROBE: &str = r#"/bin/sh -c 'test -z "${ANTHROPIC_API_KEY+set}"'"#;
 
-    /// Run `stdio` for real with `ANTHROPIC_API_KEY` set on the child, and
+    /// Run `config` for real with `ANTHROPIC_API_KEY` set on the child, and
     /// report whether it exited 0 — i.e. whether the var was removed.
-    fn probe_sees_no_key(stdio: &McpServerStdio) -> bool {
-        std::process::Command::new(&stdio.command)
-            .args(&stdio.args)
+    fn probe_sees_no_key(config: &AcpAgentConfig) -> bool {
+        std::process::Command::new(config.command())
+            .args(config.arguments())
             .env("ANTHROPIC_API_KEY", "leaked")
             .status()
             .expect("probe spawns")
@@ -447,25 +526,49 @@ mod tests {
 
         // Bash-string shape, with a leading assignment the `-u` must precede.
         let bash = spec(&format!("KEEP=1 {STRIP_PROBE}"), &strip);
-        assert!(probe_sees_no_key(&stdio_of(&prepared(&bash, &root))));
+        assert!(probe_sees_no_key(&config_of(&prepared(&bash, &root))));
 
-        // JSON stdio shape — the unsets are argv entries, not a shell prefix.
+        // JSON config shape — the unsets are argv entries, not a shell prefix.
         let probe_args = ["-c", r#"test -z "${ANTHROPIC_API_KEY+set}""#];
         let json = spec(&json_stdio("/bin/sh", &probe_args), &strip);
-        assert!(probe_sees_no_key(&stdio_of(&prepared(&json, &root))));
+        assert!(probe_sees_no_key(&config_of(&prepared(&json, &root))));
 
         // Control: without a strip the probe really does see the var, so the
         // two assertions above are testing the unsets and not a dud probe.
         let unstripped = spec(&json_stdio("/bin/sh", &probe_args), &[]);
-        assert!(!probe_sees_no_key(&stdio_of(&prepared(&unstripped, &root))));
+        assert!(!probe_sees_no_key(&config_of(&prepared(
+            &unstripped,
+            &root
+        ))));
     }
 
     #[test]
-    fn an_empty_strip_is_byte_identical_on_every_shape() {
+    fn an_empty_strip_is_byte_identical_on_every_bash_shape() {
         for produced in every_produced_shape() {
+            if produced.0.trim_start().starts_with(JSON_LAUNCH_PREFIX) {
+                continue;
+            }
             let before = produced.0.clone();
-            assert_eq!(apply_env_strip(produced, &[]).0, before);
+            assert_eq!(finalize_command(produced, &[]).0, before);
         }
+    }
+
+    #[test]
+    fn an_empty_strip_still_normalizes_a_json_shape() {
+        // The one deliberate non-identity: SDK 2.0's `from_str` rejects the
+        // registry shape outright, so it is rewritten even with nothing to
+        // strip. What must survive the rewrite is the launch it describes.
+        let registry = AdapterCommand(json_stdio("/usr/local/bin/claude-agent-acp", &["--acp"]));
+        let config = config_of(&finalize_command(registry, &[]));
+        assert_eq!(
+            config.command(),
+            Path::new("/usr/local/bin/claude-agent-acp")
+        );
+        assert_eq!(config.arguments(), ["--acp"]);
+        assert_eq!(
+            config.environment().get("EXISTING").map(String::as_str),
+            Some("1")
+        );
     }
 
     #[test]
@@ -475,21 +578,21 @@ mod tests {
             &["ANTHROPIC_API_KEY"],
         );
         let wrapped = wrap_and_strip(&NodeRuntime::System, &launch, &test_install_root());
-        let stdio = stdio_of(&wrapped);
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/env"));
+        let config = config_of(&wrapped);
+        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
 
-        let unset_at = stdio
-            .args
+        let unset_at = config
+            .arguments()
             .iter()
             .position(|a| a == "ANTHROPIC_API_KEY")
             .expect("strip var present");
-        let own_at = stdio
-            .args
+        let own_at = config
+            .arguments()
             .iter()
             .position(|a| a == "AUGMENT_DISABLE_AUTO_UPDATE=1")
             .expect("the command's own assignment survives");
         assert!(unset_at < own_at, "`-u` must precede every assignment");
-        assert!(stdio.args.iter().any(|a| a == "npx"));
+        assert!(config.arguments().iter().any(|a| a == "npx"));
     }
 
     #[test]
@@ -507,10 +610,10 @@ mod tests {
             &test_install_root(),
         );
 
-        let stdio = stdio_of(&command);
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/env"));
+        let config = config_of(&command);
+        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
         assert_eq!(
-            stdio.args,
+            config.arguments(),
             vec![
                 "-u".to_string(),
                 "ANTHROPIC_API_KEY".to_string(),
@@ -525,12 +628,13 @@ mod tests {
             ]
         );
         // The command's own assignment stays in the env list, not the argv.
-        assert!(
-            stdio
-                .env
-                .iter()
-                .any(|e| e.name == "AUGMENT_DISABLE_AUTO_UPDATE" && e.value == "1")
+        assert_eq!(
+            config
+                .environment()
+                .get("AUGMENT_DISABLE_AUTO_UPDATE")
+                .map(String::as_str),
+            Some("1")
         );
-        assert!(stdio.env.iter().any(|e| e.name == "PATH"));
+        assert!(config.environment().contains_key("PATH"));
     }
 }

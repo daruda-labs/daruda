@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
+use agent_client_protocol::AcpAgentConfig;
 use semver::Version;
 use sha2::{Digest, Sha256};
 
@@ -202,30 +202,26 @@ impl NodeRuntime {
                 let abs_launcher = bin_dir.join(&launcher);
                 let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
                 let path = prepend_to_path(&bin_dir);
-                let mut env = env_assignments
-                    .into_iter()
-                    .map(|(name, value)| EnvVariable::new(name, value))
-                    .collect::<Vec<_>>();
-                env.push(EnvVariable::new("PATH", path));
+                let mut config = AcpAgentConfig::new(abs_launcher)
+                    .args(args)
+                    .envs(env_assignments)
+                    .env("PATH", path);
                 // Skipped when the command's own env prefix already sets
                 // `npm_config_cache` — respect that explicit override rather
-                // than silently discard it (the env list is applied via
-                // sequential last-write-wins `Command::env` calls downstream,
-                // so pushing ours unconditionally here would win instead).
+                // than silently discard it, since setting ours here would
+                // overwrite the entry that prefix already put in the map.
                 if !has_cache_override {
-                    env.push(EnvVariable::new(
+                    config = config.env(
                         "npm_config_cache",
                         npx_cache_dir(install_root).to_string_lossy().into_owned(),
-                    ));
+                    );
                 }
-                let stdio = McpServerStdio::new("acp-agent", abs_launcher)
-                    .args(args)
-                    .env(env);
-                // `AcpAgent::from_str` parses a leading `{` as a JSON `McpServer`,
-                // so serializing the schema type gives a forward-compatible,
-                // shell-safe command. serde can't fail on this owned value.
-                let json = serde_json::to_string(&McpServer::Stdio(stdio))
-                    .expect("McpServer::Stdio serializes to JSON");
+                // `AcpAgent::from_str` parses a leading `{` as a JSON
+                // `AcpAgentConfig`, so serializing the SDK's own launch type
+                // gives a shell-safe command that needs no re-translation
+                // downstream. serde can't fail on this owned value.
+                let json =
+                    serde_json::to_string(&config).expect("AcpAgentConfig serializes to JSON");
                 AdapterCommand(json)
             }
             NodeRuntime::Managed { .. } => AdapterCommand(command.to_string()),
@@ -669,9 +665,9 @@ mod tests {
         assert!(!command_needs_node("/usr/local/bin/codex-acp"));
         assert!(!command_needs_node("A=1 /usr/local/bin/codex-acp"));
         assert!(!command_needs_node("A=1"));
-        // A JSON stdio config is a self-contained transport.
+        // A JSON config config is a self-contained transport.
         assert!(!command_needs_node(
-            r#"{"type":"stdio","command":"codex","args":[]}"#
+            r#"{"type":"config","command":"codex","args":[]}"#
         ));
         // Empty string needs nothing.
         assert!(!command_needs_node(""));
@@ -798,19 +794,17 @@ mod tests {
         let wrapped = NodeRuntime::System.wrap_command(&cmd, &install_root);
 
         let agent = AcpAgent::from_str(&wrapped.0).expect("wrapped command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, PathBuf::from("npx"));
-                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
-                let cache = stdio
-                    .env
-                    .iter()
-                    .find(|e| e.name == "npm_config_cache")
-                    .expect("npm_config_cache env present");
-                assert_eq!(cache.value, npx_cache_dir(&install_root).to_string_lossy());
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), PathBuf::from("npx"));
+        assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
+        let cache = config
+            .environment()
+            .get("npm_config_cache")
+            .expect("npm_config_cache env present");
+        assert_eq!(
+            cache.as_str(),
+            npx_cache_dir(&install_root).to_string_lossy()
+        );
     }
 
     #[test]
@@ -830,22 +824,17 @@ mod tests {
 
         let wrapped = NodeRuntime::System.wrap_command(&cmd, &install_root);
         let agent = AcpAgent::from_str(&wrapped.0).expect("wrapped command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, PathBuf::from("npx"));
-                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
-                let config_dir = stdio
-                    .env
-                    .iter()
-                    .find(|e| e.name == "CLAUDE_CONFIG_DIR")
-                    .expect("CLAUDE_CONFIG_DIR env present");
-                assert_eq!(
-                    config_dir.value,
-                    "/Users/x/Library/Application Support/daruda/acc/alice"
-                );
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), PathBuf::from("npx"));
+        assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
+        let config_dir = config
+            .environment()
+            .get("CLAUDE_CONFIG_DIR")
+            .expect("CLAUDE_CONFIG_DIR env present");
+        assert_eq!(
+            config_dir,
+            "/Users/x/Library/Application Support/daruda/acc/alice"
+        );
     }
 
     #[test]
@@ -871,27 +860,17 @@ mod tests {
         // The command must be JSON (leading `{`) so no shell splitting happens.
         assert!(command.0.trim_start().starts_with('{'), "{}", command.0);
 
-        // And it must parse back into a stdio transport with the absolute npx
+        // And it must parse back into a config transport with the absolute npx
         // path, the adapter package args, and a PATH env prepending the bin dir.
         let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
-                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
-                let path = stdio
-                    .env
-                    .iter()
-                    .find(|e| e.name == "PATH")
-                    .expect("PATH env present");
-                assert!(
-                    path.value
-                        .starts_with(&node_dir.join("bin").to_string_lossy().into_owned()),
-                    "PATH must start with the managed bin dir, got {}",
-                    path.value
-                );
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
+        let path = config.environment().get("PATH").expect("PATH env present");
+        assert!(
+            path.starts_with(&node_dir.join("bin").to_string_lossy().into_owned()),
+            "PATH must start with the managed bin dir, got {path}"
+        );
     }
 
     #[test]
@@ -905,20 +884,15 @@ mod tests {
         let install_root = test_install_root();
         let command = NodeRuntime::Managed { node_dir }.wrap_command(&cmd, &install_root);
         let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                let cache = stdio
-                    .env
-                    .iter()
-                    .find(|e| e.name == "npm_config_cache")
-                    .expect("npm_config_cache env present");
-                assert_eq!(
-                    cache.value,
-                    install_root.join("npx-cache").to_string_lossy()
-                );
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        let cache = config
+            .environment()
+            .get("npm_config_cache")
+            .expect("npm_config_cache env present");
+        assert_eq!(
+            cache.as_str(),
+            install_root.join("npx-cache").to_string_lossy()
+        );
     }
 
     #[test]
@@ -929,22 +903,18 @@ mod tests {
             &test_install_root(),
         );
         let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                let cache_entries = stdio
-                    .env
-                    .iter()
-                    .filter(|e| e.name == "npm_config_cache")
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    cache_entries.len(),
-                    1,
-                    "must not emit a second, app-owned npm_config_cache alongside the caller's"
-                );
-                assert_eq!(cache_entries[0].value, "/custom/cache");
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        // The env is a map, so a duplicate entry is unrepresentable; what the
+        // `has_cache_override` guard still buys is that the app-owned value
+        // does not *overwrite* the caller's.
+        assert_eq!(
+            config
+                .environment()
+                .get("npm_config_cache")
+                .map(String::as_str),
+            Some("/custom/cache"),
+            "the caller's explicit npm_config_cache must survive"
+        );
     }
 
     #[test]
@@ -955,13 +925,9 @@ mod tests {
         }
         .wrap_command("node /path/adapter.js --flag", &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("managed node command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, node_dir.join("bin").join("node"));
-                assert_eq!(stdio.args, vec!["/path/adapter.js", "--flag"]);
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), node_dir.join("bin").join("node"));
+        assert_eq!(config.arguments(), vec!["/path/adapter.js", "--flag"]);
     }
 
     #[test]
@@ -975,27 +941,24 @@ mod tests {
             &test_install_root(),
         );
         let agent = AcpAgent::from_str(&command.0).expect("managed env command parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
-                assert_eq!(
-                    stdio.args,
-                    vec!["-y", "@augmentcode/auggie@0.32.0", "--acp"]
-                );
-                assert!(
-                    stdio
-                        .env
-                        .iter()
-                        .any(|e| { e.name == "AUGMENT_DISABLE_AUTO_UPDATE" && e.value == "1" }),
-                    "registry env var must be preserved"
-                );
-                assert!(
-                    stdio.env.iter().any(|e| e.name == "PATH"),
-                    "managed Node PATH must still be injected"
-                );
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(
+            config.arguments(),
+            vec!["-y", "@augmentcode/auggie@0.32.0", "--acp"]
+        );
+        assert_eq!(
+            config
+                .environment()
+                .get("AUGMENT_DISABLE_AUTO_UPDATE")
+                .map(String::as_str),
+            Some("1"),
+            "registry env var must be preserved"
+        );
+        assert!(
+            config.environment().contains_key("PATH"),
+            "managed Node PATH must still be injected"
+        );
     }
 
     #[test]
@@ -1023,12 +986,8 @@ mod tests {
         }
         .wrap_command(&cmd, &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("command with spaces parses");
-        match agent.into_server() {
-            McpServer::Stdio(stdio) => {
-                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
-            }
-            other => panic!("expected stdio transport, got {other:?}"),
-        }
+        let config = agent.into_config();
+        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
     }
 
     #[test]
