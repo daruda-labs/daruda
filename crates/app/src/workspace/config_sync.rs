@@ -51,6 +51,10 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// Ports scan pump under `read_with` without locking the full
     /// `Config`, same shape as `terminal_redraw_interval`.
     pub ports_poll_interval: Duration,
+
+    /// Mirror of `daruda_config::AgentConfig::hidden_config_option_descriptions`.
+    /// Filters which advertised session config options get an input-dock chip.
+    pub hidden_config_option_descriptions: Vec<String>,
 }
 
 impl ConfigMirrors {
@@ -65,6 +69,10 @@ impl ConfigMirrors {
             ui_preset: config.theme.ui_preset.clone(),
             status_bar: config.status_bar.clone(),
             ports_poll_interval: config.ports.interval(),
+            hidden_config_option_descriptions: config
+                .agent
+                .hidden_config_option_descriptions
+                .clone(),
         }
     }
 }

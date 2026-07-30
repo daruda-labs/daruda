@@ -207,15 +207,21 @@ impl Workspace {
         // allowlist of known categories: whatever a given agent advertises
         // (Model, ThoughtLevel, ModelConfig, a future protocol category, …)
         // rides the same generic `config_chip` UI without daruda needing to
-        // special-case it per agent. `None` when the focused pane is not an
-        // agent pane or advertises no such options.
+        // special-case it per agent — the only trim is the user's own
+        // description-matched hide list (see `config_options_for_chips`).
+        // `None` when the focused pane is not an agent pane or no option
+        // survives the trim.
         let agent_config_options = self
             .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .map(|view| view.read(cx).session_config.config_options.clone())
+            .map(|view| {
+                view.read(cx)
+                    .session_config
+                    .config_options_for_chips(&self.mirrors.hidden_config_option_descriptions)
+            })
             .filter(|opts| !opts.is_empty())
             .map(|opts| (focused_id, opts));
         // Queued prompts of the focused agent pane, projected for the

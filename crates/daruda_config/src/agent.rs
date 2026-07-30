@@ -630,6 +630,34 @@ pub struct AgentConfig {
     /// then clips and scrolls. Clamped to
     /// [`INPUT_MAX_ROWS_MIN`]..=[`INPUT_MAX_ROWS_MAX`] at load time.
     pub input_max_rows: u8,
+    /// Session config options to hide from the input-dock chip row, matched by
+    /// the option's advertised `description` (exact string). Presentation-only:
+    /// the option stays in the session state and the agent can still change it.
+    ///
+    /// Exists because the protocol carries no structured "unusable" signal: an
+    /// adapter that knows why an option can't be used folds the reason into the
+    /// description text, and one that doesn't advertises the same description
+    /// as the working state. Matching adapter-authored text is inherently
+    /// loose: when an adapter rewords, the entry stops matching and the chip
+    /// simply shows again.
+    ///
+    /// Defaults to [`FAST_MODE_PLAIN_DESCRIPTION`]; set
+    /// `hidden_config_option_descriptions = []` to show every advertised option.
+    pub hidden_config_option_descriptions: Vec<String>,
+}
+
+/// The Claude adapter's Fast mode description in its reason-less form — the
+/// text it advertises both while the toggle works and while the CLI declines
+/// it without a stated reason. Hidden by default because the toggle does not
+/// stick through the ACP adapter path (the CLI reverts it on its next
+/// `fast_mode_state` report), leaving a chip that silently flips back. The
+/// reason-carrying variant ("… — not available on the free plan" etc.) is a
+/// different string, so an adapter that can explain itself keeps its chip.
+pub const FAST_MODE_PLAIN_DESCRIPTION: &str = "Faster responses on supported models";
+
+/// Default for [`AgentConfig::hidden_config_option_descriptions`].
+fn default_hidden_config_option_descriptions() -> Vec<String> {
+    vec![FAST_MODE_PLAIN_DESCRIPTION.to_string()]
 }
 
 /// Minimum allowed value for `AgentConfig::input_max_rows`.
@@ -645,6 +673,7 @@ impl Default for AgentConfig {
             default_permission_mode: DefaultPermissionMode::default(),
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
+            hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }
 }
@@ -839,6 +868,30 @@ mod tests {
         let omitted: AgentConfig =
             toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
         assert!(!omitted.use_modifier_to_send);
+    }
+
+    #[test]
+    fn hidden_config_option_descriptions_defaults_to_fast_mode_and_is_clearable() {
+        // Shipped default: Claude's Fast mode chip is hidden for everyone —
+        // the toggle does not stick through the ACP adapter path, so by
+        // default the chip would only silently flip back.
+        assert_eq!(
+            AgentConfig::default().hidden_config_option_descriptions,
+            vec![FAST_MODE_PLAIN_DESCRIPTION.to_string()]
+        );
+
+        // Omitting the key keeps the default…
+        let omitted: AgentConfig =
+            toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
+        assert_eq!(
+            omitted.hidden_config_option_descriptions,
+            vec![FAST_MODE_PLAIN_DESCRIPTION.to_string()]
+        );
+
+        // …while an explicit empty list opts back into showing everything.
+        let cleared: AgentConfig =
+            toml::from_str("hidden_config_option_descriptions = []").expect("deserialize");
+        assert!(cleared.hidden_config_option_descriptions.is_empty());
     }
 
     #[test]

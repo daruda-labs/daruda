@@ -19,6 +19,9 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
         IconColorMode::Color => IconColorMode::Monochrome,
         IconColorMode::Monochrome => IconColorMode::Color,
     };
+    // A value distinct from the shipped default, so the assertion proves the
+    // mirror synced rather than matching the baseline by accident.
+    new_config.agent.hidden_config_option_descriptions = vec!["mirror-sync-probe".to_string()];
 
     ws.update(cx, |ws, cx| ws.apply_config(&new_config, cx));
 
@@ -42,6 +45,10 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
         assert_eq!(
             ws.mirrors.files_icon_color_mode,
             new_config.left_dock.file_icon_color_mode
+        );
+        assert_eq!(
+            ws.mirrors.hidden_config_option_descriptions,
+            new_config.agent.hidden_config_option_descriptions
         );
     });
 }
