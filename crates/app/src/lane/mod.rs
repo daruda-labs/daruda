@@ -43,7 +43,14 @@ pub struct Lane {
     /// Path on a *different* machine this lane's session connects to
     /// (e.g. an SSH-reachable VM). `None` means the lane runs against
     /// the local filesystem. Persisted.
+    ///
+    /// Legacy — names a path without its host. Superseded by
+    /// [`Self::session_host`] and only consulted while that is `None`.
     pub remote_cwd: Option<String>,
+    /// Where this lane's agent session attaches. `None` = never answered
+    /// on this lane, which is what keeps the legacy `remote_cwd` pair
+    /// alive; `Some(Local)` explicitly retires it. Persisted.
+    pub session_host: Option<daruda_store::project::LaneSessionHost>,
     /// Runtime-only. Whether this lane's root directory can be read on
     /// disk. Recomputed from the live filesystem on restore / activate /
     /// failed load; never serialized. Defaults to `Present`.
@@ -68,6 +75,7 @@ impl Lane {
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
             availability: LaneAvailability::Present,
         }
     }
@@ -109,6 +117,7 @@ impl Lane {
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
             availability: LaneAvailability::Present,
         }
     }
@@ -222,6 +231,7 @@ impl Lane {
             base_ref: s.base_ref.clone(),
             description: s.description.clone(),
             remote_cwd: s.remote_cwd.clone(),
+            session_host: s.session_host.clone(),
             // Recomputed from disk by the workspace restore path; the
             // serialized form carries no availability.
             availability: LaneAvailability::Present,
@@ -268,6 +278,7 @@ impl Lane {
             base_ref: self.base_ref.clone(),
             description: self.description.clone(),
             remote_cwd: self.remote_cwd.clone(),
+            session_host: self.session_host.clone(),
             tabs: Vec::new(),
             active_tab_index: 0,
         }
@@ -316,8 +327,22 @@ impl Lane {
     /// Overwrite the remote path this lane's session connects to.
     /// `None` reverts the lane to running against the local
     /// filesystem.
+    ///
+    /// Legacy — new callers set [`Self::set_session_host`], which names
+    /// the host alongside the path.
     pub fn set_remote_cwd(&mut self, remote_cwd: Option<String>) {
         self.remote_cwd = remote_cwd;
+    }
+
+    /// Answer where this lane's agent session attaches. Passing
+    /// `Some(LaneSessionHost::Local)` is the explicit "run it here" that
+    /// retires the legacy `remote_cwd` pair for this lane; `None` puts
+    /// the lane back to never having answered.
+    pub fn set_session_host(
+        &mut self,
+        session_host: Option<daruda_store::project::LaneSessionHost>,
+    ) {
+        self.session_host = session_host;
     }
 
     /// `true` when this lane is git-backed.
@@ -528,6 +553,7 @@ mod tests {
             base_ref: Some("origin/main".into()),
             description: Some("PR #123".into()),
             remote_cwd: Some("/remote/path".into()),
+            session_host: None,
             // Runtime-only — must not survive the round-trip; the
             // assertion below proves it resets to the default.
             availability: LaneAvailability::Missing,
@@ -565,6 +591,48 @@ mod tests {
         assert_eq!(back.remote_cwd, None);
     }
 
+    /// All three variants survive the runtime↔serialized round-trip, and
+    /// the distinction the precedence rule depends on — never answered
+    /// (`None`) vs. explicitly local (`Some(Local)`) — survives with them.
+    #[test]
+    fn session_host_round_trips_every_variant() {
+        use daruda_store::project::LaneSessionHost;
+        let cases = [
+            None,
+            Some(LaneSessionHost::Local),
+            Some(LaneSessionHost::Ssh {
+                target: "buildbox".into(),
+                session_path: "/home/user/project".into(),
+            }),
+            Some(LaneSessionHost::Docker {
+                container: "dev-1".into(),
+                session_path: "/workspace".into(),
+            }),
+        ];
+        for case in cases {
+            let mut w = Lane::default_for_project(0, PathBuf::from("/tmp"));
+            w.set_session_host(case.clone());
+            let back = Lane::from_serialized(&w.to_serialized());
+            assert_eq!(back.session_host, case);
+        }
+    }
+
+    /// A lane saved before this field existed must load as "never
+    /// answered", which is what keeps its legacy `remote_cwd` in play.
+    #[test]
+    fn a_lane_saved_without_a_session_host_loads_as_unanswered() {
+        let json = r#"{
+            "id": 3,
+            "kind": { "type": "default" },
+            "path": "/tmp/lane",
+            "remote_cwd": "/remote/path"
+        }"#;
+        let s: daruda_store::project::SerializedLane =
+            serde_json::from_str(json).expect("legacy lane JSON must still load");
+        assert_eq!(s.session_host, None);
+        assert_eq!(s.remote_cwd, Some("/remote/path".to_string()));
+    }
+
     #[test]
     fn set_remote_cwd_overwrites_and_clears() {
         let mut w = Lane::default_for_project(0, PathBuf::from("/tmp"));
@@ -595,6 +663,7 @@ mod tests {
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
             availability: LaneAvailability::Present,
         };
         let s = w.to_serialized();

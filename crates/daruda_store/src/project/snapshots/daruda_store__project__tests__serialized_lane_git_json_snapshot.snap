@@ -19,5 +19,6 @@ expression: "serde_json::to_string_pretty(&lane).unwrap()"
   "active_tab_index": 0,
   "base_ref": "main",
   "description": "PR #123 review",
-  "remote_cwd": null
+  "remote_cwd": null,
+  "session_host": null
 }

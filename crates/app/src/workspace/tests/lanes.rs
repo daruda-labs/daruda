@@ -1015,6 +1015,7 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
         };
         let project_uuid = ProjectUuid::new();
         let project_state = ProjectState {
@@ -1113,6 +1114,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
         };
         let project_uuid = ProjectUuid::new();
         let project_state = ProjectState {

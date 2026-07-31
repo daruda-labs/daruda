@@ -464,6 +464,7 @@ fn serialized_worktree_display_name_uses_branch_for_git() {
         base_ref: None,
         description: None,
         remote_cwd: None,
+        session_host: None,
     };
     assert_eq!(w.display_name(), "feat/sidebar");
 }
@@ -487,6 +488,7 @@ fn serialized_worktree_display_name_detached_head() {
         base_ref: None,
         description: None,
         remote_cwd: None,
+        session_host: None,
     };
     assert_eq!(w.display_name(), "(detached)");
 }
@@ -934,6 +936,7 @@ fn serialized_lane_git_json_snapshot() {
         base_ref: Some("main".into()),
         description: Some("PR #123 review".into()),
         remote_cwd: None,
+        session_host: None,
     };
     insta::assert_snapshot!(serde_json::to_string_pretty(&lane).unwrap());
 }

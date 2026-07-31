@@ -133,8 +133,66 @@ pub struct SerializedLane {
     /// the local filesystem has no opinion on whether a remote path
     /// exists, so it must not be validated or canonicalized locally.
     /// `None` means the lane runs against the local filesystem.
+    ///
+    /// Legacy: it names a path without naming the host, which lived on
+    /// the agent instead. Superseded by [`Self::session_host`], which
+    /// carries both. Only consulted while `session_host` is `None`.
     #[serde(default)]
     pub remote_cwd: Option<String>,
+    /// Where this lane's agent session attaches. `None` means the user
+    /// has never answered the question on this lane, which is what lets
+    /// the legacy `remote_cwd` + agent-side host pair still apply;
+    /// `Some(LaneSessionHost::Local)` is an explicit "run it here" and
+    /// retires that pair for good.
+    #[serde(default)]
+    pub session_host: Option<LaneSessionHost>,
+}
+
+/// Where a lane's agent session attaches. `Local` runs the adapter
+/// against the lane's own [`SerializedLane::path`]; the other two run it
+/// on another machine, so they carry the path over there — a host with
+/// no path, or a path with no host, cannot be expressed.
+///
+/// Paths are plain `String`, not `PathBuf`: the local filesystem has no
+/// opinion on a path that lives elsewhere, so it must not be validated
+/// or canonicalized here.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LaneSessionHost {
+    #[default]
+    Local,
+    Ssh {
+        /// Host to `ssh` to — an alias from the user's SSH config, or
+        /// `user@host`.
+        target: String,
+        /// Working directory on that host.
+        session_path: String,
+    },
+    Docker {
+        /// Name of an already-running container.
+        container: String,
+        /// Working directory inside that container.
+        session_path: String,
+    },
+}
+
+impl LaneSessionHost {
+    /// Whether the session runs somewhere other than this machine — the
+    /// question every "can this be done locally?" caller is really
+    /// asking (browser OAuth, a local `PATH` probe, a spawned process).
+    pub fn is_remote(&self) -> bool {
+        !matches!(self, LaneSessionHost::Local)
+    }
+
+    /// The working directory the session is rooted at, for a remote
+    /// host. `None` for `Local`, whose directory is the lane's own path.
+    pub fn session_path(&self) -> Option<&str> {
+        match self {
+            LaneSessionHost::Local => None,
+            LaneSessionHost::Ssh { session_path, .. }
+            | LaneSessionHost::Docker { session_path, .. } => Some(session_path),
+        }
+    }
 }
 
 impl SerializedLane {
@@ -154,6 +212,7 @@ impl SerializedLane {
             base_ref: None,
             description: None,
             remote_cwd: None,
+            session_host: None,
         }
     }
 
