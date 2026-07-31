@@ -11,7 +11,7 @@
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 
 use daruda_config::AgentLaunch;
-use daruda_store::project::PaneCwd;
+use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{AppContext as _, Context, Entity, Window};
 use std::path::PathBuf;
 
@@ -83,25 +83,49 @@ enum PaneCwdOutcome {
 }
 
 /// Pure core of [`Workspace::resolve_new_pane_cwd`]: decide `Local` vs.
-/// `Remote` cwd for a fresh pane. Needs-remote + no usable `remote_cwd` →
-/// `Err(())` (nowhere to attach, caller must not connect).
+/// `Remote` cwd for a fresh pane, mirroring what its first connect will
+/// resolve (`resolve_session_command` in `agent_chat_connect_ops.rs`) so a
+/// freshly opened pane's `PaneCwd` — the value the rest of the app reads via
+/// `PaneCwd::as_local`/`into_local` — already agrees with where the session
+/// actually attaches.
+///
+/// The legacy `Raw` + `{{cwd}}` token escape hatch is the one shape that
+/// still needs a non-blank `remote_cwd` up front — `Err(())` (nowhere to
+/// attach, caller must not connect) when it has none, exactly as before this
+/// axis moved to the lane. Every other launch shape (`Ssh`/`Docker`/a
+/// host-agnostic `Raw`) now resolves through `session_host` and always
+/// succeeds — `session_host` grew a session path or it didn't, and either
+/// way there's a valid place to attach (remote path, or the lane's own
+/// local one).
 fn resolve_new_pane_cwd_core(
     launch: &AgentLaunch,
     local_cwd: Option<PathBuf>,
     remote_cwd: Option<String>,
+    session_host: Option<&LaneSessionHost>,
 ) -> Result<Option<PaneCwd>, ()> {
-    if launch.needs_remote_cwd() {
+    if matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN))
+    {
         // A blank remote_cwd has nothing to substitute for the remote path
         // — treat it the same as `None` rather than letting it flow into
         // `AgentLaunch::wrap` and produce a broken `cd  && ...` command.
-        remote_cwd
+        return remote_cwd
             .filter(|cwd| !cwd.trim().is_empty())
             .map(PaneCwd::Remote)
             .map(Some)
-            .ok_or(())
-    } else {
-        Ok(local_cwd.map(PaneCwd::Local))
+            .ok_or(());
     }
+    let Some(local_cwd) = local_cwd else {
+        return Ok(None); // no active lane at all
+    };
+    let host = crate::lane::session_host::effective_session_host(
+        session_host,
+        remote_cwd.as_deref(),
+        launch,
+    );
+    Ok(Some(match host.session_path() {
+        Some(remote_path) => PaneCwd::Remote(remote_path.to_string()),
+        None => PaneCwd::Local(local_cwd),
+    }))
 }
 
 /// Whether to raise the notification: the channel must be enabled, and it is
@@ -324,11 +348,12 @@ impl Workspace {
         agent_id: &str,
         local_cwd: Option<PathBuf>,
         remote_cwd: Option<String>,
+        session_host: Option<&LaneSessionHost>,
     ) -> Result<Option<PaneCwd>, ()> {
         let launch = self
             .agent_launch_for(agent_id)
             .unwrap_or_else(|| AgentLaunch::Raw(String::new()));
-        resolve_new_pane_cwd_core(&launch, local_cwd, remote_cwd)
+        resolve_new_pane_cwd_core(&launch, local_cwd, remote_cwd, session_host)
     }
 
     /// Construct a fresh Agent chat pane for `agent_id`. The single
@@ -340,22 +365,35 @@ impl Workspace {
         agent_id: String,
         local_cwd: Option<PathBuf>,
         remote_cwd: Option<String>,
+        session_host: Option<LaneSessionHost>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
-        let outcome = match self.resolve_new_pane_cwd(&agent_id, local_cwd, remote_cwd) {
+        let outcome = match self.resolve_new_pane_cwd(
+            &agent_id,
+            local_cwd,
+            remote_cwd,
+            session_host.as_ref(),
+        ) {
             Ok(cwd) => PaneCwdOutcome::Ready(cwd),
             Err(()) => PaneCwdOutcome::Blocked(s::agent_chat_no_remote_cwd()),
         };
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
     }
 
-    /// The active lane's local path and remote cwd, or `(None, None)` when there
-    /// is no active lane. Single source both fresh-pane cwd call sites read from.
-    pub(in crate::workspace) fn active_lane_cwds(&self) -> (Option<PathBuf>, Option<String>) {
+    /// The active lane's local path, legacy `remote_cwd`, and `session_host`
+    /// — `(None, None, None)` when there is no active lane. Single source
+    /// every fresh-pane cwd call site reads from.
+    pub(in crate::workspace) fn active_lane_cwds(
+        &self,
+    ) -> (Option<PathBuf>, Option<String>, Option<LaneSessionHost>) {
         match self.active_lane() {
-            Some(lane) => (Some(lane.path.clone()), lane.remote_cwd.clone()),
-            None => (None, None),
+            Some(lane) => (
+                Some(lane.path.clone()),
+                lane.remote_cwd.clone(),
+                lane.session_host.clone(),
+            ),
+            None => (None, None, None),
         }
     }
 
@@ -408,8 +446,15 @@ impl Workspace {
             return;
         }
         self.last_agent_id = Some(agent_id.clone());
-        let (local_cwd, remote_cwd) = self.active_lane_cwds();
-        let pane = self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx);
+        let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
+        let pane = self.create_new_agent_chat_pane(
+            agent_id,
+            local_cwd,
+            remote_cwd,
+            session_host,
+            window,
+            cx,
+        );
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
@@ -539,6 +584,24 @@ impl Workspace {
             .agent_chat_view()
     }
 
+    /// The lane that owns `pane_id`, found by the same cross-lane scan as
+    /// [`Self::agent_chat_view`] (a pane's owning lane never changes, but a
+    /// lane switch only re-points `self.active`, so this must not be
+    /// active-lane-only either). Lets a connect resolve *this* lane's session
+    /// host even for a parked pane, rather than trusting a persisted
+    /// `PaneCwd::Remote` that carries no host of its own — see
+    /// `connect_agent_chat`.
+    pub(in crate::workspace) fn lane_ref_for_pane(
+        &self,
+        pane_id: PaneId,
+    ) -> Option<daruda_store::project::LaneRef> {
+        self.main_area
+            .runtimes
+            .iter()
+            .find(|(_, rt)| rt.panes.iter().any(|p| p.id == pane_id))
+            .map(|(lane_ref, _)| *lane_ref)
+    }
+
     /// The AgentChat pane's `AccountSelection`. Same cross-lane scan as
     /// [`Self::agent_chat_view`], for the same reason. Falls back to
     /// `SystemDefault` when the pane is gone or isn't an AgentChat pane.
@@ -564,7 +627,7 @@ mod tests {
         should_notify_agent_event,
     };
     use daruda_config::{AgentDefinition, AgentLaunch};
-    use daruda_store::project::PaneCwd;
+    use daruda_store::project::{LaneSessionHost, PaneCwd};
     use std::path::PathBuf;
 
     fn ssh_launch() -> AgentLaunch {
@@ -585,16 +648,21 @@ mod tests {
         AgentLaunch::Raw("npx acp-adapter".into())
     }
 
+    fn token_launch() -> AgentLaunch {
+        AgentLaunch::Raw("ssh vm-work \"cd {{cwd}} && run\"".into())
+    }
+
     #[test]
-    fn resolve_new_pane_cwd_remote_launch_with_remote_cwd_is_remote() {
-        // Ssh and Docker must behave identically here: both always need a
-        // remote cwd (`AgentLaunch::needs_remote_cwd` is unconditionally true
-        // for both), regardless of adapter_command contents.
+    fn resolve_new_pane_cwd_legacy_remote_combo_is_remote() {
+        // The legacy pair (agent-side `Ssh`/`Docker` + the lane's own
+        // `remote_cwd`, no `session_host` answered yet) still resolves
+        // remotely — `effective_session_host`'s legacy fallback branch.
         for launch in [ssh_launch(), docker_launch()] {
             let result = resolve_new_pane_cwd_core(
                 &launch,
                 Some(PathBuf::from("/local/lane")),
                 Some("/remote/lane".to_string()),
+                None,
             );
             assert_eq!(
                 result,
@@ -605,34 +673,75 @@ mod tests {
     }
 
     #[test]
-    fn resolve_new_pane_cwd_remote_launch_without_remote_cwd_is_err() {
+    fn resolve_new_pane_cwd_remote_launch_without_remote_cwd_falls_back_to_local() {
+        // No `Err` case for `Ssh`/`Docker` anymore — with nothing on either
+        // axis to name a host, the lane falls back to `Local` rather than
+        // blocking the pane (mirrors `a_half_configured_legacy_pair_stays_local`
+        // in `lane::session_host`).
         for launch in [ssh_launch(), docker_launch()] {
             let result =
-                resolve_new_pane_cwd_core(&launch, Some(PathBuf::from("/local/lane")), None);
-            assert_eq!(result, Err(()), "launch {launch:?} should be Err");
+                resolve_new_pane_cwd_core(&launch, Some(PathBuf::from("/local/lane")), None, None);
+            assert_eq!(
+                result,
+                Ok(Some(PaneCwd::Local(PathBuf::from("/local/lane")))),
+                "launch {launch:?} should fall back to Local"
+            );
         }
     }
 
     #[test]
-    fn resolve_new_pane_cwd_remote_launch_with_blank_remote_cwd_is_err() {
-        // An empty or whitespace-only `remote_cwd` (e.g. a lane whose remote
-        // path field was set to just spaces) has nothing to substitute in —
-        // it must behave exactly like `None`, not flow through as a bogus
-        // `Remote("")`/`Remote("   ")`.
+    fn resolve_new_pane_cwd_remote_launch_with_blank_remote_cwd_falls_back_to_local() {
+        // An empty or whitespace-only legacy `remote_cwd` has nothing to
+        // substitute in — same fallback as no `remote_cwd` at all, not a
+        // bogus `Remote("")`/`Remote("   ")`.
         for launch in [ssh_launch(), docker_launch()] {
             for blank in ["", "   ", "\t"] {
                 let result = resolve_new_pane_cwd_core(
                     &launch,
                     Some(PathBuf::from("/local/lane")),
                     Some(blank.to_string()),
+                    None,
                 );
                 assert_eq!(
                     result,
-                    Err(()),
-                    "launch {launch:?}, blank remote_cwd {blank:?} should be Err"
+                    Ok(Some(PaneCwd::Local(PathBuf::from("/local/lane")))),
+                    "launch {launch:?}, blank remote_cwd {blank:?} should fall back to Local"
                 );
             }
         }
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_session_host_overrides_a_local_agent_to_remote() {
+        // The point of the lane axis: a plain local `Raw` agent still
+        // attaches remotely when the lane itself answered `session_host`.
+        let host = LaneSessionHost::Ssh {
+            target: "vm-work".into(),
+            session_path: "/srv/app".into(),
+        };
+        let result = resolve_new_pane_cwd_core(
+            &local_launch(),
+            Some(PathBuf::from("/local/lane")),
+            None,
+            Some(&host),
+        );
+        assert_eq!(result, Ok(Some(PaneCwd::Remote("/srv/app".to_string()))));
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_session_host_local_wins_over_legacy_remote_cwd() {
+        // `Some(Local)` retires the legacy pair even for a fresh pane —
+        // matches `answering_local_retires_the_legacy_pair`.
+        let result = resolve_new_pane_cwd_core(
+            &ssh_launch(),
+            Some(PathBuf::from("/local/lane")),
+            Some("/legacy/path".to_string()),
+            Some(&LaneSessionHost::Local),
+        );
+        assert_eq!(
+            result,
+            Ok(Some(PaneCwd::Local(PathBuf::from("/local/lane"))))
+        );
     }
 
     #[test]
@@ -641,6 +750,7 @@ mod tests {
             &local_launch(),
             Some(PathBuf::from("/local/lane")),
             Some("/remote/lane".to_string()),
+            None,
         );
         assert_eq!(
             result,
@@ -650,8 +760,41 @@ mod tests {
 
     #[test]
     fn resolve_new_pane_cwd_local_launch_no_local_is_none() {
-        let result = resolve_new_pane_cwd_core(&local_launch(), None, None);
+        let result = resolve_new_pane_cwd_core(&local_launch(), None, None, None);
         assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_token_escape_hatch_still_errs_without_remote_cwd() {
+        // The one shape that keeps blocking: the legacy `{{cwd}}` token is
+        // untouched by the lane session-host axis (see
+        // `session_host::adapter_command`'s doc), so it still needs a
+        // non-blank `remote_cwd` up front, `session_host` notwithstanding.
+        let host = LaneSessionHost::Ssh {
+            target: "other-host".into(),
+            session_path: "/other/path".into(),
+        };
+        let result = resolve_new_pane_cwd_core(
+            &token_launch(),
+            Some(PathBuf::from("/local/lane")),
+            None,
+            Some(&host),
+        );
+        assert_eq!(result, Err(()));
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_token_escape_hatch_uses_its_own_remote_cwd() {
+        let result = resolve_new_pane_cwd_core(
+            &token_launch(),
+            Some(PathBuf::from("/local/lane")),
+            Some("/remote/lane".to_string()),
+            None,
+        );
+        assert_eq!(
+            result,
+            Ok(Some(PaneCwd::Remote("/remote/lane".to_string())))
+        );
     }
 
     #[test]

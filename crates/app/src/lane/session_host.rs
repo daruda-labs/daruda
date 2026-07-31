@@ -7,7 +7,7 @@
 //!
 //! GPUI-free (see the `lane/` module doc).
 
-use daruda_config::AgentLaunch;
+use daruda_config::{AccountEnv, AgentLaunch};
 use daruda_store::project::LaneSessionHost;
 
 /// Which field of a [`LaneSessionHost`] a [`SessionHostError`] is about, so the
@@ -151,6 +151,28 @@ pub fn effective_session_host(
     }
 }
 
+/// The bare adapter command a launch runs, independent of any host embedded
+/// in the launch itself — the input [`wrap`] expects, so the lane's own host
+/// decides where it runs rather than whatever host (if any) `launch` names.
+///
+/// **Not for a `Raw` command carrying the legacy `{{cwd}}` token**
+/// (`launch.needs_remote_cwd()` true via that token): that command is a
+/// hand-written `cd`-then-launch string predating this host axis entirely,
+/// and returning it here would drop the token unexpanded into another `cd`
+/// wrapper. Callers must route that case through [`AgentLaunch::wrap`]
+/// directly — see `connect_agent_chat`.
+pub fn adapter_command(launch: &AgentLaunch) -> &str {
+    match launch {
+        AgentLaunch::Raw(command) => command,
+        AgentLaunch::Ssh {
+            adapter_command, ..
+        }
+        | AgentLaunch::Docker {
+            adapter_command, ..
+        } => adapter_command,
+    }
+}
+
 /// The command to spawn for a session on `host`.
 ///
 /// The `Ssh`/`Docker` strings are byte-identical to what
@@ -169,6 +191,41 @@ pub fn wrap(host: &LaneSessionHost, adapter_command: &str) -> String {
             session_path,
         } => {
             format!("docker exec -i {container} sh -c 'cd \"{session_path}\" && {adapter_command}'")
+        }
+    }
+}
+
+/// Like [`wrap`], but folds `env` in — mirrors [`AgentLaunch::wrap_with_env`]
+/// byte-for-byte for the same `(host, adapter_command, env)` triple: `Local`
+/// gets the same `KEY='value' ` inject-only prefix (no `unset`, so the
+/// launcher token driving Node.js detection stays first on the line);
+/// `Ssh`/`Docker` get the same `unset`/`export` splice right after the `cd
+/// "…" && ` it just assembled.
+pub fn wrap_with_env(host: &LaneSessionHost, adapter_command: &str, env: &AccountEnv) -> String {
+    let base = wrap(host, adapter_command);
+    match host {
+        LaneSessionHost::Local => {
+            let mut prefix = String::new();
+            for (k, v) in &env.inject {
+                prefix.push_str(&format!("{k}='{v}' "));
+            }
+            format!("{prefix}{base}")
+        }
+        LaneSessionHost::Ssh { .. } | LaneSessionHost::Docker { .. } => {
+            let mut env_script = String::new();
+            for s in &env.strip {
+                env_script.push_str(&format!("unset {s}; "));
+            }
+            for (k, v) in &env.inject {
+                env_script.push_str(&format!("export {k}=\"{v}\"; "));
+            }
+            match base.rfind("&& ") {
+                Some(idx) => {
+                    let (head, tail) = base.split_at(idx + 3);
+                    format!("{head}{env_script}{tail}")
+                }
+                None => base,
+            }
         }
     }
 }
@@ -281,6 +338,60 @@ mod tests {
             ),
             format!("docker exec -i dev-1 sh -c 'cd \"/workspace\" && {ADAPTER}'")
         );
+    }
+
+    #[test]
+    fn adapter_command_reads_through_any_launch_shape() {
+        assert_eq!(adapter_command(&AgentLaunch::Raw(ADAPTER.into())), ADAPTER);
+        assert_eq!(
+            adapter_command(&AgentLaunch::Ssh {
+                adapter_command: ADAPTER.into(),
+                host: "old-box".into(),
+            }),
+            ADAPTER
+        );
+        assert_eq!(
+            adapter_command(&AgentLaunch::Docker {
+                adapter_command: ADAPTER.into(),
+                container: "old-box".into(),
+            }),
+            ADAPTER
+        );
+    }
+
+    /// Mirrors `wrap_with_env_prefixes_raw_command` /
+    /// `wrap_with_env_raw_emits_no_unset_flags` in `daruda_config`: a `Local`
+    /// host gets the same inject-only `KEY='value' ` prefix, never an
+    /// `unset`/`/usr/bin/env` — that would hide the launcher token from
+    /// `daruda_acp::node::command_needs_node`.
+    #[test]
+    fn wrap_with_env_local_matches_the_shipped_assembly() {
+        let env = AccountEnv {
+            inject: vec![(
+                "CLAUDE_CONFIG_DIR".into(),
+                "/Users/x/Library/Application Support/daruda/acc/alice".into(),
+            )],
+            strip: vec!["ANTHROPIC_API_KEY"],
+        };
+        let cmd = wrap_with_env(&LaneSessionHost::Local, "npx -y some-acp", &env);
+        assert_eq!(
+            cmd,
+            "CLAUDE_CONFIG_DIR='/Users/x/Library/Application Support/daruda/acc/alice' npx -y some-acp"
+        );
+        assert!(!cmd.contains("unset "));
+        assert!(!cmd.contains("/usr/bin/env"));
+    }
+
+    /// Mirrors `wrap_with_env_ssh_exports_and_unsets` in `daruda_config`.
+    #[test]
+    fn wrap_with_env_ssh_matches_the_shipped_assembly() {
+        let env = AccountEnv {
+            inject: vec![("CLAUDE_CONFIG_DIR".into(), "/remote/acc".into())],
+            strip: vec!["ANTHROPIC_API_KEY"],
+        };
+        let cmd = wrap_with_env(&ssh("vm", "/work"), "npx -y some-acp", &env);
+        assert!(cmd.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
+        assert!(cmd.contains("unset ANTHROPIC_API_KEY"));
     }
 
     #[test]

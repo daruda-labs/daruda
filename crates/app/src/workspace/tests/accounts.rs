@@ -259,6 +259,7 @@ async fn new_panes_seed_the_default_only_for_a_matching_agent(cx: &mut TestAppCo
                     daruda_config::AgentDefinition::claude_default().id,
                     Some(std::env::temp_dir()),
                     None,
+                    None,
                     window,
                     cx,
                 );
@@ -292,6 +293,7 @@ async fn new_panes_without_a_default_start_on_the_system_default(cx: &mut TestAp
                 let agent_chat = ws.create_new_agent_chat_pane(
                     daruda_config::AgentDefinition::claude_default().id,
                     Some(std::env::temp_dir()),
+                    None,
                     None,
                     window,
                     cx,

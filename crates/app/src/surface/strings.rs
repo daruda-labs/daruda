@@ -1366,11 +1366,11 @@ pub fn ctx_edit_description() -> String {
 pub fn ctx_edit_remote_cwd() -> String {
     rust_i18n::t!("ctx.edit_remote_cwd").into_owned()
 }
-/// Hover tooltip on the "Set Remote Path…" context-menu item, spelling
-/// out that the setting only takes effect for panes created *after*
-/// the change — an already-created (but not yet connected) agent-chat
-/// pane keeps whatever cwd was resolved when it was created
-/// (`resolve_new_pane_cwd` runs once, at pane-creation time).
+/// Hover tooltip on the "Set Remote Path…" context-menu item. The lane owns
+/// this setting, so every pane for it — not just ones created afterward —
+/// picks it up on its next connect (`resolve_session_command` re-resolves
+/// the lane's host fresh each time); only a session already live keeps
+/// running on the path it connected with until it reconnects.
 pub fn ctx_edit_remote_cwd_hint() -> String {
     rust_i18n::t!("ctx.edit_remote_cwd_hint").into_owned()
 }
@@ -3089,13 +3089,6 @@ pub fn ctx_new_terminal() -> String {
 }
 pub fn new_agent_chat_named(name: &str) -> String {
     rust_i18n::t!("common.new_agent_chat_named", name = name).into_owned()
-}
-/// Suffix appended to a `+`-menu agent entry's label when the entry is
-/// disabled because the agent's command needs a remote working directory but
-/// the active lane has none set. `PopupMenuItem` has no tooltip API, so the
-/// reason has to live in the label text itself.
-pub fn agent_needs_remote_cwd_suffix() -> String {
-    rust_i18n::t!("common.agent_needs_remote_cwd_suffix").into_owned()
 }
 pub fn ctx_split_terminal_horizontal() -> String {
     rust_i18n::t!("common.split_terminal_horizontal").into_owned()

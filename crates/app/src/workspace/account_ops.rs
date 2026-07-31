@@ -277,15 +277,21 @@ impl Workspace {
                 }
             }
             NewPaneCause::AgentChatBusy | NewPaneCause::AgentChatConversation => {
-                let (local_cwd, remote_cwd) = self.active_lane_cwds();
+                let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
                 let agent_id = self
                     .agent_chat_view(source_pane_id)
                     .map(|v| v.read(cx).agent_id.clone())
                     .unwrap_or_else(|| {
                         resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
                     });
-                let mut new_pane =
-                    self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx);
+                let mut new_pane = self.create_new_agent_chat_pane(
+                    agent_id,
+                    local_cwd,
+                    remote_cwd,
+                    session_host,
+                    window,
+                    cx,
+                );
                 if let Some(content) = new_pane.agent_chat_content_mut() {
                     content.account = selection;
                 }

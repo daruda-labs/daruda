@@ -6,20 +6,82 @@
 //! is one large, self-contained concern with its own failure/retry paths.
 
 use daruda_acp::{LaunchSpec, NodeProgress, connect_agent_session};
-use daruda_config::AgentLaunch;
+use daruda_config::{AccountEnv, AgentLaunch};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::project::PaneCwd;
+use daruda_store::project::{LaneSessionHost, PaneCwd};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::Context;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::agent_chat_ops::{agent_name_for, catalog_default_id, resolve_open_agent_id};
 use super::view::{AgentSessionStatus, RuntimePrepPhase};
+use crate::lane::Lane;
+use crate::lane::session_host;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::PreparedAccount;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+/// Pure core of the `command`/`connect_cwd` resolution inside
+/// [`Workspace::connect_agent_chat`]. `owning_lane` is the pane's owning lane
+/// (`None` when it could not be found — falls back to `Local`, never
+/// promotes to remote; see the design's B′ note on restored remote panes).
+///
+/// `pane_cwd` is consulted only for the legacy `Raw` + `{{cwd}}`-token escape
+/// hatch (`AgentLaunch::CWD_TOKEN`), which predates the lane session-host
+/// axis entirely and is untouched by it — see
+/// [`session_host::adapter_command`]'s doc. Every other launch shape
+/// resolves **both** the command and the connect cwd from the lane, not the
+/// pane's own (possibly stale) persisted `cwd` — a restored remote pane
+/// whose owning lane's host later changes follows the lane on its next
+/// connect, not a frozen snapshot (the "의도된 행동 변화" the design calls
+/// out for `edit_remote_cwd_hint`).
+fn resolve_session_command(
+    launch: &AgentLaunch,
+    owning_lane: Option<&Lane>,
+    pane_cwd: &PaneCwd,
+    env: Option<&AccountEnv>,
+) -> (Result<String, ()>, PathBuf) {
+    let is_raw_token = matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN));
+    if is_raw_token {
+        let (remote_path, connect_cwd) = match pane_cwd {
+            PaneCwd::Remote(remote_path) => {
+                (Some(remote_path.as_str()), PathBuf::from(remote_path))
+            }
+            PaneCwd::Local(path) => (None, path.clone()),
+        };
+        let wrapped = match env {
+            Some(env) => launch.wrap_with_env(remote_path, env),
+            None => launch.wrap(remote_path),
+        };
+        return (wrapped, connect_cwd);
+    }
+
+    let host = owning_lane
+        .map(|lane| lane.effective_session_host(launch))
+        .unwrap_or(LaneSessionHost::Local);
+    let adapter = session_host::adapter_command(launch);
+    let command = match env {
+        Some(env) => session_host::wrap_with_env(&host, adapter, env),
+        None => session_host::wrap(&host, adapter),
+    };
+    let connect_cwd = match host.session_path() {
+        Some(remote_path) => PathBuf::from(remote_path),
+        // `Local`: the lane's own current path when it's known, else the
+        // pane's own last-persisted local value (owning lane not found —
+        // there is no better answer, see the module doc on that gate).
+        None => owning_lane
+            .map(|lane| lane.path.clone())
+            .unwrap_or_else(|| {
+                pane_cwd
+                    .as_local()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default()
+            }),
+    };
+    (Ok(command), connect_cwd)
+}
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
 /// milestones that shouldn't surface a banner (system node found, or a cache
@@ -250,24 +312,17 @@ impl Workspace {
             .agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).last_known_mode_id.clone());
 
-        // A `Remote` cwd's launch needs the lane's remote path assembled in;
-        // `Local` needs none. This is the only place a connect resolves the
-        // command/cwd pair to spawn, so a restored `Remote` pane (which skips
-        // `resolve_new_pane_cwd`) still gets wrapped here on its lazy connect.
-        let (remote_path, connect_cwd): (Option<&str>, PathBuf) = match &cwd {
-            PaneCwd::Remote(remote_path) => {
-                (Some(remote_path.as_str()), PathBuf::from(remote_path))
-            }
-            PaneCwd::Local(path) => (None, path.clone()),
-        };
-        // `wrap` fails only when the pane's fixed `cwd` and the (possibly
-        // just-reconciled) `launch`'s remote-cwd requirement now disagree —
-        // e.g. a stale agent_id got swapped by `resolve_pane_launch` to a
-        // catalog entry with different remote-cwd needs than this pane's
-        // already-resolved `cwd`. A genuine edge case, not a "can't happen":
-        // never spawn a connection with a broken command, park the pane in
-        // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
-        // bail out of this connect attempt entirely.
+        // Resolve the pane's owning lane so remote-ness is decided by the
+        // lane's session host, not by whatever host (if any) `launch` itself
+        // names — a restored `PaneCwd::Remote` pane whose agent has since
+        // become host-agnostic must still attach to *this lane's* host
+        // rather than silently falling back to local. This is the only place
+        // a connect resolves the command/cwd pair to spawn, so a restored
+        // remote pane (which skips `resolve_new_pane_cwd`) is fixed up here
+        // on its lazy connect. See `resolve_session_command`'s doc.
+        let owning_lane = self
+            .lane_ref_for_pane(pane_id)
+            .and_then(|lane_ref| self.lane_for(lane_ref));
         // The pane's account must belong to the auth domain its own agent
         // launches under; an account from another domain is refused here
         // rather than injected under the wrong config-dir env var.
@@ -293,10 +348,21 @@ impl Workspace {
             .build();
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
-        let wrapped = match &prepared {
-            Some(account) => launch.wrap_with_env(remote_path, &account.env),
-            None => launch.wrap(remote_path),
-        };
+        // `wrap` fails only for the legacy `Raw` + `{{cwd}}` token escape
+        // hatch when the pane's fixed `cwd` and the (possibly
+        // just-reconciled) `launch`'s remote-cwd requirement now disagree —
+        // e.g. a stale agent_id got swapped by `resolve_pane_launch` to a
+        // catalog entry with different remote-cwd needs than this pane's
+        // already-resolved `cwd`. A genuine edge case, not a "can't happen":
+        // never spawn a connection with a broken command, park the pane in
+        // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
+        // bail out of this connect attempt entirely.
+        let (wrapped, connect_cwd) = resolve_session_command(
+            &launch,
+            owning_lane,
+            &cwd,
+            prepared.as_ref().map(|account| &account.env),
+        );
         let command = match wrapped {
             Ok(command) => command,
             Err(()) => {
@@ -765,8 +831,160 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{account_strip_env, agent_default_mode};
-    use daruda_config::{AgentDefinition, AgentLaunch};
+    use super::{account_strip_env, agent_default_mode, resolve_session_command};
+    use crate::lane::Lane;
+    use daruda_config::{AccountEnv, AgentDefinition, AgentLaunch};
+    use daruda_store::project::{LaneKind, LaneSessionHost, LaneStatus, PaneCwd};
+    use std::path::PathBuf;
+
+    /// A minimal lane at `path` for `resolve_session_command` tests — only
+    /// `path` / `session_host` / `remote_cwd` matter to that function.
+    fn lane_at(
+        path: &str,
+        session_host: Option<LaneSessionHost>,
+        remote_cwd: Option<&str>,
+    ) -> Lane {
+        Lane {
+            id: 1,
+            kind: LaneKind::Default,
+            path: PathBuf::from(path),
+            name: None,
+            tab_order: 0,
+            is_unread: false,
+            last_activity: 0,
+            status: LaneStatus::Idle,
+            is_main: false,
+            base_ref: None,
+            description: None,
+            remote_cwd: remote_cwd.map(str::to_string),
+            session_host,
+            availability: crate::lane::availability::LaneAvailability::Present,
+        }
+    }
+
+    fn raw(command: &str) -> AgentLaunch {
+        AgentLaunch::Raw(command.to_string())
+    }
+
+    /// The rev2 design's B′ regression: a restored `PaneCwd::Remote` pane
+    /// (a stale path with no host of its own) whose launch is a
+    /// host-agnostic `Raw` command must still attach to its lane's `Ssh`
+    /// host — not silently fall back to local because the launch no longer
+    /// names a host itself.
+    #[test]
+    fn restored_remote_pane_follows_the_lanes_ssh_host_not_a_local_fallback() {
+        let lane = lane_at(
+            "/local/checkout",
+            Some(LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+            }),
+            None,
+        );
+        let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
+        let (command, connect_cwd) =
+            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &stale_cwd, None);
+        assert_eq!(
+            command,
+            Ok("ssh vm-work sh -c 'cd \"/srv/app\" && npx acp-adapter'".to_string())
+        );
+        assert_eq!(
+            connect_cwd,
+            PathBuf::from("/srv/app"),
+            "connect cwd follows the lane's current session path, not the pane's stale one"
+        );
+    }
+
+    /// The other half of B′: the lane answering `Local` (explicitly retiring
+    /// a prior remote setup) must also override a stale `PaneCwd::Remote`.
+    #[test]
+    fn restored_remote_pane_follows_the_lane_back_to_local() {
+        let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
+        let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
+        let (command, connect_cwd) =
+            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &stale_cwd, None);
+        assert_eq!(command, Ok("npx acp-adapter".to_string()));
+        assert_eq!(connect_cwd, PathBuf::from("/local/checkout"));
+    }
+
+    /// Owning lane not found (pane outlived it) — falls back to local,
+    /// never promoted to remote off a launch that names no host of its own.
+    #[test]
+    fn missing_owning_lane_falls_back_to_local_never_promotes_to_remote() {
+        let local_cwd = PaneCwd::Local(PathBuf::from("/pane/own/local/path"));
+        let (command, connect_cwd) =
+            resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None);
+        assert_eq!(command, Ok("npx acp-adapter".to_string()));
+        assert_eq!(connect_cwd, PathBuf::from("/pane/own/local/path"));
+    }
+
+    /// The legacy combo (lane never answered `session_host`, agent-side
+    /// `Ssh`/`Docker` + `remote_cwd`) must keep assembling remotely, and the
+    /// assembled string must stay byte-identical to what `AgentLaunch::wrap`
+    /// alone produced before this axis moved to the lane.
+    #[test]
+    fn legacy_combo_still_assembles_remotely_byte_identical() {
+        let lane = lane_at("/local/checkout", None, Some("/srv/legacy"));
+        let launch = AgentLaunch::Ssh {
+            adapter_command: "npx acp-adapter".into(),
+            host: "old-box".into(),
+        };
+        let cwd = PaneCwd::Remote("/srv/legacy".into());
+        let (command, connect_cwd) = resolve_session_command(&launch, Some(&lane), &cwd, None);
+        assert_eq!(
+            command,
+            launch.wrap(Some("/srv/legacy")),
+            "must match AgentLaunch::wrap's own assembly for the same inputs"
+        );
+        assert_eq!(connect_cwd, PathBuf::from("/srv/legacy"));
+    }
+
+    /// The legacy `Raw` + `{{cwd}}` token escape hatch predates the lane
+    /// session-host axis and must be untouched by it: even when the lane has
+    /// its own `session_host` set to something else, the token path keeps
+    /// resolving purely from the pane's own persisted `cwd`, exactly as
+    /// `AgentLaunch::wrap` already did.
+    #[test]
+    fn raw_token_escape_hatch_ignores_the_lanes_session_host() {
+        let lane = lane_at(
+            "/local/checkout",
+            Some(LaneSessionHost::Ssh {
+                target: "other-host".into(),
+                session_path: "/other/path".into(),
+            }),
+            None,
+        );
+        let launch = raw("ssh vm-work \"cd {{cwd}} && run\"");
+        let cwd = PaneCwd::Remote("/home/user/project".into());
+        let (command, connect_cwd) = resolve_session_command(&launch, Some(&lane), &cwd, None);
+        assert_eq!(
+            command,
+            Ok("ssh vm-work \"cd /home/user/project && run\"".to_string())
+        );
+        assert_eq!(connect_cwd, PathBuf::from("/home/user/project"));
+    }
+
+    #[test]
+    fn env_is_folded_in_for_the_lane_resolved_path() {
+        let lane = lane_at(
+            "/local/checkout",
+            Some(LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+            }),
+            None,
+        );
+        let env = AccountEnv {
+            inject: vec![("CLAUDE_CONFIG_DIR".into(), "/remote/acc".into())],
+            strip: vec!["ANTHROPIC_API_KEY"],
+        };
+        let cwd = PaneCwd::Local(PathBuf::from("/unused"));
+        let (command, _) =
+            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &cwd, Some(&env));
+        let command = command.unwrap();
+        assert!(command.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
+        assert!(command.contains("unset ANTHROPIC_API_KEY"));
+    }
 
     #[test]
     fn account_strip_env_carries_the_recipes_auth_overrides() {

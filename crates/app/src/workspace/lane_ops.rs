@@ -328,12 +328,20 @@ impl Workspace {
             }
             TaskAgentSurface::AgentChat => {
                 // No source pane (new lane), so open under the
-                // session-sticky default. A brand-new lane has no
-                // `remote_cwd`, so an agent whose command needs `{{cwd}}`
-                // parks in the "no remote path set" error rather than
-                // connecting.
+                // session-sticky default. A brand-new lane has neither a
+                // legacy `remote_cwd` nor a `session_host` yet, so an agent
+                // whose command needs the legacy `{{cwd}}` token parks in
+                // the "no remote path set" error rather than connecting;
+                // every other launch shape resolves to `Local`.
                 let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
-                self.create_new_agent_chat_pane(agent_id, Some(new_path.clone()), None, window, cx)
+                self.create_new_agent_chat_pane(
+                    agent_id,
+                    Some(new_path.clone()),
+                    None,
+                    None,
+                    window,
+                    cx,
+                )
             }
         };
         let pane_id = pane.id;
@@ -720,9 +728,11 @@ impl Workspace {
 
     /// Update the remote path the lane named by `target` connects
     /// its session to. `None` reverts the lane to the local
-    /// filesystem. Only affects panes created *after* this call —
-    /// `resolve_new_pane_cwd` resolves the remote cwd once, at
-    /// pane-creation time, and never re-runs for panes already open.
+    /// filesystem. `resolve_new_pane_cwd` resolves it once, at
+    /// pane-creation time, seeding a fresh pane's initial `PaneCwd`; every
+    /// pane's next *connect* (fresh or already open) re-resolves from the
+    /// lane fresh via `resolve_session_command` — only an already-connected
+    /// session keeps running on the path it connected with.
     pub(in crate::workspace) fn set_lane_remote_cwd(
         &mut self,
         target: LaneRef,

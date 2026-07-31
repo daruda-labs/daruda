@@ -79,44 +79,17 @@ fn agent_menu_is_flat(agent_count: usize) -> bool {
     agent_count <= crate::ui::theme::AGENT_MENU_FLAT_MAX
 }
 
-/// Whether a `+`-menu agent entry should be disabled: the agent's launch
-/// needs a remote working directory substituted in (see
-/// [`daruda_config::AgentLaunch::needs_remote_cwd`]) but the active lane
-/// has no `remote_cwd` set — there is nothing to substitute the remote path
-/// with, so the entry is pre-disabled rather than left to fail after
-/// the user picks it (`resolve_new_pane_cwd`'s error path remains a fallback
-/// for call sites that bypass this menu, e.g. programmatic pane creation).
-fn agent_menu_entry_disabled(needs_remote_cwd: bool, lane_has_remote_cwd: bool) -> bool {
-    needs_remote_cwd && !lane_has_remote_cwd
-}
-
-/// Label for a `+`-menu agent entry, appending the disabled-reason suffix
-/// when [`agent_menu_entry_disabled`] is true (there is no tooltip API on
-/// `PopupMenuItem`, so the reason has to live in the label text itself).
-fn agent_menu_entry_label(base_label: String, disabled: bool) -> String {
-    if disabled {
-        format!(
-            "{base_label}{}",
-            crate::surface::strings::agent_needs_remote_cwd_suffix()
-        )
-    } else {
-        base_label
-    }
-}
-
 /// Build the `+` tab-add dropdown: New Terminal, then one agent-chat entry per
 /// configured agent — flat when `agents.len() <= AGENT_MENU_FLAT_MAX`, else
 /// folded into a `New Agent Chat` submenu. All handlers dispatch into
 /// `Workspace` (one-way data flow) and wrap in `mutate_durable_in` so the new
-/// tab is persisted. `agents` is `(id, name, needs_remote_cwd)`;
-/// `lane_has_remote_cwd` is the active lane's `remote_cwd.is_some()` at
-/// snapshot time — together they decide, per entry, whether
-/// [`agent_menu_entry_disabled`] disables it.
+/// tab is persisted. `agents` is `(id, name)` — remote-ness is resolved from
+/// the lane at connect time (`resolve_session_command`), not the agent
+/// picked here, so every catalog entry is always selectable.
 fn build_new_tab_menu(
     menu: PopupMenu,
     ws: &gpui::WeakEntity<Workspace>,
-    agents: &[(String, String, bool)],
-    lane_has_remote_cwd: bool,
+    agents: &[(String, String)],
     window: &mut gpui::Window,
     cx: &mut gpui::Context<PopupMenu>,
 ) -> PopupMenu {
@@ -139,20 +112,15 @@ fn build_new_tab_menu(
 
     if agent_menu_is_flat(agents.len()) {
         // Flat: New {name} Chat per agent.
-        agents.iter().fold(menu, |m, (id, name, needs_remote_cwd)| {
+        agents.iter().fold(menu, |m, (id, name)| {
             let ws = ws.clone();
             let agent_id = id.clone();
-            let disabled = agent_menu_entry_disabled(*needs_remote_cwd, lane_has_remote_cwd);
-            let label = agent_menu_entry_label(
-                crate::surface::strings::new_agent_chat_named(name),
-                disabled,
-            );
+            let label = crate::surface::strings::new_agent_chat_named(name);
             m.item(
                 PopupMenuItem::new(label)
                     .icon(crate::ui::agent_menu_icon(
                         crate::agent::icons::icon_for_agent(id),
                     ))
-                    .disabled(disabled)
                     .on_click(move |_, window, app| {
                         if let Some(w) = ws.upgrade() {
                             let agent_id = agent_id.clone();
@@ -167,25 +135,21 @@ fn build_new_tab_menu(
         })
     } else {
         // Submenu: New Agent Chat ▸ { agent display name per item }.
-        let agents: Vec<(String, String, bool)> = agents.to_vec();
+        let agents: Vec<(String, String)> = agents.to_vec();
         let ws = ws.clone();
         menu.submenu(
             crate::surface::strings::ctx_new_agent_chat(),
             window,
             cx,
             move |sub, _w, _c| {
-                agents.iter().fold(sub, |m, (id, name, needs_remote_cwd)| {
+                agents.iter().fold(sub, |m, (id, name)| {
                     let ws = ws.clone();
                     let agent_id = id.clone();
-                    let disabled =
-                        agent_menu_entry_disabled(*needs_remote_cwd, lane_has_remote_cwd);
-                    let label = agent_menu_entry_label(name.clone(), disabled);
                     m.item(
-                        PopupMenuItem::new(gpui::SharedString::from(label))
+                        PopupMenuItem::new(gpui::SharedString::from(name.clone()))
                             .icon(crate::ui::agent_menu_icon(
                                 crate::agent::icons::icon_for_agent(id),
                             ))
-                            .disabled(disabled)
                             .on_click(move |_, window, app| {
                                 if let Some(w) = ws.upgrade() {
                                     let agent_id = agent_id.clone();
@@ -832,18 +796,13 @@ impl Render for Workspace {
                 // Button (`impl DropdownMenu for Button`), so this is a ghost button
                 // sized to match the tab bar via the NEW_TAB_* metrics, not a div.
                 let ws = cx.entity().downgrade();
-                // Snapshot the catalog as owned (id, name, needs_remote_cwd)
-                // triples for the 'static menu closure, plus whether the
-                // active lane has a remote_cwd to disable remote-only agent
-                // entries against.
-                let agents: Vec<(String, String, bool)> = self
+                // Snapshot the catalog as owned (id, name) pairs for the
+                // 'static menu closure.
+                let agents: Vec<(String, String)> = self
                     .agents
                     .iter()
-                    .map(|a| (a.id.clone(), a.name.clone(), a.launch.needs_remote_cwd()))
+                    .map(|a| (a.id.clone(), a.name.clone()))
                     .collect();
-                let lane_has_remote_cwd = self
-                    .active_lane()
-                    .is_some_and(|lane| lane.remote_cwd.is_some());
                 button("new-tab-btn", "+")
                     .ghost()
                     .px(px(theme::NEW_TAB_PAD_X))
@@ -858,7 +817,7 @@ impl Render for Workspace {
                         d.border_l_2().border_color(tab_insertion_line_color)
                     })
                     .dropdown_menu(menu_builder(move |menu, window, cx| {
-                        build_new_tab_menu(menu, &ws, &agents, lane_has_remote_cwd, window, cx)
+                        build_new_tab_menu(menu, &ws, &agents, window, cx)
                     }))
             })
             .child(
@@ -1456,7 +1415,7 @@ impl Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_menu_entry_disabled, agent_menu_entry_label, agent_menu_is_flat};
+    use super::agent_menu_is_flat;
 
     #[test]
     fn agent_menu_flat_boundary() {
@@ -1465,25 +1424,5 @@ mod tests {
         assert!(agent_menu_is_flat(5));
         assert!(!agent_menu_is_flat(6));
         assert!(!agent_menu_is_flat(20));
-    }
-
-    #[test]
-    fn agent_menu_entry_disabled_only_when_remote_needed_and_unset() {
-        // Local agent: never disabled, regardless of lane state.
-        assert!(!agent_menu_entry_disabled(false, false));
-        assert!(!agent_menu_entry_disabled(false, true));
-        // Remote agent: disabled unless the active lane has a remote_cwd.
-        assert!(agent_menu_entry_disabled(true, false));
-        assert!(!agent_menu_entry_disabled(true, true));
-    }
-
-    #[test]
-    fn agent_menu_entry_label_appends_suffix_only_when_disabled() {
-        let enabled_label = agent_menu_entry_label("New Claude".to_string(), false);
-        assert_eq!(enabled_label, "New Claude");
-
-        let disabled_label = agent_menu_entry_label("New Claude".to_string(), true);
-        assert_ne!(disabled_label, "New Claude");
-        assert!(disabled_label.starts_with("New Claude"));
     }
 }

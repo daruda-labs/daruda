@@ -723,7 +723,7 @@ impl Workspace {
                 // `None` when there is no active lane; `create_new_agent_chat_pane`
                 // then parks the pane in `AgentSessionStatus::Error` rather
                 // than connecting.
-                let (local_cwd, remote_cwd) = self.active_lane_cwds();
+                let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
                 // Inherit the focused pane's agent (splitting a `codex` chat
                 // opens another `codex`); fall back to the session-sticky
                 // default only if its agent id can't be read.
@@ -734,7 +734,14 @@ impl Workspace {
                     .unwrap_or_else(|| {
                         resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
                     });
-                self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx)
+                self.create_new_agent_chat_pane(
+                    agent_id,
+                    local_cwd,
+                    remote_cwd,
+                    session_host,
+                    window,
+                    cx,
+                )
             }
         };
         let new_pane_id = new_pane.id;
