@@ -227,6 +227,41 @@ fn mermaid_renderer_sizes_east_asian_labels_wider_than_latin() {
     );
 }
 
+/// End-to-end guard through the real pipeline (merman host theme → SVG →
+/// resvg raster): the diagram canvas must rasterize transparent, so the
+/// bitmap composites over the host surface (agent-chat card tint) instead
+/// of stamping an opaque rectangle. Node fills stay opaque separately.
+/// Swept per diagram type because the original leak was per-type hardcoded
+/// root backgrounds that bypass `themeVariables`.
+#[test]
+fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
+    let palette = mermaid_theme::MermaidPalette::default();
+    let profile = markdown_viewer::mermaid_host_theme_profile(&palette);
+    for source in [
+        "flowchart TD\n  A[hello]\n",
+        "sequenceDiagram\n  A->>B: hi\n",
+        "pie\n  \"a\": 1\n  \"b\": 2\n",
+        "stateDiagram-v2\n  [*] --> S1\n",
+    ] {
+        let svg = merman::render::HeadlessRenderer::new()
+            .with_host_theme(&profile)
+            .render_svg_sync(source)
+            .expect("merman should render")
+            .expect("diagram should be detected");
+        let img = visual::rasterize_svg(&svg).expect("rasterize should succeed");
+        // Corner pixel sits on the canvas, outside any node.
+        assert_eq!(
+            img.rgba[3], 0,
+            "canvas corner must be fully transparent for {source:?}"
+        );
+        // The raster still contains opaque content (node fill / text).
+        assert!(
+            img.rgba.chunks_exact(4).any(|px| px[3] == 255),
+            "diagram content must remain opaque for {source:?}"
+        );
+    }
+}
+
 #[test]
 fn make_plain_row_helper() {
     let r = make_plain_row("foo", 1);

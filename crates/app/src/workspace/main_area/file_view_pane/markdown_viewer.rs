@@ -674,11 +674,14 @@ pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option
 /// (`palette`), so every diagram type — not just flowchart nodes — picks up
 /// daruda's actual surface/text/border/note/actor colors instead of leaving
 /// diagram-specific elements (sequence notes/actors, pie background, ...) on
-/// mermaid's own hardcoded light defaults. `HostThemeOutput::resvg_safe_editor`
-/// force-patches the SVG root background to `canvas` regardless of which
-/// diagram renderer produced the SVG, which is what actually stops the
-/// "white background" leak — the per-`themeVariables` route many diagram
-/// types don't consistently honor.
+/// mermaid's own hardcoded light defaults. The root background is force-
+/// patched to `transparent` regardless of which diagram renderer produced
+/// the SVG — the rewrite is what stops the hardcoded-white leak many diagram
+/// types don't route through `themeVariables`, and transparency (rather than
+/// an opaque `canvas` fill) lets the host surface show through, matching the
+/// translucent-tint design language of agent-chat cards. Node/label fills
+/// stay opaque (`MermaidPalette` flattens them against `canvas`) so text
+/// keeps a solid backing.
 pub(in crate::workspace) fn mermaid_host_theme_profile(
     palette: &MermaidPalette,
 ) -> merman::render::HostThemeProfile {
@@ -725,9 +728,25 @@ pub(in crate::workspace) fn mermaid_host_theme_profile(
         } else {
             MERMAID_SERIES_PALETTE_LIGHT
         })
-        .output(merman::render::HostThemeOutput::resvg_safe_editor())
+        // `resvg_safe_editor()` defaults the root background to the opaque
+        // `canvas` role; `Color(transparent)` keeps its rewrite of per-
+        // diagram hardcoded backgrounds while clearing them instead of
+        // repainting (usvg parses the non-standard root `background-color`
+        // and `transparent` yields an alpha-0 fill). `None` would skip the
+        // postprocessor entirely and let hardcoded whites through.
+        .output(merman::render::HostThemeOutput {
+            root_background: merman::render::HostThemeRootBackground::Color(
+                MERMAID_ROOT_BACKGROUND.to_owned(),
+            ),
+            ..merman::render::HostThemeOutput::resvg_safe_editor()
+        })
         .build()
 }
+
+/// CSS color for the patched SVG root background: transparent, so the
+/// diagram composites over whatever surface hosts it (agent-chat card
+/// tint, file-viewer background) instead of stamping an opaque rectangle.
+const MERMAID_ROOT_BACKGROUND: &str = "transparent";
 
 const MERMAID_SERIES_PALETTE_DARK: [&str; 8] = [
     "#60a5fa", "#34d399", "#f59e0b", "#c084fc", "#22d3ee", "#fb7185", "#facc15", "#a3e635",
@@ -980,6 +999,20 @@ mod tests {
         let mut light = test_palette();
         light.dark = false;
         assert!(!mermaid_host_theme_profile(&light).series_palette.is_empty());
+    }
+
+    /// Regression guard: the root background must be patched to
+    /// `transparent` — `Canvas` would stamp an opaque rectangle that breaks
+    /// the translucent agent-chat card design, while `None` would skip the
+    /// rewrite and let per-diagram hardcoded white backgrounds through.
+    #[test]
+    fn mermaid_host_theme_profile_patches_root_background_transparent() {
+        assert_eq!(
+            mermaid_host_theme_profile(&test_palette())
+                .output
+                .root_background,
+            merman::render::HostThemeRootBackground::Color("transparent".to_owned())
+        );
     }
 
     #[test]
