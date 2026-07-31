@@ -564,26 +564,26 @@ fn login_command_appends_the_given_args_for_raw_only() {
 fn account_recipe_derives_the_auth_domain_from_the_adapter() {
     let raw = |c: &str| AgentLaunch::Raw(c.to_string());
     assert_eq!(
-        raw("npx -y @agentclientprotocol/claude-agent-acp@latest").account_recipe(),
+        raw("npx -y @agentclientprotocol/claude-agent-acp@latest").account_recipe(false),
         Some(AccountRecipeId::Claude)
     );
     assert_eq!(
-        raw("npx -y @agentclientprotocol/codex-acp@latest").account_recipe(),
+        raw("npx -y @agentclientprotocol/codex-acp@latest").account_recipe(false),
         Some(AccountRecipeId::Codex)
     );
     // A version pin must not break derivation.
     assert_eq!(
-        raw("npx -y @agentclientprotocol/codex-acp@1.1.0").account_recipe(),
+        raw("npx -y @agentclientprotocol/codex-acp@1.1.0").account_recipe(false),
         Some(AccountRecipeId::Codex)
     );
     // The legacy Claude adapter shares Claude's credentials.
     assert_eq!(
-        raw("npx -y @zed-industries/claude-code-acp@latest").account_recipe(),
+        raw("npx -y @zed-industries/claude-code-acp@latest").account_recipe(false),
         Some(AccountRecipeId::Claude)
     );
     // An adapter with no managed-account support.
     assert_eq!(
-        raw("npx -y @google/gemini-cli@latest --acp").account_recipe(),
+        raw("npx -y @google/gemini-cli@latest --acp").account_recipe(false),
         None
     );
 }
@@ -597,7 +597,7 @@ fn account_recipe_is_none_for_every_remote_launch() {
             adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
             host: "vm-work".into(),
         }
-        .account_recipe(),
+        .account_recipe(false),
         None
     );
     assert_eq!(
@@ -605,7 +605,7 @@ fn account_recipe_is_none_for_every_remote_launch() {
             adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
             container: "ubuntu-dev".into(),
         }
-        .account_recipe(),
+        .account_recipe(false),
         None
     );
     // A `Raw` carrying `{{cwd}}` is the legacy remote escape hatch.
@@ -614,9 +614,20 @@ fn account_recipe_is_none_for_every_remote_launch() {
             "docker exec -i ubuntu-dev sh -c \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
                 .into()
         )
-        .account_recipe(),
+        .account_recipe(false),
         None
     );
+}
+
+/// A plain `Raw` command carries no host of its own — it's the caller's
+/// `is_remote` (the lane it's actually attached to) that must exclude it,
+/// since `Ssh`/`Docker`/the `{{cwd}}` token can't self-report a lane-native
+/// remote attachment.
+#[test]
+fn account_recipe_is_none_when_the_caller_reports_a_remote_context() {
+    let claude = AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".into());
+    assert_eq!(claude.account_recipe(false), Some(AccountRecipeId::Claude));
+    assert_eq!(claude.account_recipe(true), None);
 }
 
 #[test]
@@ -627,13 +638,13 @@ fn account_recipe_is_none_for_a_json_stdio_config() {
     let json = AgentLaunch::Raw(
         r#"{"command":"/opt/adapters/claude-agent-acp","args":["--stdio"]}"#.into(),
     );
-    assert_eq!(json.account_recipe(), None);
+    assert_eq!(json.account_recipe(false), None);
     // Leading whitespace must not hide the JSON shape.
     let padded = AgentLaunch::Raw("  {\"command\":\"/opt/adapters/codex-acp\",\"args\":[]}".into());
-    assert_eq!(padded.account_recipe(), None);
+    assert_eq!(padded.account_recipe(false), None);
     // A plain shell command naming the same adapter still resolves.
     assert_eq!(
-        AgentLaunch::Raw("/opt/adapters/claude-agent-acp --stdio".into()).account_recipe(),
+        AgentLaunch::Raw("/opt/adapters/claude-agent-acp --stdio".into()).account_recipe(false),
         Some(AccountRecipeId::Claude)
     );
 }
@@ -642,11 +653,15 @@ fn account_recipe_is_none_for_a_json_stdio_config() {
 fn built_in_defaults_derive_their_own_auth_domain() {
     // Guards a future command change from silently breaking derivation.
     assert_eq!(
-        AgentDefinition::claude_default().launch.account_recipe(),
+        AgentDefinition::claude_default()
+            .launch
+            .account_recipe(false),
         Some(AccountRecipeId::Claude)
     );
     assert_eq!(
-        AgentDefinition::codex_default().launch.account_recipe(),
+        AgentDefinition::codex_default()
+            .launch
+            .account_recipe(false),
         Some(AccountRecipeId::Codex)
     );
 }

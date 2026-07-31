@@ -300,10 +300,14 @@ impl Workspace {
         };
         let pane_id = self.alloc_id();
         let window_handle = window.window_handle();
-        // Only this agent's own auth domain has a default that may apply here.
+        // Only this agent's own auth domain has a default that may apply
+        // here — and only when this cwd is actually local: a managed
+        // account's config dir is a local path, so it must never seed a
+        // pane whose resolved cwd is remote (see `account_recipe`'s doc).
+        let is_remote = matches!(cwd, Some(PaneCwd::Remote(_)));
         let account = self.default_account_selection_for_new_pane(
             self.agent_launch_for(&agent_id)
-                .and_then(|l| l.account_recipe()),
+                .and_then(|l| l.account_recipe(is_remote)),
         );
         // `title` seeds the view's `session_title` below (restored dormant
         // panes show their persisted label before the session loads);

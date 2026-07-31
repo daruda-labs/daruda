@@ -291,11 +291,23 @@ impl AgentLaunch {
     /// adapter share one set of credentials. `None` for a remote launch (no
     /// local browser to complete OAuth in), for a JSON stdio config (see
     /// [`Self::is_json_stdio`]), and for an unrecognized adapter.
-    pub fn account_recipe(&self) -> Option<AccountRecipeId> {
+    ///
+    /// `is_remote`: whether the *caller's* context — the lane a pane is
+    /// attached to, not this launch's own shape — is remote. A `Raw`
+    /// command carries no host of its own once the session-host axis lives
+    /// on the lane, so `Ssh`/`Docker`/the legacy `{{cwd}}` token remain the
+    /// only self-describing remote shapes; `is_remote` is how a lane-aware
+    /// caller closes the rest: a managed account's config dir is a local
+    /// path, and injecting one into a command that actually runs elsewhere
+    /// would point the remote adapter at a directory that doesn't exist
+    /// there. A caller with no lane in scope (the catalog-wide login-command
+    /// scan) passes `false` — there is no lane to ask, and unlike Ssh/Docker,
+    /// a bare `Raw` command cannot self-report as remote-only.
+    pub fn account_recipe(&self, is_remote: bool) -> Option<AccountRecipeId> {
         let AgentLaunch::Raw(command) = self else {
             return None;
         };
-        if self.needs_remote_cwd() || is_json_stdio(command) {
+        if is_remote || self.needs_remote_cwd() || is_json_stdio(command) {
             return None;
         }
         if CLAUDE_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {

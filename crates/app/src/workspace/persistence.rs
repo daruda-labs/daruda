@@ -9,7 +9,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{
-    DockStates, ProjectOverride, ProjectState, ProjectUuid, SerializedTab,
+    DockStates, PaneCwd, ProjectOverride, ProjectState, ProjectUuid, SerializedTab,
     WORKSPACE_SCHEMA_VERSION, WorkspaceState,
 };
 use gpui::{App, Context, Window};
@@ -649,9 +649,10 @@ impl Workspace {
                     // else the default agent (session id dropped — it belongs
                     // to a now-absent agent and could not resume).
                     let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
+                    let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
                     let pane_recipe = self
                         .agent_launch_for(&agent_id)
-                        .and_then(|l| l.account_recipe());
+                        .and_then(|l| l.account_recipe(is_remote));
                     let mut restored = self.create_agent_chat_pane(
                         ac.cwd.clone(),
                         if keep_session {

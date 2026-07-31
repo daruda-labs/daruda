@@ -919,8 +919,14 @@ pub(in crate::workspace) enum AccountDomain {
 pub(in crate::workspace) enum AccountPane {
     Terminal,
     /// Agent chat, carrying the launch of the agent it runs (`None` when that
-    /// agent id is no longer in the catalog).
-    AgentChat(Option<daruda_config::AgentLaunch>),
+    /// agent id is no longer in the catalog) and whether *this pane's* lane
+    /// is currently remote — a `Raw` launch carries no host of its own, so
+    /// the domain gate below can't tell local from remote by the launch
+    /// alone (see `AgentLaunch::account_recipe`'s doc).
+    AgentChat {
+        launch: Option<daruda_config::AgentLaunch>,
+        is_remote: bool,
+    },
 }
 
 impl AccountDomain {
@@ -941,8 +947,8 @@ impl AccountDomain {
     pub(in crate::workspace) fn for_pane(pane: &AccountPane) -> Self {
         match pane {
             AccountPane::Terminal => Self::Any,
-            AccountPane::AgentChat(launch) => {
-                Self::for_agent(launch.as_ref().and_then(|l| l.account_recipe()))
+            AccountPane::AgentChat { launch, is_remote } => {
+                Self::for_agent(launch.as_ref().and_then(|l| l.account_recipe(*is_remote)))
             }
         }
     }
@@ -1092,8 +1098,12 @@ impl Workspace {
         let focused_pane_id = self.active_runtime().focused_pane_id;
         match self.agent_chat_view(focused_pane_id) {
             Some(view) => {
-                let agent_id = view.read(cx).agent_id.clone();
-                AccountPane::AgentChat(self.agent_launch_for(&agent_id))
+                let v = view.read(cx);
+                let is_remote = matches!(v.cwd, Some(PaneCwd::Remote(_)));
+                AccountPane::AgentChat {
+                    launch: self.agent_launch_for(&v.agent_id),
+                    is_remote,
+                }
             }
             None => AccountPane::Terminal,
         }
@@ -1702,17 +1712,23 @@ mod tests {
 
     #[test]
     fn agent_chat_pane_scopes_to_its_own_adapter() {
-        let claude = AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
-            "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
-        )));
+        let claude = AccountPane::AgentChat {
+            launch: Some(daruda_config::AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+            )),
+            is_remote: false,
+        };
         assert_eq!(
             AccountDomain::for_pane(&claude),
             AccountDomain::Exactly(daruda_store::accounts::AccountRecipeId::Claude)
         );
 
-        let codex = AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
-            "npx -y @agentclientprotocol/codex-acp@latest".into(),
-        )));
+        let codex = AccountPane::AgentChat {
+            launch: Some(daruda_config::AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/codex-acp@latest".into(),
+            )),
+            is_remote: false,
+        };
         assert_eq!(
             AccountDomain::for_pane(&codex),
             AccountDomain::Exactly(daruda_store::accounts::AccountRecipeId::Codex)
@@ -1722,23 +1738,49 @@ mod tests {
     #[test]
     fn agent_chat_pane_on_a_remote_launch_has_no_domain() {
         let remote = [
-            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Ssh {
-                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
-                host: "build-box".into(),
-            })),
-            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Docker {
-                adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
-                container: "dev".into(),
-            })),
-            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
-                "ssh box sh -c 'cd \"{{cwd}}\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
-                    .into(),
-            ))),
-            AccountPane::AgentChat(None),
+            AccountPane::AgentChat {
+                launch: Some(daruda_config::AgentLaunch::Ssh {
+                    adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+                    host: "build-box".into(),
+                }),
+                is_remote: false,
+            },
+            AccountPane::AgentChat {
+                launch: Some(daruda_config::AgentLaunch::Docker {
+                    adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
+                    container: "dev".into(),
+                }),
+                is_remote: false,
+            },
+            AccountPane::AgentChat {
+                launch: Some(daruda_config::AgentLaunch::Raw(
+                    "ssh box sh -c 'cd \"{{cwd}}\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+                        .into(),
+                )),
+                is_remote: false,
+            },
+            AccountPane::AgentChat {
+                launch: None,
+                is_remote: false,
+            },
         ];
         for pane in &remote {
             assert_eq!(AccountDomain::for_pane(pane), AccountDomain::Unsupported);
         }
+    }
+
+    /// The case `Ssh`/`Docker`/the `{{cwd}}` token can't cover on their own:
+    /// a plain `Raw` command carries no host, so a pane whose *lane* is
+    /// remote must be excluded via `is_remote`, not the launch shape.
+    #[test]
+    fn agent_chat_pane_on_a_remote_lane_has_no_domain_even_for_a_bare_raw_launch() {
+        let pane = AccountPane::AgentChat {
+            launch: Some(daruda_config::AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+            )),
+            is_remote: true,
+        };
+        assert_eq!(AccountDomain::for_pane(&pane), AccountDomain::Unsupported);
     }
 
     #[test]

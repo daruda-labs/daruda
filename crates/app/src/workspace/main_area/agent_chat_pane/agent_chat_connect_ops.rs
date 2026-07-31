@@ -325,10 +325,19 @@ impl Workspace {
             .and_then(|lane_ref| self.lane_for(lane_ref));
         // The pane's account must belong to the auth domain its own agent
         // launches under; an account from another domain is refused here
-        // rather than injected under the wrong config-dir env var.
+        // rather than injected under the wrong config-dir env var. Gated on
+        // this connect's actual resolved host, not the launch's own shape —
+        // a managed account's config dir is a local path, and injecting one
+        // into a command that runs on another machine via `wrap_with_env`
+        // would point the remote adapter at a directory that doesn't exist
+        // there (see `account_recipe`'s doc).
+        let is_remote = owning_lane
+            .map(|lane| lane.effective_session_host(&launch).is_remote())
+            .unwrap_or(false);
         let selection = self.agent_chat_account_selection(pane_id);
-        let domain =
-            crate::workspace::main_area::pane::AccountDomain::for_agent(launch.account_recipe());
+        let domain = crate::workspace::main_area::pane::AccountDomain::for_agent(
+            launch.account_recipe(is_remote),
+        );
         let prepared = crate::workspace::main_area::pane::resolve_pane_account(
             &self.accounts,
             &self.data_dir,

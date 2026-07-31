@@ -429,11 +429,13 @@ impl Workspace {
                 // Restore always launches under the domain's configured
                 // default agent — the original session's exact agent
                 // variant isn't tracked. A domain with no default agent
-                // configured has nothing to restore into.
+                // configured has nothing to restore into. Catalog-wide scan,
+                // no lane in scope — same `is_remote: false` reasoning as
+                // `resolve_login_command`.
                 let agent_id = self
                     .agents
                     .iter()
-                    .find(|a| a.launch.account_recipe() == Some(section.recipe))?
+                    .find(|a| a.launch.account_recipe(false) == Some(section.recipe))?
                     .id
                     .clone();
                 let mut matched: Vec<crate::workspace::layout::snap::RestorableSession> = raw

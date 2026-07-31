@@ -818,8 +818,13 @@ pub(in crate::workspace) fn resolve_login_command(
     requested: AccountRecipeId,
 ) -> String {
     let login_args = recipe_for(requested).login_args();
+    // No lane in scope for this catalog-wide scan — `is_remote: false` is
+    // not a guess, it's the honest answer: a bare `Raw` command can't
+    // self-report as remote-only (see `account_recipe`'s doc), so this
+    // flow's exclusions stay limited to what `Ssh`/`Docker`/`{{cwd}}`
+    // already self-describe, exactly as before this axis moved to the lane.
     let signs_into_requested =
-        |a: &&daruda_config::AgentDefinition| a.launch.account_recipe() == Some(requested);
+        |a: &&daruda_config::AgentDefinition| a.launch.account_recipe(false) == Some(requested);
     let active = agents
         .iter()
         .find(|a| a.id == active_id)
