@@ -9,6 +9,7 @@ pub mod git;
 pub mod history;
 pub mod paths;
 pub mod port_attribution;
+pub mod session_host;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -343,6 +344,20 @@ impl Lane {
         session_host: Option<daruda_store::project::LaneSessionHost>,
     ) {
         self.session_host = session_host;
+    }
+
+    /// Where this lane's session attaches, given the agent it launches under.
+    /// `launch` only matters while the lane has never answered — see
+    /// [`session_host::effective_session_host`].
+    pub fn effective_session_host(
+        &self,
+        launch: &daruda_config::AgentLaunch,
+    ) -> daruda_store::project::LaneSessionHost {
+        session_host::effective_session_host(
+            self.session_host.as_ref(),
+            self.remote_cwd.as_deref(),
+            launch,
+        )
     }
 
     /// `true` when this lane is git-backed.
