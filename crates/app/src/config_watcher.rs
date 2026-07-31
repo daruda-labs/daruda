@@ -68,7 +68,11 @@ mod tests {
 
     #[test]
     fn config_reload_produces_valid_config() {
-        let dir = std::env::temp_dir().join("daruda_config_reload_test");
+        // Per-process dir, like the git/boot fixtures: a fixed path makes the
+        // test order-dependent once anything else in the run touches it.
+        let dir =
+            std::env::temp_dir().join(format!("daruda_config_reload_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("config.toml");
 

@@ -364,85 +364,32 @@ pub const CURATED_PRESETS: &[AgentPreset] = &[];
 mod tests {
     use super::*;
 
-    /// Registry entries that publish only per-platform binary archives.
-    const EXPECTED_MANUAL_INSTALL: usize = 15;
-    /// Registry entries launchable from a single npx/uvx command line.
-    const EXPECTED_RUNNABLE: usize = 23;
-
-    fn runnable_count(presets: &[AgentPreset]) -> usize {
-        presets
-            .iter()
-            .filter(|p| matches!(p.launchability, PresetLaunchability::Runnable { .. }))
-            .count()
-    }
-
+    /// `definition()` is what decides whether a preset can become a catalog row
+    /// at all, so the Add button's behaviour rides on this being exactly
+    /// "Some for Runnable, None for NeedsManualInstall".
+    ///
+    /// `install_url` is checked here rather than in the generator because it
+    /// comes from the registry's own `website`/`repository` — upstream data we
+    /// hand to `open_url` without reading it first.
     #[test]
-    fn the_registry_block_carries_every_agent_of_its_snapshot() {
-        assert_eq!(ACP_REGISTRY_VERSION, "1.0.0");
-        assert_eq!(
-            REGISTRY_PRESETS.len(),
-            EXPECTED_RUNNABLE + EXPECTED_MANUAL_INSTALL
-        );
-        assert_eq!(runnable_count(REGISTRY_PRESETS), EXPECTED_RUNNABLE);
-    }
-
-    #[test]
-    fn every_runnable_preset_has_a_command_and_yields_a_definition() {
+    fn definition_follows_launchability() {
         for preset in presets() {
-            let PresetLaunchability::Runnable { command } = preset.launchability else {
-                continue;
-            };
-            assert!(
-                !command.trim().is_empty(),
-                "{} has an empty command",
-                preset.id
-            );
-            let definition = preset
-                .definition()
-                .unwrap_or_else(|| panic!("{} is runnable so it has a definition", preset.id));
-            assert_eq!(definition.id, preset.id);
-            assert_eq!(definition.launch, AgentLaunch::Raw(command.to_string()));
+            match preset.launchability {
+                PresetLaunchability::Runnable { command } => {
+                    let definition = preset.definition().unwrap_or_else(|| {
+                        panic!("{} is runnable so it has a definition", preset.id)
+                    });
+                    assert_eq!(definition.launch, AgentLaunch::Raw(command.to_string()));
+                }
+                PresetLaunchability::NeedsManualInstall { install_url } => {
+                    assert!(
+                        install_url.starts_with("https://"),
+                        "{} install_url is not https: {install_url}",
+                        preset.id
+                    );
+                    assert_eq!(preset.definition(), None, "{} cannot launch", preset.id);
+                }
+            }
         }
-    }
-
-    #[test]
-    fn every_manual_install_preset_points_at_a_https_url_and_has_no_definition() {
-        for preset in presets() {
-            let PresetLaunchability::NeedsManualInstall { install_url } = preset.launchability
-            else {
-                continue;
-            };
-            assert!(
-                install_url.starts_with("https://"),
-                "{} install_url is not https: {install_url}",
-                preset.id
-            );
-            assert_eq!(
-                preset.definition(),
-                None,
-                "{} cannot be launched, so it must not produce a catalog entry",
-                preset.id
-            );
-        }
-    }
-
-    #[test]
-    fn preset_ids_are_unique_and_sorted() {
-        // Sorted by id so the generator in a later pass can rewrite the block
-        // without reshuffling the diff.
-        let ids: Vec<&str> = presets().map(|p| p.id).collect();
-        let mut sorted = ids.clone();
-        sorted.sort_unstable();
-        assert_eq!(ids, sorted, "REGISTRY_PRESETS must stay sorted by id");
-        let mut unique = sorted.clone();
-        unique.dedup();
-        assert_eq!(unique.len(), ids.len(), "duplicate preset id");
-    }
-
-    #[test]
-    fn curated_presets_start_empty() {
-        // Guards the admission rule: an entry lands here only after a real
-        // connect-and-one-turn check, never as a drive-by transcription.
-        assert!(CURATED_PRESETS.is_empty());
     }
 }

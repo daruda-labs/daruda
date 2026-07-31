@@ -206,7 +206,12 @@ fn select_agent_transport(
     index: usize,
     kind: &str,
 ) {
-    let state = win.read_with(cx, |w, _| w.agent_rows[index].transport_select.clone());
+    let state = win.read_with(cx, |w, _| {
+        w.agent_editable_row(index)
+            .unwrap()
+            .transport_select
+            .clone()
+    });
     let value = SharedString::from(kind.to_owned());
     wh.update(cx, |_root, window, cx| {
         state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
@@ -223,7 +228,7 @@ fn set_agent_row_input(
     field: fn(&AgentCatalogRow) -> Entity<InputState>,
     value: &str,
 ) {
-    let state = win.read_with(cx, |w, _| field(&w.agent_rows[index]));
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
     wh.update(cx, |_root, window, cx| {
         state.update(cx, |i, cx_state| {
             i.set_value(value.to_owned(), window, cx_state)
@@ -265,7 +270,7 @@ fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContex
     assert!(select_agent_preset(&wh, &win, cx, "gemini"));
     add_selected_agent_preset(&wh, &win, cx);
     win.read_with(cx, |w, cx| {
-        assert_eq!(w.agent_rows.len(), 2);
+        assert_eq!(w.agent_editable_rows().count(), 2);
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
@@ -275,7 +280,12 @@ fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContex
             }
         );
         // Nothing was edited, so the row reports no override to diff.
-        assert!(!w.agent_rows[1].provenance(cx).is_overridden());
+        assert!(
+            !w.agent_editable_row(1)
+                .unwrap()
+                .provenance(cx)
+                .is_overridden()
+        );
     });
 }
 
@@ -302,7 +312,7 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                 },
             }
         );
-        let provenance = w.agent_rows[1].provenance(cx);
+        let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
         assert!(provenance.is_overridden());
         let base = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
         let name_diff = provenance
@@ -351,7 +361,7 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
 fn the_default_npx_row_has_no_path_warning(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.read_with(cx, |w, _cx| {
-        assert_eq!(w.agent_rows[0].path_warning, None);
+        assert_eq!(w.agent_editable_row(0).unwrap().path_warning, None);
     });
 }
 
@@ -383,7 +393,7 @@ fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppCon
 
     win.read_with(cx, |w, cx| {
         assert_eq!(
-            w.agent_rows[1].path_warning.as_deref(),
+            w.agent_editable_row(1).unwrap().path_warning.as_deref(),
             Some("daruda-settings-path-warning-test-missing-binary")
         );
         assert!(
@@ -408,14 +418,14 @@ fn editing_the_command_field_recomputes_the_path_warning(cx: &mut TestAppContext
     );
     win.read_with(cx, |w, _cx| {
         assert_eq!(
-            w.agent_rows[0].path_warning.as_deref(),
+            w.agent_editable_row(0).unwrap().path_warning.as_deref(),
             Some("daruda-settings-path-warning-test-missing-binary")
         );
     });
 
     set_agent_row_input(&wh, &win, cx, 0, |r| r.command_input.clone(), "sh -c true");
     win.read_with(cx, |w, _cx| {
-        assert_eq!(w.agent_rows[0].path_warning, None);
+        assert_eq!(w.agent_editable_row(0).unwrap().path_warning, None);
     });
 }
 
@@ -437,13 +447,13 @@ fn switching_transport_does_not_clear_the_cached_path_warning(cx: &mut TestAppCo
         "daruda-settings-path-warning-test-missing-binary",
     );
     win.read_with(cx, |w, _cx| {
-        assert!(w.agent_rows[0].path_warning.is_some());
+        assert!(w.agent_editable_row(0).unwrap().path_warning.is_some());
     });
 
     select_agent_transport(&wh, &win, cx, 0, "ssh");
     set_agent_row_input(&wh, &win, cx, 0, |r| r.host_input.clone(), "vm-work");
     win.read_with(cx, |w, cx| {
-        assert!(w.agent_rows[0].path_warning.is_some());
+        assert!(w.agent_editable_row(0).unwrap().path_warning.is_some());
         assert!(
             w.validate(cx).is_ok(),
             "an ssh row's command runs remotely, so Save must succeed regardless"
@@ -468,7 +478,7 @@ fn picking_a_preset_that_needs_a_manual_install_adds_no_row(cx: &mut TestAppCont
     add_selected_agent_preset(&wh, &win, cx);
     win.read_with(cx, |w, cx| {
         assert_eq!(
-            w.agent_rows.len(),
+            w.agent_editable_rows().count(),
             1,
             "a preset with no launch command must not become a row"
         );
@@ -508,20 +518,112 @@ fn validate_preserves_an_unresolved_catalog_entry(cx: &mut TestAppContext) {
     let (_wh, win) = build_window_with_config(cx, config);
     win.read_with(cx, |w, cx| {
         // Only the resolvable entry got an editable row…
-        assert_eq!(w.agent_rows.len(), 1);
+        assert_eq!(w.agent_editable_rows().count(), 1);
         // …the other is held for the section's "not available" warning, which is
         // the only place the user can find out why that agent never shows up…
-        assert_eq!(w.agent_unresolved_entries, vec![unresolved.clone()]);
+        assert_eq!(
+            w.agent_unresolved_entries()
+                .map(|(_, e)| e.clone())
+                .collect::<Vec<_>>(),
+            vec![unresolved.clone()]
+        );
         let cfg = w.validate(cx).expect("agent catalog must validate");
         // …and it is still there after a save.
         assert!(cfg.agents.contains(&unresolved), "{:?}", cfg.agents);
     });
 }
 
+/// A catalog whose every entry is unresolvable still has entries, so a Save of
+/// any unrelated setting must go through. `preset = "cursor"` reaches this with
+/// a preset daruda ships today — the manual-install ones resolve to nothing.
+#[gpui::test]
+fn validate_accepts_a_catalog_of_only_unresolved_entries(cx: &mut TestAppContext) {
+    let needs_install = daruda_config::AgentEntry::Preset {
+        preset: "cursor".to_string(),
+        overrides: daruda_config::PresetOverrides::default(),
+    };
+    let config = daruda_config::Config {
+        agents: vec![needs_install.clone()],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        assert!(w.agent_editable_rows().next().is_none());
+        assert_eq!(
+            w.agent_unresolved_entries()
+                .map(|(_, e)| e.clone())
+                .collect::<Vec<_>>(),
+            vec![needs_install.clone()]
+        );
+        let cfg = w
+            .validate(cx)
+            .expect("an unresolved-only catalog is not an empty catalog");
+        assert_eq!(cfg.agents, vec![needs_install]);
+        // The runtime still has an agent to launch: the fallback in
+        // `resolved_agents` covers what the persisted catalog cannot.
+        assert!(!cfg.resolved_agents().is_empty());
+        // The one predicate the section's placeholder reads too, so it cannot
+        // call this catalog empty while the Save above succeeds.
+        assert!(!w.agent_catalog_is_empty());
+    });
+}
+
+/// A non-editable entry keeps its config position across a Save. It used to be
+/// appended after the editable rows, so an entry the user had listed first came
+/// back last — and would silently become a different default agent the day its
+/// preset resolves again.
+#[gpui::test]
+fn an_unresolved_entry_keeps_its_position_across_a_save(cx: &mut TestAppContext) {
+    let unresolved = daruda_config::AgentEntry::Preset {
+        preset: "retired-agent".to_string(),
+        overrides: daruda_config::PresetOverrides::default(),
+    };
+    let claude =
+        daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default());
+    let config = daruda_config::Config {
+        // Unresolved first, editable second.
+        agents: vec![unresolved.clone(), claude.clone()],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(cfg.agents, vec![unresolved, claude], "order preserved");
+    });
+}
+
+/// Removal addresses the catalog, not the editable subset: dropping the row
+/// that sits *after* a non-editable entry must not drop the wrong entry.
+#[gpui::test]
+fn removing_a_row_after_an_unresolved_entry_drops_the_right_one(cx: &mut TestAppContext) {
+    let unresolved = daruda_config::AgentEntry::Preset {
+        preset: "retired-agent".to_string(),
+        overrides: daruda_config::PresetOverrides::default(),
+    };
+    let config = daruda_config::Config {
+        agents: vec![
+            unresolved.clone(),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    // The sole editable row is at catalog index 1, not 0.
+    let catalog_index = win.read_with(cx, |w, _| {
+        w.agent_editable_rows().next().expect("one editable row").0
+    });
+    assert_eq!(catalog_index, 1);
+    win.update(cx, |w, cx| w.remove_agent_catalog_item(catalog_index, cx));
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the unresolved entry still counts");
+        assert_eq!(cfg.agents, vec![unresolved], "only the row went away");
+    });
+}
+
 #[gpui::test]
 fn validate_rejects_empty_agent_catalog(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
-    win.update(cx, |w, cx| w.remove_agent_row(0, cx));
+    win.update(cx, |w, cx| w.remove_agent_catalog_item(0, cx));
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("agent") || err.contains("에이전트"));
@@ -547,7 +649,7 @@ fn validate_rejects_duplicate_agent_id(cx: &mut TestAppContext) {
 #[gpui::test]
 fn validate_rejects_invalid_agent_id(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    let id_input = win.read_with(cx, |w, _| w.agent_rows[0].id_input.clone());
+    let id_input = win.read_with(cx, |w, _| w.agent_editable_row(0).unwrap().id_input.clone());
     wh.update(cx, |_root, window, cx| {
         id_input.update(cx, |i, cx_state| {
             i.set_value("bad id".to_owned(), window, cx_state)
@@ -572,7 +674,9 @@ fn default_mode_input_change_clears_error_for_constructor_seeded_row(cx: &mut Te
         w.error = Some("boom".into());
         cx.notify();
     });
-    let default_mode_input = win.read_with(cx, |w, _| w.agent_rows[0].default_mode_input.clone());
+    let default_mode_input = win.read_with(cx, |w, _| {
+        w.agent_editable_row(0).unwrap().default_mode_input.clone()
+    });
     wh.update(cx, |_root, window, cx| {
         default_mode_input.update(cx, |i, cx_state| {
             i.set_value("plan".to_owned(), window, cx_state)

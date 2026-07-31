@@ -2098,7 +2098,13 @@ async fn agent_chat_agent_id_survives_restore_when_agent_present(cx: &mut TestAp
     use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let config = daruda_config::Config::default();
-    let project_root = std::env::temp_dir().join("daruda_agent_chat_restore_agent_present");
+    // Per-process root: a fixed path makes the restore assertions depend on
+    // whatever else in the run happened to write here first.
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_restore_agent_present_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
     let _ = std::fs::create_dir_all(&project_root);
     let project = daruda_store::project::Project::from_path(&project_root);
 

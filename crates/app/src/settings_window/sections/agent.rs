@@ -167,7 +167,9 @@ impl SettingsWindow {
             ));
         }
 
-        if self.agent_rows.is_empty() {
+        // Same predicate the Save check uses, so the placeholder cannot claim an
+        // empty catalog while a Save of the same catalog succeeds.
+        if self.agent_catalog_is_empty() {
             body = body.child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -175,17 +177,19 @@ impl SettingsWindow {
                     .child(s::settings_agent_catalog_empty()),
             );
         }
-        for (index, row) in self.agent_rows.iter().enumerate() {
-            body = body.child(self.render_agent_catalog_row(index, row, cx));
+        // Editable rows first, non-editable ones grouped under their own header:
+        // a visual grouping, while the model keeps both at their config position.
+        for (ordinal, (catalog_index, row)) in self.agent_editable_rows().enumerate() {
+            body = body.child(self.render_agent_catalog_row(catalog_index, ordinal, row, cx));
         }
 
-        if !self.agent_unresolved_entries.is_empty() {
+        if self.agent_unresolved_entries().next().is_some() {
             body = body.child(Self::section_label(
                 s::settings_agent_unresolved_section(),
                 cx,
             ));
-            for (index, entry) in self.agent_unresolved_entries.iter().enumerate() {
-                body = body.child(Self::render_unresolved_entry(index, entry, cx));
+            for (catalog_index, entry) in self.agent_unresolved_entries() {
+                body = body.child(Self::render_unresolved_entry(catalog_index, entry, cx));
             }
         }
 
@@ -222,34 +226,56 @@ impl SettingsWindow {
                 SharedString::from(format!("settings-agent-unresolved-{index}")),
                 message,
             ))
-            .when_some(install_url, |body, url| {
-                body.child(
-                    div().flex().flex_row().child(
-                        button(
-                            SharedString::from(format!(
-                                "settings-agent-unresolved-install-{index}"
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .when_some(install_url, |row, url| {
+                        row.child(
+                            button(
+                                SharedString::from(format!(
+                                    "settings-agent-unresolved-install-{index}"
+                                )),
+                                s::settings_agent_preset_install_page(),
+                            )
+                            .on_click(cx.listener(
+                                move |_this, _: &ClickEvent, _window, cx| {
+                                    cx.open_url(url);
+                                },
                             )),
-                            s::settings_agent_preset_install_page(),
+                        )
+                    })
+                    // Removable like any other entry: without this the user's
+                    // only way to drop a preset daruda can no longer launch is
+                    // hand-editing `config.toml`.
+                    .child(
+                        button_danger(
+                            SharedString::from(format!("settings-agent-unresolved-remove-{index}")),
+                            s::settings_agent_remove(),
                         )
                         .on_click(cx.listener(
-                            move |_this, _: &ClickEvent, _window, cx| {
-                                cx.open_url(url);
+                            move |this, _: &ClickEvent, _window, cx| {
+                                this.remove_agent_catalog_item(index, cx);
                             },
                         )),
                     ),
-                )
-            })
+            )
             .into_any_element()
     }
 
+    /// `catalog_index` addresses the entry for removal; `ordinal` is its
+    /// position among the editable rows, which is what the "Agent N" label
+    /// shows. They differ as soon as a non-editable entry sits in between.
     fn render_agent_catalog_row(
         &self,
-        index: usize,
+        catalog_index: usize,
+        ordinal: usize,
         row: &AgentCatalogRow,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let t = theme::current(cx);
-        let remove_id = format!("settings-agent-remove-{index}");
+        let remove_id = format!("settings-agent-remove-{catalog_index}");
         let transport_kind = row
             .transport_select
             .read(cx)
@@ -292,12 +318,12 @@ impl SettingsWindow {
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(t.text_primary)
-                            .child(s::settings_agent_catalog_row_label(index + 1)),
+                            .child(s::settings_agent_catalog_row_label(ordinal + 1)),
                     )
                     .child(
                         button_danger(remove_id, s::settings_agent_remove()).on_click(cx.listener(
                             move |this, _: &ClickEvent, _window, cx| {
-                                this.remove_agent_row(index, cx);
+                                this.remove_agent_catalog_item(catalog_index, cx);
                             },
                         )),
                     ),
@@ -328,7 +354,7 @@ impl SettingsWindow {
             .when(transport_needs_local_path_check(&transport_kind), |body| {
                 body.when_some(row.path_warning.as_deref(), |body, command| {
                     body.child(crate::ui::alert::warning(
-                        SharedString::from(format!("settings-agent-path-warning-{index}")),
+                        SharedString::from(format!("settings-agent-path-warning-{catalog_index}")),
                         s::settings_agent_row_command_not_on_path(command),
                     ))
                 })

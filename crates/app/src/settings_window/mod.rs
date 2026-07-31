@@ -62,13 +62,13 @@ pub struct SettingsWindow {
     default_permission_mode_select: Entity<SelectState>,
     agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
-    agent_rows: Vec<AgentCatalogRow>,
-    /// Catalog entries with no editable row — a `preset` id daruda cannot
-    /// resolve. Carried verbatim from load to save so the editor never silently
-    /// deletes an entry it has no fields for. Appended after the editable rows,
-    /// which is positionally lossy but semantically not: an entry that resolves
-    /// to nothing never takes part in the runtime catalog's ordering.
-    agent_unresolved_entries: Vec<daruda_config::AgentEntry>,
+    /// The agent catalog in `config.toml` order, editable and non-editable
+    /// entries in one list. Reach it through [`Self::agent_catalog_is_empty`] /
+    /// [`Self::agent_editable_rows`] / [`Self::agent_unresolved_entries`]:
+    /// holding the two kinds in separate vectors previously let each operation
+    /// decide on its own whether "the catalog" included the non-editable half,
+    /// and the two that answered "no" disagreed with the rest.
+    agent_catalog: Vec<AgentCatalogItem>,
     // Accounts (Task 9). Snapshot loaded from `accounts.json` at
     // construction; every write goes through the section's own
     // `set_default_account`/`remove_account` handlers, which persist
@@ -174,6 +174,16 @@ pub(super) enum PluginSkillBodyState {
     Loading,
     Loaded(SharedString),
     Error(SharedString),
+}
+
+/// One entry of the Settings agent catalog. An entry that resolves gets
+/// editable fields; one naming a preset daruda cannot launch has no fields to
+/// edit and is carried verbatim, so both kinds live in a single ordered list —
+/// position survives a save, and no operation can see one kind without the
+/// other being in reach.
+pub(super) enum AgentCatalogItem {
+    Editable(AgentCatalogRow),
+    Unresolved(daruda_config::AgentEntry),
 }
 
 #[derive(Clone)]
@@ -392,14 +402,58 @@ impl SettingsWindow {
         ));
     }
 
-    /// Index of the row whose `command_input` is `entity`, if any. Rows are
-    /// looked up by entity identity rather than a captured index because
-    /// indices shift on [`Self::remove_agent_row`], and this closure is wired
-    /// once per row without a stable index to close over.
-    fn agent_row_index_by_command(&self, entity: &Entity<InputState>) -> Option<usize> {
-        self.agent_rows
+    /// Whether the catalog holds no entries **of either kind**. The single
+    /// definition the Save check and the section's placeholder both read, so a
+    /// catalog of only non-editable entries can never be called empty by one
+    /// and non-empty by the other.
+    pub(super) fn agent_catalog_is_empty(&self) -> bool {
+        self.agent_catalog.is_empty()
+    }
+
+    /// Editable rows paired with their catalog index (the index
+    /// [`Self::remove_agent_catalog_item`] takes — not the "Agent N" ordinal).
+    pub(super) fn agent_editable_rows(
+        &self,
+    ) -> impl Iterator<Item = (usize, &AgentCatalogRow)> + '_ {
+        self.agent_catalog
             .iter()
-            .position(|row| row.command_input == *entity)
+            .enumerate()
+            .filter_map(|(index, item)| match item {
+                AgentCatalogItem::Editable(row) => Some((index, row)),
+                AgentCatalogItem::Unresolved(_) => None,
+            })
+    }
+
+    /// Non-editable entries paired with their catalog index.
+    pub(super) fn agent_unresolved_entries(
+        &self,
+    ) -> impl Iterator<Item = (usize, &daruda_config::AgentEntry)> + '_ {
+        self.agent_catalog
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| match item {
+                AgentCatalogItem::Unresolved(entry) => Some((index, entry)),
+                AgentCatalogItem::Editable(_) => None,
+            })
+    }
+
+    /// The `ordinal`-th editable row, counting only editable ones — the number
+    /// the section shows as "Agent N" (1-based there, 0-based here). Test-only:
+    /// production code walks [`Self::agent_editable_rows`], which also yields
+    /// the catalog index every mutation needs.
+    #[cfg(test)]
+    pub(super) fn agent_editable_row(&self, ordinal: usize) -> Option<&AgentCatalogRow> {
+        self.agent_editable_rows().nth(ordinal).map(|(_, row)| row)
+    }
+
+    /// Catalog index of the row whose `command_input` is `entity`, if any. Rows
+    /// are looked up by entity identity rather than a captured index because
+    /// indices shift on [`Self::remove_agent_catalog_item`], and this closure is
+    /// wired once per row without a stable index to close over.
+    fn agent_row_index_by_command(&self, entity: &Entity<InputState>) -> Option<usize> {
+        self.agent_editable_rows()
+            .find(|(_, row)| row.command_input == *entity)
+            .map(|(index, _)| index)
     }
 
     /// Re-run the local-PATH check for one row and store the result. The
@@ -409,11 +463,14 @@ impl SettingsWindow {
     /// ssh/docker exemption is applied at render time instead, since it needs
     /// no I/O (see `agent.rs::render_agent_catalog_row`).
     fn recompute_agent_row_path_warning(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(row) = self.agent_rows.get(index) else {
+        let Some(AgentCatalogItem::Editable(row)) = self.agent_catalog.get(index) else {
             return;
         };
         let command = row.command_input.read(cx).value().to_string();
-        self.agent_rows[index].path_warning = agent_command_path_warning(&command);
+        let warning = agent_command_path_warning(&command);
+        if let Some(AgentCatalogItem::Editable(row)) = self.agent_catalog.get_mut(index) {
+            row.path_warning = warning;
+        }
         cx.notify();
     }
 
@@ -429,14 +486,17 @@ impl SettingsWindow {
     ) {
         let row = Self::agent_row_from_definition(&definition, preset, window, cx);
         Self::subscribe_agent_row(&row, window, cx, &mut self._input_subscriptions);
-        self.agent_rows.push(row);
+        self.agent_catalog.push(AgentCatalogItem::Editable(row));
         self.error = None;
         cx.notify();
     }
 
-    pub(super) fn remove_agent_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.agent_rows.len() {
-            self.agent_rows.remove(index);
+    /// Drop the catalog entry at `index`, whichever kind it is — a non-editable
+    /// entry is removable for the same reason an editable one is: the user's
+    /// only alternative is hand-editing `config.toml`.
+    pub(super) fn remove_agent_catalog_item(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.agent_catalog.len() {
+            self.agent_catalog.remove(index);
             self.error = None;
             cx.notify();
         }
@@ -705,23 +765,24 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&agent_preset), window, cx)
         });
 
-        // Entries that resolve get an editable row; entries that don't (a
-        // preset id daruda no longer knows) have no fields to edit, so they are
-        // held aside and written back untouched on save — a config the editor
-        // cannot represent must not be a config the editor deletes.
-        let mut agent_rows = Vec::with_capacity(config.agents.len());
-        let mut agent_unresolved_entries = Vec::new();
-        for entry in &config.agents {
-            match entry.resolve() {
-                Some(definition) => agent_rows.push(Self::agent_row_from_definition(
+        // Entries that resolve get an editable row; entries that don't (a preset
+        // id daruda no longer knows, or one that needs a manual install) have no
+        // fields to edit and are kept verbatim — a config the editor cannot
+        // represent must not be a config the editor deletes. Both kinds stay in
+        // one list at their config position.
+        let agent_catalog: Vec<AgentCatalogItem> = config
+            .agents
+            .iter()
+            .map(|entry| match entry.resolve() {
+                Some(definition) => AgentCatalogItem::Editable(Self::agent_row_from_definition(
                     &definition,
                     entry.preset_id().map(str::to_string),
                     window,
                     cx,
                 )),
-                None => agent_unresolved_entries.push(entry.clone()),
-            }
-        }
+                None => AgentCatalogItem::Unresolved(entry.clone()),
+            })
+            .collect();
 
         let max_fps_str: SharedString = config.render.max_fps.to_string().into();
         let max_fps_select = cx.new(|cx| {
@@ -805,14 +866,20 @@ impl SettingsWindow {
                 }
             },
         ));
-        for row in &agent_rows {
+        let editable_rows = || {
+            agent_catalog.iter().filter_map(|item| match item {
+                AgentCatalogItem::Editable(row) => Some(row),
+                AgentCatalogItem::Unresolved(_) => None,
+            })
+        };
+        for row in editable_rows() {
             Self::subscribe_agent_row(row, window, cx, &mut input_subscriptions);
         }
 
         // First-field jump target for the Agent section (its full tab-cycle
         // list is dynamic — see `focus_next_input` — since rows are
         // added/removed at runtime).
-        if let Some(row) = agent_rows.first() {
+        if let Some(row) = editable_rows().next() {
             section_focus_targets
                 .entry(BuiltinSection::Agent)
                 .or_default()
@@ -856,8 +923,7 @@ impl SettingsWindow {
             default_permission_mode_select,
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
-            agent_rows,
-            agent_unresolved_entries,
+            agent_catalog,
             accounts,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
@@ -1057,9 +1123,24 @@ impl SettingsWindow {
             .unwrap_or_default();
         config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
 
-        let mut agents = Vec::with_capacity(self.agent_rows.len());
+        // One pass over the whole catalog, so a non-editable entry keeps its
+        // config position instead of being appended after the editable rows.
+        // `index` counts editable rows only — it is the "Agent N" the section
+        // labels, which is the number an error message has to name.
+        let mut agents = Vec::with_capacity(self.agent_catalog.len());
         let mut seen_agent_ids = HashSet::new();
-        for (index, row) in self.agent_rows.iter().enumerate() {
+        let mut index = 0usize;
+        for item in &self.agent_catalog {
+            let row = match item {
+                // No fields to validate; carried through exactly as loaded.
+                AgentCatalogItem::Unresolved(entry) => {
+                    agents.push(entry.clone());
+                    continue;
+                }
+                AgentCatalogItem::Editable(row) => row,
+            };
+            index += 1;
+            let index = index - 1;
             let id = row.id_input.read(cx).value().trim().to_string();
             let name = row.name_input.read(cx).value().trim().to_string();
             let command = row.command_input.read(cx).value().trim().to_string();
@@ -1120,10 +1201,15 @@ impl SettingsWindow {
                 row.preset.as_deref(),
             ));
         }
+        // Non-editable entries are part of this count: they carry no fields but
+        // they are still catalog entries, and `resolved_agents` already falls
+        // back to the built-in default when none of them resolve. Counting only
+        // the editable rows would block every Save — including unrelated
+        // settings — for a config whose entries all name manual-install or
+        // retired presets.
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
         }
-        agents.extend(self.agent_unresolved_entries.iter().cloned());
         config.agents = agents;
 
         config.render.max_fps = self
@@ -1265,9 +1351,8 @@ impl SettingsWindow {
             // Dynamic: rows are added/removed at runtime, so this section
             // can't be precomputed into `section_focus_targets` like the
             // fixed sections below.
-            self.agent_rows
-                .iter()
-                .flat_map(|row| {
+            self.agent_editable_rows()
+                .flat_map(|(_, row)| {
                     [
                         row.id_input.read(cx).focus_handle(cx),
                         row.name_input.read(cx).focus_handle(cx),
