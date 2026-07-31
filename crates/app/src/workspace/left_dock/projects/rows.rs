@@ -800,7 +800,6 @@ pub(in crate::workspace) fn worktree_row(
     let wt_path: std::path::PathBuf = wt.path.clone();
     let wt_label_shared = SharedString::from(label.clone());
     let wt_description_current: Option<String> = wt.description.clone();
-    let wt_remote_cwd_current: Option<String> = wt.remote_cwd.clone();
     let wt_name_current: Option<String> = wt.name.clone();
     let removable = crate::workspace::Workspace::lane_removable(wt);
     let wt_availability = wt.availability;
@@ -926,7 +925,6 @@ pub(in crate::workspace) fn worktree_row(
                 wt_id,
                 path_str,
                 current_description: wt_description_current.clone(),
-                current_remote_cwd: wt_remote_cwd_current.clone(),
                 current_name: wt_name_current.clone(),
                 workspace: ws_for_rclick.clone(),
                 is_git: wt_is_git,

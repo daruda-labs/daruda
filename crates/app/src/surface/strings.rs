@@ -1034,11 +1034,12 @@ pub fn agent_chat_no_lane_cwd() -> String {
     rust_i18n::t!("agent_chat.no_lane_cwd").into_owned()
 }
 
-/// Status-line reason shown when a fresh Agent chat pane's agent command
-/// needs a remote working directory (`{{cwd}}` token — see
-/// `daruda_config::agent::command_needs_remote_cwd`) but the active lane has
-/// no `remote_cwd` configured. Unlike `agent_chat_no_lane_cwd`, this names
-/// the fix (right-click the lane in the sidebar) rather than just stating
+/// Status-line reason shown when an Agent chat pane's command carries the
+/// legacy `{{cwd}}` token (`AgentLaunch::needs_remote_cwd`) but the lane has
+/// no `remote_cwd` configured. The one launch shape the lane's
+/// `session_host` axis doesn't cover (see `session_host::adapter_command`'s
+/// doc) — `remote_cwd` for it is config-file-only, no UI sets it. Unlike
+/// `agent_chat_no_lane_cwd`, this names the fix rather than just stating
 /// the symptom.
 pub fn agent_chat_no_remote_cwd() -> String {
     rust_i18n::t!("agent_chat.no_remote_cwd").into_owned()
@@ -1373,6 +1374,14 @@ pub fn ctx_edit_remote_cwd() -> String {
 /// running on the path it connected with until it reconnects.
 pub fn ctx_edit_remote_cwd_hint() -> String {
     rust_i18n::t!("ctx.edit_remote_cwd_hint").into_owned()
+}
+/// The lane owns this setting, so every pane for it — not just ones created
+/// afterward — picks it up on its next connect
+/// (`resolve_session_command` re-resolves the lane's host fresh each time);
+/// only a session already live keeps running on the path it connected with
+/// until it reconnects.
+pub fn ctx_session_host() -> String {
+    rust_i18n::t!("ctx.session_host").into_owned()
 }
 pub fn ctx_rename() -> String {
     rust_i18n::t!("common.btn_rename").into_owned()
@@ -3823,6 +3832,74 @@ pub fn create_lane_err_branch_invalid() -> String {
 
 pub fn create_lane_err_no_active_project() -> String {
     rust_i18n::t!("create_lane.err_no_active_project").into_owned()
+}
+
+pub fn session_host_modal_title() -> String {
+    rust_i18n::t!("session_host.title").into_owned()
+}
+pub fn session_host_field_host() -> String {
+    rust_i18n::t!("session_host.field_host").into_owned()
+}
+pub fn session_host_option_local() -> String {
+    rust_i18n::t!("session_host.option_local").into_owned()
+}
+pub fn session_host_option_ssh() -> String {
+    rust_i18n::t!("session_host.option_ssh").into_owned()
+}
+pub fn session_host_option_docker() -> String {
+    rust_i18n::t!("session_host.option_docker").into_owned()
+}
+pub fn session_host_field_target() -> String {
+    rust_i18n::t!("session_host.field_target").into_owned()
+}
+pub fn session_host_placeholder_target() -> String {
+    rust_i18n::t!("session_host.placeholder_target").into_owned()
+}
+pub fn session_host_field_container() -> String {
+    rust_i18n::t!("session_host.field_container").into_owned()
+}
+pub fn session_host_placeholder_container() -> String {
+    rust_i18n::t!("session_host.placeholder_container").into_owned()
+}
+pub fn session_host_field_session_path() -> String {
+    rust_i18n::t!("session_host.field_session_path").into_owned()
+}
+pub fn session_host_placeholder_session_path() -> String {
+    rust_i18n::t!("session_host.placeholder_session_path").into_owned()
+}
+/// Shown inside the modal when the lane has never answered `session_host`
+/// but its legacy `remote_cwd` is set — informs the user that saving here
+/// (even choosing Local) retires that legacy pair for good, per
+/// `effective_session_host`'s precedence.
+pub fn session_host_legacy_notice() -> String {
+    rust_i18n::t!("session_host.legacy_notice").into_owned()
+}
+pub fn session_host_err_target_empty() -> String {
+    rust_i18n::t!("session_host.err_target_empty").into_owned()
+}
+pub fn session_host_err_target_unsafe() -> String {
+    rust_i18n::t!("session_host.err_target_unsafe").into_owned()
+}
+pub fn session_host_err_container_empty() -> String {
+    rust_i18n::t!("session_host.err_container_empty").into_owned()
+}
+pub fn session_host_err_container_unsafe() -> String {
+    rust_i18n::t!("session_host.err_container_unsafe").into_owned()
+}
+pub fn session_host_err_session_path_empty() -> String {
+    rust_i18n::t!("session_host.err_session_path_empty").into_owned()
+}
+pub fn session_host_err_session_path_unsafe() -> String {
+    rust_i18n::t!("session_host.err_session_path_unsafe").into_owned()
+}
+pub fn session_host_save() -> String {
+    rust_i18n::t!("common.btn_save").into_owned()
+}
+pub fn session_host_cancel() -> String {
+    rust_i18n::t!("common.btn_cancel").into_owned()
+}
+pub fn session_host_saving() -> String {
+    rust_i18n::t!("session_host.saving_label").into_owned()
 }
 
 #[cfg(test)]

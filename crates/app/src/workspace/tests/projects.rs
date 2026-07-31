@@ -332,30 +332,34 @@ fn lane0_field<T>(ws: &Workspace, pid: u64, f: impl FnOnce(&crate::lane::Lane) -
 // `mutate_lane` helper via each setter.
 
 #[gpui::test]
-fn set_lane_remote_cwd_targets_named_project_not_active(cx: &mut TestAppContext) {
+fn set_lane_session_host_targets_named_project_not_active(cx: &mut TestAppContext) {
     let (wh, ws) = workspace_with_background_project_a(
         cx,
-        "/tmp/daruda_remote_cwd_scope_a",
-        "/tmp/daruda_remote_cwd_scope_b",
+        "/tmp/daruda_session_host_scope_a",
+        "/tmp/daruda_session_host_scope_b",
     );
     let a_lane = daruda_store::project::LaneRef {
         project: 0,
         lane: 0,
     };
+    let host = daruda_store::project::LaneSessionHost::Ssh {
+        target: "vm-a".to_string(),
+        session_path: "/data/a".to_string(),
+    };
     cx.update_window(wh.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.set_lane_remote_cwd(a_lane, Some("/data/a".to_string()), cx);
+            ws.set_lane_session_host(a_lane, host.clone(), cx);
         })
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            lane0_field(ws, 0, |l| l.remote_cwd.clone()),
-            Some("/data/a".to_string()),
+            lane0_field(ws, 0, |l| l.session_host.clone()),
+            Some(host),
             "target project A's lane must receive the edit"
         );
         assert_eq!(
-            lane0_field(ws, 1, |l| l.remote_cwd.clone()),
+            lane0_field(ws, 1, |l| l.session_host.clone()),
             None,
             "active project B's like-id lane must stay untouched"
         );

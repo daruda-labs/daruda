@@ -16,5 +16,6 @@ pub(in crate::workspace) mod merge_modal;
 pub(in crate::workspace) mod project_menu;
 pub(in crate::workspace) mod remove_modal;
 pub(in crate::workspace) mod rows;
+pub(in crate::workspace) mod session_host_modal;
 
 pub(in crate::workspace) use list::render;

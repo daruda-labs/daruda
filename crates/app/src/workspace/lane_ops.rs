@@ -4,7 +4,7 @@
 //! Git CLI runs on `cx.background_executor`; post-git state mutations
 //! return via `cx.update`.
 
-use daruda_store::project::{LaneId, LaneRef, ProjectId};
+use daruda_store::project::{LaneId, LaneRef, LaneSessionHost, ProjectId};
 use daruda_store::tasks::TaskAgentSurface;
 use gpui::{Context, Window};
 
@@ -726,20 +726,21 @@ impl Workspace {
         self.mutate_lane(target, |wt| wt.set_description(description), cx);
     }
 
-    /// Update the remote path the lane named by `target` connects
-    /// its session to. `None` reverts the lane to the local
-    /// filesystem. `resolve_new_pane_cwd` resolves it once, at
-    /// pane-creation time, seeding a fresh pane's initial `PaneCwd`; every
-    /// pane's next *connect* (fresh or already open) re-resolves from the
-    /// lane fresh via `resolve_session_command` — only an already-connected
-    /// session keeps running on the path it connected with.
-    pub(in crate::workspace) fn set_lane_remote_cwd(
+    /// Answer where the lane named by `target` attaches its session —
+    /// always `Some`, since opening the Session Host modal and saving *is*
+    /// answering the question (picking Local is the explicit "run it here"
+    /// that retires a legacy `remote_cwd`/agent pair, not a way to go back
+    /// to unanswered — see `Lane::set_session_host`'s doc). Every pane's
+    /// next *connect* (fresh or already open) re-resolves from the lane
+    /// fresh via `resolve_session_command` — only an already-connected
+    /// session keeps running on the host it connected with.
+    pub(in crate::workspace) fn set_lane_session_host(
         &mut self,
         target: LaneRef,
-        remote_cwd: Option<String>,
+        host: LaneSessionHost,
         cx: &mut Context<Self>,
     ) {
-        self.mutate_lane(target, |wt| wt.set_remote_cwd(remote_cwd), cx);
+        self.mutate_lane(target, |wt| wt.set_session_host(Some(host)), cx);
     }
 
     /// Update the user-visible display name for the lane named by `target`.
