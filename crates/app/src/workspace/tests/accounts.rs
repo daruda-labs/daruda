@@ -566,9 +566,9 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
     };
 
     let mut config = daruda_config::Config::default();
-    config
-        .agents
-        .push(daruda_config::AgentDefinition::codex_default());
+    config.agents.push(daruda_config::AgentEntry::Custom(
+        daruda_config::AgentDefinition::codex_default(),
+    ));
     let (window_handle, workspace) = build_workspace_with(cx, &config, None);
     cx.run_until_parked();
 
@@ -842,8 +842,8 @@ async fn right_dock_snapshot_threads_focused_domain_and_override(cx: &mut TestAp
     // domain reads back as `Unsupported` instead of `Exactly(Codex)`.
     let config = daruda_config::Config {
         agents: vec![
-            daruda_config::AgentDefinition::claude_default(),
-            daruda_config::AgentDefinition::codex_default(),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
         ],
         ..Default::default()
     };

@@ -1,0 +1,19 @@
+[package]
+name = "gen_acp_presets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Generates the ACP registry preset block from a registry snapshot"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gen_acp_presets"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

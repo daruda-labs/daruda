@@ -482,10 +482,11 @@ pub struct Workspace {
     pub(in crate::workspace) clipboard: daruda_config::ClipboardConfig,
     /// Agent chat configuration — permission mode applied on connect.
     pub(in crate::workspace) agent: daruda_config::AgentConfig,
-    /// The agent catalog mirrored from config `[[agents]]`. A newly opened
-    /// pane runs under `agents[0]`; each pane resolves its `agent_id` to a
-    /// launch command here at connect time. Guaranteed non-empty by the
-    /// config layer.
+    /// The agent catalog mirrored from config `[[agents]]`, already resolved
+    /// (`Config::resolved_agents`) — preset references expanded, entries that
+    /// resolve to nothing dropped. A newly opened pane runs under `agents[0]`;
+    /// each pane resolves its `agent_id` to a launch command here at connect
+    /// time. Guaranteed non-empty by the config layer.
     pub(in crate::workspace) agents: Vec<daruda_config::AgentDefinition>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
@@ -1151,7 +1152,7 @@ impl Workspace {
             telegram: config.telegram.clone(),
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),
-            agents: config.agents.clone(),
+            agents: config.resolved_agents(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
             deferred_telegram: std::collections::HashMap::new(),

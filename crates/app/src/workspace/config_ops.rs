@@ -54,7 +54,7 @@ impl Workspace {
         }
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
-        self.agents = config.agents.clone();
+        self.agents = config.resolved_agents();
         let agent_names = self
             .agents
             .iter()

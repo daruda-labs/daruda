@@ -90,6 +90,17 @@ pub fn command_needs_node(command: &str) -> bool {
     )
 }
 
+/// The command's first real token — the executable name, after stripping any
+/// leading `NAME=value` env-prefix assignments (see `daruda_config`'s
+/// `AgentLaunch::wrap_with_env`). Exposed for the Settings window's
+/// local-PATH check, which needs the same env-prefix-aware tokenization
+/// [`command_needs_node`] uses but tests the token against a different set
+/// (`npx`/`uvx`) than the Node-only launcher check.
+#[must_use]
+pub fn first_command_token(command: &str) -> Option<String> {
+    launcher_after_env_prefix(command)
+}
+
 fn launcher_after_env_prefix(command: &str) -> Option<String> {
     let (_, tokens) = split_env_prefixed_tokens(command);
     tokens.into_iter().next()

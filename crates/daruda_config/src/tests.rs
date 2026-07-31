@@ -68,8 +68,11 @@ fn empty_toml_produces_defaults() {
 #[test]
 fn missing_agents_seeds_single_claude_default() {
     let cfg: Config = toml::from_str("").unwrap();
-    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
-    assert_eq!(cfg.agents[0].id, "claude");
+    assert_eq!(
+        cfg.agents,
+        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+    );
+    assert_eq!(cfg.resolved_agents()[0].id, "claude");
 }
 
 #[test]
@@ -85,24 +88,32 @@ id = \"custom\"\n\
 name = \"My Agent\"\n\
 command = \"my-agent --acp\"\n";
     let cfg: Config = toml::from_str(input).unwrap();
-    assert_eq!(cfg.agents.len(), 2);
-    assert_eq!(cfg.agents[0].id, "codex");
-    assert_eq!(cfg.agents[1].id, "custom");
+    let resolved = cfg.resolved_agents();
+    assert_eq!(resolved.len(), 2);
+    assert_eq!(resolved[0].id, "codex");
+    assert_eq!(resolved[1].id, "custom");
     // The Claude default is gone — a provided array replaces, not merges.
-    assert!(cfg.agents.iter().all(|a| a.id != "claude"));
+    assert!(resolved.iter().all(|a| a.id != "claude"));
 }
 
 #[test]
 fn agents_round_trip_through_toml() {
     let cfg = Config {
         agents: vec![
-            AgentDefinition {
+            AgentEntry::Custom(AgentDefinition {
                 id: "codex".to_string(),
                 name: "Codex".to_string(),
                 launch: AgentLaunch::Raw("codex acp".to_string()),
                 default_mode: None,
+            }),
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides {
+                    name: Some("Codex (renamed)".to_string()),
+                    ..PresetOverrides::default()
+                },
             },
-            AgentDefinition::claude_default(),
+            AgentEntry::Custom(AgentDefinition::claude_default()),
         ],
         ..Config::default()
     };
@@ -112,12 +123,44 @@ fn agents_round_trip_through_toml() {
 }
 
 #[test]
+fn a_preset_reference_resolves_but_an_unknown_one_only_stays_persisted() {
+    let input = "\
+[[agents]]\n\
+preset = \"codex-acp\"\n\
+\n\
+[[agents]]\n\
+preset = \"retired-agent\"\n";
+    let cfg: Config = toml::from_str(input).unwrap();
+    // Both entries persist; only the resolvable one reaches the runtime.
+    assert_eq!(cfg.agents.len(), 2);
+    let resolved = cfg.resolved_agents();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0], AgentDefinition::codex_default());
+}
+
+#[test]
+fn a_catalog_that_resolves_to_nothing_still_hands_out_the_built_in_default() {
+    // Every consumer relies on `catalog[0]`; a config whose only entries are
+    // unknown presets must not produce an empty runtime catalog.
+    let mut cfg: Config = toml::from_str("[[agents]]\npreset = \"retired-agent\"\n").unwrap();
+    cfg.clamp();
+    assert_eq!(cfg.agents.len(), 1, "the unresolved entry is not pruned");
+    assert_eq!(
+        cfg.resolved_agents(),
+        vec![AgentDefinition::claude_default()]
+    );
+}
+
+#[test]
 fn load_from_missing_path_normalizes_agents() {
     // The error branch returns Config::default(), which seeds the Claude default
     // directly (since a232e44), and still clamps — so the normalized non-empty
     // catalog holds regardless. Proves normalization runs on every load path.
     let cfg = Config::load_from(std::path::Path::new("/nonexistent/daruda/config.toml"));
-    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
+    assert_eq!(
+        cfg.agents,
+        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+    );
 }
 
 #[test]
@@ -125,7 +168,10 @@ fn explicitly_empty_agents_normalizes_to_claude_default() {
     let mut cfg: Config = toml::from_str("agents = []").unwrap();
     assert!(cfg.agents.is_empty());
     cfg.clamp();
-    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
+    assert_eq!(
+        cfg.agents,
+        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+    );
 }
 
 #[test]
@@ -478,8 +524,8 @@ fn patch_config_file_writes_non_default_agents() {
 
     let cfg = Config {
         agents: vec![
-            AgentDefinition::claude_default(),
-            AgentDefinition::codex_default(),
+            AgentEntry::Custom(AgentDefinition::claude_default()),
+            AgentEntry::Custom(AgentDefinition::codex_default()),
         ],
         ..Config::default()
     };
@@ -488,8 +534,79 @@ fn patch_config_file_writes_non_default_agents() {
     let on_disk = std::fs::read_to_string(&path).unwrap();
     assert!(on_disk.contains("[[agents]]"));
     assert!(on_disk.contains("@agentclientprotocol/codex-acp"));
+    // The Codex row was written flat but matches its preset exactly, so the
+    // reload promotes it to a reference — same resolved catalog either way.
     let reloaded = Config::load_from(&path);
-    assert_eq!(reloaded.agents, cfg.agents);
+    assert_eq!(
+        reloaded.agents,
+        vec![
+            AgentEntry::Custom(AgentDefinition::claude_default()),
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides::default(),
+            },
+        ]
+    );
+    assert_eq!(reloaded.resolved_agents(), cfg.resolved_agents());
+}
+
+/// The catalog's real persistence boundary is the hand-built `toml_edit`
+/// writer, not serde — a reference that came back as a flat `id`/`name`/
+/// `command` copy would put the copy model back on disk, and an unresolved
+/// entry the writer skipped would delete part of the user's config.
+#[test]
+fn patch_config_file_round_trips_every_agent_entry_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let cfg = Config {
+        agents: vec![
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides::default(),
+            },
+            AgentEntry::Preset {
+                preset: "gemini".to_string(),
+                overrides: PresetOverrides {
+                    name: Some("Gemini (pinned)".to_string()),
+                    command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
+                    default_mode: Some("plan".to_string()),
+                },
+            },
+            AgentEntry::Preset {
+                preset: "retired-agent".to_string(),
+                overrides: PresetOverrides::default(),
+            },
+            AgentEntry::Custom(AgentDefinition {
+                id: "hermes".to_string(),
+                name: "Hermes Agent".to_string(),
+                launch: AgentLaunch::Raw("hermes acp".to_string()),
+                default_mode: Some("yolo".to_string()),
+            }),
+            AgentEntry::Custom(AgentDefinition {
+                id: "remote".to_string(),
+                name: "Remote".to_string(),
+                launch: AgentLaunch::Ssh {
+                    adapter_command: "npx -y some-acp".to_string(),
+                    host: "vm-work".to_string(),
+                },
+                default_mode: None,
+            }),
+        ],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.contains("preset = \"codex-acp\""), "{on_disk}");
+    // A bare reference carries no copied command.
+    assert!(
+        !on_disk.contains("@agentclientprotocol/codex-acp"),
+        "{on_disk}"
+    );
+    assert!(on_disk.contains("preset = \"retired-agent\""), "{on_disk}");
+
+    assert_eq!(Config::load_from(&path).agents, cfg.agents);
 }
 
 #[test]
@@ -502,7 +619,10 @@ fn patch_config_file_preserves_implicit_default_agents_when_unmanaged() {
     let on_disk = std::fs::read_to_string(&path).unwrap();
     assert!(!on_disk.contains("[[agents]]"));
     let reloaded = Config::load_from(&path);
-    assert_eq!(reloaded.agents, vec![AgentDefinition::claude_default()]);
+    assert_eq!(
+        reloaded.agents,
+        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+    );
 }
 
 #[test]

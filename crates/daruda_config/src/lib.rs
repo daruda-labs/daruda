@@ -40,8 +40,9 @@ use std::path::PathBuf;
 
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
-    ACP_REGISTRY_AGENT_PRESETS, ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig,
-    AgentDefinition, AgentLaunch, AgentPreset, DefaultPermissionMode,
+    ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
+    AgentPreset, DefaultPermissionMode, PresetLaunchability, PresetOverrides, agent_preset,
+    agent_presets,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -128,11 +129,16 @@ pub struct Config {
     pub logs: LogsConfig,
     pub render: RenderConfig,
     pub agent: AgentConfig,
-    /// Selectable ACP agent catalog. Absent `[[agents]]` seeds a single Claude
-    /// default (see [`agent::default_agents`]); an explicitly-empty catalog is
-    /// normalized back to that default in [`Config::clamp`].
+    /// Selectable ACP agent catalog **as persisted** — preset references and
+    /// custom entries alike, including entries that resolve to nothing. Absent
+    /// `[[agents]]` seeds a single Claude default (see [`agent::default_agents`]);
+    /// an explicitly-empty catalog is normalized back to that default in
+    /// [`Config::clamp`].
+    ///
+    /// Runtime consumers want [`Config::resolved_agents`] instead; this field is
+    /// for the Settings editor, which has to show (and re-save) unresolved rows.
     #[serde(default = "agent::default_agents")]
-    pub agents: Vec<AgentDefinition>,
+    pub agents: Vec<AgentEntry>,
     pub update: UpdateConfig,
     pub telegram: TelegramConfig,
 }
@@ -218,6 +224,27 @@ impl Config {
         if self.agents.is_empty() {
             self.agents = agent::default_agents();
         }
+    }
+
+    /// The launchable agent catalog: every [`AgentEntry`] that resolves, in
+    /// config order. An entry referencing a preset daruda no longer knows is
+    /// skipped — it stays in [`Self::agents`] (so a save preserves it and the
+    /// Settings editor can flag it) but never reaches the runtime, where a
+    /// nameless, commandless agent would only be selectable-then-broken.
+    ///
+    /// Falls back to the built-in default when nothing resolves, upholding the
+    /// same non-empty-catalog invariant [`Self::clamp`] enforces for an
+    /// explicitly-empty array — every consumer relies on `catalog[0]` existing.
+    pub fn resolved_agents(&self) -> Vec<AgentDefinition> {
+        let resolved: Vec<AgentDefinition> =
+            self.agents.iter().filter_map(AgentEntry::resolve).collect();
+        if resolved.is_empty() {
+            return agent::default_agents()
+                .iter()
+                .filter_map(AgentEntry::resolve)
+                .collect();
+        }
+        resolved
     }
 
     /// Return the effective `ColorConfig` for this configuration.
@@ -408,34 +435,8 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
     if doc.contains_key("agents") || config.agents != agent::default_agents() {
         let mut agents = toml_edit::ArrayOfTables::new();
-        for agent in &config.agents {
-            let mut table = toml_edit::Table::new();
-            table["id"] = toml_edit::value(agent.id.clone());
-            table["name"] = toml_edit::value(agent.name.clone());
-            match &agent.launch {
-                AgentLaunch::Raw(command) => {
-                    table["command"] = toml_edit::value(command.clone());
-                }
-                AgentLaunch::Ssh {
-                    adapter_command,
-                    host,
-                } => {
-                    let mut ssh = toml_edit::Table::new();
-                    ssh["adapter_command"] = toml_edit::value(adapter_command.clone());
-                    ssh["host"] = toml_edit::value(host.clone());
-                    table["ssh"] = toml_edit::Item::Table(ssh);
-                }
-                AgentLaunch::Docker {
-                    adapter_command,
-                    container,
-                } => {
-                    let mut docker = toml_edit::Table::new();
-                    docker["adapter_command"] = toml_edit::value(adapter_command.clone());
-                    docker["container"] = toml_edit::value(container.clone());
-                    table["docker"] = toml_edit::Item::Table(docker);
-                }
-            }
-            agents.push(table);
+        for entry in &config.agents {
+            agents.push(agent_entry_table(entry));
         }
         doc.insert("agents", toml_edit::Item::ArrayOfTables(agents));
     }
@@ -444,4 +445,69 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, doc.to_string()).map_err(|e| e.to_string())
+}
+
+/// One `[[agents]]` table as [`patch_config_file_to`] writes it. Hand-built
+/// rather than serialized because the surrounding document is a `toml_edit`
+/// tree that preserves the user's comments and formatting — which means this
+/// function is the real persistence boundary for the catalog and has to mirror
+/// [`AgentEntry`]'s shape exactly: a reference writes `preset` plus only the
+/// overrides that are set, so an untouched field keeps tracking the preset, and
+/// an entry daruda cannot resolve is written back unchanged instead of pruned.
+///
+/// Scalars are written before the `ssh` / `docker` sub-tables — TOML gives a
+/// value after a table to that table.
+fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    match entry {
+        AgentEntry::Preset { preset, overrides } => {
+            table["preset"] = toml_edit::value(preset.clone());
+            if let Some(name) = &overrides.name {
+                table["name"] = toml_edit::value(name.clone());
+            }
+            if let Some(command) = &overrides.command {
+                table["command"] = toml_edit::value(command.clone());
+            }
+            if let Some(default_mode) = &overrides.default_mode {
+                table["default_mode"] = toml_edit::value(default_mode.clone());
+            }
+        }
+        AgentEntry::Custom(agent) => {
+            table["id"] = toml_edit::value(agent.id.clone());
+            table["name"] = toml_edit::value(agent.name.clone());
+            // A remote launch has no flat `command` key; it yields the sub-table
+            // held back until every scalar key is in place.
+            let remote = match &agent.launch {
+                AgentLaunch::Raw(command) => {
+                    table["command"] = toml_edit::value(command.clone());
+                    None
+                }
+                AgentLaunch::Ssh {
+                    adapter_command,
+                    host,
+                } => {
+                    let mut ssh = toml_edit::Table::new();
+                    ssh["adapter_command"] = toml_edit::value(adapter_command.clone());
+                    ssh["host"] = toml_edit::value(host.clone());
+                    Some(("ssh", ssh))
+                }
+                AgentLaunch::Docker {
+                    adapter_command,
+                    container,
+                } => {
+                    let mut docker = toml_edit::Table::new();
+                    docker["adapter_command"] = toml_edit::value(adapter_command.clone());
+                    docker["container"] = toml_edit::value(container.clone());
+                    Some(("docker", docker))
+                }
+            };
+            if let Some(default_mode) = &agent.default_mode {
+                table["default_mode"] = toml_edit::value(default_mode.clone());
+            }
+            if let Some((key, sub_table)) = remote {
+                table[key] = toml_edit::Item::Table(sub_table);
+            }
+        }
+    }
+    table
 }

@@ -63,6 +63,12 @@ pub struct SettingsWindow {
     agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
     agent_rows: Vec<AgentCatalogRow>,
+    /// Catalog entries with no editable row — a `preset` id daruda cannot
+    /// resolve. Carried verbatim from load to save so the editor never silently
+    /// deletes an entry it has no fields for. Appended after the editable rows,
+    /// which is positionally lossy but semantically not: an entry that resolves
+    /// to nothing never takes part in the runtime catalog's ordering.
+    agent_unresolved_entries: Vec<daruda_config::AgentEntry>,
     // Accounts (Task 9). Snapshot loaded from `accounts.json` at
     // construction; every write goes through the section's own
     // `set_default_account`/`remove_account` handlers, which persist
@@ -172,6 +178,10 @@ pub(super) enum PluginSkillBodyState {
 
 #[derive(Clone)]
 pub(super) struct AgentCatalogRow {
+    /// The preset this row references, when it has one. Kept so saving
+    /// re-derives the row's overrides against that preset instead of writing a
+    /// frozen copy — an untouched field keeps tracking the preset.
+    pub(super) preset: Option<String>,
     pub(super) id_input: Entity<InputState>,
     pub(super) name_input: Entity<InputState>,
     /// The command that runs the ACP adapter — `Raw`'s full string, or the
@@ -190,6 +200,16 @@ pub(super) struct AgentCatalogRow {
     /// the global default. Free text: a mode id is whatever the agent
     /// advertises, which varies by agent and by model. Empty = no override.
     pub(super) default_mode_input: Entity<InputState>,
+    /// The command's executable name, when [`agent_command_path_warning`]
+    /// determined it names a local binary not found on `PATH` — `None` when
+    /// no check applies (`npx`/`uvx`/JSON stdio) or the binary was found.
+    /// Independent of transport: an ssh/docker row's warning is suppressed at
+    /// render time instead (see `sections::agent::render_agent_catalog_row`),
+    /// since that needs no fresh `which` lookup. Recomputed on construction
+    /// and whenever `command_input` changes (see
+    /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
+    /// is I/O, so `render` only ever reads this field, never calls it.
+    pub(super) path_warning: Option<String>,
 }
 
 impl SettingsWindow {
@@ -241,6 +261,7 @@ impl SettingsWindow {
 
     fn agent_row_from_definition(
         definition: &daruda_config::AgentDefinition,
+        preset: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AgentCatalogRow {
@@ -264,9 +285,11 @@ impl SettingsWindow {
                 container.clone(),
             ),
         };
+        let path_warning = agent_command_path_warning(&command);
         let transport_kind = SharedString::from(transport_kind);
         let default_mode = definition.default_mode.clone().unwrap_or_default();
         AgentCatalogRow {
+            preset,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
                     .placeholder("agent-id")
@@ -305,6 +328,7 @@ impl SettingsWindow {
                     .placeholder(s::settings_agent_default_mode_placeholder())
                     .default_value(default_mode)
             }),
+            path_warning,
         }
     }
 
@@ -337,7 +361,11 @@ impl SettingsWindow {
         ));
         // Re-render on transport pick so the row immediately shows/hides the
         // matching host/container field (rows are added/removed at runtime,
-        // unlike the fixed global dropdowns wired in `new_with_section`).
+        // unlike the fixed global dropdowns wired in `new_with_section`), and
+        // so an ssh/docker pick immediately hides a stale PATH warning — that
+        // suppression is transport-dependent but needs no fresh `which` call
+        // (see `agent.rs::render_agent_catalog_row`), so a plain repaint
+        // suffices here.
         subs.push(cx.subscribe_in(
             &row.transport_select,
             window,
@@ -347,15 +375,59 @@ impl SettingsWindow {
                 }
             },
         ));
+        // Recompute the local-PATH warning whenever the command text changes.
+        // Separate from the standard submit/clear-error subscription above,
+        // which is shared by every input field and doesn't know which row's
+        // command changed.
+        subs.push(cx.subscribe_in(
+            &row.command_input,
+            window,
+            |this, state, ev: &InputEvent, _window, cx| {
+                if matches!(ev, InputEvent::Change)
+                    && let Some(index) = this.agent_row_index_by_command(state)
+                {
+                    this.recompute_agent_row_path_warning(index, cx);
+                }
+            },
+        ));
     }
 
+    /// Index of the row whose `command_input` is `entity`, if any. Rows are
+    /// looked up by entity identity rather than a captured index because
+    /// indices shift on [`Self::remove_agent_row`], and this closure is wired
+    /// once per row without a stable index to close over.
+    fn agent_row_index_by_command(&self, entity: &Entity<InputState>) -> Option<usize> {
+        self.agent_rows
+            .iter()
+            .position(|row| row.command_input == *entity)
+    }
+
+    /// Re-run the local-PATH check for one row and store the result. The
+    /// `which` lookup is I/O, so this runs from the command-change handler
+    /// and construction only — never from `render`, which just reads
+    /// [`AgentCatalogRow::path_warning`]. Independent of transport: the
+    /// ssh/docker exemption is applied at render time instead, since it needs
+    /// no I/O (see `agent.rs::render_agent_catalog_row`).
+    fn recompute_agent_row_path_warning(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(row) = self.agent_rows.get(index) else {
+            return;
+        };
+        let command = row.command_input.read(cx).value().to_string();
+        self.agent_rows[index].path_warning = agent_command_path_warning(&command);
+        cx.notify();
+    }
+
+    /// Append a catalog row. `preset` names the preset `definition` came from
+    /// (the "Add Preset" button), so the saved entry references it rather than
+    /// copying its fields; `None` adds a custom row.
     pub(super) fn add_agent_row(
         &mut self,
         definition: daruda_config::AgentDefinition,
+        preset: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let row = Self::agent_row_from_definition(&definition, window, cx);
+        let row = Self::agent_row_from_definition(&definition, preset, window, cx);
         Self::subscribe_agent_row(&row, window, cx, &mut self._input_subscriptions);
         self.agent_rows.push(row);
         self.error = None;
@@ -613,20 +685,43 @@ impl SettingsWindow {
 
         let agent_preset = SharedString::from("codex-acp");
         let agent_preset_select = cx.new(|cx| {
-            let opts = daruda_config::ACP_REGISTRY_AGENT_PRESETS
-                .iter()
+            // Every built-in preset, launchable or not. A preset that needs a
+            // manual install cannot become a row, so its label says so and the
+            // section swaps the Add button for install instructions — hiding it
+            // instead left the user with no sign the agent exists at all.
+            let opts = daruda_config::agent_presets()
                 .map(|preset| {
-                    SelectOption::new(preset.id, format!("{} ({})", preset.name, preset.id))
+                    let label = match preset.launchability {
+                        daruda_config::PresetLaunchability::Runnable { .. } => {
+                            s::settings_agent_preset_option(preset.name, preset.id)
+                        }
+                        daruda_config::PresetLaunchability::NeedsManualInstall { .. } => {
+                            s::settings_agent_preset_option_needs_install(preset.name, preset.id)
+                        }
+                    };
+                    SelectOption::new(preset.id, label)
                 })
                 .collect();
             select::state_with_options(opts, Some(&agent_preset), window, cx)
         });
 
-        let agent_rows = config
-            .agents
-            .iter()
-            .map(|agent| Self::agent_row_from_definition(agent, window, cx))
-            .collect::<Vec<_>>();
+        // Entries that resolve get an editable row; entries that don't (a
+        // preset id daruda no longer knows) have no fields to edit, so they are
+        // held aside and written back untouched on save — a config the editor
+        // cannot represent must not be a config the editor deletes.
+        let mut agent_rows = Vec::with_capacity(config.agents.len());
+        let mut agent_unresolved_entries = Vec::new();
+        for entry in &config.agents {
+            match entry.resolve() {
+                Some(definition) => agent_rows.push(Self::agent_row_from_definition(
+                    &definition,
+                    entry.preset_id().map(str::to_string),
+                    window,
+                    cx,
+                )),
+                None => agent_unresolved_entries.push(entry.clone()),
+            }
+        }
 
         let max_fps_str: SharedString = config.render.max_fps.to_string().into();
         let max_fps_select = cx.new(|cx| {
@@ -699,6 +794,17 @@ impl SettingsWindow {
                 }
             },
         ));
+        // Picking a preset swaps the Add button for install instructions when
+        // that preset ships binaries only — repaint so the swap is immediate.
+        input_subscriptions.push(cx.subscribe_in(
+            &agent_preset_select,
+            window,
+            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    cx.notify();
+                }
+            },
+        ));
         for row in &agent_rows {
             Self::subscribe_agent_row(row, window, cx, &mut input_subscriptions);
         }
@@ -751,6 +857,7 @@ impl SettingsWindow {
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_rows,
+            agent_unresolved_entries,
             accounts,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
@@ -999,17 +1106,24 @@ impl SettingsWindow {
                 _ => daruda_config::AgentLaunch::Raw(command),
             };
             let default_mode = row.default_mode_input.read(cx).value().trim().to_string();
-            agents.push(daruda_config::AgentDefinition {
+            let definition = daruda_config::AgentDefinition {
                 id,
                 name,
                 launch,
                 // Empty field = no override; the global default applies.
                 default_mode: (!default_mode.is_empty()).then_some(default_mode),
-            });
+            };
+            // A row that came from a preset stays a reference to it, so the
+            // fields the user left alone keep following the preset.
+            agents.push(daruda_config::AgentEntry::for_definition(
+                definition,
+                row.preset.as_deref(),
+            ));
         }
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
         }
+        agents.extend(self.agent_unresolved_entries.iter().cloned());
         config.agents = agents;
 
         config.render.max_fps = self
@@ -1270,6 +1384,38 @@ fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
     }
 }
 
+/// The token [`agent_command_path_warning`] should look up on `PATH`, or
+/// `None` when `command` means no local-PATH check applies.
+///
+/// No check applies when: the command is a JSON stdio config (self-contained,
+/// no executable name to look up — same discrimination `daruda_config`'s
+/// `AgentLaunch` uses to gate its own shell-string edits); or the first real
+/// token (after stripping any `NAME=value` env-prefix assignments) is
+/// `npx`/`uvx` — daruda provisions Node.js itself, and `uvx` resolves its own
+/// Python venvs, so neither names a binary the user is expected to have
+/// installed locally. Transport (ssh/docker exempts the whole row) is not
+/// considered here — that suppression needs no `which` call, so it is applied
+/// at render time instead (`sections::agent::render_agent_catalog_row`).
+fn path_check_token(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() || trimmed.starts_with('{') {
+        return None;
+    }
+    let token = daruda_acp::node::first_command_token(trimmed)?;
+    (!matches!(token.as_str(), "npx" | "uvx")).then_some(token)
+}
+
+/// The catalog row's local-PATH warning: `Some(token)` when
+/// [`path_check_token`] says a check applies and that token is not found on
+/// `PATH`, `None` otherwise (no check applies, or the binary was found).
+/// Advisory only — a missing command never blocks
+/// [`SettingsWindow::validate`], since registering an agent before
+/// installing its CLI (or before adding it to `PATH`) is a legitimate flow.
+fn agent_command_path_warning(command: &str) -> Option<String> {
+    let token = path_check_token(command)?;
+    which::which(&token).is_err().then_some(token)
+}
+
 /// Return all font family names available on this system, sorted alphabetically.
 /// The `current` family is always included as the first entry so the select
 /// can show the currently-configured font even if it is not yet installed.
@@ -1315,5 +1461,71 @@ mod agent_row_validation_tests {
     fn unrecognized_kind_is_treated_as_valid() {
         assert!(agent_row_is_valid("", "", ""));
         assert!(agent_row_is_valid("bogus", "", ""));
+    }
+}
+
+#[cfg(test)]
+mod agent_command_path_warning_tests {
+    use super::{agent_command_path_warning, path_check_token};
+
+    /// Never a real executable name, so `which` is guaranteed to miss it.
+    const MISSING_COMMAND: &str = "daruda-settings-path-warning-test-missing-binary";
+
+    #[test]
+    fn npx_prefixed_commands_skip_the_check() {
+        assert_eq!(path_check_token("npx -y some-pkg@latest --acp"), None);
+    }
+
+    #[test]
+    fn uvx_prefixed_commands_skip_the_check() {
+        assert_eq!(path_check_token("uvx some-pkg@latest -x"), None);
+    }
+
+    #[test]
+    fn json_stdio_configs_skip_the_check() {
+        assert_eq!(path_check_token(r#"{"command": "some-binary"}"#), None);
+    }
+
+    #[test]
+    fn env_prefix_is_stripped_before_testing_the_launcher_token() {
+        // The env-prefixed form of an npx preset (e.g. Augment) must not warn.
+        assert_eq!(
+            path_check_token("AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y pkg@latest --acp"),
+            None
+        );
+        // A plain local command behind an env prefix still gets checked.
+        assert_eq!(
+            path_check_token("FOO=1 my-local-cli acp"),
+            Some("my-local-cli".to_string())
+        );
+    }
+
+    #[test]
+    fn a_plain_local_command_is_checked() {
+        assert_eq!(
+            path_check_token("my-local-cli acp"),
+            Some("my-local-cli".to_string())
+        );
+    }
+
+    #[test]
+    fn a_command_found_on_path_gets_no_warning() {
+        assert_eq!(agent_command_path_warning("sh -c true"), None);
+    }
+
+    #[test]
+    fn a_command_missing_from_path_gets_a_warning() {
+        assert_eq!(
+            agent_command_path_warning(MISSING_COMMAND),
+            Some(MISSING_COMMAND.to_string())
+        );
+    }
+
+    #[test]
+    fn npx_never_warns_even_when_npm_is_unavailable_in_the_test_sandbox() {
+        assert_eq!(
+            agent_command_path_warning("npx -y definitely-nonexistent-package@latest"),
+            None
+        );
     }
 }

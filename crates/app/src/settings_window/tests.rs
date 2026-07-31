@@ -129,7 +129,13 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
     let win_for_add = win.clone();
     cx.update_window(wh.into(), |_, window, cx| {
         win_for_add.update(cx, |w, cx| {
-            w.add_agent_row(daruda_config::AgentDefinition::codex_default(), window, cx);
+            // What the "Add Preset" button does.
+            w.add_agent_row(
+                daruda_config::AgentDefinition::codex_default(),
+                Some("codex-acp".to_string()),
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -139,10 +145,376 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
         assert_eq!(
             cfg.agents,
             vec![
+                // The built-in default keeps its own stable id — never promoted
+                // to the `claude-acp` preset it shares a command with.
+                daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+                // The added preset is stored as a reference, not a copy.
+                daruda_config::AgentEntry::Preset {
+                    preset: "codex-acp".to_string(),
+                    overrides: daruda_config::PresetOverrides::default(),
+                },
+            ]
+        );
+        assert_eq!(
+            cfg.resolved_agents(),
+            vec![
                 daruda_config::AgentDefinition::claude_default(),
                 daruda_config::AgentDefinition::codex_default(),
             ]
         );
+    });
+}
+
+/// Test-only — pick `preset_id` in the catalog's preset dropdown, exactly as
+/// clicking the dropdown does. Returns whether the dropdown offered that id at
+/// all (`set_selected_value` clears the selection for an unknown value).
+fn select_agent_preset(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    preset_id: &str,
+) -> bool {
+    let state = win.read_with(cx, |w, _| w.agent_preset_select.clone());
+    let value = SharedString::from(preset_id.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+    win.read_with(cx, |w, cx| {
+        w.agent_preset_select.read(cx).selected_value() == Some(&value)
+    })
+}
+
+/// Test-only — click "Add Preset" for whatever the dropdown currently holds.
+fn add_selected_agent_preset(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.add_selected_preset_row_for_test(window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — pick `kind` in one catalog row's transport dropdown.
+fn select_agent_transport(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    kind: &str,
+) {
+    let state = win.read_with(cx, |w, _| w.agent_rows[index].transport_select.clone());
+    let value = SharedString::from(kind.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — write `value` into one catalog row's input.
+fn set_agent_row_input(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<InputState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(&w.agent_rows[index]));
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |i, cx_state| {
+            i.set_value(value.to_owned(), window, cx_state)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// The dropdown offers the whole preset table, not just the launchable subset —
+/// hiding the rest left the user with no sign those agents exist.
+#[gpui::test]
+fn the_preset_dropdown_offers_every_built_in_preset(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let mut needs_install = 0;
+    for preset in daruda_config::agent_presets() {
+        assert!(
+            select_agent_preset(&wh, &win, cx, preset.id),
+            "the preset dropdown is missing {}",
+            preset.id
+        );
+        if matches!(
+            preset.launchability,
+            daruda_config::PresetLaunchability::NeedsManualInstall { .. }
+        ) {
+            needs_install += 1;
+        }
+    }
+    assert!(
+        needs_install > 0,
+        "the table has manual-install presets, so the dropdown must have been exercised with some"
+    );
+}
+
+/// The real "Add Preset" path: pick an id, click Add, and the row is saved as a
+/// reference to that preset rather than a frozen copy of its fields.
+#[gpui::test]
+fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
+    add_selected_agent_preset(&wh, &win, cx);
+    win.read_with(cx, |w, cx| {
+        assert_eq!(w.agent_rows.len(), 2);
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::Preset {
+                preset: "gemini".to_string(),
+                overrides: daruda_config::PresetOverrides::default(),
+            }
+        );
+        // Nothing was edited, so the row reports no override to diff.
+        assert!(!w.agent_rows[1].provenance(cx).is_overridden());
+    });
+}
+
+/// Editing one field of a preset row overrides that field only — every other
+/// field keeps following the preset, and the row shows the preset's own value
+/// next to the one that changed.
+#[gpui::test]
+fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
+    add_selected_agent_preset(&wh, &win, cx);
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Gemini");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::Preset {
+                preset: "gemini".to_string(),
+                overrides: daruda_config::PresetOverrides {
+                    name: Some("My Gemini".to_string()),
+                    command: None,
+                    default_mode: None,
+                },
+            }
+        );
+        let provenance = w.agent_rows[1].provenance(cx);
+        assert!(provenance.is_overridden());
+        let base = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
+        let name_diff = provenance
+            .name_base
+            .expect("the renamed field shows its base");
+        assert!(name_diff.contains(&base.name), "{name_diff}");
+        assert_eq!(provenance.command_base, None, "command still follows");
+        assert_eq!(provenance.default_mode_base, None, "mode still follows");
+    });
+}
+
+/// A remote transport is not expressible as a preset override, so saving detaches
+/// the row into a self-contained custom entry.
+#[gpui::test]
+fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
+    add_selected_agent_preset(&wh, &win, cx);
+    select_agent_transport(&wh, &win, cx, 1, "ssh");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.host_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        let base = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
+        let daruda_config::AgentLaunch::Raw(command) = base.launch else {
+            panic!("presets launch Raw");
+        };
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+                id: base.id,
+                name: base.name,
+                launch: daruda_config::AgentLaunch::Ssh {
+                    adapter_command: command,
+                    host: "vm-work".to_string(),
+                },
+                default_mode: None,
+            })
+        );
+    });
+}
+
+/// The built-in default row's command is `npx`-prefixed, so it never gets a
+/// local-PATH warning — daruda provisions Node.js itself for these.
+#[gpui::test]
+fn the_default_npx_row_has_no_path_warning(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(w.agent_rows[0].path_warning, None);
+    });
+}
+
+/// A custom row whose command names a binary that is not on `PATH` shows a
+/// warning, but Save still succeeds — registering an agent before installing
+/// its CLI (or adding it to PATH) is a legitimate flow, so the check must
+/// only warn, never block.
+#[gpui::test]
+fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            w.add_agent_row(
+                daruda_config::AgentDefinition {
+                    id: "local-cli".to_string(),
+                    name: "Local CLI".to_string(),
+                    launch: daruda_config::AgentLaunch::Raw(
+                        "daruda-settings-path-warning-test-missing-binary acp".to_string(),
+                    ),
+                    default_mode: None,
+                },
+                None,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |w, cx| {
+        assert_eq!(
+            w.agent_rows[1].path_warning.as_deref(),
+            Some("daruda-settings-path-warning-test-missing-binary")
+        );
+        assert!(
+            w.validate(cx).is_ok(),
+            "a missing local command must not block Save"
+        );
+    });
+}
+
+/// Editing a row's command recomputes the warning live — typing a missing
+/// binary shows it, and correcting the command to a real one clears it.
+#[gpui::test]
+fn editing_the_command_field_recomputes_the_path_warning(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.command_input.clone(),
+        "daruda-settings-path-warning-test-missing-binary",
+    );
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(
+            w.agent_rows[0].path_warning.as_deref(),
+            Some("daruda-settings-path-warning-test-missing-binary")
+        );
+    });
+
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.command_input.clone(), "sh -c true");
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(w.agent_rows[0].path_warning, None);
+    });
+}
+
+/// The cached PATH warning is transport-independent by design — switching a
+/// row to ssh does not clear it. The ssh/docker exemption is applied at
+/// render time instead (`sections::agent::render_agent_catalog_row`, unit-
+/// tested by `transport_needs_local_path_check`), since that needs no fresh
+/// `which` call. Save must still succeed: an ssh row's command runs on the
+/// remote host, so this machine's PATH is irrelevant to it.
+#[gpui::test]
+fn switching_transport_does_not_clear_the_cached_path_warning(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.command_input.clone(),
+        "daruda-settings-path-warning-test-missing-binary",
+    );
+    win.read_with(cx, |w, _cx| {
+        assert!(w.agent_rows[0].path_warning.is_some());
+    });
+
+    select_agent_transport(&wh, &win, cx, 0, "ssh");
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.host_input.clone(), "vm-work");
+    win.read_with(cx, |w, cx| {
+        assert!(w.agent_rows[0].path_warning.is_some());
+        assert!(
+            w.validate(cx).is_ok(),
+            "an ssh row's command runs remotely, so Save must succeed regardless"
+        );
+    });
+}
+
+/// Picking a preset that ships binaries only must not silently do nothing:
+/// no row is added, and the section has an install page to point at instead.
+#[gpui::test]
+fn picking_a_preset_that_needs_a_manual_install_adds_no_row(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "cursor"));
+    win.read_with(cx, |w, cx| {
+        let (name, install_url) = w
+            .selected_preset_needs_install(cx)
+            .expect("cursor ships prebuilt binaries, so it cannot be launched as-is");
+        assert_eq!(name, "Cursor");
+        assert!(install_url.starts_with("https://"), "{install_url}");
+    });
+
+    add_selected_agent_preset(&wh, &win, cx);
+    win.read_with(cx, |w, cx| {
+        assert_eq!(
+            w.agent_rows.len(),
+            1,
+            "a preset with no launch command must not become a row"
+        );
+        assert!(
+            w.selected_preset_needs_install(cx).is_some(),
+            "the install guidance stays up after the click"
+        );
+    });
+}
+
+/// A launchable pick clears the install guidance — the two states are exclusive.
+#[gpui::test]
+fn a_launchable_preset_shows_no_install_guidance(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "codex-acp"));
+    win.read_with(cx, |w, cx| {
+        assert!(w.selected_preset_needs_install(cx).is_none());
+    });
+}
+
+/// A catalog entry the editor cannot render a row for (a preset id daruda no
+/// longer knows) must survive a Save — the alternative is silently deleting
+/// part of the user's config on an unrelated settings change.
+#[gpui::test]
+fn validate_preserves_an_unresolved_catalog_entry(cx: &mut TestAppContext) {
+    let unresolved = daruda_config::AgentEntry::Preset {
+        preset: "retired-agent".to_string(),
+        overrides: daruda_config::PresetOverrides::default(),
+    };
+    let config = daruda_config::Config {
+        agents: vec![
+            unresolved.clone(),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        // Only the resolvable entry got an editable row…
+        assert_eq!(w.agent_rows.len(), 1);
+        // …the other is held for the section's "not available" warning, which is
+        // the only place the user can find out why that agent never shows up…
+        assert_eq!(w.agent_unresolved_entries, vec![unresolved.clone()]);
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        // …and it is still there after a save.
+        assert!(cfg.agents.contains(&unresolved), "{:?}", cfg.agents);
     });
 }
 
@@ -160,8 +532,8 @@ fn validate_rejects_empty_agent_catalog(cx: &mut TestAppContext) {
 fn validate_rejects_duplicate_agent_id(cx: &mut TestAppContext) {
     let config = daruda_config::Config {
         agents: vec![
-            daruda_config::AgentDefinition::codex_default(),
-            daruda_config::AgentDefinition::codex_default(),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
+            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
         ],
         ..daruda_config::Config::default()
     };

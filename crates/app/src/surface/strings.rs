@@ -2812,6 +2812,81 @@ pub fn settings_agent_add_custom() -> String {
 pub fn settings_agent_remove() -> String {
     rust_i18n::t!("settings.agent_remove").into_owned()
 }
+
+/// Preset dropdown label for a preset daruda can launch as it stands.
+pub fn settings_agent_preset_option(name: &str, id: &str) -> String {
+    rust_i18n::t!("settings.agent_preset_option", name = name, id = id).into_owned()
+}
+
+/// Preset dropdown label for a preset that ships binaries only, so picking it
+/// cannot add a catalog row.
+pub fn settings_agent_preset_option_needs_install(name: &str, id: &str) -> String {
+    rust_i18n::t!(
+        "settings.agent_preset_option_needs_install",
+        name = name,
+        id = id
+    )
+    .into_owned()
+}
+
+pub fn settings_agent_preset_install_page() -> String {
+    rust_i18n::t!("settings.agent_preset_install_page").into_owned()
+}
+
+pub fn settings_agent_preset_needs_install_hint(name: &str) -> String {
+    rust_i18n::t!("settings.agent_preset_needs_install_hint", name = name).into_owned()
+}
+
+/// Provenance line on a catalog row that references a preset.
+pub fn settings_agent_row_source_preset(preset: &str) -> String {
+    rust_i18n::t!("settings.agent_row_source_preset", preset = preset).into_owned()
+}
+
+pub fn settings_agent_row_source_custom() -> String {
+    rust_i18n::t!("settings.agent_row_source_custom").into_owned()
+}
+
+pub fn settings_agent_row_overridden() -> String {
+    rust_i18n::t!("settings.agent_row_overridden").into_owned()
+}
+
+/// The preset's own value for a field the row overrides.
+pub fn settings_agent_override_preset_value(value: &str) -> String {
+    rust_i18n::t!("settings.agent_override_preset_value", value = value).into_owned()
+}
+
+/// Same as [`settings_agent_override_preset_value`] for a field the preset
+/// leaves unset (only `default_mode` can be).
+pub fn settings_agent_override_preset_value_unset() -> String {
+    rust_i18n::t!("settings.agent_override_preset_value_unset").into_owned()
+}
+
+pub fn settings_agent_row_detach_hint() -> String {
+    rust_i18n::t!("settings.agent_row_detach_hint").into_owned()
+}
+
+pub fn settings_agent_unresolved_section() -> String {
+    rust_i18n::t!("settings.agent_unresolved_section").into_owned()
+}
+
+pub fn settings_agent_unresolved_unknown(preset: &str) -> String {
+    rust_i18n::t!("settings.agent_unresolved_unknown", preset = preset).into_owned()
+}
+
+pub fn settings_agent_unresolved_needs_install(preset: &str, name: &str) -> String {
+    rust_i18n::t!(
+        "settings.agent_unresolved_needs_install",
+        preset = preset,
+        name = name
+    )
+    .into_owned()
+}
+
+/// Inline, non-blocking warning under a catalog row's command field when
+/// `command`'s executable is not found on `PATH`.
+pub fn settings_agent_row_command_not_on_path(command: &str) -> String {
+    rust_i18n::t!("settings.agent_row_command_not_on_path", command = command).into_owned()
+}
 pub fn settings_err_agent_catalog_empty() -> String {
     rust_i18n::t!("settings.err_agent_catalog_empty").into_owned()
 }
