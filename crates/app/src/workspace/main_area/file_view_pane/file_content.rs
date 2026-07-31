@@ -142,16 +142,23 @@ fn load_raw(
                     });
                 }
                 super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
-                    // Match the diagram theme to the host appearance so edges
-                    // stay visible (dark UI → dark diagram).
-                    let themed =
-                        super::markdown_viewer::mermaid_with_theme(source, mermaid_palette);
                     // merman is a young reimplementation; guard against a
                     // panic on malformed input so one bad diagram can't fail
                     // the load.
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        merman::render::HeadlessRenderer::new()
-                            .render_svg_resvg_safe_sync(&themed)
+                        // Match the diagram theme to the host appearance so
+                        // every diagram type — not just flowchart nodes —
+                        // stays legible (dark UI → dark diagram chrome).
+                        let mut renderer = merman::render::HeadlessRenderer::new();
+                        if !super::markdown_viewer::source_has_own_theme_directive(source) {
+                            renderer = renderer.with_host_theme(
+                                &super::markdown_viewer::mermaid_host_theme_profile(
+                                    mermaid_palette,
+                                ),
+                            );
+                        }
+                        renderer
+                            .render_svg_sync(source)
                             .ok()
                             .flatten()
                             .and_then(|svg| super::visual::rasterize_svg(&svg).ok())

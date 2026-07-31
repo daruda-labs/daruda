@@ -670,52 +670,82 @@ pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option
     found
 }
 
-/// Prepend a mermaid `%%{init}%%` directive matching the host appearance, so
-/// a dark UI renders a diagram in daruda's actual surface/text/border colors
-/// (`palette`) rather than the renderer's generic dark preset. On a light UI the
-/// source is unchanged (mermaid's default is already light).
-///
-/// A user directive that sets an explicit `theme` name (e.g. `"forest"`) is
-/// fully respected — nothing is prepended. A user directive that only
-/// overrides `themeVariables` (no `theme` name) still gets our directive
-/// prepended: the renderer merges multiple `%%{init}%%` blocks with later
-/// ones overriding earlier ones per-field, so the user's overrides win for
-/// the keys they set while ours fill in the rest instead of leaving them at
-/// mermaid's light default.
-pub(in crate::workspace) fn mermaid_with_theme(source: &str, palette: &MermaidPalette) -> String {
-    if !palette.dark {
-        return source.to_string();
-    }
-    if source_declares_explicit_theme(source) {
-        return source.to_string();
-    }
-    format!(
-        "%%{{init: {{\"theme\":\"dark\",\"themeVariables\":{{\"background\":\"{}\",\"primaryColor\":\"{}\",\"primaryTextColor\":\"{}\",\"primaryBorderColor\":\"{}\",\"lineColor\":\"{}\",\"secondaryColor\":\"{}\"}}}}}}%%\n{source}",
-        palette.background,
-        palette.primary_color,
-        palette.primary_text_color,
-        palette.primary_border_color,
-        palette.line_color,
-        palette.secondary_color,
-    )
+/// Build the merman host-theme profile matching daruda's active appearance
+/// (`palette`), so every diagram type — not just flowchart nodes — picks up
+/// daruda's actual surface/text/border/note/actor colors instead of leaving
+/// diagram-specific elements (sequence notes/actors, pie background, ...) on
+/// mermaid's own hardcoded light defaults. `HostThemeOutput::resvg_safe_editor`
+/// force-patches the SVG root background to `canvas` regardless of which
+/// diagram renderer produced the SVG, which is what actually stops the
+/// "white background" leak — the per-`themeVariables` route many diagram
+/// types don't consistently honor.
+pub(in crate::workspace) fn mermaid_host_theme_profile(
+    palette: &MermaidPalette,
+) -> merman::render::HostThemeProfile {
+    merman::render::HostThemeProfile::builder()
+        .appearance(if palette.dark {
+            merman::render::HostThemeAppearance::Dark
+        } else {
+            merman::render::HostThemeAppearance::Light
+        })
+        .roles(merman::render::HostThemeRoles {
+            canvas: Some(palette.background.clone()),
+            surface: Some(palette.primary_color.clone()),
+            surface_alt: Some(palette.secondary_color.clone()),
+            surface_muted: Some(palette.surface_muted.clone()),
+            text: Some(palette.primary_text_color.clone()),
+            subtle_text: Some(palette.line_color.clone()),
+            border: Some(palette.primary_border_color.clone()),
+            line: Some(palette.line_color.clone()),
+            edge_label_background: Some(palette.background.clone()),
+            cluster_background: Some(palette.cluster_background.clone()),
+            cluster_border: Some(palette.primary_border_color.clone()),
+            note_background: Some(palette.note_background.clone()),
+            note_border: Some(palette.warning.clone()),
+            note_text: Some(palette.note_text.clone()),
+            actor_background: Some(palette.primary_color.clone()),
+            actor_border: Some(palette.primary_border_color.clone()),
+            actor_text: Some(palette.primary_text_color.clone()),
+            activation_background: Some(palette.activation_background.clone()),
+            activation_border: Some(palette.primary_border_color.clone()),
+            error: Some(palette.error.clone()),
+            warning: Some(palette.warning.clone()),
+            success: Some(palette.success.clone()),
+        })
+        // Mindmap/timeline sections, pie slices, and git-graph branches don't
+        // read from `roles` at all — they cycle a categorical `series_palette`
+        // (`cScaleN`/`git{N}`/`pie{N}`). Left empty, merman's "base" theme
+        // auto-derives those from `surface`, compounding into more
+        // near-black boxes on top of the ones `roles` already covers. daruda
+        // has no categorical palette of its own, so borrow merman's — tuned
+        // by its own authors for the same "editor preview on a dark/light
+        // host" case this is.
+        .series_palette(if palette.dark {
+            MERMAID_SERIES_PALETTE_DARK
+        } else {
+            MERMAID_SERIES_PALETTE_LIGHT
+        })
+        .output(merman::render::HostThemeOutput::resvg_safe_editor())
+        .build()
 }
 
-/// Whether `source`'s own (first) `%%{init: {...}}%%` directive sets an
-/// explicit `theme` key — distinct from `themeVariables`/`themeCSS`, which
-/// don't count as an explicit theme choice. A crude token scan instead of a
-/// JSON parse because mermaid init bodies are JSON5-ish (single-quoted,
-/// unquoted keys) and don't always parse as strict JSON.
-fn source_declares_explicit_theme(source: &str) -> bool {
-    let Some(start) = source.find("%%{init") else {
-        return false;
-    };
-    let block = match source[start..].find("}%%") {
-        Some(rel_end) => &source[start..start + rel_end],
-        None => &source[start..],
-    };
-    block
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|token| token == "theme")
+const MERMAID_SERIES_PALETTE_DARK: [&str; 8] = [
+    "#60a5fa", "#34d399", "#f59e0b", "#c084fc", "#22d3ee", "#fb7185", "#facc15", "#a3e635",
+];
+const MERMAID_SERIES_PALETTE_LIGHT: [&str; 8] = [
+    "#2563eb", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be123c", "#a16207", "#65a30d",
+];
+
+/// Whether `source` already carries its own `%%{init: ...}%%` directive —
+/// if so, daruda's host theme is skipped entirely so the diagram author's
+/// customization (theme name, individual `themeVariables`, `themeCSS`, ...)
+/// isn't silently overridden. merman applies a renderer-level host theme via
+/// site config, which wins over a document-level directive wholesale rather
+/// than merging per-field, so partial-respect isn't possible here — an
+/// author who wrote any `%%{init}%%` block opts out of daruda's chrome for
+/// that diagram.
+pub(in crate::workspace) fn source_has_own_theme_directive(source: &str) -> bool {
+    source.contains("%%{init")
 }
 
 /// Walk every mermaid block in `blocks` (recursing into list item children) and
@@ -900,46 +930,69 @@ mod tests {
             primary_border_color: "#333333".to_owned(),
             line_color: "#cccccc".to_owned(),
             secondary_color: "#444444".to_owned(),
+            surface_muted: "#1a1a1a".to_owned(),
+            cluster_background: "#1c1c1c".to_owned(),
+            note_background: "#3a2a10".to_owned(),
+            note_text: "#f0d9a0".to_owned(),
+            activation_background: "#2a2a2a".to_owned(),
+            error: "#ff6666".to_owned(),
+            warning: "#ffcc66".to_owned(),
+            success: "#66ff99".to_owned(),
         }
     }
 
     #[test]
-    fn mermaid_with_theme_injects_dark_only_when_needed() {
-        // dark UI + plain source → dark directive (with daruda's palette hex
-        // values) prepended.
+    fn mermaid_host_theme_profile_matches_appearance_and_palette() {
         let palette = test_palette();
-        let d = mermaid_with_theme("graph TD\nA-->B", &palette);
-        assert!(d.starts_with("%%{init") && d.contains("dark"));
-        assert!(d.contains(&palette.background));
-        assert!(d.contains("graph TD"));
-
-        // light UI → unchanged.
-        let mut light = palette.clone();
-        light.dark = false;
+        let dark = mermaid_host_theme_profile(&palette);
+        assert_eq!(dark.appearance, merman::render::HostThemeAppearance::Dark);
         assert_eq!(
-            mermaid_with_theme("graph TD\nA-->B", &light),
-            "graph TD\nA-->B"
+            dark.roles.canvas.as_deref(),
+            Some(palette.background.as_str())
+        );
+        assert_eq!(
+            dark.roles.text.as_deref(),
+            Some(palette.primary_text_color.as_str())
         );
 
-        // user directive with an explicit theme name → respected even on a
-        // dark UI, nothing prepended.
-        let user = "%%{init: {\"theme\":\"forest\"}}%%\ngraph TD\nA-->B";
-        assert_eq!(mermaid_with_theme(user, &palette), user);
+        let mut light = palette.clone();
+        light.dark = false;
+        let light_profile = mermaid_host_theme_profile(&light);
+        assert_eq!(
+            light_profile.appearance,
+            merman::render::HostThemeAppearance::Light
+        );
+    }
+
+    /// Regression guard: mindmap/timeline/pie/gitgraph sections don't read
+    /// `roles` at all — they cycle a categorical `series_palette`
+    /// (`cScaleN`/`git{N}`/`pie{N}`). An empty palette isn't "use mermaid's
+    /// default colors", it's "auto-derive from `surface`", which compounds
+    /// into near-black boxes on top of a dark `surface`. See the mindmap/
+    /// timeline "too black" report this guards against.
+    #[test]
+    fn mermaid_host_theme_profile_always_sets_a_series_palette() {
+        assert!(
+            !mermaid_host_theme_profile(&test_palette())
+                .series_palette
+                .is_empty()
+        );
+        let mut light = test_palette();
+        light.dark = false;
+        assert!(!mermaid_host_theme_profile(&light).series_palette.is_empty());
     }
 
     #[test]
-    fn mermaid_with_theme_merges_when_user_omits_theme_name() {
-        // user directive overrides only `themeVariables`, no `theme` name →
-        // our dark directive is still prepended (the renderer merges multiple
-        // `%%{init}%%` blocks, later overrides earlier per-field), so the
-        // user's override survives while unset fields get daruda's palette.
-        let palette = test_palette();
-        let user =
-            "%%{init: {\"themeVariables\": {\"primaryColor\": \"#ff0000\"}}}%%\ngraph TD\nA-->B";
-        let themed = mermaid_with_theme(user, &palette);
-        assert!(themed.starts_with("%%{init") && themed.contains("dark"));
-        assert!(themed.contains(&palette.background));
-        assert!(themed.contains(user));
+    fn source_has_own_theme_directive_detects_any_init_block() {
+        assert!(!source_has_own_theme_directive("graph TD\nA-->B"));
+        assert!(source_has_own_theme_directive(
+            "%%{init: {\"theme\":\"forest\"}}%%\ngraph TD\nA-->B"
+        ));
+        // Even a themeVariables-only (no theme name) directive opts out —
+        // daruda's host theme can't merge on top of it per-field.
+        assert!(source_has_own_theme_directive(
+            "%%{init: {\"themeVariables\": {\"primaryColor\": \"#ff0000\"}}}%%\ngraph TD\nA-->B"
+        ));
     }
 
     #[test]

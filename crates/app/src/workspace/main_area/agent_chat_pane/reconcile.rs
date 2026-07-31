@@ -23,7 +23,9 @@ use super::agent_chat_helpers::{
 };
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
-use crate::workspace::main_area::file_view_pane::markdown_viewer::mermaid_with_theme;
+use crate::workspace::main_area::file_view_pane::markdown_viewer::{
+    mermaid_host_theme_profile, source_has_own_theme_directive,
+};
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
@@ -196,14 +198,18 @@ impl AgentChatView {
                 let raster = cx
                     .background_executor()
                     .spawn(async move {
-                        let themed = mermaid_with_theme(&source, &palette);
                         // merman is a young reimplementation; guard against a
                         // panic on malformed input so one bad diagram can't
                         // take the executor down — on panic / error we drop
                         // it and the fence keeps the default code rendering.
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            merman::render::HeadlessRenderer::new()
-                                .render_svg_resvg_safe_sync(&themed)
+                            let mut renderer = merman::render::HeadlessRenderer::new();
+                            if !source_has_own_theme_directive(&source) {
+                                renderer =
+                                    renderer.with_host_theme(&mermaid_host_theme_profile(&palette));
+                            }
+                            renderer
+                                .render_svg_sync(&source)
                                 .ok()
                                 .flatten()
                                 .and_then(|svg| visual::rasterize_svg(&svg).ok())

@@ -7,8 +7,14 @@ use gpui::Hsla;
 use crate::ui::theme::DarudaTheme;
 
 /// Plain-data palette snapshot threaded down to the GPUI-free mermaid
-/// renderer (`markdown_viewer::mermaid_with_theme`). Resolved once here, at
-/// the GPUI boundary, so background-thread code never touches `Hsla`.
+/// renderer (`markdown_viewer::mermaid_host_theme_profile`). Resolved once
+/// here, at the GPUI boundary, so background-thread code never touches
+/// `Hsla`. Field set mirrors merman's `HostThemeRoles` — a diagram-type-
+/// agnostic role palette, not per-diagram-type `themeVariables` — so every
+/// diagram kind (flowchart, sequence, pie, ...) picks up daruda's actual
+/// surface/text/border colors instead of leaving diagram-specific elements
+/// (sequence notes/actors, pie background, ...) on mermaid's own light
+/// defaults.
 #[derive(Clone)]
 pub(in crate::workspace) struct MermaidPalette {
     pub dark: bool,
@@ -18,18 +24,57 @@ pub(in crate::workspace) struct MermaidPalette {
     pub primary_border_color: String,
     pub line_color: String,
     pub secondary_color: String,
+    pub surface_muted: String,
+    pub cluster_background: String,
+    pub note_background: String,
+    pub note_text: String,
+    pub activation_background: String,
+    pub error: String,
+    pub warning: String,
+    pub success: String,
 }
 
 impl MermaidPalette {
     pub fn from_theme(theme: &DarudaTheme) -> Self {
+        let canvas = theme.file_viewer_bg;
         Self {
             dark: theme.is_dark(),
-            background: to_hex(theme.file_viewer_bg),
-            primary_color: to_hex(theme.md_code_block_bg),
+            background: to_hex(canvas),
+            // `md_code_block_bg`/`md_code_inline_bg`/`dock_bg`/`file_viewer_header_bg`
+            // sit on daruda's panel-elevation ladder, which is deliberately subtle
+            // (a few % lightness apart) for panel-on-panel chrome — too close to
+            // `canvas` to read as a filled node/section on open diagram canvas
+            // (mindmap topics, timeline sections have no border to compensate, so
+            // they rendered as near-invisible black-on-black boxes). `overlay_*`
+            // already encodes the right *direction* per theme (white-alpha in
+            // dark, black-alpha in light; see `daruda_light.json`), but even its
+            // strongest step (`overlay_prominent`, 10% alpha) is tuned for barely-
+            // perceptible chrome (hover/selected rows), not a standalone content
+            // box — so `diagram_surface` reuses that hue at a level actually
+            // meant to read as a filled card.
+            primary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALPHA), canvas),
             primary_text_color: to_hex(theme.text_body),
             primary_border_color: to_hex(theme.border),
             line_color: to_hex(theme.text_muted),
-            secondary_color: to_hex(theme.md_code_inline_bg),
+            secondary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
+            surface_muted: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
+            cluster_background: to_hex_over(
+                diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA),
+                canvas,
+            ),
+            // `banner_warning_bg` is a translucent tint (`with_alpha(WARNING, 0.10)`)
+            // meant to composite over a panel, not stand alone — flattening it to
+            // opaque RGB without compositing would emit a full-intensity warning
+            // color instead of the intended subtle tint.
+            note_background: to_hex_over(theme.banner_warning_bg, canvas),
+            note_text: to_hex(theme.banner_warning_text),
+            activation_background: to_hex_over(
+                diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA),
+                canvas,
+            ),
+            error: to_hex(theme.banner_error_text),
+            warning: to_hex(theme.banner_warning_text),
+            success: to_hex(theme.banner_success_text),
         }
     }
 }
@@ -42,6 +87,27 @@ impl Default for MermaidPalette {
     }
 }
 
+/// Alpha for a primary diagram surface (node/topic/section fill) — strong
+/// enough to read as a filled card against `canvas` without a border to
+/// help, unlike `overlay_prominent`'s 10% ceiling tuned for barely-visible
+/// UI chrome (hover/selected rows).
+const DIAGRAM_SURFACE_ALPHA: f32 = 0.22;
+/// Alpha for a secondary diagram surface (edge-label tag, cluster fill,
+/// activation bar) — visibly lighter than `canvas` but subordinate to
+/// `DIAGRAM_SURFACE_ALPHA`.
+const DIAGRAM_SURFACE_ALT_ALPHA: f32 = 0.14;
+
+/// `overlay_prominent` with its hue/lightness kept (already the correct
+/// *direction* per theme — white in dark, black in light) but its alpha
+/// replaced, so a diagram surface can be stronger than any step on daruda's
+/// actual UI-chrome overlay ladder while staying theme-coherent.
+fn diagram_surface(theme: &DarudaTheme, alpha: f32) -> Hsla {
+    Hsla {
+        a: alpha,
+        ..theme.overlay_prominent
+    }
+}
+
 fn to_hex(color: Hsla) -> String {
     let rgb = color.to_rgb();
     format!(
@@ -49,6 +115,31 @@ fn to_hex(color: Hsla) -> String {
         (rgb.r * 255.0).round().clamp(0.0, 255.0) as u8,
         (rgb.g * 255.0).round().clamp(0.0, 255.0) as u8,
         (rgb.b * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
+}
+
+/// Alpha-composites `fg` over the opaque `base`, then hex-encodes the result.
+/// mermaid's `themeVariables`/host-theme roles carry no alpha channel, so a
+/// translucent daruda token (a banner tint, an overlay) needs to be flattened
+/// against the surface it actually sits on before it can be handed over —
+/// otherwise the alpha is silently dropped and the raw, full-intensity hue
+/// leaks through.
+fn to_hex_over(fg: Hsla, base: Hsla) -> String {
+    let fg_rgb = fg.to_rgb();
+    let base_rgb = base.to_rgb();
+    let a = fg_rgb.a;
+    let blend = |f: f32, b: f32| f * a + b * (1.0 - a);
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (blend(fg_rgb.r, base_rgb.r) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        (blend(fg_rgb.g, base_rgb.g) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        (blend(fg_rgb.b, base_rgb.b) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
     )
 }
 
@@ -76,6 +167,32 @@ mod tests {
             }),
             "#ffffff"
         );
+    }
+
+    #[test]
+    fn to_hex_over_flattens_translucent_color_against_base() {
+        let translucent_red = Hsla {
+            h: 0.0,
+            s: 1.0,
+            l: 0.5,
+            a: 0.1,
+        };
+        let black = Hsla {
+            h: 0.0,
+            s: 0.0,
+            l: 0.0,
+            a: 1.0,
+        };
+        // 10% red over black should land close to black, not full-intensity red.
+        let composited = to_hex_over(translucent_red, black);
+        assert_ne!(
+            composited,
+            to_hex(Hsla {
+                a: 1.0,
+                ..translucent_red
+            })
+        );
+        assert_eq!(composited, "#1a0000");
     }
 
     #[test]

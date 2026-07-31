@@ -243,7 +243,7 @@ pub(in crate::workspace) fn chat_item_markdown(item: &daruda_acp::ChatItem) -> O
 /// Stable cache key for a mermaid fence's source *at a given appearance*, shared
 /// between the rasterizer (insert) and the renderer (lookup) so the embed
 /// matches what was cached. `dark` is part of the key because the diagram is
-/// themed to the host appearance (`mermaid_with_theme`): without it a cached
+/// themed to the host appearance (`mermaid_host_theme_profile`): without it a cached
 /// raster would keep its old colours after a light/dark toggle. `DefaultHasher`
 /// is process-stable, which is all the in-memory cache needs.
 pub(in crate::workspace) fn mermaid_key(source: &str, dark: bool) -> u64 {
