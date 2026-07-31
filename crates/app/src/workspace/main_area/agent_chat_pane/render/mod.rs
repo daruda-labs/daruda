@@ -7,6 +7,8 @@
 mod blocks;
 mod chrome;
 mod diff;
+mod mermaid;
+mod mermaid_lightbox;
 mod plan;
 mod tool;
 
@@ -702,6 +704,7 @@ fn render_item(
                 diff_editors,
                 diff_stats,
                 tool_images,
+                mermaid_images,
                 fold,
                 t,
                 dim,

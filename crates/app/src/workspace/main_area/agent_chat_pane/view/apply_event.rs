@@ -373,9 +373,10 @@ impl AgentChatView {
             }
         }
         // Gate the full-conversation reconciles on what the event actually
-        // changed: diff editors only when a tool call moved, mermaid raster only
-        // when message text changed. Running both on every streamed chunk would
-        // rescan the whole `items` vec per chunk — O(n²) over a long turn.
+        // changed: diff editors only when a tool call moved, mermaid raster
+        // whenever either tool or message content moved. Running these on every
+        // streamed chunk would rescan the whole `items` vec per chunk — O(n²)
+        // over a long turn.
         if touched_tool {
             self.reconcile_diff_editors(syntax_theme, is_light, cx);
             // Tool-output images arrive on a `ToolCall`/`ToolCallUpdate`
@@ -385,8 +386,14 @@ impl AgentChatView {
             // never get scanned.
             self.reconcile_tool_images(cx);
         }
-        if touched_text {
-            self.reconcile_mermaid(!is_light, cx);
+        // Mermaid fences arrive in message text AND in tool `Text` output blocks
+        // (a tool writing/reading a .md file), so both flags trigger the scan.
+        // `dark` must be `host_is_dark` — the same source the theme observer and
+        // the render hook use for the cache key; `!is_light` here keyed by the
+        // terminal-bg lightness and permanently missed the cache whenever the two
+        // disagreed (the raster content itself is themed from `DarudaTheme`).
+        if touched_text || touched_tool {
+            self.reconcile_mermaid(Self::host_is_dark(cx), cx);
         }
         // During a `session/load` replay the adapter streams the whole prior
         // conversation as many `session/update`s before the `Connected` reply.

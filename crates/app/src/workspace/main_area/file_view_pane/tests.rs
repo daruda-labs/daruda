@@ -262,6 +262,93 @@ fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
     }
 }
 
+fn right_edge_is_transparent(img: &visual::RasterImage) -> bool {
+    let width = img.width as usize;
+    (0..img.height as usize).all(|y| img.rgba[(y * width + width - 1) * 4 + 3] == 0)
+}
+
+#[test]
+fn wide_mermaid_samples_keep_clear_right_edge_after_rasterize() {
+    let palette = mermaid_theme::MermaidPalette::default();
+    let profile = markdown_viewer::mermaid_host_theme_profile(&palette);
+    for (name, source) in [
+        (
+            "er",
+            r#"erDiagram
+  WORKSPACE ||--o{ PROJECT : owns
+  PROJECT ||--o{ AGENT : contains
+  PROJECT ||--o{ RULE : defines
+  AGENT ||--o{ HEARTBEAT : emits
+  RULE ||--o{ ALERT : triggers
+  ALERT ||--o{ NOTIFICATION : sends
+
+  WORKSPACE {
+    bigint id PK
+    string name
+    datetime created_at
+  }
+
+  PROJECT {
+    bigint id PK
+    bigint workspace_id FK
+    string code
+  }
+
+  AGENT {
+    bigint id PK
+    bigint project_id FK
+    string hostname
+    string status
+  }
+
+  RULE {
+    bigint id PK
+    bigint project_id FK
+    string expression
+  }
+"#,
+        ),
+        (
+            "mindmap",
+            r#"mindmap
+  root((OpsMeta))
+    Runtime State
+      Redis
+        heartbeat
+        agent settings
+        volatile metadata
+    Ledger
+      MariaDB
+        rules
+        history
+        reports
+        jobs
+    Time Series
+      S3 or MinIO
+        parquet
+        hot retention
+        warm retention
+    Operations
+      backup
+      purge
+      restore
+"#,
+        ),
+    ] {
+        let svg = merman::render::HeadlessRenderer::new()
+            .with_svg_options(markdown_viewer::mermaid_svg_render_options())
+            .with_host_theme(&profile)
+            .render_svg_sync(source)
+            .expect("merman should render")
+            .unwrap_or_else(|| panic!("{name} diagram should be detected"));
+        let img = visual::rasterize_svg(&svg).expect("rasterize should succeed");
+        assert!(
+            right_edge_is_transparent(&img),
+            "{name} diagram should leave transparent padding at the right edge"
+        );
+    }
+}
+
 #[test]
 fn make_plain_row_helper() {
     let r = make_plain_row("foo", 1);

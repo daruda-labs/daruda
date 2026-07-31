@@ -303,12 +303,16 @@ impl AssetCache {
         self.diff_editors.clear();
         self.diff_editor_sources.clear();
         self.diff_stats.clear();
-        self.mermaid_inflight.clear();
-        if let Ok(mut m) = self.mermaid_images.lock() {
-            m.clear();
-        }
+        self.clear_mermaid();
         self.tool_image_inflight.clear();
         if let Ok(mut m) = self.tool_images.lock() {
+            m.clear();
+        }
+    }
+
+    pub(in crate::workspace) fn clear_mermaid(&mut self) {
+        self.mermaid_inflight.clear();
+        if let Ok(mut m) = self.mermaid_images.lock() {
             m.clear();
         }
     }
@@ -513,11 +517,11 @@ impl AgentChatView {
         title: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Re-rasterize mermaid diagrams for the new appearance when the host
-        // theme toggles. `apply_ui_theme` replaces the `DarudaTheme` global, so
-        // this fires on every light/dark swap; `reconcile_mermaid` then fills the
-        // `(source, dark)` cache keys the render hook now looks up.
+        // Re-rasterize mermaid diagrams when the UI theme changes. The chat
+        // surface/foreground come from the terminal mirror, but the host
+        // profile still uses UI semantic colors for notes/status accents.
         let theme_observer = cx.observe_global::<crate::ui::theme::DarudaTheme>(|this, cx| {
+            this.assets.clear_mermaid();
             let dark = Self::host_is_dark(cx);
             this.reconcile_mermaid(dark, cx);
             this.reconcile_tool_images(cx);
@@ -632,13 +636,12 @@ impl AgentChatView {
         crate::ui::theme::dim_toward_gray(c, self.dim_amount)
     }
 
-    /// Whether the host UI surface is currently dark, read from the theme
-    /// global (defaults to dark before the global installs). Drives the mermaid
-    /// diagram theme so edges stay visible against the host surface.
+    /// Whether the agent-chat paint surface is currently dark. This follows the
+    /// terminal-mirrored chat background, not the surrounding UI theme, so a
+    /// light UI shell with a dark terminal preset still gets dark-surface
+    /// Mermaid colors and cache keys.
     fn host_is_dark(cx: &App) -> bool {
-        cx.try_global::<crate::ui::theme::DarudaTheme>()
-            .map(crate::ui::theme::DarudaTheme::is_dark)
-            .unwrap_or(true)
+        !crate::ui::theme::agent_chat_syntax_is_light(cx)
     }
 }
 

@@ -1,76 +1,16 @@
 //! The conversation message blocks: user bubble, assistant prose (labeled
 //! foldable block, header-less inline render, and the turn conclusion), agent
-//! thinking, surfaced errors, plus the mermaid `code_block_render` hook shared
-//! by every markdown body.
+//! thinking, and surfaced errors. The mermaid `code_block_render` hook shared
+//! by every markdown body lives in the sibling `mermaid` module.
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
+use super::mermaid::mermaid_code_block_render;
 use super::{MermaidImages, ToggleTarget, collapsed_text_summary, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{IconName, button_bare};
-use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::mermaid_key;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
-
-/// The `code_block_render` hook for a chat markdown body: replace a
-/// ` ```mermaid ` fence with its cached diagram bitmap, leaving every other code
-/// block (and a not-yet-rasterized mermaid fence) to the default code rendering
-/// by returning `None`. Captures a cheap clone of the images map (`Arc` values)
-/// so the closure stays `Send + Sync + 'static` (the `TextView` requirement)
-/// without borrowing or cloning the image bytes.
-fn mermaid_code_block_render(
-    mermaid_images: &MermaidImages,
-) -> impl Fn(&str, &str, &mut gpui::Window, &mut gpui::App) -> Option<AnyElement> + Send + Sync + 'static
-{
-    let images = mermaid_images.clone();
-    move |lang, source, _window, cx| {
-        if lang != "mermaid" {
-            return None;
-        }
-        // Key by the current appearance so a light/dark toggle looks up the
-        // matching raster (the ops layer re-rasterizes on theme change); a miss
-        // during the brief re-raster falls back to the default code block.
-        let dark = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(crate::ui::theme::DarudaTheme::is_dark)
-            .unwrap_or(true);
-        let key = mermaid_key(source, dark);
-        // Read the live shared cache (not a snapshot) — see `MermaidImages`.
-        // Cloning the cached `CachedImage` is an `Arc` bump, so gpui reuses the
-        // already-uploaded texture instead of re-uploading the bitmap.
-        let image = images.lock().ok()?.get(&key).cloned()?;
-        let diagram = image.block_diagram();
-        // The diagram is a bitmap (not selectable), so overlay a hover-revealed
-        // button that copies the mermaid source to the clipboard.
-        let group = SharedString::from(format!("mermaid-{key}"));
-        let src = source.to_string();
-        Some(
-            div()
-                .relative()
-                .group(group.clone())
-                .child(diagram)
-                .child(
-                    div()
-                        .absolute()
-                        .top_1()
-                        .right_1()
-                        .invisible()
-                        .group_hover(group, |s| s.visible())
-                        .child(
-                            button_bare(SharedString::from(format!("mermaid-copy-{key}")))
-                                .icon(IconName::Copy)
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                        src.clone(),
-                                    ));
-                                }),
-                        ),
-                )
-                .into_any_element(),
-        )
-    }
-}
 
 /// User prompt — right-aligned accent-tinted bubble. The body renders as
 /// selectable **plain text** via `crate::ui::selectable_text` (verbatim, no
@@ -123,7 +63,7 @@ pub(super) fn assistant_markdown(
     crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
         .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .code_block_render(mermaid_code_block_render(mermaid_images))
+        .code_block_render(mermaid_code_block_render(mermaid_images, dim))
         .into_any_element()
 }
 
@@ -218,7 +158,7 @@ pub(super) fn thinking_block(
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
         .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .code_block_render(mermaid_code_block_render(mermaid_images))
+        .code_block_render(mermaid_code_block_render(mermaid_images, dim))
         .into_any_element();
     let header = div()
         .flex_none()

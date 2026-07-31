@@ -12,7 +12,8 @@ use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
-use super::{DiffEditors, DiffStats, ToggleTarget, ToolImages, foldable_block};
+use super::mermaid::mermaid_fence_element;
+use super::{DiffEditors, DiffStats, MermaidImages, ToggleTarget, ToolImages, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
@@ -42,6 +43,7 @@ pub(super) fn tool_card(
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
     tool_images: &ToolImages,
+    mermaid_images: &MermaidImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
@@ -220,7 +222,15 @@ pub(super) fn tool_card(
                 .child(SharedString::from(s::agent_chat_tool_output_label())),
         );
         for (ix, block) in tc.output.iter().enumerate() {
-            body = body.child(output_block_view(&tc.id, ix, block, tool_images, dim, cx));
+            body = body.child(output_block_view(
+                &tc.id,
+                ix,
+                block,
+                tool_images,
+                mermaid_images,
+                dim,
+                cx,
+            ));
         }
     }
 
@@ -277,6 +287,7 @@ pub(super) fn tool_card(
                     diff_editors,
                     diff_stats,
                     tool_images,
+                    mermaid_images,
                     fold,
                     t,
                     dim,
@@ -338,6 +349,7 @@ fn output_block_view(
     ix: usize,
     block: &ToolOutputBlock,
     tool_images: &ToolImages,
+    mermaid_images: &MermaidImages,
     dim: f32,
     cx: &App,
 ) -> AnyElement {
@@ -349,11 +361,21 @@ fn output_block_view(
             let plain_id_prefix = format!("agent-chat-tool-out-{tool_id}-{ix}");
             let plain_color = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
             let font_size = px(theme::agent_chat_font_size(cx));
+            let mermaid_images = mermaid_images.clone();
             let markdown =
                 crate::ui::markdown(SharedString::from(plain_id_prefix.clone()), text.clone())
                     .color(plain_color)
                     .text_size(font_size)
                     .code_block_render(move |lang, source, _window, cx| {
+                        // A ```mermaid fence in tool output renders as the same
+                        // diagram card as chat prose (shared builder); a cache
+                        // miss (still rasterizing) falls through to the plain
+                        // bare-fence branch below, same as the prose hook.
+                        if let Some(card) =
+                            mermaid_fence_element(&mermaid_images, lang, source, dim, cx)
+                        {
+                            return Some(card);
+                        }
                         // The Claude ACP adapter wraps every tool result in a bare,
                         // language-less fence (`daruda_acp::output_highlight`) even
                         // when the content isn't source code (command output, search

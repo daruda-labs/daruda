@@ -149,7 +149,8 @@ fn load_raw(
                         // Match the diagram theme to the host appearance so
                         // every diagram type — not just flowchart nodes —
                         // stays legible (dark UI → dark diagram chrome).
-                        let mut renderer = merman::render::HeadlessRenderer::new();
+                        let mut renderer = merman::render::HeadlessRenderer::new()
+                            .with_svg_options(super::markdown_viewer::mermaid_svg_render_options());
                         if !super::markdown_viewer::source_has_own_theme_directive(source) {
                             renderer = renderer.with_host_theme(
                                 &super::markdown_viewer::mermaid_host_theme_profile(

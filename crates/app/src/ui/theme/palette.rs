@@ -801,6 +801,15 @@ pub const AGENT_CHAT_INPUT_INNER_PAD_X: f32 = PAD_STANDARD;
 pub const AGENT_CHAT_INPUT_INNER_PAD_Y: f32 = PAD_XS;
 /// Agent chat input box corner radius (px).
 pub const AGENT_CHAT_INPUT_RADIUS: f32 = RADIUS_SM;
+/// Inner padding of the mermaid diagram card in the agent chat — breathing
+/// room between the card hairline and the (transparent-canvas) diagram.
+pub const AGENT_CHAT_DIAGRAM_PAD: f32 = PAD_STANDARD;
+/// Vertical gap after a mermaid diagram card embedded in markdown. The custom
+/// code-block renderer replaces TextView's built-in code-block spacing, so the
+/// card supplies its own gap for consecutive diagrams.
+pub const AGENT_CHAT_DIAGRAM_GAP: f32 = GAP_LG;
+/// Fraction of the viewport the mermaid lightbox dialog may occupy.
+pub const MERMAID_LIGHTBOX_VIEWPORT_FRACTION: f32 = 0.9;
 /// Slack (px) for "is the agent chat scrolled to the bottom?" — within this
 /// distance of the live edge still counts as at-bottom (follow mode stays on).
 pub const AGENT_CHAT_SCROLL_BOTTOM_SLACK: f32 = 24.0;

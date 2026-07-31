@@ -535,6 +535,22 @@ impl CachedImage {
             .max_w_full()
             .into_any_element()
     }
+
+    /// Logical (point) width the diagram lays out at — the lightbox uses it to
+    /// size the dialog to the content.
+    pub(in crate::workspace) fn logical_width(&self) -> f32 {
+        self.logical_w
+    }
+
+    /// Uncapped element at natural logical size — for the lightbox body, where
+    /// the surrounding scroll container (not the image) handles overflow.
+    /// `block_diagram`'s `max_w_full` would re-shrink the image to the modal.
+    pub(in crate::workspace) fn natural(&self) -> AnyElement {
+        img(ImageSource::Render(self.image.clone()))
+            .flex_none()
+            .w(px(self.logical_w))
+            .into_any_element()
+    }
 }
 
 /// Block-layout element for a raster, converting fresh for Markdown preview.

@@ -4,7 +4,7 @@
 
 use gpui::Hsla;
 
-use crate::ui::theme::DarudaTheme;
+use crate::ui::theme::{self, DarudaTheme};
 
 /// Plain-data palette snapshot threaded down to the GPUI-free mermaid
 /// renderer (`markdown_viewer::mermaid_host_theme_profile`). Resolved once
@@ -77,6 +77,39 @@ impl MermaidPalette {
             success: to_hex(theme.banner_success_text),
         }
     }
+
+    /// Agent-chat diagrams sit on the terminal-mirrored chat surface, which can
+    /// disagree with the UI theme's light/dark bit. Build this palette from
+    /// that actual surface/foreground pair so light UI chrome cannot leak
+    /// black Mermaid text onto a dark chat transcript.
+    pub fn from_agent_chat(cx: &gpui::App) -> Self {
+        let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
+        let canvas = theme::agent_chat_bg(cx);
+        let text = theme::agent_chat_fg(cx);
+        let line = to_hex_over(theme::agent_chat_fg_muted(cx), canvas);
+        let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
+        let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
+        let primary_surface_hex = to_hex_over(primary_surface, canvas);
+        let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
+
+        Self {
+            dark: !theme::agent_chat_syntax_is_light(cx),
+            background: to_hex(canvas),
+            primary_color: primary_surface_hex.clone(),
+            primary_text_color: to_hex(text),
+            primary_border_color: to_hex_over(theme::agent_chat_border_tint(cx), canvas),
+            line_color: line,
+            secondary_color: secondary_surface_hex.clone(),
+            surface_muted: secondary_surface_hex.clone(),
+            cluster_background: secondary_surface_hex.clone(),
+            note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
+            note_text: to_hex(ui_theme.banner_warning_text),
+            activation_background: secondary_surface_hex,
+            error: to_hex(ui_theme.banner_error_text),
+            warning: to_hex(ui_theme.banner_warning_text),
+            success: to_hex(ui_theme.banner_success_text),
+        }
+    }
 }
 
 impl Default for MermaidPalette {
@@ -105,6 +138,18 @@ fn diagram_surface(theme: &DarudaTheme, alpha: f32) -> Hsla {
     Hsla {
         a: alpha,
         ..theme.overlay_prominent
+    }
+}
+
+fn diagram_surface_for_base(base: Hsla, alpha: f32) -> Hsla {
+    let overlay = if base.l < 0.5 {
+        theme::OVERLAY_WHITE
+    } else {
+        theme::OVERLAY_BLACK
+    };
+    Hsla {
+        a: alpha,
+        ..overlay
     }
 }
 
@@ -201,5 +246,37 @@ mod tests {
         let palette = MermaidPalette::from_theme(&theme);
         assert_eq!(palette.dark, theme.is_dark());
         assert!(palette.background.starts_with('#'));
+    }
+
+    #[gpui::test]
+    fn from_agent_chat_uses_chat_surface_not_light_ui_text(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let light_ui = DarudaTheme {
+                title_bar_bg: Hsla {
+                    h: 0.0,
+                    s: 0.0,
+                    l: 0.95,
+                    a: 1.0,
+                },
+                text_body: Hsla {
+                    h: 0.0,
+                    s: 0.0,
+                    l: 0.0,
+                    a: 1.0,
+                },
+                ..Default::default()
+            };
+            cx.set_global(light_ui);
+            theme::set_agent_chat_bg(cx, 0, 0, 0);
+            theme::set_agent_chat_fg(cx, 255, 255, 255);
+
+            let palette = MermaidPalette::from_agent_chat(cx);
+
+            assert!(palette.dark);
+            assert_eq!(palette.background, "#000000");
+            assert_eq!(palette.primary_text_color, "#ffffff");
+            assert_ne!(palette.primary_text_color, "#000000");
+            assert_ne!(palette.line_color, "#000000");
+        });
     }
 }

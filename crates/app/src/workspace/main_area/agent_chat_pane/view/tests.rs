@@ -34,6 +34,34 @@ fn make_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Ag
     })
 }
 
+#[gpui::test]
+fn host_is_dark_tracks_agent_chat_background_not_ui_theme(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let light_ui = crate::ui::theme::DarudaTheme {
+            title_bar_bg: gpui::Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 0.95,
+                a: 1.0,
+            },
+            ..Default::default()
+        };
+        cx.set_global(light_ui);
+
+        crate::ui::theme::set_agent_chat_bg(cx, 0, 0, 0);
+        assert!(
+            super::AgentChatView::host_is_dark(cx),
+            "dark terminal-backed chat background should drive dark Mermaid keys"
+        );
+
+        crate::ui::theme::set_agent_chat_bg(cx, 255, 255, 255);
+        assert!(
+            !super::AgentChatView::host_is_dark(cx),
+            "light terminal-backed chat background should drive light Mermaid keys"
+        );
+    });
+}
+
 /// Appending a follow-up prompt must not make the previously visible agent
 /// response collapse out from under the user. The model still keeps every
 /// item either way; this pins the row projection so the prior response's

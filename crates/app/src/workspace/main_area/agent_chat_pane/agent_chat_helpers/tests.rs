@@ -519,6 +519,44 @@ fn fold_active_resolves_per_key() {
     assert!(!fold_active(&FoldKey::Tool("nope".to_owned()), &items));
 }
 
+/// `chat_item_mermaid_texts` covers every markdown body that can carry a
+/// mermaid fence: assistant/thinking/user text, and each `Text` output block
+/// of a tool call (a `ResourceLink` block contributes none). Permission /
+/// error items carry none.
+#[test]
+fn chat_item_mermaid_texts_includes_tool_output_text() {
+    let tc = daruda_acp::ToolCallItem {
+        id: "t1".into(),
+        title: "Write".into(),
+        kind: daruda_acp::ToolKindView::Edit,
+        tool_name: None,
+        status: daruda_acp::ToolStatusView::Completed,
+        diffs: Vec::new(),
+        output: vec![
+            daruda_acp::ToolOutputBlock::Text {
+                text: "```mermaid\nflowchart TD\n  A-->B\n```".into(),
+                truncated_from: None,
+            },
+            daruda_acp::ToolOutputBlock::ResourceLink {
+                uri: "file:///x".into(),
+                name: "x".into(),
+            },
+        ],
+        raw_input: None,
+        parent_tool_id: None,
+    };
+    let item = daruda_acp::ChatItem::ToolCall(tc);
+    let texts = chat_item_mermaid_texts(&item);
+    assert_eq!(texts.len(), 1);
+    assert!(texts[0].contains("flowchart"));
+
+    assert!(chat_item_mermaid_texts(&daruda_acp::ChatItem::Error("boom".into())).is_empty());
+    assert_eq!(
+        chat_item_mermaid_texts(&daruda_acp::ChatItem::UserText("hi".into())),
+        vec!["hi"]
+    );
+}
+
 /// A single closed mermaid fence yields its verbatim body.
 #[test]
 fn mermaid_sources_extracts_a_closed_fence() {

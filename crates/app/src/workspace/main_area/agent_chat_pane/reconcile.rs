@@ -18,13 +18,13 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::Context;
 
 use super::agent_chat_helpers::{
-    DiffStat, build_diff_view_model, chat_item_markdown, create_diff_editor, diff_editor_key,
+    DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor, diff_editor_key,
     diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources, tool_image_key,
 };
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{
-    mermaid_host_theme_profile, source_has_own_theme_directive,
+    mermaid_host_theme_profile, mermaid_svg_render_options, source_has_own_theme_directive,
 };
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
@@ -156,23 +156,22 @@ impl AgentChatView {
         // live.
         let mut pending: Vec<(u64, String)> = Vec::new();
         for item in &self.items {
-            let Some(text) = chat_item_markdown(item) else {
-                continue;
-            };
-            for source in mermaid_sources(text) {
-                let key = mermaid_key(&source, dark);
-                if self
-                    .assets
-                    .mermaid_images
-                    .lock()
-                    .unwrap()
-                    .contains_key(&key)
-                    || self.assets.mermaid_inflight.contains(&key)
-                    || pending.iter().any(|(k, _)| *k == key)
-                {
-                    continue;
+            for text in chat_item_mermaid_texts(item) {
+                for source in mermaid_sources(text) {
+                    let key = mermaid_key(&source, dark);
+                    if self
+                        .assets
+                        .mermaid_images
+                        .lock()
+                        .unwrap()
+                        .contains_key(&key)
+                        || self.assets.mermaid_inflight.contains(&key)
+                        || pending.iter().any(|(k, _)| *k == key)
+                    {
+                        continue;
+                    }
+                    pending.push((key, source));
                 }
-                pending.push((key, source));
             }
         }
         if pending.is_empty() {
@@ -187,10 +186,7 @@ impl AgentChatView {
 
         // Resolved here (main thread) so the background rasterizer never
         // touches `Hsla` / the `DarudaTheme` global — see `MermaidPalette`.
-        let palette = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(MermaidPalette::from_theme)
-            .unwrap_or_default();
+        let palette = MermaidPalette::from_agent_chat(cx);
 
         for (key, source) in pending {
             let palette = palette.clone();
@@ -203,7 +199,8 @@ impl AgentChatView {
                         // take the executor down — on panic / error we drop
                         // it and the fence keeps the default code rendering.
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let mut renderer = merman::render::HeadlessRenderer::new();
+                            let mut renderer = merman::render::HeadlessRenderer::new()
+                                .with_svg_options(mermaid_svg_render_options());
                             if !source_has_own_theme_directive(&source) {
                                 renderer =
                                     renderer.with_host_theme(&mermaid_host_theme_profile(&palette));

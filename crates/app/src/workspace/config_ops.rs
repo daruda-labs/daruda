@@ -182,7 +182,8 @@ impl Workspace {
         // color theme on a live reload too.
         let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
         let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
-        if bg_alpha_changed || bg_color_changed || fg_color_changed || agent_chat_font_changed {
+        let agent_chat_mermaid_theme_changed = bg_color_changed || fg_color_changed;
+        if bg_alpha_changed || agent_chat_mermaid_theme_changed || agent_chat_font_changed {
             let views: Vec<_> = self
                 .main_area
                 .runtimes
@@ -191,7 +192,16 @@ impl Workspace {
                 .filter_map(|pane| pane.agent_chat_content().map(|ac| ac.view.clone()))
                 .collect();
             for view in views {
-                view.update(cx, |_, cx| cx.notify());
+                view.update(cx, |view, cx| {
+                    if agent_chat_mermaid_theme_changed {
+                        view.assets.clear_mermaid();
+                        view.reconcile_mermaid(
+                            !crate::ui::theme::agent_chat_syntax_is_light(cx),
+                            cx,
+                        );
+                    }
+                    cx.notify();
+                });
             }
         }
 

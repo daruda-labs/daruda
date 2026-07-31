@@ -226,17 +226,24 @@ pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The markdown body of a chat item that can carry a ` ```mermaid ` fence —
-/// assistant / thinking / user text. Tool / permission / error items carry no
-/// markdown body and contribute none. Drives the mermaid scan.
-pub(in crate::workspace) fn chat_item_markdown(item: &daruda_acp::ChatItem) -> Option<&str> {
+/// Every markdown body of a chat item that can carry a ```mermaid fence —
+/// assistant / thinking / user text, plus each `Text` output block of a tool
+/// call (a tool that reads or writes a .md file streams fences there).
+/// Permission / error items carry none. Drives the mermaid scan.
+pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> {
     match item {
         daruda_acp::ChatItem::AssistantText { text, .. }
-        | daruda_acp::ChatItem::Thinking { text, .. } => Some(text),
-        daruda_acp::ChatItem::UserText(text) => Some(text),
-        daruda_acp::ChatItem::ToolCall(_)
-        | daruda_acp::ChatItem::Permission(_)
-        | daruda_acp::ChatItem::Error(_) => None,
+        | daruda_acp::ChatItem::Thinking { text, .. } => vec![text],
+        daruda_acp::ChatItem::UserText(text) => vec![text],
+        daruda_acp::ChatItem::ToolCall(tc) => tc
+            .output
+            .iter()
+            .filter_map(|block| match block {
+                daruda_acp::ToolOutputBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect(),
+        daruda_acp::ChatItem::Permission(_) | daruda_acp::ChatItem::Error(_) => Vec::new(),
     }
 }
 
