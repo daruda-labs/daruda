@@ -547,7 +547,7 @@ impl Render for Workspace {
         // Rendered as a border on the adjacent cell (or the "+" button for
         // the end slot) rather than an absolute-positioned overlay, so it
         // never has to re-derive the tab bar's flex-computed x offsets.
-        let tab_reorder_preview = self.main_area.tab_reorder_preview;
+        let tab_reorder_preview = self.main_area.tab_reorder_preview.map(|(_, index)| index);
         let tab_count = tab_titles.len();
         let tab_bar = div()
             .flex()
@@ -883,13 +883,11 @@ impl Render for Workspace {
             // Fallback for a `TabDrag` released on the tab bar but off every
             // individual cell's own hitbox (e.g. over the "+" new-tab
             // button, which is exactly where the "insert at the end"
-            // indicator renders). A per-cell `on_drop::<TabDrag>` handling
-            // the drop first calls `cx.stop_propagation()`, so this
-            // container-level listener only runs when no cell caught it —
-            // without it, that drop would silently no-op and leave
-            // `tab_reorder_preview` / `tab_hover_switch` stuck showing a
-            // stale indicator (only an outside-window release is caught by
-            // the root `clear_tab_drag_state` call).
+            // indicator renders — the cells resolve to `Hold` there, so the
+            // end slot survives to be committed here). A per-cell
+            // `on_drop::<TabDrag>` handling the drop first calls
+            // `cx.stop_propagation()`, so this container-level listener only
+            // runs when no cell caught it.
             .on_drop::<TabDrag>(cx.listener(|this, d: &TabDrag, window, cx| {
                 this.drop_tab_onto_bar(d.tab_id, window, cx);
             }));
@@ -1117,6 +1115,7 @@ impl Render for Workspace {
             .relative()
             .key_context(key_ctx)
             .track_focus(&self.focus_handle)
+            .capture_key_down(cx.listener(Self::cancel_drag_on_escape))
             // Search actions — context-gated via KeyBinding context strings in main.rs.
             .on_action(cx.listener(|this, _: &SaveFilePane, _window, cx| {
                 this.save_focused_file_pane(cx);
@@ -1289,7 +1288,7 @@ impl Render for Workspace {
                     this.end_stale_resize_drags(cx);
                     this.end_file_selection_drag(cx);
                     this.clear_pane_drop_hover(cx);
-                    this.clear_tab_drag_state(cx);
+                    this.finish_tab_drag(false, cx);
                     return;
                 }
                 if let Some(drag) = this.dock_drag {
@@ -1309,12 +1308,17 @@ impl Render for Workspace {
                 };
                 this.update_divider_drag(cursor_px, window, cx);
             }))
+            // Bubble phase, so every `on_drop` has already had its shot and a
+            // consumed drop stopped propagation (gpui `div.rs`). Reaching
+            // here means the release hit no drop target at all.
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseUpEvent, _window, cx| {
                     this.end_divider_drag(cx);
                     this.end_dock_drag(cx);
                     this.end_file_selection_drag(cx);
+                    this.clear_pane_drop_hover(cx);
+                    this.finish_tab_drag(false, cx);
                 }),
             )
             .on_action(cx.listener(Self::on_new_tab))

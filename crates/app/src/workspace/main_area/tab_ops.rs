@@ -18,6 +18,16 @@ pub(in crate::workspace) enum NewPaneKind {
     AgentChat,
 }
 
+/// Whether a tab switch leaves a trail in `tab_history`, which
+/// `close_tab_at` pops to choose the next tab. Drag previews and their
+/// unwind pass `Skip`: they are visual look-aheads, and recording them
+/// would let an abandoned drag redirect a later close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabHistory {
+    Record,
+    Skip,
+}
+
 impl Workspace {
     /// Set the user-visible window title (Window > Edit Window Title…).
     /// `None` clears the override so the title falls back to the
@@ -358,7 +368,7 @@ impl Workspace {
     /// `active_tab_index` write. Returns the new tab's `last_focused_pane`
     /// on a real switch, `None` on a no-op (out-of-range or already
     /// active) — callers branch on that to decide whether to focus/persist.
-    fn switch_active_tab_index(&mut self, index: usize) -> Option<PaneId> {
+    fn switch_active_tab_index(&mut self, index: usize, history: TabHistory) -> Option<PaneId> {
         if index >= self.active_runtime().tabs.len()
             || index == self.active_runtime().active_tab_index
         {
@@ -368,17 +378,20 @@ impl Workspace {
         // Drop any in-flight drag hover so a stale half-fill overlay does
         // not linger on the newly-activated tab. The caller's notify covers it.
         self.main_area.pane_drop_hover = None;
-        // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
-        if self.active_runtime().tab_history.last() != Some(&self.active_runtime().active_tab_index)
-        {
-            let cur_tab = self.active_runtime().active_tab_index;
-            self.active_runtime_mut().tab_history.push(cur_tab);
-        }
-        // Cap size to bound memory use across long sessions.
-        const TAB_HISTORY_CAP: usize = 64;
-        if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
-            let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
-            self.active_runtime_mut().tab_history.drain(..drain_to);
+        if history == TabHistory::Record {
+            // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
+            if self.active_runtime().tab_history.last()
+                != Some(&self.active_runtime().active_tab_index)
+            {
+                let cur_tab = self.active_runtime().active_tab_index;
+                self.active_runtime_mut().tab_history.push(cur_tab);
+            }
+            // Cap size to bound memory use across long sessions.
+            const TAB_HISTORY_CAP: usize = 64;
+            if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
+                let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
+                self.active_runtime_mut().tab_history.drain(..drain_to);
+            }
         }
         self.active_runtime_mut().active_tab_index = index;
         Some(self.active_runtime().tabs[index].last_focused_pane)
@@ -390,7 +403,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(focused) = self.switch_active_tab_index(index) else {
+        let Some(focused) = self.switch_active_tab_index(index, TabHistory::Record) else {
             return;
         };
         // Switching tabs changes the focused pane — route through the
@@ -417,9 +430,40 @@ impl Workspace {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.switch_active_tab_index(index).is_some() {
+        // Stash on the first hop only — later hops must not overwrite it, or
+        // an abandoned drag would unwind to the last tab passed over instead
+        // of where the drag started.
+        let pre_drag = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+            .map(|t| t.id);
+        if self
+            .switch_active_tab_index(index, TabHistory::Skip)
+            .is_some()
+        {
+            if self.main_area.tab_preview_restore.is_none() {
+                self.main_area.tab_preview_restore = pre_drag;
+            }
             cx.notify();
         }
+    }
+
+    /// Re-activate a tab by id, for unwinding a drag preview. `false` when
+    /// that tab is gone (closed mid-drag) or already active. Skips history
+    /// for the same reason the preview hops do — the unwind is part of the
+    /// look-ahead, not navigation the user performed.
+    pub(in crate::workspace) fn restore_active_tab_by_id(&mut self, tab_id: u64) -> bool {
+        let Some(index) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|t| t.id == tab_id)
+        else {
+            return false;
+        };
+        self.switch_active_tab_index(index, TabHistory::Skip)
+            .is_some()
     }
 
     pub(in crate::workspace) fn move_tab(

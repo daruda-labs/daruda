@@ -209,10 +209,10 @@ impl Workspace {
     }
 
     /// Called from a pane's `on_drop` for a `TabDrag` payload. Mirrors
-    /// `drop_pane_onto`'s zoom-guard-then-take-hover-then-act shape exactly,
-    /// but the act step merges a whole tab into the target pane instead of
-    /// rearranging a single leaf, and is the single commit point for the
-    /// merge (`merge_tab_into_pane` itself does not persist).
+    /// `drop_pane_onto`'s zoom-guard-then-take-hover-then-act shape, but the
+    /// act step merges a whole tab instead of rearranging a single leaf and
+    /// is the single commit point for it (`merge_tab_into_pane` does not
+    /// persist). Every exit settles the drag through `finish_tab_drag`.
     pub(in crate::workspace) fn drop_tab_onto_pane(
         &mut self,
         dragged_tab_id: u64,
@@ -224,16 +224,17 @@ impl Workspace {
         // into the full tree while a synthetic single-leaf zoom layout is
         // showing.
         if self.main_area.zoomed_pane_id.is_some() {
-            if self.main_area.pane_drop_hover.take().is_some() {
-                cx.notify();
-            }
+            self.main_area.pane_drop_hover = None;
+            self.finish_tab_drag(false, cx);
+            cx.notify();
             return;
         }
         let Some((target, half)) = self.main_area.pane_drop_hover.take() else {
+            self.finish_tab_drag(false, cx);
             cx.notify();
             return;
         };
-        self.mutate_durable_in(window, cx, |ws, window, cx| {
+        let merged = self.mutate_durable_in(window, cx, |ws, window, cx| {
             ws.merge_tab_into_pane(
                 dragged_tab_id,
                 target,
@@ -241,13 +242,15 @@ impl Workspace {
                 half.before(),
                 window,
                 cx,
-            );
+            )
         });
+        self.finish_tab_drag(merged, cx);
         cx.notify();
     }
 
-    /// Called from the root `on_mouse_move` `!ev.dragging()` branch to clear
-    /// a stale overlay when a drag was released outside the window.
+    /// Clear a stale drop overlay from every drag-termination path that
+    /// isn't a drop itself: the root `on_mouse_up`, Escape, and the root
+    /// `on_mouse_move` fallback for a release outside the window.
     pub(in crate::workspace) fn clear_pane_drop_hover(&mut self, cx: &mut Context<Self>) {
         if self.main_area.pane_drop_hover.take().is_some() {
             cx.notify();
