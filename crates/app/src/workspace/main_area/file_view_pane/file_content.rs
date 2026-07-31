@@ -146,11 +146,14 @@ fn load_raw(
                     // stay visible (dark UI → dark diagram).
                     let themed =
                         super::markdown_viewer::mermaid_with_theme(source, mermaid_palette);
-                    // selkie is a young reimplementation; guard against a panic
-                    // on malformed input so one bad diagram can't fail the load.
+                    // merman is a young reimplementation; guard against a
+                    // panic on malformed input so one bad diagram can't fail
+                    // the load.
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        selkie::render::render_text(&themed)
+                        merman::render::HeadlessRenderer::new()
+                            .render_svg_resvg_safe_sync(&themed)
                             .ok()
+                            .flatten()
                             .and_then(|svg| super::visual::rasterize_svg(&svg).ok())
                     }))
                     .ok()

@@ -251,12 +251,14 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
-             →  gpui, gpui_component, portable-pty
+             →  gpui, gpui_component, merman, portable-pty
 
 gpui_component  →  daruda_core                         # vendored; shares the text primitives
 ```
 
 `gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above).
+
+`merman` (crates.io, MIT/Apache-2.0) is the mermaid → SVG renderer behind every ` ```mermaid ` fence in the file viewer and agent chat, pulled as a normal dependency (not vendored — no daruda-side patch needed) and validated against upstream Mermaid.js SVG baselines. Dark-mode theming goes through a `%%{init: {"theme":"dark","themeVariables":{...}}}%%` directive prepend (`markdown_viewer::mermaid_with_theme`), which merman parses natively. Entry points: `crate::workspace::main_area::file_view_pane::file_content` and `agent_chat_pane::reconcile`, both via `merman::render::HeadlessRenderer::render_svg_resvg_safe_sync`.
 
 `daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 

@@ -96,7 +96,7 @@ pub(in crate::workspace) enum MdBlock {
     /// Raw HTML block (dim monospace passthrough).
     HtmlBlock(String),
     /// Mermaid diagram (```mermaid fence). `raster` is filled by the loader
-    /// (selkie → SVG → rasterize); `None` falls back to the raw source.
+    /// (merman → SVG → rasterize); `None` falls back to the raw source.
     Mermaid {
         source: String,
         raster: Option<RasterImage>,
@@ -672,24 +672,21 @@ pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option
 
 /// Prepend a mermaid `%%{init}%%` directive matching the host appearance, so
 /// a dark UI renders a diagram in daruda's actual surface/text/border colors
-/// (`palette`) rather than selkie's generic dark preset. On a light UI the
+/// (`palette`) rather than the renderer's generic dark preset. On a light UI the
 /// source is unchanged (mermaid's default is already light).
 ///
 /// A user directive that sets an explicit `theme` name (e.g. `"forest"`) is
 /// fully respected — nothing is prepended. A user directive that only
 /// overrides `themeVariables` (no `theme` name) still gets our directive
-/// prepended: selkie merges multiple `%%{init}%%` blocks with later ones
-/// overriding earlier ones per-field, so the user's overrides win for the
-/// keys they set while ours fill in the rest instead of leaving them at
+/// prepended: the renderer merges multiple `%%{init}%%` blocks with later
+/// ones overriding earlier ones per-field, so the user's overrides win for
+/// the keys they set while ours fill in the rest instead of leaving them at
 /// mermaid's light default.
 pub(in crate::workspace) fn mermaid_with_theme(source: &str, palette: &MermaidPalette) -> String {
     if !palette.dark {
         return source.to_string();
     }
-    let has_explicit_theme = selkie::diagrams::detect_init(source)
-        .and_then(|cfg| cfg.theme)
-        .is_some();
-    if has_explicit_theme {
+    if source_declares_explicit_theme(source) {
         return source.to_string();
     }
     format!(
@@ -703,9 +700,27 @@ pub(in crate::workspace) fn mermaid_with_theme(source: &str, palette: &MermaidPa
     )
 }
 
+/// Whether `source`'s own (first) `%%{init: {...}}%%` directive sets an
+/// explicit `theme` key — distinct from `themeVariables`/`themeCSS`, which
+/// don't count as an explicit theme choice. A crude token scan instead of a
+/// JSON parse because mermaid init bodies are JSON5-ish (single-quoted,
+/// unquoted keys) and don't always parse as strict JSON.
+fn source_declares_explicit_theme(source: &str) -> bool {
+    let Some(start) = source.find("%%{init") else {
+        return false;
+    };
+    let block = match source[start..].find("}%%") {
+        Some(rel_end) => &source[start..start + rel_end],
+        None => &source[start..],
+    };
+    block
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|token| token == "theme")
+}
+
 /// Walk every mermaid block in `blocks` (recursing into list item children) and
 /// fill its `raster` via `resolve`. Pure traversal — the caller supplies the
-/// rendering (selkie → SVG → rasterize) as the closure.
+/// rendering (merman → SVG → rasterize) as the closure.
 pub(in crate::workspace) fn resolve_mermaid(
     blocks: &mut [MdBlock],
     resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
@@ -915,7 +930,7 @@ mod tests {
     #[test]
     fn mermaid_with_theme_merges_when_user_omits_theme_name() {
         // user directive overrides only `themeVariables`, no `theme` name →
-        // our dark directive is still prepended (selkie merges multiple
+        // our dark directive is still prepended (the renderer merges multiple
         // `%%{init}%%` blocks, later overrides earlier per-field), so the
         // user's override survives while unset fields get daruda's palette.
         let palette = test_palette();

@@ -142,8 +142,8 @@ impl AgentChatView {
     /// Rasterize every ` ```mermaid ` fence in the conversation that does not
     /// yet have a cached bitmap (and isn't already being rendered). Collect the
     /// pure work first, then spawn each rasterization on the background executor
-    /// (selkie is CPU-heavy and can panic), and re-enter the view to fill the
-    /// cache + `cx.notify()` when it lands.
+    /// (mermaid rendering is CPU-heavy and can panic), and re-enter the view to
+    /// fill the cache + `cx.notify()` when it lands.
     ///
     /// `dark` matches the diagram theme to the host appearance so edges stay
     /// visible. Theme-switch staleness (a cached raster keeps its colour after a
@@ -197,13 +197,15 @@ impl AgentChatView {
                     .background_executor()
                     .spawn(async move {
                         let themed = mermaid_with_theme(&source, &palette);
-                        // selkie is a young reimplementation; guard against a
-                        // panic on malformed input so one bad diagram can't take
-                        // the executor down — on panic / error we drop it and the
-                        // fence keeps the default code rendering.
+                        // merman is a young reimplementation; guard against a
+                        // panic on malformed input so one bad diagram can't
+                        // take the executor down — on panic / error we drop
+                        // it and the fence keeps the default code rendering.
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            selkie::render::render_text(&themed)
+                            merman::render::HeadlessRenderer::new()
+                                .render_svg_resvg_safe_sync(&themed)
                                 .ok()
+                                .flatten()
                                 .and_then(|svg| visual::rasterize_svg(&svg).ok())
                         }))
                         .ok()

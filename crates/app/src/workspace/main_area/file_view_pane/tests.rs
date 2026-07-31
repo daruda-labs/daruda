@@ -192,6 +192,41 @@ fn selected_text_for_copy_no_selection() {
     assert!(text.contains("+new"));
 }
 
+/// Width of the first `<rect>` in a rendered single-node flowchart — the
+/// node box the renderer sized from its text estimate.
+fn first_node_rect_width(source: &str) -> f64 {
+    let svg = merman::render::HeadlessRenderer::new()
+        .render_svg_resvg_safe_sync(source)
+        .expect("merman should render")
+        .expect("diagram should be detected");
+    let rect = svg
+        .find("<rect")
+        .expect("flowchart should emit a node rect");
+    let attr = svg[rect..]
+        .find("width=\"")
+        .expect("rect should have width")
+        + rect
+        + 7;
+    let end = svg[attr..].find('"').expect("unterminated width") + attr;
+    svg[attr..end].parse().expect("numeric width")
+}
+
+/// East Asian Wide glyphs advance closer to a full em than Latin glyphs, so a
+/// Hangul label must measure meaningfully wider than a same-length Latin one
+/// — a renderer that regresses to a flat per-character ratio silently clips
+/// CJK labels (the previous vendored renderer needed a local patch for
+/// exactly this).
+#[test]
+fn mermaid_renderer_sizes_east_asian_labels_wider_than_latin() {
+    let hangul = first_node_rect_width("flowchart TD\n  A[가나다라마바]\n");
+    let latin = first_node_rect_width("flowchart TD\n  A[abcdef]\n");
+    assert!(
+        hangul > latin,
+        "6 Hangul glyphs must measure wider than 6 Latin ones \
+         (hangul={hangul}, latin={latin}) — East Asian width handling is broken"
+    );
+}
+
 #[test]
 fn make_plain_row_helper() {
     let r = make_plain_row("foo", 1);

@@ -1,6 +1,6 @@
 //! Maps daruda's active palette to the mermaid `themeVariables` a rendered
 //! diagram should adopt, so a dark-mode diagram matches the app's actual
-//! surface/text/border colors instead of selkie's generic dark preset.
+//! surface/text/border colors instead of the renderer's generic dark preset.
 
 use gpui::Hsla;
 

@@ -50,7 +50,9 @@ lsp-types = { workspace = true }
 portable-pty = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 resvg = "0.45"
-selkie-rs = { version = "0.3", default-features = false }
+# Mermaid → SVG renderer for the file viewer and agent chat. Not vendored —
+# no daruda-side patch needed. See CLAUDE.md's crate dependency graph section.
+merman = { version = "0.8.0-alpha.3", features = ["render"] }
 rust-i18n = { workspace = true }
 semver = "1"
 sys-locale = "0.3"
