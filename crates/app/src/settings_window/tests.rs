@@ -355,6 +355,79 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
     });
 }
 
+/// The agent-side `Ssh`/`Docker` transport is deprecated (Session Host on
+/// the Lane is the new axis) but stays fully functional for one more
+/// release — an already-persisted `Ssh` row must keep loading and saving
+/// byte-for-byte, untouched.
+#[gpui::test]
+fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
+    let ssh_entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        id: "remote-claude".to_string(),
+        name: "Remote Claude".to_string(),
+        launch: daruda_config::AgentLaunch::Ssh {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            host: "vm-work".to_string(),
+        },
+        default_mode: None,
+    });
+    let config = daruda_config::Config {
+        agents: vec![ssh_entry.clone()],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("an untouched ssh row must validate");
+        assert_eq!(cfg.agents[0], ssh_entry);
+    });
+}
+
+/// Same as the `Ssh` case, for `Docker`.
+#[gpui::test]
+fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
+    let docker_entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        id: "remote-codex".to_string(),
+        name: "Remote Codex".to_string(),
+        launch: daruda_config::AgentLaunch::Docker {
+            adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".to_string(),
+            container: "dev-1".to_string(),
+        },
+        default_mode: None,
+    });
+    let config = daruda_config::Config {
+        agents: vec![docker_entry.clone()],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("an untouched docker row must validate");
+        assert_eq!(cfg.agents[0], docker_entry);
+    });
+}
+
+/// A freshly added custom row defaults to the `Raw` transport — remote-ness
+/// is the lane's job now, so a brand-new row has no reason to default to
+/// the deprecated agent-side host axis.
+#[gpui::test]
+fn a_new_custom_row_defaults_to_the_raw_transport(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let selected = w
+            .agent_editable_row(1)
+            .unwrap()
+            .transport_select
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string());
+        assert_eq!(selected.as_deref(), Some("raw"));
+    });
+}
+
 /// The built-in default row's command is `npx`-prefixed, so it never gets a
 /// local-PATH warning — daruda provisions Node.js itself for these.
 #[gpui::test]

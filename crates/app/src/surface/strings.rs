@@ -2771,6 +2771,16 @@ pub fn settings_agent_transport_docker() -> String {
     rust_i18n::t!("settings.agent_transport_docker").into_owned()
 }
 
+/// Shown under the transport select whenever a row's transport is `ssh` or
+/// `docker` — the agent-side host axis these two carry is deprecated in
+/// favor of the lane's own `session_host` (any `Raw` launch works on any
+/// lane, remote or local — see `lane::session_host::effective_session_host`).
+/// Existing rows keep loading, saving, and connecting unchanged; this only
+/// steers new setups toward the lane.
+pub fn settings_agent_transport_deprecated_hint() -> String {
+    rust_i18n::t!("settings.agent_transport_deprecated_hint").into_owned()
+}
+
 /// Label for the SSH host field, shown only when a row's transport is `ssh`.
 pub fn settings_agent_field_host() -> String {
     rust_i18n::t!("settings.agent_field_host").into_owned()

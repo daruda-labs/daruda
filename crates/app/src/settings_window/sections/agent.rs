@@ -363,6 +363,17 @@ impl SettingsWindow {
                 s::settings_agent_field_transport(),
                 crate::ui::select::select(&row.transport_select, cx, ()),
             ))
+            .when(
+                transport_kind == "ssh" || transport_kind == "docker",
+                |body| {
+                    body.child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(t.text_muted)
+                            .child(s::settings_agent_transport_deprecated_hint()),
+                    )
+                },
+            )
             .child(field_row(
                 s::settings_agent_field_default_mode(),
                 crate::ui::input(&row.default_mode_input, cx, ()),
@@ -384,9 +395,10 @@ impl SettingsWindow {
         }
 
         // Only one of host/container is meaningful per transport kind — show
-        // just that field, plus a hint pointing at the Lane's remote-path
-        // setting (the value `AgentLaunch::wrap` substitutes in at connect
-        // time; see `daruda_config::AgentLaunch::needs_remote_cwd`).
+        // just that field, plus a hint pointing at the Lane's own Session
+        // Host setting: unless the lane's session_host is unanswered (the
+        // legacy fallback), this agent-side host/container is ignored in
+        // favor of the lane's — see `Lane::effective_session_host`.
         if transport_kind == "ssh" {
             body = body
                 .child(field_row(
@@ -571,6 +583,16 @@ impl SettingsWindow {
         cx: &mut gpui::Context<Self>,
     ) {
         self.add_selected_preset_row(window, cx);
+    }
+
+    /// Test-only entry into [`Self::add_custom_agent_row`] — same reason as
+    /// [`Self::add_selected_preset_row_for_test`].
+    pub(in crate::settings_window) fn add_custom_agent_row_for_test(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.add_custom_agent_row(window, cx);
     }
 }
 
