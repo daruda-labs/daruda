@@ -1038,11 +1038,24 @@ pub fn agent_chat_no_lane_cwd() -> String {
 /// legacy `{{cwd}}` token (`AgentLaunch::needs_remote_cwd`) but the lane has
 /// no `remote_cwd` configured. The one launch shape the lane's
 /// `session_host` axis doesn't cover (see `session_host::adapter_command`'s
-/// doc) — `remote_cwd` for it is config-file-only, no UI sets it. Unlike
-/// `agent_chat_no_lane_cwd`, this names the fix rather than just stating
-/// the symptom.
+/// doc). `remote_cwd` is a per-lane persisted-state field
+/// (`daruda_store::project::SerializedLane`, not `config.toml`) with no
+/// editor anymore (the Session Host dialog never writes it), so the only
+/// real fix is dropping the token from the command and setting the host on
+/// the lane instead — this message names that, rather than a config key
+/// that doesn't exist. Unlike `agent_chat_no_lane_cwd`, this names the fix
+/// rather than just stating the symptom.
 pub fn agent_chat_no_remote_cwd() -> String {
     rust_i18n::t!("agent_chat.no_remote_cwd").into_owned()
+}
+
+/// Status-line reason shown when a lane's Session Host resolves to a remote
+/// host (`Ssh`/`Docker`) but the pane's launch is a JSON stdio config —
+/// `session_host::wrap` can only fold a shell command line into `ssh`/
+/// `docker`, and injecting raw JSON there produces something the remote
+/// shell can't execute. See `AgentLaunch::is_json_stdio`'s doc.
+pub fn agent_chat_json_stdio_remote_unsupported() -> String {
+    rust_i18n::t!("agent_chat.json_stdio_remote_unsupported").into_owned()
 }
 
 /// Connect aborted because the pane's managed account config dir could not

@@ -944,11 +944,37 @@ impl AccountDomain {
     /// The domain a pane resolves in. An agent-chat pane is scoped to *its
     /// own* agent's domain rather than the session's active agent, so a Codex
     /// pane never offers Claude accounts.
+    ///
+    /// A deprecated `Ssh`/`Docker` launch that `is_remote` reports as
+    /// currently resolving `Local` (the lane's Session Host picked Local,
+    /// retiring the launch's own embedded host) is special-cased the same
+    /// way the connect path does — `account_recipe()` alone can't see past
+    /// the launch's own shape, but `is_remote` already reflects the lane's
+    /// verified locality here, so the recipe is derived from the bare
+    /// adapter command directly (mirrors
+    /// `agent_chat_connect_ops::account_recipe_for_connect`, which the
+    /// account-switcher display and the actual connect must agree with —
+    /// otherwise the switcher would keep hiding accounts the connect can
+    /// now use).
     pub(in crate::workspace) fn for_pane(pane: &AccountPane) -> Self {
         match pane {
             AccountPane::Terminal => Self::Any,
             AccountPane::AgentChat { launch, is_remote } => {
-                Self::for_agent(launch.as_ref().and_then(|l| l.account_recipe(*is_remote)))
+                let recipe = match launch {
+                    Some(
+                        daruda_config::AgentLaunch::Ssh {
+                            adapter_command, ..
+                        }
+                        | daruda_config::AgentLaunch::Docker {
+                            adapter_command, ..
+                        },
+                    ) if !is_remote => {
+                        daruda_config::account_recipe_for_local_command(adapter_command)
+                    }
+                    Some(l) => l.account_recipe(*is_remote),
+                    None => None,
+                };
+                Self::for_agent(recipe)
             }
         }
     }
@@ -1743,20 +1769,24 @@ mod tests {
                     adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
                     host: "build-box".into(),
                 }),
-                is_remote: false,
+                is_remote: true,
             },
             AccountPane::AgentChat {
                 launch: Some(daruda_config::AgentLaunch::Docker {
                     adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
                     container: "dev".into(),
                 }),
-                is_remote: false,
+                is_remote: true,
             },
             AccountPane::AgentChat {
                 launch: Some(daruda_config::AgentLaunch::Raw(
                     "ssh box sh -c 'cd \"{{cwd}}\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
                         .into(),
                 )),
+                // The `{{cwd}}` token isn't reflected in `is_remote` at all
+                // (see `agent_chat_connect_ops::account_recipe_for_connect`'s
+                // doc on why `Raw` stays on `account_recipe`'s own,
+                // `needs_remote_cwd()`-based exclusion) — excluded either way.
                 is_remote: false,
             },
             AccountPane::AgentChat {
@@ -1767,6 +1797,27 @@ mod tests {
         for pane in &remote {
             assert_eq!(AccountDomain::for_pane(pane), AccountDomain::Unsupported);
         }
+    }
+
+    /// Finding: a deprecated `Ssh`/`Docker` launch that `is_remote` reports
+    /// as resolving `Local` right now (the lane's Session Host picked
+    /// Local) must still offer a managed account, exactly like a `Raw`
+    /// launch running the same command would — the account-switcher display
+    /// must agree with what the actual connect now does (see
+    /// `agent_chat_connect_ops::account_recipe_for_connect`).
+    #[test]
+    fn agent_chat_pane_on_a_locally_resolved_legacy_launch_still_has_a_domain() {
+        let pane = AccountPane::AgentChat {
+            launch: Some(daruda_config::AgentLaunch::Ssh {
+                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+                host: "old-box".into(),
+            }),
+            is_remote: false,
+        };
+        assert_eq!(
+            AccountDomain::for_pane(&pane),
+            AccountDomain::Exactly(daruda_store::accounts::AccountRecipeId::Claude)
+        );
     }
 
     /// The case `Ssh`/`Docker`/the `{{cwd}}` token can't cover on their own:

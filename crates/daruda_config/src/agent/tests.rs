@@ -649,6 +649,49 @@ fn account_recipe_is_none_for_a_json_stdio_config() {
     );
 }
 
+/// `is_json_stdio` is the same discrimination `account_recipe` already
+/// relies on, exposed as its own method for a lane-aware caller that needs
+/// it independent of the recipe question.
+#[test]
+fn is_json_stdio_matches_the_leading_brace_only_for_raw() {
+    assert!(AgentLaunch::Raw(r#"{"command":"x"}"#.into()).is_json_stdio());
+    assert!(!AgentLaunch::Raw("npx -y some-acp".into()).is_json_stdio());
+    // Ssh/Docker's adapter_command is always a shell command — never JSON,
+    // even if someone typed a leading brace into it.
+    assert!(
+        !AgentLaunch::Ssh {
+            adapter_command: r#"{"command":"x"}"#.into(),
+            host: "box".into(),
+        }
+        .is_json_stdio()
+    );
+}
+
+/// The fix for a deprecated `Ssh`/`Docker` launch that a lane resolves to
+/// `Local`: `account_recipe` itself can't see past the launch's own shape,
+/// but a caller holding the lane can feed the bare adapter command here
+/// directly and get the same derivation a `Raw` launch would.
+#[test]
+fn account_recipe_for_local_command_matches_account_recipes_own_derivation() {
+    assert_eq!(
+        account_recipe_for_local_command("npx -y @agentclientprotocol/claude-agent-acp@latest"),
+        Some(AccountRecipeId::Claude)
+    );
+    assert_eq!(
+        account_recipe_for_local_command("npx -y @agentclientprotocol/codex-acp@latest"),
+        Some(AccountRecipeId::Codex)
+    );
+    assert_eq!(
+        account_recipe_for_local_command(r#"{"command":"x"}"#),
+        None,
+        "a JSON stdio adapter command is excluded here too"
+    );
+    assert_eq!(
+        account_recipe_for_local_command("npx -y @google/gemini-cli@latest --acp"),
+        None
+    );
+}
+
 #[test]
 fn built_in_defaults_derive_their_own_auth_domain() {
     // Guards a future command change from silently breaking derivation.

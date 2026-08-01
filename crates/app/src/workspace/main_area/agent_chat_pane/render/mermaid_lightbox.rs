@@ -60,6 +60,9 @@ pub(super) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
     let handle = entity_for_focus.read(cx).focus_handle(cx);
     let wh = window.window_handle();
     cx.defer(move |cx| {
+        // Deferred so the dialog wins over `Root`'s own synchronous focus,
+        // which means the window can already be gone by the time this runs.
+        // SILENT-OK: focus restore on a lightbox the user may have dismissed.
         let _ = cx.update_window(wh, |_, window, cx| window.focus(&handle, cx));
     });
 }

@@ -89,6 +89,19 @@ fn checked_session_path(value: &str) -> Result<String, SessionHostError> {
     if trimmed.is_empty() {
         return Err(SessionHostError::Empty(SessionHostField::SessionPath));
     }
+    // A leading `~` looks like home-directory shorthand, but `wrap`'s
+    // `cd "…"` always double-quotes the path — POSIX tilde expansion only
+    // applies to an *unquoted* leading `~`, so `cd "~/work"` looks for a
+    // literal directory named `~` and fails. `$HOME/…` isn't a safe
+    // alternative either: `$` is one of the characters `breaks_quoting`
+    // rejects below, precisely because unrestricted variable/command
+    // substitution inside the quotes is the injection risk this validator
+    // exists to close. Reject the shorthand outright rather than ship a
+    // value that silently can't connect — the absolute path is the only
+    // form that's both safe and correct here.
+    if trimmed.starts_with('~') {
+        return Err(SessionHostError::Unsafe(SessionHostField::SessionPath));
+    }
     if trimmed.chars().any(breaks_quoting) {
         return Err(SessionHostError::Unsafe(SessionHostField::SessionPath));
     }
@@ -484,17 +497,29 @@ mod tests {
                 "path {bad:?} must be rejected"
             );
         }
-        for good in [
-            "/srv/my project",
-            "/srv/a;b",
-            "/srv/a(b)",
-            "/srv/a&b",
-            "~/work",
-        ] {
+        for good in ["/srv/my project", "/srv/a;b", "/srv/a(b)", "/srv/a&b"] {
             assert!(
                 sanitized_ssh("box", good).is_ok(),
                 "path {good:?} must be accepted"
             );
         }
+    }
+
+    /// Regression: `~/work` used to be accepted, but `wrap` always emits
+    /// `cd "…"` — double quotes suppress POSIX tilde expansion, so a saved
+    /// `~/work` connected and then failed with "no such file or directory"
+    /// on every real remote host.
+    #[test]
+    fn a_session_path_starting_with_tilde_is_rejected() {
+        for bad in ["~/work", "~", "~root/x"] {
+            assert_eq!(
+                sanitized_ssh("box", bad),
+                Err(SessionHostError::Unsafe(SessionHostField::SessionPath)),
+                "path {bad:?} must be rejected"
+            );
+        }
+        // A `~` that isn't the leading character is inert — the shell only
+        // ever expands a *leading* tilde.
+        assert!(sanitized_ssh("box", "/srv/a~b").is_ok());
     }
 }

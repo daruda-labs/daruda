@@ -588,6 +588,19 @@ impl Workspace {
             .agent_chat_view()
     }
 
+    /// Mutable counterpart of [`Self::agent_chat_view`]'s cross-lane scan —
+    /// same reason (a parked lane's pane still needs reaching). Used to keep
+    /// `Pane::agent_chat_content_mut().cwd` (the cx-free wrapper cache
+    /// `Pane::cwd()` reads) in step with the view's own `cwd` when a connect
+    /// resolves somewhere new.
+    pub(in crate::workspace) fn pane_mut(&mut self, pane_id: PaneId) -> Option<&mut Pane> {
+        self.main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|rt| rt.panes.iter_mut())
+            .find(|p| p.id == pane_id)
+    }
+
     /// The lane that owns `pane_id`, found by the same cross-lane scan as
     /// [`Self::agent_chat_view`] (a pane's owning lane never changes, but a
     /// lane switch only re-points `self.active`, so this must not be

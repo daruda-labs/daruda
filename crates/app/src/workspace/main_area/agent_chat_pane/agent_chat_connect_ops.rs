@@ -23,16 +23,36 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::PreparedAccount;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Pure core of the `command`/`connect_cwd` resolution inside
+/// Why [`resolve_session_command`] could not build a connect command —
+/// distinct reasons because they need distinct messages (`connect_agent_chat`
+/// maps each to its own status-line string; see that match).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectCommandError {
+    /// The legacy `Raw` + `{{cwd}}` escape hatch has no usable remote path
+    /// to substitute (`pane_cwd` isn't `Remote`, or its path is blank).
+    NoRemotePath,
+    /// `launch` is a JSON stdio config and the resolved host is remote —
+    /// `session_host::wrap` can only fold a shell command line into
+    /// `ssh`/`docker`, and raw JSON isn't one. See
+    /// `AgentLaunch::is_json_stdio`'s doc.
+    JsonStdioRemote,
+}
+
+/// Pure core of the `command`/cwd resolution inside
 /// [`Workspace::connect_agent_chat`]. `owning_lane` is the pane's owning lane
 /// (`None` when it could not be found — falls back to `Local`, never
 /// promotes to remote; see the design's B′ note on restored remote panes).
+///
+/// Returns the resolved [`PaneCwd`] unconditionally (even on `Err`) — the
+/// caller writes it back into the pane's own `cwd` so a pane whose lane's
+/// host changed doesn't keep reporting the host it was created with (see
+/// that call site's comment).
 ///
 /// `pane_cwd` is consulted only for the legacy `Raw` + `{{cwd}}`-token escape
 /// hatch (`AgentLaunch::CWD_TOKEN`), which predates the lane session-host
 /// axis entirely and is untouched by it — see
 /// [`session_host::adapter_command`]'s doc. Every other launch shape
-/// resolves **both** the command and the connect cwd from the lane, not the
+/// resolves **both** the command and the cwd from the lane, not the
 /// pane's own (possibly stale) persisted `cwd` — a restored remote pane
 /// whose owning lane's host later changes follows the lane on its next
 /// connect, not a frozen snapshot (the "의도된 행동 변화" the design calls
@@ -42,45 +62,92 @@ fn resolve_session_command(
     owning_lane: Option<&Lane>,
     pane_cwd: &PaneCwd,
     env: Option<&AccountEnv>,
-) -> (Result<String, ()>, PathBuf) {
+) -> (Result<String, ConnectCommandError>, PaneCwd) {
     let is_raw_token = matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN));
     if is_raw_token {
-        let (remote_path, connect_cwd) = match pane_cwd {
-            PaneCwd::Remote(remote_path) => {
-                (Some(remote_path.as_str()), PathBuf::from(remote_path))
-            }
-            PaneCwd::Local(path) => (None, path.clone()),
+        let (remote_path, resolved_cwd) = match pane_cwd {
+            PaneCwd::Remote(remote_path) => (
+                Some(remote_path.as_str()),
+                PaneCwd::Remote(remote_path.clone()),
+            ),
+            PaneCwd::Local(path) => (None, PaneCwd::Local(path.clone())),
         };
         let wrapped = match env {
             Some(env) => launch.wrap_with_env(remote_path, env),
             None => launch.wrap(remote_path),
-        };
-        return (wrapped, connect_cwd);
+        }
+        .map_err(|()| ConnectCommandError::NoRemotePath);
+        return (wrapped, resolved_cwd);
     }
 
     let host = owning_lane
         .map(|lane| lane.effective_session_host(launch))
         .unwrap_or(LaneSessionHost::Local);
+    let resolved_cwd =
+        match host.session_path() {
+            Some(remote_path) => PaneCwd::Remote(remote_path.to_string()),
+            // `Local`: the lane's own current path when it's known, else the
+            // pane's own last-persisted local value (owning lane not found —
+            // there is no better answer, see the module doc on that gate).
+            None => PaneCwd::Local(owning_lane.map(|lane| lane.path.clone()).unwrap_or_else(
+                || {
+                    pane_cwd
+                        .as_local()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default()
+                },
+            )),
+        };
+    // A JSON stdio config carries its command/args/env as structured
+    // fields; `session_host::wrap` only knows how to splice a shell command
+    // line into `ssh`/`docker`, so folding raw JSON in there would hand the
+    // remote shell something it can't run. Local is unaffected — `wrap`
+    // returns a JSON `Local` command unchanged, and `daruda_acp` parses it
+    // exactly as it always has.
+    if host.is_remote() && launch.is_json_stdio() {
+        return (Err(ConnectCommandError::JsonStdioRemote), resolved_cwd);
+    }
     let adapter = session_host::adapter_command(launch);
     let command = match env {
         Some(env) => session_host::wrap_with_env(&host, adapter, env),
         None => session_host::wrap(&host, adapter),
     };
-    let connect_cwd = match host.session_path() {
-        Some(remote_path) => PathBuf::from(remote_path),
-        // `Local`: the lane's own current path when it's known, else the
-        // pane's own last-persisted local value (owning lane not found —
-        // there is no better answer, see the module doc on that gate).
-        None => owning_lane
-            .map(|lane| lane.path.clone())
-            .unwrap_or_else(|| {
-                pane_cwd
-                    .as_local()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_default()
-            }),
-    };
-    (Ok(command), connect_cwd)
+    (Ok(command), resolved_cwd)
+}
+
+/// The account recipe for `launch` on this connect, given `is_remote` (a
+/// lane-verified locality this call site already has — see the doc on
+/// `connect_agent_chat`'s `is_remote`). Handles the one case
+/// [`AgentLaunch::account_recipe`] can't: a deprecated `Ssh`/`Docker` launch
+/// this lane resolves to `Local` derives its recipe from `adapter_command`
+/// directly, since `account_recipe` itself has no lane to verify locality
+/// against and must stay conservative for its other three callers (see that
+/// method's doc).
+fn account_recipe_for_connect(
+    launch: &AgentLaunch,
+    is_remote: bool,
+) -> Option<daruda_store::accounts::AccountRecipeId> {
+    match launch {
+        AgentLaunch::Ssh {
+            adapter_command, ..
+        }
+        | AgentLaunch::Docker {
+            adapter_command, ..
+        } if !is_remote => daruda_config::account_recipe_for_local_command(adapter_command),
+        _ => launch.account_recipe(is_remote),
+    }
+}
+
+/// The `PathBuf` `connect_agent_session` needs for `cwd`, from a resolved
+/// [`PaneCwd`]. For `Remote` this just re-wraps the opaque remote-path
+/// string — the ACP wire protocol's `cwd` field is a plain path string
+/// regardless of which machine it names, so this isn't a "real" local
+/// `PathBuf`, only the shape the protocol call needs.
+fn connect_wire_path(cwd: &PaneCwd) -> PathBuf {
+    match cwd {
+        PaneCwd::Local(path) => path.clone(),
+        PaneCwd::Remote(remote_path) => PathBuf::from(remote_path),
+    }
 }
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
@@ -336,7 +403,7 @@ impl Workspace {
             .unwrap_or(false);
         let selection = self.agent_chat_account_selection(pane_id);
         let domain = crate::workspace::main_area::pane::AccountDomain::for_agent(
-            launch.account_recipe(is_remote),
+            account_recipe_for_connect(&launch, is_remote),
         );
         let prepared = crate::workspace::main_area::pane::resolve_pane_account(
             &self.accounts,
@@ -357,26 +424,49 @@ impl Workspace {
             .build();
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
-        // `wrap` fails only for the legacy `Raw` + `{{cwd}}` token escape
-        // hatch when the pane's fixed `cwd` and the (possibly
-        // just-reconciled) `launch`'s remote-cwd requirement now disagree —
-        // e.g. a stale agent_id got swapped by `resolve_pane_launch` to a
-        // catalog entry with different remote-cwd needs than this pane's
-        // already-resolved `cwd`. A genuine edge case, not a "can't happen":
-        // never spawn a connection with a broken command, park the pane in
-        // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
-        // bail out of this connect attempt entirely.
-        let (wrapped, connect_cwd) = resolve_session_command(
+        let (wrapped, resolved_cwd) = resolve_session_command(
             &launch,
             owning_lane,
             &cwd,
             prepared.as_ref().map(|account| &account.env),
         );
+        // Keep the pane's own cwd in step with what this connect actually
+        // resolved. B′ (see `resolve_session_command`'s doc) means the live
+        // host can diverge from what the pane was created or last connected
+        // with; `AgentChatContent.cwd` is the cx-free cache `Pane::cwd()`,
+        // the account-switcher, and persistence all read, and left unsynced
+        // it would keep reporting a host this pane no longer attaches to.
+        let cwd_changed = self
+            .agent_chat_view(pane_id)
+            .is_some_and(|view| view.read(cx).cwd.as_ref() != Some(&resolved_cwd));
+        if cwd_changed {
+            if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                view.update(cx, |v, _| v.cwd = Some(resolved_cwd.clone()));
+            }
+            if let Some(content) = self
+                .pane_mut(pane_id)
+                .and_then(|p| p.agent_chat_content_mut())
+            {
+                content.cwd = Some(resolved_cwd.clone());
+            }
+            self.mutate_durable(cx, |_, _| {});
+        }
+        let connect_cwd = connect_wire_path(&resolved_cwd);
+        // `wrap` fails only for the two `ConnectCommandError` reasons — see
+        // that enum's doc. Never spawn a connection with a broken command:
+        // park the pane in the matching error and bail out of this connect
+        // attempt entirely.
         let command = match wrapped {
             Ok(command) => command,
-            Err(()) => {
+            Err(err) => {
+                let message = match err {
+                    ConnectCommandError::NoRemotePath => s::agent_chat_no_remote_cwd(),
+                    ConnectCommandError::JsonStdioRemote => {
+                        s::agent_chat_json_stdio_remote_unsupported()
+                    }
+                };
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                    view.update(cx, |v, cx| v.set_error(s::agent_chat_no_remote_cwd(), cx));
+                    view.update(cx, |v, cx| v.set_error(message, cx));
                     // Connecting → Error clears the badge; dirty the cached
                     // docks so it doesn't linger stale (same pattern as every
                     // other Error transition in this function).
@@ -840,7 +930,10 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{account_strip_env, agent_default_mode, resolve_session_command};
+    use super::{
+        ConnectCommandError, account_recipe_for_connect, account_strip_env, agent_default_mode,
+        resolve_session_command,
+    };
     use crate::lane::Lane;
     use daruda_config::{AccountEnv, AgentDefinition, AgentLaunch};
     use daruda_store::project::{LaneKind, LaneSessionHost, LaneStatus, PaneCwd};
@@ -899,7 +992,7 @@ mod tests {
         );
         assert_eq!(
             connect_cwd,
-            PathBuf::from("/srv/app"),
+            PaneCwd::Remote("/srv/app".to_string()),
             "connect cwd follows the lane's current session path, not the pane's stale one"
         );
     }
@@ -913,7 +1006,10 @@ mod tests {
         let (command, connect_cwd) =
             resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &stale_cwd, None);
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
-        assert_eq!(connect_cwd, PathBuf::from("/local/checkout"));
+        assert_eq!(
+            connect_cwd,
+            PaneCwd::Local(PathBuf::from("/local/checkout"))
+        );
     }
 
     /// Owning lane not found (pane outlived it) — falls back to local,
@@ -924,7 +1020,10 @@ mod tests {
         let (command, connect_cwd) =
             resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None);
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
-        assert_eq!(connect_cwd, PathBuf::from("/pane/own/local/path"));
+        assert_eq!(
+            connect_cwd,
+            PaneCwd::Local(PathBuf::from("/pane/own/local/path"))
+        );
     }
 
     /// The legacy combo (lane never answered `session_host`, agent-side
@@ -942,10 +1041,12 @@ mod tests {
         let (command, connect_cwd) = resolve_session_command(&launch, Some(&lane), &cwd, None);
         assert_eq!(
             command,
-            launch.wrap(Some("/srv/legacy")),
+            launch
+                .wrap(Some("/srv/legacy"))
+                .map_err(|()| ConnectCommandError::NoRemotePath),
             "must match AgentLaunch::wrap's own assembly for the same inputs"
         );
-        assert_eq!(connect_cwd, PathBuf::from("/srv/legacy"));
+        assert_eq!(connect_cwd, PaneCwd::Remote("/srv/legacy".to_string()));
     }
 
     /// The legacy `Raw` + `{{cwd}}` token escape hatch predates the lane
@@ -970,7 +1071,114 @@ mod tests {
             command,
             Ok("ssh vm-work \"cd /home/user/project && run\"".to_string())
         );
-        assert_eq!(connect_cwd, PathBuf::from("/home/user/project"));
+        assert_eq!(
+            connect_cwd,
+            PaneCwd::Remote("/home/user/project".to_string())
+        );
+    }
+
+    fn json_stdio_launch() -> AgentLaunch {
+        AgentLaunch::Raw(r#"{"command":"/opt/adapters/claude-agent-acp","args":[]}"#.to_string())
+    }
+
+    /// A JSON stdio config can't be folded into `ssh`/`docker` — `wrap` only
+    /// knows how to splice a shell command line in there, and raw JSON isn't
+    /// one. Must fail with the dedicated reason, not silently produce a
+    /// broken command.
+    #[test]
+    fn json_stdio_launch_on_a_remote_lane_is_rejected() {
+        let lane = lane_at(
+            "/local/checkout",
+            Some(LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+            }),
+            None,
+        );
+        let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
+        let (command, resolved_cwd) =
+            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None);
+        assert_eq!(command, Err(ConnectCommandError::JsonStdioRemote));
+        // The resolved cwd is still reported (used to sync the pane even on
+        // a rejected connect), even though the command itself failed.
+        assert_eq!(resolved_cwd, PaneCwd::Remote("/srv/app".to_string()));
+    }
+
+    /// The same JSON stdio config on a lane that resolves `Local` is
+    /// unaffected — `wrap` passes a `Local` command through unchanged, and
+    /// `daruda_acp` parses it exactly as it always has.
+    #[test]
+    fn json_stdio_launch_on_a_local_lane_is_unaffected() {
+        let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
+        let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
+        let (command, resolved_cwd) =
+            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None);
+        assert_eq!(
+            command,
+            Ok(r#"{"command":"/opt/adapters/claude-agent-acp","args":[]}"#.to_string())
+        );
+        assert_eq!(
+            resolved_cwd,
+            PaneCwd::Local(PathBuf::from("/local/checkout"))
+        );
+    }
+
+    /// Finding: a deprecated `Ssh`-typed launch that a lane now resolves to
+    /// `Local` (the user picked Local in the Session Host dialog, retiring
+    /// the launch's own embedded host) must still be eligible for a managed
+    /// account, exactly like a `Raw` launch running the same command would.
+    #[test]
+    fn account_recipe_for_connect_recognizes_a_locally_resolved_ssh_launch() {
+        let launch = AgentLaunch::Ssh {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+            host: "old-box".into(),
+        };
+        assert_eq!(
+            account_recipe_for_connect(&launch, false),
+            Some(daruda_store::accounts::AccountRecipeId::Claude)
+        );
+        // Still excluded once it's actually remote.
+        assert_eq!(account_recipe_for_connect(&launch, true), None);
+    }
+
+    /// Same for `Docker`.
+    #[test]
+    fn account_recipe_for_connect_recognizes_a_locally_resolved_docker_launch() {
+        let launch = AgentLaunch::Docker {
+            adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
+            container: "dev-1".into(),
+        };
+        assert_eq!(
+            account_recipe_for_connect(&launch, false),
+            Some(daruda_store::accounts::AccountRecipeId::Codex)
+        );
+    }
+
+    /// A locally-resolved `Ssh`/`Docker` launch whose command is a JSON
+    /// stdio config is still excluded — the shape that bars a managed
+    /// account for `Raw` bars it here too.
+    #[test]
+    fn account_recipe_for_connect_still_excludes_json_stdio() {
+        let launch = AgentLaunch::Ssh {
+            adapter_command: r#"{"command":"x"}"#.into(),
+            host: "old-box".into(),
+        };
+        assert_eq!(account_recipe_for_connect(&launch, false), None);
+    }
+
+    /// A plain `Raw` launch is unaffected by the new match arm — behaves
+    /// exactly as `account_recipe` itself already does.
+    #[test]
+    fn account_recipe_for_connect_matches_account_recipe_for_raw_launches() {
+        let launch = raw("npx -y @agentclientprotocol/claude-agent-acp@latest");
+        assert_eq!(
+            account_recipe_for_connect(&launch, false),
+            launch.account_recipe(false)
+        );
+        assert_eq!(
+            account_recipe_for_connect(&launch, true),
+            launch.account_recipe(true)
+        );
     }
 
     #[test]

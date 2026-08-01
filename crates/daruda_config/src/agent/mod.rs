@@ -155,7 +155,7 @@ const JSON_STDIO_PREFIX: char = '{';
 /// [`AgentLaunch::wrap_with_env`] and [`AgentLaunch::login_command`] would
 /// corrupt it — both are gated on this, and it also bars the launch from
 /// carrying a managed account at all.
-fn is_json_stdio(command: &str) -> bool {
+fn is_json_stdio_str(command: &str) -> bool {
     command.trim_start().starts_with(JSON_STDIO_PREFIX)
 }
 
@@ -286,6 +286,18 @@ impl AgentLaunch {
         }
     }
 
+    /// Whether this launch is a JSON stdio config (`{"command": ...}`)
+    /// rather than a shell command line — the same discrimination
+    /// `daruda_acp`'s adapter parser makes. Only `Raw` can carry one;
+    /// `Ssh`/`Docker`'s `adapter_command` is always a shell command (it gets
+    /// wrapped in `sh -c '...'`), so this is always `false` for them.
+    pub fn is_json_stdio(&self) -> bool {
+        match self {
+            AgentLaunch::Raw(command) => is_json_stdio_str(command),
+            AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => false,
+        }
+    }
+
     /// The auth domain a managed account for this agent belongs to, keyed by
     /// adapter rather than agent id so two catalog entries running the same
     /// adapter share one set of credentials. `None` for a remote launch (no
@@ -303,20 +315,25 @@ impl AgentLaunch {
     /// there. A caller with no lane in scope (the catalog-wide login-command
     /// scan) passes `false` — there is no lane to ask, and unlike Ssh/Docker,
     /// a bare `Raw` command cannot self-report as remote-only.
+    ///
+    /// Deliberately unconditional for `Ssh`/`Docker` here (via
+    /// `needs_remote_cwd()`), even when `is_remote` is `false`: a caller
+    /// without a real lane to check against (this fn's other three callers)
+    /// cannot tell "verified local" from "don't know," so this stays
+    /// conservative. A caller that *did* verify locality through a lane —
+    /// `effective_session_host(..).is_remote() == false` — should call
+    /// [`account_recipe_for_local_command`] on
+    /// `lane::session_host::adapter_command(launch)` instead, which is what
+    /// lets a deprecated `Ssh`/`Docker` launch that now resolves `Local`
+    /// still seed a managed account like any other local one.
     pub fn account_recipe(&self, is_remote: bool) -> Option<AccountRecipeId> {
         let AgentLaunch::Raw(command) = self else {
             return None;
         };
-        if is_remote || self.needs_remote_cwd() || is_json_stdio(command) {
+        if is_remote || self.needs_remote_cwd() {
             return None;
         }
-        if CLAUDE_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
-            Some(AccountRecipeId::Claude)
-        } else if CODEX_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
-            Some(AccountRecipeId::Codex)
-        } else {
-            None
-        }
+        account_recipe_for_local_command(command)
     }
 
     /// The interactive login command for this agent, or `None` for remote
@@ -328,6 +345,28 @@ impl AgentLaunch {
             AgentLaunch::Raw(command) => Some(format!("{command} {login_args}")),
             AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => None,
         }
+    }
+}
+
+/// The auth domain a *known-local* `command` derives to — `None` for a JSON
+/// stdio config or an unrecognized adapter. The command-matching half of
+/// [`AgentLaunch::account_recipe`], factored out so a caller holding a real
+/// lane can apply it to `lane::session_host::adapter_command(launch)`
+/// directly: the bare adapter command regardless of which `AgentLaunch`
+/// variant carries it, once that caller has already confirmed via
+/// `effective_session_host` that this specific launch is running locally
+/// right now. `account_recipe` itself stays conservative for callers with no
+/// lane to check against — see its doc.
+pub fn account_recipe_for_local_command(command: &str) -> Option<AccountRecipeId> {
+    if is_json_stdio_str(command) {
+        return None;
+    }
+    if CLAUDE_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
+        Some(AccountRecipeId::Claude)
+    } else if CODEX_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
+        Some(AccountRecipeId::Codex)
+    } else {
+        None
     }
 }
 

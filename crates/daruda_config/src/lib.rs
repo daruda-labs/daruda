@@ -41,8 +41,8 @@ use std::path::PathBuf;
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
-    AgentPreset, DefaultPermissionMode, PresetLaunchability, PresetOverrides, agent_preset,
-    agent_presets,
+    AgentPreset, DefaultPermissionMode, PresetLaunchability, PresetOverrides,
+    account_recipe_for_local_command, agent_preset, agent_presets,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
