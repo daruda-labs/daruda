@@ -16,8 +16,8 @@ use agent_client_protocol::schema::v1::{
 
 use crate::adapter::{AcpAdapter, DefaultAdapter};
 use crate::model::{
-    ChatItem, CommandExit, DiffView, PermissionChoice, PermissionItem, PermissionKindView,
-    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
+    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
+    ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 
 /// What an applied `session/update` touched, so the host can gate its expensive
@@ -428,7 +428,7 @@ fn upsert_tool_call(
         output,
         raw_input: tool_call.raw_input.clone(),
         parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
-        exit: command_exit_for(kind, adapter, &tool_call.raw_output, &tool_call.meta),
+        exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
     };
     highlight_tool_output(&mut item);
     let dropped = unreported_terminal && lost_output(&item);
@@ -511,7 +511,7 @@ fn apply_tool_call_update(
     fold_output(&mut item.output, body, sideband, &fields.raw_output);
     // Only overwrite on a reported value — an intermediate status-only update
     // carries no exit channel and must not blank out one recorded earlier.
-    if let Some(exit) = command_exit_for(item.kind, adapter, &fields.raw_output, &update.meta) {
+    if let Some(exit) = adapter.command_exit(&fields.raw_output, &update.meta) {
         item.exit = Some(exit);
     }
     // Run last: kind / raw_input (source of the language) and output text are
@@ -613,23 +613,6 @@ fn fold_output(
         *output = blocks;
     }
     push_raw_output_fallback(output, raw_output);
-}
-
-/// A shell command's exit status, or `None` for any other tool.
-///
-/// Gated on the kind because `raw_output` is a free-form channel: an MCP result
-/// that happens to carry an `exit_code` field is not a command exit, and would
-/// otherwise put an `Exit 1` badge on a tool that never ran a shell.
-fn command_exit_for(
-    kind: ToolKindView,
-    adapter: &dyn AcpAdapter,
-    raw_output: &Option<serde_json::Value>,
-    meta: &Option<agent_client_protocol::schema::v1::Meta>,
-) -> Option<CommandExit> {
-    if kind != ToolKindView::Execute {
-        return None;
-    }
-    adapter.command_exit(raw_output, meta)
 }
 
 /// Max bytes of tool-output text carried into the render model. Larger text is
@@ -1319,9 +1302,44 @@ mod tests {
     }
 
     #[test]
-    fn a_non_execute_tool_never_reads_an_exit_code_from_raw_output() {
-        // `raw_output` is a free-form channel — an MCP result that happens to
-        // carry `exit_code` is not a command exit, and must not badge the card.
+    fn a_codex_shell_failure_badges_its_exit_whatever_kind_it_was_labelled() {
+        // Wire-captured (`acp-wire-codex-acp.log`): codex labels a failing `ls`
+        // as `Read` — it classifies by intent, not by mechanism — and the
+        // completion update carries no `kind` at all. Gating the exit on
+        // `Execute` therefore blanks the badge for every codex command that is
+        // not literally a shell invocation.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "List files").kind(ToolKind::Read)),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Failed)
+                    .raw_output(serde_json::json!({
+                        "formatted_output": "ls: /nope: No such file or directory\n",
+                        "exit_code": 1,
+                    })),
+            )),
+        );
+        assert_eq!(
+            only_tool_call(&items).exit,
+            Some(CommandExit {
+                code: Some(1),
+                signal: None
+            }),
+            "a shell result is identified by its channel shape, not the tool kind"
+        );
+    }
+
+    #[test]
+    fn a_stray_exit_code_without_command_output_is_not_a_command_exit() {
+        // `raw_output` also carries MCP and other free-form results. Only the
+        // `{ formatted_output, exit_code }` pair is codex's command shape, so an
+        // `exit_code` on its own must not badge a tool that never ran a shell.
         let mut items = Vec::new();
         apply_update(
             &mut items,
@@ -1331,11 +1349,7 @@ mod tests {
                     .raw_output(serde_json::json!({ "exit_code": 1, "result": "ok" })),
             ),
         );
-        assert_eq!(
-            only_tool_call(&items).exit,
-            None,
-            "only an Execute tool reports a command exit"
-        );
+        assert_eq!(only_tool_call(&items).exit, None);
     }
 
     #[test]
@@ -1624,7 +1638,7 @@ mod tests {
                 "c1",
                 ToolCallUpdateFields::new()
                     .status(ToolCallStatus::Completed)
-                    .raw_output(serde_json::json!({ "exit_code": 0 })),
+                    .raw_output(serde_json::json!({ "formatted_output": "ok\n", "exit_code": 0 })),
             )),
         );
         apply_update(

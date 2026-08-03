@@ -86,8 +86,13 @@ impl AcpAdapter for DefaultAdapter {
             return Some(exit);
         }
         let raw = raw_output.as_ref()?;
-        // Gate on the key's presence so a stray `signal` field elsewhere in a
-        // non-shell `raw_output` can't be read as an exit status.
+        // `raw_output` is a free-form channel (MCP results land here too), so an
+        // `exit_code` alone does not mean a command ran. codex-acp's shell result
+        // is the pair `{ formatted_output, exit_code }` — verified on the wire —
+        // and requiring the sibling is what keeps a stray `exit_code` in some
+        // other tool's result from badging a card. The tool *kind* cannot serve
+        // here: codex labels by intent, so a failing `ls` arrives as `Read`.
+        raw.get("formatted_output")?;
         raw.get("exit_code")?;
         command_exit_of(raw)
     }
@@ -304,7 +309,7 @@ mod tests {
     fn command_exit_zero_is_reported_as_some() {
         // Display judgment belongs to the renderer — the model carries a
         // reported zero exit code as-is, not as an absence.
-        let raw = json!({"exit_code": 0});
+        let raw = json!({"formatted_output": "", "exit_code": 0});
         assert_eq!(
             DefaultAdapter.command_exit(&Some(raw), &None),
             Some(CommandExit {
@@ -345,7 +350,7 @@ mod tests {
 
     #[test]
     fn command_exit_falls_back_to_raw_output_when_terminal_exit_is_empty() {
-        let raw = json!({"exit_code": 3});
+        let raw = json!({"formatted_output": "boom\n", "exit_code": 3});
         let m = meta(json!({"terminal_exit": {"signal": null}}));
         assert_eq!(
             DefaultAdapter.command_exit(&Some(raw), &m),
