@@ -406,6 +406,7 @@ fn tool_call(id: &str, status: daruda_acp::ToolStatusView, diffs: usize) -> Tool
         output: Vec::new(),
         raw_input: None,
         parent_tool_id: None,
+        exit: None,
     }
 }
 
@@ -544,6 +545,7 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
         ],
         raw_input: None,
         parent_tool_id: None,
+        exit: None,
     };
     let item = daruda_acp::ChatItem::ToolCall(tc);
     let texts = chat_item_mermaid_texts(&item);
@@ -711,6 +713,7 @@ fn raw_input_disclosure_gate_and_fold_coverage() {
         output: Vec::new(),
         raw_input: Some(serde_json::json!({ "pattern": "foo" })),
         parent_tool_id: None,
+        exit: None,
     };
     // Generic tool with args and no diffs → disclosure shown, and the fold
     // key is collected (expand/collapse-all reaches it).

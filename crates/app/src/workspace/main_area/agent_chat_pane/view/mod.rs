@@ -464,6 +464,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// Whether the bottom plan region is collapsed to its header. Defaults to
     /// `false` (expanded); toggled via [`Self::toggle_plan_collapsed`].
     pub(in crate::workspace) plan_collapsed: bool,
+    /// Latches once this pane has logged a `dropped_terminal_output` warning,
+    /// so a systemic adapter mismatch (every command in the session would
+    /// trip it) logs one line instead of one per command. Reset alongside
+    /// `plan`/`session_title`/`session_usage` on a fresh (non-resumed) session.
+    pub(in crate::workspace) warned_dropped_terminal_output: bool,
     /// Scroll position of the expanded plan checklist, backing its 4px daruda
     /// thumb overlay. Runtime-only; never serialized.
     pub(in crate::workspace) plan_scroll: ScrollHandle,
@@ -572,6 +577,7 @@ impl AgentChatView {
             session_title: title.filter(|t| !t.is_empty()),
             session_updated_at: None,
             plan_collapsed: false,
+            warned_dropped_terminal_output: false,
             plan_scroll: ScrollHandle::new(),
             list_bounds: None,
             autoscroll_task: None,

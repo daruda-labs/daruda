@@ -1265,6 +1265,16 @@ pub fn agent_chat_tool_background() -> String {
     rust_i18n::t!("agent_chat.tool_background").into_owned()
 }
 
+/// Badge naming a shell tool call's nonzero exit code, e.g. "Exit 1".
+pub fn agent_chat_tool_exit_code(code: i32) -> String {
+    rust_i18n::t!("agent_chat.tool_exit_code", code = code).into_owned()
+}
+
+/// Badge naming the signal that terminated a shell tool call, e.g. "Signal SIGKILL".
+pub fn agent_chat_tool_exit_signal(signal: &str) -> String {
+    rust_i18n::t!("agent_chat.tool_exit_signal", signal = signal).into_owned()
+}
+
 /// Label above a Task/Agent card's nested subagent tool calls.
 pub fn agent_chat_subagent_label() -> String {
     rust_i18n::t!("agent_chat.subagent_label").into_owned()

@@ -436,6 +436,23 @@ pub fn connect_agent_session(
 /// native boolean toggle (e.g. Claude's "Fast mode") instead of degrading it to
 /// a two-value select — see [`ConfigOptionKindView::Boolean`]. Advertise a
 /// capability only once the host actually renders it.
+///
+/// Deliberately **not** advertised: `_meta.terminal_output`, claude-agent-acp's
+/// own non-standard switch. Setting it makes a shell tool's result *content-less*
+/// (`content: [{type:"terminal"}]`) and moves the bytes to
+/// `_meta.terminal_output.data`; unset, the adapter returns a fenced
+/// ```` ```console ```` text block. The same one flag also gates
+/// `_meta.terminal_exit` — the exit badge's only source — so both stand or fall
+/// together (see [`crate::adapter::TERMINAL_OUTPUT_META_KEY`]).
+///
+/// The parsing side is implemented and unit-tested against the three-notification
+/// sequence, but the shape is read from adapter *source*
+/// (`dist/acp-agent.js` + `dist/tools.js`, `@agentclientprotocol/claude-agent-acp`
+/// 0.62.0), not from a wire capture. Turn it on only after a live capture
+/// confirms that sequence — flipping it blind would degrade Bash rendering.
+///
+/// The standard `.terminal(true)` capability is likewise NOT claimed: it promises
+/// the whole `terminal/*` method family, which this client does not implement.
 fn client_capabilities() -> ClientCapabilities {
     ClientCapabilities::new().session(ClientSessionCapabilities::new().config_options(
         SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
@@ -1244,6 +1261,27 @@ mod tests {
         assert_eq!(
             InfoFieldChange::from(MaybeUndefined::Value("Fix parser bug".to_string())),
             InfoFieldChange::Set("Fix parser bug".to_string())
+        );
+    }
+
+    #[test]
+    fn client_capabilities_withhold_terminal_output_and_the_terminal_methods() {
+        // The adapter gates its shell-output sideband on the literal wire shape
+        // `_meta.terminal_output === true`, so assert the serialized JSON, not
+        // just the builder call. It stays withheld until a live wire capture
+        // confirms the three-notification sequence the parser was written
+        // against. `terminal` must stay off too: claiming it promises the
+        // `terminal/*` methods this client does not implement.
+        let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+        assert_eq!(
+            json.get("_meta").and_then(|m| m.get("terminal_output")),
+            None,
+            "the sideband flag is implemented but deliberately not advertised"
+        );
+        assert_ne!(
+            json.get("terminal"),
+            Some(&serde_json::Value::Bool(true)),
+            "daruda implements no terminal/* method — advertising it would be a lie"
         );
     }
 

@@ -320,7 +320,10 @@ pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
 /// Every markdown body of a chat item that can carry a ```mermaid fence —
 /// assistant / thinking / user text, plus each `Text` output block of a tool
 /// call (a tool that reads or writes a .md file streams fences there).
-/// Permission / error items carry none. Drives the mermaid scan.
+/// Permission / error items carry none. A `RawText` block is excluded on
+/// purpose — it is verbatim shell output, not a markdown body, so a fence-shaped
+/// run of characters a command printed must not become a diagram. Drives the
+/// mermaid scan.
 pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> {
     match item {
         daruda_acp::ChatItem::AssistantText { text, .. }

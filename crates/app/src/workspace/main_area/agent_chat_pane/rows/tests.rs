@@ -14,6 +14,7 @@ fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         output: Vec::new(),
         raw_input: None,
         parent_tool_id: None,
+        exit: None,
     })
 }
 /// A permission card — `resolved=false` makes it pending (actionable).

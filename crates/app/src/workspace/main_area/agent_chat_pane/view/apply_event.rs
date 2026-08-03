@@ -144,6 +144,10 @@ impl AgentChatView {
                     self.activity.was_busy = false;
                     self.activity.pending_completion = None;
                     self.activity.cancel_in_flight = false;
+                    // A fresh session gets its own chance to report a dropped-
+                    // output mismatch instead of inheriting the prior session's
+                    // silence.
+                    self.warned_dropped_terminal_output = false;
                 }
                 self.pump_pending_prompt(cx);
             }
@@ -165,6 +169,32 @@ impl AgentChatView {
                 let effect = apply_update_with(&mut self.items, &update, adapter.as_ref());
                 touched_tool = effect.touched_tool;
                 touched_text = effect.touched_text;
+                // A settled tool call whose only content was an embedded
+                // terminal handle we couldn't resolve from any channel — the
+                // card is left empty. `daruda_acp` has no logger of its own, so
+                // the drop is reported back through the effect and logged here.
+                // Logged once per pane per session: this indicates a systemic
+                // adapter contract mismatch (every command would trip it), so
+                // one line is enough to diagnose. The `dedup` key is a grep tag
+                // only — `LogWriter::log` writes unconditionally; it does not
+                // itself suppress repeats.
+                if effect.dropped_terminal_output && !self.warned_dropped_terminal_output {
+                    self.warned_dropped_terminal_output = true;
+                    let report = ErrorReport::new("Tool output dropped")
+                        .severity(ErrorSeverity::Warning)
+                        .message(
+                            "A shell tool reported its result as an embedded terminal with no \
+                             output on any side channel, so the card is empty.",
+                        )
+                        .with_context("agent", self.agent_id.clone())
+                        .at(file!(), line!())
+                        .dedup(format!(
+                            "agent_chat.dropped_terminal_output.{}",
+                            self.agent_id
+                        ))
+                        .build();
+                    daruda_store::observability::log_writer::LogWriter::log(report);
+                }
                 // Post-turn (background) activity: an update that touches text or a
                 // tool while no turn is in flight and we're not replaying a load.
                 // Stamp the quiescence clock; the pulse tick relays the settled

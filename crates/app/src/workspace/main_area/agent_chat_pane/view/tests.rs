@@ -413,6 +413,7 @@ fn escape_clears_parked_queue_even_while_a_subagent_runs(cx: &mut gpui::TestAppC
                 output: Vec::new(),
                 raw_input: None,
                 parent_tool_id: Some("parent".into()),
+                exit: None,
             }));
             assert!(view.is_busy(), "the trailing subagent keeps the pane busy");
             assert!(view.turn_is_idle(), "but no foreground turn is in flight");

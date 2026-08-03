@@ -33,6 +33,12 @@ pub struct UpdateEffect {
     /// Assistant / thinking / user message text changed — it may carry a
     /// ` ```mermaid ` fence to rasterize.
     pub touched_text: bool,
+    /// A settled tool call carried an embedded terminal block whose output this
+    /// build could not recover from any channel, leaving the card empty. This
+    /// crate has no logger of its own (it depends on `daruda_core` only), so the
+    /// host logs it — see [`crate::adapter::AcpAdapter::sideband_output`] for
+    /// the channel that normally recovers it.
+    pub dropped_terminal_output: bool,
 }
 
 /// Apply one `session/update` notification to the chat item list, reporting what
@@ -81,20 +87,16 @@ pub fn apply_update_with(
                 ..UpdateEffect::default()
             }
         }
-        SessionUpdate::ToolCall(tool_call) => {
-            upsert_tool_call(items, tool_call, adapter);
-            UpdateEffect {
-                touched_tool: true,
-                ..UpdateEffect::default()
-            }
-        }
-        SessionUpdate::ToolCallUpdate(update) => {
-            apply_tool_call_update(items, update);
-            UpdateEffect {
-                touched_tool: true,
-                ..UpdateEffect::default()
-            }
-        }
+        SessionUpdate::ToolCall(tool_call) => UpdateEffect {
+            touched_tool: true,
+            dropped_terminal_output: upsert_tool_call(items, tool_call, adapter),
+            ..UpdateEffect::default()
+        },
+        SessionUpdate::ToolCallUpdate(update) => UpdateEffect {
+            touched_tool: true,
+            dropped_terminal_output: apply_tool_call_update(items, update, adapter),
+            ..UpdateEffect::default()
+        },
         // MVP: plan / available-commands / mode / config / info / usage updates
         // carry no conversation content we render yet.
         _ => UpdateEffect::default(),
@@ -390,26 +392,47 @@ fn append_streaming(
     }
 }
 
-fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall, adapter: &dyn AcpAdapter) {
+/// Insert or replace a tool call. Returns whether its terminal content was
+/// dropped unrecovered — see [`UpdateEffect::dropped_terminal_output`].
+fn upsert_tool_call(
+    items: &mut Vec<ChatItem>,
+    tool_call: &ToolCall,
+    adapter: &dyn AcpAdapter,
+) -> bool {
     let id = tool_call.tool_call_id.0.to_string();
-    let (diffs, mut output) = split_content(&tool_call.content);
-    push_raw_output_fallback(&mut output, &tool_call.raw_output);
+    let split = split_content(&tool_call.content);
+    let sideband = adapter.sideband_output(&tool_call.meta);
+    let unreported_terminal = split.saw_terminal && sideband.is_none();
+    let mut output = Vec::new();
+    fold_output(&mut output, split.output, sideband, &tool_call.raw_output);
     let mut item = ToolCallItem {
         id: id.clone(),
         title: tool_call.title.clone(),
         kind: kind_of(&tool_call.kind),
         tool_name: adapter.tool_name(&tool_call.meta),
         status: status_of(&tool_call.status),
-        diffs,
+        diffs: split.diffs,
         output,
         raw_input: tool_call.raw_input.clone(),
         parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
+        exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
     };
     highlight_tool_output(&mut item);
+    let dropped = unreported_terminal && lost_output(&item);
     match find_tool_call(items, &id) {
         Some(existing) => *existing = item,
         None => items.push(ChatItem::ToolCall(item)),
     }
+    dropped
+}
+
+/// Whether a dropped terminal block actually cost the user something: the call
+/// has settled and no other channel filled the card. While the call is still
+/// live the output simply hasn't arrived yet (every adapter's *first* Bash
+/// event is a content-less handle), and codex's completion refills the card
+/// from `raw_output` — neither is a loss worth logging.
+fn lost_output(item: &ToolCallItem) -> bool {
+    !item.status.is_live() && item.output.is_empty()
 }
 
 /// Rewrite the tool's text output so its fenced code block syntax-highlights:
@@ -417,7 +440,8 @@ fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall, adapter: &d
 /// language inferred from the tool (the read target's file extension) and strip
 /// any `cat -n` line-number prefixes. No-op for tools without an inferable
 /// language and idempotent (an already-tagged fence is left untouched), so it
-/// is safe to run after every tool-call insert or update.
+/// is safe to run after every tool-call insert or update. `RawText` blocks are
+/// deliberately skipped — they never carry a fence to rewrite.
 fn highlight_tool_output(item: &mut ToolCallItem) {
     let Some(lang) = crate::output_highlight::output_language(item.kind, &item.raw_input) else {
         return;
@@ -429,10 +453,17 @@ fn highlight_tool_output(item: &mut ToolCallItem) {
     }
 }
 
-fn apply_tool_call_update(items: &mut [ChatItem], update: &ToolCallUpdate) {
+/// Fold a `ToolCallUpdate` into the matching tool call. Returns whether its
+/// terminal content was dropped unrecovered — see
+/// [`UpdateEffect::dropped_terminal_output`].
+fn apply_tool_call_update(
+    items: &mut [ChatItem],
+    update: &ToolCallUpdate,
+    adapter: &dyn AcpAdapter,
+) -> bool {
     let id = update.tool_call_id.0.to_string();
     let Some(item) = find_tool_call(items, &id) else {
-        return;
+        return false;
     };
     let fields = &update.fields;
     if let Some(kind) = &fields.kind {
@@ -444,21 +475,38 @@ fn apply_tool_call_update(items: &mut [ChatItem], update: &ToolCallUpdate) {
     if let Some(title) = &fields.title {
         item.title = title.clone();
     }
+    // Read unconditionally, outside the `content` guard: claude-agent-acp ships
+    // the captured bytes on a notification of their own that carries neither
+    // `content` nor `status` (`dist/acp-agent.js`, 0.62.0), so gating this on
+    // `content` would never see it.
+    let sideband = adapter.sideband_output(&update.meta);
+    let mut content_output = Vec::new();
+    let mut saw_terminal = false;
     if let Some(content) = &fields.content {
-        let (diffs, output) = split_content(content);
-        item.diffs = diffs;
-        item.output = output;
+        let split = split_content(content);
+        item.diffs = split.diffs;
+        content_output = split.output;
+        saw_terminal = split.saw_terminal;
     }
     if fields.raw_input.is_some() {
         item.raw_input = fields.raw_input.clone();
     }
-    // A completion update often carries the result only in `raw_output` with no
-    // `content` (codex-acp's command execution) — fold it in when the typed
-    // content left the body empty.
-    push_raw_output_fallback(&mut item.output, &fields.raw_output);
+    let unreported_terminal = saw_terminal && sideband.is_none();
+    fold_output(
+        &mut item.output,
+        content_output,
+        sideband,
+        &fields.raw_output,
+    );
+    // Only overwrite on a reported value — an intermediate status-only update
+    // carries no exit channel and must not blank out one recorded earlier.
+    if let Some(exit) = adapter.command_exit(&fields.raw_output, &update.meta) {
+        item.exit = Some(exit);
+    }
     // Run last: kind / raw_input (source of the language) and output text are
     // both current by now, and the rewrite is idempotent.
     highlight_tool_output(item);
+    unreported_terminal && lost_output(item)
 }
 
 fn find_tool_call<'a>(items: &'a mut [ChatItem], id: &str) -> Option<&'a mut ToolCallItem> {
@@ -468,12 +516,27 @@ fn find_tool_call<'a>(items: &'a mut [ChatItem], id: &str) -> Option<&'a mut Too
     })
 }
 
-/// Partition tool-call content into diffs and typed output blocks. Embedded
-/// terminals (and any future content kind [`output_block_of`] doesn't
-/// recognize) are dropped.
-fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputBlock>) {
+/// What one pass over a tool call's `content` yielded.
+struct SplitContent {
+    diffs: Vec<DiffView>,
+    output: Vec<ToolOutputBlock>,
+    /// An embedded terminal block was present. It renders nothing by itself, so
+    /// the caller has to recover the bytes from another channel.
+    saw_terminal: bool,
+}
+
+/// Partition tool-call content into diffs and typed output blocks.
+///
+/// An embedded terminal block carries no content of its own — it is a handle to
+/// a terminal this client never created (daruda implements no `terminal/*`
+/// method) — so it only sets [`SplitContent::saw_terminal`]; recovering its
+/// bytes is [`fold_output`]'s job, since they arrive on a different
+/// notification than the handle. Any future content kind [`output_block_of`]
+/// doesn't recognize is dropped silently.
+fn split_content(content: &[ToolCallContent]) -> SplitContent {
     let mut diffs = Vec::new();
     let mut output = Vec::new();
+    let mut saw_terminal = false;
     for block in content {
         match block {
             ToolCallContent::Diff(diff) => diffs.push(DiffView {
@@ -486,11 +549,43 @@ fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputB
                     output.push(out);
                 }
             }
-            // Embedded terminals and any future content kinds are not rendered.
+            ToolCallContent::Terminal(_) => saw_terminal = true,
+            // Any future content kind is not rendered.
             _ => {}
         }
     }
-    (diffs, output)
+    SplitContent {
+        diffs,
+        output,
+        saw_terminal,
+    }
+}
+
+/// Fold one event's output channels into a tool call's body, in priority order:
+/// typed `content` blocks, then the adapter's `_meta` output sideband, then
+/// `raw_output`. Only the first channel that carries something applies, and a
+/// channel that carries nothing leaves the body as it stands.
+///
+/// The "leaves it as it stands" half is what makes claude-agent-acp's shell
+/// lifecycle work: the captured bytes and the completion (`terminal_exit` +
+/// an unfenced `rawOutput`) arrive as two separate `tool_call_update`s, so
+/// overwriting from the second would both blank the recovered [`ToolOutputBlock::RawText`]
+/// and push raw shell bytes through the markdown renderer.
+fn fold_output(
+    output: &mut Vec<ToolOutputBlock>,
+    content_output: Vec<ToolOutputBlock>,
+    sideband: Option<String>,
+    raw_output: &Option<serde_json::Value>,
+) {
+    if !content_output.is_empty() {
+        *output = content_output;
+    } else if let Some(blocks) = sideband
+        .map(bounded_raw_text_blocks)
+        .filter(|blocks| !blocks.is_empty())
+    {
+        *output = blocks;
+    }
+    push_raw_output_fallback(output, raw_output);
 }
 
 /// Max bytes of tool-output text carried into the render model. Larger text is
@@ -510,24 +605,48 @@ const MAX_TOOL_OUTPUT_TEXT_BYTES: usize = 64 * 1024;
 /// screenshot/PNG; only pathological payloads fall back.
 const MAX_TOOL_OUTPUT_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
-/// Build a `Text` block, truncating at a UTF-8 char boundary when the input
-/// exceeds `MAX_TOOL_OUTPUT_TEXT_BYTES`. `truncated_from` records the original
-/// byte length so the renderer can show a marker.
-fn bounded_text(s: String) -> ToolOutputBlock {
+/// Cap `s` at a UTF-8 char boundary when it exceeds
+/// `MAX_TOOL_OUTPUT_TEXT_BYTES`, returning the kept text plus the original byte
+/// length when it was cut (so the renderer can show a marker). Shared by both
+/// text block kinds so one cap governs everything the model carries.
+fn bounded(s: String) -> (String, Option<usize>) {
     let cap = MAX_TOOL_OUTPUT_TEXT_BYTES;
     if s.len() <= cap {
-        return ToolOutputBlock::Text {
-            text: s,
-            truncated_from: None,
-        };
+        return (s, None);
     }
     let original_len = s.len();
     let boundary = s.floor_char_boundary(cap);
     let mut text = s;
     text.truncate(boundary);
+    (text, Some(original_len))
+}
+
+/// Build a bounded markdown `Text` block.
+fn bounded_text(s: String) -> ToolOutputBlock {
+    let (text, truncated_from) = bounded(s);
     ToolOutputBlock::Text {
         text,
-        truncated_from: Some(original_len),
+        truncated_from,
+    }
+}
+
+/// Build a bounded `RawText` block — verbatim shell output, never markdown.
+fn bounded_raw_text(s: String) -> ToolOutputBlock {
+    let (text, truncated_from) = bounded(s);
+    ToolOutputBlock::RawText {
+        text,
+        truncated_from,
+    }
+}
+
+/// A bounded `RawText` block wrapped in a `Vec`, or an empty `Vec` when the
+/// command printed nothing — the `RawText` counterpart of
+/// [`bounded_text_blocks`], so a silent command adds no empty block.
+fn bounded_raw_text_blocks(text: String) -> Vec<ToolOutputBlock> {
+    if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![bounded_raw_text(text)]
     }
 }
 
@@ -588,13 +707,13 @@ fn media_block(mime: String, data: &str) -> ToolOutputBlock {
 }
 
 /// Append fallback output blocks derived from a tool call's `raw_output`, but
-/// only when the typed `content` produced no renderable output. Adapters that
-/// report results through an embedded terminal (which we drop) or *only* in
-/// `raw_output` — codex-acp streams a shell command's output through a terminal
-/// and repeats it in `raw_output`, and its MCP calls carry results solely there
-/// — would otherwise render an empty card. Claude-style adapters embed the same
-/// content as `content` blocks, so their `output` is already non-empty and this
-/// is a no-op (no duplication).
+/// only when no higher-priority channel produced renderable output (see
+/// [`fold_output`]). Adapters that report results through an embedded terminal
+/// with no output sideband, or *only* in `raw_output` — codex-acp streams a
+/// shell command's output through a terminal and repeats it in `raw_output`, and
+/// its MCP calls carry results solely there — would otherwise render an empty
+/// card. Claude-style adapters embed the same content as `content` blocks, so
+/// their `output` is already non-empty and this is a no-op (no duplication).
 fn push_raw_output_fallback(
     output: &mut Vec<ToolOutputBlock>,
     raw_output: &Option<serde_json::Value>,
@@ -791,8 +910,10 @@ fn kind_of(kind: &ToolKind) -> ToolKindView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::CommandExit;
     use agent_client_protocol::schema::v1::{
-        Content, ContentChunk, Diff, ResourceLink, Terminal, TextContent, ToolCallUpdateFields,
+        Content, ContentChunk, Diff, ImageContent, ResourceLink, Terminal, TextContent,
+        ToolCallUpdateFields,
     };
 
     #[test]
@@ -807,7 +928,7 @@ mod tests {
             )))),
             ToolCallContent::Diff(Diff::new("/tmp/x.txt", "hi\n")),
         ];
-        let (diffs, output) = split_content(&content);
+        let (diffs, output) = split(&content);
         assert_eq!(diffs.len(), 1);
         assert_eq!(
             output,
@@ -843,6 +964,21 @@ mod tests {
                 _meta: &Option<agent_client_protocol::schema::v1::Meta>,
             ) -> Option<String> {
                 Some("stub-tool".to_owned())
+            }
+
+            fn command_exit(
+                &self,
+                _raw_output: &Option<serde_json::Value>,
+                _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            ) -> Option<crate::model::CommandExit> {
+                None
+            }
+
+            fn sideband_output(
+                &self,
+                _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            ) -> Option<String> {
+                None
             }
         }
         let mut items = Vec::new();
@@ -895,12 +1031,559 @@ mod tests {
         let ChatItem::ToolCall(tc) = &items[0] else {
             panic!("expected a tool call");
         };
+        // Regression anchor: exit-status recovery must not change output-block
+        // recovery, which already worked before this field existed.
         assert_eq!(
             tc.output,
             vec![ToolOutputBlock::Text {
                 text: "total 0\ndrwxr-xr-x  2 me  staff".to_string(),
                 truncated_from: None,
             }]
+        );
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(0),
+                signal: None
+            })
+        );
+    }
+
+    /// [`split_content`] as a plain `(diffs, output)` pair — the shape the
+    /// content-only tests care about.
+    fn split(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputBlock>) {
+        let split = split_content(content);
+        (split.diffs, split.output)
+    }
+
+    /// A settled Bash tool call whose result is the adapter's content-less
+    /// terminal handle, with `meta` standing in for the update's `_meta`.
+    fn terminal_result(meta: Option<serde_json::Value>) -> SessionUpdate {
+        let mut tc = ToolCall::new("c1", "ls -la")
+            .kind(ToolKind::Execute)
+            .status(ToolCallStatus::Completed)
+            .content(vec![ToolCallContent::Terminal(Terminal::new("c1"))]);
+        if let Some(m) = meta {
+            tc = tc.meta(meta_map(m));
+        }
+        SessionUpdate::ToolCall(tc)
+    }
+
+    fn only_tool_call(items: &[ChatItem]) -> &ToolCallItem {
+        match items.first() {
+            Some(ChatItem::ToolCall(tc)) => tc,
+            other => panic!("expected a tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_sideband_output_fills_the_card() {
+        // claude-agent-acp, once `_meta.terminal_output` is advertised, replaces
+        // a Bash result's content with a bare terminal handle and ships the
+        // captured bytes on `_meta`. They must land as raw (unfenced) text.
+        let mut items = Vec::new();
+        let effect = apply_update(
+            &mut items,
+            &terminal_result(Some(serde_json::json!({
+                "terminal_output": { "terminal_id": "c1", "data": "total 0\ndrwxr-xr-x  2 me" }
+            }))),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::RawText {
+                text: "total 0\ndrwxr-xr-x  2 me".to_string(),
+                truncated_from: None,
+            }]
+        );
+        assert!(
+            !effect.dropped_terminal_output,
+            "nothing was dropped — the sideband carried the output"
+        );
+    }
+
+    #[test]
+    fn terminal_block_without_a_sideband_is_dropped_and_flagged() {
+        let mut items = Vec::new();
+        let effect = apply_update(&mut items, &terminal_result(None));
+        assert!(
+            only_tool_call(&items).output.is_empty(),
+            "with no channel to read, the terminal block renders nothing"
+        );
+        assert!(
+            effect.dropped_terminal_output,
+            "the host must be told the card was left empty"
+        );
+    }
+
+    #[test]
+    fn a_reshaped_sideband_payload_is_dropped_and_flagged_not_panicked() {
+        // The `_meta` shape is derived from adapter source, not a stable
+        // contract: a renamed inner key degrades to the pre-existing drop.
+        let mut items = Vec::new();
+        let effect = apply_update(
+            &mut items,
+            &terminal_result(Some(
+                serde_json::json!({ "terminal_output": { "output": "renamed" } }),
+            )),
+        );
+        assert!(only_tool_call(&items).output.is_empty());
+        assert!(effect.dropped_terminal_output);
+    }
+
+    #[test]
+    fn a_live_terminal_block_is_not_flagged_as_dropped() {
+        // Every adapter's *first* Bash event is a content-less handle with no
+        // output yet. Flagging that would warn on every healthy command.
+        let mut items = Vec::new();
+        let effect = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "ls -la")
+                    .kind(ToolKind::Execute)
+                    .content(vec![ToolCallContent::Terminal(Terminal::new("c1"))]),
+            ),
+        );
+        assert!(only_tool_call(&items).output.is_empty());
+        assert!(
+            !effect.dropped_terminal_output,
+            "a still-running call hasn't lost anything yet"
+        );
+    }
+
+    #[test]
+    fn terminal_sideband_output_arrives_on_a_tool_call_update() {
+        // The real sequence: content-less handle on the insert, bytes on the
+        // completion update's `_meta`.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "ls").kind(ToolKind::Execute)),
+        );
+        let effect = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(
+                    "c1",
+                    ToolCallUpdateFields::new()
+                        .status(ToolCallStatus::Completed)
+                        .content(vec![ToolCallContent::Terminal(Terminal::new("c1"))]),
+                )
+                .meta(meta_map(serde_json::json!({
+                    "terminal_output": { "data": "hello" },
+                    "terminal_exit": { "exit_code": 0 },
+                }))),
+            ),
+        );
+        let tc = only_tool_call(&items);
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::RawText {
+                text: "hello".to_string(),
+                truncated_from: None,
+            }]
+        );
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(0),
+                signal: None
+            }),
+            "the exit sideband keeps working alongside the output one"
+        );
+        assert!(!effect.dropped_terminal_output);
+    }
+
+    #[test]
+    fn the_real_three_notification_bash_sequence_recovers_the_output() {
+        // claude-agent-acp 0.62.0 (`dist/acp-agent.js`) splits a Bash result into
+        // three notifications, and the bytes ride the *middle* one, which carries
+        // neither `content` nor `status`:
+        //   1. tool_call        → _meta.terminal_info
+        //   2. tool_call_update → _meta.terminal_output   (no content, no status)
+        //   3. tool_call_update → content:[terminal] + _meta.terminal_exit
+        //                         + rawOutput + status
+        // Notification 3's `_meta` carries no `terminal_output` at all (the
+        // adapter destructures `_meta` out and re-adds only `terminal_exit`), so
+        // reading the sideband only when `content` is present misses it entirely.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("toolu_1", "ls -la")
+                    .kind(ToolKind::Execute)
+                    .meta(meta_map(
+                        serde_json::json!({ "terminal_info": { "terminal_id": "toolu_1" } }),
+                    )),
+            ),
+        );
+
+        let output_note = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("toolu_1", ToolCallUpdateFields::new()).meta(meta_map(
+                    serde_json::json!({
+                        "terminal_output": { "terminal_id": "toolu_1", "data": "total 0\n---\n" }
+                    }),
+                )),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::RawText {
+                text: "total 0\n---\n".to_string(),
+                truncated_from: None,
+            }],
+            "the content-less sideband notification is what carries the bytes"
+        );
+        assert!(!output_note.dropped_terminal_output);
+
+        let completion = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(
+                    "toolu_1",
+                    ToolCallUpdateFields::new()
+                        .status(ToolCallStatus::Completed)
+                        .content(vec![ToolCallContent::Terminal(Terminal::new("toolu_1"))])
+                        // Unfenced raw bytes — must never reach the markdown renderer.
+                        .raw_output(serde_json::json!("total 0\n---\n")),
+                )
+                .meta(meta_map(serde_json::json!({
+                    "claudeCode": { "toolName": "Bash" },
+                    "terminal_exit": { "terminal_id": "toolu_1", "exit_code": 0, "signal": null },
+                }))),
+            ),
+        );
+
+        let tc = only_tool_call(&items);
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::RawText {
+                text: "total 0\n---\n".to_string(),
+                truncated_from: None,
+            }],
+            "the completion must not blank the sideband, nor refill from rawOutput as markdown"
+        );
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(0),
+                signal: None
+            }),
+            "the exit rides notification 3"
+        );
+        assert!(
+            !completion.dropped_terminal_output,
+            "the card is full — the once-per-pane warning must not burn on a healthy command"
+        );
+    }
+
+    #[test]
+    fn a_later_empty_terminal_exit_does_not_erase_a_recorded_exit() {
+        // `dist/tools.js` builds `terminal_exit` from `bashResult.return_code`;
+        // when that is absent the key is dropped and only `signal: null` ships.
+        // The renderer reads `{None, None}` as "no exit", so letting it through
+        // would silently drop an `Exit 1` badge recorded a moment earlier.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "false").kind(ToolKind::Execute)),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("c1", ToolCallUpdateFields::new()).meta(meta_map(
+                    serde_json::json!({ "terminal_exit": { "exit_code": 1, "signal": null } }),
+                )),
+            ),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(
+                    "c1",
+                    ToolCallUpdateFields::new().status(ToolCallStatus::Failed),
+                )
+                .meta(meta_map(serde_json::json!({
+                    "terminal_exit": { "terminal_id": "c1", "signal": null }
+                }))),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).exit,
+            Some(CommandExit {
+                code: Some(1),
+                signal: None
+            }),
+            "an exit report with no usable field must not overwrite the recorded one"
+        );
+    }
+
+    #[test]
+    fn oversized_sideband_output_is_capped_and_records_its_original_length() {
+        let original_len = MAX_TOOL_OUTPUT_TEXT_BYTES + 4096;
+        let huge = "x".repeat(original_len);
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &terminal_result(Some(
+                serde_json::json!({ "terminal_output": { "data": huge } }),
+            )),
+        );
+        let [
+            ToolOutputBlock::RawText {
+                text,
+                truncated_from,
+            },
+        ] = only_tool_call(&items).output.as_slice()
+        else {
+            panic!("expected one raw text block");
+        };
+        assert_eq!(text.len(), MAX_TOOL_OUTPUT_TEXT_BYTES);
+        assert_eq!(
+            *truncated_from,
+            Some(original_len),
+            "the sideband reuses the shared cap and its truncation marker"
+        );
+    }
+
+    #[test]
+    fn a_silent_command_adds_no_empty_block_and_is_not_flagged() {
+        let mut items = Vec::new();
+        let effect = apply_update(
+            &mut items,
+            &terminal_result(Some(
+                serde_json::json!({ "terminal_output": { "data": "  \n" } }),
+            )),
+        );
+        assert!(only_tool_call(&items).output.is_empty());
+        assert!(
+            !effect.dropped_terminal_output,
+            "the sideband reported an empty command — nothing was lost"
+        );
+    }
+
+    #[test]
+    fn image_output_keeps_the_content_path_and_ignores_the_sideband() {
+        // The adapter routes image results through normal content blocks rather
+        // than the terminal handle. The sideband must not touch that path even
+        // when the update happens to carry a `terminal_output` meta.
+        let mut items = Vec::new();
+        let effect = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "screenshot")
+                    .kind(ToolKind::Execute)
+                    .status(ToolCallStatus::Completed)
+                    .content(vec![ToolCallContent::Content(Content::new(
+                        ContentBlock::Image(ImageContent::new("BASE64", "image/png")),
+                    ))])
+                    .meta(meta_map(
+                        serde_json::json!({ "terminal_output": { "data": "leaked" } }),
+                    )),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::Image {
+                data: "BASE64".to_string(),
+                mime: "image/png".to_string(),
+            }]
+        );
+        assert!(!effect.dropped_terminal_output);
+    }
+
+    #[test]
+    fn codex_terminal_then_raw_output_is_never_flagged_as_dropped() {
+        // Regression anchor: codex's shell path (terminal handle on the insert,
+        // output in `raw_output` on the completion) is unchanged by the
+        // sideband, and must not produce a spurious drop warning either.
+        let mut items = Vec::new();
+        let insert = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "ls -la")
+                    .kind(ToolKind::Execute)
+                    .content(vec![ToolCallContent::Terminal(Terminal::new("term-1"))]),
+            ),
+        );
+        let complete = apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .content(vec![ToolCallContent::Terminal(Terminal::new("term-1"))])
+                    .raw_output(serde_json::json!({
+                        "formatted_output": "total 0",
+                        "exit_code": 0,
+                    })),
+            )),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::Text {
+                text: "total 0".to_string(),
+                truncated_from: None,
+            }],
+            "codex still recovers its output through raw_output, as markdown text"
+        );
+        assert!(!insert.dropped_terminal_output);
+        assert!(
+            !complete.dropped_terminal_output,
+            "raw_output refilled the card, so nothing was lost"
+        );
+    }
+
+    /// Build a `Meta` map from a JSON object literal — the schema type is
+    /// `serde_json::Map<String, Value>`, not `Value`, so builders taking `Meta`
+    /// need the unwrapped map.
+    fn meta_map(v: serde_json::Value) -> agent_client_protocol::schema::v1::Meta {
+        v.as_object()
+            .expect("test fixture must be a JSON object")
+            .clone()
+    }
+
+    #[test]
+    fn command_exit_reads_codex_exit_code_through_the_full_pipeline() {
+        // End-to-end through apply_update (DefaultAdapter), not just the
+        // adapter unit test — proves the mapping wiring, not only the parse.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "run tests")
+                    .kind(ToolKind::Execute)
+                    .raw_output(serde_json::json!({ "formatted_output": "FAIL", "exit_code": 1 })),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(1),
+                signal: None
+            })
+        );
+    }
+
+    #[test]
+    fn command_exit_reads_claude_terminal_exit_meta_through_the_full_pipeline() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "run tests")
+                    .kind(ToolKind::Execute)
+                    .meta(meta_map(
+                        serde_json::json!({ "terminal_exit": { "exit_code": 2, "signal": null } }),
+                    )),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(2),
+                signal: None
+            })
+        );
+    }
+
+    #[test]
+    fn command_exit_signal_only_has_no_code() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "run tests")
+                    .kind(ToolKind::Execute)
+                    .meta(meta_map(
+                        serde_json::json!({ "terminal_exit": { "signal": "SIGTERM" } }),
+                    )),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: None,
+                signal: Some("SIGTERM".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn command_exit_is_none_when_neither_channel_reports() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "run tests").kind(ToolKind::Execute)),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(tc.exit, None);
+    }
+
+    #[test]
+    fn command_exit_is_none_for_a_non_execute_tool() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("t1", "Read src/main.rs")
+                    .kind(ToolKind::Read)
+                    .raw_input(serde_json::json!({"file_path": "src/main.rs"})),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(tc.exit, None);
+    }
+
+    #[test]
+    fn command_exit_arrives_on_a_tool_call_update_without_blanking_on_a_later_status_only_update() {
+        // The completion update carries the exit status; a later status-only
+        // update (no raw_output, no meta) must not wipe it back to None.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "ls").kind(ToolKind::Execute)),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .raw_output(serde_json::json!({ "exit_code": 0 })),
+            )),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new().title("ls (renamed)"),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.exit,
+            Some(CommandExit {
+                code: Some(0),
+                signal: None
+            }),
+            "a later update with no exit channel must not clear the recorded exit"
         );
     }
 
@@ -1219,6 +1902,7 @@ mod tests {
                 output: Vec::new(),
                 raw_input: None,
                 parent_tool_id: None,
+                exit: None,
             }),
             ChatItem::AssistantText {
                 text: "done".to_string(),
@@ -1255,6 +1939,7 @@ mod tests {
                 output: Vec::new(),
                 raw_input: None,
                 parent_tool_id: None,
+                exit: None,
             })
         };
         let mut items = vec![
@@ -1293,6 +1978,7 @@ mod tests {
             output: Vec::new(),
             raw_input: None,
             parent_tool_id: Some(parent.to_string()),
+            exit: None,
         })
     }
 
@@ -1543,6 +2229,7 @@ mod tests {
             output: Vec::new(),
             raw_input: Some(serde_json::json!({"command": "perl -0pi -e 's/clean/'"})),
             parent_tool_id: None,
+            exit: None,
         })];
 
         let mut tool_fields = ToolCallUpdateFields::default();
@@ -1867,7 +2554,7 @@ mod tests {
         let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
             ImageContent::new("b64data", "image/png"),
         )))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Image {
@@ -1884,7 +2571,7 @@ mod tests {
         let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Audio(
             AudioContent::new(data, "audio/wav"),
         )))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Media {
@@ -1908,7 +2595,7 @@ mod tests {
                 ),
             )),
         ))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Media {
@@ -1931,7 +2618,7 @@ mod tests {
                 )),
             )),
         ))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Text {
@@ -1954,7 +2641,7 @@ mod tests {
                 )),
             )),
         ))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert!(
             output.is_empty(),
             "whitespace-only embedded resource text is dropped, not an empty block"
@@ -1968,7 +2655,7 @@ mod tests {
         let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
             ImageContent::new(data.clone(), "image/png"),
         )))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Media {
@@ -1986,7 +2673,7 @@ mod tests {
         let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
             ImageContent::new(data.clone(), "image/png"),
         )))];
-        let (_, output) = split_content(&content);
+        let (_, output) = split(&content);
         assert_eq!(
             output,
             vec![ToolOutputBlock::Image {

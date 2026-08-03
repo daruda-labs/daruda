@@ -68,6 +68,21 @@ pub struct ToolCallItem {
     /// through this field. `None` for a top-level call. The renderer nests
     /// children inside the parent card instead of listing them as siblings.
     pub parent_tool_id: Option<String>,
+    /// Exit status of a shell-execution tool call, read from the agent's
+    /// vendor side channel via [`crate::adapter::AcpAdapter::command_exit`].
+    /// `None` when the adapter hasn't reported one (a non-shell tool, or a
+    /// shell tool still running / whose adapter never surfaces it).
+    pub exit: Option<CommandExit>,
+}
+
+/// Exit status of a shell-execution tool call. ACP has no standard field for
+/// this — each adapter reports it (or doesn't) in its own side channel, so the
+/// model only records what was actually reported; whether an absent/zero exit
+/// is worth displaying is the renderer's call, not this type's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandExit {
+    pub code: Option<i32>,
+    pub signal: Option<String>,
 }
 
 impl ToolCallItem {
@@ -105,9 +120,19 @@ impl ToolCallItem {
 /// flattened to a base64 text blob.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolOutputBlock {
-    /// Plain text — rendered verbatim and selectable. `truncated_from` is
+    /// Markdown text — the ACP spec says clients SHOULD render tool text as
+    /// Markdown, and adapters escape it accordingly. `truncated_from` is
     /// `Some(original_byte_len)` when the text was capped, `None` otherwise.
     Text {
+        text: String,
+        truncated_from: Option<usize>,
+    },
+    /// Shell output recovered from an adapter's terminal side channel (see
+    /// [`crate::adapter::AcpAdapter::sideband_output`]). Unlike [`Self::Text`]
+    /// this never passed through the adapter's markdown escaping, so it must
+    /// render as flush monospace, verbatim — a `#` or `*` a command printed is
+    /// literal, not a heading or emphasis. Same `truncated_from` contract.
+    RawText {
         text: String,
         truncated_from: Option<usize>,
     },
@@ -663,6 +688,7 @@ mod tests {
             output: vec![],
             raw_input,
             parent_tool_id: None,
+            exit: None,
         }
     }
 

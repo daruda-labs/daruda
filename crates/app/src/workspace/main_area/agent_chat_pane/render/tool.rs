@@ -4,11 +4,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use daruda_acp::CommandExit;
 use daruda_acp::{
     ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
-use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Hsla, IntoElement, Pixels, SharedString, div, prelude::*, px};
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
@@ -111,6 +112,18 @@ pub(super) fn tool_card(
                     dim,
                 ))
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                .into_any_element(),
+        );
+    }
+    // A shell command that exited abnormally (nonzero code or killed by a
+    // signal) gets its own badge ahead of the status one, so a collapsed
+    // "Failed" card still says *what kind* of failure it was. Pushed before
+    // the status badge so the status badge — always present — stays the
+    // rightmost element and card-to-card right alignment doesn't shift.
+    if let Some(exit_label) = exit_badge_label(&tc.exit) {
+        header = header.trailing(
+            crate::ui::Badge::new(SharedString::from(exit_label))
+                .text_color(t.banner_error_text)
                 .into_any_element(),
         );
     }
@@ -324,10 +337,59 @@ pub(super) fn tool_card(
         .child(block)
 }
 
+/// Flush plain-monospace text: no markdown pass, no code-block chrome, just
+/// selectable verbatim content. Shared by the two entry points that must not
+/// let markdown reinterpret a tool's bytes — a bare (language-less) fence in a
+/// markdown body, and a `RawText` block that never had a fence at all.
+fn plain_monospace_text(
+    id: SharedString,
+    source: &str,
+    color: Hsla,
+    font_size: Pixels,
+) -> AnyElement {
+    div()
+        .min_w_0()
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .text_color(color)
+        .text_size(font_size)
+        .child(
+            crate::ui::selectable_text(id, SharedString::from(source.to_string()))
+                .color(color)
+                .text_size(font_size),
+        )
+        .into_any_element()
+}
+
+/// Append the "output was capped at N bytes" marker under `body` when the block
+/// carries one. Shared by every text-shaped output block so the marker reads and
+/// sits the same regardless of which channel the text arrived through.
+fn with_truncation_note(
+    body: AnyElement,
+    truncated_from: Option<usize>,
+    dim: f32,
+    cx: &App,
+) -> AnyElement {
+    let Some(original_len) = truncated_from else {
+        return body;
+    };
+    div()
+        .flex()
+        .flex_col()
+        .child(body)
+        .child(
+            div()
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(s::agent_chat_tool_output_truncated(original_len)),
+        )
+        .into_any_element()
+}
+
 /// Render one tool-output block: rendered markdown (drag-selectable, keyed per
-/// block for stable selection state), or a resource link as an open button.
-/// The ACP spec says clients SHOULD render tool text as Markdown; code blocks
-/// keep their own monospace + syntax highlight.
+/// block for stable selection state), verbatim monospace for raw shell output,
+/// or a resource link as an open button. The ACP spec says clients SHOULD render
+/// tool text as Markdown; code blocks keep their own monospace + syntax
+/// highlight.
 fn output_block_view(
     tool_id: &str,
     ix: usize,
@@ -377,38 +439,31 @@ fn output_block_view(
                             "{plain_id_prefix}-plain-{}",
                             hasher.finish()
                         ));
-                        Some(
-                            div()
-                                .min_w_0()
-                                .font_family(theme::FONT_FAMILY_MONOSPACE)
-                                .text_color(plain_color)
-                                .text_size(px(theme::agent_chat_font_size(cx)))
-                                .child(
-                                    crate::ui::selectable_text(
-                                        id,
-                                        SharedString::from(source.to_string()),
-                                    )
-                                    .color(plain_color)
-                                    .text_size(px(theme::agent_chat_font_size(cx))),
-                                )
-                                .into_any_element(),
-                        )
+                        Some(plain_monospace_text(
+                            id,
+                            source,
+                            plain_color,
+                            px(theme::agent_chat_font_size(cx)),
+                        ))
                     })
                     .into_any_element();
-            let Some(original_len) = truncated_from else {
-                return markdown;
-            };
-            div()
-                .flex()
-                .flex_col()
-                .child(markdown)
-                .child(
-                    div()
-                        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-                        .text_size(px(theme::agent_chat_font_size(cx)))
-                        .child(s::agent_chat_tool_output_truncated(*original_len)),
-                )
-                .into_any_element()
+            with_truncation_note(markdown, *truncated_from, dim, cx)
+        }
+        ToolOutputBlock::RawText {
+            text,
+            truncated_from,
+        } => {
+            // Shell output recovered from the terminal sideband: never escaped
+            // by the adapter, so it goes straight to monospace rather than
+            // through markdown, which would eat a `#` or `*` the command
+            // actually printed.
+            let body = plain_monospace_text(
+                SharedString::from(format!("agent-chat-tool-rawout-{tool_id}-{ix}")),
+                text,
+                theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
+                px(theme::agent_chat_font_size(cx)),
+            );
+            with_truncation_note(body, *truncated_from, dim, cx)
         }
         ToolOutputBlock::Image { data, mime } => {
             let key = tool_image_key(data);
@@ -518,6 +573,22 @@ fn tool_kind_icon(kind: ToolKindView) -> IconName {
         ToolKindView::Fetch => IconName::Globe,
         ToolKindView::SwitchMode => IconName::Refresh,
         ToolKindView::Other => IconName::Settings2,
+    }
+}
+
+/// The exit-status badge text for a shell tool call, if abnormal. `None` for a
+/// clean exit (code 0, no signal), an unreported exit, or a reported-but-empty
+/// one (`code: None, signal: None` — a side channel that had nothing usable).
+/// A signal takes priority over the code when both are present, since a
+/// signal-killed process's reported exit code is rarely the meaningful part.
+fn exit_badge_label(exit: &Option<CommandExit>) -> Option<String> {
+    let exit = exit.as_ref()?;
+    if let Some(signal) = exit.signal.as_deref() {
+        return Some(s::agent_chat_tool_exit_signal(signal));
+    }
+    match exit.code {
+        Some(code) if code != 0 => Some(s::agent_chat_tool_exit_code(code)),
+        _ => None,
     }
 }
 
@@ -722,5 +793,53 @@ mod tests {
         // kind now — nothing is lost since the card is always expandable.
         let cmd = "cd /repo &&\n  cargo build\n  cargo test";
         assert_eq!(tool_title_summary(cmd), "cd /repo &&…");
+    }
+
+    #[test]
+    fn exit_badge_hidden_when_no_exit_reported() {
+        assert_eq!(exit_badge_label(&None), None);
+    }
+
+    #[test]
+    fn exit_badge_hidden_for_clean_exit() {
+        let exit = Some(CommandExit {
+            code: Some(0),
+            signal: None,
+        });
+        assert_eq!(exit_badge_label(&exit), None);
+    }
+
+    #[test]
+    fn exit_badge_hidden_for_empty_report() {
+        // Reported but carrying nothing usable — treat the same as absent.
+        let exit = Some(CommandExit {
+            code: None,
+            signal: None,
+        });
+        assert_eq!(exit_badge_label(&exit), None);
+    }
+
+    #[test]
+    fn exit_badge_shown_for_nonzero_code() {
+        let exit = Some(CommandExit {
+            code: Some(1),
+            signal: None,
+        });
+        assert_eq!(
+            exit_badge_label(&exit),
+            Some(s::agent_chat_tool_exit_code(1))
+        );
+    }
+
+    #[test]
+    fn exit_badge_shown_for_signal_only() {
+        let exit = Some(CommandExit {
+            code: None,
+            signal: Some("SIGKILL".to_string()),
+        });
+        assert_eq!(
+            exit_badge_label(&exit),
+            Some(s::agent_chat_tool_exit_signal("SIGKILL"))
+        );
     }
 }

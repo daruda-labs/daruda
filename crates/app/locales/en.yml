@@ -260,6 +260,8 @@ agent_chat:
   tool_status_failed: "Failed"
   tool_status_cancelled: "Cancelled"
   tool_background: "Background"
+  tool_exit_code: "Exit %{code}"
+  tool_exit_signal: "Signal %{signal}"
   subagent_label: "Subagent"
   subagent_label_typed: "Subagent: %{kind}"
   permission_title: "Permission required"

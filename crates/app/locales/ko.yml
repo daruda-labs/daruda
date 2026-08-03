@@ -260,6 +260,8 @@ agent_chat:
   tool_status_failed: "실패"
   tool_status_cancelled: "취소됨"
   tool_background: "백그라운드"
+  tool_exit_code: "종료 코드 %{code}"
+  tool_exit_signal: "시그널 %{signal}"
   subagent_label: "서브에이전트"
   subagent_label_typed: "서브에이전트: %{kind}"
   permission_title: "권한 필요"

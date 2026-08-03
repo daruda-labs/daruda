@@ -195,6 +195,7 @@ async fn row_projection_tracks_list_count_and_fold_visibility(cx: &mut TestAppCo
             output: Vec::new(),
             raw_input: None,
             parent_tool_id: None,
+            exit: None,
         })
     };
 
@@ -585,6 +586,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
             output: Vec::new(),
             raw_input: None,
             parent_tool_id: None,
+            exit: None,
         })
     };
 
@@ -1041,6 +1043,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                             output: Vec::new(),
                             raw_input: None,
                             parent_tool_id: None,
+                            exit: None,
                         }),
                     ];
                 });
@@ -1238,6 +1241,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
             output: Vec::new(),
             raw_input: None,
             parent_tool_id: Some("parent".into()),
+            exit: None,
         })
     };
 
@@ -1327,6 +1331,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
                 output: Vec::new(),
                 raw_input: None,
                 parent_tool_id: None,
+                exit: None,
             }),
         ];
     });
@@ -2855,6 +2860,7 @@ async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAp
             output: Vec::new(),
             raw_input: None,
             parent_tool_id: Some("parent".into()),
+            exit: None,
         })
     };
 

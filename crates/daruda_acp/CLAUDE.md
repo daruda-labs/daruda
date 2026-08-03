@@ -45,6 +45,17 @@ as a select and the boolean path was simply unreachable. `client_capabilities()`
 in `session.rs` is the single place this is declared; advertise a capability only
 once the host actually renders it.
 
+**Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
+non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less*
+(`content: [{type:"terminal"}]`) and moves the bytes to
+`_meta.terminal_output.data`; unset, the adapter returns a fenced ```` ```console ````
+block. It also gates `_meta.terminal_exit`, the exit badge's only source. The
+mapper parses both (`adapter.rs` + `mapping.rs`, with the three-notification
+sequence pinned by a test), but `client_capabilities()` deliberately withholds
+the advertisement until a live wire capture confirms that sequence. The shape is
+read from adapter source (`dist/acp-agent.js`, `dist/tools.js`, 0.62.0), not the
+wire — **re-verify on every adapter bump** before flipping it on.
+
 ### 2. Claude ACP adapter (npm, spawned at runtime)
 
 - Repo: <https://github.com/agentclientprotocol/claude-agent-acp>

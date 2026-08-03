@@ -27,11 +27,11 @@ pub use mapping::{
     finalize_streaming, permission_item, subagent_activity, touched_tool_id,
 };
 pub use model::{
-    ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
-    ConfigValueView, CostView, DiffView, ModeStateView, PermissionChoice, PermissionItem,
-    PermissionKindView, PermissionResolution, PlanEntryView, PlanPriority, PlanStatus,
-    SessionCapabilitiesView, SessionModeView, SlashCommand, SlashCommandInput, ToolCallItem,
-    ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
+    ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,
+    ConfigOptionView, ConfigValueView, CostView, DiffView, ModeStateView, PermissionChoice,
+    PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView, PlanPriority,
+    PlanStatus, SessionCapabilitiesView, SessionModeView, SlashCommand, SlashCommandInput,
+    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
 };
 pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
 pub use session::{
