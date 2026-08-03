@@ -4,6 +4,7 @@
 //! GPUI-free: produces plain [`RasterImage`] data. Wrapping into a GPUI
 //! `RenderImage` happens at the render boundary, not here.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -43,12 +44,7 @@ impl RasterImage {
 /// Rasterize an SVG document to a [`RasterImage`] at [`RASTER_SCALE`]× its
 /// intrinsic size, so the bitmap stays crisp when painted on HiDPI displays.
 pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterImage> {
-    let opt = resvg::usvg::Options {
-        fontdb: shared_fontdb(),
-        ..Default::default()
-    };
-
-    let tree = resvg::usvg::Tree::from_str(svg, &opt)?;
+    let tree = resvg::usvg::Tree::from_str(svg, &usvg_options())?;
     let size = tree.size();
     let width = ((size.width() * RASTER_SCALE).ceil() as u32).clamp(1, MAX_DIM);
     let height = ((size.height() * RASTER_SCALE).ceil() as u32).clamp(1, MAX_DIM);
@@ -68,6 +64,105 @@ pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterIma
         height,
         rgba,
         scale: RASTER_SCALE,
+    })
+}
+
+/// Parse options for every SVG daruda reads, so a document is measured and
+/// rasterized through exactly one text stack. Anything that inspects geometry
+/// before rasterizing (see `mermaid_label_geometry`) must parse with these too,
+/// or it measures a different font than the one that gets painted.
+pub(in crate::workspace) fn usvg_options() -> resvg::usvg::Options<'static> {
+    let mut options = resvg::usvg::Options {
+        fontdb: shared_fontdb(),
+        ..Default::default()
+    };
+    options.font_resolver.select_font = case_insensitive_font_selector();
+    options
+}
+
+/// Resolve `font-family` names the way CSS does: case-insensitively.
+///
+/// `fontdb` compares family names byte-for-byte, and mermaid emits its stack
+/// lowercased (`font-family:"trebuchet ms",verdana,arial,sans-serif`), so every
+/// named family missed and text fell through to the generic `sans-serif` face.
+/// Diagrams rendered in Arial while merman had sized every label from its
+/// Trebuchet MS metrics — up to 14px of disagreement per label, which shows up
+/// as text overflowing node boxes and label bands.
+fn case_insensitive_font_selector() -> resvg::usvg::FontSelectionFn<'static> {
+    use resvg::usvg::fontdb;
+
+    Box::new(|font, db| {
+        // `fontdb::Family::Name` borrows, so the canonical spellings have to
+        // outlive the query built from them.
+        let canonical: Vec<String> = font
+            .families()
+            .iter()
+            .filter_map(|family| match family {
+                resvg::usvg::FontFamily::Named(name) => Some(
+                    canonical_family_names()
+                        .get(&name.to_lowercase())
+                        .cloned()
+                        .unwrap_or_else(|| name.clone()),
+                ),
+                _ => None,
+            })
+            .collect();
+        let mut named = canonical.iter();
+        let mut families: Vec<fontdb::Family> = font
+            .families()
+            .iter()
+            .map(|family| match family {
+                resvg::usvg::FontFamily::Serif => fontdb::Family::Serif,
+                resvg::usvg::FontFamily::SansSerif => fontdb::Family::SansSerif,
+                resvg::usvg::FontFamily::Cursive => fontdb::Family::Cursive,
+                resvg::usvg::FontFamily::Fantasy => fontdb::Family::Fantasy,
+                resvg::usvg::FontFamily::Monospace => fontdb::Family::Monospace,
+                resvg::usvg::FontFamily::Named(_) => {
+                    fontdb::Family::Name(named.next().map_or("", std::string::String::as_str))
+                }
+            })
+            .collect();
+        // Same last-resort family usvg's own selector appends.
+        families.push(fontdb::Family::Serif);
+
+        db.query(&fontdb::Query {
+            families: &families,
+            weight: fontdb::Weight(font.weight()),
+            stretch: match font.stretch() {
+                resvg::usvg::FontStretch::UltraCondensed => fontdb::Stretch::UltraCondensed,
+                resvg::usvg::FontStretch::ExtraCondensed => fontdb::Stretch::ExtraCondensed,
+                resvg::usvg::FontStretch::Condensed => fontdb::Stretch::Condensed,
+                resvg::usvg::FontStretch::SemiCondensed => fontdb::Stretch::SemiCondensed,
+                resvg::usvg::FontStretch::Normal => fontdb::Stretch::Normal,
+                resvg::usvg::FontStretch::SemiExpanded => fontdb::Stretch::SemiExpanded,
+                resvg::usvg::FontStretch::Expanded => fontdb::Stretch::Expanded,
+                resvg::usvg::FontStretch::ExtraExpanded => fontdb::Stretch::ExtraExpanded,
+                resvg::usvg::FontStretch::UltraExpanded => fontdb::Stretch::UltraExpanded,
+            },
+            style: match font.style() {
+                resvg::usvg::FontStyle::Normal => fontdb::Style::Normal,
+                resvg::usvg::FontStyle::Italic => fontdb::Style::Italic,
+                resvg::usvg::FontStyle::Oblique => fontdb::Style::Oblique,
+            },
+        })
+    })
+}
+
+/// Lowercased family name → the spelling the installed face declares. Built
+/// once from the shared database; first declaration wins so a later face can't
+/// shadow the canonical name.
+fn canonical_family_names() -> &'static HashMap<String, String> {
+    static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names = HashMap::new();
+        for face in shared_fontdb().faces() {
+            for (family, _) in &face.families {
+                names
+                    .entry(family.to_lowercase())
+                    .or_insert_with(|| family.clone());
+            }
+        }
+        names
     })
 }
 
@@ -105,6 +200,56 @@ fn unpremultiply(rgba: &mut [u8]) {
             }
         }
     }
+}
+
+/// Render a ` ```mermaid ` source to a [`RasterImage`]: merman SVG → label
+/// background alignment → raster.
+///
+/// The single funnel for both mermaid surfaces (file viewer and agent chat), so
+/// they cannot drift apart on theme options, panic containment, or the label
+/// geometry correction.
+pub(in crate::workspace) fn render_mermaid_raster(
+    source: &str,
+    palette: &super::mermaid_theme::MermaidPalette,
+) -> Option<RasterImage> {
+    let svg = render_mermaid_svg(source, palette)?;
+    // Contain a panic across the whole post-render pipeline, not just the
+    // renderer: one bad diagram must not fail a file load or take the
+    // background executor down.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let svg = super::mermaid_label_geometry::align_label_backgrounds(&svg, &usvg_options());
+        rasterize_svg(&svg).ok()
+    }))
+    .ok()
+    .flatten()
+}
+
+/// merman's SVG for `source`, with every option the app renders diagrams under.
+/// Split out so anything inspecting the diagram (tests, the label geometry pass)
+/// sees exactly what ships.
+pub(in crate::workspace) fn render_mermaid_svg(
+    source: &str,
+    palette: &super::mermaid_theme::MermaidPalette,
+) -> Option<String> {
+    use super::markdown_viewer::{
+        mermaid_host_theme_profile, mermaid_svg_render_options, source_has_own_theme_directive,
+    };
+
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut renderer = merman::render::HeadlessRenderer::new()
+            .with_svg_options(mermaid_svg_render_options())
+            // Layout has to reserve the width this app's own text stack paints,
+            // not what merman's Trebuchet MS table estimates for Hangul.
+            .with_text_measurer(super::mermaid_text_measurer::host_text_measurer());
+        // Match the diagram theme to the host appearance so every diagram type —
+        // not just flowchart nodes — stays legible (dark UI → dark chrome).
+        if !source_has_own_theme_directive(source) {
+            renderer = renderer.with_host_theme(&mermaid_host_theme_profile(palette));
+        }
+        renderer.render_svg_sync(source).ok().flatten()
+    }))
+    .ok()
+    .flatten()
 }
 
 /// Resolve a markdown image reference to its encoded bytes.
@@ -149,6 +294,74 @@ pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterI
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ink width of `text` laid out in `family`, through the app's own options.
+    fn ink_width(text: &str, family: &str) -> f32 {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="200"><style>text{{font-family:{family};font-size:16px}}</style><text x="0" y="100">{text}</text></svg>"#
+        );
+        let tree = resvg::usvg::Tree::from_str(&svg, &usvg_options()).expect("parses");
+        fn find(group: &resvg::usvg::Group) -> Option<f32> {
+            for node in group.children() {
+                match node {
+                    resvg::usvg::Node::Text(text) => return Some(text.abs_bounding_box().width()),
+                    resvg::usvg::Node::Group(inner) => {
+                        if let Some(width) = find(inner) {
+                            return Some(width);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        find(tree.root()).expect("laid out text")
+    }
+
+    /// CSS family matching is case-insensitive. Pick an installed family whose
+    /// canonical spelling actually changes the layout, and check that asking for
+    /// it in lowercase — the way mermaid's CSS does — lands on the same face.
+    #[test]
+    fn a_lowercase_font_family_resolves_like_its_canonical_spelling() {
+        const PROBE: &str = "Handgloves 123";
+        let fallback = ink_width(PROBE, "\"daruda-no-such-font\"");
+        let distinctive = canonical_family_names().values().find(|name| {
+            name.is_ascii()
+                && name.chars().any(char::is_uppercase)
+                && (ink_width(PROBE, &format!("\"{name}\"")) - fallback).abs() > 0.5
+        });
+        let Some(canonical) = distinctive else {
+            // No installed family both differs from the fallback and has a case
+            // to normalize, so there is nothing this test can prove here.
+            return;
+        };
+        assert_eq!(
+            ink_width(PROBE, &format!("\"{}\"", canonical.to_lowercase())),
+            ink_width(PROBE, &format!("\"{canonical}\"")),
+            "lowercase {canonical:?} must resolve to the same face"
+        );
+    }
+
+    /// The case the fix exists for: mermaid's own stack, verbatim. Without
+    /// case-insensitive resolution every name misses and text lands on the
+    /// generic `sans-serif` face, disagreeing with merman's Trebuchet MS
+    /// metrics by up to 14px per label.
+    #[test]
+    fn the_mermaid_font_stack_resolves_to_trebuchet_ms() {
+        if !canonical_family_names().contains_key("trebuchet ms") {
+            // Trebuchet MS ships with macOS (the verified target) but not with
+            // every Linux image; nothing to assert without it.
+            return;
+        }
+        const PROBE: &str = "schedule tick";
+        assert!(
+            (ink_width(PROBE, r#""trebuchet ms",verdana,arial,sans-serif"#)
+                - ink_width(PROBE, r#""Trebuchet MS""#))
+            .abs()
+                < 0.05,
+            "mermaid's lowercased stack must land on Trebuchet MS"
+        );
+    }
 
     fn encode_png(width: u32, height: u32, px: [u8; 4]) -> Vec<u8> {
         let mut img = image::RgbaImage::new(width, height);

@@ -1330,7 +1330,17 @@ impl Node {
                     .whitespace_normal()
                     .text_size(text_size)
                     .font_weight(font_weight)
-                    .child(children.render(node_cx, window, cx))
+                    // `min_w_0` overrides the flex-row default `min-width: auto`
+                    // so the text wrapper shrinks with the pane instead of
+                    // holding its intrinsic max-content width — the same
+                    // width-dependent class as the list-item and table-cell
+                    // wrap fixes above.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(children.render(node_cx, window, cx)),
+                    )
                     .into_any_element()
             }
             Node::Blockquote { children } => div()

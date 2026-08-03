@@ -142,30 +142,7 @@ fn load_raw(
                     });
                 }
                 super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
-                    // merman is a young reimplementation; guard against a
-                    // panic on malformed input so one bad diagram can't fail
-                    // the load.
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        // Match the diagram theme to the host appearance so
-                        // every diagram type — not just flowchart nodes —
-                        // stays legible (dark UI → dark diagram chrome).
-                        let mut renderer = merman::render::HeadlessRenderer::new()
-                            .with_svg_options(super::markdown_viewer::mermaid_svg_render_options());
-                        if !super::markdown_viewer::source_has_own_theme_directive(source) {
-                            renderer = renderer.with_host_theme(
-                                &super::markdown_viewer::mermaid_host_theme_profile(
-                                    mermaid_palette,
-                                ),
-                            );
-                        }
-                        renderer
-                            .render_svg_sync(source)
-                            .ok()
-                            .flatten()
-                            .and_then(|svg| super::visual::rasterize_svg(&svg).ok())
-                    }))
-                    .ok()
-                    .flatten()
+                    super::visual::render_mermaid_raster(source, mermaid_palette)
                 });
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();

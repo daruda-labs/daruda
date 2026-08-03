@@ -138,3 +138,80 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
         code_block_render: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+        Pixels, Render, SharedString, Styled as _, TestAppContext, VisualTestContext, Window,
+        WindowBounds, WindowOptions, div, point, px, size,
+    };
+
+    use crate::test_support::init_gpui_component;
+
+    struct HeadingProbe {
+        text: SharedString,
+    }
+
+    impl Render for HeadingProbe {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("heading-probe")
+                .debug_selector(|| "heading-probe".into())
+                .w_full()
+                .child(super::markdown("probe-heading", self.text.clone()))
+        }
+    }
+
+    /// Opens a real window pinned to `width` (tall enough that height never
+    /// clips) with a single heading, lets it settle, then reads the painted
+    /// height of the `heading-probe` div back via `debug_bounds` — the
+    /// wrap-driven line count made visible.
+    fn heading_probe_height(cx: &mut TestAppContext, text: SharedString, width: Pixels) -> Pixels {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let window = cx
+            .update(|cx| cx.open_window(opts, |_window, cx| cx.new(|_cx| HeadingProbe { text })))
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        // The window's construction-time paint (`open_window`'s "at least one
+        // draw") can land before layout has fully settled; force + wait out a
+        // second frame so `debug_bounds` reads the settled wrap, not a
+        // first-frame transient (same rationale as the diff-editor probe's
+        // frame-1-vs-frame-2 check in `workspace/tests/agent_diff_layout.rs`).
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        vcx.debug_bounds("heading-probe")
+            .expect("heading probe painted")
+            .size
+            .height
+    }
+
+    /// A long `# ` heading laid out at a narrow window width must wrap to
+    /// more lines (grow taller) than the same heading laid out at a wide
+    /// window width — proof it reflows with the container instead of holding
+    /// its intrinsic max-content width and overflowing unbroken (the
+    /// agent-chat heading wrap regression:
+    /// `gpui_component::text::node::Node::Heading` wraps its text in a bare
+    /// `h_flex()`, whose flex-row default `min-width: auto` stops the child
+    /// from shrinking below its unwrapped width).
+    #[gpui::test]
+    fn heading_reflows_narrower_than_wide(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+        let text: SharedString =
+            "# This heading has enough words that it must wrap across more than one line once the pane narrows"
+                .into();
+
+        let narrow = heading_probe_height(cx, text.clone(), px(220.));
+        let wide = heading_probe_height(cx, text, px(1400.));
+
+        assert!(
+            narrow > wide,
+            "heading did not reflow at a narrower width: narrow={narrow:?} wide={wide:?}"
+        );
+    }
+}
