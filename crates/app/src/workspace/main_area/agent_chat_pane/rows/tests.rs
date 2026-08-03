@@ -42,6 +42,7 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
                 // The conclusion is still an item row for visibility tests;
                 // its distinct variant is asserted directly where it matters.
                 RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
+                RowKind::SoloResponse(_) => "solo",
                 RowKind::ToolGroupHeader { .. } => "group",
                 RowKind::WorkingIndicator => "working",
             };
@@ -85,10 +86,12 @@ fn turn_with_tools_nests_response_and_group() {
 
 #[test]
 fn trivial_response_has_no_bar() {
-    // One short assistant reply, no tools → inline (no response header).
+    // One short assistant reply, no tools → inline (no response header). The
+    // block stands for the whole response, so it is a `SoloResponse` and carries
+    // the rollup glyph the absent bar would have shown.
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
     let rows = project(&items, &FoldState::default(), false);
-    assert_eq!(kinds(&rows), vec![("user", false), ("item", false)]);
+    assert_eq!(kinds(&rows), vec![("user", false), ("solo", false)]);
 }
 
 #[test]
@@ -283,7 +286,10 @@ fn trivial_reply_is_not_a_conclusion_item() {
     // (labeled) foldable assistant block, not a bare-chevron ConclusionItem.
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
     let rows = project(&items, &FoldState::default(), false);
-    assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::SoloResponse(1)))
+    );
     assert!(
         !rows
             .iter()
@@ -699,4 +705,96 @@ fn same_slot_compares_key_not_hidden_or_payload() {
         hidden: false,
         indent: 0
     }));
+}
+
+#[test]
+fn collapsed_response_survivors_all_sit_at_the_run_indent() {
+    use ToolStatusView::{Completed, InProgress};
+    // A collapsed response leaves three kinds of row visible: its own bar, the
+    // conclusion, a still-live tool group, and the working indicator. The bar is
+    // the parent at indent 0 and every survivor stays one level in, so a folded
+    // turn still reads as "bar ⊃ what survived" rather than a flat list. The
+    // trivial-response case has no bar, hence no parent and no indent — that
+    // difference is hierarchy, not drift.
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("planning"),
+        tool("a", Completed),
+        tool("b", InProgress),
+        asst("here is the result"),
+    ];
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Response(0), true);
+    let rows = project(&items, &fold, true);
+
+    for row in rows.iter().filter(|r| !r.hidden) {
+        let expected = match row.kind {
+            RowKind::User(_) | RowKind::ResponseHeader { .. } => 0,
+            _ => 1,
+        };
+        assert_eq!(
+            row.indent,
+            expected,
+            "{:?} sits at the wrong depth under a collapsed response",
+            kinds(std::slice::from_ref(row))
+        );
+    }
+    // The set of survivors is what the invariant above is worth asserting over.
+    let visible = kinds(&rows)
+        .into_iter()
+        .filter(|(_, hidden)| !hidden)
+        .map(|(k, _)| k)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        visible,
+        vec!["user", "response", "group", "item", "working"]
+    );
+}
+
+#[test]
+fn leading_run_without_a_user_anchor_gets_no_solo_response() {
+    use ToolStatusView::Failed;
+    // Reachable on session restore: `append_user_chunk` drops a replayed
+    // `<task-notification>` user turn (see daruda_acp::mapping), so a restored
+    // pane can open with agent items and no `UserText` anchor. Such a run gets no
+    // response bar, and its blocks must stay plain `AgentItem`s — a `SoloResponse`
+    // here would let the assistant header report ✓ over itself while the sibling
+    // tool call sitting right next to it has failed.
+    let items = [asst("here is what I found"), tool("c1", Failed)];
+    let rows = project(&items, &FoldState::default(), false);
+
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::SoloResponse(_))),
+        "an unanchored run has no block that stands for the whole response"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::ResponseHeader { .. })),
+        "and no bar is emitted for it either"
+    );
+    assert_eq!(kinds(&rows), vec![("item", false), ("item", false)]);
+}
+
+#[test]
+fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
+    // The complement: two blocks under an anchor *is* non-trivial, so the bar
+    // carries the verdict and no block does.
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("thinking out loud"),
+        asst("done"),
+    ];
+    let rows = project(&items, &FoldState::default(), false);
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::SoloResponse(_)))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::ResponseHeader { .. }))
+    );
 }

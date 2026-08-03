@@ -10,7 +10,7 @@
 
 use daruda_acp::{ChatItem, ToolCallItem};
 
-use super::agent_chat_helpers::fold_active;
+use super::agent_chat_helpers::{agent_run, fold_active};
 use super::fold::{FoldKey, FoldState};
 
 /// Minimum consecutive tool-call run length that earns a collapsible group. A
@@ -29,8 +29,16 @@ pub(in crate::workspace) enum RowKind {
     /// whole response.
     ResponseHeader { anchor: usize, collapsed: bool },
     /// An individual agent block (assistant / thinking / tool / permission /
-    /// error), keyed by its `items` index.
+    /// error), keyed by its `items` index. One block among siblings: it says
+    /// nothing about the run it sits in.
     AgentItem(usize),
+    /// The lone agent block that *is* an entire response — an anchored run too
+    /// trivial to earn a [`RowKind::ResponseHeader`]. Since no bar exists to carry
+    /// them, this row owns the response-level affordances (the status-rollup
+    /// glyph). Emitted only for a single-block anchored run, so a response can
+    /// never show two rollups: a leading run with no user anchor stays
+    /// [`RowKind::AgentItem`] and reports nothing.
+    SoloResponse(usize),
     /// Synthetic header for a consecutive run of ≥ [`TOOL_GROUP_MIN`] tool
     /// calls. `gid` is the first tool call's id (stable under append-only);
     /// `first_ix` + `count` locate the run; `collapsed` drives the chevron and
@@ -74,6 +82,7 @@ impl RenderRow {
         match (&self.kind, &other.kind) {
             (RowKind::User(a), RowKind::User(b))
             | (RowKind::AgentItem(a), RowKind::AgentItem(b))
+            | (RowKind::SoloResponse(a), RowKind::SoloResponse(b))
             | (
                 RowKind::ResponseHeader { anchor: a, .. },
                 RowKind::ResponseHeader { anchor: b, .. },
@@ -138,11 +147,8 @@ pub(in crate::workspace) fn project(
             _ => None,
         };
 
-        let run_start = i;
-        while i < items.len() && !matches!(items[i], ChatItem::UserText(_)) {
-            i += 1;
-        }
-        let run = run_start..i;
+        let run = agent_run(items, i);
+        i = run.end;
         let is_last_turn = i >= items.len();
 
         let tools = run
@@ -179,11 +185,28 @@ pub(in crate::workspace) fn project(
                 1,
                 collapsed,
                 conclusion_ix,
+                false,
                 &mut rows,
             );
             1u8
         } else {
-            project_run(items, fold, run.clone(), 0, false, conclusion_ix, &mut rows);
+            // A single block under a user anchor is the whole response, so it
+            // carries the rollup no bar exists to show. Any other bar-less run —
+            // a leading run with no anchor, or (were `RESPONSE_MIN_BLOCKS` to
+            // rise) a multi-block trivial one — is blocks among siblings, and a
+            // per-block rollup there would report a verdict over one item while
+            // a sibling tool is still running or failed.
+            let solo = anchor.is_some() && run.len() == 1;
+            project_run(
+                items,
+                fold,
+                run.clone(),
+                0,
+                false,
+                conclusion_ix,
+                solo,
+                &mut rows,
+            );
             0u8
         };
 
@@ -208,6 +231,9 @@ pub(in crate::workspace) fn project(
 /// tool group additionally hides its own members. `conclusion_ix`, when set, is
 /// the run's final assistant-text item — it stays visible even while the
 /// response is collapsed, so a folded turn reads as "question → conclusion".
+/// `solo_response` marks a bar-less run whose single block stands for the whole
+/// response ([`RowKind::SoloResponse`]).
+#[allow(clippy::too_many_arguments)]
 fn project_run(
     items: &[ChatItem],
     fold: &FoldState,
@@ -215,6 +241,7 @@ fn project_run(
     base_indent: u8,
     response_collapsed: bool,
     conclusion_ix: Option<usize>,
+    solo_response: bool,
     rows: &mut Vec<RenderRow>,
 ) {
     let mut k = run.start;
@@ -287,6 +314,8 @@ fn project_run(
             let force_visible = is_conclusion || pending_permission;
             let kind = if is_conclusion && base_indent > 0 {
                 RowKind::ConclusionItem(k)
+            } else if solo_response {
+                RowKind::SoloResponse(k)
             } else {
                 RowKind::AgentItem(k)
             };

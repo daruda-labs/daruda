@@ -86,8 +86,11 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
             // The conclusion's own `FoldKey::Assistant` is added by the per-block
             // loop below (it is not in `inline_assistant`), so nothing to do here.
+            // A `SoloResponse` is likewise a top-level block at indent 0 — its own
+            // key comes from that loop, and it is never inline.
             RowKind::User(_)
             | RowKind::AgentItem(_)
+            | RowKind::SoloResponse(_)
             | RowKind::ConclusionItem(_)
             | RowKind::WorkingIndicator => {}
         }
@@ -150,6 +153,94 @@ pub(in crate::workspace) fn diff_source_fingerprint(diff: &DiffView) -> u64 {
     diff.old_text.hash(&mut hasher);
     diff.new_text.hash(&mut hasher);
     hasher.finish()
+}
+
+/// The agent run starting at `start`: every item up to (not including) the next
+/// user message, or the end of the conversation. Single source for "where does
+/// this response end" — [`crate::workspace::main_area::agent_chat_pane::rows`]
+/// walks turns with it and the response bar recomputes its own run from the
+/// anchor with it (the projected header carries only the anchor index). An empty
+/// range when `start` is past the end, so a prompt with no reply yet is not a
+/// special case.
+pub(in crate::workspace) fn agent_run(
+    items: &[daruda_acp::ChatItem],
+    start: usize,
+) -> std::ops::Range<usize> {
+    let end = items
+        .iter()
+        .skip(start)
+        .position(|item| matches!(item, daruda_acp::ChatItem::UserText(_)))
+        .map_or(items.len(), |offset| start + offset);
+    start.min(end)..end
+}
+
+/// The outcome a fold header's rollup glyph summarizes over the run it stands
+/// for. Single source shared by the response bar, the tool-group bar, and a
+/// top-level assistant block, so the three can never disagree on treatment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum Rollup {
+    /// At least one child still in progress / streaming (not settled).
+    Running,
+    /// All children succeeded.
+    Ok,
+    /// A mix — at least one failure alongside at least one success.
+    Partial,
+    /// Everything failed; nothing succeeded.
+    Failed,
+}
+
+impl Rollup {
+    /// Classify `items[range]` as one unit. `Running` wins (not settled yet);
+    /// otherwise a failure mixed with a success is `Partial`, all-failure is
+    /// `Failed`, no failure is `Ok`. Out-of-bounds parts of `range` are ignored,
+    /// so a caller need not clamp.
+    pub(in crate::workspace) fn of_run(
+        items: &[daruda_acp::ChatItem],
+        range: std::ops::Range<usize>,
+    ) -> Self {
+        use daruda_acp::{ChatItem, ToolStatusView};
+
+        let (mut running, mut any_failed, mut any_ok) = (false, false, false);
+        for item in range.filter_map(|k| items.get(k)) {
+            match item {
+                ChatItem::ToolCall(tc) => match tc.status {
+                    ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
+                    ToolStatusView::Failed => any_failed = true,
+                    ToolStatusView::Completed => any_ok = true,
+                    // Settled, neither success nor failure — sets no flag, so the
+                    // run stops pulsing without turning the glyph red.
+                    ToolStatusView::Cancelled => {}
+                },
+                ChatItem::AssistantText {
+                    text, streaming, ..
+                }
+                | ChatItem::Thinking {
+                    text, streaming, ..
+                } => {
+                    // Produced output counts as success, so a response that
+                    // answered *and* hit a tool failure reads partial (⚠), not a
+                    // hard failure (✗).
+                    if !text.trim().is_empty() {
+                        any_ok = true;
+                    }
+                    running |= *streaming;
+                }
+                ChatItem::Error(_) => any_failed = true,
+                // A user message never belongs to a run; a permission card is
+                // neither an outcome nor progress.
+                ChatItem::UserText(_) | ChatItem::Permission(_) => {}
+            }
+        }
+        if running {
+            Self::Running
+        } else if !any_failed {
+            Self::Ok
+        } else if any_ok {
+            Self::Partial
+        } else {
+            Self::Failed
+        }
+    }
 }
 
 /// Max glyphs the first-prompt fallback title keeps before ellipsizing, and the

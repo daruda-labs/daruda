@@ -746,3 +746,119 @@ fn raw_input_disclosure_gate_and_fold_coverage() {
         ..generic
     }));
 }
+
+#[test]
+fn rollup_of_run_is_ok_when_every_member_settled_successfully() {
+    let items = [
+        ChatItem::UserText("go".to_owned()),
+        ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Completed, 0)),
+        asst("done"),
+    ];
+    assert_eq!(Rollup::of_run(&items, 1..3), Rollup::Ok);
+}
+
+#[test]
+fn rollup_of_run_lets_running_outrank_a_settled_failure() {
+    let items = [
+        ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
+        ChatItem::ToolCall(tool_call("c2", daruda_acp::ToolStatusView::InProgress, 0)),
+    ];
+    assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Running);
+}
+
+#[test]
+fn rollup_of_run_reads_partial_when_output_accompanies_a_failure() {
+    // Produced prose counts as success, so an answered turn that also hit a tool
+    // failure warns rather than reading as a hard failure.
+    let items = [
+        ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
+        asst("here is what I found anyway"),
+    ];
+    assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Partial);
+}
+
+#[test]
+fn rollup_of_run_is_failed_when_nothing_succeeded() {
+    let items = [
+        ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
+        ChatItem::Error("boom".to_owned()),
+        // Empty prose is not output, so it cannot lift this to Partial.
+        asst("   "),
+    ];
+    assert_eq!(Rollup::of_run(&items, 0..3), Rollup::Failed);
+}
+
+#[test]
+fn rollup_of_run_ignores_a_cancelled_member() {
+    // Settled but neither success nor failure: the run stops pulsing without
+    // turning the glyph red.
+    let items = [ChatItem::ToolCall(tool_call(
+        "c1",
+        daruda_acp::ToolStatusView::Cancelled,
+        0,
+    ))];
+    assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Ok);
+}
+
+#[test]
+fn rollup_of_run_streaming_prose_reads_running() {
+    let items = [ChatItem::AssistantText {
+        text: "thinking out loud".to_owned(),
+        streaming: true,
+        message_id: None,
+    }];
+    assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Running);
+}
+
+#[test]
+fn rollup_of_run_tolerates_an_out_of_bounds_range() {
+    // A single-item run is addressed as `ix..ix + 1` by the top-level assistant
+    // block, and group ranges come from a projection — neither should have to
+    // clamp against `items.len()`.
+    let items = [asst("only")];
+    assert_eq!(Rollup::of_run(&items, 0..9), Rollup::Ok);
+    assert_eq!(Rollup::of_run(&items, 5..9), Rollup::Ok);
+}
+
+#[test]
+fn agent_run_ends_before_the_next_user_message() {
+    let items = [
+        ChatItem::UserText("q1".to_owned()),
+        asst("a1"),
+        ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Completed, 0)),
+        ChatItem::UserText("q2".to_owned()),
+        asst("a2"),
+    ];
+    // From the first anchor's reply through the tool call, stopping at `q2`.
+    assert_eq!(agent_run(&items, 1), 1..3);
+    // The last turn runs to the end of the conversation.
+    assert_eq!(agent_run(&items, 4), 4..5);
+}
+
+#[test]
+fn agent_run_is_empty_for_a_prompt_with_no_reply_yet() {
+    // `anchor + 1 == items.len()` — the in-flight first turn. Must be an empty
+    // range rather than a panic or an inverted one.
+    let items = [ChatItem::UserText("q".to_owned())];
+    let run = agent_run(&items, 1);
+    assert!(run.is_empty(), "{run:?} should be empty");
+    assert_eq!(run, 1..1);
+}
+
+#[test]
+fn agent_run_is_empty_when_a_user_message_follows_immediately() {
+    // Two prompts back to back (a re-prompt before any output): the first turn's
+    // run is empty, not the whole tail.
+    let items = [
+        ChatItem::UserText("q1".to_owned()),
+        ChatItem::UserText("q2".to_owned()),
+        asst("a"),
+    ];
+    assert_eq!(agent_run(&items, 1), 1..1);
+}
+
+#[test]
+fn agent_run_clamps_a_start_past_the_end() {
+    let items = [asst("only")];
+    assert_eq!(agent_run(&items, 9), 1..1);
+}

@@ -1,11 +1,12 @@
 //! Per-file diff blocks nested inside a tool card: the foldable diff header,
 //! the expanded body (embedded read-only editor or inline old/new fallback),
-//! the collapsed `+N −M` summary, and the inline fallback lines.
+//! the collapsed `+N −M` badge, and the inline fallback lines.
 
 use daruda_acp::DiffView;
 use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
-use super::{DiffStats, ToggleTarget, foldable_block};
+use super::DiffStats;
+use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{DiffStat, diff_editor_key};
@@ -14,9 +15,10 @@ use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
 /// Diff for a tool-call file modification — foldable (default collapsed),
 /// nested inside the tool card body. The header is the chevron + the file path
-/// (single-line ellipsized), on the hunk-header bg chrome. Collapsed, the
-/// summary shows `+N −M` from `diff_stats` (green added / red removed); a diff
-/// with no stat entry (a no-change diff) shows nothing. Expanded body: when a
+/// (single-line ellipsized), on the hunk-header bg chrome. Collapsed, `+N −M`
+/// from `diff_stats` (green added / red removed) stands in for the folded diff as
+/// a right-anchored badge; a diff with no stat entry (a no-change diff) shows
+/// nothing. Expanded body: when a
 /// read-only diff editor has been built for this file (in the ops layer), embed
 /// it so the treatment matches the File viewer exactly — gutter + syntax +
 /// word-diff backgrounds. Falls back to inline old/new colored monospace lines
@@ -33,36 +35,36 @@ pub(super) fn diff_block(
     t: &theme::DarudaTheme,
     dim: f32,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
+) -> AnyElement {
     let diff_key = diff_editor_key(tool_id, di);
     let key = FoldKey::Diff(diff_key.clone());
     // Diff policy is DefaultExpanded → derivation ignores `active` either way.
     let expanded = fold.is_expanded(&key, false);
 
-    let header = div()
-        .flex_1()
-        .min_w_0()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_color(t.file_diff_hunk_text)
-        .font_family(theme::FONT_FAMILY_MONOSPACE)
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(diff.path.display().to_string()))
-        .into_any_element();
+    // The path is the block's identity, shown in both fold states, so it takes
+    // the stretch slot; the truncation idiom lives in `fold_header`.
+    let mut header = FoldHeader::with_title(
+        div()
+            .text_color(t.file_diff_hunk_text)
+            .font_family(theme::FONT_FAMILY_MONOSPACE)
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .child(SharedString::from(diff.path.display().to_string()))
+            .into_any_element(),
+    );
+    // `+N −M` is right-anchored, so it is a trailing badge — not the stretch
+    // slot's collapsed summary it used to be routed through. Trailing content is
+    // fold-state-independent, so the stat stays readable while the diff is open.
+    if let Some(stat) = diff_stats.get(&diff_key) {
+        header = header.trailing(diff_stat_summary(stat, t, cx));
+    }
 
-    // Collapsed summary: `+N −M`. Absent entry ≡ no changes → show nothing.
-    let summary = diff_stats
-        .get(&diff_key)
-        .map(|stat| diff_stat_summary(stat, t, cx));
-
-    let body = diff_body(diff, editor, t, &diff_key, dim, cx).into_any_element();
     // Background-derived tint (not the fixed UI `BG_RAISED` surface) so the
     // header matches the same terminal-preset background the rest of the
     // tool card chrome tracks (`tool.rs` / `plan.rs` card bg). Not part of
     // `t` (the pre-dimmed theme snapshot), so it needs its own dim wrap.
-    // Computed up front (rather than inside the `header_chrome` closure
-    // below) because the closure runs during `foldable_block`'s own `cx`
-    // borrow, and `agent_chat_tint` needs its own immutable `cx` read.
+    // Computed up front (rather than inside the `chrome` closure below) because
+    // that closure runs during `FoldRow::render`'s own `cx` borrow, and
+    // `agent_chat_tint` needs its own immutable `cx` read.
     let header_bg = theme::dim_toward_gray(theme::agent_chat_tint(cx), dim);
 
     // The hunk-bg + padding chrome lives on the header row; the rounded /
@@ -74,28 +76,28 @@ pub(super) fn diff_block(
     // height (gpui `list.rs` `available_item_space`) — without it, the row's
     // measured height undercounts the diff and this container absorbs the
     // whole deficit, clipping the diff body / folded header.
+    let block = FoldRow::block(
+        SharedString::from(format!("agent-chat-diff-{diff_key}")),
+        key,
+        expanded,
+        header,
+        |cx| diff_body(diff, editor, t, &diff_key, dim, cx).into_any_element(),
+    )
+    .toggle_on_chevron()
+    .chrome(move |row| {
+        row.px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+            .py(px(theme::GAP_XS))
+            .bg(header_bg)
+    })
+    .render(dim, cx);
     div()
         .w_full()
         .flex_none()
         .rounded(px(theme::RADIUS_XS))
         .overflow_hidden()
         .debug_selector(|| format!("agent-chat-diff-container-{diff_key}"))
-        .child(foldable_block(
-            SharedString::from(format!("agent-chat-diff-{diff_key}")),
-            key,
-            expanded,
-            ToggleTarget::Chevron,
-            header,
-            summary,
-            body,
-            |row| {
-                row.px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-                    .py(px(theme::GAP_XS))
-                    .bg(header_bg)
-            },
-            dim,
-            cx,
-        ))
+        .child(block)
+        .into_any_element()
 }
 
 /// The expanded body of a diff block: the embedded read-only editor when one

@@ -5,10 +5,12 @@
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
+use super::MermaidImages;
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
 use super::mermaid::mermaid_code_block_render;
-use super::{MermaidImages, ToggleTarget, collapsed_text_summary, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
@@ -73,6 +75,11 @@ pub(super) fn assistant_markdown(
 /// its partial markdown fine (no per-message caret — the streaming signal lives
 /// on the input dock). Collapsed, the header shows the first non-empty line of
 /// `text`, dimmed and single-line ellipsized.
+///
+/// `rollup` is `Some` only when this block *is* the whole response — a bar-less
+/// anchored run of one block (`RowKind::SoloResponse`), where no response bar
+/// exists to carry the verdict. `None` for a block among siblings, so a run never
+/// shows a rollup computed over one of its items.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assistant_block(
     ix: usize,
@@ -81,37 +88,35 @@ pub(super) fn assistant_block(
     text: &str,
     mermaid_images: &MermaidImages,
     agent_label: &str,
+    rollup: Option<Rollup>,
+    t: &theme::DarudaTheme,
     dim: f32,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, dim, cx);
-    let header = div()
-        .flex_none()
-        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(agent_label.to_string()))
-        .into_any_element();
-    let summary = collapsed_text_summary(text, false, dim, cx);
-    foldable_block(
-        ("agent-chat-assistant", ix),
-        key,
-        expanded,
-        ToggleTarget::Row,
-        header,
-        summary,
-        body_el,
-        |row| row,
-        dim,
-        cx,
-    )
+) -> AnyElement {
+    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
+        div()
+            .flex_none()
+            .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .child(SharedString::from(agent_label.to_string()))
+            .into_any_element(),
+    );
+    if let Some(rollup) = rollup {
+        header = header.trailing(rollup_glyph(rollup, t, cx));
+    }
+    FoldRow::block(("agent-chat-assistant", ix), key, expanded, header, |cx| {
+        assistant_markdown(ix, text, mermaid_images, dim, cx)
+    })
+    .render(dim, cx)
 }
 
 /// The turn's conclusion — the run's final assistant message rendered under a
 /// response bar. Same drag-selectable markdown body as [`assistant_block`] but
-/// with no speaker label (the response bar above already names the speaker):
-/// just the bare disclosure chevron, so the conclusion folds to its first-line
-/// summary independently of the response's process fold.
+/// with no speaker label and no rollup glyph (the response bar above already
+/// names the speaker and carries the run's verdict): just the bare disclosure
+/// chevron, so the conclusion folds to its first-line summary independently of
+/// the response's process fold.
 pub(super) fn conclusion_block(
     ix: usize,
     key: FoldKey,
@@ -120,21 +125,15 @@ pub(super) fn conclusion_block(
     mermaid_images: &MermaidImages,
     dim: f32,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, dim, cx);
-    let summary = collapsed_text_summary(text, false, dim, cx);
-    foldable_block(
+) -> AnyElement {
+    FoldRow::block(
         ("agent-chat-conclusion", ix),
         key,
         expanded,
-        ToggleTarget::Row,
-        gpui::Empty.into_any_element(),
-        summary,
-        body_el,
-        |row| row,
-        dim,
-        cx,
+        FoldHeader::with_summary(|| SummaryLine::from_markdown(text)),
+        |cx| assistant_markdown(ix, text, mermaid_images, dim, cx),
     )
+    .render(dim, cx)
 }
 
 /// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
@@ -154,32 +153,26 @@ pub(super) fn thinking_block(
     mermaid_images: &MermaidImages,
     dim: f32,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
-        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .code_block_render(mermaid_code_block_render(mermaid_images, dim))
-        .into_any_element();
-    let header = div()
-        .flex_none()
-        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(s::agent_chat_thinking_label()))
-        .into_any_element();
-    let summary = collapsed_text_summary(text, true, dim, cx);
-    foldable_block(
-        ("agent-chat-thinking", ix),
-        key,
-        expanded,
-        ToggleTarget::Row,
-        header,
-        summary,
-        body_el,
-        |row| row,
-        dim,
-        cx,
-    )
+) -> AnyElement {
+    let header =
+        FoldHeader::with_summary(|| SummaryLine::from_markdown(text).map(SummaryLine::reasoning))
+            .leading(
+                div()
+                    .flex_none()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(s::agent_chat_thinking_label()))
+                    .into_any_element(),
+            );
+    FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
+        crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
+            .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .code_block_render(mermaid_code_block_render(mermaid_images, dim))
+            .into_any_element()
+    })
+    .render(dim, cx)
 }
 
 /// Surfaced error item — error-tinted block.

@@ -12,8 +12,9 @@ use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
 use super::mermaid::mermaid_fence_element;
-use super::{DiffEditors, DiffStats, MermaidImages, ToggleTarget, ToolImages, foldable_block};
+use super::{DiffEditors, DiffStats, MermaidImages, ToolImages};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
@@ -27,10 +28,10 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
-/// in progress). The header holds a fixed-width label (the agent's own tool
-/// name, else the kind) + the status badge, so it never grows with a long or
-/// multiline title; collapsed, a dimmed one-line summary of the title fills the
-/// header row instead. The
+/// in progress). The header leads with a fixed-width label (the agent's own tool
+/// name, else the kind) so it never grows with a long or multiline title, keeps
+/// the status badge right-anchored in the trailing slot, and — collapsed — fills
+/// the stretch slot between them with a dimmed one-line summary of the title. The
 /// body — full untruncated title, then diffs + plain-text output — shows only
 /// when expanded; the card's border / bg chrome wraps the fold assembly either
 /// way. The nested diffs are independently foldable.
@@ -77,233 +78,227 @@ pub(super) fn tool_card(
     // (Read/Edit/Search/…). Either way it's a short identifier, never the long
     // or multiline title, so the header line never grows — the full title is not
     // a summary here, it moves to the expanded body (below) instead. Collapsed,
-    // a dimmed one-line summary of the title fills the gap before the badge so
-    // the card still reads at a glance without expanding.
+    // a dimmed one-line summary of the title fills the stretch slot before the
+    // badge so the card still reads at a glance without expanding.
     let fg = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
     let failed = matches!(tc.status, ToolStatusView::Failed);
     let font_size = px(theme::agent_chat_font_size(cx));
-    let header = div()
-        .flex_1()
-        .min_w_0()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(theme::GAP_SM))
-                .child(Icon::new(tool_kind_icon(tc.kind)).xsmall().text_color(fg))
-                .child(div().flex_none().text_color(fg).text_size(font_size).child(
-                    SharedString::from(tool_header_label(tc.tool_name.as_deref(), tc.kind)),
-                ))
-                .when(!expanded, |d| {
-                    d.child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_color(theme::dim_toward_gray(
-                                theme::agent_chat_fg_subtle(cx),
-                                dim,
-                            ))
-                            .text_size(font_size)
-                            .child(SharedString::from(tool_title_summary(&tc.title))),
-                    )
-                }),
-        )
-        // Detached shell command (`run_in_background: true`): the tool completes
-        // immediately with an ack while the real process keeps running, so a
-        // chip marks it as launched-in-background — otherwise the card is
-        // indistinguishable from a normal one-shot command.
-        .when(tc.is_background(), |d| {
-            d.child(
-                crate::ui::Badge::new(SharedString::from(s::agent_chat_tool_background()))
-                    .bg_color(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
-                    .border_color(theme::dim_toward_gray(
-                        theme::agent_chat_border_tint(cx),
-                        dim,
+    let mut header =
+        FoldHeader::with_summary(|| Some(SummaryLine::plain(tool_title_summary(&tc.title))))
+            .leading(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::GAP_SM))
+                    .child(Icon::new(tool_kind_icon(tc.kind)).xsmall().text_color(fg))
+                    .child(div().flex_none().text_color(fg).text_size(font_size).child(
+                        SharedString::from(tool_header_label(tc.tool_name.as_deref(), tc.kind)),
                     ))
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim)),
-            )
-        })
-        .child(
-            div()
-                .flex_none()
-                .text_color(badge_fg)
-                .text_size(font_size)
-                .child(badge_text),
-        )
-        .into_any_element();
+                    .into_any_element(),
+            );
+    // Detached shell command (`run_in_background: true`): the tool completes
+    // immediately with an ack while the real process keeps running, so a
+    // chip marks it as launched-in-background — otherwise the card is
+    // indistinguishable from a normal one-shot command.
+    if tc.is_background() {
+        header = header.trailing(
+            crate::ui::Badge::new(SharedString::from(s::agent_chat_tool_background()))
+                .bg_color(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
+                .border_color(theme::dim_toward_gray(
+                    theme::agent_chat_border_tint(cx),
+                    dim,
+                ))
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                .into_any_element(),
+        );
+    }
+    let header = header.trailing(
+        div()
+            .flex_none()
+            .text_color(badge_fg)
+            .text_size(font_size)
+            .child(badge_text)
+            .into_any_element(),
+    );
 
     // Body: the full, untruncated title first (dropped from the header above,
     // so it needs a home — un-muted `fg` so it reads as the primary statement
     // ahead of the muted raw-input/output labels and the diff blocks' own
     // hunk-bg chrome below it), then an optional raw-input disclosure (generic
     // tools), then nested diffs (each independently foldable), then plain-text
-    // output.
-    let mut body = div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(
-            div().text_color(fg).text_size(font_size).child(
-                crate::ui::selectable_text(
-                    SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
-                    SharedString::from(tc.title.clone()),
-                )
-                .color(fg)
-                .text_size(font_size),
-            ),
-        );
-    if renders_raw_input(tc)
-        && let Some(raw) = &tc.raw_input
-    {
-        // Collapsed-by-default disclosure so the detail is on tap without
-        // cluttering the card. The pretty-print + selectable-text build only
-        // when expanded: `foldable_block` drops the body when collapsed, so
-        // building it then is wasted work on the render hot path (GPUI has no
-        // partial redraw) for a large `raw_input` blob.
-        let raw_key = FoldKey::ToolRawInput(tc.id.clone());
-        let raw_expanded = fold.is_expanded(&raw_key, false);
-        let raw_header = div()
-            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
-            .text_size(font_size)
-            .child(SharedString::from(s::agent_chat_raw_input_label()))
-            .into_any_element();
-        let raw_json: AnyElement = if raw_expanded {
-            let pretty = serde_json::to_string_pretty(raw).unwrap_or_else(|_| raw.to_string());
-            div()
-                .min_w_0()
-                .font_family(theme::FONT_FAMILY_MONOSPACE)
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
-                .text_size(font_size)
-                .child(
+    // output. Built inside `FoldRow::block`'s closure, so a collapsed card never
+    // pays for it.
+    let body = move |cx: &mut Context<AgentChatView>| {
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::AGENT_CHAT_MSG_GAP))
+            .child(
+                div().text_color(fg).text_size(font_size).child(
                     crate::ui::selectable_text(
-                        SharedString::from(format!("agent-chat-tool-rawin-{}", tc.id)),
-                        SharedString::from(pretty),
+                        SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
+                        SharedString::from(tc.title.clone()),
                     )
+                    .color(fg)
                     .text_size(font_size),
-                )
-                .into_any_element()
-        } else {
-            gpui::Empty.into_any_element()
-        };
-        body = body.child(foldable_block(
-            SharedString::from(format!("agent-chat-rawin-{}", tc.id)),
-            raw_key,
-            raw_expanded,
-            ToggleTarget::Chevron,
-            raw_header,
-            None,
-            raw_json,
-            |row| row,
-            dim,
-            cx,
-        ));
-    }
-    for (di, diff) in tc.diffs.iter().enumerate() {
-        let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
-        body = body.child(diff_block(
-            &tc.id, di, diff, editor, diff_stats, fold, t, dim, cx,
-        ));
-    }
-    if !tc.output.is_empty() {
-        body = body.child(
-            div()
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat_tool_output_label())),
-        );
-        for (ix, block) in tc.output.iter().enumerate() {
-            body = body.child(output_block_view(
-                &tc.id,
-                ix,
-                block,
-                tool_images,
-                mermaid_images,
-                dim,
-                cx,
-            ));
-        }
-    }
-
-    // Subagent activity: the Claude adapter flattens a spawned subagent's inner
-    // tool calls into this session, linking each to this Task/Agent call only
-    // via `parent_tool_id`. `rows::project` skips those children in the main
-    // flow; render them nested here (recursively — a child may itself spawn one)
-    // so the subagent reads as one unit that folds with its parent card.
-    //
-    // `depth` bounds the recursion: real `parentToolUseId`s are unique and
-    // acyclic (a parent always precedes its children), but this id comes from a
-    // subprocess pipe, so a malformed / cyclic ref (a self-parent, or A→B→A)
-    // would otherwise recurse until the stack overflows — an uncatchable abort
-    // that takes the whole window down. Past the cap the children are simply not
-    // nested (the parent card still renders), which no real conversation hits.
-    let children: Vec<&ToolCallItem> = if depth < SUBAGENT_NEST_DEPTH_CAP {
-        items
-            .iter()
-            .filter_map(|it| match it {
-                ChatItem::ToolCall(c) if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) => {
-                    Some(c)
-                }
-                _ => None,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if !children.is_empty() {
-        // Name the spawned subagent when the Task input carries its type
-        // (`subagent_type`); fall back to the generic label otherwise.
-        let subagent_label = match tc.subagent_type() {
-            Some(kind) => s::agent_chat_subagent_label_typed(kind),
-            None => s::agent_chat_subagent_label(),
-        };
-        body = body.child(
-            div()
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(subagent_label)),
-        );
-        for child in children {
-            // A nested child may itself be a subagent launch (a subagent that
-            // spawns its own subagent), so key it the same way as a top-level
-            // card — collapsed by default when it is one.
-            let child_key = tool_fold_key(child);
-            let child_expanded = fold.is_expanded(&child_key, fold_active(&child_key, items));
+                ),
+            );
+        if renders_raw_input(tc)
+            && let Some(raw) = &tc.raw_input
+        {
+            // Collapsed-by-default disclosure so the detail is on tap without
+            // cluttering the card. `FoldRow::block` builds its body only when
+            // expanded, so the pretty-print of a large `raw_input` blob stays off the
+            // render hot path (GPUI has no partial redraw) with no manual gate.
+            let raw_key = FoldKey::ToolRawInput(tc.id.clone());
+            let raw_expanded = fold.is_expanded(&raw_key, false);
+            let raw_header = FoldHeader::bare().leading(
+                div()
+                    .flex_none()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_size(font_size)
+                    .child(SharedString::from(s::agent_chat_raw_input_label()))
+                    .into_any_element(),
+            );
             body = body.child(
-                tool_card(
-                    child_key,
-                    child_expanded,
-                    child,
-                    items,
-                    diff_editors,
-                    diff_stats,
-                    tool_images,
-                    mermaid_images,
-                    fold,
-                    t,
-                    dim,
-                    depth + 1,
-                    cx,
+                FoldRow::block(
+                    SharedString::from(format!("agent-chat-rawin-{}", tc.id)),
+                    raw_key,
+                    raw_expanded,
+                    raw_header,
+                    |cx| {
+                        let pretty =
+                            serde_json::to_string_pretty(raw).unwrap_or_else(|_| raw.to_string());
+                        div()
+                            .min_w_0()
+                            .font_family(theme::FONT_FAMILY_MONOSPACE)
+                            .text_color(theme::dim_toward_gray(
+                                theme::agent_chat_fg_subtle(cx),
+                                dim,
+                            ))
+                            .text_size(font_size)
+                            .child(
+                                crate::ui::selectable_text(
+                                    SharedString::from(format!("agent-chat-tool-rawin-{}", tc.id)),
+                                    SharedString::from(pretty),
+                                )
+                                .text_size(font_size),
+                            )
+                            .into_any_element()
+                    },
                 )
-                .into_any_element(),
+                .toggle_on_chevron()
+                .render(dim, cx),
             );
         }
-    }
+        for (di, diff) in tc.diffs.iter().enumerate() {
+            let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
+            body = body.child(diff_block(
+                &tc.id, di, diff, editor, diff_stats, fold, t, dim, cx,
+            ));
+        }
+        if !tc.output.is_empty() {
+            body = body.child(
+                div()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(s::agent_chat_tool_output_label())),
+            );
+            for (ix, block) in tc.output.iter().enumerate() {
+                body = body.child(output_block_view(
+                    &tc.id,
+                    ix,
+                    block,
+                    tool_images,
+                    mermaid_images,
+                    dim,
+                    cx,
+                ));
+            }
+        }
 
-    // Card chrome (border + bg) wraps the fold assembly. The collapsed-only
-    // summary is built into `header` itself (not passed as `foldable_block`'s
-    // `summary` slot): the badge must stay pinned to the header's right edge
-    // in both fold states, and `foldable_block` appends its `summary` slot as
-    // a sibling *after* the whole header, which would land it past the badge.
+        // Subagent activity: the Claude adapter flattens a spawned subagent's inner
+        // tool calls into this session, linking each to this Task/Agent call only
+        // via `parent_tool_id`. `rows::project` skips those children in the main
+        // flow; render them nested here (recursively — a child may itself spawn one)
+        // so the subagent reads as one unit that folds with its parent card.
+        //
+        // `depth` bounds the recursion: real `parentToolUseId`s are unique and
+        // acyclic (a parent always precedes its children), but this id comes from a
+        // subprocess pipe, so a malformed / cyclic ref (a self-parent, or A→B→A)
+        // would otherwise recurse until the stack overflows — an uncatchable abort
+        // that takes the whole window down. Past the cap the children are simply not
+        // nested (the parent card still renders), which no real conversation hits.
+        let children: Vec<&ToolCallItem> = if depth < SUBAGENT_NEST_DEPTH_CAP {
+            items
+                .iter()
+                .filter_map(|it| match it {
+                    ChatItem::ToolCall(c)
+                        if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) =>
+                    {
+                        Some(c)
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if !children.is_empty() {
+            // Name the spawned subagent when the Task input carries its type
+            // (`subagent_type`); fall back to the generic label otherwise.
+            let subagent_label = match tc.subagent_type() {
+                Some(kind) => s::agent_chat_subagent_label_typed(kind),
+                None => s::agent_chat_subagent_label(),
+            };
+            body = body.child(
+                div()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(subagent_label)),
+            );
+            for child in children {
+                // A nested child may itself be a subagent launch (a subagent that
+                // spawns its own subagent), so key it the same way as a top-level
+                // card — collapsed by default when it is one.
+                let child_key = tool_fold_key(child);
+                let child_expanded = fold.is_expanded(&child_key, fold_active(&child_key, items));
+                body = body.child(
+                    tool_card(
+                        child_key,
+                        child_expanded,
+                        child,
+                        items,
+                        diff_editors,
+                        diff_stats,
+                        tool_images,
+                        mermaid_images,
+                        fold,
+                        t,
+                        dim,
+                        depth + 1,
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
+        body.into_any_element()
+    };
+
+    let block = FoldRow::block(
+        SharedString::from(format!("agent-chat-tool-{}", tc.id)),
+        key,
+        expanded,
+        header,
+        body,
+    )
+    .toggle_on_chevron()
+    .render(dim, cx);
+
+    // Card chrome (border + bg) wraps the fold assembly.
     div()
         .w_full()
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -326,18 +321,7 @@ pub(super) fn tool_card(
             theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim)
         })
         .when(failed, |d| d.border_dashed())
-        .child(foldable_block(
-            SharedString::from(format!("agent-chat-tool-{}", tc.id)),
-            key,
-            expanded,
-            ToggleTarget::Chevron,
-            header,
-            None,
-            body.into_any_element(),
-            |row| row,
-            dim,
-            cx,
-        ))
+        .child(block)
 }
 
 /// Render one tool-output block: rendered markdown (drag-selectable, keyed per

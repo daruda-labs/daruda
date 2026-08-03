@@ -7,15 +7,16 @@
 mod blocks;
 mod chrome;
 mod diff;
+mod fold_header;
 mod mermaid;
 mod mermaid_lightbox;
 mod plan;
 mod tool;
 
-use daruda_acp::{ChatItem, ToolStatusView};
+use daruda_acp::ChatItem;
 use gpui::{
-    AnyElement, App, ElementId, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString,
-    canvas, div, list, prelude::*, px,
+    AnyElement, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString, canvas, div,
+    list, prelude::*, px,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -59,16 +60,15 @@ use blocks::{
     assistant_block, assistant_markdown, conclusion_block, error_block, thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
+use fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
 use plan::plan_region;
 use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{
-    ContextMenuExt, Disclosure, IconName, StatusPulseClock, button_bare, disclosure, menu_builder,
-};
+use crate::ui::{ContextMenuExt, IconName, StatusPulseClock, button_bare, menu_builder};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, activity_bar_title, is_active, summary_preview_line, tool_fold_key,
+    DiffStat, Rollup, activity_bar_title, agent_run, is_active, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
@@ -281,24 +281,19 @@ fn render_row(
         RowKind::ResponseHeader { anchor, collapsed } => {
             response_bar(this, *anchor, *collapsed, t, cx).into_any_element()
         }
-        RowKind::AgentItem(i) => match this.items.get(*i) {
-            Some(item) => render_item(
-                *i,
-                item,
-                row.indent > 0,
-                &this.items,
-                &this.assets.diff_editors,
-                &this.assets.diff_stats,
-                &this.assets.mermaid_images,
-                &this.assets.tool_images,
-                &this.fold,
-                t,
-                this.dim_amount,
-                agent_display_name(this),
-                cx,
-            ),
-            None => gpui::Empty.into_any_element(),
-        },
+        // One block among siblings — it reports nothing about the run, so no
+        // rollup glyph (see `RowKind::SoloResponse`).
+        RowKind::AgentItem(i) => render_agent_item(this, *i, row.indent > 0, None, t, cx),
+        // The whole response in one block: it owns the rollup a response bar would
+        // otherwise carry. The run is this single item, so classify over it.
+        RowKind::SoloResponse(i) => render_agent_item(
+            this,
+            *i,
+            row.indent > 0,
+            Some(Rollup::of_run(&this.items, *i..*i + 1)),
+            t,
+            cx,
+        ),
         RowKind::ToolGroupHeader {
             gid,
             first_ix,
@@ -347,87 +342,6 @@ fn render_row(
         .into_any_element()
 }
 
-/// Where the fold-toggle click lives on a [`disclosure_row`] / [`foldable_block`]
-/// header: the whole row, or the chevron glyph alone.
-#[derive(Clone, Copy)]
-pub(super) enum ToggleTarget {
-    /// The whole header row toggles the fold — generous hit area (section bars,
-    /// text blocks).
-    Row,
-    /// Only the chevron toggles; the rest of the header stays inert so a header
-    /// carrying selectable content (the tool-card title) doesn't fight text
-    /// selection.
-    Chevron,
-}
-
-/// Shared scaffold for every collapsible header: a full-width borderless row
-/// that toggles `key` and leads with the disclosure chevron. Callers append
-/// their own label / summary / trailing glyph; `target` picks where the click
-/// lives. One source for layout + click target, so the section bars and inline
-/// blocks can't drift apart.
-fn disclosure_row(
-    base: impl Into<ElementId>,
-    key: FoldKey,
-    expanded: bool,
-    target: ToggleTarget,
-    dim: f32,
-    cx: &mut Context<AgentChatView>,
-) -> gpui::Stateful<gpui::Div> {
-    // One base id yields both the row's click target and the chevron glyph's
-    // identity — distinct yet stable across renders.
-    let base: ElementId = base.into();
-    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
-        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
-    let row = div()
-        .id((base, "row"))
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP));
-    match target {
-        ToggleTarget::Row => row
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
-            .child(chevron),
-        // Bind the click to the chevron itself; the row carries no click
-        // handler, so selectable header content stays freely selectable.
-        ToggleTarget::Chevron => row.child(chevron.on_toggle(
-            cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)),
-        )),
-    }
-}
-
-/// The outcome a section header's rollup glyph summarizes over its run (see
-/// [`rollup_glyph`]). Single source for the response bar and tool-group bar so
-/// the two never disagree on treatment.
-enum Rollup {
-    /// At least one child still in progress / streaming (not settled).
-    Running,
-    /// All children succeeded.
-    Ok,
-    /// A mix — at least one failure alongside at least one success.
-    Partial,
-    /// Everything failed; nothing succeeded.
-    Failed,
-}
-
-/// Classify a run from whether anything is active, anything failed, and anything
-/// succeeded. `Running` wins (not settled yet); otherwise a failure mixed with a
-/// success is `Partial`, all-failure is `Failed`, no failure is `Ok`.
-fn rollup_of(running: bool, any_failed: bool, any_ok: bool) -> Rollup {
-    if running {
-        Rollup::Running
-    } else if !any_failed {
-        Rollup::Ok
-    } else if any_ok {
-        Rollup::Partial
-    } else {
-        Rollup::Failed
-    }
-}
-
 /// The blink opacity for the shared 2-tick `StatusPulseClock` pulse:
 /// `1.0` on even half-ticks (bright), `STATUS_INDICATOR_PULSE_OPACITY_MIN`
 /// on odd half-ticks (dim). Used by [`rollup_glyph`] for the Running dot
@@ -444,139 +358,79 @@ pub(super) fn pulse_opacity(cx: &gpui::App) -> f32 {
     }
 }
 
-fn rollup_glyph(
-    rollup: Rollup,
-    t: &theme::DarudaTheme,
-    cx: &gpui::App,
-) -> impl IntoElement + use<> {
-    let (glyph, color) = match rollup {
-        // Amber "executing tool" accent so an in-progress run reads stronger
-        // than a settled glyph.
-        Rollup::Running => ("●", t.status_executing_tool_dark),
-        Rollup::Ok => ("✓", t.file_diff_stat_add),
-        // Partial = some failed, some succeeded → warning, not a hard failure.
-        Rollup::Partial => ("⚠", t.banner_warning_text),
-        Rollup::Failed => ("✗", t.banner_error_text),
-    };
-    // Blink the running dot on the shared 2-tick pulse so it reads as live;
-    // settled glyphs stay solid.
-    let opacity = if matches!(rollup, Rollup::Running) {
-        pulse_opacity(cx)
-    } else {
-        1.0
-    };
-    div()
-        .flex_none()
-        .opacity(opacity)
-        .text_color(color)
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(glyph))
-}
-
 /// Collapsible header for an agent response (agent items under a user message).
-/// The whole row toggles `FoldKey::Response`; shows a chevron + agent label and,
-/// when collapsed, the response's first line, tool count, and status-rollup
-/// glyph (see [`rollup_glyph`]).
+/// The whole row toggles `FoldKey::Response`; the agent label leads, the
+/// response's first line fills the row when collapsed, and the tool count plus
+/// the status-rollup glyph sit at the right edge.
 fn response_bar(
     this: &AgentChatView,
     anchor: usize,
     collapsed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let mut tools = 0usize;
-    let mut first_line: Option<String> = None;
-    let (mut running, mut failed, mut any_ok) = (false, false, false);
-    for item in this.items.iter().skip(anchor + 1) {
-        match item {
-            ChatItem::UserText(_) => break,
-            ChatItem::ToolCall(tc) => {
-                tools += 1;
-                match tc.status {
-                    ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
-                    ToolStatusView::Failed => failed = true,
-                    ToolStatusView::Completed => any_ok = true,
-                    // Settled, neither success nor failure — sets no flag.
-                    ToolStatusView::Cancelled => {}
+) -> AnyElement {
+    let run = agent_run(&this.items, anchor + 1);
+    let tools = run
+        .clone()
+        .filter(|&k| matches!(this.items.get(k), Some(ChatItem::ToolCall(_))))
+        .count();
+    // The response's opening prose — the first item that yields a preview, so a
+    // turn that opened with reasoning still previews something and an empty
+    // leading block (a streaming placeholder that has not filled yet) falls
+    // through to the next rather than blanking the summary.
+    let summary_run = run.clone();
+    let items = &this.items;
+    let mut header = FoldHeader::with_summary(move || {
+        summary_run
+            .filter_map(|k| match items.get(k) {
+                Some(ChatItem::AssistantText { text, .. } | ChatItem::Thinking { text, .. }) => {
+                    SummaryLine::from_markdown(text)
                 }
-            }
-            ChatItem::AssistantText {
-                text, streaming, ..
-            }
-            | ChatItem::Thinking {
-                text, streaming, ..
-            } => {
-                if first_line.is_none() {
-                    first_line = text
-                        .lines()
-                        .find(|l| !l.trim().is_empty())
-                        .map(str::to_owned);
-                }
-                // Produced assistant output counts as success, so a response
-                // that answered *and* hit a tool failure reads partial (⚠),
-                // not a hard failure (✗).
-                if !text.trim().is_empty() {
-                    any_ok = true;
-                }
-                running |= *streaming;
-            }
-            ChatItem::Error(_) => failed = true,
-            ChatItem::Permission(_) => {}
-        }
+                _ => None,
+            })
+            .next()
+    })
+    .leading(agent_label(this, cx).into_any_element());
+    // Trailing content is fold-state-independent (see `FoldHeader::trailing`), so
+    // the count reads the same expanded or collapsed.
+    if tools > 0 {
+        header = header.trailing(count_label(s::agent_chat_tool_group_count(tools), this, cx));
     }
-    let rollup = rollup_of(running, failed, any_ok);
-    // Borderless `disclosure_row`, matching the block headers — section headers
-    // stay light; only content cards (`tool_card`) carry box chrome.
-    let mut row = disclosure_row(
+    let header = header.trailing(rollup_glyph(Rollup::of_run(&this.items, run), t, cx));
+    // Borderless section bar, matching the block headers — section headers stay
+    // light; only content cards (`tool_card`) carry box chrome.
+    FoldRow::section(
         SharedString::from(format!("agent-chat-response-{anchor}")),
         FoldKey::Response(anchor),
         !collapsed,
-        ToggleTarget::Row,
-        this.dim_amount,
-        cx,
+        header,
     )
-    .child(
-        div()
-            .flex_none()
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(this.dim(theme::agent_chat_fg(cx)))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(agent_display_name(this).to_string())),
-    );
+    .render(this.dim_amount, cx)
+}
 
-    // Collapsed: first line (ellipsized) + tool count fill the row before the
-    // status glyph. Expanded: push the glyph to the right.
-    if collapsed {
-        let line = first_line.unwrap_or_default();
-        row = row.child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(line)),
-        );
-        if tools > 0 {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
-                    .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_tool_group_count(tools))),
-            );
-        }
-    } else {
-        row = row.child(div().flex_1());
-    }
+/// The agent name as a fold header's leading label.
+fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoElement + use<> {
+    div()
+        .flex_none()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(this.dim(theme::agent_chat_fg(cx)))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(SharedString::from(agent_display_name(this).to_string()))
+}
 
-    row.child(rollup_glyph(rollup, t, cx))
+/// A right-anchored count in a fold header's trailing slot.
+fn count_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>) -> AnyElement {
+    div()
+        .flex_none()
+        .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(SharedString::from(label))
+        .into_any_element()
 }
 
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
 /// the group's fold (`FoldKey::ToolGroup`); shows a chevron, a ⚙ marker, the
-/// "N tool calls" count, and a status-rollup glyph (see [`rollup_glyph`]).
+/// "N tool calls" count, and a status-rollup glyph.
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
@@ -585,46 +439,35 @@ fn tool_group_bar(
     collapsed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let (mut running, mut failed, mut any_ok) = (false, false, false);
-    for k in first_ix..(first_ix + count).min(this.items.len()) {
-        if let ChatItem::ToolCall(tc) = &this.items[k] {
-            match tc.status {
-                ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
-                ToolStatusView::Failed => failed = true,
-                ToolStatusView::Completed => any_ok = true,
-                // Settled but neither success nor failure: sets no flag, so the
-                // run stops pulsing without turning the glyph red.
-                ToolStatusView::Cancelled => {}
-            }
-        }
-    }
-    let rollup = rollup_of(running, failed, any_ok);
-    // Borderless `disclosure_row`, same as the response bar.
-    disclosure_row(
-        SharedString::from(format!("agent-chat-toolgroup-{gid}")),
-        FoldKey::ToolGroup(gid.to_string()),
-        !collapsed,
-        ToggleTarget::Row,
-        this.dim_amount,
-        cx,
+) -> AnyElement {
+    let rollup = Rollup::of_run(&this.items, first_ix..first_ix + count);
+    // The count is the group's own identity, not a preview of folded content, so
+    // it shows in both states — hence `plain` rather than a markdown summary.
+    let label = s::agent_chat_tool_group_count(count);
+    let header = FoldHeader::with_title(
+        div()
+            .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .child(SharedString::from(label))
+            .into_any_element(),
     )
-    .child(
+    .leading(
         div()
             .flex_none()
             .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from("⚙")),
+            .child(SharedString::from("⚙"))
+            .into_any_element(),
     )
-    .child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(s::agent_chat_tool_group_count(count))),
+    .trailing(rollup_glyph(rollup, t, cx));
+    // Borderless section bar, same as the response bar.
+    FoldRow::section(
+        SharedString::from(format!("agent-chat-toolgroup-{gid}")),
+        FoldKey::ToolGroup(gid.to_string()),
+        !collapsed,
+        header,
     )
-    .child(rollup_glyph(rollup, t, cx))
+    .render(this.dim_amount, cx)
 }
 
 /// Floating "jump to bottom" affordance shown when the user has scrolled up
@@ -644,6 +487,38 @@ fn scroll_to_bottom_button(
         )
 }
 
+/// Look up an item row's `ChatItem` and render it. `rollup`, when present, is the
+/// verdict this block reports for the response it stands for — `Some` only for a
+/// [`RowKind::SoloResponse`], so exactly one row per response shows a glyph.
+fn render_agent_item(
+    this: &AgentChatView,
+    ix: usize,
+    under_response: bool,
+    rollup: Option<Rollup>,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    match this.items.get(ix) {
+        Some(item) => render_item(
+            ix,
+            item,
+            under_response,
+            rollup,
+            &this.items,
+            &this.assets.diff_editors,
+            &this.assets.diff_stats,
+            &this.assets.mermaid_images,
+            &this.assets.tool_images,
+            &this.fold,
+            t,
+            this.dim_amount,
+            agent_display_name(this),
+            cx,
+        ),
+        None => gpui::Empty.into_any_element(),
+    }
+}
+
 /// One conversation row. Message bodies render as selectable markdown via
 /// `crate::ui::markdown`, keyed by `ix` for stable selection identity. `fold` /
 /// `diff_stats` are read-only here: foldable kinds derive expanded state via
@@ -654,6 +529,7 @@ fn render_item(
     ix: usize,
     item: &ChatItem,
     under_response: bool,
+    rollup: Option<Rollup>,
     items: &[ChatItem],
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
@@ -683,10 +559,11 @@ fn render_item(
                 text,
                 mermaid_images,
                 agent_label,
+                rollup,
+                t,
                 dim,
                 cx,
             )
-            .into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
@@ -716,85 +593,4 @@ fn render_item(
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t, cx).into_any_element(),
     }
-}
-
-/// Shared assembly for the four foldable block kinds (treatment C): a left
-/// chevron + clickable header row, an optional dimmed inline summary shown only
-/// when collapsed, and a body shown only when expanded. The whole header row is
-/// the click target (generous hit area); the [`disclosure`] chevron renders as
-/// a pure indicator glyph with no click handler of its own, so it never
-/// double-dispatches (a `disclosure` without `.on_toggle()` registers no click
-/// listener — see gpui `paint_mouse_listeners`).
-///
-/// `header_chrome` styles the header row itself — `|row| row` for the bare
-/// assistant / thinking / tool headers, or a closure that adds the diff's
-/// hunk-bg + padding. Each kind owns its outer chrome (assistant / thinking:
-/// none; tool: card border + bg; diff: hunk-bg header) by wrapping this output
-/// and/or styling the header row through `header_chrome`.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn foldable_block<
-    Id: Into<ElementId>,
-    F: FnOnce(gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div>,
->(
-    id: Id,
-    key: FoldKey,
-    expanded: bool,
-    target: ToggleTarget,
-    header: AnyElement,
-    summary: Option<AnyElement>,
-    body: AnyElement,
-    header_chrome: F,
-    dim: f32,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<Id, F> {
-    // Same `disclosure_row` scaffold as the section bars (chevron + click), then
-    // append this block's own header content.
-    let mut header_row = disclosure_row(id, key, expanded, target, dim, cx).child(header);
-    // The collapsed-only inline summary sits after the header content, on the
-    // same row, and is dropped entirely when expanded (the body carries the
-    // detail then).
-    if !expanded && let Some(summary) = summary {
-        header_row = header_row.child(summary);
-    }
-    let header_row = header_chrome(header_row);
-
-    div()
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(header_row)
-        .when(expanded, move |this| this.child(body))
-}
-
-/// The collapsed-only inline summary for a text block (assistant / thinking):
-/// the first non-empty line of `text` with inline markdown flattened to plain
-/// text (via [`summary_preview_line`], so `**bold**` reads as prose, not raw
-/// `**`), dimmed (`theme::agent_chat_fg_subtle(cx)`) and single-line ellipsized
-/// via `flex_1().min_w_0()` + `overflow_hidden()` — the same truncation idiom
-/// the path / title elements use, so layout (not a hardcoded char limit) does
-/// the ellipsizing. A left margin (`AGENT_CHAT_SUMMARY_GAP`) separates it from
-/// the header label. `italic` matches the thinking block's treatment. `None`
-/// when the text has no non-empty line (nothing to summarize).
-pub(super) fn collapsed_text_summary(
-    text: &str,
-    italic: bool,
-    dim: f32,
-    cx: &App,
-) -> Option<AnyElement> {
-    let line = summary_preview_line(text)?;
-    Some(
-        div()
-            .flex_1()
-            .min_w_0()
-            .ml(px(theme::AGENT_CHAT_SUMMARY_GAP))
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .when(italic, |el| el.italic())
-            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(line))
-            .into_any_element(),
-    )
 }
