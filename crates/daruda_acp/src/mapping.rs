@@ -16,8 +16,8 @@ use agent_client_protocol::schema::v1::{
 
 use crate::adapter::{AcpAdapter, DefaultAdapter};
 use crate::model::{
-    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
-    ToolKindView, ToolOutputBlock, ToolStatusView,
+    ChatItem, CommandExit, DiffView, PermissionChoice, PermissionItem, PermissionKindView,
+    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 
 /// What an applied `session/update` touched, so the host can gate its expensive
@@ -400,22 +400,35 @@ fn upsert_tool_call(
     adapter: &dyn AcpAdapter,
 ) -> bool {
     let id = tool_call.tool_call_id.0.to_string();
-    let split = split_content(&tool_call.content);
+    let SplitContent {
+        diffs,
+        output: blocks,
+        saw_terminal,
+    } = split_content(&tool_call.content);
     let sideband = adapter.sideband_output(&tool_call.meta);
-    let unreported_terminal = split.saw_terminal && sideband.is_none();
+    let unreported_terminal = saw_terminal && sideband.is_none();
+    let kind = kind_of(&tool_call.kind);
     let mut output = Vec::new();
-    fold_output(&mut output, split.output, sideband, &tool_call.raw_output);
+    fold_output(
+        &mut output,
+        Some(ContentBody {
+            blocks,
+            terminal_handle: saw_terminal,
+        }),
+        sideband,
+        &tool_call.raw_output,
+    );
     let mut item = ToolCallItem {
         id: id.clone(),
         title: tool_call.title.clone(),
-        kind: kind_of(&tool_call.kind),
+        kind,
         tool_name: adapter.tool_name(&tool_call.meta),
         status: status_of(&tool_call.status),
-        diffs: split.diffs,
+        diffs,
         output,
         raw_input: tool_call.raw_input.clone(),
         parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
-        exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
+        exit: command_exit_for(kind, adapter, &tool_call.raw_output, &tool_call.meta),
     };
     highlight_tool_output(&mut item);
     let dropped = unreported_terminal && lost_output(&item);
@@ -480,27 +493,25 @@ fn apply_tool_call_update(
     // `content` nor `status` (`dist/acp-agent.js`, 0.62.0), so gating this on
     // `content` would never see it.
     let sideband = adapter.sideband_output(&update.meta);
-    let mut content_output = Vec::new();
-    let mut saw_terminal = false;
-    if let Some(content) = &fields.content {
+    // `None` when the update carried no `content` field at all — distinct from a
+    // present-but-empty one, which `fold_output` must treat as a replacement.
+    let body = fields.content.as_ref().map(|content| {
         let split = split_content(content);
         item.diffs = split.diffs;
-        content_output = split.output;
-        saw_terminal = split.saw_terminal;
-    }
+        ContentBody {
+            blocks: split.output,
+            terminal_handle: split.saw_terminal,
+        }
+    });
     if fields.raw_input.is_some() {
         item.raw_input = fields.raw_input.clone();
     }
-    let unreported_terminal = saw_terminal && sideband.is_none();
-    fold_output(
-        &mut item.output,
-        content_output,
-        sideband,
-        &fields.raw_output,
-    );
+    let unreported_terminal =
+        body.as_ref().is_some_and(|b| b.terminal_handle) && sideband.is_none();
+    fold_output(&mut item.output, body, sideband, &fields.raw_output);
     // Only overwrite on a reported value — an intermediate status-only update
     // carries no exit channel and must not blank out one recorded earlier.
-    if let Some(exit) = adapter.command_exit(&fields.raw_output, &update.meta) {
+    if let Some(exit) = command_exit_for(item.kind, adapter, &fields.raw_output, &update.meta) {
         item.exit = Some(exit);
     }
     // Run last: kind / raw_input (source of the language) and output text are
@@ -571,21 +582,54 @@ fn split_content(content: &[ToolCallContent]) -> SplitContent {
 /// an unfenced `rawOutput`) arrive as two separate `tool_call_update`s, so
 /// overwriting from the second would both blank the recovered [`ToolOutputBlock::RawText`]
 /// and push raw shell bytes through the markdown renderer.
+/// The part of a `content` field [`fold_output`] folds: what it rendered to,
+/// and whether a terminal handle was among it.
+struct ContentBody {
+    blocks: Vec<ToolOutputBlock>,
+    terminal_handle: bool,
+}
+
 fn fold_output(
     output: &mut Vec<ToolOutputBlock>,
-    content_output: Vec<ToolOutputBlock>,
+    content: Option<ContentBody>,
     sideband: Option<String>,
     raw_output: &Option<serde_json::Value>,
 ) {
-    if !content_output.is_empty() {
-        *output = content_output;
-    } else if let Some(blocks) = sideband
-        .map(bounded_raw_text_blocks)
-        .filter(|blocks| !blocks.is_empty())
+    // `content` is replace semantics (the schema calls the field "Replace the
+    // content collection"), so a present-but-unrenderable one — an empty array,
+    // or diffs only — must clear a body an earlier update filled. The single
+    // exception is a bare terminal handle: its bytes ride a content-less
+    // notification of their own, so replacing on it would blank them.
+    if let Some(body) = content
+        && !(body.blocks.is_empty() && body.terminal_handle)
+    {
+        *output = body.blocks;
+    }
+    if output.is_empty()
+        && let Some(blocks) = sideband
+            .map(bounded_raw_text_blocks)
+            .filter(|blocks| !blocks.is_empty())
     {
         *output = blocks;
     }
     push_raw_output_fallback(output, raw_output);
+}
+
+/// A shell command's exit status, or `None` for any other tool.
+///
+/// Gated on the kind because `raw_output` is a free-form channel: an MCP result
+/// that happens to carry an `exit_code` field is not a command exit, and would
+/// otherwise put an `Exit 1` badge on a tool that never ran a shell.
+fn command_exit_for(
+    kind: ToolKindView,
+    adapter: &dyn AcpAdapter,
+    raw_output: &Option<serde_json::Value>,
+    meta: &Option<agent_client_protocol::schema::v1::Meta>,
+) -> Option<CommandExit> {
+    if kind != ToolKindView::Execute {
+        return None;
+    }
+    adapter.command_exit(raw_output, meta)
 }
 
 /// Max bytes of tool-output text carried into the render model. Larger text is
@@ -1193,88 +1237,104 @@ mod tests {
         assert!(!effect.dropped_terminal_output);
     }
 
+    /// The literal wire capture from claude-agent-acp **0.64.2**, taken through
+    /// `examples/acp_spike` with `_meta.terminal_output` advertised. Replayed
+    /// verbatim rather than hand-transcribed: the defect this pins — reading the
+    /// sideband only when `content` is present — survived a suite of hand-written
+    /// tests because every one of them modelled the shape from adapter source,
+    /// and the source comment names three notifications where the wire sends
+    /// four (the second refines title/rawInput and carries content but no status).
+    const CAPTURED_BASH_TURN: [&str; 4] = [
+        r#"{"_meta":{"claudeCode":{"toolName":"Bash"},"terminal_info":{"terminal_id":"toolu_01"}},"toolCallId":"toolu_01","sessionUpdate":"tool_call","rawInput":{},"status":"pending","title":"Terminal","kind":"execute","content":[{"type":"terminal","terminalId":"toolu_01"}]}"#,
+        r#"{"_meta":{"claudeCode":{"toolName":"Bash","title":"List crates"}},"toolCallId":"toolu_01","sessionUpdate":"tool_call_update","rawInput":{"command":"ls -la crates | head -5"},"title":"ls -la crates | head -5","kind":"execute","content":[{"type":"terminal","terminalId":"toolu_01"}]}"#,
+        r#"{"_meta":{"terminal_output":{"terminal_id":"toolu_01","data":"total 24\n---\ndrwxr-xr-x@  5 woo  staff   160 Jul 31 14:17 app"}},"toolCallId":"toolu_01","sessionUpdate":"tool_call_update"}"#,
+        r#"{"_meta":{"claudeCode":{"toolName":"Bash"},"terminal_exit":{"terminal_id":"toolu_01","exit_code":0,"signal":null}},"toolCallId":"toolu_01","sessionUpdate":"tool_call_update","status":"completed","rawOutput":"total 24\n---\ndrwxr-xr-x@  5 woo  staff   160 Jul 31 14:17 app","content":[{"type":"terminal","terminalId":"toolu_01"}]}"#,
+    ];
+
     #[test]
-    fn the_real_three_notification_bash_sequence_recovers_the_output() {
-        // claude-agent-acp 0.62.0 (`dist/acp-agent.js`) splits a Bash result into
-        // three notifications, and the bytes ride the *middle* one, which carries
-        // neither `content` nor `status`:
-        //   1. tool_call        → _meta.terminal_info
-        //   2. tool_call_update → _meta.terminal_output   (no content, no status)
-        //   3. tool_call_update → content:[terminal] + _meta.terminal_exit
-        //                         + rawOutput + status
-        // Notification 3's `_meta` carries no `terminal_output` at all (the
-        // adapter destructures `_meta` out and re-adds only `terminal_exit`), so
-        // reading the sideband only when `content` is present misses it entirely.
+    fn the_captured_bash_turn_recovers_its_output_and_exit() {
         let mut items = Vec::new();
-        apply_update(
-            &mut items,
-            &SessionUpdate::ToolCall(
-                ToolCall::new("toolu_1", "ls -la")
-                    .kind(ToolKind::Execute)
-                    .meta(meta_map(
-                        serde_json::json!({ "terminal_info": { "terminal_id": "toolu_1" } }),
-                    )),
-            ),
-        );
-
-        let output_note = apply_update(
-            &mut items,
-            &SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new("toolu_1", ToolCallUpdateFields::new()).meta(meta_map(
-                    serde_json::json!({
-                        "terminal_output": { "terminal_id": "toolu_1", "data": "total 0\n---\n" }
-                    }),
-                )),
-            ),
-        );
-        assert_eq!(
-            only_tool_call(&items).output,
-            vec![ToolOutputBlock::RawText {
-                text: "total 0\n---\n".to_string(),
-                truncated_from: None,
-            }],
-            "the content-less sideband notification is what carries the bytes"
-        );
-        assert!(!output_note.dropped_terminal_output);
-
-        let completion = apply_update(
-            &mut items,
-            &SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new(
-                    "toolu_1",
-                    ToolCallUpdateFields::new()
-                        .status(ToolCallStatus::Completed)
-                        .content(vec![ToolCallContent::Terminal(Terminal::new("toolu_1"))])
-                        // Unfenced raw bytes — must never reach the markdown renderer.
-                        .raw_output(serde_json::json!("total 0\n---\n")),
-                )
-                .meta(meta_map(serde_json::json!({
-                    "claudeCode": { "toolName": "Bash" },
-                    "terminal_exit": { "terminal_id": "toolu_1", "exit_code": 0, "signal": null },
-                }))),
-            ),
-        );
+        let effects: Vec<UpdateEffect> = CAPTURED_BASH_TURN
+            .iter()
+            .map(|line| {
+                let update: SessionUpdate =
+                    serde_json::from_str(line).expect("captured notification deserializes");
+                apply_update(&mut items, &update)
+            })
+            .collect();
 
         let tc = only_tool_call(&items);
+        // `---` is in the payload on purpose: routed through the markdown path it
+        // would become a horizontal rule, so this asserts the bytes stay verbatim.
         assert_eq!(
             tc.output,
             vec![ToolOutputBlock::RawText {
-                text: "total 0\n---\n".to_string(),
+                text: "total 24\n---\ndrwxr-xr-x@  5 woo  staff   160 Jul 31 14:17 app".to_string(),
                 truncated_from: None,
             }],
-            "the completion must not blank the sideband, nor refill from rawOutput as markdown"
+            "the content-less third notification carries the bytes, and the \
+             completion behind it must neither blank them nor refill from rawOutput"
         );
         assert_eq!(
             tc.exit,
             Some(CommandExit {
                 code: Some(0),
                 signal: None
-            }),
-            "the exit rides notification 3"
+            })
         );
         assert!(
-            !completion.dropped_terminal_output,
-            "the card is full — the once-per-pane warning must not burn on a healthy command"
+            effects.iter().all(|e| !e.dropped_terminal_output),
+            "a healthy command must not burn the once-per-pane warning"
+        );
+    }
+
+    #[test]
+    fn a_present_but_empty_content_clears_a_body_an_earlier_update_filled() {
+        // `content` is replace semantics (schema: "Replace the content
+        // collection"), so an update that explicitly sends nothing renderable
+        // must not leave stale output on screen. Only a bare terminal handle is
+        // exempt — its bytes ride their own notification.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "run").kind(ToolKind::Execute).content(
+                vec![ToolCallContent::Content(Content::new(ContentBlock::Text(
+                    TextContent::new("stale"),
+                )))],
+            )),
+        );
+        assert!(!only_tool_call(&items).output.is_empty());
+
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new().content(Vec::new()),
+            )),
+        );
+        assert!(
+            only_tool_call(&items).output.is_empty(),
+            "an explicit empty content replaces, it does not preserve"
+        );
+    }
+
+    #[test]
+    fn a_non_execute_tool_never_reads_an_exit_code_from_raw_output() {
+        // `raw_output` is a free-form channel — an MCP result that happens to
+        // carry `exit_code` is not a command exit, and must not badge the card.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "fetch")
+                    .kind(ToolKind::Fetch)
+                    .raw_output(serde_json::json!({ "exit_code": 1, "result": "ok" })),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).exit,
+            None,
+            "only an Execute tool reports a command exit"
         );
     }
 
