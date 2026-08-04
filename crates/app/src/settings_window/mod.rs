@@ -238,7 +238,8 @@ pub(super) struct AgentCatalogRow {
 /// (rather than waiting for Save) so [`SettingsWindow::validate`] can tell
 /// "this row existed before this Save" from "this row is new" by id
 /// membership alone — the distinction the tombstone/redirect bookkeeping
-/// needs.
+/// needs. The id a Save *writes* can still differ: a row whose Type changed
+/// retires it (see [`session_host_entry_id`]).
 #[derive(Clone)]
 pub(super) struct SessionHostRow {
     pub(super) id: daruda_store::project::SessionHostId,
@@ -1454,7 +1455,7 @@ impl SettingsWindow {
                 daruda_config::SessionHostKind::Ssh { target }
             };
             session_hosts.push(daruda_config::SessionHostEntry {
-                id: row.id,
+                id: session_host_entry_id(&self.base_config.session_hosts, row.id, &kind),
                 label,
                 kind,
             });
@@ -1783,6 +1784,32 @@ fn session_host_kind_value(kind: &daruda_config::SessionHostKind) -> &str {
     }
 }
 
+/// The id a saved session-host row carries into `config.toml`: the row's own
+/// id, unless the row's Type was changed — i.e. a persisted entry holds that
+/// id under the other [`daruda_config::SessionHostKind`] variant.
+///
+/// A Type change has to retire the id because a lane's `registry_id` resolves
+/// on id *and* kind (`lane::session_host` treats a kind mismatch as "not
+/// found", never coercing an SSH lane into a Docker one). Keeping the id would
+/// leave every linked lane silently unresolvable with nothing recorded;
+/// retiring it makes [`reconcile_session_host_tombstones`] log the removal, so
+/// the lane reports Orphaned and heals if an equivalent host is registered
+/// again.
+fn session_host_entry_id(
+    previous_entries: &[daruda_config::SessionHostEntry],
+    row_id: daruda_store::project::SessionHostId,
+    kind: &daruda_config::SessionHostKind,
+) -> daruda_store::project::SessionHostId {
+    let retyped = previous_entries.iter().any(|entry| {
+        entry.id == row_id && std::mem::discriminant(&entry.kind) != std::mem::discriminant(kind)
+    });
+    if retyped {
+        daruda_store::project::SessionHostId::new()
+    } else {
+        row_id
+    }
+}
+
 /// Cap on the session host tombstone list — see
 /// [`reconcile_session_host_tombstones`].
 const MAX_SESSION_HOST_TOMBSTONES: usize = 20;
@@ -1996,7 +2023,7 @@ mod agent_command_path_warning_tests {
 
 #[cfg(test)]
 mod session_host_reconcile_tests {
-    use super::reconcile_session_host_tombstones;
+    use super::{reconcile_session_host_tombstones, session_host_entry_id};
     use daruda_config::{SessionHostEntry, SessionHostKind, SessionHostTombstone};
     use daruda_store::project::SessionHostId;
 
@@ -2047,6 +2074,58 @@ mod session_host_reconcile_tests {
         let current = vec![ssh_entry(id, "Renamed", "new-target")];
         let tombstones = reconcile_session_host_tombstones(&previous, &[], &current, 100);
         assert!(tombstones.is_empty());
+    }
+
+    /// A row that keeps its id while switching Type stops resolving for every
+    /// lane linked to it (id *and* kind must match), so the id is retired and
+    /// the removal recorded — with no redirect, since bridging kinds would
+    /// turn an SSH lane into a Docker one.
+    #[test]
+    fn a_retyped_row_retires_its_id_and_gets_tombstoned() {
+        let row_id = SessionHostId::new();
+        let previous = vec![ssh_entry(row_id, "Box", "vm-work")];
+        let retyped = SessionHostKind::Docker {
+            container: "dev-1".into(),
+        };
+        let saved_id = session_host_entry_id(&previous, row_id, &retyped);
+        assert_ne!(saved_id, row_id);
+
+        let current = vec![SessionHostEntry {
+            id: saved_id,
+            label: "Box".to_string(),
+            kind: retyped,
+        }];
+        let tombstones = reconcile_session_host_tombstones(&previous, &[], &current, 100);
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].old_id, row_id);
+        assert_eq!(
+            tombstones[0].kind,
+            SessionHostKind::Ssh {
+                target: "vm-work".into()
+            }
+        );
+        assert_eq!(tombstones[0].redirected_to, None);
+    }
+
+    /// Editing only the value keeps the same kind variant, which still
+    /// resolves — retiring the id there would orphan lanes for nothing.
+    #[test]
+    fn an_edited_value_keeps_the_rows_id() {
+        let row_id = SessionHostId::new();
+        let previous = vec![ssh_entry(row_id, "Box", "vm-work")];
+        let kind = SessionHostKind::Ssh {
+            target: "vm-other".into(),
+        };
+        assert_eq!(session_host_entry_id(&previous, row_id, &kind), row_id);
+    }
+
+    #[test]
+    fn a_row_with_no_persisted_entry_keeps_its_id() {
+        let row_id = SessionHostId::new();
+        let kind = SessionHostKind::Docker {
+            container: "dev-1".into(),
+        };
+        assert_eq!(session_host_entry_id(&[], row_id, &kind), row_id);
     }
 
     #[test]

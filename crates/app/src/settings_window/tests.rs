@@ -1168,6 +1168,133 @@ fn readding_the_same_target_redirects_the_deleted_tombstone(cx: &mut TestAppCont
     });
 }
 
+/// A one-row SSH catalog plus the lane host linked to it — the starting
+/// state for the retype tests below.
+fn ssh_catalog_config(
+    id: daruda_store::project::SessionHostId,
+) -> (
+    daruda_config::Config,
+    daruda_store::project::LaneSessionHost,
+) {
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let lane_host = daruda_store::project::LaneSessionHost::Ssh {
+        target: "vm-work".to_string(),
+        session_path: "/srv/app".to_string(),
+        registry_id: Some(id),
+    };
+    (config, lane_host)
+}
+
+/// Changing a loaded row's Type retires its id. A lane's `registry_id`
+/// resolves on id *and* kind, so keeping the id would leave every linked lane
+/// unresolvable with nothing recorded anywhere; retiring it records the
+/// removal and surfaces the lane as Orphaned (banner + "keep current" path)
+/// instead of silently stale.
+#[gpui::test]
+fn retyping_a_loaded_row_retires_its_id_and_orphans_the_linked_lane(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let (config, lane_host) = ssh_catalog_config(old_id);
+    let (wh, win) = build_window_with_config(cx, config);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a retyped row must still validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_ne!(
+            cfg.session_hosts[0].id, old_id,
+            "a row that switched Type must not keep the id SSH lanes point at"
+        );
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, old_id);
+        assert_eq!(
+            cfg.session_host_tombstones[0].kind,
+            daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string()
+            }
+        );
+        assert_eq!(
+            cfg.session_host_tombstones[0].redirected_to, None,
+            "an SSH lane must never be redirected onto a Docker entry"
+        );
+
+        use crate::lane::session_host;
+        assert_eq!(
+            session_host::registry_link_status(&lane_host, &cfg.session_hosts),
+            session_host::LinkStatus::Orphaned
+        );
+        assert_eq!(
+            session_host::effective_session_host(
+                Some(&lane_host),
+                None,
+                &daruda_config::AgentLaunch::Raw("adapter".to_string()),
+                &cfg.session_hosts,
+                &cfg.session_host_tombstones,
+            ),
+            lane_host,
+            "an orphaned lane keeps its cached target, never the Docker one"
+        );
+    });
+}
+
+/// What the retype's tombstone buys: registering the SSH host again later
+/// redirects the retired id, so the linked lane resolves to the new entry
+/// instead of sitting on a stale cache forever.
+#[gpui::test]
+fn re_registering_a_retyped_host_heals_the_linked_lane(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let (config, lane_host) = ssh_catalog_config(old_id);
+
+    let (wh, win) = build_window_with_config(cx, config);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+    let after_retype = win.read_with(cx, |w, cx| w.validate(cx).expect("retype must validate"));
+
+    // Second Save, over the config the first one produced: the user
+    // re-registers the SSH host they moved off of.
+    let (wh, win) = build_window_with_config(cx, after_retype);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        1,
+        |r| r.label_input.clone(),
+        "Build box (ssh)",
+    );
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.target_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("re-registering must validate");
+        let new_ssh_id = cfg
+            .session_hosts
+            .iter()
+            .find(|e| matches!(e.kind, daruda_config::SessionHostKind::Ssh { .. }))
+            .expect("the re-registered ssh entry")
+            .id;
+
+        use crate::lane::session_host;
+        assert_eq!(
+            session_host::resolved_registry_id(
+                &lane_host,
+                &cfg.session_hosts,
+                &cfg.session_host_tombstones,
+            ),
+            Some(new_ssh_id),
+            "the retired id must redirect onto the re-registered ssh entry"
+        );
+    });
+}
+
 #[gpui::test]
 fn removing_a_session_host_row_updates_the_row_list_immediately(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
