@@ -1019,6 +1019,10 @@ impl Element for TextElement {
         let is_empty = text.len() == 0;
         let placeholder = self.placeholder.clone();
 
+        // daruda vendor patch — keep the element's own rect before `bounds` is
+        // shadowed and shifted by the scroll offset; the capture-phase wheel
+        // hitbox must stay put as the content scrolls.
+        let viewport = bounds;
         let mut bounds = bounds;
 
         let (display_text, text_color) = if is_empty {
@@ -1294,8 +1298,12 @@ impl Element for TextElement {
         PrepaintState {
             bounds,
             // daruda vendor patch — the editor handles the wheel in the capture
-            // phase now, which needs a hitbox of its own to gate on.
-            scroll_hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            // phase now, which needs a hitbox of its own to gate on. It must be
+            // the element's *own* rect: `bounds` is shadowed below and shifted by
+            // the scroll offset (`layout_cursor`), so hit-testing against it
+            // walks the hitbox off screen as the content scrolls and the wheel
+            // stops reaching the editor after the first notch.
+            scroll_hitbox: window.insert_hitbox(viewport, HitboxBehavior::Normal),
             last_layout,
             scroll_size,
             line_numbers,

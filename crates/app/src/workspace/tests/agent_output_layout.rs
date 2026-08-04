@@ -572,6 +572,50 @@ async fn a_capped_embed_holds_the_wheel_while_it_can_still_scroll(cx: &mut TestA
     );
 }
 
+/// Scrolling is repeated, not a single notch. The capture-phase wheel hitbox is
+/// inserted in `prepaint`, where the editor's `bounds` is shifted by the scroll
+/// offset — hit-testing against that walks the hitbox off screen and the wheel
+/// stops reaching the editor after the first notch, which a one-event test
+/// cannot see.
+#[gpui::test]
+async fn a_capped_embed_keeps_scrolling_across_repeated_notches(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    push_filler_cards(cx, &view, 40);
+    cx.update_window(window_handle, |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+
+    let mut offsets = Vec::new();
+    for _ in 0..4 {
+        wheel_down_over_embed(&mut vcx, embed);
+        offsets.push(view.read_with(&vcx, |v, cx| {
+            v.assets
+                .output_editors
+                .get("b1#0")
+                .expect("output editor built")
+                .read(cx)
+                .scroll_handle()
+                .offset()
+                .y
+        }));
+    }
+
+    for (n, pair) in offsets.windows(2).enumerate() {
+        assert!(
+            pair[1] < pair[0],
+            "notch {} did not scroll further: {:?} → {:?} (full run {offsets:?})",
+            n + 2,
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
 /// …and once it has none left in that direction, the gesture must carry on to
 /// the transcript instead of dying on the embed.
 #[gpui::test]
