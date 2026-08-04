@@ -332,6 +332,8 @@ pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem)
         daruda_acp::ChatItem::ToolCall(tc) => tc
             .output
             .iter()
+            // `Text` only: a `SourceText` block is a file's contents, so a fence
+            // inside it is text the file holds, not a diagram the tool drew.
             .filter_map(|block| match block {
                 daruda_acp::ToolOutputBlock::Text { text, .. } => Some(text.as_str()),
                 _ => None,

@@ -1196,7 +1196,7 @@ pub fn agent_chat_tool_group_count(count: usize) -> String {
 }
 
 /// Marker shown below a tool-output text block that was capped before
-/// reaching the render model (`ToolOutputBlock::Text::truncated_from`),
+/// reaching the render model (any text block's `truncated_from`),
 /// e.g. "… (truncated, 1.2 MB total)". `original_bytes` is the untruncated
 /// byte length.
 pub fn agent_chat_tool_output_truncated(original_bytes: usize) -> String {

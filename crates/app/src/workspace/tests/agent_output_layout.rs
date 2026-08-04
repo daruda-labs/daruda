@@ -409,6 +409,452 @@ fn render_shell_output_card(
     (window_handle.into(), view)
 }
 
+/// Append `count` further completed shell cards to `view`, so the transcript
+/// list has scrollable range of its own.
+///
+/// Scroll-chaining assertions are worthless without it: with one card the list
+/// cannot move, so "the transcript did not scroll" holds for free.
+fn push_filler_cards(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    count: usize,
+) {
+    use agent_client_protocol::schema::v1::{
+        SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    };
+
+    for n in 0..count {
+        let id = format!("filler{n}");
+        view.update(cx, |v, cx| {
+            let mut fields = ToolCallUpdateFields::default();
+            fields.status = Some(ToolCallStatus::Completed);
+            fields.raw_output = Some(serde_json::json!({
+                "formatted_output": "filler\n",
+                "exit_code": 0,
+            }));
+            v.apply_event(
+                daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                    ToolCall::new(id.clone(), "Bash filler").kind(ToolKind::Execute),
+                ))),
+                "",
+                false,
+                cx,
+            );
+            v.apply_event(
+                daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                    ToolCallUpdate::new(id, fields),
+                ))),
+                "",
+                false,
+                cx,
+            );
+        });
+    }
+    cx.run_until_parked();
+    view.update(cx, |v, cx| {
+        v.set_all_folds(true, cx);
+        // The transcript follows its tail, so the filler would push the card
+        // under test out of the virtualized window and it would never paint.
+        v.list_state.scroll_to(gpui::ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+}
+
+/// The transcript list's own scrollable range, and how many items it holds —
+/// the pair a chaining test must check before trusting either outcome.
+fn transcript_scroll_range(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) -> (usize, gpui::Pixels) {
+    view.read_with(cx, |v, _| {
+        (v.items.len(), v.list_state.max_offset_for_scrollbar().y)
+    })
+}
+
+/// Guards the guard: the filler cards must actually give the transcript room to
+/// move, or every chaining assertion below passes vacuously.
+#[gpui::test]
+async fn the_filler_transcript_is_actually_scrollable(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    push_filler_cards(cx, &view, 40);
+    cx.update_window(window_handle, |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+
+    let (items, max_offset) = transcript_scroll_range(cx, &view);
+    assert_eq!(items, 41, "every filler card must reach the transcript");
+    assert!(
+        max_offset > px(0.),
+        "the transcript has no scrollable range, so it cannot be observed \
+         *not* scrolling — max_offset {max_offset:?}"
+    );
+}
+
+/// Scroll `view`'s `b1` output embed to its far end on the Y axis and report the
+/// offset it settled at.
+fn scroll_embed_to_bottom(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) -> gpui::Pixels {
+    let editor = view.read_with(cx, |v, _| {
+        v.assets
+            .output_editors
+            .get("b1#0")
+            .expect("output editor built")
+            .clone()
+    });
+    // A wildly out-of-range value: `set_scroll_offset` clamps to the content, so
+    // this lands exactly at the end whatever the content height is.
+    editor.update(cx, |state, cx| {
+        state.set_scroll_offset(point(px(0.), px(-1_000_000.)), cx);
+    });
+    cx.run_until_parked();
+    editor.read_with(cx, |state, _| state.scroll_handle().offset().y)
+}
+
+/// One downward wheel notch over the embed's centre.
+fn wheel_down_over_embed(vcx: &mut gpui::VisualTestContext, embed: gpui::Bounds<gpui::Pixels>) {
+    use gpui::{ScrollDelta, ScrollWheelEvent};
+    vcx.simulate_event(ScrollWheelEvent {
+        position: embed.center(),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
+        ..Default::default()
+    });
+    vcx.run_until_parked();
+}
+
+/// A capped embed owns the wheel while it still has rows to reveal, so the
+/// transcript must stay put — otherwise one gesture moves both.
+#[gpui::test]
+async fn a_capped_embed_holds_the_wheel_while_it_can_still_scroll(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    push_filler_cards(cx, &view, 40);
+    cx.update_window(window_handle, |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+    let (_, max_offset) = transcript_scroll_range(cx, &view);
+    assert!(
+        max_offset > px(0.),
+        "fixture is vacuous — see the guard test"
+    );
+
+    let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    wheel_down_over_embed(&mut vcx, embed);
+
+    let (after, editor_offset) = view.read_with(&vcx, |v, cx| {
+        (
+            v.list_state.scroll_px_offset_for_scrollbar(),
+            v.assets
+                .output_editors
+                .get("b1#0")
+                .expect("output editor built")
+                .read(cx)
+                .scroll_handle()
+                .offset()
+                .y,
+        )
+    });
+    assert!(
+        editor_offset < px(0.),
+        "the embed had rows to reveal, so it must have scrolled — got {editor_offset:?}"
+    );
+    assert_eq!(
+        after, before,
+        "the transcript scrolled too — the embed did not claim the gesture"
+    );
+}
+
+/// …and once it has none left in that direction, the gesture must carry on to
+/// the transcript instead of dying on the embed.
+#[gpui::test]
+async fn a_capped_embed_at_its_end_passes_the_wheel_to_the_transcript(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+    push_filler_cards(cx, &view, 40);
+    cx.update_window(window_handle, |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+    let (_, max_offset) = transcript_scroll_range(cx, &view);
+    assert!(
+        max_offset > px(0.),
+        "fixture is vacuous — see the guard test"
+    );
+
+    let end = scroll_embed_to_bottom(cx, &view);
+    assert!(
+        end < px(0.),
+        "the embed should have scrolled somewhere, got {end:?}"
+    );
+
+    let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    wheel_down_over_embed(&mut vcx, embed);
+
+    let (after, still_at_end) = view.read_with(&vcx, |v, cx| {
+        (
+            v.list_state.scroll_px_offset_for_scrollbar(),
+            v.assets
+                .output_editors
+                .get("b1#0")
+                .expect("output editor built")
+                .read(cx)
+                .scroll_handle()
+                .offset()
+                .y,
+        )
+    });
+    assert_eq!(
+        still_at_end, end,
+        "the embed was already at its end and must not have moved further"
+    );
+    assert_ne!(
+        after, before,
+        "the embed had nothing left to give, so the transcript must take the \
+         gesture — it stopped dead instead"
+    );
+}
+
+/// Rows of `cat -n`-numbered Rust, the shape a `Read` tool's body arrives in.
+/// Terminated like a real file, so the trailing newline must not count as a row.
+/// `{n:>4}` keeps every line 19 bytes so the block stays under `daruda_acp`'s
+/// 64 KiB cap and this stays the *untruncated* case.
+fn numbered_source(rows: usize) -> String {
+    (1..=rows)
+        .map(|n| format!("{n:>4}\tlet a = {n};\n"))
+        .collect()
+}
+
+/// Drive a real agent-chat pane to one completed, expanded `Read` tool call
+/// whose only output block is `body` — delivered *unfenced*, the shape an
+/// adapter that does not markdown-escape sends. `path` is what the call names in
+/// its raw input, and therefore the only source of the language.
+fn render_read_output_card(
+    cx: &mut TestAppContext,
+    path: &str,
+    body: String,
+) -> (
+    gpui::AnyWindowHandle,
+    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) {
+    use crate::workspace::main_area::pane::PaneContent;
+    use agent_client_protocol::schema::v1::{
+        Content, ContentBlock, SessionUpdate, TextContent, ToolCall, ToolCallContent,
+        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    };
+
+    let (window_handle, workspace) = super::build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
+                _ => None,
+            })
+            .expect("agent chat pane present")
+    });
+
+    let raw_input = serde_json::json!({ "file_path": path });
+    view.update(cx, |v, cx| {
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        fields.content = Some(vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Text(TextContent::new(body)),
+        ))]);
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                ToolCall::new("t1", "Read")
+                    .kind(ToolKind::Read)
+                    .raw_input(raw_input),
+            ))),
+            "",
+            false,
+            cx,
+        );
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("t1", fields),
+            ))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+    (window_handle.into(), view)
+}
+
+/// The sole output block of the `t1` tool call.
+fn only_output_block(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) -> daruda_acp::ToolOutputBlock {
+    view.read_with(cx, |v, _| {
+        let blocks = v
+            .items
+            .iter()
+            .find_map(|item| match item {
+                daruda_acp::ChatItem::ToolCall(tc) => Some(&tc.output),
+                _ => None,
+            })
+            .expect("the tool call is present");
+        assert_eq!(blocks.len(), 1, "fixture must produce exactly one block");
+        blocks[0].clone()
+    })
+}
+
+/// A `Read` whose body carries no fence used to be rejected by the fence-shaped
+/// classifier and fall to the markdown path — unbounded paint, `cat -n` gutter
+/// intact, no highlighting. It must reach the capped embed, hold the file's own
+/// bytes, and highlight as the extension's language.
+#[gpui::test]
+async fn a_read_tool_s_unfenced_output_renders_through_the_capped_embed(cx: &mut TestAppContext) {
+    const ROWS: usize = 2_000;
+    let body = numbered_source(ROWS);
+    // Fixture validity: without both of these the case degenerates into the
+    // already-covered fenced one and proves nothing.
+    assert!(
+        !body.starts_with("```"),
+        "the fixture must be unfenced, else it is the fenced case"
+    );
+    assert!(
+        body.starts_with("   1\tlet a = 1;"),
+        "the fixture must carry a `cat -n` gutter to strip, got {:?}",
+        &body[..20.min(body.len())]
+    );
+
+    let (window_handle, view) = render_read_output_card(cx, "probe.rs", body);
+
+    let block = only_output_block(cx, &view);
+    let daruda_acp::ToolOutputBlock::SourceText {
+        text,
+        language,
+        truncated_from,
+    } = &block
+    else {
+        panic!("an unfenced read must map to a SourceText block, got {block:?}");
+    };
+    assert_eq!(
+        language.as_deref(),
+        Some("rust"),
+        "the language must come from the read target's extension"
+    );
+    assert_eq!(
+        truncated_from, &None,
+        "{ROWS} rows must stay under the byte cap, else this is the truncated case"
+    );
+    assert!(
+        text.starts_with("let a = 1;\n"),
+        "the `cat -n` gutter survived into the block: {:?}",
+        &text[..20.min(text.len())]
+    );
+
+    let (editor_language, value, rows, visible) = view.read_with(cx, |v, cx| {
+        let state = v
+            .assets
+            .output_editors
+            .get("t1#0")
+            .expect("no output editor built — the read fell back to markdown")
+            .read(cx);
+        (
+            state.code_editor_language().cloned(),
+            state.value().to_string(),
+            state.display_rows(),
+            state.visible_rows(),
+        )
+    });
+    assert_eq!(
+        editor_language.as_deref(),
+        Some("rust"),
+        "the editor highlights with something other than the file's language"
+    );
+    assert!(
+        !value.contains('\t'),
+        "the editor still holds `cat -n` tab-prefixed rows"
+    );
+    assert_eq!(
+        rows, ROWS,
+        "the editor's row count must match the file's lines, terminator excluded"
+    );
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-t1#0")
+        .expect("the bounded embed painted — the read fell back to markdown");
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(ROWS),
+        "a read's embed is capped exactly like a shell command's"
+    );
+    let visible = visible.expect("the embedded editor painted");
+    assert!(
+        visible.len() >= capped_rows() && visible.len() <= max_visible_rows(),
+        "the read's embed shaped {} of {ROWS} rows — expected about {}",
+        visible.len(),
+        capped_rows()
+    );
+}
+
+/// Reading a **markdown** file: its body holds fences of its own, which is
+/// exactly the shape the fence classifier has to reject as ambiguous. Since the
+/// block now names its language instead of tagging a fence, the read still
+/// reaches the embed — the ambiguity rule only guards blocks that really are
+/// markdown.
+#[gpui::test]
+async fn a_read_of_a_file_holding_its_own_fences_still_embeds(cx: &mut TestAppContext) {
+    let body = "# Doc\n\n```sh\nls\n```\n\nprose\n".to_string();
+    let (window_handle, view) = render_read_output_card(cx, "notes.md", body);
+
+    let block = only_output_block(cx, &view);
+    let daruda_acp::ToolOutputBlock::SourceText { text, language, .. } = &block else {
+        panic!("a markdown read must map to a SourceText block, got {block:?}");
+    };
+    assert_eq!(language.as_deref(), Some("markdown"));
+    assert!(
+        text.contains("```sh"),
+        "the file's own fence must survive verbatim: {text:?}"
+    );
+
+    let editor_language = view.read_with(cx, |v, cx| {
+        v.assets
+            .output_editors
+            .get("t1#0")
+            .expect("no output editor built — the nested fence rejected the block")
+            .read(cx)
+            .code_editor_language()
+            .cloned()
+    });
+    assert_eq!(editor_language.as_deref(), Some("markdown"));
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    assert!(
+        vcx.debug_bounds("agent-chat-out-embed-t1#0").is_some(),
+        "the bounded embed painted — a markdown read fell back to the markdown path"
+    );
+}
+
 /// The embedded editor's painted viewport height and its `scroll_size()` height.
 fn output_editor_extents(
     cx: &mut TestAppContext,

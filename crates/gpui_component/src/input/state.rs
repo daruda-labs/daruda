@@ -1016,6 +1016,21 @@ impl InputState {
         self.last_layout.as_ref().map(|l| l.visible_range.clone())
     }
 
+    /// The language this state highlights with, or `None` outside code-editor
+    /// mode.
+    ///
+    /// daruda vendor patch — [`InputMode`] is `pub(crate)`, so a host that
+    /// derives the language from its own data (the agent chat resolves a read
+    /// tool's file extension) has no way to read back which one actually
+    /// reached the editor. The only observation point that separates "the host
+    /// computed a language" from "the editor highlights with it".
+    pub fn code_editor_language(&self) -> Option<&SharedString> {
+        match &self.mode {
+            InputMode::CodeEditor { language, .. } => Some(language),
+            _ => None,
+        }
+    }
+
     /// Set with password masked state.
     ///
     /// Only for [`InputMode::SingleLine`] mode.

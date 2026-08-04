@@ -19,6 +19,7 @@ use crate::model::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
     ToolKindView, ToolOutputBlock, ToolStatusView,
 };
+use crate::output_highlight::TextOutputKind;
 
 /// What an applied `session/update` touched, so the host can gate its expensive
 /// per-event reconciles instead of rescanning the whole conversation on every
@@ -430,7 +431,7 @@ fn upsert_tool_call(
         parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
         exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
     };
-    highlight_tool_output(&mut item);
+    classify_source_output(&mut item);
     let dropped = unreported_terminal && lost_output(&item);
     match find_tool_call(items, &id) {
         Some(existing) => *existing = item,
@@ -448,21 +449,20 @@ fn lost_output(item: &ToolCallItem) -> bool {
     !item.status.is_live() && item.output.is_empty()
 }
 
-/// Rewrite the tool's text output so its fenced code block syntax-highlights:
-/// the ACP adapter wraps results in a language-less ``` fence, so we inject the
-/// language inferred from the tool (the read target's file extension) and strip
-/// any `cat -n` line-number prefixes. No-op for tools without an inferable
-/// language and idempotent (an already-tagged fence is left untouched), so it
-/// is safe to run after every tool-call insert or update. `RawText` blocks are
-/// deliberately skipped — they never carry a fence to rewrite.
-fn highlight_tool_output(item: &mut ToolCallItem) {
-    let Some(lang) = crate::output_highlight::output_language(item.kind, &item.raw_input) else {
+/// Retype a file read's text output as [`ToolOutputBlock::SourceText`]: the
+/// bytes are one file's contents, not markdown, so the adapter's escaping fence
+/// and the tool's `cat -n` gutter come off and the language its path implies
+/// rides along as a field. No-op for every other tool, and idempotent (a retyped
+/// block is no longer `Text`), so it is safe to run after every tool-call insert
+/// or update.
+fn classify_source_output(item: &mut ToolCallItem) {
+    let TextOutputKind::Source { language } =
+        crate::output_highlight::classify_text_output(item.kind, &item.raw_input)
+    else {
         return;
     };
     for block in &mut item.output {
-        if let ToolOutputBlock::Text { text, .. } = block {
-            *text = crate::output_highlight::rewrite_fenced_output(text, lang);
-        }
+        crate::output_highlight::retype_as_source(block, language);
     }
 }
 
@@ -515,8 +515,8 @@ fn apply_tool_call_update(
         item.exit = Some(exit);
     }
     // Run last: kind / raw_input (source of the language) and output text are
-    // both current by now, and the rewrite is idempotent.
-    highlight_tool_output(item);
+    // both current by now, and the retype is idempotent.
+    classify_source_output(item);
     unreported_terminal && lost_output(item)
 }
 
@@ -2234,36 +2234,124 @@ mod tests {
         );
     }
 
-    #[test]
-    fn read_output_gets_language_injected_and_line_numbers_stripped() {
+    /// Drive a `Read` tool call whose only output block is `body`, and return the
+    /// output blocks it mapped to.
+    fn read_output_blocks(path: &str, body: &str) -> Vec<ToolOutputBlock> {
+        read_output_blocks_with_raw_input(serde_json::json!({"file_path": path}), body)
+    }
+
+    /// Drive a `Read` tool call with explicit raw input, and return the output
+    /// blocks it mapped to.
+    fn read_output_blocks_with_raw_input(
+        raw_input: serde_json::Value,
+        body: &str,
+    ) -> Vec<ToolOutputBlock> {
         let mut items = Vec::new();
-        // A Read tool call carrying its target path in raw_input.
         apply_update(
             &mut items,
             &SessionUpdate::ToolCall(
-                ToolCall::new("t1", "Read src/main.rs")
+                ToolCall::new("t1", "Read")
                     .kind(ToolKind::Read)
-                    .raw_input(serde_json::json!({"file_path": "src/main.rs"})),
+                    .raw_input(raw_input),
             ),
         );
-        // The adapter delivers the file as a language-less, line-numbered fence.
         let mut fields = ToolCallUpdateFields::default();
         fields.status = Some(ToolCallStatus::Completed);
         fields.content = Some(vec![ToolCallContent::Content(Content::new(
-            ContentBlock::Text(TextContent::new("```\n1\tfn main() {}\n2\t// end\n```")),
+            ContentBlock::Text(TextContent::new(body.to_string())),
         ))]);
         apply_update(
             &mut items,
             &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new("t1", fields)),
         );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call item");
+        };
+        tc.output.clone()
+    }
 
+    #[test]
+    fn a_fenced_read_becomes_source_text_in_the_extension_s_language() {
+        // The adapter delivers the file as a language-less, line-numbered fence.
+        assert_eq!(
+            read_output_blocks("src/main.rs", "```\n1\tfn main() {}\n2\t// end\n```"),
+            vec![ToolOutputBlock::SourceText {
+                text: "fn main() {}\n// end".to_string(),
+                language: Some("rust".to_string()),
+                truncated_from: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_unfenced_read_becomes_source_text_too() {
+        // An adapter that does not markdown-escape: no fence to hang the
+        // language off, and the `cat -n` gutter used to survive to the render.
+        assert_eq!(
+            read_output_blocks("src/main.rs", "   1\tfn main() {}\n   2\tlet x = 1;"),
+            vec![ToolOutputBlock::SourceText {
+                text: "fn main() {}\nlet x = 1;".to_string(),
+                language: Some("rust".to_string()),
+                truncated_from: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_read_of_an_unknown_extension_is_source_text_without_a_language() {
+        assert_eq!(
+            read_output_blocks("NOTES", "plain contents"),
+            vec![ToolOutputBlock::SourceText {
+                text: "plain contents".to_string(),
+                language: None,
+                truncated_from: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_read_with_only_path_raw_input_stays_markdown() {
+        // `path` is too broad: directory/list-style tools naturally use it and
+        // may still be classified as `Read`, so only `file_path` proves this is
+        // one file's source text.
+        assert_eq!(
+            read_output_blocks_with_raw_input(
+                serde_json::json!({"path": "src"}),
+                "```\na.rs\nb.rs\n```",
+            ),
+            vec![ToolOutputBlock::Text {
+                text: "```\na.rs\nb.rs\n```".to_string(),
+                truncated_from: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_shell_command_s_text_output_stays_markdown() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "ls")
+                    .kind(ToolKind::Execute)
+                    .raw_input(serde_json::json!({"command": "ls"})),
+            ),
+        );
+        let mut fields = ToolCallUpdateFields::default();
+        fields.content = Some(vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Text(TextContent::new("```\na.rs\nb.rs\n```")),
+        ))]);
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new("c1", fields)),
+        );
         let ChatItem::ToolCall(tc) = &items[0] else {
             panic!("expected a tool call item");
         };
         assert_eq!(
             tc.output,
             vec![ToolOutputBlock::Text {
-                text: "```rust\nfn main() {}\n// end\n```".to_string(),
+                text: "```\na.rs\nb.rs\n```".to_string(),
                 truncated_from: None,
             }]
         );

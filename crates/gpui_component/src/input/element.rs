@@ -1,10 +1,10 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
-    App, Bounds, Corners, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Half,
-    HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId, MouseButton, MouseMoveEvent, Path, Pixels,
-    Point, ShapedLine, SharedString, Size, Style, TextRun, TextStyle, UnderlineStyle, Window, fill,
-    point, px, relative, size,
+    App, Bounds, Corners, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, IntoElement, LayoutId,
+    MouseButton, MouseMoveEvent, Path, Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString,
+    Size, Style, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -39,7 +39,7 @@ impl TextElement {
         self
     }
 
-    fn paint_mouse_listeners(&mut self, window: &mut Window, _: &mut App) {
+    fn paint_mouse_listeners(&mut self, hitbox: &Hitbox, window: &mut Window, _: &mut App) {
         window.on_mouse_event({
             let state = self.state.clone();
 
@@ -47,6 +47,30 @@ impl TextElement {
                 if event.pressed_button == Some(MouseButton::Left) {
                     state.update(cx, |state, cx| {
                         state.on_drag_move(event, window, cx);
+                    });
+                }
+            }
+        });
+        // daruda vendor patch — the wheel is handled in the **capture** phase,
+        // not through `Input`'s div (`on_scroll_wheel` is bubble-only).
+        //
+        // An outer virtualized list registers its own wheel handler *after*
+        // painting its items, and the bubble phase runs listeners in reverse
+        // registration order, so the list always fired first and never stopped
+        // propagation: one gesture scrolled both it and an embedded editor.
+        // Capture runs before every bubble listener, and `on_scroll_wheel` stops
+        // propagation only when the offset actually changed — so the editor takes
+        // the gesture while it has somewhere to go and lets the outer scroller
+        // have it at the extremes. That is scroll chaining; the host no longer
+        // has to occlude the list to get the first half of it.
+        window.on_mouse_event({
+            let state = self.state.clone();
+            let hitbox = hitbox.clone();
+
+            move |event: &ScrollWheelEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
+                    state.update(cx, |state, cx| {
+                        state.on_scroll_wheel(event, window, cx);
                     });
                 }
             }
@@ -851,6 +875,9 @@ pub(super) struct PrepaintState {
     hover_definition_hitbox: Option<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
     bounds: Bounds<Pixels>,
+    /// daruda vendor patch — gates the capture-phase wheel handler in
+    /// [`TextElement::paint_mouse_listeners`].
+    scroll_hitbox: Hitbox,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
     ghost_lines: Vec<ShapedLine>,
@@ -1266,6 +1293,9 @@ impl Element for TextElement {
 
         PrepaintState {
             bounds,
+            // daruda vendor patch — the editor handles the wheel in the capture
+            // phase now, which needs a hitbox of its own to gate on.
+            scroll_hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
             last_layout,
             scroll_size,
             line_numbers,
@@ -1553,7 +1583,7 @@ impl Element for TextElement {
             }
         }
 
-        self.paint_mouse_listeners(window, cx);
+        self.paint_mouse_listeners(&prepaint.scroll_hitbox, window, cx);
     }
 }
 

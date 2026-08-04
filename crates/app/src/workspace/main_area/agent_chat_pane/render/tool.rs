@@ -389,7 +389,8 @@ fn with_truncation_note(
 fn output_truncated_from(block: &ToolOutputBlock) -> Option<usize> {
     match block {
         ToolOutputBlock::Text { truncated_from, .. }
-        | ToolOutputBlock::RawText { truncated_from, .. } => *truncated_from,
+        | ToolOutputBlock::RawText { truncated_from, .. }
+        | ToolOutputBlock::SourceText { truncated_from, .. } => *truncated_from,
         _ => None,
     }
 }
@@ -444,13 +445,13 @@ fn output_block_view(
                             return Some(card);
                         }
                         // The Claude ACP adapter wraps every tool result in a bare,
-                        // language-less fence (`daruda_acp::output_highlight`) even
-                        // when the content isn't source code (command output, search
-                        // hits, …). A tagged fence — e.g. Read's syntax-highlighted
-                        // snippet — keeps the default boxed/highlighted rendering;
-                        // a bare one renders as flush plain text instead, so
-                        // non-code output doesn't double the tool card's own
-                        // border/bg chrome for content that reads as prose, not code.
+                        // language-less fence (`markdownEscape`) even when the
+                        // content isn't source code (command output, search hits,
+                        // …). A tagged fence keeps the default boxed/highlighted
+                        // rendering; a bare one renders as flush plain text
+                        // instead, so non-code output doesn't double the tool
+                        // card's own border/bg chrome for content that reads as
+                        // prose, not code.
                         if !lang.is_empty() {
                             return None;
                         }
@@ -473,11 +474,17 @@ fn output_block_view(
         ToolOutputBlock::RawText {
             text,
             truncated_from,
+        }
+        | ToolOutputBlock::SourceText {
+            text,
+            truncated_from,
+            ..
         } => {
-            // Shell output recovered from the terminal sideband: never escaped
-            // by the adapter, so it goes straight to monospace rather than
-            // through markdown, which would eat a `#` or `*` the command
-            // actually printed.
+            // Verbatim bytes — shell output recovered from the terminal sideband,
+            // or a file's own contents. Straight to monospace rather than through
+            // markdown, which would eat a `#` or `*` that is literal here. Only
+            // reached when the reconciler built no editor (window gone), so the
+            // language a `SourceText` carries has nothing to colour.
             let body = plain_monospace_text(
                 SharedString::from(format!("agent-chat-tool-rawout-{tool_id}-{ix}")),
                 text,

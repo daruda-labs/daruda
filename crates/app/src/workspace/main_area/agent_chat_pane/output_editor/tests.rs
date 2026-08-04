@@ -23,6 +23,33 @@ fn truncated_text_block(text: &str) -> ToolOutputBlock {
     }
 }
 
+fn source_block(text: &str, language: Option<&str>) -> ToolOutputBlock {
+    ToolOutputBlock::SourceText {
+        text: text.to_string(),
+        language: language.map(str::to_string),
+        truncated_from: None,
+    }
+}
+
+#[test]
+fn a_file_s_contents_are_verbatim_in_the_language_the_block_names() {
+    // `daruda_acp` already undid the fence and the `cat -n` gutter, so nothing
+    // about the body may gate the embed — not even a fence pair the file itself
+    // holds, which is exactly what a markdown read looks like.
+    let block = source_block("# Doc\n```sh\nls\n```", Some("markdown"));
+    let src = output_editor_source(&block).expect("a file's contents are verbatim by definition");
+    assert_eq!(src.text, "# Doc\n```sh\nls\n```");
+    assert_eq!(src.language, Some("markdown"));
+}
+
+#[test]
+fn a_file_of_an_unknown_extension_is_still_verbatim() {
+    let block = source_block("some contents", None);
+    let src = output_editor_source(&block).expect("an unknown language still embeds");
+    assert_eq!(src.text, "some contents");
+    assert_eq!(src.language, None);
+}
+
 #[test]
 fn raw_shell_bytes_are_verbatim_and_untagged() {
     let block = raw_block("# not a heading\n*not* emphasis");

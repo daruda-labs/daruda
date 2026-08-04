@@ -23,11 +23,16 @@ pub(in crate::workspace) struct OutputEditorSource<'a> {
 }
 
 /// The verbatim body of `block`, when the whole block is one — raw shell bytes,
-/// or a `Text` block that is nothing but a single fenced code block (the shape
-/// the adapter's `markdownEscape` produces, possibly tagged by
-/// `daruda_acp::output_highlight`). Anything else keeps its markdown renderer:
-/// prose, several fences, and a `mermaid`-tagged fence, whose diagram card
-/// (`render/tool.rs`'s `mermaid_fence_element` hook) must keep winning.
+/// a file's contents, or a `Text` block that is nothing but a single fenced code
+/// block (the shape the adapter's `markdownEscape` produces). Anything else keeps
+/// its markdown renderer: prose, several fences, and a `mermaid`-tagged fence,
+/// whose diagram card (`render/tool.rs`'s `mermaid_fence_element` hook) must keep
+/// winning.
+///
+/// Only the `Text` arm inspects the body, because only `Text` might really be
+/// markdown. The other two arms are typed as verbatim upstream, which is what
+/// lets a read of a fence-bearing markdown file embed instead of being rejected
+/// as ambiguous.
 pub(in crate::workspace) fn output_editor_source(
     block: &ToolOutputBlock,
 ) -> Option<OutputEditorSource<'_>> {
@@ -51,6 +56,15 @@ pub(in crate::workspace) fn output_editor_source(
                 language: tag,
             })
         }
+        // A file's contents, already unwrapped by
+        // `daruda_acp::output_highlight` and carrying its own language — so
+        // nothing here inspects the body. That is the point: a read of a
+        // markdown file holds fences of its own, and gating on them is what used
+        // to drop it (and every unfenced read) onto the markdown path.
+        ToolOutputBlock::SourceText { text, language, .. } => Some(OutputEditorSource {
+            text,
+            language: language.as_deref(),
+        }),
         ToolOutputBlock::Image { .. }
         | ToolOutputBlock::Media { .. }
         | ToolOutputBlock::ResourceLink { .. } => None,
@@ -96,10 +110,10 @@ fn single_fenced_block(text: &str, truncated: bool) -> Option<(&str, Option<&str
 /// token is `None` for a bare fence, `Some(first word)` for an info string.
 /// `None` overall for a line that opens no fence.
 ///
-/// Mirrors, not shares, `daruda_acp::output_highlight`'s
-/// `is_bare_backtick_fence`: that one rewrites a fence it already knows is bare,
-/// while this classifies arbitrary text, so only this side needs a minimum run,
-/// a tag, and a closer at least as long as the opener.
+/// Mirrors, not shares, `daruda_acp::output_highlight`'s `unwrap_fence`: that one
+/// undoes the adapter's own wrapping of a file it already knows is source, so it
+/// need not read a tag, while this classifies arbitrary text and the tag decides
+/// both the highlighting and whether a mermaid card wins instead.
 fn fence_open(line: &str) -> Option<(usize, Option<&str>)> {
     let ticks = backtick_run(line);
     if ticks < MIN_FENCE_TICKS {
@@ -179,9 +193,9 @@ fn without_trailing_terminator(mut text: String) -> String {
 /// Create + configure the read-only editor for a verbatim output block inside a
 /// single window re-entry against the view's stored `window_handle`. `text` is
 /// taken by value — it moves straight into the editor state, which is why the
-/// reconciler owns it rather than borrowing. `language` is a fenced-block token;
-/// `None` (or one the registry cannot colour) renders un-highlighted. Returns
-/// `None` if the owning window is gone.
+/// reconciler owns it rather than borrowing. `language` is a fence tag or the
+/// name a `SourceText` block carries; `None` (or one the registry cannot colour)
+/// renders un-highlighted. Returns `None` if the owning window is gone.
 pub(in crate::workspace) fn create_output_editor(
     cx: &mut Context<AgentChatView>,
     window_handle: AnyWindowHandle,

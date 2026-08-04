@@ -136,6 +136,22 @@ pub enum ToolOutputBlock {
         text: String,
         truncated_from: Option<usize>,
     },
+    /// One file's verbatim contents, as read by a file-reading tool, plus the
+    /// source language its path implies. [`Self::Text`]'s markdown contract does
+    /// not apply: [`crate::output_highlight`] has already undone the adapter's
+    /// escaping fence and the tool's `cat -n` line-number gutter, so `text` is
+    /// what the file holds and renders through the host's code editor.
+    ///
+    /// `language` names a language rather than tagging a fence so the host never
+    /// has to parse markdown back out to find it — which is what made an
+    /// unfenced read lose both its highlighting and its bounded embed.
+    /// `None` when the extension is absent or unrecognized. Same
+    /// `truncated_from` contract.
+    SourceText {
+        text: String,
+        language: Option<String>,
+        truncated_from: Option<usize>,
+    },
     /// A decodable image; `data` is base64 (decoded to a real image at the app
     /// render boundary). `mime` may be empty when the source omitted it.
     Image { data: String, mime: String },
