@@ -255,6 +255,28 @@ pub(super) struct SessionHostRow {
     pub(super) container_input: Entity<InputState>,
 }
 
+impl SessionHostRow {
+    /// Whether the row's Type dropdown currently says Docker — the single
+    /// read the renderer, the tab cycle and `validate` all branch on, so they
+    /// can't disagree about which value field is live.
+    fn is_docker(&self, cx: &gpui::App) -> bool {
+        self.kind_select
+            .read(cx)
+            .selected_value()
+            .is_some_and(|value| value.as_ref() == "docker")
+    }
+
+    /// The value field the row's current Type renders. The other one is
+    /// invisible, so nothing may focus or read it.
+    fn value_input(&self, cx: &gpui::App) -> &Entity<InputState> {
+        if self.is_docker(cx) {
+            &self.container_input
+        } else {
+            &self.target_input
+        }
+    }
+}
+
 impl SettingsWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_section(BuiltinSection::default(), window, cx)
@@ -1431,13 +1453,7 @@ impl SettingsWindow {
                     s::settings_err_session_host_label_duplicate(&label),
                 ));
             }
-            let kind_str = row
-                .kind_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "ssh".to_string());
-            let kind = if kind_str == "docker" {
+            let kind = if row.is_docker(cx) {
                 let container = row.container_input.read(cx).value().to_string();
                 let container = session_host::checked_bare_word(
                     &container,
@@ -1603,11 +1619,12 @@ impl SettingsWindow {
         // Cycle only through inputs that belong to the *active* section
         // — Tab on the Font page must not jump into the Window page's
         // opacity input while it is hidden.
-        let handles: Vec<FocusHandle> = if self.active_section == BuiltinSection::Agent {
-            // Dynamic: rows are added/removed at runtime, so this section
-            // can't be precomputed into `section_focus_targets` like the
-            // fixed sections below.
-            self.agent_editable_rows()
+        let handles: Vec<FocusHandle> = match self.active_section {
+            // Dynamic sections: rows are added/removed at runtime, so neither
+            // can be precomputed into `section_focus_targets` like the fixed
+            // sections below (which keep only a first-field jump target).
+            BuiltinSection::Agent => self
+                .agent_editable_rows()
                 .flat_map(|(_, row)| {
                     [
                         row.id_input.read(cx).focus_handle(cx),
@@ -1615,15 +1632,28 @@ impl SettingsWindow {
                         row.command_input.read(cx).focus_handle(cx),
                     ]
                 })
-                .collect()
-        } else {
+                .collect(),
+            // Label then whichever value field the row's Type renders — the
+            // hidden one would be an invisible stop. The Type dropdown itself
+            // stays out, as the agent catalog's transport select does.
+            BuiltinSection::SessionHosts => self
+                .session_host_rows
+                .iter()
+                .flat_map(|row| {
+                    [
+                        row.label_input.read(cx).focus_handle(cx),
+                        row.value_input(cx).read(cx).focus_handle(cx),
+                    ]
+                })
+                .collect(),
             // Sections with no text input (Cursor / Shell / placeholders /
             // …) have no entry in the map, so this falls through to the
             // `n == 0` early-return below.
-            self.section_focus_targets
+            _ => self
+                .section_focus_targets
                 .get(&self.active_section)
                 .cloned()
-                .unwrap_or_default()
+                .unwrap_or_default(),
         };
         let n = handles.len();
         if n == 0 {

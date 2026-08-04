@@ -1305,6 +1305,163 @@ fn removing_a_session_host_row_updates_the_row_list_immediately(cx: &mut TestApp
     win.read_with(cx, |w, _| assert_eq!(w.session_host_rows().count(), 1));
 }
 
+// ---- Session Hosts tab cycle ----
+
+/// Test-only — open the Session Hosts page, landing focus where a sidebar
+/// click would.
+fn open_session_hosts_section(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| {
+            w.focus_section(BuiltinSection::SessionHosts, window, cx)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — one Tab (`forward`) / Shift-Tab press.
+fn press_tab(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    forward: bool,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.focus_next_input(forward, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — whether one session-host row's input currently holds focus.
+fn session_host_input_is_focused(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+) -> bool {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).is_focused(window)
+    })
+    .expect("settings window should still be open during the test")
+}
+
+/// A one-row SSH catalog config — the seed for the tab-cycle tests.
+fn one_ssh_row_config() -> daruda_config::Config {
+    daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id: daruda_store::project::SessionHostId::new(),
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    }
+}
+
+/// Tab has to walk a row's fields, not sit on its label: the section's
+/// precomputed focus list holds only the first field, so the cycle is built
+/// from the live rows instead.
+#[gpui::test]
+fn tab_walks_from_a_session_host_label_to_its_value_field(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
+    open_session_hosts_section(&wh, &win, cx);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "opening the page lands on the first row's label"
+    );
+
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "Tab from the label must reach the row's target field"
+    );
+
+    press_tab(&wh, &win, cx, false);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "Shift-Tab must walk back to the label"
+    );
+}
+
+/// Two rows, the second one Docker: the cycle spans both rows and only ever
+/// stops on the value field the row actually renders.
+#[gpui::test]
+fn tab_wraps_across_two_session_host_rows(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
+    add_session_host(&wh, &win, cx);
+    select_session_host_kind(&wh, &win, cx, 1, "docker");
+    open_session_hosts_section(&wh, &win, cx);
+
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "the first row's value field comes after its label"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.label_input.clone()),
+        "the cycle carries on into the second row"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.container_input.clone()),
+        "a Docker row's container field is the one on screen"
+    );
+    assert!(
+        !session_host_input_is_focused(&wh, &win, cx, 1, |r| r.target_input.clone()),
+        "the hidden target field must never take focus"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "the cycle wraps back to the first row"
+    );
+}
+
+/// A row added after the window opened is in the cycle too — it can't be, if
+/// the cycle comes from the list built at construction.
+#[gpui::test]
+fn a_session_host_row_added_at_runtime_joins_the_tab_cycle(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
+    open_session_hosts_section(&wh, &win, cx);
+    add_session_host(&wh, &win, cx);
+
+    press_tab(&wh, &win, cx, true);
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.label_input.clone()),
+        "the row added at runtime must be reachable by Tab"
+    );
+}
+
+/// An empty catalog leaves the section with no precomputed focus target at
+/// all, so Tab has to pick the cycle up from the rows the user just added.
+#[gpui::test]
+fn tab_cycles_session_host_rows_added_to_an_empty_catalog(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    open_session_hosts_section(&wh, &win, cx);
+    add_session_host(&wh, &win, cx);
+
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "Tab must land on the first field of the only row"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "and carries on to its value field"
+    );
+}
+
 #[gpui::test]
 fn focus_section_resets_scroll(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);

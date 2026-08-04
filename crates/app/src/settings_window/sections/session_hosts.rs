@@ -63,12 +63,7 @@ impl SettingsWindow {
     ) -> AnyElement {
         let t = theme::current(cx);
         let remove_id = format!("settings-session-host-remove-{index}");
-        let kind = row
-            .kind_select
-            .read(cx)
-            .selected_value()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "ssh".to_string());
+        let is_docker = row.is_docker(cx);
 
         let mut body = div()
             .flex()
@@ -109,7 +104,7 @@ impl SettingsWindow {
 
         // Only one of target/container is meaningful per kind — show just
         // that field, mirroring the agent catalog row's ssh/docker split.
-        if kind == "docker" {
+        if is_docker {
             body = body.child(field_row(
                 s::settings_session_host_field_container(),
                 crate::ui::input(&row.container_input, cx, ()),
