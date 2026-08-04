@@ -61,6 +61,12 @@ pub(crate) fn rewrite_fenced_output(text: &str, lang: &str) -> String {
 }
 
 /// A fence line made of nothing but backticks (`` ``` ``, `` ```` ``, …).
+///
+/// Deliberately looser than the app's mirror of this parsing
+/// (`workspace::main_area::agent_chat_pane::output_editor`'s `fence_open` /
+/// `is_closing_fence`): here the fence is already known to be the adapter's
+/// bare one, so no minimum run or tag handling is needed; that one classifies
+/// arbitrary text and must reject ambiguous shapes.
 fn is_bare_backtick_fence(line: &str) -> bool {
     !line.is_empty() && line.bytes().all(|b| b == b'`')
 }

@@ -16,7 +16,9 @@ fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
 /// `make_activity_view` (which goes through a full `Workspace` +
 /// `create_agent_chat_pane`): `AgentChatView::new` only needs a
 /// `Context<Self>`, not a `Workspace` at all.
-fn make_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::AgentChatView> {
+pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
+    cx: &mut gpui::TestAppContext,
+) -> gpui::WindowHandle<super::AgentChatView> {
     crate::test_support::init_gpui_component(cx);
     cx.add_window(|window, cx| {
         super::AgentChatView::new(

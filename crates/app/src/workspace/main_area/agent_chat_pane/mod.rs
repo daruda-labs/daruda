@@ -23,6 +23,7 @@ pub(in crate::workspace) mod autoscroll_ops;
 pub(in crate::workspace) mod config_chip;
 pub(in crate::workspace) mod fold;
 pub(in crate::workspace) mod mode_chip;
+pub(in crate::workspace) mod output_editor;
 pub(in crate::workspace) mod reconcile;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod rows;

@@ -7,6 +7,9 @@
 mod blocks;
 mod chrome;
 mod diff;
+/// The height-capped editor embed. Reachable from `workspace/tests` so the
+/// layout probe measures the shipped builder rather than a copy of it.
+pub(in crate::workspace) mod embed;
 mod fold_header;
 mod mermaid;
 mod mermaid_lightbox;
@@ -25,6 +28,14 @@ use gpui::{
 /// (`view/mod.rs`) uses this as its field type too, so both the owning cache
 /// and its read-only render-side view share one definition.
 pub(in crate::workspace) type DiffEditors =
+    std::collections::HashMap<String, Entity<crate::ui::InputState>>;
+
+/// Read-only editor entities for verbatim tool-output blocks keyed by
+/// `"{tool_call_id}#{block_index}"` (built in the ops layer; this view only
+/// embeds them). `pub(in crate::workspace)` rather than `pub(super)` for the
+/// same reason as [`DiffEditors`]: `AgentChatView::assets` uses it as a field
+/// type too.
+pub(in crate::workspace) type OutputEditors =
     std::collections::HashMap<String, Entity<crate::ui::InputState>>;
 
 /// Per-diff `+N −M` line counts keyed by `"{tool_call_id}#{diff_index}"`
@@ -56,6 +67,31 @@ pub(in crate::workspace) type ToolImages = std::sync::Arc<
     >,
 >;
 
+/// The `AgentChatView::assets` caches the render pass reads, borrowed as one
+/// parameter instead of five threaded through `render_item` → `tool_card` →
+/// `output_block_view` (and `tool_card`'s recursion into flattened subagent
+/// children). Read-only here: entries are built in the reconcile layer.
+#[derive(Clone, Copy)]
+pub(super) struct RenderAssets<'a> {
+    pub(super) diff_editors: &'a DiffEditors,
+    pub(super) diff_stats: &'a DiffStats,
+    pub(super) output_editors: &'a OutputEditors,
+    pub(super) tool_images: &'a ToolImages,
+    pub(super) mermaid_images: &'a MermaidImages,
+}
+
+impl<'a> RenderAssets<'a> {
+    fn of(assets: &'a AssetCache) -> Self {
+        Self {
+            diff_editors: &assets.diff_editors,
+            diff_stats: &assets.diff_stats,
+            output_editors: &assets.output_editors,
+            tool_images: &assets.tool_images,
+            mermaid_images: &assets.mermaid_images,
+        }
+    }
+}
+
 use blocks::{
     assistant_block, assistant_markdown, conclusion_block, error_block, thinking_block, user_bubble,
 };
@@ -72,7 +108,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
-use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AssetCache};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Build the element tree for an Agent chat pane.
@@ -505,10 +541,7 @@ fn render_agent_item(
             under_response,
             rollup,
             &this.items,
-            &this.assets.diff_editors,
-            &this.assets.diff_stats,
-            &this.assets.mermaid_images,
-            &this.assets.tool_images,
+            RenderAssets::of(&this.assets),
             &this.fold,
             t,
             this.dim_amount,
@@ -531,16 +564,14 @@ fn render_item(
     under_response: bool,
     rollup: Option<Rollup>,
     items: &[ChatItem],
-    diff_editors: &DiffEditors,
-    diff_stats: &DiffStats,
-    mermaid_images: &MermaidImages,
-    tool_images: &ToolImages,
+    assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
     agent_label: &str,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
+    let mermaid_images = assets.mermaid_images;
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),
         // Under a response bar the speaker is already labeled with the agent
@@ -573,22 +604,7 @@ fn render_item(
         ChatItem::ToolCall(tc) => {
             let key = tool_fold_key(tc);
             let expanded = fold.is_expanded(&key, is_active(item));
-            tool_card(
-                key,
-                expanded,
-                tc,
-                items,
-                diff_editors,
-                diff_stats,
-                tool_images,
-                mermaid_images,
-                fold,
-                t,
-                dim,
-                0,
-                cx,
-            )
-            .into_any_element()
+            tool_card(key, expanded, tc, items, assets, fold, t, dim, 0, cx).into_any_element()
         }
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t, cx).into_any_element(),

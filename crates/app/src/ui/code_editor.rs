@@ -14,7 +14,7 @@
 use crate::ui::theme;
 use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px};
 use gpui_component::Sizable as _;
-use gpui_component::input::{Input, InputState, ScrollWheelBehavior};
+use gpui_component::input::{Input, InputState};
 
 /// Re-export so app code (the diff viewer) can build per-row editor
 /// decorations without importing `gpui_component` directly.
@@ -110,7 +110,7 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 /// unmapped captures) would inherit gpui's default black `text_style` and
 /// vanish on a dark theme; `fg` is the host's slot for it — each caller picks
 /// it to match whatever background it actually paints on (see
-/// [`file_viewer_editor`] vs [`code_diff_viewer`]).
+/// [`file_viewer_editor`] vs [`embedded_code_viewer`]).
 fn code_editor_chrome(state: &Entity<InputState>, fg: Hsla, cx: &App) -> Input {
     Input::new(state)
         .appearance(false)
@@ -123,8 +123,8 @@ fn code_editor_chrome(state: &Entity<InputState>, fg: Hsla, cx: &App) -> Input {
 
 /// Render `state` as a full-size code editor for the file-viewer pane (raw +
 /// diff). Standalone in its own pane, so it scrolls both axes
-/// ([`ScrollWheelBehavior::Both`], the default) and fills the body via
-/// `.flex()` at the call site. Paints on the UI theme's fixed
+/// ([`crate::ui::ScrollWheelBehavior::Both`], the default) and fills the body
+/// via `.flex()` at the call site. Paints on the UI theme's fixed
 /// `file_viewer_bg` editor surface, so the fallback text colour is matched to
 /// the *UI* theme's light/dark bit (`HighlightTheme::editor_foreground`, set
 /// light-aware by `apply_daruda_palette`).
@@ -139,28 +139,27 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
     code_editor_chrome(state, fg, cx)
 }
 
-/// Render `state` as a diff editor **embedded in an outer vertical scroller**
-/// (the agent-chat tool-card transcript). Shares [`file_viewer_editor`]'s
-/// chrome but differs on scroll: the wheel scrolls
-/// [`ScrollWheelBehavior::Horizontal`] only (a vertical swipe belongs to the
-/// transcript list). The built-in scrollbar is suppressed — the host
-/// overlays its own thin daruda thumb (`crate::ui::scrollbar::horizontal_thumb`,
-/// paired with `InputState::last_bounds`/`scroll_size`), matching every other
-/// scrollable surface in the app (File viewer, right dock, files/git-changes
-/// views) instead of gpui_component's globally-themed bar. The caller pins an
-/// explicit height (`rows × row_h`) that reserves a strip for the thumb.
-pub fn code_diff_viewer(state: &Entity<InputState>, cx: &App) -> Input {
-    // Paints on `theme::agent_chat_bg` (the terminal-preset background
-    // mirrored into the pane), not the UI theme's editor surface — so the
-    // fallback fg's light/dark pick tracks that background via the same
-    // `agent_chat_syntax_is_light` judgment `Workspace::agent_chat_theme_params`
-    // uses for the diff's tree-sitter spans, keeping both in lockstep.
+/// Render `state` as a read-only viewer **embedded, height-capped, in the
+/// agent-chat transcript** — tool output and file diffs alike. Shares
+/// [`file_viewer_editor`]'s chrome but picks its fallback colour off the
+/// terminal-preset background the embed paints on, and keeps
+/// [`crate::ui::ScrollWheelBehavior::Both`]: a capped embed hides rows below
+/// the bound, so internal vertical scroll is the only way to reach them.
+/// `InputState::on_scroll_wheel` calls `stop_propagation` only when the offset
+/// actually changed, so a gesture at either extreme still bubbles to the
+/// transcript instead of being captured. The built-in scrollbar is suppressed —
+/// the host overlays its own thin daruda thumbs
+/// (`crate::ui::scrollbar::{vertical,horizontal}_thumb`, paired with
+/// `InputState::last_bounds`/`scroll_size`), matching every other scrollable
+/// surface in the app instead of gpui_component's globally-themed bar.
+pub fn embedded_code_viewer(state: &Entity<InputState>, cx: &App) -> Input {
+    // The light/dark pick goes through `agent_chat_syntax_is_light` — the same
+    // judgment `Workspace::agent_chat_theme_params` feeds the tree-sitter spans,
+    // so the fallback colour and the highlighted runs stay in lockstep.
     let fg = theme::palette::syntax_theme_of(
         theme::active_syntax_palette(cx),
         theme::agent_chat_syntax_is_light(cx),
     )
     .default;
     code_editor_chrome(state, fg, cx)
-        .scroll_wheel(ScrollWheelBehavior::Horizontal)
-        .show_scrollbar(false)
 }

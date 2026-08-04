@@ -29,12 +29,12 @@ pub enum ScrollWheelBehavior {
     Both,
     /// Scroll (and consume) only horizontal-dominant gestures
     /// (`|delta.x| > |delta.y|`); let vertical-dominant gestures bubble to an
-    /// outer scroller. For an editor embedded in a vertical list whose long,
-    /// non-wrapped lines still need horizontal scroll — the agent-chat diff
-    /// embed: a vertical swipe scrolls the transcript, a horizontal swipe
-    /// scrolls the diff. Without it `on_scroll_wheel` consumes any event that
-    /// nudges the horizontal offset (a diagonal trackpad delta), swallowing
-    /// the list's vertical scroll.
+    /// outer scroller. For an editor embedded in a vertical list that shows all
+    /// its rows, so only its long, non-wrapped lines need scrolling: under
+    /// [`Self::Both`] a diagonal trackpad delta that nudges the horizontal
+    /// offset consumes the event and swallows the list's vertical scroll. A
+    /// height-capped embed still takes [`Self::Both`] and accepts that trade —
+    /// the rows below the cap are otherwise unreachable.
     Horizontal,
     /// The mirror of [`Self::Horizontal`]: scroll (and consume) only
     /// vertical-dominant gestures and let horizontal ones bubble to an outer

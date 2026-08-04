@@ -210,12 +210,10 @@ impl AgentChatView {
     pub(super) fn echo_prompt(&mut self, text: String, cx: &mut Context<Self>) {
         self.preserve_tail_response_expansion();
         self.items.push(ChatItem::UserText(text));
-        // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
-        // be a no-op here; diff editors are reconciled solely on the event-pump
-        // path. Same reasoning rules out `reconcile_tool_images` here — no
-        // ToolCall at a prompt echo, so no tool image to reconcile. The echoed
-        // `UserText` renders its markdown directly; a prompt may carry a
-        // ` ```mermaid ` fence, so rasterize those (no-op when there are none).
+        // An echo appends a `UserText`, never a `ToolCall`, so all three
+        // tool-derived reconciles (diff editors, output editors, tool images)
+        // would be no-ops here; they run solely on the event-pump path. A prompt
+        // may carry a ` ```mermaid ` fence, so rasterize those.
         let dark = Self::host_is_dark(cx);
         self.reconcile_mermaid(dark, cx);
         self.rebuild_rows();

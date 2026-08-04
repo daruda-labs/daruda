@@ -11,11 +11,12 @@ use daruda_acp::{
 };
 use gpui::{AnyElement, App, Hsla, IntoElement, Pixels, SharedString, div, prelude::*, px};
 
+use super::RenderAssets;
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
+use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
 use super::mermaid::mermaid_fence_element;
-use super::{DiffEditors, DiffStats, MermaidImages, ToolImages};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
@@ -23,6 +24,9 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     diff_editor_key, fold_active, renders_raw_input, tool_fold_key, tool_image_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::output_editor::{
+    output_editor_key, output_editor_source,
+};
 use crate::workspace::main_area::agent_chat_pane::rows::{
     SUBAGENT_NEST_DEPTH_CAP, subagent_subtree_live,
 };
@@ -42,10 +46,7 @@ pub(super) fn tool_card(
     expanded: bool,
     tc: &ToolCallItem,
     items: &[ChatItem],
-    diff_editors: &DiffEditors,
-    diff_stats: &DiffStats,
-    tool_images: &ToolImages,
-    mermaid_images: &MermaidImages,
+    assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
@@ -207,9 +208,17 @@ pub(super) fn tool_card(
             );
         }
         for (di, diff) in tc.diffs.iter().enumerate() {
-            let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
+            let editor = assets.diff_editors.get(&diff_editor_key(&tc.id, di));
             body = body.child(diff_block(
-                &tc.id, di, diff, editor, diff_stats, fold, t, dim, cx,
+                &tc.id,
+                di,
+                diff,
+                editor,
+                assets.diff_stats,
+                fold,
+                t,
+                dim,
+                cx,
             ));
         }
         if !tc.output.is_empty() {
@@ -220,15 +229,7 @@ pub(super) fn tool_card(
                     .child(SharedString::from(s::agent_chat_tool_output_label())),
             );
             for (ix, block) in tc.output.iter().enumerate() {
-                body = body.child(output_block_view(
-                    &tc.id,
-                    ix,
-                    block,
-                    tool_images,
-                    mermaid_images,
-                    dim,
-                    cx,
-                ));
+                body = body.child(output_block_view(&tc.id, ix, block, assets, t, dim, cx));
             }
         }
 
@@ -284,10 +285,7 @@ pub(super) fn tool_card(
                         child_expanded,
                         child,
                         items,
-                        diff_editors,
-                        diff_stats,
-                        tool_images,
-                        mermaid_images,
+                        assets,
                         fold,
                         t,
                         dim,
@@ -385,20 +383,43 @@ fn with_truncation_note(
         .into_any_element()
 }
 
-/// Render one tool-output block: rendered markdown (drag-selectable, keyed per
-/// block for stable selection state), verbatim monospace for raw shell output,
-/// or a resource link as an open button. The ACP spec says clients SHOULD render
-/// tool text as Markdown; code blocks keep their own monospace + syntax
-/// highlight.
+/// The byte-cap marker a text-shaped output block carries, if any. Shared by the
+/// editor-embed path and the per-variant fallbacks so both reach
+/// [`with_truncation_note`] through the same read.
+fn output_truncated_from(block: &ToolOutputBlock) -> Option<usize> {
+    match block {
+        ToolOutputBlock::Text { truncated_from, .. }
+        | ToolOutputBlock::RawText { truncated_from, .. } => *truncated_from,
+        _ => None,
+    }
+}
+
+/// Render one tool-output block: a height-capped read-only editor when the
+/// reconciler built one for this block (verbatim, non-markdown content), else
+/// rendered markdown (drag-selectable, keyed per block for stable selection
+/// state), verbatim monospace for raw shell output, or a resource link as an open
+/// button. The ACP spec says clients SHOULD render tool text as Markdown; code
+/// blocks keep their own monospace + syntax highlight.
 fn output_block_view(
     tool_id: &str,
     ix: usize,
     block: &ToolOutputBlock,
-    tool_images: &ToolImages,
-    mermaid_images: &MermaidImages,
+    assets: RenderAssets<'_>,
+    t: &theme::DarudaTheme,
     dim: f32,
     cx: &App,
 ) -> AnyElement {
+    let key = output_editor_key(tool_id, ix);
+    if let Some(editor) = assets.output_editors.get(&key) {
+        // The copy text comes from the same classifier the reconciler fed the
+        // editor, so it is the fence body rather than the raw block text — what
+        // the user actually sees in the embed.
+        let copy = output_editor_source(block).map(|src| SharedString::from(src.text.to_string()));
+        let body = bounded_editor_embed(&key, editor, copy, t, dim, cx);
+        return with_truncation_note(body, output_truncated_from(block), dim, cx);
+    }
+    let mermaid_images = assets.mermaid_images;
+    let tool_images = assets.tool_images;
     match block {
         ToolOutputBlock::Text {
             text,

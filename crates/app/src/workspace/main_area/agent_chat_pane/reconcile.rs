@@ -1,17 +1,20 @@
-//! Async reconcilers for the agent chat pane — the two passes that turn
+//! Async reconcilers for the agent chat pane — the passes that turn
 //! conversation content into GPU-ready artifacts: read-only diff editors for
-//! tool-call file edits (rebuilt whenever the underlying diff content
-//! changes), and rasterized mermaid diagrams for ` ```mermaid ` fences
+//! tool-call file edits and read-only editors for verbatim tool output (both
+//! rebuilt whenever the underlying content changes), plus rasterized mermaid
+//! diagrams for ` ```mermaid ` fences and decoded tool-output images
 //! (build-once).
 //!
-//! Split out of [`view`](super::view) because both are distinct, async-heavy
+//! Split out of [`view`](super::view) because these are distinct, async-heavy
 //! responsibilities (window re-entry to build editor entities; background-executor
 //! rasterization that can panic) with their own failure/logging paths — separate
 //! from the view's synchronous state-transition ops. They stay `impl
-//! AgentChatView` methods (they read/fill the view's `diff_editors` /
-//! `mermaid_images` caches and `cx.notify()` the view), driven from
+//! AgentChatView` methods (they read/fill the view's `assets` caches and
+//! `cx.notify()` the view), driven from
 //! [`AgentChatView::apply_event`](super::view::AgentChatView::apply_event) gated
 //! on `touched_tool` / `touched_text`.
+
+use std::collections::HashSet;
 
 use daruda_acp::{ChatItem, ToolOutputBlock};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -20,6 +23,9 @@ use gpui::Context;
 use super::agent_chat_helpers::{
     DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor, diff_editor_key,
     diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources, tool_image_key,
+};
+use super::output_editor::{
+    create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
 };
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
@@ -48,7 +54,8 @@ impl AgentChatView {
     /// unchanged fingerprint skips the rebuild, a changed one replaces the
     /// stale editor so it doesn't stay frozen on an early partial snapshot
     /// (the diff box then undersizes and its tail visually merges into the
-    /// tool card's Output section).
+    /// tool card's Output section). A cached key this pass doesn't claim is
+    /// dropped from all three maps — see [`stale_keys`].
     pub(in crate::workspace) fn reconcile_diff_editors(
         &mut self,
         syntax_theme: &str,
@@ -79,11 +86,7 @@ impl AgentChatView {
         // which can't happen while the immutable `items` borrow is live.
         let mut pending: Vec<(String, u64, gpui::SharedString, DiffEditorModel, DiffStat)> =
             Vec::new();
-        // A diff that converged to no hunks since its editor was built (the
-        // rare reverted-mid-stream case) needs that stale editor dropped so
-        // the body falls back to the "no changes" / inline render instead of
-        // keeping a frozen one around forever.
-        let mut stale: Vec<String> = Vec::new();
+        let mut live: HashSet<String> = HashSet::new();
         for item in &self.items {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
@@ -92,20 +95,25 @@ impl AgentChatView {
                 let key = diff_editor_key(&tc.id, di);
                 let fingerprint = diff_source_fingerprint(diff);
                 if self.assets.diff_editor_sources.get(&key) == Some(&fingerprint) {
+                    // Unchanged still counts as live, or the next pass would
+                    // destroy and rebuild its editor.
+                    live.insert(key);
                     continue;
                 }
                 let Some((model, stat)) =
                     build_diff_view_model(diff, syntax_theme, is_light, &colors)
                 else {
-                    if self.assets.diff_editors.contains_key(&key) {
-                        stale.push(key);
-                    }
+                    // Converged to no hunks (the rare reverted-mid-stream case):
+                    // left unclaimed so any cached editor is dropped below and
+                    // the body falls back to the "no changes" render.
                     continue;
                 };
                 let language = diff_editor_language(diff);
+                live.insert(key.clone());
                 pending.push((key, fingerprint, language, model, stat));
             }
         }
+        let stale = stale_keys(self.assets.diff_editors.keys(), &live);
         if pending.is_empty() && stale.is_empty() {
             return;
         }
@@ -135,6 +143,82 @@ impl AgentChatView {
         // the touched call may sit mid-list (a `ToolCallUpdate` to an earlier
         // call), so `sync_list_after`'s tail-only remeasure isn't enough — do a
         // full one. Once per diff-bearing event.
+        self.list_state.remeasure();
+    }
+
+    /// Build the read-only editor entity for every verbatim tool-output block
+    /// whose current content doesn't match the editor already cached for it.
+    /// Called from `apply_event` after `items` mutates, so a long shell output
+    /// paints through `InputState` (visible rows only) instead of gpui's
+    /// per-line text walk.
+    ///
+    /// Keyed by `"{tool_call_id}#{block_index}"` — one editor per output block.
+    /// Unlike [`Self::reconcile_diff_editors`] this takes no theme input: the
+    /// editor colours through `gpui_component`'s built-in tree-sitter path,
+    /// which reads the palette at paint time, so there is no theme-derived model
+    /// to pre-compute here and no `DarudaTheme` global read to guard.
+    ///
+    /// Rebuilt-on-change, not build-once: `apply_tool_call_update`
+    /// (`daruda_acp::mapping`) replaces a tool call's `output` wholesale on
+    /// every `ToolCallUpdate`, so a streaming shell command hands this the same
+    /// key with growing text. A key whose fingerprint moved is rebuilt; a cached
+    /// key the walk no longer visits is dropped, which covers both a block that
+    /// stopped qualifying and an index a shrunken `output` vec no longer reaches.
+    pub(in crate::workspace) fn reconcile_output_editors(&mut self, cx: &mut Context<Self>) {
+        // Collect the pure work first; entity creation re-enters the window,
+        // which can't happen while the immutable `items` borrow is live.
+        let mut pending: Vec<(String, u64, String, Option<String>)> = Vec::new();
+        let mut live: HashSet<String> = HashSet::new();
+        for item in &self.items {
+            let ChatItem::ToolCall(tc) = item else {
+                continue;
+            };
+            for (bi, block) in tc.output.iter().enumerate() {
+                let Some(src) = output_editor_source(block) else {
+                    continue;
+                };
+                let key = output_editor_key(&tc.id, bi);
+                let fingerprint = output_source_fingerprint(&src);
+                // Owning the body is what costs — up to the 64 KiB output cap —
+                // so it happens only past the skip. A key that is merely
+                // unchanged still counts as live, or the next pass would destroy
+                // and rebuild its editor.
+                if self.assets.output_editor_sources.get(&key) == Some(&fingerprint) {
+                    live.insert(key);
+                    continue;
+                }
+                let text = src.text.to_owned();
+                let language = src.language.map(str::to_owned);
+                live.insert(key.clone());
+                pending.push((key, fingerprint, text, language));
+            }
+        }
+        let stale = stale_keys(self.assets.output_editors.keys(), &live);
+        if pending.is_empty() && stale.is_empty() {
+            return;
+        }
+
+        for key in stale {
+            self.assets.output_editors.remove(&key);
+            self.assets.output_editor_sources.remove(&key);
+        }
+
+        let window_handle = self.window_handle;
+        let pane_id = self.pane_id;
+        for (key, fingerprint, text, language) in pending {
+            if let Some(editor) =
+                create_output_editor(cx, window_handle, pane_id, text, language.as_deref())
+            {
+                self.assets
+                    .output_editor_sources
+                    .insert(key.clone(), fingerprint);
+                self.assets.output_editors.insert(key, editor);
+            }
+        }
+        // A tool card just changed height (an embed appeared, grew, or was
+        // dropped), and the touched call may sit mid-list (a `ToolCallUpdate` to
+        // an earlier call), so `sync_list_after`'s tail-only remeasure isn't
+        // enough — do a full one. Once per output-bearing event.
         self.list_state.remeasure();
     }
 
@@ -308,5 +392,209 @@ impl AgentChatView {
             })
             .detach();
         }
+    }
+}
+
+/// The cached keys `live` (everything the pass claimed) leaves behind — an
+/// entry whose backing content is gone: a shrunken `output` / `diffs` vec, a
+/// tool call that left `items`, or a block that stopped qualifying. Shared so
+/// both reconcilers invalidate by the same rule; left behind, an entry would
+/// either freeze the old content on screen or leak for the session.
+fn stale_keys<'a>(cached: impl Iterator<Item = &'a String>, live: &HashSet<String>) -> Vec<String> {
+    cached.filter(|key| !live.contains(*key)).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use daruda_acp::{
+        ChatItem, DiffView, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
+    };
+    use gpui::TestAppContext;
+
+    use super::super::view::tests::make_test_view;
+
+    const KEY: &str = "call_1#0";
+
+    /// A syntax theme id the diff reconciler's highlight pass can resolve.
+    const SYNTAX_THEME: &str = "base16-ocean.dark";
+
+    fn tool_call(output: Vec<ToolOutputBlock>) -> ChatItem {
+        tool_call_with(output, Vec::new())
+    }
+
+    fn diff_tool_call(diffs: Vec<DiffView>) -> ChatItem {
+        tool_call_with(Vec::new(), diffs)
+    }
+
+    fn tool_call_with(output: Vec<ToolOutputBlock>, diffs: Vec<DiffView>) -> ChatItem {
+        ChatItem::ToolCall(ToolCallItem {
+            id: "call_1".to_string(),
+            title: "Bash".to_string(),
+            kind: ToolKindView::Execute,
+            tool_name: None,
+            status: ToolStatusView::Completed,
+            diffs,
+            output,
+            raw_input: None,
+            parent_tool_id: None,
+            exit: None,
+        })
+    }
+
+    fn diff(path: &str, new_text: &str) -> DiffView {
+        DiffView {
+            path: path.into(),
+            old_text: Some("old\n".to_string()),
+            new_text: new_text.to_string(),
+        }
+    }
+
+    fn raw(text: &str) -> ToolOutputBlock {
+        ToolOutputBlock::RawText {
+            text: text.to_string(),
+            truncated_from: None,
+        }
+    }
+
+    /// The reconciler owns the whole editor lifecycle: one entity per
+    /// qualifying output block, reused while the content is unchanged, rebuilt
+    /// when a streamed output grows, and dropped once the block (or its index)
+    /// is gone. Driven through the view entity rather than `window.update` —
+    /// editor creation re-enters the window, which a held window update blocks.
+    #[gpui::test]
+    fn output_editors_are_built_reused_rebuilt_and_dropped(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        let reconcile_with = |cx: &mut TestAppContext, output: Vec<ToolOutputBlock>| {
+            view.update(cx, |v, cx| {
+                v.items = vec![tool_call(output)];
+                v.reconcile_output_editors(cx);
+            });
+        };
+        let editor_id = |cx: &mut TestAppContext| {
+            view.read_with(cx, |v, _| {
+                v.assets.output_editors.get(KEY).map(|e| e.entity_id())
+            })
+        };
+        let editor_text = |cx: &mut TestAppContext| {
+            view.read_with(cx, |v, cx| {
+                v.assets.output_editors[KEY].read(cx).value().to_string()
+            })
+        };
+
+        reconcile_with(cx, vec![raw("line 1\nline 2")]);
+        let built = editor_id(cx).expect("a verbatim block gets an editor");
+        assert_eq!(editor_text(cx), "line 1\nline 2");
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.assets.output_editors.len(), 1);
+            assert!(v.assets.output_editor_sources.contains_key(KEY));
+        });
+
+        reconcile_with(cx, vec![raw("line 1\nline 2")]);
+        assert_eq!(
+            editor_id(cx),
+            Some(built),
+            "unchanged content reuses the cached editor"
+        );
+
+        reconcile_with(cx, vec![raw("line 1\nline 2\nline 3")]);
+        assert_ne!(
+            editor_id(cx),
+            Some(built),
+            "a grown output must not stay frozen on the partial snapshot"
+        );
+        assert_eq!(editor_text(cx), "line 1\nline 2\nline 3");
+
+        // A block that stopped qualifying drops its editor so the markdown /
+        // monospace fallback renders again.
+        reconcile_with(
+            cx,
+            vec![ToolOutputBlock::Image {
+                data: "AAAA".to_string(),
+                mime: "image/png".to_string(),
+            }],
+        );
+        view.read_with(cx, |v, _| {
+            assert!(v.assets.output_editors.is_empty());
+            assert!(v.assets.output_editor_sources.is_empty());
+        });
+
+        // An index the replacement output vec no longer reaches is dropped too.
+        reconcile_with(cx, vec![raw("back again")]);
+        assert!(editor_id(cx).is_some());
+        reconcile_with(cx, Vec::new());
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.output_editors.is_empty() && v.assets.output_editor_sources.is_empty(),
+                "a shrunken output vec must not leak editors under stale indexes"
+            );
+        });
+    }
+
+    /// The diff reconciler drops by the same rule: an entry whose diff the pass
+    /// no longer reaches — a shrunken `diffs` vec, or a tool call gone from
+    /// `items` — leaves all three parallel maps, while a diff that is merely
+    /// unchanged keeps the editor it already has.
+    #[gpui::test]
+    fn diff_editors_are_dropped_when_their_diff_is_gone(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        let reconcile_with = |cx: &mut TestAppContext, items: Vec<ChatItem>| {
+            view.update(cx, |v, cx| {
+                v.items = items;
+                v.reconcile_diff_editors(SYNTAX_THEME, false, cx);
+            });
+        };
+        let cached = |cx: &mut TestAppContext, key: &str| {
+            let key = key.to_string();
+            view.read_with(cx, |v, _| {
+                (
+                    v.assets.diff_editors.get(&key).map(|e| e.entity_id()),
+                    v.assets.diff_stats.contains_key(&key),
+                    v.assets.diff_editor_sources.contains_key(&key),
+                )
+            })
+        };
+
+        reconcile_with(
+            cx,
+            vec![diff_tool_call(vec![
+                diff("a.rs", "first\n"),
+                diff("b.rs", "second\n"),
+            ])],
+        );
+        let first = cached(cx, "call_1#0");
+        assert!(
+            first.0.is_some() && first.1 && first.2,
+            "each diff gets an editor plus its stat and fingerprint"
+        );
+        assert!(cached(cx, "call_1#1").0.is_some());
+
+        // The second diff is gone from the replacement vec, so nothing keyed to
+        // it may survive — but the first is unchanged and keeps its editor.
+        reconcile_with(cx, vec![diff_tool_call(vec![diff("a.rs", "first\n")])]);
+        assert_eq!(
+            cached(cx, "call_1#0"),
+            first,
+            "an unchanged diff must keep the editor it already built"
+        );
+        assert_eq!(
+            cached(cx, "call_1#1"),
+            (None, false, false),
+            "a shrunken diffs vec must not leak an editor, stat or fingerprint"
+        );
+
+        // The whole tool call left the conversation.
+        reconcile_with(cx, Vec::new());
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.is_empty()
+                    && v.assets.diff_stats.is_empty()
+                    && v.assets.diff_editor_sources.is_empty(),
+                "a tool call that left `items` must not leak its diff entries"
+            );
+        });
     }
 }

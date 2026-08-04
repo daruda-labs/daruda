@@ -19,7 +19,9 @@
 //! resolver for every highlighting surface (raw file viewer, diff viewer,
 //! agent-chat diff cards). It layers this registry's *capability* over the
 //! extension → language *identity* in `daruda_core::language`, which the
-//! GPUI-free protocol crate shares.
+//! GPUI-free protocol crate shares. [`language_for_name`] is the same
+//! capability check for a caller that already holds a canonical language name
+//! (a fenced code block's token) instead of an extension.
 
 use gpui::SharedString;
 
@@ -48,7 +50,19 @@ pub const PLAIN_LANGUAGE: &str = "text";
 /// a canonical identifier (`"rs"` in → `"rust"` out).
 pub fn language_for_extension(ext: &str) -> SharedString {
     daruda_core::language::from_extension(ext)
-        .and_then(highlightable_config)
+        .map_or_else(|| SharedString::from(PLAIN_LANGUAGE), language_for_name)
+}
+
+/// Resolve an already-canonical language *name* to one the registry can
+/// actually highlight, falling back to [`PLAIN_LANGUAGE`].
+///
+/// [`language_for_extension`]'s sibling for callers holding a language name
+/// rather than an extension — e.g. a fenced code block's language token, which
+/// `daruda_acp::output_highlight` injected from the read target's extension.
+/// The capability check is the same and cannot be skipped (see
+/// [`highlightable_config`]).
+pub fn language_for_name(name: &str) -> SharedString {
+    highlightable_config(name)
         .map(|config| config.name)
         .unwrap_or_else(|| SharedString::from(PLAIN_LANGUAGE))
 }
@@ -97,6 +111,17 @@ mod tests {
         assert_eq!(language_for_extension("h"), "c");
         assert_eq!(language_for_extension("zsh"), "bash");
         assert_eq!(language_for_extension("exs"), "elixir");
+    }
+
+    #[test]
+    fn resolves_canonical_language_names_and_falls_back_otherwise() {
+        assert_eq!(language_for_name("rust"), "rust");
+        assert_eq!(language_for_name("bash"), "bash");
+        // A fence token no grammar is registered under.
+        assert_eq!(language_for_name("console"), PLAIN_LANGUAGE);
+        // Registered grammar, no highlight query shipped upstream.
+        assert_eq!(language_for_name("swift"), PLAIN_LANGUAGE);
+        assert_eq!(language_for_name(""), PLAIN_LANGUAGE);
     }
 
     #[test]

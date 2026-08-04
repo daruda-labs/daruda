@@ -994,6 +994,16 @@ impl InputState {
         self.scroll_size
     }
 
+    /// The row range the last paint actually shaped and painted.
+    ///
+    /// daruda vendor patch — the only observation point proving the visible-row
+    /// virtualization is live, so a host regression test fails if an embed ever
+    /// loses its height bound (which silently makes every row "visible" again
+    /// and restores the linear paint cost).
+    pub fn visible_rows(&self) -> Option<Range<usize>> {
+        self.last_layout.as_ref().map(|l| l.visible_range.clone())
+    }
+
     /// Set with password masked state.
     ///
     /// Only for [`InputMode::SingleLine`] mode.

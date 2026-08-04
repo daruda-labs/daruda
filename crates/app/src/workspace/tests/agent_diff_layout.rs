@@ -1,8 +1,15 @@
-//! Layout probe for the agent-chat tool-card diff editor: reproduces the
-//! exact `diff_body` structure (wrapper reserved at `rows × row height`,
-//! embedded read-only `file_viewer_editor`) and measures what actually
-//! paints — `display_rows()` drift across frames and the editor's painted
-//! viewport height (via its public `scroll_handle()` bounds).
+//! Layout probe for the agent-chat tool-card diff editor: reproduces the exact
+//! `diff_body` structure (wrapper and `Input` both pinned to
+//! `bounded_embed_height`, embedded read-only `embedded_code_viewer`) and
+//! measures what actually paints — `display_rows()` drift across frames, the
+//! painted wrapper height, and the row range the editor really shaped
+//! (`visible_rows()`).
+//!
+//! A whole-file `Write` diff is as long as the file, so `visible_rows()` guards
+//! it from both sides exactly as it does the output embed: too many rows means
+//! the height bound is gone and `calculate_visible_range` counts every row as
+//! visible again (the linear paint cost), too few means the editor collapsed to
+//! its one-row minimum inside the reserved box.
 
 use gpui::{
     AppContext as _, AvailableSpace, Context, Entity, Focusable, TestAppContext, Window, div,
@@ -11,11 +18,36 @@ use gpui::{
 
 use crate::test_support::init_gpui_component;
 use crate::ui::theme;
+use crate::workspace::main_area::agent_chat_pane::output_editor::bounded_embed_height;
 
 /// Six display rows: a hunk header + five added lines — the shape of the
 /// screenshot repro (`Write /tmp/daruda_word_diff_repro.rs`, `@@ -1,0 +1,5 @@`).
 const DIFF_TEXT: &str = "@@ -1,0 +1,5 @@\nuse std::collections::{HashMap, HashSet, BTreeMap, BTreeSet};\nlet a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;";
 const DIFF_ROWS: usize = 6;
+/// Far more rows than the cap can show — a whole-file `Write` of a large file.
+const LARGE_ROWS: usize = 5_000;
+
+/// How many rows the cap can actually show.
+fn capped_rows() -> usize {
+    (theme::AGENT_CHAT_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize
+}
+
+/// The row count `calculate_visible_range` may report at most: a full viewport
+/// plus its `extra_rows = 1` and the row that straddles the bottom edge.
+fn max_visible_rows() -> usize {
+    capped_rows() + 2
+}
+
+/// A whole-file-creation diff buffer of `rows` display rows: a hunk header plus
+/// added lines, the shape `build_diff_view_model` produces for a `Write`.
+fn large_diff_text(rows: usize) -> String {
+    let added = rows - 1;
+    let mut text = format!("@@ -1,0 +1,{added} @@");
+    for n in 1..=added {
+        text.push_str(&format!("\nlet v{n} = {n};"));
+    }
+    text
+}
 
 struct DiffProbe {
     editor: Entity<crate::ui::InputState>,
@@ -26,14 +58,16 @@ impl DiffProbe {
     /// Mirrors `agent_chat_helpers::create_diff_editor` construction:
     /// multi-line, no soft wrap, code-editor mode, `rows` seeded to the
     /// display-row count, value set, then read-only.
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(text: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let rows = text.lines().count().max(1);
+        let text = text.to_owned();
         let editor = cx.new(|cx_state| {
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .multi_line(true)
                 .soft_wrap(false)
                 .code_editor("rust")
-                .rows(DIFF_ROWS);
-            state.set_value(DIFF_TEXT, window, cx_state);
+                .rows(rows);
+            state.set_value(text, window, cx_state);
             state.set_disabled(true, cx_state);
             state
         });
@@ -52,19 +86,20 @@ impl Focusable for DiffProbe {
 
 impl Render for DiffProbe {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Mirrors `render/diff.rs::diff_body`'s editor branch: wrapper reserves
-        // `rows × AGENT_CHAT_DIFF_ROW_H`, editor embedded via `code_diff_viewer`
-        // (the agent-chat diff wrapper) pinned to the same height.
+        // Mirrors `render/embed.rs::bounded_editor_embed`, which
+        // `render/diff.rs::diff_body` embeds the diff through: the capped height
+        // goes on both the wrapper and the `Input`.
         let rows = self.editor.read(cx).display_rows().max(1);
-        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
+        let height = bounded_embed_height(rows);
         div().flex().flex_col().w_full().child(
             div()
                 .id("diff-wrapper")
                 .debug_selector(|| "diff-wrapper".into())
                 .flex()
                 .w_full()
+                .flex_none()
                 .h(height)
-                .child(crate::ui::code_diff_viewer(&self.editor, cx).h(height)),
+                .child(crate::ui::embedded_code_viewer(&self.editor, cx).h(height)),
         )
     }
 }
@@ -72,7 +107,7 @@ impl Render for DiffProbe {
 #[gpui::test]
 async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppContext) {
     init_gpui_component(cx);
-    let (probe, cx) = cx.add_window_view(DiffProbe::new);
+    let (probe, cx) = cx.add_window_view(|window, cx| DiffProbe::new(DIFF_TEXT, window, cx));
     cx.run_until_parked();
 
     let rows_frame1 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
@@ -97,10 +132,14 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
         rows_frame2, DIFF_ROWS,
         "frame 2 (post first paint): display_rows drifted — rows seed clobbered"
     );
-    let expected = px(DIFF_ROWS as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
+    assert!(
+        DIFF_ROWS < capped_rows(),
+        "the six-row case must stay under the cap"
+    );
+    let expected = bounded_embed_height(DIFF_ROWS);
     assert_eq!(
         wrapper.size.height, expected,
-        "the reserved wrapper height matches rows × row height"
+        "an uncapped diff measures its content plus the thumb strip"
     );
     let editor_h = editor_bounds
         .expect("the editor text element painted at least once")
@@ -112,6 +151,60 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
     );
 }
 
+/// A whole-file `Write` diff far longer than the cap must paint at the cap, not
+/// at `rows × row height`, and shape only the rows inside it — while keeping the
+/// full content reachable by scrolling.
+#[gpui::test]
+async fn large_diff_embed_is_capped_and_shapes_only_visible_rows(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let text = large_diff_text(LARGE_ROWS);
+    let (probe, cx) = cx.add_window_view(|window, cx| DiffProbe::new(&text, window, cx));
+    cx.run_until_parked();
+
+    let (rows, visible, scroll_h) = probe.read_with(cx, |p, cx| {
+        let state = p.editor.read(cx);
+        (
+            state.display_rows(),
+            state.visible_rows(),
+            state.scroll_size().height,
+        )
+    });
+    let wrapper = cx
+        .debug_bounds("diff-wrapper")
+        .expect("wrapper painted (debug bounds recorded)");
+
+    assert_eq!(rows, LARGE_ROWS, "display_rows reports the full diff");
+    assert_eq!(
+        wrapper.size.height,
+        bounded_embed_height(LARGE_ROWS),
+        "the embed is pinned at the cap plus the thumb strip"
+    );
+    assert!(
+        wrapper.size.height < px(LARGE_ROWS as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        "a capped embed must be far shorter than its uncapped content height"
+    );
+
+    let visible = visible.expect("the editor text element painted at least once");
+    assert!(
+        visible.len() <= max_visible_rows(),
+        "editor shaped {} of {LARGE_ROWS} rows — expected at most {}; the height \
+         bound is gone and every row counts as visible again",
+        visible.len(),
+        max_visible_rows()
+    );
+    assert!(
+        visible.len() >= capped_rows(),
+        "editor shaped only {} rows — expected a full {}-row viewport",
+        visible.len(),
+        capped_rows()
+    );
+    // The hidden rows are reachable by scrolling, not dropped.
+    assert!(
+        scroll_h >= px(LARGE_ROWS as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        "scroll extent {scroll_h:?} does not cover the full diff — rows lost"
+    );
+}
+
 /// The diff editor is built read-only via `set_disabled(true)`, but
 /// `Input::render` rewrites `state.disabled = self.disabled` every frame, so a
 /// `file_viewer_editor` left at the builder default would clobber it back to
@@ -120,7 +213,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 #[gpui::test]
 async fn diff_editor_stays_read_only_across_paints(cx: &mut TestAppContext) {
     init_gpui_component(cx);
-    let (probe, cx) = cx.add_window_view(DiffProbe::new);
+    let (probe, cx) = cx.add_window_view(|window, cx| DiffProbe::new(DIFF_TEXT, window, cx));
     cx.run_until_parked();
 
     assert!(
@@ -146,7 +239,7 @@ async fn diff_editor_stays_read_only_across_paints(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn diff_editor_fills_wrapper_under_min_content_constraint(cx: &mut TestAppContext) {
     init_gpui_component(cx);
-    let (probe, cx) = cx.add_window_view(DiffProbe::new);
+    let (probe, cx) = cx.add_window_view(|window, cx| DiffProbe::new(DIFF_TEXT, window, cx));
     cx.run_until_parked();
     let editor = probe.read_with(cx, |p, _| p.editor.clone());
 
@@ -168,7 +261,7 @@ async fn diff_editor_fills_wrapper_under_min_content_constraint(cx: &mut TestApp
         .size
         .height;
 
-    let expected = px(DIFF_ROWS as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
+    let expected = bounded_embed_height(DIFF_ROWS);
     assert_eq!(
         wrapper.size.height, expected,
         "wrapper keeps reserved height"
@@ -279,7 +372,7 @@ async fn streaming_write_diff_rebuild_paints_full_editor(cx: &mut TestAppContext
         rows, 6,
         "rebuilt editor reports the full content's display rows"
     );
-    let expected = px(6.0 * theme::AGENT_CHAT_DIFF_ROW_H);
+    let expected = px(6.0 * theme::AGENT_CHAT_EMBED_ROW_H);
     let painted = bounds.expect("editor painted after the final update").size;
     assert!(
         painted.height >= expected,
@@ -379,10 +472,120 @@ async fn collapsed_diff_header_keeps_row_height(cx: &mut TestAppContext) {
     // The collapsed block is exactly the header row: chevron + path on the
     // hunk-bg chrome. It must be at least one text row tall — the clipped
     // repro painted it at roughly half a row.
-    let min_header = px(theme::AGENT_CHAT_DIFF_ROW_H);
+    let min_header = px(theme::AGENT_CHAT_EMBED_ROW_H);
     assert!(
         container.size.height >= min_header,
         "collapsed diff header is {:?} tall — clipped below one row ({min_header:?})",
         container.size.height
+    );
+}
+
+/// Full pipeline, not the probe: a `Write` of a large file produces a whole-file
+/// diff (gutter line numbers on — `build_diff_view_model` enables them exactly
+/// when `old_text` is absent), and `diff_body` must embed it at the cap. The
+/// probe above proves the shape is bounded; this proves the render actually uses
+/// it, decorations and all.
+#[gpui::test]
+async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::PaneContent;
+    use agent_client_protocol::schema::v1::{
+        Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    };
+
+    let (window_handle, workspace) = super::build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
+                _ => None,
+            })
+            .expect("agent chat pane present")
+    });
+
+    let mut new_text = String::new();
+    for n in 1..=LARGE_ROWS {
+        new_text.push_str(&format!("let v{n} = {n};\n"));
+    }
+    view.update(cx, |v, cx| {
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                ToolCall::new("w1", "Write /tmp/daruda_large_write.rs")
+                    .kind(ToolKind::Edit)
+                    .content(vec![ToolCallContent::Diff(Diff::new(
+                        "/tmp/daruda_large_write.rs",
+                        new_text,
+                    ))]),
+            ))),
+            "",
+            false,
+            cx,
+        );
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("w1", fields),
+            ))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    // Completed collapses the card by default; the embed only renders expanded.
+    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+
+    let (rows, visible, scroll_h) = view.read_with(cx, |v, cx| {
+        let state = v
+            .assets
+            .diff_editors
+            .get("w1#0")
+            .expect("diff editor built for the write")
+            .read(cx);
+        (
+            state.display_rows(),
+            state.visible_rows(),
+            state.scroll_size().height,
+        )
+    });
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-diff-w1#0")
+        .expect("the bounded embed painted — diff_body did not embed the editor");
+
+    assert!(
+        rows > capped_rows(),
+        "the write's {rows}-row diff must exceed the {}-row cap",
+        capped_rows()
+    );
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(rows),
+        "the diff embed in a real card is capped"
+    );
+    let visible = visible.expect("the embedded editor painted");
+    assert!(
+        visible.len() <= max_visible_rows(),
+        "the real card's diff embed shaped {} of {rows} rows",
+        visible.len()
+    );
+    assert!(
+        scroll_h >= px(rows as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        "scroll extent {scroll_h:?} does not cover the full diff — rows lost"
     );
 }

@@ -754,9 +754,10 @@ fn push_raw_output_fallback(
 }
 
 /// Render a `raw_output` value as output blocks. codex-acp's command execution
-/// stores the human-facing output as a `formatted_output` string, surfaced
-/// verbatim (highest priority — codex-acp relies on it); a bare string is used
-/// as is. A JSON **array** is Anthropic's raw content-block shape (e.g.
+/// stores the human-facing output as a `formatted_output` string, surfaced as
+/// [`ToolOutputBlock::RawText`] (highest priority — codex-acp relies on it):
+/// those are shell bytes, not markdown, so they must render verbatim. A bare
+/// string is used as is. A JSON **array** is Anthropic's raw content-block shape (e.g.
 /// `[{"type":"image",...}, {"type":"text",...}]`) — each element is parsed via
 /// [`raw_content_block`], in order, and recognized elements (image / audio /
 /// text / embedded resource) are kept while unrecognized ones are skipped; if
@@ -771,7 +772,11 @@ fn raw_output_blocks(raw: &serde_json::Value) -> Vec<ToolOutputBlock> {
         .get("formatted_output")
         .and_then(serde_json::Value::as_str)
     {
-        return bounded_text_blocks(s.to_string());
+        // codex's command-execution shape (`{ formatted_output, exit_code }` —
+        // the same key `DefaultAdapter::command_exit` requires before it badges
+        // an exit), so these are shell bytes: a `#` or `---` the command printed
+        // is literal, not a heading or a horizontal rule.
+        return bounded_raw_text_blocks(s.to_string());
     }
     match raw {
         serde_json::Value::String(s) => return bounded_text_blocks(s.clone()),
@@ -1062,7 +1067,7 @@ mod tests {
         // recovery, which already worked before this field existed.
         assert_eq!(
             tc.output,
-            vec![ToolOutputBlock::Text {
+            vec![ToolOutputBlock::RawText {
                 text: "total 0\ndrwxr-xr-x  2 me  staff".to_string(),
                 truncated_from: None,
             }]
@@ -1496,11 +1501,11 @@ mod tests {
         );
         assert_eq!(
             only_tool_call(&items).output,
-            vec![ToolOutputBlock::Text {
+            vec![ToolOutputBlock::RawText {
                 text: "total 0".to_string(),
                 truncated_from: None,
             }],
-            "codex still recovers its output through raw_output, as markdown text"
+            "codex still recovers its output through raw_output, verbatim"
         );
         assert!(!insert.dropped_terminal_output);
         assert!(
@@ -1709,6 +1714,32 @@ mod tests {
         };
         assert!(text.contains("\"result\""), "pretty JSON, got: {text}");
         assert!(text.contains("\"ok\": true"), "pretty JSON, got: {text}");
+    }
+
+    #[test]
+    fn formatted_output_keeps_markdown_significant_bytes_verbatim() {
+        // A command may print `#`, `---` or `**` — as shell bytes those are
+        // literal, so the block must be `RawText` carrying the input unchanged.
+        let printed = "# heading\n---\n**bold**\n";
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "cat notes.md")
+                    .kind(ToolKind::Execute)
+                    .raw_output(serde_json::json!({
+                        "formatted_output": printed,
+                        "exit_code": 0,
+                    })),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::RawText {
+                text: printed.to_string(),
+                truncated_from: None,
+            }]
+        );
     }
 
     #[test]

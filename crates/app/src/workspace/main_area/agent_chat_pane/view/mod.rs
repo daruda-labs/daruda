@@ -24,7 +24,7 @@ use gpui::{
 };
 
 use super::fold::FoldState;
-use super::render::{DiffEditors, DiffStats, MermaidImages, ToolImages};
+use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 use super::rows::RenderRow;
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
@@ -262,10 +262,11 @@ pub(in crate::workspace) struct PromptQueue {
 }
 
 /// Async-built rendering artifacts derived from the conversation: read-only
-/// diff editors, rasterized mermaid diagrams, and decoded tool-output images.
-/// Each cache is filled by its own reconciler in `reconcile.rs`; `render/`
-/// only ever reads them by reference. One field instead of seven, with one
-/// [`Self::clear`] wiping all of them on a session reset.
+/// diff editors, read-only verbatim tool-output editors, rasterized mermaid
+/// diagrams, and decoded tool-output images. Each cache is filled by its own
+/// reconciler in `reconcile.rs`; `render/` only ever reads them by reference.
+/// One field instead of nine, with one [`Self::clear`] wiping all of them on a
+/// session reset.
 #[derive(Default)]
 pub(in crate::workspace) struct AssetCache {
     /// Read-only diff editor entities for tool-call file edits, keyed by
@@ -279,6 +280,14 @@ pub(in crate::workspace) struct AssetCache {
     /// Added/removed line counts per tool-call diff, same keys as
     /// `diff_editors`. Runtime cache; never serialized.
     pub(in crate::workspace) diff_stats: DiffStats,
+    /// Read-only editor entities for verbatim tool-output blocks, keyed by
+    /// `"{tool_call_id}#{block_index}"`. Built by `reconcile_output_editors`;
+    /// `render` only embeds them, never creates one.
+    pub(in crate::workspace) output_editors: OutputEditors,
+    /// Fingerprint each `output_editors` entry was built from, so a streamed
+    /// output that grew is rebuilt rather than left frozen on a partial
+    /// snapshot.
+    pub(in crate::workspace) output_editor_sources: HashMap<String, u64>,
     /// Rendered mermaid diagrams by fence-source hash, filled async by
     /// `reconcile_mermaid`. Shared `Arc<Mutex<…>>` so gpui's texture cache
     /// hits instead of re-uploading the bitmap every frame.
@@ -303,6 +312,8 @@ impl AssetCache {
         self.diff_editors.clear();
         self.diff_editor_sources.clear();
         self.diff_stats.clear();
+        self.output_editors.clear();
+        self.output_editor_sources.clear();
         self.clear_mermaid();
         self.tool_image_inflight.clear();
         if let Ok(mut m) = self.tool_images.lock() {
@@ -666,4 +677,4 @@ impl Render for AgentChatView {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

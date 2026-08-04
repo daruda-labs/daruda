@@ -779,14 +779,21 @@ pub const AGENT_CHAT_AUTOSCROLL_POLL_MS: u64 = 50;
 /// scrolls smoothly (~3 chat lines per tick) instead of jumping pages. Read
 /// by `autoscroll_step`.
 pub const AGENT_CHAT_AUTOSCROLL_MAX_STEP_PX: f32 = 48.0;
-/// Per-row height of the embedded diff editor inside a tool card (px). Equal to
-/// gpui's window `line_height` (`Rems(1.25)` × the 16 px `rem_size` = 20 px,
-/// font-size independent — same value the bottom-input auto-grow relies on).
-/// The inline diff editor (a `CodeEditor`, not `AutoGrow`) sizes to
-/// `relative(1.)` of its parent, which collapses to a single line without a
-/// definite-height parent; the tool-card diff body has none, so it sets an
-/// explicit `rows × this` height to reveal the whole diff.
-pub const AGENT_CHAT_DIFF_ROW_H: f32 = 20.0;
+/// Per-row height of any editor embedded in a tool card — the diff view and the
+/// verbatim tool-output view (px). Equal to gpui's window `line_height`
+/// (`Rems(1.25)` × the 16 px `rem_size` = 20 px, font-size independent — same
+/// value the bottom-input auto-grow relies on). An embedded `CodeEditor` (not
+/// `AutoGrow`) sizes to `relative(1.)` of its parent, which collapses to a
+/// single line without a definite-height parent; a tool-card body has none, so
+/// it sets an explicit `rows × this` height.
+pub const AGENT_CHAT_EMBED_ROW_H: f32 = 20.0;
+/// Max height (px) of an editor embedded in a tool card before it scrolls
+/// internally. Load-bearing, not cosmetic: `InputState` shapes and paints only
+/// the rows inside its own bounds height, so without a bound every row is
+/// "visible" and the paint cost is linear in output size. 12 rows keeps a shell
+/// failure unit (assert + backtrace) readable while leaving a split pane's card
+/// header and the neighbouring conversation on screen.
+pub const AGENT_CHAT_EMBED_MAX_H: f32 = 240.0;
 /// Agent chat header: gap between the agent icon and the label/text (px).
 pub const AGENT_CHAT_HEADER_ICON_GAP: f32 = GAP_STANDARD;
 /// Agent chat header: agent icon square size (px).

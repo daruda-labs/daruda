@@ -415,6 +415,9 @@ impl AgentChatView {
             // to `reconcile_mermaid` below, or an image-only tool update would
             // never get scanned.
             self.reconcile_tool_images(cx);
+            // Verbatim output blocks arrive on the same tool events as the
+            // images above, so the same gate applies.
+            self.reconcile_output_editors(cx);
         }
         // Mermaid fences arrive in message text AND in tool `Text` output blocks
         // (a tool writing/reading a .md file), so both flags trigger the scan.

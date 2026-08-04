@@ -9,9 +9,9 @@
 //! those are the parameters. Callers keep their handle-extraction code
 //! (handle types differ) and pass plain pixels in.
 //!
-//! [`horizontal_thumb`] is the X-axis mirror, for a region that only scrolls
-//! horizontally (the agent-chat diff embed's long, non-wrapped lines) —
-//! same [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
+//! [`horizontal_thumb`] is the X-axis mirror, for a region whose content
+//! overflows sideways (an agent-chat embed's long, non-wrapped lines) — same
+//! [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
 
 use gpui::{
     AnyElement, App, ElementId, Hsla, ListState, Pixels, ScrollHandle, SharedString,
@@ -38,6 +38,10 @@ pub use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 /// the positioned container's origin (the file viewer); pass `px(0.)`
 /// otherwise. The thumb is positioned with `.right(SCROLLBAR_MARGIN_R)`,
 /// so the caller's parent must be `.relative()`.
+///
+/// Debug selector (test hook): the `id` string, so a test can assert whether a
+/// thumb was drawn at all. Set here because the thumb is returned as an
+/// `AnyElement` the caller can no longer chain onto.
 pub fn vertical_thumb(
     id: impl Into<ElementId>,
     viewport_h: Pixels,
@@ -49,9 +53,12 @@ pub fn vertical_thumb(
 ) -> Option<AnyElement> {
     let (thumb_top, thumb_h) = thumb_geometry(viewport_h, content_h, scroll_offset_y, top_offset)?;
     let w = px(theme::SCROLLBAR_W);
+    let id: ElementId = id.into();
+    let selector = id.clone();
     Some(
         div()
             .id(id)
+            .debug_selector(move || selector.to_string())
             .absolute()
             .top(thumb_top)
             .right(px(theme::SCROLLBAR_MARGIN_R))
@@ -64,14 +71,16 @@ pub fn vertical_thumb(
     )
 }
 
-/// [`vertical_thumb`]'s horizontal mirror — for a region that only scrolls on
-/// the X axis (the agent-chat diff embed's long, non-wrapped lines, which
-/// keep the built-in scrollbar's drag interaction traded away in favour of
-/// matching every other pane's display-only daruda thumb). `scroll_offset_x`
-/// is the handle's `offset().x` (negative as content scrolls right). Unlike
-/// [`vertical_thumb`] there is no `top_offset` — the diff embed reserves its
-/// own bottom strip (see `AGENT_CHAT_DIFF_ROW_H` + `SCROLLBAR_W` at the call
-/// site) so the thumb sits flush at the bottom of its container.
+/// [`vertical_thumb`]'s horizontal mirror — for content that overflows on the X
+/// axis (an agent-chat embed's long, non-wrapped lines, which keep the built-in
+/// scrollbar's drag interaction traded away in favour of matching every other
+/// pane's display-only daruda thumb). `scroll_offset_x` is the handle's
+/// `offset().x` (negative as content scrolls right). Unlike [`vertical_thumb`]
+/// there is no `top_offset` — an embed reserves its own bottom strip (see
+/// `bounded_embed_height`) so the thumb sits flush at the bottom of its
+/// container.
+///
+/// Debug selector (test hook): the `id` string, as in [`vertical_thumb`].
 pub fn horizontal_thumb(
     id: impl Into<ElementId>,
     viewport_w: Pixels,
@@ -82,9 +91,12 @@ pub fn horizontal_thumb(
 ) -> Option<AnyElement> {
     let (thumb_left, thumb_w) = thumb_geometry(viewport_w, content_w, scroll_offset_x, px(0.))?;
     let h = px(theme::SCROLLBAR_W);
+    let id: ElementId = id.into();
+    let selector = id.clone();
     Some(
         div()
             .id(id)
+            .debug_selector(move || selector.to_string())
             .absolute()
             .left(thumb_left)
             .bottom(px(theme::SCROLLBAR_MARGIN_R))

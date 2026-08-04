@@ -6,6 +6,7 @@ use daruda_acp::DiffView;
 use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::DiffStats;
+use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -114,64 +115,18 @@ fn diff_body(
     let mut block = div().flex().flex_col().w_full();
 
     if let Some(editor) = editor {
-        // The embedded code editor stretches only when the `Input` itself gets
-        // a definite height. A definite-height parent alone is not enough:
-        // `Input::render` switches multi-line inputs back to `h_auto()` unless
-        // `Input::h(...)` is set, which leaves the editor at its one-line
-        // minimum inside a taller reserved wrapper. Pin both wrapper and input
-        // to `rows × line_height` so the list measures the full block and the
-        // editor paints every diff row. The built-in scrollbar is off
-        // (`code_diff_viewer` sets `show_scrollbar(false)`); reserve the
-        // thumb's full footprint below the last row — `SCROLLBAR_W` (its
-        // height) plus `SCROLLBAR_MARGIN_R` (`horizontal_thumb`'s `.bottom()`
-        // inset) — so the custom thumb overlay sits in its own strip instead
-        // of its top edge overlapping the bottom text row.
-        let rows = editor.read(cx).display_rows().max(1);
-        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H
-            + theme::SCROLLBAR_W
-            + theme::SCROLLBAR_MARGIN_R);
-        // Snapshot the editor's painted geometry into plain values before
-        // building the thumb — `InputState::scroll_handle().bounds()`/
-        // `.max_offset()` never populate (see its `scroll_size` doc comment),
-        // so the viewport/content extents come from `last_bounds()` /
-        // `scroll_size()` instead, mirroring the File-viewer's fix for the
-        // same underlying gap.
-        let (viewport_w, content_w, offset_x) = {
-            let state = editor.read(cx);
-            (
-                state.last_bounds().map_or(px(0.), |b| b.size.width),
-                state.scroll_size().width,
-                state.scroll_handle().offset().x,
-            )
-        };
-        // `t.scrollbar_thumb`/`.file_viewer_scrollbar_thumb_hover` come from
-        // the already-dimmed `t` snapshot — same colours as the File viewer
-        // and agent-chat transcript thumbs, no separate dim wrap needed.
-        let thumb = crate::ui::scrollbar::horizontal_thumb(
-            format!("agent-chat-diff-scrollbar-{diff_key}"),
-            viewport_w,
-            content_w,
-            offset_x,
-            t.scrollbar_thumb,
-            t.file_viewer_scrollbar_thumb_hover,
-        );
-        return block.child(
-            div()
-                .relative()
-                .flex()
-                .w_full()
-                .h(height)
-                // Opaque terminal-preset background (not the UI theme's fixed
-                // `file_viewer_bg` editor surface), so the diff embed matches
-                // the terminal theme the way the rest of the tool card already
-                // does. `code_diff_viewer` picks its fallback text colour off
-                // the same background (`ui::code_editor::code_diff_viewer`),
-                // and the diff's own tree-sitter spans are highlighted with
-                // `agent_chat_syntax_is_light` — all three stay in lockstep.
-                .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
-                .child(crate::ui::code_diff_viewer(editor, cx).h(height))
-                .children(thumb),
-        );
+        // A whole-file `Write` diff is as tall as the file, so it carries the
+        // same unbounded-paint cost a tool-output embed does and takes the same
+        // bound. The `diff-` prefix keeps this embed's element ids apart from
+        // the output embed of the same tool call, whose key has the same shape.
+        return block.child(bounded_editor_embed(
+            &format!("diff-{diff_key}"),
+            editor,
+            None,
+            t,
+            dim,
+            cx,
+        ));
     }
 
     // No editor and the two sides are identical: the diff carries no changes,
