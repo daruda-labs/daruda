@@ -120,14 +120,19 @@ fn checked_session_path(value: &str) -> Result<String, SessionHostError> {
 
 /// Build an SSH host from raw form input — trims, then rejects anything
 /// [`wrap`] could not quote safely. The only way the UI should construct one.
+///
+/// `registry_id` is a parameter rather than a field a caller patches
+/// afterwards: the link is part of what makes the host, and a builder that
+/// hardcoded `None` left every call site re-deriving the same overwrite step.
 pub fn sanitized_ssh(
     target: &str,
     session_path: &str,
+    registry_id: Option<SessionHostId>,
 ) -> Result<LaneSessionHost, SessionHostError> {
     Ok(LaneSessionHost::Ssh {
         target: checked_bare_word(target, SessionHostField::Target)?,
         session_path: checked_session_path(session_path)?,
-        registry_id: None,
+        registry_id,
     })
 }
 
@@ -135,12 +140,29 @@ pub fn sanitized_ssh(
 pub fn sanitized_docker(
     container: &str,
     session_path: &str,
+    registry_id: Option<SessionHostId>,
 ) -> Result<LaneSessionHost, SessionHostError> {
     Ok(LaneSessionHost::Docker {
         container: checked_bare_word(container, SessionHostField::Container)?,
         session_path: checked_session_path(session_path)?,
-        registry_id: None,
+        registry_id,
     })
+}
+
+/// Build the host a registry `entry` describes, linked to that entry — the
+/// one path every "user picked a registered host" form takes, so the kind
+/// dispatch and the `registry_id` that makes the link resolvable can't drift
+/// apart between forms.
+pub fn from_registry_entry(
+    entry: &SessionHostEntry,
+    session_path: &str,
+) -> Result<LaneSessionHost, SessionHostError> {
+    match &entry.kind {
+        SessionHostKind::Ssh { target } => sanitized_ssh(target, session_path, Some(entry.id)),
+        SessionHostKind::Docker { container } => {
+            sanitized_docker(container, session_path, Some(entry.id))
+        }
+    }
 }
 
 /// Which [`SessionHostKind`] a resolved `Ssh`/`Docker` host's `registry_id`
@@ -620,7 +642,7 @@ mod tests {
     #[test]
     fn sanitizing_trims_every_field() {
         assert_eq!(
-            sanitized_ssh("  build-box \n", "\t/srv/app  "),
+            sanitized_ssh("  build-box \n", "\t/srv/app  ", None),
             Ok(ssh("build-box", "/srv/app"))
         );
     }
@@ -628,15 +650,15 @@ mod tests {
     #[test]
     fn an_empty_field_is_rejected() {
         assert_eq!(
-            sanitized_ssh("   ", "/srv/app"),
+            sanitized_ssh("   ", "/srv/app", None),
             Err(SessionHostError::Empty(SessionHostField::Target))
         );
         assert_eq!(
-            sanitized_ssh("box", ""),
+            sanitized_ssh("box", "", None),
             Err(SessionHostError::Empty(SessionHostField::SessionPath))
         );
         assert_eq!(
-            sanitized_docker("  ", "/srv"),
+            sanitized_docker("  ", "/srv", None),
             Err(SessionHostError::Empty(SessionHostField::Container))
         );
     }
@@ -658,12 +680,12 @@ mod tests {
             "box\nhost",
         ] {
             assert_eq!(
-                sanitized_ssh(bad, "/srv"),
+                sanitized_ssh(bad, "/srv", None),
                 Err(SessionHostError::Unsafe(SessionHostField::Target)),
                 "target {bad:?} must be rejected"
             );
             assert_eq!(
-                sanitized_docker(bad, "/srv"),
+                sanitized_docker(bad, "/srv", None),
                 Err(SessionHostError::Unsafe(SessionHostField::Container)),
                 "container {bad:?} must be rejected"
             );
@@ -682,7 +704,7 @@ mod tests {
             "host:2222",
         ] {
             assert!(
-                sanitized_ssh(good, "/srv").is_ok(),
+                sanitized_ssh(good, "/srv", None).is_ok(),
                 "target {good:?} must be accepted"
             );
         }
@@ -702,14 +724,14 @@ mod tests {
             "/srv/a\rb",
         ] {
             assert_eq!(
-                sanitized_ssh("box", bad),
+                sanitized_ssh("box", bad, None),
                 Err(SessionHostError::Unsafe(SessionHostField::SessionPath)),
                 "path {bad:?} must be rejected"
             );
         }
         for good in ["/srv/my project", "/srv/a;b", "/srv/a(b)", "/srv/a&b"] {
             assert!(
-                sanitized_ssh("box", good).is_ok(),
+                sanitized_ssh("box", good, None).is_ok(),
                 "path {good:?} must be accepted"
             );
         }
@@ -723,14 +745,74 @@ mod tests {
     fn a_session_path_starting_with_tilde_is_rejected() {
         for bad in ["~/work", "~", "~root/x"] {
             assert_eq!(
-                sanitized_ssh("box", bad),
+                sanitized_ssh("box", bad, None),
                 Err(SessionHostError::Unsafe(SessionHostField::SessionPath)),
                 "path {bad:?} must be rejected"
             );
         }
         // A `~` that isn't the leading character is inert — the shell only
         // ever expands a *leading* tilde.
-        assert!(sanitized_ssh("box", "/srv/a~b").is_ok());
+        assert!(sanitized_ssh("box", "/srv/a~b", None).is_ok());
+    }
+
+    /// The link is what makes a picked registry entry resolvable later, so
+    /// building from an entry must stamp its id — no caller-side patch step.
+    #[test]
+    fn building_from_a_registry_entry_carries_its_id_and_value() {
+        let id = SessionHostId::new();
+        assert_eq!(
+            from_registry_entry(
+                &SessionHostEntry {
+                    id,
+                    label: "Build box".into(),
+                    kind: SessionHostKind::Ssh {
+                        target: " vm-work ".into(),
+                    },
+                },
+                "/srv/app",
+            ),
+            Ok(LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+                registry_id: Some(id),
+            })
+        );
+        assert_eq!(
+            from_registry_entry(
+                &SessionHostEntry {
+                    id,
+                    label: "Dev container".into(),
+                    kind: SessionHostKind::Docker {
+                        container: "dev-1".into(),
+                    },
+                },
+                "/workspace",
+            ),
+            Ok(LaneSessionHost::Docker {
+                container: "dev-1".into(),
+                session_path: "/workspace".into(),
+                registry_id: Some(id),
+            })
+        );
+    }
+
+    /// The entry's value goes through the same quoting check free-text input
+    /// did — a hand-edited `config.toml` is the reachable source here.
+    #[test]
+    fn building_from_a_registry_entry_still_rejects_an_unsafe_value() {
+        assert_eq!(
+            from_registry_entry(
+                &SessionHostEntry {
+                    id: SessionHostId::new(),
+                    label: "Bad".into(),
+                    kind: SessionHostKind::Ssh {
+                        target: "box; rm -rf /".into(),
+                    },
+                },
+                "/srv/app",
+            ),
+            Err(SessionHostError::Unsafe(SessionHostField::Target))
+        );
     }
 
     fn tombstone(

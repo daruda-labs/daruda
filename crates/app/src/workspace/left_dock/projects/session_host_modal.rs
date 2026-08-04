@@ -9,9 +9,9 @@
 //! live registry link), or one catalog entry — free-text `target`/`container`
 //! entry was removed in favor of the registry (see `settings_window::sections
 //! ::session_hosts`, where a host is actually registered). `build_host`
-//! validates via `lane::session_host::{sanitized_ssh, sanitized_docker}` (the
-//! one place that quoting-safety rule lives — see that module), and an inline
-//! banner surfaces the first rejected field.
+//! validates via `lane::session_host::from_registry_entry` (the one place
+//! that quoting-safety rule lives — see that module), and an inline banner
+//! surfaces the first rejected field.
 
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, Render, SharedString,
@@ -27,7 +27,7 @@ use crate::ui::theme;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use daruda_config::{SessionHostEntry, SessionHostKind};
+use daruda_config::SessionHostEntry;
 use daruda_store::project::{LaneRef, LaneSessionHost, SessionHostId};
 
 /// Registry-select sentinel for "no host" — never a real `SessionHostId`
@@ -103,32 +103,6 @@ fn current_session_path(current: &Option<LaneSessionHost>) -> &str {
             | LaneSessionHost::Docker { session_path, .. },
         ) => session_path,
         _ => "",
-    }
-}
-
-/// Overwrite `host`'s `registry_id` with `id` — used right after a
-/// `sanitized_ssh`/`sanitized_docker` build, which always sets `None`.
-fn with_registry_id(host: LaneSessionHost, id: SessionHostId) -> LaneSessionHost {
-    match host {
-        LaneSessionHost::Ssh {
-            target,
-            session_path,
-            ..
-        } => LaneSessionHost::Ssh {
-            target,
-            session_path,
-            registry_id: Some(id),
-        },
-        LaneSessionHost::Docker {
-            container,
-            session_path,
-            ..
-        } => LaneSessionHost::Docker {
-            container,
-            session_path,
-            registry_id: Some(id),
-        },
-        LaneSessionHost::Local => host,
     }
 }
 
@@ -309,14 +283,7 @@ impl SessionHostModal {
                     return Ok(LaneSessionHost::Local);
                 };
                 let path = self.session_path_input.read(cx).value().to_string();
-                let host = match &entry.kind {
-                    SessionHostKind::Ssh { target } => session_host::sanitized_ssh(target, &path),
-                    SessionHostKind::Docker { container } => {
-                        session_host::sanitized_docker(container, &path)
-                    }
-                }
-                .map_err(session_host_error_to_msg)?;
-                Ok(with_registry_id(host, entry.id))
+                session_host::from_registry_entry(entry, &path).map_err(session_host_error_to_msg)
             }
         }
     }
@@ -507,6 +474,7 @@ pub fn open_session_host_modal(
 mod tests {
     use super::*;
     use crate::test_support::init_gpui_component;
+    use daruda_config::SessionHostKind;
     use gpui::{TestAppContext, WindowHandle};
 
     fn ssh_entry(label: &str, target: &str) -> SessionHostEntry {

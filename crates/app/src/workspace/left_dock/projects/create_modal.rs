@@ -27,11 +27,11 @@ use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
-use daruda_config::{SessionHostEntry, SessionHostKind};
+use daruda_config::SessionHostEntry;
 use daruda_core::git::sanitize_branch_name;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::project::{LaneSessionHost, ProjectId, SessionHostId};
+use daruda_store::project::{LaneSessionHost, ProjectId};
 
 /// Registry-select sentinel for "no host" — a fresh lane has no "keep
 /// current" case (unlike `SessionHostModal`'s `KEEP_CURRENT_SELECT_VALUE`),
@@ -53,33 +53,6 @@ fn host_select_options(catalog: &[SessionHostEntry]) -> Vec<SelectOption> {
             .map(|entry| SelectOption::new(entry.id.as_inner().to_string(), entry.label.clone())),
     );
     opts
-}
-
-/// Overwrite `host`'s `registry_id` with `id` — used right after a
-/// `sanitized_ssh`/`sanitized_docker` build, which always sets `None`.
-/// Mirrors `session_host_modal::with_registry_id`.
-fn with_registry_id(host: LaneSessionHost, id: SessionHostId) -> LaneSessionHost {
-    match host {
-        LaneSessionHost::Ssh {
-            target,
-            session_path,
-            ..
-        } => LaneSessionHost::Ssh {
-            target,
-            session_path,
-            registry_id: Some(id),
-        },
-        LaneSessionHost::Docker {
-            container,
-            session_path,
-            ..
-        } => LaneSessionHost::Docker {
-            container,
-            session_path,
-            registry_id: Some(id),
-        },
-        LaneSessionHost::Local => host,
-    }
 }
 
 fn session_host_error_to_msg(e: SessionHostError) -> String {
@@ -281,14 +254,9 @@ impl CreateWorktreeModal {
                     return Ok(None);
                 };
                 let path = self.session_path_input.read(cx).value().to_string();
-                let host = match &entry.kind {
-                    SessionHostKind::Ssh { target } => session_host::sanitized_ssh(target, &path),
-                    SessionHostKind::Docker { container } => {
-                        session_host::sanitized_docker(container, &path)
-                    }
-                }
-                .map_err(session_host_error_to_msg)?;
-                Ok(Some(with_registry_id(host, entry.id)))
+                let host = session_host::from_registry_entry(entry, &path)
+                    .map_err(session_host_error_to_msg)?;
+                Ok(Some(host))
             }
         }
     }
@@ -551,6 +519,8 @@ impl Render for CreateWorktreeModal {
 mod tests {
     use super::*;
     use crate::test_support::init_gpui_component;
+    use daruda_config::SessionHostKind;
+    use daruda_store::project::SessionHostId;
     use gpui::{TestAppContext, WindowHandle};
 
     fn build_modal(
