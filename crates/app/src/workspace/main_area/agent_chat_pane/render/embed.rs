@@ -50,12 +50,22 @@ pub(in crate::workspace) fn bounded_editor_embed(
     // height by half a viewport, so that value always overflows and would draw a
     // thumb even when the cap hid nothing. The width carries no such pad.
     let content_h = embed_text_height(rows);
+    // Only a capped embed hides rows, and only then does it own the wheel. The
+    // transcript list registers its own wheel handler *after* painting its items
+    // (gpui `list.rs`), and the bubble phase runs listeners in reverse
+    // registration order (`window.rs`), so the list always fires first and never
+    // stops propagation — one gesture would scroll both. Occluding makes the
+    // list's hitbox report `should_handle_scroll() == false` (the gate in gpui's
+    // `div.rs`), which is the only way an element inside the list can claim the
+    // gesture. Uncapped embeds stay transparent so the transcript keeps it.
+    let capped = content_h > height;
     let group = SharedString::from(format!("agent-chat-out-{id}"));
     let surface = theme::dim_toward_gray(theme::agent_chat_bg(cx), dim);
     div()
         .relative()
         .flex()
         .w_full()
+        .when(capped, |d| d.occlude())
         // `flex_none` is load-bearing: the chat list lays rows out at min-content
         // height (gpui `list.rs` `available_item_space`), so a shrinkable item
         // would let the row undercount the embed and clip it — see
