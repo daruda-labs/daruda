@@ -43,6 +43,13 @@ enum ConnectCommandError {
 /// (`None` when it could not be found — falls back to `Local`, never
 /// promotes to remote; see the design's B′ note on restored remote panes).
 ///
+/// `resolved_host` is `owning_lane`'s host, already resolved against the
+/// live registry catalog/tombstones by the caller (`owning_lane.map(|lane|
+/// lane.effective_session_host(...))`) — passed in rather than recomputed
+/// here so the one connect only walks the registry chase once, and so this
+/// function stays pure over plain values instead of also taking the
+/// catalog/tombstone slices.
+///
 /// Returns the resolved [`PaneCwd`] unconditionally (even on `Err`) — the
 /// caller writes it back into the pane's own `cwd` so a pane whose lane's
 /// host changed doesn't keep reporting the host it was created with (see
@@ -62,8 +69,7 @@ fn resolve_session_command(
     owning_lane: Option<&Lane>,
     pane_cwd: &PaneCwd,
     env: Option<&AccountEnv>,
-    session_host_catalog: &[daruda_config::SessionHostEntry],
-    session_host_tombstones: &[daruda_config::SessionHostTombstone],
+    resolved_host: Option<&LaneSessionHost>,
 ) -> (Result<String, ConnectCommandError>, PaneCwd) {
     let is_raw_token = matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN));
     if is_raw_token {
@@ -82,11 +88,7 @@ fn resolve_session_command(
         return (wrapped, resolved_cwd);
     }
 
-    let host = owning_lane
-        .map(|lane| {
-            lane.effective_session_host(launch, session_host_catalog, session_host_tombstones)
-        })
-        .unwrap_or(LaneSessionHost::Local);
+    let host = resolved_host.cloned().unwrap_or(LaneSessionHost::Local);
     let resolved_cwd =
         match host.session_path() {
             Some(remote_path) => PaneCwd::Remote(remote_path.to_string()),
@@ -456,10 +458,11 @@ impl Workspace {
         // on its lazy connect. See `resolve_session_command`'s doc.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
         let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        // Resolved once and reused below for `is_remote` and the registry
-        // write-back — `effective_session_host` re-resolves `registry_id`
-        // against the live catalog/tombstones on every call, so sharing one
-        // result here avoids walking that twice for the same connect.
+        // Resolved once and reused below for `resolve_session_command`,
+        // `is_remote`, and the registry write-back — `effective_session_host`
+        // re-resolves `registry_id` against the live catalog/tombstones on
+        // every call, so sharing one result here avoids walking that chase
+        // more than once for the same connect.
         let resolved_host = owning_lane.map(|lane| {
             lane.effective_session_host(&launch, &self.session_hosts, &self.session_host_tombstones)
         });
@@ -506,8 +509,7 @@ impl Workspace {
             owning_lane,
             &cwd,
             prepared.as_ref().map(|account| &account.env),
-            &self.session_hosts,
-            &self.session_host_tombstones,
+            resolved_host.as_ref(),
         );
         // Sync the lane's cached session host with what this connect just
         // resolved — a registry `target`/`container` edit, or a tombstone
@@ -1066,6 +1068,15 @@ mod tests {
         AgentLaunch::Raw(command.to_string())
     }
 
+    /// Mirrors the caller's own `resolved_host` computation
+    /// (`connect_agent_chat`'s `owning_lane.map(|lane|
+    /// lane.effective_session_host(...))`), so tests can pass
+    /// `resolve_session_command` the same pre-resolved value it receives in
+    /// production instead of catalog/tombstone slices.
+    fn resolved(launch: &AgentLaunch, lane: Option<&Lane>) -> Option<LaneSessionHost> {
+        lane.map(|lane| lane.effective_session_host(launch, &[], &[]))
+    }
+
     /// The rev2 design's B′ regression: a restored `PaneCwd::Remote` pane
     /// (a stale path with no host of its own) whose launch is a
     /// host-agnostic `Raw` command must still attach to its lane's `Ssh`
@@ -1083,13 +1094,13 @@ mod tests {
             None,
         );
         let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
+        let launch = raw("npx acp-adapter");
         let (command, connect_cwd) = resolve_session_command(
-            &raw("npx acp-adapter"),
+            &launch,
             Some(&lane),
             &stale_cwd,
             None,
-            &[],
-            &[],
+            resolved(&launch, Some(&lane)).as_ref(),
         );
         assert_eq!(
             command,
@@ -1108,13 +1119,13 @@ mod tests {
     fn restored_remote_pane_follows_the_lane_back_to_local() {
         let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
         let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
+        let launch = raw("npx acp-adapter");
         let (command, connect_cwd) = resolve_session_command(
-            &raw("npx acp-adapter"),
+            &launch,
             Some(&lane),
             &stale_cwd,
             None,
-            &[],
-            &[],
+            resolved(&launch, Some(&lane)).as_ref(),
         );
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
         assert_eq!(
@@ -1129,7 +1140,7 @@ mod tests {
     fn missing_owning_lane_falls_back_to_local_never_promotes_to_remote() {
         let local_cwd = PaneCwd::Local(PathBuf::from("/pane/own/local/path"));
         let (command, connect_cwd) =
-            resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None, &[], &[]);
+            resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None, None);
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
         assert_eq!(
             connect_cwd,
@@ -1149,8 +1160,13 @@ mod tests {
             host: "old-box".into(),
         };
         let cwd = PaneCwd::Remote("/srv/legacy".into());
-        let (command, connect_cwd) =
-            resolve_session_command(&launch, Some(&lane), &cwd, None, &[], &[]);
+        let (command, connect_cwd) = resolve_session_command(
+            &launch,
+            Some(&lane),
+            &cwd,
+            None,
+            resolved(&launch, Some(&lane)).as_ref(),
+        );
         assert_eq!(
             command,
             launch
@@ -1179,8 +1195,13 @@ mod tests {
         );
         let launch = raw("ssh vm-work \"cd {{cwd}} && run\"");
         let cwd = PaneCwd::Remote("/home/user/project".into());
-        let (command, connect_cwd) =
-            resolve_session_command(&launch, Some(&lane), &cwd, None, &[], &[]);
+        let (command, connect_cwd) = resolve_session_command(
+            &launch,
+            Some(&lane),
+            &cwd,
+            None,
+            resolved(&launch, Some(&lane)).as_ref(),
+        );
         assert_eq!(
             command,
             Ok("ssh vm-work \"cd /home/user/project && run\"".to_string())
@@ -1211,8 +1232,14 @@ mod tests {
             None,
         );
         let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
-        let (command, resolved_cwd) =
-            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None, &[], &[]);
+        let launch = json_stdio_launch();
+        let (command, resolved_cwd) = resolve_session_command(
+            &launch,
+            Some(&lane),
+            &cwd,
+            None,
+            resolved(&launch, Some(&lane)).as_ref(),
+        );
         assert_eq!(command, Err(ConnectCommandError::JsonStdioRemote));
         // The resolved cwd is still reported (used to sync the pane even on
         // a rejected connect), even though the command itself failed.
@@ -1226,8 +1253,14 @@ mod tests {
     fn json_stdio_launch_on_a_local_lane_is_unaffected() {
         let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
         let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
-        let (command, resolved_cwd) =
-            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None, &[], &[]);
+        let launch = json_stdio_launch();
+        let (command, resolved_cwd) = resolve_session_command(
+            &launch,
+            Some(&lane),
+            &cwd,
+            None,
+            resolved(&launch, Some(&lane)).as_ref(),
+        );
         assert_eq!(
             command,
             Ok(r#"{"command":"/opt/adapters/claude-agent-acp","args":[]}"#.to_string())
@@ -1312,13 +1345,13 @@ mod tests {
             strip: vec!["ANTHROPIC_API_KEY"],
         };
         let cwd = PaneCwd::Local(PathBuf::from("/unused"));
+        let launch = raw("npx acp-adapter");
         let (command, _) = resolve_session_command(
-            &raw("npx acp-adapter"),
+            &launch,
             Some(&lane),
             &cwd,
             Some(&env),
-            &[],
-            &[],
+            resolved(&launch, Some(&lane)).as_ref(),
         );
         let command = command.unwrap();
         assert!(command.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));

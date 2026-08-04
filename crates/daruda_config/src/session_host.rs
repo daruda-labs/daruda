@@ -3,9 +3,11 @@
 //! [`SessionHostId`] instead of repeating the same target/container as free
 //! text on every lane.
 //!
-//! Schema only: nothing yet resolves a lane's `registry_id` back to its
-//! catalog row here, and nothing prunes or matches [`SessionHostTombstone`]
-//! entries — that logic is a later addition on top of this data model.
+//! Schema only: this module defines the catalog/tombstone shapes but does
+//! not itself resolve a lane's `registry_id` back to its catalog row or
+//! chase [`SessionHostTombstone`] redirects — that logic lives on top of
+//! this data model in `daruda::lane::session_host` (`effective_session_host`,
+//! `resolve_catalog_id`).
 
 use daruda_store::project::SessionHostId;
 use serde::{Deserialize, Serialize};
