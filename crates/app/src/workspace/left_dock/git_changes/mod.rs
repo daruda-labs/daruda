@@ -873,7 +873,10 @@ fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoEl
 // Scrollbar overlay
 // ----------------------------------------------------------------
 
-fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<gpui::AnyElement> {
+fn git_changes_scrollbar(
+    handle: &gpui::ScrollHandle,
+    cx: &gpui::App,
+) -> Option<crate::ui::scrollbar::Thumb> {
     let viewport_h = handle.bounds().size.height;
     let max_offset = handle.max_offset().y;
     let t = theme::current(cx);

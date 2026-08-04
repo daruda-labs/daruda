@@ -13,9 +13,12 @@
 //! overflows sideways (an agent-chat embed's long, non-wrapped lines) — same
 //! [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::{
-    AnyElement, App, ElementId, Hsla, ListState, Pixels, ScrollHandle, SharedString,
-    StyleRefinement, Window, div, prelude::*, px,
+    AnyElement, App, Context, ElementId, Hsla, IntoElement, ListState, Pixels, Render, RenderOnce,
+    ScrollHandle, SharedString, StyleRefinement, Window, div, prelude::*, px,
 };
 use gpui_component::StyledExt as _;
 
@@ -39,9 +42,10 @@ pub use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 /// otherwise. The thumb is positioned with `.right(SCROLLBAR_MARGIN_R)`,
 /// so the caller's parent must be `.relative()`.
 ///
+/// Display-only unless the caller chains [`Thumb::on_drag`].
+///
 /// Debug selector (test hook): the `id` string, so a test can assert whether a
-/// thumb was drawn at all. Set here because the thumb is returned as an
-/// `AnyElement` the caller can no longer chain onto.
+/// thumb was drawn at all.
 pub fn vertical_thumb(
     id: impl Into<ElementId>,
     viewport_h: Pixels,
@@ -50,31 +54,24 @@ pub fn vertical_thumb(
     top_offset: Pixels,
     thumb_bg: Hsla,
     thumb_hover_bg: Hsla,
-) -> Option<AnyElement> {
+) -> Option<Thumb> {
     let (thumb_top, thumb_h) = thumb_geometry(viewport_h, content_h, scroll_offset_y, top_offset)?;
-    let w = px(theme::SCROLLBAR_W);
-    let id: ElementId = id.into();
-    let selector = id.clone();
-    Some(
-        div()
-            .id(id)
-            .debug_selector(move || selector.to_string())
-            .absolute()
-            .top(thumb_top)
-            .right(px(theme::SCROLLBAR_MARGIN_R))
-            .w(w)
-            .h(thumb_h)
-            .rounded(w / 2.0)
-            .bg(thumb_bg)
-            .hover(move |d| d.bg(thumb_hover_bg))
-            .into_any_element(),
-    )
+    Some(Thumb {
+        id: id.into(),
+        axis: Axis::Vertical,
+        start: thumb_top,
+        len: thumb_h,
+        track: viewport_h,
+        scrollable: content_h - viewport_h,
+        offset: scroll_offset_y,
+        bg: thumb_bg,
+        hover_bg: thumb_hover_bg,
+        on_drag: None,
+    })
 }
 
 /// [`vertical_thumb`]'s horizontal mirror — for content that overflows on the X
-/// axis (an agent-chat embed's long, non-wrapped lines, which keep the built-in
-/// scrollbar's drag interaction traded away in favour of matching every other
-/// pane's display-only daruda thumb). `scroll_offset_x` is the handle's
+/// axis (an agent-chat embed's long, non-wrapped lines). `scroll_offset_x` is the handle's
 /// `offset().x` (negative as content scrolls right). Unlike [`vertical_thumb`]
 /// there is no `top_offset` — an embed reserves its own bottom strip (see
 /// `bounded_embed_height`) so the thumb sits flush at the bottom of its
@@ -88,25 +85,168 @@ pub fn horizontal_thumb(
     scroll_offset_x: Pixels,
     thumb_bg: Hsla,
     thumb_hover_bg: Hsla,
-) -> Option<AnyElement> {
+) -> Option<Thumb> {
     let (thumb_left, thumb_w) = thumb_geometry(viewport_w, content_w, scroll_offset_x, px(0.))?;
-    let h = px(theme::SCROLLBAR_W);
-    let id: ElementId = id.into();
-    let selector = id.clone();
-    Some(
-        div()
-            .id(id)
+    Some(Thumb {
+        id: id.into(),
+        axis: Axis::Horizontal,
+        start: thumb_left,
+        len: thumb_w,
+        track: viewport_w,
+        scrollable: content_w - viewport_w,
+        offset: scroll_offset_x,
+        bg: thumb_bg,
+        hover_bg: thumb_hover_bg,
+        on_drag: None,
+    })
+}
+
+/// Which axis a [`Thumb`] rides.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    Vertical,
+    Horizontal,
+}
+
+/// A scrollbar thumb overlay. Display-only until [`Thumb::on_drag`] installs a
+/// handler, so the ten existing call sites keep the behaviour they had.
+///
+/// Absolutely positioned against the caller's `.relative()` parent.
+#[derive(IntoElement)]
+pub struct Thumb {
+    id: ElementId,
+    axis: Axis,
+    /// Thumb offset from the track start, already including any `top_offset`.
+    start: Pixels,
+    len: Pixels,
+    /// Viewport extent along the axis — the track the thumb rides.
+    track: Pixels,
+    /// `content - viewport`: how far the region can actually scroll.
+    scrollable: Pixels,
+    /// The region's current scroll offset (negative as content moves away).
+    offset: Pixels,
+    bg: Hsla,
+    hover_bg: Hsla,
+    #[allow(clippy::type_complexity)]
+    on_drag: Option<Rc<dyn Fn(Pixels, &mut Window, &mut App)>>,
+}
+
+impl Thumb {
+    /// Make the thumb draggable: `handler` receives the scroll offset the new
+    /// thumb position implies (negative, already clamped to the scrollable
+    /// range) and writes it back to whatever handle the region scrolls on.
+    ///
+    /// Opt-in because the handle types differ per call site and most regions are
+    /// content-driven; a thumb without this stays display-only.
+    pub fn on_drag(mut self, handler: impl Fn(Pixels, &mut Window, &mut App) + 'static) -> Self {
+        self.on_drag = Some(Rc::new(handler));
+        self
+    }
+}
+
+/// Live drag state, carried by gpui's active drag so it survives the re-renders
+/// each move triggers.
+///
+/// `last` is the previous move's cursor position, so each move applies a
+/// *delta*: deriving an absolute thumb position instead would need the track's
+/// origin in window coordinates, which a thumb positioned against a parent it
+/// cannot measure does not have.
+///
+/// `id` is which thumb is being dragged. `on_drag_move::<T>` dispatches on the
+/// payload's **type** alone (gpui `div.rs`) and runs in the capture phase, so
+/// every thumb in the window sees every `ThumbDrag` — without this, a vertical
+/// and a horizontal thumb would overwrite each other's `last` with values from
+/// different axes, and a second embed's thumbs would scroll in lockstep with the
+/// one actually grabbed.
+#[derive(Clone)]
+struct ThumbDrag {
+    id: ElementId,
+    last: Rc<Cell<Option<Pixels>>>,
+}
+
+/// gpui requires a rendered view to follow the cursor during a drag; a
+/// scrollbar wants none, so this paints nothing.
+struct ThumbDragGhost;
+
+impl Render for ThumbDragGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+impl RenderOnce for Thumb {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let thickness = px(theme::SCROLLBAR_W);
+        let selector = self.id.clone();
+        let own_id = self.id.clone();
+        let vertical = self.axis == Axis::Vertical;
+        let hover_bg = self.hover_bg;
+        let mut thumb = div()
+            .id(self.id.clone())
             .debug_selector(move || selector.to_string())
             .absolute()
-            .left(thumb_left)
-            .bottom(px(theme::SCROLLBAR_MARGIN_R))
-            .h(h)
-            .w(thumb_w)
-            .rounded(h / 2.0)
-            .bg(thumb_bg)
-            .hover(move |d| d.bg(thumb_hover_bg))
-            .into_any_element(),
-    )
+            .rounded(thickness / 2.0)
+            .bg(self.bg)
+            .hover(move |d| d.bg(hover_bg));
+        thumb = if vertical {
+            thumb
+                .top(self.start)
+                .right(px(theme::SCROLLBAR_MARGIN_R))
+                .w(thickness)
+                .h(self.len)
+        } else {
+            thumb
+                .left(self.start)
+                .bottom(px(theme::SCROLLBAR_MARGIN_R))
+                .h(thickness)
+                .w(self.len)
+        };
+        let Some(handler) = self.on_drag else {
+            return thumb;
+        };
+        // Cursor travel maps onto scroll travel by the ratio of the two ranges,
+        // so the content keeps pace with the thumb regardless of their sizes.
+        let track_travel = self.track - self.len;
+        let scrollable = self.scrollable;
+        let offset = self.offset;
+        let drag = ThumbDrag {
+            id: self.id,
+            last: Rc::new(Cell::new(None)),
+        };
+        thumb
+            .cursor_pointer()
+            .on_drag(drag, |_, _, _, cx| cx.new(|_| ThumbDragGhost))
+            .on_drag_move::<ThumbDrag>(move |ev, window, cx| {
+                if track_travel <= px(0.) || scrollable <= px(0.) {
+                    return;
+                }
+                let drag = ev.drag(cx);
+                // Not our drag: this handler fires for every `ThumbDrag` in the
+                // window, including the other axis' thumb on this very embed.
+                if drag.id != own_id {
+                    return;
+                }
+                let cursor = if vertical {
+                    ev.event.position.y
+                } else {
+                    ev.event.position.x
+                };
+                let last = drag.last.replace(Some(cursor));
+                // The first move only anchors: without a previous position there
+                // is no travel yet, and treating the grab point as travel would
+                // jump the content by however far into the thumb the user clicked.
+                let Some(last) = last else {
+                    return;
+                };
+                let travelled = cursor - last;
+                if travelled == px(0.) {
+                    return;
+                }
+                let next =
+                    (offset - scrollable * (travelled / track_travel)).clamp(-scrollable, px(0.));
+                handler(next, window, cx);
+            })
+    }
 }
 
 /// Pure thumb geometry: `(thumb_start, thumb_len)` in pixels along one axis,
@@ -147,7 +287,7 @@ pub fn vertical_thumb_for_list(
     top_offset: Pixels,
     thumb_bg: Hsla,
     thumb_hover_bg: Hsla,
-) -> Option<AnyElement> {
+) -> Option<Thumb> {
     let viewport_h = list_state.viewport_bounds().size.height;
     let content_h = viewport_h + list_state.max_offset_for_scrollbar().y;
     vertical_thumb(

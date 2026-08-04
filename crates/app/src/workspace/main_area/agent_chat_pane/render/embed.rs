@@ -3,8 +3,8 @@
 //! capping makes necessary.
 
 use gpui::{
-    AnyElement, App, ElementId, Entity, Hsla, IntoElement, RenderOnce, SharedString, Window, div,
-    prelude::*, px,
+    AnyElement, App, ElementId, Entity, Hsla, IntoElement, Pixels, RenderOnce, SharedString,
+    Window, div, point, prelude::*, px,
 };
 
 use crate::ui::theme;
@@ -85,23 +85,29 @@ pub(in crate::workspace) fn bounded_editor_embed(
         // Rows past the cap are reachable only by scrolling inside the embed, so
         // the embed needs a vertical thumb as well as the horizontal one
         // `soft_wrap(false)` calls for.
-        .children(crate::ui::scrollbar::vertical_thumb(
-            format!("agent-chat-out-vthumb-{id}"),
-            viewport.height,
-            content_h,
-            offset.y,
-            px(0.),
-            t.scrollbar_thumb,
-            t.file_viewer_scrollbar_thumb_hover,
-        ))
-        .children(crate::ui::scrollbar::horizontal_thumb(
-            format!("agent-chat-out-hthumb-{id}"),
-            viewport.width,
-            content_w,
-            offset.x,
-            t.scrollbar_thumb,
-            t.file_viewer_scrollbar_thumb_hover,
-        ))
+        .children(
+            crate::ui::scrollbar::vertical_thumb(
+                format!("agent-chat-out-vthumb-{id}"),
+                viewport.height,
+                content_h,
+                offset.y,
+                px(0.),
+                t.scrollbar_thumb,
+                t.file_viewer_scrollbar_thumb_hover,
+            )
+            .map(|thumb| thumb.on_drag(drag_axis(editor, Axis::Vertical))),
+        )
+        .children(
+            crate::ui::scrollbar::horizontal_thumb(
+                format!("agent-chat-out-hthumb-{id}"),
+                viewport.width,
+                content_w,
+                offset.x,
+                t.scrollbar_thumb,
+                t.file_viewer_scrollbar_thumb_hover,
+            )
+            .map(|thumb| thumb.on_drag(drag_axis(editor, Axis::Horizontal))),
+        )
         .children(copy_source.map(|code| CopyOverlay {
             group,
             id: ElementId::Name(format!("agent-chat-out-copy-{id}").into()),
@@ -109,6 +115,33 @@ pub(in crate::workspace) fn bounded_editor_embed(
             chip_bg: surface,
         }))
         .into_any_element()
+}
+
+/// Which axis a [`drag_axis`] handler writes.
+#[derive(Clone, Copy)]
+enum Axis {
+    Vertical,
+    Horizontal,
+}
+
+/// Write a dragged thumb's new offset back onto `editor`, leaving the other axis
+/// where it was. `set_scroll_offset` owns the clamp and the repaint, so the host
+/// never has to know the editor's content extent.
+fn drag_axis(
+    editor: &Entity<crate::ui::InputState>,
+    axis: Axis,
+) -> impl Fn(Pixels, &mut Window, &mut App) + use<> {
+    let editor = editor.clone();
+    move |next, _window, cx| {
+        editor.update(cx, |state, cx| {
+            let current = state.scroll_handle().offset();
+            let offset = match axis {
+                Axis::Vertical => point(current.x, next),
+                Axis::Horizontal => point(next, current.y),
+            };
+            state.set_scroll_offset(offset, cx);
+        });
+    }
 }
 
 /// Hover-revealed copy button over an embed, so replacing a markdown-rendered

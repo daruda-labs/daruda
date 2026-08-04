@@ -260,7 +260,7 @@ fn body_scrollbar_thumb(
     scroll_handle: &gpui::ScrollHandle,
     thumb: gpui::Hsla,
     thumb_hover: gpui::Hsla,
-) -> Option<gpui::AnyElement> {
+) -> Option<crate::ui::scrollbar::Thumb> {
     let viewport_h = scroll_handle.bounds().size.height;
     let max_offset = scroll_handle.max_offset().y;
     crate::ui::scrollbar::vertical_thumb(

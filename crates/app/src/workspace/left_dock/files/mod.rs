@@ -118,7 +118,7 @@ fn build_files_scrollbar(
     handle: &UniformListScrollHandle,
     item_count: usize,
     cx: &gpui::App,
-) -> Option<AnyElement> {
+) -> Option<crate::ui::scrollbar::Thumb> {
     if item_count == 0 {
         return None;
     }

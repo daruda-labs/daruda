@@ -969,6 +969,18 @@ impl InputState {
         &self.scroll_handle
     }
 
+    /// Scroll to `offset`, clamped to the content, and repaint.
+    ///
+    /// daruda vendor patch — the write counterpart of [`Self::scroll_handle`].
+    /// A host that draws its own thumb (`Input::show_scrollbar(false)`) needs to
+    /// drive the editor when that thumb is dragged, and writing
+    /// `scroll_handle().set_offset` directly would skip both the clamp and the
+    /// notify that [`Self::update_scroll_offset`] owns — leaving the editor
+    /// scrolled past its content, or not repainting at all.
+    pub fn set_scroll_offset(&mut self, offset: Point<Pixels>, cx: &mut Context<Self>) {
+        self.update_scroll_offset(Some(offset), cx);
+    }
+
     /// The text element's bounds from the last paint, if it has painted.
     ///
     /// daruda vendor patch — layout probe for host tests measuring the

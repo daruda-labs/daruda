@@ -6,7 +6,7 @@
 //! `max_offset` instead of `total_rows * line_h`).
 
 use crate::ui::theme;
-use gpui::{AnyElement, App};
+use gpui::App;
 
 /// Build an optional scrollbar thumb element based on the current scroll state.
 /// Returns `None` when there is nothing to scroll (content fits in viewport).
@@ -27,7 +27,7 @@ pub(super) fn file_viewer_scrollbar(
     viewport_h: gpui::Pixels,
     content_h: gpui::Pixels,
     cx: &App,
-) -> Option<AnyElement> {
+) -> Option<crate::ui::scrollbar::Thumb> {
     let t = theme::current(cx);
     // `body_top` offsets the thumb within the `.relative()` file-viewer
     // container; the thumb range is [body_top, body_top + viewport_h].

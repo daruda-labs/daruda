@@ -237,7 +237,7 @@ fn section_nav_label(section: BuiltinSection) -> String {
 fn settings_scrollbar(
     scroll_handle: &gpui::ScrollHandle,
     cx: &gpui::App,
-) -> Option<gpui::AnyElement> {
+) -> Option<crate::ui::scrollbar::Thumb> {
     let viewport_h = scroll_handle.bounds().size.height;
     let max_offset = scroll_handle.max_offset().y;
     let t = theme::current(cx);

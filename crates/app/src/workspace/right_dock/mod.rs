@@ -69,7 +69,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 /// Scrollbar thumb overlay for the right-dock body. Returns `None`
 /// when content fits; shape and position derive from the shared
 /// `ScrollHandle`'s viewport / max-offset / current offset.
-fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<AnyElement> {
+fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<crate::ui::scrollbar::Thumb> {
     let viewport_h = handle.bounds().size.height;
     let max_offset = handle.max_offset().y;
     let t = theme::current(cx);

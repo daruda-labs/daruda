@@ -16,7 +16,7 @@ mod virtual_list;
 pub(in crate::workspace) use self::markdown::CachedImage;
 
 use crate::ui::theme;
-use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 
 use self::body::render_file_viewer_body;
 use self::scrollbar::file_viewer_scrollbar;
@@ -48,7 +48,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     let viewer_bg = theme::current(cx).file_viewer_bg;
 
     // One thin daruda thumb; editor modes use the editor scroll handle.
-    let scrollbar: Option<AnyElement> = if is_editor_mode {
+    let scrollbar: Option<crate::ui::scrollbar::Thumb> = if is_editor_mode {
         let editor = editor_state.read(cx);
         // `editor_scroll.bounds()`/`.max_offset()` never populate for this
         // vendored editor (see `InputState::scroll_size` doc comment) — the
