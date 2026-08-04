@@ -22,6 +22,7 @@ pub mod ports;
 pub mod project;
 pub mod render;
 pub mod scrollback;
+pub mod session_host;
 pub mod settings_section;
 pub mod shell;
 pub mod status_bar;
@@ -63,6 +64,7 @@ pub use project::{
 };
 pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
+pub use session_host::{SessionHostEntry, SessionHostKind, SessionHostTombstone};
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
 pub use status_bar::{StatusBarConfig, StatusBarItem};
@@ -139,6 +141,17 @@ pub struct Config {
     /// for the Settings editor, which has to show (and re-save) unresolved rows.
     #[serde(default = "agent::default_agents")]
     pub agents: Vec<AgentEntry>,
+    /// Named, reusable SSH/Docker hosts a lane's `session_host` can
+    /// reference by id instead of repeating the same target/container as
+    /// free text. Unlike [`Self::agents`], an empty catalog is a completely
+    /// valid state ("no hosts registered yet") — no non-empty seed.
+    #[serde(default)]
+    pub session_hosts: Vec<SessionHostEntry>,
+    /// Removed [`SessionHostEntry`] rows, kept so a lane still referencing a
+    /// deleted id can show what it used to point at. See
+    /// [`SessionHostTombstone`].
+    #[serde(default)]
+    pub session_host_tombstones: Vec<SessionHostTombstone>,
     pub update: UpdateConfig,
     pub telegram: TelegramConfig,
 }
@@ -177,6 +190,8 @@ impl Default for Config {
             render: Default::default(),
             agent: Default::default(),
             agents: agent::default_agents(),
+            session_hosts: Vec::new(),
+            session_host_tombstones: Vec::new(),
             update: Default::default(),
             telegram: Default::default(),
         }

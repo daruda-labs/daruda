@@ -2948,6 +2948,67 @@ pub fn settings_err_agent_catalog_container(index: usize) -> String {
     rust_i18n::t!("settings.err_agent_catalog_container", index = index).into_owned()
 }
 
+// Session Hosts section — the `[[session_hosts]]` registry editor.
+pub fn settings_nav_session_hosts() -> String {
+    rust_i18n::t!("settings.nav_session_hosts").into_owned()
+}
+pub fn settings_section_session_hosts() -> String {
+    rust_i18n::t!("settings.section_session_hosts").into_owned()
+}
+pub fn settings_session_hosts_description() -> String {
+    rust_i18n::t!("settings.session_hosts_description").into_owned()
+}
+/// Shown instead of the row list when the registry has no entries yet — a
+/// valid, non-error state (unlike the agent catalog, which always seeds a
+/// default).
+pub fn settings_session_hosts_empty() -> String {
+    rust_i18n::t!("settings.session_hosts_empty").into_owned()
+}
+pub fn settings_session_host_row_label(index: usize) -> String {
+    rust_i18n::t!("settings.session_host_row_label", index = index).into_owned()
+}
+pub fn settings_session_host_field_label() -> String {
+    rust_i18n::t!("settings.session_host_field_label").into_owned()
+}
+pub fn settings_session_host_field_kind() -> String {
+    rust_i18n::t!("settings.session_host_field_kind").into_owned()
+}
+pub fn settings_session_host_kind_ssh() -> String {
+    rust_i18n::t!("settings.session_host_kind_ssh").into_owned()
+}
+pub fn settings_session_host_kind_docker() -> String {
+    rust_i18n::t!("settings.session_host_kind_docker").into_owned()
+}
+pub fn settings_session_host_field_target() -> String {
+    rust_i18n::t!("settings.session_host_field_target").into_owned()
+}
+pub fn settings_session_host_field_container() -> String {
+    rust_i18n::t!("settings.session_host_field_container").into_owned()
+}
+pub fn settings_session_host_add() -> String {
+    rust_i18n::t!("settings.session_host_add").into_owned()
+}
+pub fn settings_session_host_remove() -> String {
+    rust_i18n::t!("settings.session_host_remove").into_owned()
+}
+pub fn settings_err_session_host_label_empty(index: usize) -> String {
+    rust_i18n::t!("settings.err_session_host_label_empty", index = index).into_owned()
+}
+pub fn settings_err_session_host_label_duplicate(label: &str) -> String {
+    rust_i18n::t!("settings.err_session_host_label_duplicate", label = label).into_owned()
+}
+/// Wraps a reused `session_host.err_*` validator message (see
+/// `session_host_err_target_empty` and friends) with the row's 1-based
+/// ordinal, so a multi-row save can point at which one failed.
+pub fn settings_err_session_host_field(index: usize, reason: &str) -> String {
+    rust_i18n::t!(
+        "settings.err_session_host_field",
+        index = index,
+        reason = reason
+    )
+    .into_owned()
+}
+
 // Plugin section — install / uninstall UI labels
 pub fn settings_plugin_installed_header() -> String {
     rust_i18n::t!("settings.plugin_installed_header").into_owned()

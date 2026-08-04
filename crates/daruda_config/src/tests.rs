@@ -776,3 +776,63 @@ fn config_load_missing_general_defaults_to_auto() {
     let cfg = Config::load_from(&path);
     assert_eq!(cfg.general.language, "auto");
 }
+
+// ---- session host registry ----
+
+/// Unlike `agents`, an absent/empty catalog is a valid steady state — no
+/// non-empty seed. Covers both a totally empty document and a config that
+/// sets unrelated sections but never mentions `session_hosts`.
+#[test]
+fn missing_session_hosts_defaults_to_an_empty_catalog() {
+    let cfg: Config = toml::from_str("").unwrap();
+    assert!(cfg.session_hosts.is_empty());
+    assert!(cfg.session_host_tombstones.is_empty());
+
+    let cfg: Config = toml::from_str("[font]\nsize = 14.0\n").unwrap();
+    assert!(cfg.session_hosts.is_empty());
+    assert!(cfg.session_host_tombstones.is_empty());
+
+    assert!(Config::default().session_hosts.is_empty());
+    assert!(Config::default().session_host_tombstones.is_empty());
+}
+
+#[test]
+fn session_hosts_and_tombstones_round_trip_through_config_toml() {
+    use daruda_store::project::SessionHostId;
+
+    let cfg = Config {
+        session_hosts: vec![
+            SessionHostEntry {
+                id: SessionHostId::new(),
+                label: "Build box".to_string(),
+                kind: SessionHostKind::Ssh {
+                    target: "vm-work".to_string(),
+                },
+            },
+            SessionHostEntry {
+                id: SessionHostId::new(),
+                label: "Dev container".to_string(),
+                kind: SessionHostKind::Docker {
+                    container: "dev-1".to_string(),
+                },
+            },
+        ],
+        session_host_tombstones: vec![SessionHostTombstone {
+            old_id: SessionHostId::new(),
+            kind: SessionHostKind::Ssh {
+                target: "old-box".to_string(),
+            },
+            value: "old-box".to_string(),
+            removed_at: 1_700_000_000,
+            redirected_to: None,
+        }],
+        ..Config::default()
+    };
+    let toml_str = toml::to_string(&cfg).expect("serialize");
+    let back: Config = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back.session_hosts, cfg.session_hosts, "{toml_str}");
+    assert_eq!(
+        back.session_host_tombstones, cfg.session_host_tombstones,
+        "{toml_str}"
+    );
+}

@@ -62,6 +62,8 @@ fn resolve_session_command(
     owning_lane: Option<&Lane>,
     pane_cwd: &PaneCwd,
     env: Option<&AccountEnv>,
+    session_host_catalog: &[daruda_config::SessionHostEntry],
+    session_host_tombstones: &[daruda_config::SessionHostTombstone],
 ) -> (Result<String, ConnectCommandError>, PaneCwd) {
     let is_raw_token = matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN));
     if is_raw_token {
@@ -81,7 +83,9 @@ fn resolve_session_command(
     }
 
     let host = owning_lane
-        .map(|lane| lane.effective_session_host(launch))
+        .map(|lane| {
+            lane.effective_session_host(launch, session_host_catalog, session_host_tombstones)
+        })
         .unwrap_or(LaneSessionHost::Local);
     let resolved_cwd =
         match host.session_path() {
@@ -113,6 +117,69 @@ fn resolve_session_command(
         None => session_host::wrap(&host, adapter),
     };
     (Ok(command), resolved_cwd)
+}
+
+/// `host` (as [`Lane::effective_session_host`] resolved it) with its
+/// `registry_id` corrected to the id the link currently resolves to —
+/// [`session_host::resolved_registry_id`]'s value folded back onto the
+/// host's own field. `effective_session_host` deliberately leaves a
+/// tombstone-redirected id untouched (see its doc); this is the write-back
+/// half `connect_agent_chat` persists so a future connect resolves directly
+/// against the catalog instead of re-chasing the tombstone every time. A
+/// no-op for `Local` or an unlinked/orphaned host.
+fn sync_registry_id(
+    host: LaneSessionHost,
+    catalog: &[daruda_config::SessionHostEntry],
+    tombstones: &[daruda_config::SessionHostTombstone],
+) -> LaneSessionHost {
+    let Some(fresh_id) = session_host::resolved_registry_id(&host, catalog, tombstones) else {
+        return host;
+    };
+    match host {
+        LaneSessionHost::Ssh {
+            target,
+            session_path,
+            ..
+        } => LaneSessionHost::Ssh {
+            target,
+            session_path,
+            registry_id: Some(fresh_id),
+        },
+        LaneSessionHost::Docker {
+            container,
+            session_path,
+            ..
+        } => LaneSessionHost::Docker {
+            container,
+            session_path,
+            registry_id: Some(fresh_id),
+        },
+        LaneSessionHost::Local => LaneSessionHost::Local,
+    }
+}
+
+/// Pure core of `connect_agent_chat`'s session-host write-back: `Some(host)`
+/// to persist onto the lane, `None` when there's nothing to sync.
+///
+/// `None` in two cases: `cached` is `None` — the lane never explicitly
+/// answered the host question, so its resolution falls back to the legacy
+/// `remote_cwd` pair, which must stay unanswered (see
+/// `Lane::set_session_host`'s doc) rather than being silently promoted to an
+/// explicit answer by this sync; or `resolved` is `None` — no owning lane
+/// was found for this connect at all. Otherwise compares `cached` against
+/// `resolved` corrected by [`sync_registry_id`] (folding in a tombstone
+/// redirect's fresh id alongside the catalog's current `target`/`container`)
+/// and returns the corrected value only when it actually differs.
+fn session_host_write_back(
+    cached: Option<&LaneSessionHost>,
+    resolved: Option<&LaneSessionHost>,
+    catalog: &[daruda_config::SessionHostEntry],
+    tombstones: &[daruda_config::SessionHostTombstone],
+) -> Option<LaneSessionHost> {
+    let cached = cached?;
+    let resolved = resolved?;
+    let corrected = sync_registry_id(resolved.clone(), catalog, tombstones);
+    (&corrected != cached).then_some(corrected)
 }
 
 /// The account recipe for `launch` on this connect, given `is_remote` (a
@@ -387,9 +454,19 @@ impl Workspace {
         // a connect resolves the command/cwd pair to spawn, so a restored
         // remote pane (which skips `resolve_new_pane_cwd`) is fixed up here
         // on its lazy connect. See `resolve_session_command`'s doc.
-        let owning_lane = self
-            .lane_ref_for_pane(pane_id)
-            .and_then(|lane_ref| self.lane_for(lane_ref));
+        let owning_lane_ref = self.lane_ref_for_pane(pane_id);
+        let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
+        // Resolved once and reused below for `is_remote` and the registry
+        // write-back — `effective_session_host` re-resolves `registry_id`
+        // against the live catalog/tombstones on every call, so sharing one
+        // result here avoids walking that twice for the same connect.
+        let resolved_host = owning_lane.map(|lane| {
+            lane.effective_session_host(&launch, &self.session_hosts, &self.session_host_tombstones)
+        });
+        // Cloned out now so it stays available after `owning_lane`'s borrow
+        // of `self` ends (its last use is inside `resolve_session_command`
+        // below, right before the write-back needs `&mut self`).
+        let cached_host = owning_lane.and_then(|lane| lane.session_host.clone());
         // The pane's account must belong to the auth domain its own agent
         // launches under; an account from another domain is refused here
         // rather than injected under the wrong config-dir env var. Gated on
@@ -398,9 +475,9 @@ impl Workspace {
         // into a command that runs on another machine via `wrap_with_env`
         // would point the remote adapter at a directory that doesn't exist
         // there (see `account_recipe`'s doc).
-        let is_remote = owning_lane
-            .map(|lane| lane.effective_session_host(&launch).is_remote())
-            .unwrap_or(false);
+        let is_remote = resolved_host
+            .as_ref()
+            .is_some_and(LaneSessionHost::is_remote);
         let selection = self.agent_chat_account_selection(pane_id);
         let domain = crate::workspace::main_area::pane::AccountDomain::for_agent(
             account_recipe_for_connect(&launch, is_remote),
@@ -429,7 +506,28 @@ impl Workspace {
             owning_lane,
             &cwd,
             prepared.as_ref().map(|account| &account.env),
+            &self.session_hosts,
+            &self.session_host_tombstones,
         );
+        // Sync the lane's cached session host with what this connect just
+        // resolved — a registry `target`/`container` edit, or a tombstone
+        // redirect landing on a new id, must persist onto the lane so a
+        // future connect resolves it directly instead of re-deriving it
+        // every time, and so anything reading `Lane::session_host` (e.g. a
+        // future `SessionHostModal` display) sees the fresh value right
+        // away rather than only after the next connect. Same idiom as the
+        // `cwd_changed` sync below (codex review #3 on the prior Lane
+        // session-host axis cycle), applied one layer up (Lane → Registry).
+        if let Some(lane_ref) = owning_lane_ref
+            && let Some(corrected) = session_host_write_back(
+                cached_host.as_ref(),
+                resolved_host.as_ref(),
+                &self.session_hosts,
+                &self.session_host_tombstones,
+            )
+        {
+            self.set_lane_session_host(lane_ref, corrected, cx);
+        }
         // Keep the pane's own cwd in step with what this connect actually
         // resolved. B′ (see `resolve_session_command`'s doc) means the live
         // host can diverge from what the pane was created or last connected
@@ -932,7 +1030,7 @@ impl Workspace {
 mod tests {
     use super::{
         ConnectCommandError, account_recipe_for_connect, account_strip_env, agent_default_mode,
-        resolve_session_command,
+        resolve_session_command, session_host_write_back, sync_registry_id,
     };
     use crate::lane::Lane;
     use daruda_config::{AccountEnv, AgentDefinition, AgentLaunch};
@@ -980,12 +1078,19 @@ mod tests {
             Some(LaneSessionHost::Ssh {
                 target: "vm-work".into(),
                 session_path: "/srv/app".into(),
+                registry_id: None,
             }),
             None,
         );
         let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
-        let (command, connect_cwd) =
-            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &stale_cwd, None);
+        let (command, connect_cwd) = resolve_session_command(
+            &raw("npx acp-adapter"),
+            Some(&lane),
+            &stale_cwd,
+            None,
+            &[],
+            &[],
+        );
         assert_eq!(
             command,
             Ok("ssh vm-work sh -c 'cd \"/srv/app\" && npx acp-adapter'".to_string())
@@ -1003,8 +1108,14 @@ mod tests {
     fn restored_remote_pane_follows_the_lane_back_to_local() {
         let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
         let stale_cwd = PaneCwd::Remote("stale-unrelated-path".into());
-        let (command, connect_cwd) =
-            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &stale_cwd, None);
+        let (command, connect_cwd) = resolve_session_command(
+            &raw("npx acp-adapter"),
+            Some(&lane),
+            &stale_cwd,
+            None,
+            &[],
+            &[],
+        );
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
         assert_eq!(
             connect_cwd,
@@ -1018,7 +1129,7 @@ mod tests {
     fn missing_owning_lane_falls_back_to_local_never_promotes_to_remote() {
         let local_cwd = PaneCwd::Local(PathBuf::from("/pane/own/local/path"));
         let (command, connect_cwd) =
-            resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None);
+            resolve_session_command(&raw("npx acp-adapter"), None, &local_cwd, None, &[], &[]);
         assert_eq!(command, Ok("npx acp-adapter".to_string()));
         assert_eq!(
             connect_cwd,
@@ -1038,7 +1149,8 @@ mod tests {
             host: "old-box".into(),
         };
         let cwd = PaneCwd::Remote("/srv/legacy".into());
-        let (command, connect_cwd) = resolve_session_command(&launch, Some(&lane), &cwd, None);
+        let (command, connect_cwd) =
+            resolve_session_command(&launch, Some(&lane), &cwd, None, &[], &[]);
         assert_eq!(
             command,
             launch
@@ -1061,12 +1173,14 @@ mod tests {
             Some(LaneSessionHost::Ssh {
                 target: "other-host".into(),
                 session_path: "/other/path".into(),
+                registry_id: None,
             }),
             None,
         );
         let launch = raw("ssh vm-work \"cd {{cwd}} && run\"");
         let cwd = PaneCwd::Remote("/home/user/project".into());
-        let (command, connect_cwd) = resolve_session_command(&launch, Some(&lane), &cwd, None);
+        let (command, connect_cwd) =
+            resolve_session_command(&launch, Some(&lane), &cwd, None, &[], &[]);
         assert_eq!(
             command,
             Ok("ssh vm-work \"cd /home/user/project && run\"".to_string())
@@ -1092,12 +1206,13 @@ mod tests {
             Some(LaneSessionHost::Ssh {
                 target: "vm-work".into(),
                 session_path: "/srv/app".into(),
+                registry_id: None,
             }),
             None,
         );
         let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
         let (command, resolved_cwd) =
-            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None);
+            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None, &[], &[]);
         assert_eq!(command, Err(ConnectCommandError::JsonStdioRemote));
         // The resolved cwd is still reported (used to sync the pane even on
         // a rejected connect), even though the command itself failed.
@@ -1112,7 +1227,7 @@ mod tests {
         let lane = lane_at("/local/checkout", Some(LaneSessionHost::Local), None);
         let cwd = PaneCwd::Local(PathBuf::from("/local/checkout"));
         let (command, resolved_cwd) =
-            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None);
+            resolve_session_command(&json_stdio_launch(), Some(&lane), &cwd, None, &[], &[]);
         assert_eq!(
             command,
             Ok(r#"{"command":"/opt/adapters/claude-agent-acp","args":[]}"#.to_string())
@@ -1188,6 +1303,7 @@ mod tests {
             Some(LaneSessionHost::Ssh {
                 target: "vm-work".into(),
                 session_path: "/srv/app".into(),
+                registry_id: None,
             }),
             None,
         );
@@ -1196,8 +1312,14 @@ mod tests {
             strip: vec!["ANTHROPIC_API_KEY"],
         };
         let cwd = PaneCwd::Local(PathBuf::from("/unused"));
-        let (command, _) =
-            resolve_session_command(&raw("npx acp-adapter"), Some(&lane), &cwd, Some(&env));
+        let (command, _) = resolve_session_command(
+            &raw("npx acp-adapter"),
+            Some(&lane),
+            &cwd,
+            Some(&env),
+            &[],
+            &[],
+        );
         let command = command.unwrap();
         assert!(command.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
         assert!(command.contains("unset ANTHROPIC_API_KEY"));
@@ -1253,5 +1375,174 @@ mod tests {
             None,
             "an id no longer in the catalog is not an override"
         );
+    }
+
+    // Task 3: connect-path write-back — a registry `target`/`container` edit,
+    // or a tombstone redirect, syncs back onto the lane's cached
+    // `session_host` so a future connect (and any UI reading it) sees the
+    // fresh value instead of re-deriving it every time.
+
+    fn write_back_tombstone(
+        old_id: daruda_store::project::SessionHostId,
+        redirected_to: Option<daruda_store::project::SessionHostId>,
+    ) -> daruda_config::SessionHostTombstone {
+        daruda_config::SessionHostTombstone {
+            old_id,
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "old-box".into(),
+            },
+            value: "old-box".into(),
+            removed_at: 0,
+            redirected_to,
+        }
+    }
+
+    /// The Step 1 scenario: a catalog `target` edit surfaces through
+    /// `effective_session_host` already (Task 2) — this asserts the
+    /// write-back actually persists it onto the lane's cache.
+    #[test]
+    fn catalog_target_change_writes_back_the_lanes_cached_target() {
+        let id = daruda_store::project::SessionHostId::new();
+        let cached = LaneSessionHost::Ssh {
+            target: "old-target".into(),
+            session_path: "/srv/app".into(),
+            registry_id: Some(id),
+        };
+        let catalog = vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".into(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "new-target".into(),
+            },
+        }];
+        // Task 2's resolver already folded the catalog's current target
+        // in — this is what `connect_agent_chat` would pass as `resolved`.
+        let resolved = LaneSessionHost::Ssh {
+            target: "new-target".into(),
+            session_path: "/srv/app".into(),
+            registry_id: Some(id),
+        };
+        let written = session_host_write_back(Some(&cached), Some(&resolved), &catalog, &[])
+            .expect("target changed — must write back");
+        assert_eq!(
+            written,
+            LaneSessionHost::Ssh {
+                target: "new-target".into(),
+                session_path: "/srv/app".into(),
+                registry_id: Some(id),
+            }
+        );
+    }
+
+    /// A tombstone redirect also corrects the cached `registry_id` to the
+    /// live id — not just `target` — so the next connect resolves directly
+    /// against the catalog instead of re-chasing the tombstone.
+    #[test]
+    fn tombstone_redirect_writes_back_both_target_and_registry_id() {
+        let old_id = daruda_store::project::SessionHostId::new();
+        let new_id = daruda_store::project::SessionHostId::new();
+        let cached = LaneSessionHost::Ssh {
+            target: "old-box".into(),
+            session_path: "/srv/app".into(),
+            registry_id: Some(old_id),
+        };
+        let catalog = vec![daruda_config::SessionHostEntry {
+            id: new_id,
+            label: "Renamed box".into(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "merged-target".into(),
+            },
+        }];
+        let tombstones = vec![write_back_tombstone(old_id, Some(new_id))];
+        // `effective_session_host` (Task 2) resolves the target through the
+        // redirect but leaves `registry_id` at the stale cached id — exactly
+        // what `connect_agent_chat` would pass here.
+        let resolved = LaneSessionHost::Ssh {
+            target: "merged-target".into(),
+            session_path: "/srv/app".into(),
+            registry_id: Some(old_id),
+        };
+        let written =
+            session_host_write_back(Some(&cached), Some(&resolved), &catalog, &tombstones)
+                .expect("redirect resolved a new value — must write back");
+        assert_eq!(
+            written,
+            LaneSessionHost::Ssh {
+                target: "merged-target".into(),
+                session_path: "/srv/app".into(),
+                registry_id: Some(new_id),
+            }
+        );
+    }
+
+    /// No drift → no write, so a connect that changes nothing doesn't
+    /// spuriously dirty + persist the workspace on every single connect.
+    #[test]
+    fn unchanged_value_writes_back_nothing() {
+        let id = daruda_store::project::SessionHostId::new();
+        let host = LaneSessionHost::Ssh {
+            target: "vm-work".into(),
+            session_path: "/srv/app".into(),
+            registry_id: Some(id),
+        };
+        let catalog = vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".into(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".into(),
+            },
+        }];
+        assert_eq!(
+            session_host_write_back(Some(&host), Some(&host), &catalog, &[]),
+            None
+        );
+    }
+
+    /// An unanswered lane (`session_host: None`) must never be silently
+    /// promoted to an explicit answer by this sync — that's a distinct,
+    /// user-driven action (`Lane::set_session_host`'s doc), not something a
+    /// background resolve should do on its own.
+    #[test]
+    fn unanswered_lane_is_never_written_to() {
+        let resolved = LaneSessionHost::Ssh {
+            target: "vm-work".into(),
+            session_path: "/srv/app".into(),
+            registry_id: None,
+        };
+        assert_eq!(
+            session_host_write_back(None, Some(&resolved), &[], &[]),
+            None
+        );
+    }
+
+    /// No owning lane at all (pane with no resolvable lane) — nothing to
+    /// write back to.
+    #[test]
+    fn missing_owning_lane_writes_back_nothing() {
+        let cached = LaneSessionHost::Local;
+        assert_eq!(session_host_write_back(Some(&cached), None, &[], &[]), None);
+    }
+
+    /// `sync_registry_id` itself: a `Local` host has no registry link to
+    /// correct — passed through unchanged.
+    #[test]
+    fn sync_registry_id_is_a_noop_for_local() {
+        assert_eq!(
+            sync_registry_id(LaneSessionHost::Local, &[], &[]),
+            LaneSessionHost::Local
+        );
+    }
+
+    /// An orphaned link (deleted, no redirect) keeps its stale id — there is
+    /// nothing live to correct it to.
+    #[test]
+    fn sync_registry_id_keeps_an_orphaned_id() {
+        let id = daruda_store::project::SessionHostId::new();
+        let host = LaneSessionHost::Docker {
+            container: "dev-1".into(),
+            session_path: "/workspace".into(),
+            registry_id: Some(id),
+        };
+        assert_eq!(sync_registry_id(host.clone(), &[], &[]), host);
     }
 }

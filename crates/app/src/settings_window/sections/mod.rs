@@ -6,14 +6,15 @@
 //! method here + match arm in `render::render_section_body` +
 //! sidebar nav row.
 //!
-//! The Agent and Plugin sections live in the [`agent`] / [`plugin`]
-//! submodules; their `impl SettingsWindow` blocks extend the same type
-//! through the standard sibling-module pattern.
+//! The Agent, Plugin, and Session Hosts sections live in the [`agent`] /
+//! [`plugin`] / [`session_hosts`] submodules; their `impl SettingsWindow`
+//! blocks extend the same type through the standard sibling-module pattern.
 
 mod about;
 mod accounts;
 mod agent;
 mod plugin;
+mod session_hosts;
 
 use crate::surface::strings as s;
 use crate::ui::theme;

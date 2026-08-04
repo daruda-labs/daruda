@@ -345,6 +345,7 @@ fn set_lane_session_host_targets_named_project_not_active(cx: &mut TestAppContex
     let host = daruda_store::project::LaneSessionHost::Ssh {
         target: "vm-a".to_string(),
         session_path: "/data/a".to_string(),
+        registry_id: None,
     };
     cx.update_window(wh.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| {

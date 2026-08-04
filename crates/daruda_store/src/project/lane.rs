@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::SerializedTab;
+use super::SessionHostId;
 
 /// Stable identifier for a lane within a project.
 pub type LaneId = u64;
@@ -167,12 +168,23 @@ pub enum LaneSessionHost {
         target: String,
         /// Working directory on that host.
         session_path: String,
+        /// Registry entry (`daruda_config::SessionHostEntry`) this host was
+        /// picked from, if any. `None` for a free-text host never linked to
+        /// a catalog row, and for every lane persisted before the registry
+        /// existed — `#[serde(default)]` keeps those loading as `None`
+        /// instead of failing to deserialize.
+        #[serde(default)]
+        registry_id: Option<SessionHostId>,
     },
     Docker {
         /// Name of an already-running container.
         container: String,
         /// Working directory inside that container.
         session_path: String,
+        /// Registry entry this host was picked from, if any — see the
+        /// `Ssh` variant's `registry_id` doc.
+        #[serde(default)]
+        registry_id: Option<SessionHostId>,
     },
 }
 
@@ -234,5 +246,70 @@ impl SerializedLane {
                 .unwrap_or("default")
                 .to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_session_host_round_trips_every_variant_with_registry_id() {
+        let cases = [
+            LaneSessionHost::Local,
+            LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+                registry_id: None,
+            },
+            LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+                registry_id: Some(SessionHostId::new()),
+            },
+            LaneSessionHost::Docker {
+                container: "dev-1".into(),
+                session_path: "/workspace".into(),
+                registry_id: None,
+            },
+            LaneSessionHost::Docker {
+                container: "dev-1".into(),
+                session_path: "/workspace".into(),
+                registry_id: Some(SessionHostId::new()),
+            },
+        ];
+        for case in cases {
+            let json = serde_json::to_string(&case).expect("serialize");
+            let back: LaneSessionHost = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, case, "{json}");
+        }
+    }
+
+    /// Regression anchor: a lane JSON file persisted before the registry
+    /// existed has no `registry_id` key at all — it must still deserialize,
+    /// with `registry_id` defaulting to `None`.
+    #[test]
+    fn missing_registry_id_key_deserializes_as_none() {
+        let json = r#"{"type":"ssh","target":"vm-work","session_path":"/srv/app"}"#;
+        let host: LaneSessionHost = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            host,
+            LaneSessionHost::Ssh {
+                target: "vm-work".into(),
+                session_path: "/srv/app".into(),
+                registry_id: None,
+            }
+        );
+
+        let json = r#"{"type":"docker","container":"dev-1","session_path":"/workspace"}"#;
+        let host: LaneSessionHost = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            host,
+            LaneSessionHost::Docker {
+                container: "dev-1".into(),
+                session_path: "/workspace".into(),
+                registry_id: None,
+            }
+        );
     }
 }

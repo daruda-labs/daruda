@@ -488,6 +488,15 @@ pub struct Workspace {
     /// each pane resolves its `agent_id` to a launch command here at connect
     /// time. Guaranteed non-empty by the config layer.
     pub(in crate::workspace) agents: Vec<daruda_config::AgentDefinition>,
+    /// The registered SSH/Docker host catalog mirrored from config
+    /// `[[session_hosts]]` — a lane's `session_host.registry_id` resolves
+    /// against this via `lane::session_host::effective_session_host`.
+    pub(in crate::workspace) session_hosts: Vec<daruda_config::SessionHostEntry>,
+    /// Removed catalog rows mirrored from config `[[session_host_tombstones]]`
+    /// — chased when a `registry_id` no longer resolves in `session_hosts`,
+    /// so a merge (`redirected_to`) still re-resolves. See
+    /// `lane::session_host::effective_session_host`.
+    pub(in crate::workspace) session_host_tombstones: Vec<daruda_config::SessionHostTombstone>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
@@ -1153,6 +1162,8 @@ impl Workspace {
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),
             agents: config.resolved_agents(),
+            session_hosts: config.session_hosts.clone(),
+            session_host_tombstones: config.session_host_tombstones.clone(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
             deferred_telegram: std::collections::HashMap::new(),

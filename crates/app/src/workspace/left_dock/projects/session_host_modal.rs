@@ -117,10 +117,12 @@ impl SessionHostModal {
             Some(LaneSessionHost::Ssh {
                 target,
                 session_path,
+                ..
             }) => (HostKind::Ssh, target.as_str(), "", session_path.as_str()),
             Some(LaneSessionHost::Docker {
                 container,
                 session_path,
+                ..
             }) => (
                 HostKind::Docker,
                 "",
@@ -462,6 +464,7 @@ mod tests {
         let current = LaneSessionHost::Ssh {
             target: "vm-work".into(),
             session_path: "/srv/app".into(),
+            registry_id: None,
         };
         let (_wh, modal) = build_modal(cx, Some(current.clone()), false);
         modal.read_with(cx, |m, cx| {
@@ -475,6 +478,7 @@ mod tests {
         let current = LaneSessionHost::Docker {
             container: "dev-1".into(),
             session_path: "/workspace".into(),
+            registry_id: None,
         };
         let (_wh, modal) = build_modal(cx, Some(current.clone()), false);
         modal.read_with(cx, |m, cx| {
@@ -505,6 +509,7 @@ mod tests {
                 Ok(LaneSessionHost::Ssh {
                     target: "build-box".into(),
                     session_path: "/home/user/project".into(),
+                    registry_id: None,
                 })
             );
         });
@@ -522,6 +527,7 @@ mod tests {
                 Ok(LaneSessionHost::Docker {
                     container: "dev-1".into(),
                     session_path: "/workspace".into(),
+                    registry_id: None,
                 })
             );
         });

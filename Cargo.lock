@@ -1708,6 +1708,7 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "toml_edit 0.22.27",
+ "uuid",
 ]
 
 [[package]]

@@ -102,6 +102,8 @@ fn resolve_new_pane_cwd_core(
     local_cwd: Option<PathBuf>,
     remote_cwd: Option<String>,
     session_host: Option<&LaneSessionHost>,
+    session_host_catalog: &[daruda_config::SessionHostEntry],
+    session_host_tombstones: &[daruda_config::SessionHostTombstone],
 ) -> Result<Option<PaneCwd>, ()> {
     if matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN))
     {
@@ -121,6 +123,8 @@ fn resolve_new_pane_cwd_core(
         session_host,
         remote_cwd.as_deref(),
         launch,
+        session_host_catalog,
+        session_host_tombstones,
     );
     Ok(Some(match host.session_path() {
         Some(remote_path) => PaneCwd::Remote(remote_path.to_string()),
@@ -357,7 +361,14 @@ impl Workspace {
         let launch = self
             .agent_launch_for(agent_id)
             .unwrap_or_else(|| AgentLaunch::Raw(String::new()));
-        resolve_new_pane_cwd_core(&launch, local_cwd, remote_cwd, session_host)
+        resolve_new_pane_cwd_core(
+            &launch,
+            local_cwd,
+            remote_cwd,
+            session_host,
+            &self.session_hosts,
+            &self.session_host_tombstones,
+        )
     }
 
     /// Construct a fresh Agent chat pane for `agent_id`. The single
@@ -680,6 +691,8 @@ mod tests {
                 Some(PathBuf::from("/local/lane")),
                 Some("/remote/lane".to_string()),
                 None,
+                &[],
+                &[],
             );
             assert_eq!(
                 result,
@@ -696,8 +709,14 @@ mod tests {
         // blocking the pane (mirrors `a_half_configured_legacy_pair_stays_local`
         // in `lane::session_host`).
         for launch in [ssh_launch(), docker_launch()] {
-            let result =
-                resolve_new_pane_cwd_core(&launch, Some(PathBuf::from("/local/lane")), None, None);
+            let result = resolve_new_pane_cwd_core(
+                &launch,
+                Some(PathBuf::from("/local/lane")),
+                None,
+                None,
+                &[],
+                &[],
+            );
             assert_eq!(
                 result,
                 Ok(Some(PaneCwd::Local(PathBuf::from("/local/lane")))),
@@ -718,6 +737,8 @@ mod tests {
                     Some(PathBuf::from("/local/lane")),
                     Some(blank.to_string()),
                     None,
+                    &[],
+                    &[],
                 );
                 assert_eq!(
                     result,
@@ -735,12 +756,15 @@ mod tests {
         let host = LaneSessionHost::Ssh {
             target: "vm-work".into(),
             session_path: "/srv/app".into(),
+            registry_id: None,
         };
         let result = resolve_new_pane_cwd_core(
             &local_launch(),
             Some(PathBuf::from("/local/lane")),
             None,
             Some(&host),
+            &[],
+            &[],
         );
         assert_eq!(result, Ok(Some(PaneCwd::Remote("/srv/app".to_string()))));
     }
@@ -754,6 +778,8 @@ mod tests {
             Some(PathBuf::from("/local/lane")),
             Some("/legacy/path".to_string()),
             Some(&LaneSessionHost::Local),
+            &[],
+            &[],
         );
         assert_eq!(
             result,
@@ -768,6 +794,8 @@ mod tests {
             Some(PathBuf::from("/local/lane")),
             Some("/remote/lane".to_string()),
             None,
+            &[],
+            &[],
         );
         assert_eq!(
             result,
@@ -777,7 +805,7 @@ mod tests {
 
     #[test]
     fn resolve_new_pane_cwd_local_launch_no_local_is_none() {
-        let result = resolve_new_pane_cwd_core(&local_launch(), None, None, None);
+        let result = resolve_new_pane_cwd_core(&local_launch(), None, None, None, &[], &[]);
         assert_eq!(result, Ok(None));
     }
 
@@ -790,12 +818,15 @@ mod tests {
         let host = LaneSessionHost::Ssh {
             target: "other-host".into(),
             session_path: "/other/path".into(),
+            registry_id: None,
         };
         let result = resolve_new_pane_cwd_core(
             &token_launch(),
             Some(PathBuf::from("/local/lane")),
             None,
             Some(&host),
+            &[],
+            &[],
         );
         assert_eq!(result, Err(()));
     }
@@ -807,6 +838,8 @@ mod tests {
             Some(PathBuf::from("/local/lane")),
             Some("/remote/lane".to_string()),
             None,
+            &[],
+            &[],
         );
         assert_eq!(
             result,

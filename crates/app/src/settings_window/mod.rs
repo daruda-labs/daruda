@@ -20,6 +20,7 @@ use gpui::{
     Window, WindowBackgroundAppearance, div, prelude::*, px,
 };
 
+use crate::lane::session_host;
 use crate::surface::strings as s;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
@@ -69,6 +70,11 @@ pub struct SettingsWindow {
     /// decide on its own whether "the catalog" included the non-editable half,
     /// and the two that answered "no" disagreed with the rest.
     agent_catalog: Vec<AgentCatalogItem>,
+    /// The session host registry (`[[session_hosts]]`) in `config.toml`
+    /// order — named, reusable SSH/Docker targets a lane's `session_host`
+    /// can reference by id instead of repeating the same target/container
+    /// as free text on every lane. See [`SessionHostRow`].
+    session_host_rows: Vec<SessionHostRow>,
     // Accounts (Task 9). Snapshot loaded from `accounts.json` at
     // construction; every write goes through the section's own
     // `set_default_account`/`remove_account` handlers, which persist
@@ -220,6 +226,32 @@ pub(super) struct AgentCatalogRow {
     /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
+}
+
+/// One row of the session host registry editor. Unlike [`AgentCatalogRow`],
+/// there is no preset concept here — every row is a plain user-entered
+/// `{label, kind, target|container}`.
+///
+/// `id` is minted once, at construction, and never changes for the row's
+/// lifetime: an existing row keeps the [`daruda_config::SessionHostId`] it
+/// loaded from config, and a freshly added row mints its own right away
+/// (rather than waiting for Save) so [`SettingsWindow::validate`] can tell
+/// "this row existed before this Save" from "this row is new" by id
+/// membership alone — the distinction the tombstone/redirect bookkeeping
+/// needs.
+#[derive(Clone)]
+pub(super) struct SessionHostRow {
+    pub(super) id: daruda_store::project::SessionHostId,
+    pub(super) label_input: Entity<InputState>,
+    /// `"ssh"` / `"docker"` — mirrors [`daruda_config::SessionHostKind`]'s
+    /// two variants.
+    pub(super) kind_select: Entity<SelectState>,
+    /// SSH target — only meaningful (and only rendered) when `kind_select`
+    /// is `"ssh"`.
+    pub(super) target_input: Entity<InputState>,
+    /// Docker container name — only meaningful (and only rendered) when
+    /// `kind_select` is `"docker"`.
+    pub(super) container_input: Entity<InputState>,
 }
 
 impl SettingsWindow {
@@ -497,6 +529,150 @@ impl SettingsWindow {
     pub(super) fn remove_agent_catalog_item(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.agent_catalog.len() {
             self.agent_catalog.remove(index);
+            self.error = None;
+            cx.notify();
+        }
+    }
+
+    /// Build one session-host row from a persisted entry — used both for the
+    /// rows seeded at window-open and (via [`Self::add_session_host_row`])
+    /// nowhere else, since a freshly added row starts blank rather than
+    /// copying an existing entry.
+    fn session_host_row_from_entry(
+        entry: &daruda_config::SessionHostEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> SessionHostRow {
+        let (kind, target, container) = match &entry.kind {
+            daruda_config::SessionHostKind::Ssh { target } => {
+                ("ssh", target.clone(), String::new())
+            }
+            daruda_config::SessionHostKind::Docker { container } => {
+                ("docker", String::new(), container.clone())
+            }
+        };
+        Self::session_host_row_new(
+            entry.id,
+            &entry.label,
+            kind,
+            &target,
+            &container,
+            window,
+            cx,
+        )
+    }
+
+    /// Shared row constructor for both a loaded entry and a blank "Add Host"
+    /// row — keeping one constructor means the two can never wire their
+    /// inputs' subscriptions differently.
+    fn session_host_row_new(
+        id: daruda_store::project::SessionHostId,
+        label: &str,
+        kind: &str,
+        target: &str,
+        container: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> SessionHostRow {
+        SessionHostRow {
+            id,
+            label_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder(s::settings_session_host_field_label())
+                    .default_value(label.to_string())
+            }),
+            kind_select: cx.new(|cx| {
+                let opts = vec![
+                    SelectOption::new("ssh", s::settings_session_host_kind_ssh()),
+                    SelectOption::new("docker", s::settings_session_host_kind_docker()),
+                ];
+                select::state_with_options(opts, Some(&SharedString::from(kind)), window, cx)
+            }),
+            target_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("user@host")
+                    .default_value(target.to_string())
+            }),
+            container_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("container-name")
+                    .default_value(container.to_string())
+            }),
+        }
+    }
+
+    /// Wire one session-host row's inputs to the standard submit /
+    /// clear-error subscription plus the kind-pick repaint, mirroring
+    /// [`Self::subscribe_agent_row`].
+    fn subscribe_session_host_row(
+        row: &SessionHostRow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        subs: &mut Vec<Subscription>,
+    ) {
+        subs.push(Self::subscribe_input_state(&row.label_input, window, cx));
+        subs.push(Self::subscribe_input_state(&row.target_input, window, cx));
+        subs.push(Self::subscribe_input_state(
+            &row.container_input,
+            window,
+            cx,
+        ));
+        // Re-render on kind pick so the row immediately shows/hides the
+        // matching target/container field — same reason as the agent
+        // catalog's transport select (see `subscribe_agent_row`).
+        subs.push(cx.subscribe_in(
+            &row.kind_select,
+            window,
+            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    cx.notify();
+                }
+            },
+        ));
+    }
+
+    /// Session-host rows paired with their catalog index — mirrors
+    /// [`Self::agent_editable_rows`], minus the non-editable half agents
+    /// have (every session-host row is always editable).
+    pub(super) fn session_host_rows(&self) -> impl Iterator<Item = (usize, &SessionHostRow)> + '_ {
+        self.session_host_rows.iter().enumerate()
+    }
+
+    /// Test-only: the `ordinal`-th row — production code walks
+    /// [`Self::session_host_rows`], which also yields the index every
+    /// mutation needs.
+    #[cfg(test)]
+    pub(super) fn session_host_row(&self, ordinal: usize) -> Option<&SessionHostRow> {
+        self.session_host_rows.get(ordinal)
+    }
+
+    /// Append a blank row the user fills in by hand. A fresh
+    /// [`daruda_store::project::SessionHostId`] is minted right away (not
+    /// deferred to Save) — see [`SessionHostRow::id`]'s doc for why.
+    pub(super) fn add_session_host_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let row = Self::session_host_row_new(
+            daruda_store::project::SessionHostId::new(),
+            "",
+            "ssh",
+            "",
+            "",
+            window,
+            cx,
+        );
+        Self::subscribe_session_host_row(&row, window, cx, &mut self._input_subscriptions);
+        self.session_host_rows.push(row);
+        self.error = None;
+        cx.notify();
+    }
+
+    /// Drop the row at `index`. Nothing is written to `config.toml` (and so
+    /// no tombstone is recorded) until Save — [`Self::validate`] diffs the
+    /// saved rows against `self.base_config.session_hosts` to build the
+    /// tombstone the missing row implies. Mirrors
+    /// [`Self::remove_agent_catalog_item`].
+    pub(super) fn remove_session_host_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.session_host_rows.len() {
+            self.session_host_rows.remove(index);
             self.error = None;
             cx.notify();
         }
@@ -784,6 +960,12 @@ impl SettingsWindow {
             })
             .collect();
 
+        let session_host_rows: Vec<SessionHostRow> = config
+            .session_hosts
+            .iter()
+            .map(|entry| Self::session_host_row_from_entry(entry, window, cx))
+            .collect();
+
         let max_fps_str: SharedString = config.render.max_fps.to_string().into();
         let max_fps_select = cx.new(|cx| {
             let opts = daruda_config::ALLOWED_MAX_FPS
@@ -886,6 +1068,21 @@ impl SettingsWindow {
                 .push(row.id_input.read(cx).focus_handle(cx));
         }
 
+        for row in &session_host_rows {
+            Self::subscribe_session_host_row(row, window, cx, &mut input_subscriptions);
+        }
+        // First-field jump target for the Session Hosts section — mirrors
+        // the Agent section above. An empty catalog is a valid state (see
+        // `daruda_config::Config::session_hosts`), so there may be nothing
+        // to jump to; `focus_section` already falls back to the panel focus
+        // handle when the map has no entry.
+        if let Some(row) = session_host_rows.first() {
+            section_focus_targets
+                .entry(BuiltinSection::SessionHosts)
+                .or_default()
+                .push(row.label_input.read(cx).focus_handle(cx));
+        }
+
         let _updater_subscription =
             crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
 
@@ -924,6 +1121,7 @@ impl SettingsWindow {
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_catalog,
+            session_host_rows,
             accounts,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
@@ -1212,6 +1410,63 @@ impl SettingsWindow {
         }
         config.agents = agents;
 
+        // Session host registry: `label` must be unique across the whole
+        // catalog (trim + case-insensitive) — two rows saved with the same
+        // display label would leave a lane's "which host is this?" picker
+        // unable to tell them apart. `target`/`container` go through the
+        // exact same bare-word check `SessionHostModal` uses, so a value
+        // that would break `wrap`'s shell quoting is rejected here too.
+        let mut session_hosts = Vec::with_capacity(self.session_host_rows.len());
+        let mut seen_session_host_labels: HashSet<String> = HashSet::new();
+        for (index, row) in self.session_host_rows.iter().enumerate() {
+            let label = row.label_input.read(cx).value().trim().to_string();
+            if label.is_empty() {
+                return Err(SharedString::from(
+                    s::settings_err_session_host_label_empty(index + 1),
+                ));
+            }
+            if !seen_session_host_labels.insert(label.to_ascii_lowercase()) {
+                return Err(SharedString::from(
+                    s::settings_err_session_host_label_duplicate(&label),
+                ));
+            }
+            let kind_str = row
+                .kind_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "ssh".to_string());
+            let kind = if kind_str == "docker" {
+                let container = row.container_input.read(cx).value().to_string();
+                let container = session_host::checked_bare_word(
+                    &container,
+                    session_host::SessionHostField::Container,
+                )
+                .map_err(|e| session_host_validation_message(index, e))?;
+                daruda_config::SessionHostKind::Docker { container }
+            } else {
+                let target = row.target_input.read(cx).value().to_string();
+                let target = session_host::checked_bare_word(
+                    &target,
+                    session_host::SessionHostField::Target,
+                )
+                .map_err(|e| session_host_validation_message(index, e))?;
+                daruda_config::SessionHostKind::Ssh { target }
+            };
+            session_hosts.push(daruda_config::SessionHostEntry {
+                id: row.id,
+                label,
+                kind,
+            });
+        }
+        config.session_host_tombstones = reconcile_session_host_tombstones(
+            &self.base_config.session_hosts,
+            &self.base_config.session_host_tombstones,
+            &session_hosts,
+            now_unix(),
+        );
+        config.session_hosts = session_hosts;
+
         config.render.max_fps = self
             .max_fps_select
             .read(cx)
@@ -1469,6 +1724,130 @@ fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
     }
 }
 
+/// Seconds since the Unix epoch, clamped to `0` on a clock error — mirrors
+/// `sections::accounts::now_unix`. Duplicated locally rather than shared:
+/// both are trivial, single-use timestamp helpers that would gain nothing
+/// from a shared home.
+fn now_unix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// `session_host::SessionHostError` names the field by
+/// [`session_host::SessionHostField`], but the registry editor's rows have
+/// no natural field label beyond their position — reuses the same
+/// `session_host.err_*` strings [`SessionHostModal`] shows, wrapped with the
+/// row's 1-based ordinal so a multi-row save can still point at which one
+/// failed.
+///
+/// [`SessionHostModal`]: crate::workspace::left_dock::projects::session_host_modal::SessionHostModal
+fn session_host_validation_message(
+    index: usize,
+    err: session_host::SessionHostError,
+) -> SharedString {
+    use session_host::{SessionHostError, SessionHostField};
+    let reason = match err {
+        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
+        SessionHostError::Empty(SessionHostField::Container) => {
+            s::session_host_err_container_empty()
+        }
+        // Never produced by this editor (it never validates a session path),
+        // but matched explicitly rather than panicking so a future caller
+        // that does can't trigger an `unreachable!()`.
+        SessionHostError::Empty(SessionHostField::SessionPath) => {
+            s::session_host_err_session_path_empty()
+        }
+        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
+        SessionHostError::Unsafe(SessionHostField::Container) => {
+            s::session_host_err_container_unsafe()
+        }
+        SessionHostError::Unsafe(SessionHostField::SessionPath) => {
+            s::session_host_err_session_path_unsafe()
+        }
+    };
+    SharedString::from(s::settings_err_session_host_field(index + 1, &reason))
+}
+
+/// The string value carried inside a [`daruda_config::SessionHostKind`] —
+/// `target` for `Ssh`, `container` for `Docker`. Used to populate a
+/// [`daruda_config::SessionHostTombstone::value`] display field, which
+/// duplicates what `kind` already carries structurally (see that field's
+/// doc in `daruda_config::session_host`).
+fn session_host_kind_value(kind: &daruda_config::SessionHostKind) -> &str {
+    match kind {
+        daruda_config::SessionHostKind::Ssh { target } => target,
+        daruda_config::SessionHostKind::Docker { container } => container,
+    }
+}
+
+/// Cap on the session host tombstone list — see
+/// [`reconcile_session_host_tombstones`].
+const MAX_SESSION_HOST_TOMBSTONES: usize = 20;
+
+/// Diff `previous_entries`/`current_entries` (matched by
+/// [`daruda_store::project::SessionHostId`]) against `previous_tombstones` to
+/// produce the tombstone list a Save persists:
+///
+/// 1. Every entry present in `previous_entries` but missing from
+///    `current_entries` was removed this Save — append a fresh tombstone for
+///    it (`redirected_to: None`, `removed_at`).
+/// 2. Trim to the most recently removed [`MAX_SESSION_HOST_TOMBSTONES`]
+///    (oldest evicted first).
+/// 3. Every entry in `current_entries` that is genuinely new (its id was not
+///    in `previous_entries`) is matched by exact `(kind, value)` —
+///    `SessionHostKind` equality already covers both, since a kind's inner
+///    field *is* its value — against the surviving unresolved tombstones
+///    (`redirected_to: None`). The most recently removed match gets
+///    `redirected_to` set to the new entry's id; an older tie is left
+///    unresolved, the plan's stated tie-break.
+///
+/// Pure and GPUI-free so it is directly unit-testable — [`SettingsWindow::validate`]
+/// is the only caller.
+fn reconcile_session_host_tombstones(
+    previous_entries: &[daruda_config::SessionHostEntry],
+    previous_tombstones: &[daruda_config::SessionHostTombstone],
+    current_entries: &[daruda_config::SessionHostEntry],
+    removed_at: u64,
+) -> Vec<daruda_config::SessionHostTombstone> {
+    let mut tombstones = previous_tombstones.to_vec();
+
+    for old in previous_entries {
+        if current_entries.iter().any(|e| e.id == old.id) {
+            continue;
+        }
+        tombstones.push(daruda_config::SessionHostTombstone {
+            old_id: old.id,
+            kind: old.kind.clone(),
+            value: session_host_kind_value(&old.kind).to_string(),
+            removed_at,
+            redirected_to: None,
+        });
+    }
+    if tombstones.len() > MAX_SESSION_HOST_TOMBSTONES {
+        tombstones.sort_by_key(|t| t.removed_at);
+        let excess = tombstones.len() - MAX_SESSION_HOST_TOMBSTONES;
+        tombstones.drain(0..excess);
+    }
+
+    for new in current_entries {
+        if previous_entries.iter().any(|e| e.id == new.id) {
+            continue;
+        }
+        let redirect = tombstones
+            .iter_mut()
+            .filter(|t| t.redirected_to.is_none() && t.kind == new.kind)
+            .max_by_key(|t| t.removed_at);
+        if let Some(t) = redirect {
+            t.redirected_to = Some(new.id);
+        }
+    }
+
+    tombstones
+}
+
 /// The token [`agent_command_path_warning`] should look up on `PATH`, or
 /// `None` when `command` means no local-PATH check applies.
 ///
@@ -1611,6 +1990,186 @@ mod agent_command_path_warning_tests {
         assert_eq!(
             agent_command_path_warning("npx -y definitely-nonexistent-package@latest"),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod session_host_reconcile_tests {
+    use super::reconcile_session_host_tombstones;
+    use daruda_config::{SessionHostEntry, SessionHostKind, SessionHostTombstone};
+    use daruda_store::project::SessionHostId;
+
+    fn ssh_entry(id: SessionHostId, label: &str, target: &str) -> SessionHostEntry {
+        SessionHostEntry {
+            id,
+            label: label.to_string(),
+            kind: SessionHostKind::Ssh {
+                target: target.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn an_unchanged_catalog_produces_no_new_tombstones() {
+        let id = SessionHostId::new();
+        let entries = vec![ssh_entry(id, "Box", "vm-work")];
+        let tombstones = reconcile_session_host_tombstones(&entries, &[], &entries, 100);
+        assert!(tombstones.is_empty());
+    }
+
+    #[test]
+    fn a_removed_entry_gets_a_fresh_tombstone() {
+        let id = SessionHostId::new();
+        let previous = vec![ssh_entry(id, "Box", "vm-work")];
+        let tombstones = reconcile_session_host_tombstones(&previous, &[], &[], 100);
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].old_id, id);
+        assert_eq!(
+            tombstones[0].kind,
+            SessionHostKind::Ssh {
+                target: "vm-work".into()
+            }
+        );
+        assert_eq!(tombstones[0].value, "vm-work");
+        assert_eq!(tombstones[0].removed_at, 100);
+        assert_eq!(tombstones[0].redirected_to, None);
+    }
+
+    /// A row surviving with the same id but an edited target/label is an
+    /// in-place edit, not a removal — the catalog's own id-based resolution
+    /// already picks up the new value (see `lane::session_host::resolve_catalog_id`),
+    /// so no tombstone should be recorded for it.
+    #[test]
+    fn an_edited_entry_that_keeps_its_id_is_not_tombstoned() {
+        let id = SessionHostId::new();
+        let previous = vec![ssh_entry(id, "Box", "old-target")];
+        let current = vec![ssh_entry(id, "Renamed", "new-target")];
+        let tombstones = reconcile_session_host_tombstones(&previous, &[], &current, 100);
+        assert!(tombstones.is_empty());
+    }
+
+    #[test]
+    fn a_new_entry_matching_kind_and_value_redirects_the_matching_tombstone() {
+        let old_id = SessionHostId::new();
+        let new_id = SessionHostId::new();
+        let previous = vec![ssh_entry(old_id, "Box", "vm-work")];
+        let current = vec![ssh_entry(new_id, "Box (recreated)", "vm-work")];
+        let tombstones = reconcile_session_host_tombstones(&previous, &[], &current, 100);
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].old_id, old_id);
+        assert_eq!(tombstones[0].redirected_to, Some(new_id));
+    }
+
+    /// A Docker entry must never redirect an SSH tombstone (or vice versa)
+    /// even if the string value happens to collide.
+    #[test]
+    fn a_kind_mismatch_never_redirects() {
+        let old_id = SessionHostId::new();
+        let new_id = SessionHostId::new();
+        let previous = vec![ssh_entry(old_id, "Box", "shared-name")];
+        let current = vec![SessionHostEntry {
+            id: new_id,
+            label: "Container".into(),
+            kind: SessionHostKind::Docker {
+                container: "shared-name".into(),
+            },
+        }];
+        let tombstones = reconcile_session_host_tombstones(&previous, &[], &current, 100);
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].redirected_to, None);
+    }
+
+    /// Two live tombstones share `(kind, value)` — only the most recently
+    /// removed one gets redirected; the older one stays unresolved rather
+    /// than being touched, per the plan's stated tie-break.
+    #[test]
+    fn ties_redirect_only_the_most_recently_removed_tombstone() {
+        let older_id = SessionHostId::new();
+        let newer_id = SessionHostId::new();
+        let recreated_id = SessionHostId::new();
+        let previous_tombstones = vec![
+            SessionHostTombstone {
+                old_id: older_id,
+                kind: SessionHostKind::Ssh {
+                    target: "vm-work".into(),
+                },
+                value: "vm-work".into(),
+                removed_at: 50,
+                redirected_to: None,
+            },
+            SessionHostTombstone {
+                old_id: newer_id,
+                kind: SessionHostKind::Ssh {
+                    target: "vm-work".into(),
+                },
+                value: "vm-work".into(),
+                removed_at: 75,
+                redirected_to: None,
+            },
+        ];
+        let current = vec![ssh_entry(recreated_id, "Box", "vm-work")];
+        let tombstones =
+            reconcile_session_host_tombstones(&[], &previous_tombstones, &current, 100);
+        let older = tombstones.iter().find(|t| t.old_id == older_id).unwrap();
+        let newer = tombstones.iter().find(|t| t.old_id == newer_id).unwrap();
+        assert_eq!(older.redirected_to, None);
+        assert_eq!(newer.redirected_to, Some(recreated_id));
+    }
+
+    /// A tombstone that already resolved to a surviving entry is never
+    /// re-targeted by a second recreation of the same value.
+    #[test]
+    fn an_already_resolved_tombstone_is_never_redirected_again() {
+        let old_id = SessionHostId::new();
+        let first_redirect = SessionHostId::new();
+        let second_id = SessionHostId::new();
+        let previous_tombstones = vec![SessionHostTombstone {
+            old_id,
+            kind: SessionHostKind::Ssh {
+                target: "vm-work".into(),
+            },
+            value: "vm-work".into(),
+            removed_at: 50,
+            redirected_to: Some(first_redirect),
+        }];
+        let current = vec![ssh_entry(second_id, "Box again", "vm-work")];
+        let tombstones =
+            reconcile_session_host_tombstones(&[], &previous_tombstones, &current, 100);
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].redirected_to, Some(first_redirect));
+    }
+
+    #[test]
+    fn the_tombstone_list_is_trimmed_to_the_most_recent_twenty_oldest_evicted_first() {
+        let previous_tombstones: Vec<SessionHostTombstone> = (0..20)
+            .map(|i| SessionHostTombstone {
+                old_id: SessionHostId::new(),
+                kind: SessionHostKind::Ssh {
+                    target: format!("box-{i}"),
+                },
+                value: format!("box-{i}"),
+                removed_at: i,
+                redirected_to: None,
+            })
+            .collect();
+        let oldest_id = previous_tombstones[0].old_id;
+        let newest_removed_id = SessionHostId::new();
+        let previous_entries = vec![ssh_entry(newest_removed_id, "Freshly removed", "box-fresh")];
+        // Removing this one 21st-oldest entry pushes the total to 21, which
+        // must evict exactly the single oldest tombstone (removed_at: 0).
+        let tombstones =
+            reconcile_session_host_tombstones(&previous_entries, &previous_tombstones, &[], 1_000);
+        assert_eq!(tombstones.len(), 20);
+        assert!(
+            !tombstones.iter().any(|t| t.old_id == oldest_id),
+            "the oldest tombstone must be evicted"
+        );
+        assert!(
+            tombstones
+                .iter()
+                .any(|t| t.old_id == newest_removed_id && t.removed_at == 1_000),
+            "the just-created tombstone must survive the trim"
         );
     }
 }

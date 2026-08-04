@@ -12,6 +12,7 @@
 
 pub mod lane;
 pub mod persistence;
+pub mod session_host_id;
 pub mod types;
 
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub use persistence::{
     load_workspace_state_in, projects_dir_in, recent_path_in, save_project_state_in,
     save_recent_in, save_workspace_state_in, touch_recent_in, workspaces_dir_in,
 };
+pub use session_host_id::SessionHostId;
 pub use types::{
     PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid, RecentEntry,
     WORKSPACE_SCHEMA_VERSION, WorkspaceState, WorkspaceUuid,

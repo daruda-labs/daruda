@@ -346,17 +346,23 @@ impl Lane {
         self.session_host = session_host;
     }
 
-    /// Where this lane's session attaches, given the agent it launches under.
-    /// `launch` only matters while the lane has never answered — see
+    /// Where this lane's session attaches, given the agent it launches under
+    /// and the live registry catalog/tombstones. `launch` only matters while
+    /// the lane has never answered; `catalog`/`tombstones` only matter while
+    /// the resolved host carries a `registry_id` — see
     /// [`session_host::effective_session_host`].
     pub fn effective_session_host(
         &self,
         launch: &daruda_config::AgentLaunch,
+        catalog: &[daruda_config::SessionHostEntry],
+        tombstones: &[daruda_config::SessionHostTombstone],
     ) -> daruda_store::project::LaneSessionHost {
         session_host::effective_session_host(
             self.session_host.as_ref(),
             self.remote_cwd.as_deref(),
             launch,
+            catalog,
+            tombstones,
         )
     }
 
@@ -618,10 +624,12 @@ mod tests {
             Some(LaneSessionHost::Ssh {
                 target: "buildbox".into(),
                 session_path: "/home/user/project".into(),
+                registry_id: None,
             }),
             Some(LaneSessionHost::Docker {
                 container: "dev-1".into(),
                 session_path: "/workspace".into(),
+                registry_id: None,
             }),
         ];
         for case in cases {

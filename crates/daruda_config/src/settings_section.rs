@@ -54,6 +54,11 @@ pub enum BuiltinSection {
     Dock,
     Clipboard,
     Agent,
+    /// Named, reusable SSH/Docker host registry a lane's `session_host` can
+    /// reference by id (`daruda_config::SessionHostEntry`) — companion to
+    /// [`Self::Agent`], which still hosts the per-agent legacy transport
+    /// fields the registry is meant to replace.
+    SessionHosts,
     Accounts,
     Notifications,
     Keymap,
@@ -73,6 +78,7 @@ impl BuiltinSection {
         Self::Dock,
         Self::Clipboard,
         Self::Agent,
+        Self::SessionHosts,
         Self::Accounts,
         Self::Notifications,
         Self::Keymap,
@@ -95,6 +101,7 @@ impl BuiltinSection {
             Self::Dock => "dock",
             Self::Clipboard => "clipboard",
             Self::Agent => "agent",
+            Self::SessionHosts => "session_hosts",
             Self::Accounts => "accounts",
             Self::Notifications => "notifications",
             Self::Keymap => "keymap",
@@ -227,6 +234,6 @@ mod tests {
         // added or removed. There is no `strum::EnumCount`-style helper
         // in this crate; the count exists precisely to force a manual
         // sync of `ALL` with the enum.
-        assert_eq!(BuiltinSection::ALL.len(), 14);
+        assert_eq!(BuiltinSection::ALL.len(), 15);
     }
 }

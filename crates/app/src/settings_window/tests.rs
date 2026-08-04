@@ -940,6 +940,244 @@ async fn copy_telegram_pair_command_copied_label_reverts_after_one_second(cx: &m
     });
 }
 
+// ---- Session Hosts section ----
+
+/// Test-only — click "Add Host".
+fn add_session_host(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.add_session_host_row(window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — pick `kind` in one session-host row's kind dropdown.
+fn select_session_host_kind(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    kind: &str,
+) {
+    let state = win.read_with(cx, |w, _| {
+        w.session_host_row(index).unwrap().kind_select.clone()
+    });
+    let value = SharedString::from(kind.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — write `value` into one session-host row's input.
+fn set_session_host_row_input(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |i, cx_state| {
+            i.set_value(value.to_owned(), window, cx_state)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+#[gpui::test]
+fn validate_accepts_an_empty_session_host_catalog(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("an empty registry is a valid state");
+        assert!(cfg.session_hosts.is_empty());
+    });
+}
+
+#[gpui::test]
+fn validate_collects_an_added_ssh_session_host(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build box");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a filled-in ssh row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_eq!(cfg.session_hosts[0].label, "Build box");
+        assert_eq!(
+            cfg.session_hosts[0].kind,
+            daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string()
+            }
+        );
+    });
+}
+
+#[gpui::test]
+fn validate_collects_an_added_docker_session_host(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Dev container");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("a filled-in docker row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_eq!(
+            cfg.session_hosts[0].kind,
+            daruda_config::SessionHostKind::Docker {
+                container: "dev-1".to_string()
+            }
+        );
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_an_empty_session_host_label(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains('1'));
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_a_duplicate_label_case_insensitively(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build Box");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.label_input.clone(), "  build box  ");
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.target_input.clone(), "vm-other");
+
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("build box") || err.contains("Build Box"));
+    });
+}
+
+/// `target`/`container` are validated through the exact same
+/// `lane::session_host::checked_bare_word` [`SessionHostModal`] uses — a
+/// value that would break `wrap`'s shell quoting must be rejected here too.
+#[gpui::test]
+fn validate_rejects_a_target_that_breaks_shell_quoting(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.target_input.clone(),
+        "box; rm -rf /",
+    );
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).is_err());
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_an_empty_target(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).is_err());
+    });
+}
+
+/// Deleting a row that was loaded from config and saving must record a
+/// tombstone for it.
+#[gpui::test]
+fn deleting_a_loaded_row_and_saving_records_a_tombstone(cx: &mut TestAppContext) {
+    let id = daruda_store::project::SessionHostId::new();
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("removing the only row is a valid save");
+        assert!(cfg.session_hosts.is_empty());
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, id);
+        assert_eq!(cfg.session_host_tombstones[0].value, "vm-work");
+        assert_eq!(cfg.session_host_tombstones[0].redirected_to, None);
+    });
+}
+
+/// Re-adding a host with the same `(kind, value)` as a just-deleted one sets
+/// `redirected_to` on the most recent matching tombstone, so a lane still
+/// referencing the deleted id resolves through the redirect chain.
+#[gpui::test]
+fn readding_the_same_target_redirects_the_deleted_tombstone(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id: old_id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config);
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.label_input.clone(),
+        "Build box again",
+    );
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the recreated row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        let new_id = cfg.session_hosts[0].id;
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, old_id);
+        assert_eq!(cfg.session_host_tombstones[0].redirected_to, Some(new_id));
+    });
+}
+
+#[gpui::test]
+fn removing_a_session_host_row_updates_the_row_list_immediately(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    add_session_host(&wh, &win, cx);
+    win.read_with(cx, |w, _| assert_eq!(w.session_host_rows().count(), 2));
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    win.read_with(cx, |w, _| assert_eq!(w.session_host_rows().count(), 1));
+}
+
 #[gpui::test]
 fn focus_section_resets_scroll(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
