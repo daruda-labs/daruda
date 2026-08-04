@@ -30,6 +30,12 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     pub base_ref: Option<String>,
     /// Free-form description; surfaced as the lane row sublabel.
     pub description: Option<String>,
+    /// The host picked in the create form's registry dropdown. `None` keeps
+    /// the freshly-created `Lane` at its `Lane::git` default (`session_host:
+    /// None`, i.e. unanswered/Local) — only an explicit non-Local pick
+    /// carries a value here, so the modal's Local default never writes a
+    /// redundant `Some(LaneSessionHost::Local)`.
+    pub session_host: Option<daruda_store::project::LaneSessionHost>,
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.
@@ -302,6 +308,7 @@ impl Workspace {
             repo_root,
             base_ref,
             description,
+            session_host,
         } = plan;
         // The initial pane mirrors the requested surface: a terminal
         // (default) or an in-app Agent chat rooted at the new checkout.
@@ -376,6 +383,9 @@ impl Workspace {
         );
         wt.base_ref = base_ref;
         wt.description = description;
+        if let Some(host) = session_host {
+            wt.set_session_host(Some(host));
+        }
         if let Some(project) = self.project_for_mut(project_id) {
             project.lanes.push(wt);
         }

@@ -14,21 +14,102 @@ use std::path::PathBuf;
 
 use crate::ui::theme;
 use gpui::{
-    App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, Render, SharedString,
-    Subscription, WeakEntity, Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, FocusHandle, Focusable, Hsla, IntoElement, Render,
+    SharedString, Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
+use crate::lane::session_host::{self, SessionHostError, SessionHostField};
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
+use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
+use daruda_config::{SessionHostEntry, SessionHostKind};
 use daruda_core::git::sanitize_branch_name;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::project::ProjectId;
+use daruda_store::project::{LaneSessionHost, ProjectId, SessionHostId};
+
+/// Registry-select sentinel for "no host" — a fresh lane has no "keep
+/// current" case (unlike `SessionHostModal`'s `KEEP_CURRENT_SELECT_VALUE`),
+/// so the dropdown is just Local + the catalog.
+const LOCAL_SELECT_VALUE: &str = "local";
+
+/// The registry dropdown's option list for the create form: Local first
+/// (the default), then every catalog entry keyed by its id — no "keep
+/// current" entry, since there is no existing lane to preserve.
+fn host_select_options(catalog: &[SessionHostEntry]) -> Vec<SelectOption> {
+    let mut opts = Vec::with_capacity(catalog.len() + 1);
+    opts.push(SelectOption::new(
+        LOCAL_SELECT_VALUE,
+        s::session_host_option_local(),
+    ));
+    opts.extend(
+        catalog
+            .iter()
+            .map(|entry| SelectOption::new(entry.id.as_inner().to_string(), entry.label.clone())),
+    );
+    opts
+}
+
+/// Overwrite `host`'s `registry_id` with `id` — used right after a
+/// `sanitized_ssh`/`sanitized_docker` build, which always sets `None`.
+/// Mirrors `session_host_modal::with_registry_id`.
+fn with_registry_id(host: LaneSessionHost, id: SessionHostId) -> LaneSessionHost {
+    match host {
+        LaneSessionHost::Ssh {
+            target,
+            session_path,
+            ..
+        } => LaneSessionHost::Ssh {
+            target,
+            session_path,
+            registry_id: Some(id),
+        },
+        LaneSessionHost::Docker {
+            container,
+            session_path,
+            ..
+        } => LaneSessionHost::Docker {
+            container,
+            session_path,
+            registry_id: Some(id),
+        },
+        LaneSessionHost::Local => host,
+    }
+}
+
+fn session_host_error_to_msg(e: SessionHostError) -> String {
+    match e {
+        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
+        SessionHostError::Empty(SessionHostField::Container) => {
+            s::session_host_err_container_empty()
+        }
+        SessionHostError::Empty(SessionHostField::SessionPath) => {
+            s::session_host_err_session_path_empty()
+        }
+        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
+        SessionHostError::Unsafe(SessionHostField::Container) => {
+            s::session_host_err_container_unsafe()
+        }
+        SessionHostError::Unsafe(SessionHostField::SessionPath) => {
+            s::session_host_err_session_path_unsafe()
+        }
+    }
+}
+
+/// Small label rendered above a form field — mirrors
+/// `session_host_modal::field_label`, kept local since this modal doesn't
+/// otherwise import that module.
+fn field_label(text: impl Into<SharedString>, muted_text: Hsla) -> impl IntoElement {
+    div()
+        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+        .text_color(muted_text)
+        .child(text.into())
+}
 
 pub struct CreateWorktreeModal {
     /// Panel focus handle — `.track_focus` target for the modal root
@@ -46,9 +127,18 @@ pub struct CreateWorktreeModal {
     /// Free-form description (optional). Surfaced in the left dock
     /// row so an idle lane from last week is still self-describing.
     description_input: Entity<InputState>,
-    /// Subscriptions to all three inputs — kept alive so PressEnter
+    /// Registry host dropdown — Local (default) plus every entry in
+    /// `catalog`. See `host_select_options`.
+    host_select: Entity<SelectState>,
+    /// Working directory on the picked host. Only consulted (and shown)
+    /// when `host_select`'s current value names a catalog entry.
+    session_path_input: Entity<InputState>,
+    /// Subscriptions to all four text inputs — kept alive so PressEnter
     /// + Change events keep flowing into us.
-    _input_subscriptions: [Subscription; 3],
+    _input_subscriptions: [Subscription; 4],
+    /// Clears the validation banner and re-renders (to show/hide the
+    /// session-path field) whenever the dropdown selection changes.
+    _host_select_sub: Subscription,
     error: Option<SharedString>,
     submitting: bool,
     /// Workspace that finalizes the create on success. Weak so a
@@ -62,6 +152,9 @@ pub struct CreateWorktreeModal {
     /// lifetime so submit always targets the intended project regardless
     /// of which project is focused when the user clicks Create.
     project_id: ProjectId,
+    /// The workspace's `session_hosts` registry catalog, snapshotted at
+    /// modal-open time — same one-time-snapshot shape as `SessionHostModal`.
+    catalog: Vec<SessionHostEntry>,
 }
 
 impl CreateWorktreeModal {
@@ -69,6 +162,7 @@ impl CreateWorktreeModal {
         workspace: WeakEntity<Workspace>,
         repo_root: PathBuf,
         project_id: ProjectId,
+        catalog: Vec<SessionHostEntry>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -80,6 +174,18 @@ impl CreateWorktreeModal {
         });
         let description_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder("description (optional)")
+        });
+        let host_select = cx.new(|cx_state| {
+            select::state_with_options(
+                host_select_options(&catalog),
+                Some(&SharedString::from(LOCAL_SELECT_VALUE)),
+                window,
+                cx_state,
+            )
+        });
+        let session_path_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder(s::session_host_placeholder_session_path())
         });
 
         // Tab order is fully driven by the `tab_index` argument to
@@ -110,19 +216,80 @@ impl CreateWorktreeModal {
             make_sub(&branch_input, cx),
             make_sub(&base_input, cx),
             make_sub(&description_input, cx),
+            make_sub(&session_path_input, cx),
         ];
+        // Selecting a registry entry (or Local) both clears a stale
+        // validation banner and re-renders — the session-path field's
+        // visibility follows the current selection.
+        let _host_select_sub = cx.subscribe_in(
+            &host_select,
+            window,
+            |this, _, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    this.error = None;
+                    cx.notify();
+                }
+            },
+        );
 
         Self {
             panel_focus_handle: cx.focus_handle(),
             branch_input,
             base_input,
             description_input,
+            host_select,
+            session_path_input,
             _input_subscriptions,
+            _host_select_sub,
             error: None,
             submitting: false,
             workspace,
             repo_root,
             project_id,
+            catalog,
+        }
+    }
+
+    /// The catalog entry `host_select` currently points at — `None` for
+    /// Local, so the session-path field only appears while a registry
+    /// entry is selected.
+    fn selected_entry(&self, cx: &App) -> Option<&SessionHostEntry> {
+        let value = self.host_select.read(cx).selected_value()?.to_string();
+        self.catalog
+            .iter()
+            .find(|entry| entry.id.as_inner().to_string() == value)
+    }
+
+    /// Resolve `host_select` + `session_path_input` into the plan's
+    /// `session_host`. `None` for Local (the default) — validation and
+    /// quoting-safety are delegated to `session_host::sanitized_ssh`/
+    /// `sanitized_docker`, never reimplemented here.
+    fn build_session_host(&self, cx: &App) -> Result<Option<LaneSessionHost>, String> {
+        let value = self
+            .host_select
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string());
+        match value.as_deref() {
+            None | Some(LOCAL_SELECT_VALUE) => Ok(None),
+            Some(_) => {
+                let Some(entry) = self.selected_entry(cx) else {
+                    // Unreachable in practice: every non-Local option value
+                    // is minted from `self.catalog` itself in
+                    // `host_select_options`. Fall back to Local rather than
+                    // error out.
+                    return Ok(None);
+                };
+                let path = self.session_path_input.read(cx).value().to_string();
+                let host = match &entry.kind {
+                    SessionHostKind::Ssh { target } => session_host::sanitized_ssh(target, &path),
+                    SessionHostKind::Docker { container } => {
+                        session_host::sanitized_docker(container, &path)
+                    }
+                }
+                .map_err(session_host_error_to_msg)?;
+                Ok(Some(with_registry_id(host, entry.id)))
+            }
         }
     }
 
@@ -155,6 +322,7 @@ impl CreateWorktreeModal {
 
         let base_ref = blank_to_none(&self.base_input.read(cx).value());
         let description = blank_to_none(&self.description_input.read(cx).value());
+        let session_host = self.build_session_host(cx)?;
 
         Ok(CreateWorktreePlan {
             branch,
@@ -162,6 +330,7 @@ impl CreateWorktreeModal {
             repo_root: self.repo_root.clone(),
             base_ref,
             description,
+            session_host,
         })
     }
 
@@ -288,7 +457,7 @@ impl ModalView for CreateWorktreeModal {}
 impl Render for CreateWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted_text = theme::current(cx).text_muted;
-        let body = div()
+        let mut body = div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
@@ -312,7 +481,27 @@ impl Render for CreateWorktreeModal {
                     .text_color(muted_text)
                     .child("Description (optional) — shown in the left dock."),
             )
-            .child(input(&self.description_input, cx, 2));
+            .child(input(&self.description_input, cx, 2))
+            .child(field_label(s::session_host_field_host(), muted_text))
+            .child(select::select(&self.host_select, cx, 3_isize));
+
+        if self.catalog.is_empty() {
+            body = body.child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(muted_text)
+                    .child(s::create_lane_session_host_registry_empty_hint()),
+            );
+        }
+
+        if self.selected_entry(cx).is_some() {
+            body = body
+                .child(field_label(
+                    s::session_host_field_session_path(),
+                    muted_text,
+                ))
+                .child(input(&self.session_path_input, cx, 4));
+        }
 
         let create_disabled = self.submitting || self.branch_input.read(cx).value().is_empty();
         let submit_label = if self.submitting {
@@ -367,6 +556,7 @@ mod tests {
     fn build_modal(
         cx: &mut TestAppContext,
         repo_root: &str,
+        catalog: Vec<SessionHostEntry>,
     ) -> (
         WindowHandle<CreateWorktreeModal>,
         Entity<CreateWorktreeModal>,
@@ -377,12 +567,48 @@ mod tests {
                 WeakEntity::new_invalid(),
                 PathBuf::from(repo_root),
                 0, // test fixture — project_id not exercised
+                catalog,
                 window,
                 cx,
             )
         });
         let modal = wh.root(cx).unwrap();
         (wh, modal)
+    }
+
+    fn ssh_entry(label: &str, target: &str) -> SessionHostEntry {
+        SessionHostEntry {
+            id: SessionHostId::new(),
+            label: label.to_string(),
+            kind: SessionHostKind::Ssh {
+                target: target.to_string(),
+            },
+        }
+    }
+
+    fn select_host(
+        wh: &WindowHandle<CreateWorktreeModal>,
+        modal: &Entity<CreateWorktreeModal>,
+        cx: &mut TestAppContext,
+        value: &str,
+    ) {
+        let select = modal.read_with(cx, |m, _| m.host_select.clone());
+        let value = SharedString::from(value.to_string());
+        // SILENT-OK: window may drop after modal closes / dialog dismiss on focus restore
+        let _ = wh.update(cx, |_root, window, cx| {
+            select.update(cx, |s, cx_state| {
+                s.set_selected_value(&value, window, cx_state);
+            });
+        });
+    }
+
+    fn set_session_path(
+        wh: &WindowHandle<CreateWorktreeModal>,
+        modal: &Entity<CreateWorktreeModal>,
+        cx: &mut TestAppContext,
+        s: &str,
+    ) {
+        set_field(wh, modal, cx, |m| m.session_path_input.clone(), s);
     }
 
     fn set_field(
@@ -430,7 +656,7 @@ mod tests {
 
     #[gpui::test]
     fn validate_rejects_empty_input(cx: &mut TestAppContext) {
-        let (_wh, modal) = build_modal(cx, "/repo");
+        let (_wh, modal) = build_modal(cx, "/repo", vec![]);
         modal.read_with(cx, |m, cx| {
             let err = m.validate(cx).unwrap_err();
             assert!(err.contains("required"));
@@ -439,7 +665,7 @@ mod tests {
 
     #[gpui::test]
     fn validate_accepts_valid_branch(cx: &mut TestAppContext) {
-        let (wh, modal) = build_modal(cx, "/Users/dev/repo");
+        let (wh, modal) = build_modal(cx, "/Users/dev/repo", vec![]);
         set_branch(&wh, &modal, cx, "feat/sidebar");
         modal.read_with(cx, |m, cx| {
             let plan = m.validate(cx).unwrap();
@@ -453,7 +679,7 @@ mod tests {
 
     #[gpui::test]
     fn validate_rejects_invalid_chars(cx: &mut TestAppContext) {
-        let (wh, modal) = build_modal(cx, "/repo");
+        let (wh, modal) = build_modal(cx, "/repo", vec![]);
         set_branch(&wh, &modal, cx, "has space");
         modal.read_with(cx, |m, cx| {
             let err = m.validate(cx).unwrap_err();
@@ -463,7 +689,7 @@ mod tests {
 
     #[gpui::test]
     fn validate_captures_base_ref(cx: &mut TestAppContext) {
-        let (wh, modal) = build_modal(cx, "/Users/dev/repo");
+        let (wh, modal) = build_modal(cx, "/Users/dev/repo", vec![]);
         set_branch(&wh, &modal, cx, "feat/x");
         set_base(&wh, &modal, cx, "origin/main");
         modal.read_with(cx, |m, cx| {
@@ -474,7 +700,7 @@ mod tests {
 
     #[gpui::test]
     fn validate_blank_base_normalizes_to_none(cx: &mut TestAppContext) {
-        let (wh, modal) = build_modal(cx, "/repo");
+        let (wh, modal) = build_modal(cx, "/repo", vec![]);
         set_branch(&wh, &modal, cx, "feat/x");
         set_base(&wh, &modal, cx, "   ");
         modal.read_with(cx, |m, cx| {
@@ -485,12 +711,102 @@ mod tests {
 
     #[gpui::test]
     fn validate_captures_description(cx: &mut TestAppContext) {
-        let (wh, modal) = build_modal(cx, "/repo");
+        let (wh, modal) = build_modal(cx, "/repo", vec![]);
         set_branch(&wh, &modal, cx, "feat/x");
         set_description(&wh, &modal, cx, "PR #123 review");
         modal.read_with(cx, |m, cx| {
             let plan = m.validate(cx).unwrap();
             assert_eq!(plan.description.as_deref(), Some("PR #123 review"));
+        });
+    }
+
+    /// Local is the dropdown's default selection — untouched, the plan
+    /// carries no `session_host` at all (the freshly-created lane stays at
+    /// `Lane::git`'s `session_host: None` default).
+    #[gpui::test]
+    fn default_selection_is_local_and_plan_has_no_session_host(cx: &mut TestAppContext) {
+        let entry = ssh_entry("Build box", "build-box");
+        let (wh, modal) = build_modal(cx, "/repo", vec![entry]);
+        set_branch(&wh, &modal, cx, "feat/x");
+        modal.read_with(cx, |m, cx| {
+            let plan = m.validate(cx).unwrap();
+            assert_eq!(plan.session_host, None);
+        });
+    }
+
+    /// Picking a registry entry and filling in the session path carries a
+    /// fully-formed `LaneSessionHost` (registry id included) into the plan.
+    #[gpui::test]
+    fn selecting_a_registry_entry_sets_the_plans_session_host(cx: &mut TestAppContext) {
+        let entry = ssh_entry("Build box", "build-box");
+        let entry_id = entry.id;
+        let (wh, modal) = build_modal(cx, "/repo", vec![entry]);
+        set_branch(&wh, &modal, cx, "feat/x");
+        select_host(&wh, &modal, cx, &entry_id.as_inner().to_string());
+        set_session_path(&wh, &modal, cx, "/home/user/project");
+        modal.read_with(cx, |m, cx| {
+            let plan = m.validate(cx).unwrap();
+            assert_eq!(
+                plan.session_host,
+                Some(LaneSessionHost::Ssh {
+                    target: "build-box".into(),
+                    session_path: "/home/user/project".into(),
+                    registry_id: Some(entry_id),
+                })
+            );
+        });
+    }
+
+    /// An empty catalog offers only Local — nothing crashes, and the plan's
+    /// `session_host` still comes back `None`.
+    #[gpui::test]
+    fn an_empty_catalog_only_offers_local(cx: &mut TestAppContext) {
+        let (wh, modal) = build_modal(cx, "/repo", vec![]);
+        set_branch(&wh, &modal, cx, "feat/x");
+        modal.read_with(cx, |m, cx| {
+            assert!(m.catalog.is_empty());
+            let plan = m.validate(cx).unwrap();
+            assert_eq!(plan.session_host, None);
+        });
+    }
+
+    /// Picking a registry entry but leaving the session path blank blocks
+    /// creation with the same reused `session_host::checked_session_path`
+    /// error `SessionHostModal` shows.
+    #[gpui::test]
+    fn validate_rejects_an_empty_session_path_when_a_registry_entry_is_selected(
+        cx: &mut TestAppContext,
+    ) {
+        let entry = ssh_entry("Build box", "build-box");
+        let entry_id = entry.id;
+        let (wh, modal) = build_modal(cx, "/repo", vec![entry]);
+        set_branch(&wh, &modal, cx, "feat/x");
+        select_host(&wh, &modal, cx, &entry_id.as_inner().to_string());
+        modal.read_with(cx, |m, cx| {
+            assert_eq!(
+                m.validate(cx).unwrap_err(),
+                session_host_error_to_msg(SessionHostError::Empty(SessionHostField::SessionPath))
+            );
+        });
+    }
+
+    /// A session path that would escape `session_host::wrap`'s quoting is
+    /// rejected the same way — inline error, no lane created.
+    #[gpui::test]
+    fn validate_rejects_an_unsafe_session_path_when_a_registry_entry_is_selected(
+        cx: &mut TestAppContext,
+    ) {
+        let entry = ssh_entry("Build box", "build-box");
+        let entry_id = entry.id;
+        let (wh, modal) = build_modal(cx, "/repo", vec![entry]);
+        set_branch(&wh, &modal, cx, "feat/x");
+        select_host(&wh, &modal, cx, &entry_id.as_inner().to_string());
+        set_session_path(&wh, &modal, cx, "/srv/a\"b");
+        modal.read_with(cx, |m, cx| {
+            assert_eq!(
+                m.validate(cx).unwrap_err(),
+                session_host_error_to_msg(SessionHostError::Unsafe(SessionHostField::SessionPath))
+            );
         });
     }
 }

@@ -160,6 +160,10 @@ impl Workspace {
             repo_root: repo_root.clone(),
             base_ref: self.resolve_lane_base_ref(base_ref),
             description: Some(format!("task: {}", task.title)),
+            // Task-driven lanes have no create-form host picker — they stay
+            // at `Lane::git`'s default (unanswered/Local), same as before
+            // this task added the field.
+            session_host: None,
         };
 
         let task_id = task.id.clone();

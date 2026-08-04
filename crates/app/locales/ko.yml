@@ -930,6 +930,7 @@ create_lane:
   err_branch_required: "브랜치 이름을 입력해 주세요."
   err_branch_invalid: "잘못된 브랜치 이름입니다."
   err_no_active_project: "활성 프로젝트가 없습니다."
+  session_host_registry_empty_hint: "등록된 호스트가 없습니다 — 새 lane은 로컬에서 실행됩니다. 설정 → 세션 호스트에서 추가해 주세요."
 
 # Session Host 모달 — Lane의 에이전트 세션이 어디에 붙는지 (Local/SSH/Docker),
 # Settings → Session Hosts에서 관리하는 레지스트리에서 선택

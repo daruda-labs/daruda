@@ -3928,6 +3928,15 @@ pub fn create_lane_err_no_active_project() -> String {
     rust_i18n::t!("create_lane.err_no_active_project").into_owned()
 }
 
+/// Shown under the create-lane form's host dropdown when the workspace's
+/// registry catalog (`Workspace.session_hosts`) is empty — mirrors
+/// `session_host_registry_empty_hint`'s tone but is its own string since
+/// this modal's copy can diverge (e.g. pointing at the create flow rather
+/// than an existing lane).
+pub fn create_lane_session_host_registry_empty_hint() -> String {
+    rust_i18n::t!("create_lane.session_host_registry_empty_hint").into_owned()
+}
+
 pub fn session_host_modal_title() -> String {
     rust_i18n::t!("session_host.title").into_owned()
 }

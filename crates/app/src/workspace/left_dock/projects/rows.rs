@@ -540,6 +540,7 @@ pub(in crate::workspace) fn project_header_row(
                                 let Some(repo_root) = ws.git_repo_root() else {
                                     return;
                                 };
+                                let catalog = ws.session_hosts.clone();
                                 crate::workspace::dialog_helpers::open_form_modal(
                                     "Create Lane",
                                     None,
@@ -548,6 +549,7 @@ pub(in crate::workspace) fn project_header_row(
                                             workspace_for_modal.clone(),
                                             repo_root,
                                             project_id,
+                                            catalog,
                                             window,
                                             cx,
                                         )

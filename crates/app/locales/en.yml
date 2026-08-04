@@ -930,6 +930,7 @@ create_lane:
   err_branch_required: "Branch name is required."
   err_branch_invalid: "Invalid branch name."
   err_no_active_project: "No active project."
+  session_host_registry_empty_hint: "No hosts are registered yet — the new lane will run locally. Add one in Settings → Session Hosts."
 
 # Session Host modal — where a lane's agent session attaches (Local/SSH/Docker),
 # picked from the registry managed in Settings → Session Hosts.
