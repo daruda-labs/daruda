@@ -18,7 +18,8 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
-use crate::lane::session_host::{self, LinkStatus, SessionHostError, SessionHostField};
+use super::modal_shared::{field_label, session_host_error_to_msg};
+use crate::lane::session_host::{self, LinkStatus};
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
@@ -41,36 +42,6 @@ const LOCAL_SELECT_VALUE: &str = "local";
 /// modal and hitting Save without touching the dropdown can never silently
 /// downgrade a working remote lane to Local.
 const KEEP_CURRENT_SELECT_VALUE: &str = "keep-current";
-
-/// Small label rendered above a form field — mirrors
-/// `right_dock::tools::modal_shared::field_label`, kept local since this is
-/// the only modal in this directory that needs it.
-fn field_label(text: impl Into<SharedString>, t: &theme::DarudaTheme) -> impl IntoElement {
-    div()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(t.text_muted)
-        .child(text.into())
-}
-
-fn session_host_error_to_msg(e: SessionHostError) -> SharedString {
-    match e {
-        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
-        SessionHostError::Empty(SessionHostField::Container) => {
-            s::session_host_err_container_empty()
-        }
-        SessionHostError::Empty(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_empty()
-        }
-        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
-        SessionHostError::Unsafe(SessionHostField::Container) => {
-            s::session_host_err_container_unsafe()
-        }
-        SessionHostError::Unsafe(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_unsafe()
-        }
-    }
-    .into()
-}
 
 /// `host`'s registry link, read straight off whichever variant carries it —
 /// `None` for `Local` and for a free-text `Ssh`/`Docker` host.
@@ -283,7 +254,8 @@ impl SessionHostModal {
                     return Ok(LaneSessionHost::Local);
                 };
                 let path = self.session_path_input.read(cx).value().to_string();
-                session_host::from_registry_entry(entry, &path).map_err(session_host_error_to_msg)
+                session_host::from_registry_entry(entry, &path)
+                    .map_err(|e| SharedString::from(session_host_error_to_msg(e)))
             }
         }
     }
@@ -473,6 +445,7 @@ pub fn open_session_host_modal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lane::session_host::{SessionHostError, SessionHostField};
     use crate::test_support::init_gpui_component;
     use daruda_config::SessionHostKind;
     use gpui::{TestAppContext, WindowHandle};
@@ -642,8 +615,8 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.build_host(cx),
-                Err(session_host_error_to_msg(SessionHostError::Empty(
-                    SessionHostField::SessionPath
+                Err(SharedString::from(session_host_error_to_msg(
+                    SessionHostError::Empty(SessionHostField::SessionPath)
                 )))
             );
         });
@@ -661,8 +634,8 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.build_host(cx),
-                Err(session_host_error_to_msg(SessionHostError::Unsafe(
-                    SessionHostField::SessionPath
+                Err(SharedString::from(session_host_error_to_msg(
+                    SessionHostError::Unsafe(SessionHostField::SessionPath)
                 )))
             );
         });

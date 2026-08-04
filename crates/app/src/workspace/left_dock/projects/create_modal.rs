@@ -14,11 +14,12 @@ use std::path::PathBuf;
 
 use crate::ui::theme;
 use gpui::{
-    App, ClickEvent, Context, Entity, FocusHandle, Focusable, Hsla, IntoElement, Render,
-    SharedString, Subscription, WeakEntity, Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, Render, SharedString,
+    Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
-use crate::lane::session_host::{self, SessionHostError, SessionHostField};
+use super::modal_shared::{field_label, session_host_error_to_msg};
+use crate::lane::session_host;
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
@@ -53,35 +54,6 @@ fn host_select_options(catalog: &[SessionHostEntry]) -> Vec<SelectOption> {
             .map(|entry| SelectOption::new(entry.id.as_inner().to_string(), entry.label.clone())),
     );
     opts
-}
-
-fn session_host_error_to_msg(e: SessionHostError) -> String {
-    match e {
-        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
-        SessionHostError::Empty(SessionHostField::Container) => {
-            s::session_host_err_container_empty()
-        }
-        SessionHostError::Empty(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_empty()
-        }
-        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
-        SessionHostError::Unsafe(SessionHostField::Container) => {
-            s::session_host_err_container_unsafe()
-        }
-        SessionHostError::Unsafe(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_unsafe()
-        }
-    }
-}
-
-/// Small label rendered above a form field — mirrors
-/// `session_host_modal::field_label`, kept local since this modal doesn't
-/// otherwise import that module.
-fn field_label(text: impl Into<SharedString>, muted_text: Hsla) -> impl IntoElement {
-    div()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(muted_text)
-        .child(text.into())
 }
 
 pub struct CreateWorktreeModal {
@@ -424,7 +396,8 @@ impl ModalView for CreateWorktreeModal {}
 
 impl Render for CreateWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted_text = theme::current(cx).text_muted;
+        let t = theme::current(cx).clone();
+        let muted_text = t.text_muted;
         let mut body = div()
             .flex()
             .flex_col()
@@ -450,7 +423,7 @@ impl Render for CreateWorktreeModal {
                     .child("Description (optional) — shown in the left dock."),
             )
             .child(input(&self.description_input, cx, 2))
-            .child(field_label(s::session_host_field_host(), muted_text))
+            .child(field_label(s::session_host_field_host(), &t))
             .child(select::select(&self.host_select, cx, 3_isize));
 
         if self.catalog.is_empty() {
@@ -464,10 +437,7 @@ impl Render for CreateWorktreeModal {
 
         if self.selected_entry(cx).is_some() {
             body = body
-                .child(field_label(
-                    s::session_host_field_session_path(),
-                    muted_text,
-                ))
+                .child(field_label(s::session_host_field_session_path(), &t))
                 .child(input(&self.session_path_input, cx, 4));
         }
 
@@ -518,6 +488,7 @@ impl Render for CreateWorktreeModal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lane::session_host::{SessionHostError, SessionHostField};
     use crate::test_support::init_gpui_component;
     use daruda_config::SessionHostKind;
     use daruda_store::project::SessionHostId;
