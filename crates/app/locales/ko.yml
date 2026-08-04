@@ -931,17 +931,15 @@ create_lane:
   err_branch_invalid: "잘못된 브랜치 이름입니다."
   err_no_active_project: "활성 프로젝트가 없습니다."
 
-# Session Host 모달 — Lane의 에이전트 세션이 어디에 붙는지 (Local/SSH/Docker)
+# Session Host 모달 — Lane의 에이전트 세션이 어디에 붙는지 (Local/SSH/Docker),
+# Settings → Session Hosts에서 관리하는 레지스트리에서 선택
 session_host:
   title: "세션 호스트"
   field_host: "호스트"
   option_local: "로컬"
-  option_ssh: "SSH"
-  option_docker: "Docker"
-  field_target: "대상"
-  placeholder_target: "user@host 또는 SSH config 별칭"
-  field_container: "컨테이너"
-  placeholder_container: "이미 실행 중인 컨테이너 이름"
+  option_keep_current: "현재 값 유지 (%{value})"
+  registry_empty_hint: "등록된 호스트가 없습니다. 설정 → 세션 호스트에서 추가해 주세요."
+  orphaned_banner: "이 worktree가 연결됐던 등록 호스트가 삭제되었습니다. 아래에 마지막으로 알려진 값으로 계속 연결됩니다 — 새로 선택해 다시 연결하세요."
   field_session_path: "세션 경로"
   placeholder_session_path: "다른 머신의 절대 경로, 예: /home/user/project"
   legacy_notice: "이 worktree는 현재 에이전트 측 원격 설정을 쓰고 있습니다. 여기서 저장하면 그 설정을 대체합니다 — Local을 선택해도 마찬가지입니다."

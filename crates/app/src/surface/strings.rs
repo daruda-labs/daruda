@@ -3937,23 +3937,22 @@ pub fn session_host_field_host() -> String {
 pub fn session_host_option_local() -> String {
     rust_i18n::t!("session_host.option_local").into_owned()
 }
-pub fn session_host_option_ssh() -> String {
-    rust_i18n::t!("session_host.option_ssh").into_owned()
+/// The dropdown entry that preserves a legacy (non-registry) or orphaned
+/// host's cached `target`/`container` verbatim — selected by default so
+/// opening the modal and hitting Save can never silently downgrade a
+/// working remote lane to Local.
+pub fn session_host_option_keep_current(value: &str) -> String {
+    rust_i18n::t!("session_host.option_keep_current", value = value).into_owned()
 }
-pub fn session_host_option_docker() -> String {
-    rust_i18n::t!("session_host.option_docker").into_owned()
+/// Shown below the registry dropdown when the catalog has no entries yet.
+pub fn session_host_registry_empty_hint() -> String {
+    rust_i18n::t!("session_host.registry_empty_hint").into_owned()
 }
-pub fn session_host_field_target() -> String {
-    rust_i18n::t!("session_host.field_target").into_owned()
-}
-pub fn session_host_placeholder_target() -> String {
-    rust_i18n::t!("session_host.placeholder_target").into_owned()
-}
-pub fn session_host_field_container() -> String {
-    rust_i18n::t!("session_host.field_container").into_owned()
-}
-pub fn session_host_placeholder_container() -> String {
-    rust_i18n::t!("session_host.placeholder_container").into_owned()
+/// Banner shown when the lane's `registry_id` no longer resolves in the
+/// catalog (`lane::session_host::LinkStatus::Orphaned`) — the last cached
+/// value keeps connecting, but the link itself is gone.
+pub fn session_host_orphaned_banner() -> String {
+    rust_i18n::t!("session_host.orphaned_banner").into_owned()
 }
 pub fn session_host_field_session_path() -> String {
     rust_i18n::t!("session_host.field_session_path").into_owned()

@@ -931,17 +931,15 @@ create_lane:
   err_branch_invalid: "Invalid branch name."
   err_no_active_project: "No active project."
 
-# Session Host modal — where a lane's agent session attaches (Local/SSH/Docker)
+# Session Host modal — where a lane's agent session attaches (Local/SSH/Docker),
+# picked from the registry managed in Settings → Session Hosts.
 session_host:
   title: "Session Host"
   field_host: "Host"
   option_local: "Local"
-  option_ssh: "SSH"
-  option_docker: "Docker"
-  field_target: "Target"
-  placeholder_target: "user@host, or an SSH config alias"
-  field_container: "Container"
-  placeholder_container: "Name of an already-running container"
+  option_keep_current: "Keep current (%{value})"
+  registry_empty_hint: "No hosts are registered yet. Add one in Settings → Session Hosts."
+  orphaned_banner: "The registered host this worktree was linked to has been removed. It's still connecting with the last known value below — pick a new one to relink."
   field_session_path: "Session Path"
   placeholder_session_path: "Absolute path on the other machine, e.g. /home/user/project"
   legacy_notice: "This worktree is currently using its agent's own remote setup. Saving here takes over — and retires it, even if you pick Local."
