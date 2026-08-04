@@ -124,20 +124,22 @@ enum Axis {
     Horizontal,
 }
 
-/// Write a dragged thumb's new offset back onto `editor`, leaving the other axis
-/// where it was. `set_scroll_offset` owns the clamp and the repaint, so the host
-/// never has to know the editor's content extent.
+/// Add a dragged thumb's scroll delta to `editor` on `axis`, leaving the other
+/// axis where it was. Reads the offset live rather than closing over a
+/// render-time copy, so moves that arrive between two paints accumulate instead
+/// of each overwriting the last. `set_scroll_offset` owns the clamp and the
+/// repaint, so the host never has to know the editor's content extent.
 fn drag_axis(
     editor: &Entity<crate::ui::InputState>,
     axis: Axis,
 ) -> impl Fn(Pixels, &mut Window, &mut App) + use<> {
     let editor = editor.clone();
-    move |next, _window, cx| {
+    move |delta, _window, cx| {
         editor.update(cx, |state, cx| {
             let current = state.scroll_handle().offset();
             let offset = match axis {
-                Axis::Vertical => point(current.x, next),
-                Axis::Horizontal => point(next, current.y),
+                Axis::Vertical => point(current.x, current.y + delta),
+                Axis::Horizontal => point(current.x + delta, current.y),
             };
             state.set_scroll_offset(offset, cx);
         });

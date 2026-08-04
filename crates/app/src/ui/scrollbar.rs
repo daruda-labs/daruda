@@ -63,7 +63,6 @@ pub fn vertical_thumb(
         len: thumb_h,
         track: viewport_h,
         scrollable: content_h - viewport_h,
-        offset: scroll_offset_y,
         bg: thumb_bg,
         hover_bg: thumb_hover_bg,
         on_drag: None,
@@ -94,7 +93,6 @@ pub fn horizontal_thumb(
         len: thumb_w,
         track: viewport_w,
         scrollable: content_w - viewport_w,
-        offset: scroll_offset_x,
         bg: thumb_bg,
         hover_bg: thumb_hover_bg,
         on_drag: None,
@@ -123,8 +121,6 @@ pub struct Thumb {
     track: Pixels,
     /// `content - viewport`: how far the region can actually scroll.
     scrollable: Pixels,
-    /// The region's current scroll offset (negative as content moves away).
-    offset: Pixels,
     bg: Hsla,
     hover_bg: Hsla,
     #[allow(clippy::type_complexity)]
@@ -132,9 +128,14 @@ pub struct Thumb {
 }
 
 impl Thumb {
-    /// Make the thumb draggable: `handler` receives the scroll offset the new
-    /// thumb position implies (negative, already clamped to the scrollable
-    /// range) and writes it back to whatever handle the region scrolls on.
+    /// Make the thumb draggable: `handler` receives how far the region should
+    /// scroll (a signed delta in content pixels) and adds it to whatever handle
+    /// the region scrolls on.
+    ///
+    /// A delta rather than an absolute offset because several mouse moves can
+    /// land between two paints: an absolute offset would be computed from the
+    /// stale render-time position every time, so all but the last move would be
+    /// dropped. The handler reads the live offset instead.
     ///
     /// Opt-in because the handle types differ per call site and most regions are
     /// content-driven; a thumb without this stays display-only.
@@ -142,6 +143,21 @@ impl Thumb {
         self.on_drag = Some(Rc::new(handler));
         self
     }
+}
+
+/// Content pixels the region scrolls when the thumb's grab point travels
+/// `travelled` along a track with `track_travel` of room and `scrollable`
+/// content beyond the viewport.
+///
+/// Pure so the mapping is testable without a window — the same reason
+/// [`thumb_geometry`] is split out. Returns `0` for a degenerate track, where no
+/// cursor travel can mean anything: dividing by it would send the region to one
+/// end on the first jitter.
+fn thumb_scroll_delta(travelled: Pixels, track_travel: Pixels, scrollable: Pixels) -> Pixels {
+    if track_travel <= px(0.) || scrollable <= px(0.) {
+        return px(0.);
+    }
+    -(scrollable * (travelled / track_travel))
 }
 
 /// Live drag state, carried by gpui's active drag so it survives the re-renders
@@ -208,18 +224,22 @@ impl RenderOnce for Thumb {
         // so the content keeps pace with the thumb regardless of their sizes.
         let track_travel = self.track - self.len;
         let scrollable = self.scrollable;
-        let offset = self.offset;
         let drag = ThumbDrag {
             id: self.id,
             last: Rc::new(Cell::new(None)),
         };
         thumb
             .cursor_pointer()
+            // A draggable thumb owns the press. Without this the mouse-down
+            // reaches whatever it overlays — for the agent-chat embed, the
+            // read-only editor, whose `on_mouse_down` starts a text selection
+            // that the drag then extends across the content. Occluding drops the
+            // hitboxes behind the thumb out of the hit test (gpui `window.rs`),
+            // and the editor gates both its press and its selection-extend on
+            // being hovered.
+            .occlude()
             .on_drag(drag, |_, _, _, cx| cx.new(|_| ThumbDragGhost))
             .on_drag_move::<ThumbDrag>(move |ev, window, cx| {
-                if track_travel <= px(0.) || scrollable <= px(0.) {
-                    return;
-                }
                 let drag = ev.drag(cx);
                 // Not our drag: this handler fires for every `ThumbDrag` in the
                 // window, including the other axis' thumb on this very embed.
@@ -238,13 +258,11 @@ impl RenderOnce for Thumb {
                 let Some(last) = last else {
                     return;
                 };
-                let travelled = cursor - last;
-                if travelled == px(0.) {
+                let delta = thumb_scroll_delta(cursor - last, track_travel, scrollable);
+                if delta == px(0.) {
                     return;
                 }
-                let next =
-                    (offset - scrollable * (travelled / track_travel)).clamp(-scrollable, px(0.));
-                handler(next, window, cx);
+                handler(delta, window, cx);
             })
     }
 }
@@ -560,5 +578,45 @@ mod tests {
             thumb_geometry(px(100.), px(500.), px(-100.), px(40.)),
             Some((px(59.), px(theme::SCROLLBAR_MIN_THUMB_H)))
         );
+    }
+
+    /// A thumb that fills most of its track has little room to travel, but the
+    /// content it stands for has just as little to scroll — the two shrink
+    /// together, so cursor travel must still map roughly 1:1 and never fling the
+    /// region to one end. This is the horizontal case in practice: lines are
+    /// usually only a little wider than the viewport.
+    #[test]
+    fn a_nearly_full_thumb_maps_travel_about_one_to_one() {
+        // viewport 800, content 808 → scrollable 8, proportional thumb 792.
+        let delta = thumb_scroll_delta(px(4.), px(8.), px(8.));
+        assert_eq!(delta, px(-4.), "a 4px drag on an 8px track must scroll 4px");
+    }
+
+    /// The mirror: a long line makes the thumb tiny, so a short drag covers a lot
+    /// of content. Still proportional, just the other way.
+    #[test]
+    fn a_tiny_thumb_maps_travel_to_a_large_scroll() {
+        // viewport 800, content 80_000 → scrollable 79_200, thumb 8 → travel 792.
+        let delta = thumb_scroll_delta(px(79.2), px(792.), px(79_200.));
+        // A ratio this large amplifies f32 rounding, so compare within a pixel.
+        assert!(
+            (f32::from(delta) + 7_920.).abs() < 1.0,
+            "expected about -7920px, got {delta:?}"
+        );
+    }
+
+    /// Dragging back up scrolls back toward the start.
+    #[test]
+    fn travel_is_signed() {
+        assert_eq!(thumb_scroll_delta(px(-10.), px(100.), px(500.)), px(50.));
+    }
+
+    /// A degenerate track carries no information: any division would send the
+    /// region to an end on the first pixel of jitter.
+    #[test]
+    fn a_degenerate_track_or_fitting_content_scrolls_nothing() {
+        assert_eq!(thumb_scroll_delta(px(20.), px(0.), px(500.)), px(0.));
+        assert_eq!(thumb_scroll_delta(px(20.), px(-3.), px(500.)), px(0.));
+        assert_eq!(thumb_scroll_delta(px(20.), px(100.), px(0.)), px(0.));
     }
 }
