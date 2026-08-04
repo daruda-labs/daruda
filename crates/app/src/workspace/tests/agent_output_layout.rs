@@ -662,3 +662,100 @@ async fn a_shell_output_s_trailing_newline_adds_no_row(cx: &mut TestAppContext) 
         "a {ROWS}-row output hides nothing, so no vertical thumb may be drawn"
     );
 }
+
+/// claude-shaped Bash: the bytes ride a `_meta.terminal_output.data` sideband on
+/// a content-less update, not `raw_output`. That is a second, independent route
+/// into `RawText` — the codex test above cannot cover it.
+#[gpui::test]
+async fn a_sideband_shell_output_block_renders_through_the_capped_embed(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::PaneContent;
+    use agent_client_protocol::schema::v1::{
+        SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    };
+
+    let (window_handle, workspace) = super::build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
+                _ => None,
+            })
+            .expect("agent chat pane present")
+    });
+
+    let printed = format!("{}\n", numbered_lines(LARGE_ROWS));
+    view.update(cx, |v, cx| {
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                ToolCall::new("b1", "Bash seq").kind(ToolKind::Execute),
+            ))),
+            "",
+            false,
+            cx,
+        );
+        let mut update = ToolCallUpdate::new("b1", {
+            let mut f = ToolCallUpdateFields::default();
+            f.status = Some(ToolCallStatus::Completed);
+            f
+        });
+        update.meta = Some(
+            serde_json::from_value(serde_json::json!({
+                "terminal_output": { "terminal_id": "b1", "data": printed },
+            }))
+            .expect("meta shape"),
+        );
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(update))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+
+    let (is_raw, rows) = view.read_with(cx, |v, cx| {
+        let raw = v.items.iter().any(|item| match item {
+            daruda_acp::ChatItem::ToolCall(tc) => tc
+                .output
+                .first()
+                .is_some_and(|b| matches!(b, daruda_acp::ToolOutputBlock::RawText { .. })),
+            _ => false,
+        });
+        let rows = v
+            .assets
+            .output_editors
+            .get("b1#0")
+            .map(|e| e.read(cx).display_rows());
+        (raw, rows)
+    });
+    assert!(is_raw, "the sideband must map to a RawText block");
+    assert_eq!(
+        rows,
+        Some(LARGE_ROWS),
+        "no output editor was built for the sideband block, or it counted the \
+         line terminator as a row"
+    );
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted — the sideband block fell back to markdown");
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(LARGE_ROWS),
+        "a capped sideband output embed is pinned to the cap"
+    );
+}
