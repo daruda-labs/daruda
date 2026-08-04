@@ -1148,7 +1148,11 @@ impl Element for TextElement {
         let ghost_lines_height = ghost_line_count as f32 * line_height;
 
         let total_wrapped_lines = state.text_wrapper.len();
-        let empty_bottom_height = if state.mode.is_code_editor() {
+        // daruda vendor patch — the pad exists so an *editor* can lift its last
+        // line to mid-screen; a read-only viewer has no cursor to centre, and the
+        // pad made a fully-visible buffer scrollable into blank space (and, for a
+        // host embedded in an outer scroller, drag both at once).
+        let empty_bottom_height = if state.mode.is_code_editor() && !state.disabled {
             bounds
                 .size
                 .height

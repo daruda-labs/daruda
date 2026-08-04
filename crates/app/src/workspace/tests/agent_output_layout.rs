@@ -540,13 +540,14 @@ async fn a_truncated_output_block_still_renders_through_the_capped_embed(cx: &mu
     );
 }
 
-/// An output that fits under the cap hides nothing, so it must draw no vertical
-/// thumb — a permanently-visible one both reads as broken chrome and lies about
-/// whether there is more output. The guard is against reading the thumb's content
-/// extent off `InputState::scroll_size().height`, which in code-editor mode is
-/// padded past the viewport unconditionally (`gpui_component` `element.rs`).
+/// An output that fits under the cap hides nothing, so it must neither draw a
+/// vertical thumb nor scroll at all. Both used to be possible: code-editor mode
+/// padded `scroll_size().height` half a viewport past the content so a
+/// fully-visible buffer stayed scrollable into blank space — and, inside the
+/// transcript's own scroller, dragged both at once. The pad is now editor-only
+/// (`gpui_component` `element.rs`), so the scroll extent is the viewport.
 #[gpui::test]
-async fn a_short_output_block_draws_no_vertical_thumb(cx: &mut TestAppContext) {
+async fn a_short_output_block_neither_scrolls_nor_shows_a_thumb(cx: &mut TestAppContext) {
     let (window_handle, view) = render_fenced_output_card(cx, SMALL_ROWS);
     let (viewport_h, scroll_h) = output_editor_extents(cx, &view);
 
@@ -561,10 +562,9 @@ async fn a_short_output_block_draws_no_vertical_thumb(cx: &mut TestAppContext) {
         "a short embed measures its content"
     );
     assert!(
-        scroll_h > viewport_h,
-        "the upstream bottom pad is what makes this case a trap: scroll extent \
-         {scroll_h:?} must exceed the {viewport_h:?} viewport even though every \
-         row is visible"
+        scroll_h <= viewport_h,
+        "scroll extent {scroll_h:?} exceeds the {viewport_h:?} viewport even though \
+         every row is visible — the embed can be dragged into blank space"
     );
     assert_eq!(
         vcx.debug_bounds("agent-chat-out-vthumb-b1#0"),
