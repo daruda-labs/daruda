@@ -334,6 +334,81 @@ fn render_fenced_output_card(
     (window_handle.into(), view)
 }
 
+/// Drive a **codex-shaped** shell tool call: its output arrives only through
+/// `raw_output.formatted_output`, which `daruda_acp` maps to
+/// `ToolOutputBlock::RawText` — the shape the CPU repro (`seq 1 200000` in a
+/// codex pane) actually takes, and the one the fenced-`Text` helper above never
+/// exercises. `trailing_newline` mirrors a real command's output, which
+/// terminates its last line.
+fn render_shell_output_card(
+    cx: &mut TestAppContext,
+    rows: usize,
+    trailing_newline: bool,
+) -> (
+    gpui::AnyWindowHandle,
+    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) {
+    use crate::workspace::main_area::pane::PaneContent;
+    use agent_client_protocol::schema::v1::{
+        SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    };
+
+    let (window_handle, workspace) = super::build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
+                _ => None,
+            })
+            .expect("agent chat pane present")
+    });
+
+    let mut printed = numbered_lines(rows);
+    if trailing_newline {
+        printed.push('\n');
+    }
+    view.update(cx, |v, cx| {
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        fields.raw_output = Some(serde_json::json!({
+            "formatted_output": printed,
+            "exit_code": 0,
+        }));
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                ToolCall::new("b1", "Bash seq").kind(ToolKind::Execute),
+            ))),
+            "",
+            false,
+            cx,
+        );
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("b1", fields),
+            ))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+    (window_handle.into(), view)
+}
+
 /// The embedded editor's painted viewport height and its `scroll_size()` height.
 fn output_editor_extents(
     cx: &mut TestAppContext,
@@ -495,5 +570,95 @@ async fn a_short_output_block_draws_no_vertical_thumb(cx: &mut TestAppContext) {
         vcx.debug_bounds("agent-chat-out-vthumb-b1#0"),
         None,
         "a {SMALL_ROWS}-row output hides nothing, so no vertical thumb may be drawn"
+    );
+}
+
+/// The CPU repro's own shape, end to end: codex reports a shell command only
+/// through `raw_output.formatted_output`, so the block is `RawText` rather than
+/// a fence. It must reach the capped embed and shape a bounded row range — the
+/// property the whole feature exists for.
+#[gpui::test]
+async fn a_codex_shell_output_block_renders_through_the_capped_embed(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
+
+    let (is_raw, visible) = view.read_with(cx, |v, cx| {
+        let raw = v.items.iter().any(|item| match item {
+            daruda_acp::ChatItem::ToolCall(tc) => tc
+                .output
+                .first()
+                .is_some_and(|b| matches!(b, daruda_acp::ToolOutputBlock::RawText { .. })),
+            _ => false,
+        });
+        let visible = v
+            .assets
+            .output_editors
+            .get("b1#0")
+            .expect("output editor built for the codex shell block")
+            .read(cx)
+            .visible_rows();
+        (raw, visible)
+    });
+    assert!(
+        is_raw,
+        "the fixture must exercise the RawText path, not a fenced Text block"
+    );
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted — output_block_view fell back to markdown");
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(LARGE_ROWS),
+        "a capped shell output embed is pinned to the cap"
+    );
+    let visible = visible.expect("the embedded editor painted");
+    assert!(
+        visible.len() <= max_visible_rows(),
+        "shaped {} of {LARGE_ROWS} rows — the height bound is gone",
+        visible.len()
+    );
+    assert!(
+        visible.len() >= capped_rows(),
+        "shaped only {} rows — the editor collapsed inside its reserved box",
+        visible.len()
+    );
+}
+
+/// A command's trailing newline terminates its last line; counting the empty
+/// remainder as a row made every shell embed one row taller than its output and
+/// shifted the cap boundary by a row.
+#[gpui::test]
+async fn a_shell_output_s_trailing_newline_adds_no_row(cx: &mut TestAppContext) {
+    const ROWS: usize = 5;
+    let (window_handle, view) = render_shell_output_card(cx, ROWS, true);
+
+    let rows = view.read_with(cx, |v, cx| {
+        v.assets
+            .output_editors
+            .get("b1#0")
+            .expect("output editor built for the codex shell block")
+            .read(cx)
+            .display_rows()
+    });
+    assert_eq!(
+        rows,
+        ROWS,
+        "the terminator was counted as a {}th row",
+        ROWS + 1
+    );
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-b1#0")
+        .expect("the bounded embed painted");
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(ROWS),
+        "an uncapped embed measures its output, not its output plus a blank row"
+    );
+    assert!(
+        vcx.debug_bounds("agent-chat-out-vthumb-b1#0").is_none(),
+        "a {ROWS}-row output hides nothing, so no vertical thumb may be drawn"
     );
 }

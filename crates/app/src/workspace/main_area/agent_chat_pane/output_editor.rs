@@ -158,6 +158,24 @@ pub(in crate::workspace) fn bounded_embed_height(rows: usize) -> Pixels {
     px(text_h.min(theme::AGENT_CHAT_EMBED_MAX_H) + theme::SCROLLBAR_W + theme::SCROLLBAR_MARGIN_R)
 }
 
+/// Drop one trailing line terminator, so the editor's row count is the number
+/// of lines the output actually has.
+///
+/// A shell command's output ends with a newline that *terminates* its last
+/// line rather than starting another, but the editor's wrapper counts the empty
+/// remainder as a row — which would make every output embed one row taller than
+/// its content and shift the height cap by a row. The diff embed needs no such
+/// trim: `build_diff_editor_model` emits exactly one line per decoration.
+fn without_trailing_terminator(mut text: String) -> String {
+    if text.ends_with('\n') {
+        text.pop();
+        if text.ends_with('\r') {
+            text.pop();
+        }
+    }
+    text
+}
+
 /// Create + configure the read-only editor for a verbatim output block inside a
 /// single window re-entry against the view's stored `window_handle`. `text` is
 /// taken by value — it moves straight into the editor state, which is why the
@@ -172,6 +190,7 @@ pub(in crate::workspace) fn create_output_editor(
     language: Option<&str>,
 ) -> Option<Entity<crate::ui::InputState>> {
     let language = language.map_or_else(|| SharedString::from(PLAIN_LANGUAGE), language_for_name);
+    let text = without_trailing_terminator(text);
     match cx.update_window(window_handle, move |_, window, cx_w| {
         cx_w.new(|cx_state| {
             // Wrapping re-wraps the whole text on every width change and makes

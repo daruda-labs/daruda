@@ -233,3 +233,20 @@ fn key_is_per_tool_call_and_block() {
         output_editor_key("call_1", 1)
     );
 }
+
+#[test]
+fn a_trailing_terminator_is_not_a_row() {
+    // Shell output ends with a newline terminating its last line; counting the
+    // empty remainder as a row made every embed one row too tall.
+    assert_eq!(without_trailing_terminator("a\nb\nc\n".into()), "a\nb\nc");
+    assert_eq!(without_trailing_terminator("a\nb\nc\r\n".into()), "a\nb\nc");
+}
+
+#[test]
+fn only_the_terminator_goes_and_a_blank_last_line_stays() {
+    // Two newlines mean a genuine blank final line — dropping both would eat
+    // content, not a terminator.
+    assert_eq!(without_trailing_terminator("a\n\n".into()), "a\n");
+    assert_eq!(without_trailing_terminator("a\nb".into()), "a\nb");
+    assert_eq!(without_trailing_terminator(String::new()), "");
+}
