@@ -103,6 +103,32 @@ fn normalize_prompt_title_keeps_short_and_truncates_long_on_char_boundary() {
     assert!(title.ends_with('…'));
 }
 
+#[test]
+fn normalize_prompt_title_collapses_whitespace_at_the_budget_boundary() {
+    // Boundary armour for the bounded rewrite: the budget is decided on the
+    // *normalized* glyph count, so whitespace runs must collapse first.
+    assert_eq!(normalize_prompt_title("  a\t\tb \n c  "), "a b c");
+    assert_eq!(normalize_prompt_title(""), "");
+    assert_eq!(normalize_prompt_title(" \t\n "), "");
+
+    // Exactly at the limit → kept whole; one glyph past → ellipsized.
+    let at_limit = "x".repeat(FALLBACK_TITLE_MAX);
+    assert_eq!(normalize_prompt_title(&at_limit), at_limit);
+    let past_limit = "x".repeat(FALLBACK_TITLE_MAX + 1);
+    let title = normalize_prompt_title(&past_limit);
+    assert_eq!(title.chars().count(), FALLBACK_TITLE_HEAD + 1);
+    assert!(title.ends_with('…'));
+
+    // A word boundary landing on the cut must not leave a dangling space
+    // before the ellipsis.
+    let words = format!("{} tail", "y".repeat(FALLBACK_TITLE_HEAD - 1));
+    let title = normalize_prompt_title(&words);
+    assert!(
+        !title.contains(" …"),
+        "no dangling space before the ellipsis"
+    );
+}
+
 fn modes(ids: &[&str], current: &str) -> ModeStateView {
     ModeStateView {
         available: ids

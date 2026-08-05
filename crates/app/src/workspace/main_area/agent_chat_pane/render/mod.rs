@@ -104,7 +104,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ContextMenuExt, IconName, StatusPulseClock, button_bare, menu_builder};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, Rollup, activity_bar_title, agent_run, is_active, tool_fold_key,
+    DiffStat, Rollup, agent_run, is_active, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, RenderRow, RowKind};
@@ -135,12 +135,13 @@ pub(in crate::workspace) fn render(
 
     // Activity bar: title left, fold buttons right. Title resolves to the
     // session title, else the first prompt, else the configured agent name.
-    let title = activity_bar_title(content.session_title.as_deref(), &content.items);
     let bar = activity_bar(
         ActivityBarProps {
             pane_id,
             agent_id: &content.agent_id,
-            title: title.as_deref().or(Some(content.agent_name.as_str())),
+            title: content
+                .activity_title()
+                .or(Some(content.agent_name.as_str())),
             last_active: content.session_updated_at.as_deref(),
             usage: content.session_usage.as_ref(),
             has_items: !content.items.is_empty(),

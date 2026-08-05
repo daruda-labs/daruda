@@ -313,14 +313,37 @@ pub(in crate::workspace) fn activity_bar_title(
 /// Collapse a user prompt to a single-line title: trim, collapse internal
 /// whitespace runs to one space, and glyph-truncate (never byte-slice, so a
 /// multibyte prompt can't split a char). Empty when the prompt is whitespace.
+///
+/// Stops one glyph past the budget rather than normalizing the whole prompt
+/// first: the result is at most [`FALLBACK_TITLE_MAX`] glyphs, so the cost must
+/// track the title, not the message. Reaching that glyph is also what decides
+/// ellipsis — the full text is longer than the budget exactly when the walk
+/// doesn't run out of words first.
 fn normalize_prompt_title(text: &str) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.chars().count() > FALLBACK_TITLE_MAX {
-        let head: String = normalized.chars().take(FALLBACK_TITLE_HEAD).collect();
-        format!("{}…", head.trim_end())
-    } else {
-        normalized
+    let decisive = FALLBACK_TITLE_MAX + 1;
+    let mut head = String::new();
+    let mut glyphs = 0usize;
+    'walk: for word in text.split_whitespace() {
+        if glyphs > 0 {
+            head.push(' ');
+            glyphs += 1;
+            if glyphs == decisive {
+                break 'walk;
+            }
+        }
+        for ch in word.chars() {
+            head.push(ch);
+            glyphs += 1;
+            if glyphs == decisive {
+                break 'walk;
+            }
+        }
     }
+    if glyphs < decisive {
+        return head;
+    }
+    let kept: String = head.chars().take(FALLBACK_TITLE_HEAD).collect();
+    format!("{}…", kept.trim_end())
 }
 
 /// The single-line preview shown next to a collapsed assistant / thinking

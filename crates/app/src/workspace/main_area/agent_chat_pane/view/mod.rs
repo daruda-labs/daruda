@@ -468,6 +468,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// the diffs fall back to inline until the next event.
     /// Single update site: [`Self::set_syntax_theme`].
     syntax_theme: Option<String>,
+    /// Activity-bar title derived from `session_title` + the first user prompt.
+    /// Neither input moves per frame, but resolving it *in* `render` made it the
+    /// paint path's top cost on a pane whose first message was long. Derived
+    /// cache — rebuilt in [`Self::rebuild_rows`] alongside `rows` / `live_units`,
+    /// its single update site, which every mutation of either input already ends
+    /// in. (A `session/load` replay defers that funnel, so the bar shows the
+    /// agent-name fallback until the catch-up — the same window in which `rows`
+    /// is deliberately stale and no conversation is on screen yet.)
+    activity_title: Option<String>,
     /// What the connected agent advertises: modes, config options, slash
     /// commands. Established at `Connected`, cleared together on teardown.
     pub(in crate::workspace) session_config: SessionConfig,
@@ -596,6 +605,7 @@ impl AgentChatView {
             rows: Vec::new(),
             live_units: LiveSubagentUnits::default(),
             syntax_theme: None,
+            activity_title: None,
             session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
             session_usage: None,
@@ -618,6 +628,13 @@ impl AgentChatView {
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
+    }
+
+    /// The resolved activity-bar title, or `None` when the session has neither
+    /// an agent-supplied title nor a user prompt yet (the caller falls back to
+    /// the pane's agent name).
+    pub(in crate::workspace) fn activity_title(&self) -> Option<&str> {
+        self.activity_title.as_deref()
     }
 
     /// The recorded syntax theme, if the view has seen one yet.
