@@ -152,10 +152,8 @@ impl Elider {
 
     fn walk(&mut self, value: &mut Value, path: &mut String) {
         match value {
-            Value::String(text) => {
-                if text.len() > self.cap {
-                    *text = self.elide(path, text);
-                }
+            Value::String(text) if text.len() > self.cap => {
+                *text = self.elide(path, text);
             }
             Value::Array(items) => {
                 for (index, item) in items.iter_mut().enumerate() {
