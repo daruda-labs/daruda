@@ -185,9 +185,12 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 /// partial 1-line diff (editor built + painted from that snapshot), then the
 /// final `ToolCallUpdate` replaces it with the full 5-line content. The
 /// rebuilt editor must report the full display-row count and paint the full
-/// reserved height — not stay clipped at the partial snapshot's size.
+/// reserved height — not stay clipped at the partial snapshot's size. The same
+/// pane then covers the folded-header shape of an `Edit` card so both
+/// screenshot regressions share one workspace fixture.
 #[gpui::test]
-async fn streaming_write_diff_rebuild_paints_full_editor(cx: &mut TestAppContext) {
+async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
     use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
         Content, ContentBlock, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent,
@@ -301,40 +304,8 @@ async fn streaming_write_diff_rebuild_paints_full_editor(cx: &mut TestAppContext
         "diff container is {:?} tall — clipped below its {expected:?} body",
         container.size.height
     );
-}
 
-/// The folded-diff shape of the screenshot's Edit card: an `Edit` tool call
-/// whose diff the user collapses after completion. The collapsed diff block
-/// must keep its full header-row height — not get squeezed by an ancestor
-/// (the clipped `+1 −1` strip in the repro screenshot).
-#[gpui::test]
-async fn collapsed_diff_header_keeps_row_height(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-    use crate::workspace::main_area::pane::PaneContent;
-    use agent_client_protocol::schema::v1::{
-        Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields, ToolKind,
-    };
-
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
-
+    drop(vcx);
     view.update(cx, |v, cx| {
         let mut fields = ToolCallUpdateFields::default();
         fields.status = Some(ToolCallStatus::Completed);

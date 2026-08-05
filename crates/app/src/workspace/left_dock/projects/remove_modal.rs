@@ -340,35 +340,23 @@ mod tests {
     }
 
     #[gpui::test]
-    fn starts_with_target_and_no_error(cx: &mut TestAppContext) {
+    fn modal_defaults_and_delete_branch_toggle_policy(cx: &mut TestAppContext) {
         let modal = build_modal(cx);
         modal.read_with(cx, |m, _| {
             assert_eq!(m.target_id(), 7);
             assert!(!m.allow_force());
             assert!(m.error.is_none());
             assert!(!m.submitting);
+            // Branch deletion is destructive — must require explicit
+            // user opt-in even when a branch is present.
+            assert!(!m.delete_branch_too());
         });
-    }
 
-    #[gpui::test]
-    fn delete_branch_defaults_off(cx: &mut TestAppContext) {
-        // Branch deletion is destructive — must require explicit
-        // user opt-in even when a branch is present.
-        let modal = build_modal(cx);
-        modal.read_with(cx, |m, _| assert!(!m.delete_branch_too()));
-    }
-
-    #[gpui::test]
-    fn toggle_delete_branch_flips_when_branch_present(cx: &mut TestAppContext) {
-        let modal = build_modal(cx);
         modal.update(cx, |m, cx| m.toggle_delete_branch(cx));
         modal.read_with(cx, |m, _| assert!(m.delete_branch_too()));
         modal.update(cx, |m, cx| m.toggle_delete_branch(cx));
         modal.read_with(cx, |m, _| assert!(!m.delete_branch_too()));
-    }
 
-    #[gpui::test]
-    fn toggle_delete_branch_noop_when_branch_absent(cx: &mut TestAppContext) {
         // Default (non-git) or detached-HEAD lane → no branch
         // to delete → toggle must stay off so the modal doesn't
         // pretend it can clean something up.

@@ -25,7 +25,28 @@ fn add_project_mints_next_id_and_activates_first_lane(cx: &mut TestAppContext) {
         assert_eq!(ws.projects[0].id, 0);
         assert_eq!(ws.next_project_id, 1);
         assert_eq!(ws.active.project, 0);
+        assert_eq!(
+            ws.window_open_policy(),
+            daruda_store::project::WindowOpenPolicy::Ask
+        );
     });
+    ws.update(cx, |ws, cx| {
+        ws.set_window_open_policy(daruda_store::project::WindowOpenPolicy::NewWindow, cx);
+    });
+    let (workspace_state, project_states) = ws
+        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
+        .expect("snapshot_for_disk");
+    assert_eq!(
+        workspace_state.window_open_policy,
+        daruda_store::project::WindowOpenPolicy::NewWindow
+    );
+    // `next_project_id` is a runtime-only (per-session) counter, not persisted;
+    // the workspace state references exactly one project before the add path.
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.next_project_id, 1);
+    });
+    assert_eq!(workspace_state.project_ids.len(), 1);
+    assert_eq!(project_states.len(), 1);
 
     // Give project 0 content that must survive closing the later active project.
     cx.update_window(wh.into(), |_, window, cx| {
@@ -198,50 +219,6 @@ fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mu
     });
 }
 
-#[gpui::test]
-fn open_delete_project_modal_by_id_does_not_change_active(cx: &mut TestAppContext) {
-    // Root-wrapped window so `open_form_modal`'s `window.open_dialog`
-    // can walk the `gpui_component::Root` layer.
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/daruda_delete_byid_a");
-    std::fs::create_dir_all("/tmp/daruda_delete_byid_a").unwrap();
-    std::fs::create_dir_all("/tmp/daruda_delete_byid_b").unwrap();
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
-
-    // Add project B; `add_project` makes the new project (id 1) active,
-    // leaving project 0 as the non-active target for this test.
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_delete_byid_b"),
-                window,
-                cx,
-            )
-        })
-    })
-    .ok();
-    let active_before = ws.read_with(cx, |ws, _| ws.active);
-    assert_eq!(active_before.project, 1, "added project becomes active");
-
-    // Opening the delete chooser for the *non-active* project (id 0)
-    // must NOT force activation onto it — activation only happens once
-    // the user confirms inside the modal, so cancel leaves focus put.
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.open_delete_project_modal(0, window, cx));
-    })
-    .ok();
-    cx.run_until_parked();
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active, active_before,
-            "merely opening the delete modal for another project must not \
-             change the active focus"
-        );
-        assert_eq!(ws.projects.len(), 2, "both projects still present");
-    });
-}
-
 /// Build a workspace with project A (id 0) and project B (id 1); `add_project`
 /// activates B, so A is the *non-active* project. Both bootstrap lanes share
 /// id 0 (lane ids restart per project) — the precondition for the
@@ -295,6 +272,24 @@ fn lane_field_setters_target_named_project_not_active(cx: &mut TestAppContext) {
         "/tmp/daruda_lane_field_scope_a",
         "/tmp/daruda_lane_field_scope_b",
     );
+    let active_before = ws.read_with(cx, |ws, _| ws.active);
+
+    // Opening the delete chooser for the non-active project must not force
+    // activation onto it; activation happens only after confirmation.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.open_delete_project_modal(0, window, cx));
+    })
+    .ok();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active, active_before,
+            "merely opening the delete modal for another project must not \
+             change the active focus"
+        );
+        assert_eq!(ws.projects.len(), 2, "both projects still present");
+    });
+
     let a_lane = daruda_store::project::LaneRef {
         project: 0,
         lane: 0,
@@ -344,45 +339,6 @@ fn lane_field_setters_target_named_project_not_active(cx: &mut TestAppContext) {
             "active project B's like-id lane must keep its description"
         );
     });
-}
-
-#[gpui::test]
-fn window_open_policy_round_trips_through_state(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/daruda_policy_round");
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.window_open_policy(),
-            daruda_store::project::WindowOpenPolicy::Ask
-        );
-    });
-    ws.update(cx, |ws, cx| {
-        ws.set_window_open_policy(daruda_store::project::WindowOpenPolicy::NewWindow, cx);
-    });
-    let (workspace_state, project_states) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
-    assert_eq!(
-        workspace_state.window_open_policy,
-        daruda_store::project::WindowOpenPolicy::NewWindow
-    );
-    // `next_project_id` is a runtime-only (per-session) counter, not
-    // persisted; the workspace state references exactly one project.
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.next_project_id, 1);
-    });
-    assert_eq!(workspace_state.project_ids.len(), 1);
-    assert_eq!(project_states.len(), 1);
 }
 
 // ---- Group CRUD ----

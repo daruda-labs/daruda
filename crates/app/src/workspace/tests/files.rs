@@ -61,21 +61,17 @@ fn child_id_by_name(
 // ---------------- Integration ----------------
 
 #[gpui::test]
-async fn ensure_file_tree_loads_root_children(cx: &mut TestAppContext) {
+async fn file_tree_loads_root_and_lazy_children(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| {
-        let id = ws.active_ref();
         ws.ensure_file_tree(id, cx);
     });
     // Snapshot before the root scan returns.
-    let v1: Arc<_> = ws.update(cx, |ws, _cx| {
-        let id = ws.active_ref();
-        ws.cached_or_rebuild_visible(id)
-    });
+    let v1: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(id));
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        let id = ws.active_ref();
         let tree = ws.file_tree.file_trees.get(&id).expect("tree");
         let names: Vec<&str> = tree
             .child_entries(tree.root_id)
@@ -96,14 +92,6 @@ async fn ensure_file_tree_loads_root_children(cx: &mut TestAppContext) {
         // Sort puts dirs first ("sub"), then alpha files.
         assert_eq!(names, vec!["sub", "a.txt", "b.txt"]);
     });
-}
-
-#[gpui::test]
-async fn toggle_dir_lazy_loads_children(cx: &mut TestAppContext) {
-    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_ref());
-    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
-    cx.run_until_parked();
 
     // `sub` has no children loaded yet (UnloadedDir).
     let sub_id = child_id_by_name(&ws, cx, "sub");
@@ -278,7 +266,9 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
 // ---------------- watcher / dirty flag ----------------
 
 #[gpui::test]
-async fn watcher_event_creates_entry_and_invalidates_cache(cx: &mut TestAppContext) {
+async fn watcher_event_updates_tree_invalidates_cache_and_collapses_git_refresh(
+    cx: &mut TestAppContext,
+) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
     let id = ws.read_with(cx, |ws, _| ws.active_ref());
     let repo = ws.read_with(cx, |ws, _| ws.active_lanes()[0].path.clone());
@@ -327,6 +317,24 @@ async fn watcher_event_creates_entry_and_invalidates_cache(cx: &mut TestAppConte
         !Arc::ptr_eq(&v1, &v2),
         "watcher-driven reload must invalidate the visible cache"
     );
+
+    // The watcher path above already switches the lane to Git and proves a
+    // refresh is kicked. Also keep the concurrent-refresh guard covered here
+    // instead of paying for another workspace fixture.
+    ws.update(cx, |ws, cx| {
+        let target = ws.active_ref();
+        ws.refresh_git_status(target, cx);
+        ws.refresh_git_status(target, cx);
+        ws.refresh_git_status(target, cx);
+        assert!(ws.git_status_in_flight.contains(&target));
+        assert!(ws.git_status_pending_repeat.contains(&target));
+    });
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        let target = ws.active_ref();
+        assert!(!ws.git_status_in_flight.contains(&target));
+        assert!(!ws.git_status_pending_repeat.contains(&target));
+    });
 }
 
 #[gpui::test]
@@ -412,45 +420,6 @@ async fn inactive_lane_event_marks_dirty_then_replays_on_activation(cx: &mut Tes
     });
     // Hold temp2 alive until here so the FS reads above succeed.
     drop(temp2);
-}
-
-#[gpui::test]
-async fn refresh_git_status_collapses_concurrent_calls(cx: &mut TestAppContext) {
-    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let _id = ws.read_with(cx, |ws, _| ws.active_ref());
-    // Default lane (non-git) → refresh_git_status returns
-    // before touching the in-flight guard. Switch the lane's
-    // kind so the guard path actually runs.
-    let repo = ws.read_with(cx, |ws, _| ws.active_lanes()[0].path.clone());
-    ws.update(cx, |ws, _| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes[0].kind = daruda_store::project::LaneKind::Git {
-                branch: Some("main".into()),
-                repo_root: repo.clone(),
-                worktree_root: repo,
-            };
-        }
-    });
-
-    // First call enters the guard. Second + third calls during
-    // the same update cycle hit the "already in flight" branch
-    // and request a single repeat.
-    ws.update(cx, |ws, cx| {
-        let target = ws.active_ref();
-        ws.refresh_git_status(target, cx);
-        ws.refresh_git_status(target, cx);
-        ws.refresh_git_status(target, cx);
-        assert!(ws.git_status_in_flight.contains(&target));
-        assert!(ws.git_status_pending_repeat.contains(&target));
-    });
-    cx.run_until_parked();
-    // After the in-flight task completes, the repeat fires and
-    // also completes — both flags settle to clear.
-    ws.read_with(cx, |ws, _| {
-        let target = ws.active_ref();
-        assert!(!ws.git_status_in_flight.contains(&target));
-        assert!(!ws.git_status_pending_repeat.contains(&target));
-    });
 }
 
 // ---------------- hidden toggle + Alt+ collapse ----------------
