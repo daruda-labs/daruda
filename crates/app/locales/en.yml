@@ -264,7 +264,6 @@ agent_chat:
   tool_exit_signal: "Signal %{signal}"
   subagent_label: "Subagent"
   subagent_label_typed: "Subagent: %{kind}"
-  subagent_instructions_label: "Instructions"
   subagent_type_chip: "Type: %{kind}"
   permission_title: "Permission required"
   permission_resolved_prefix: "Selected:"

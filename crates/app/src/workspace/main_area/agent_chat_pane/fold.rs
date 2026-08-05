@@ -27,12 +27,6 @@ pub(in crate::workspace) enum FoldKey {
     ToolRawInput(String),
     /// Subagent-launch tool call; distinct so it can default collapsed.
     Subagent(String),
-    /// A subagent-launch tool call's "Instructions" disclosure (prompt +
-    /// dispatch metadata), keyed by tool-call id. Distinct from
-    /// [`FoldKey::ToolRawInput`] — that generic JSON-dump disclosure never
-    /// renders for a subagent launch (see `renders_raw_input`), this one does
-    /// instead.
-    ToolSubagentInstructions(String),
     /// A consecutive tool-call group, keyed by the group's first tool-call id.
     ToolGroup(String),
     /// An agent response (the run of agent items under a user message), keyed by
@@ -61,9 +55,7 @@ impl FoldKey {
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
             // Raw JSON and nested subagent activity are bulky; keep them
             // collapsed even while active unless the user expands them.
-            FoldKey::ToolRawInput(_)
-            | FoldKey::Subagent(_)
-            | FoldKey::ToolSubagentInstructions(_) => FoldPolicy::DefaultCollapsed,
+            FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => FoldPolicy::DefaultCollapsed,
         }
     }
 }
@@ -154,13 +146,6 @@ mod tests {
         let state = FoldState::default();
         assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), true));
         assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), false));
-    }
-
-    #[test]
-    fn tool_subagent_instructions_is_collapsed_by_default() {
-        let state = FoldState::default();
-        assert!(!state.is_expanded(&FoldKey::ToolSubagentInstructions("call-1".into()), true));
-        assert!(!state.is_expanded(&FoldKey::ToolSubagentInstructions("call-1".into()), false));
     }
 
     #[test]

@@ -412,6 +412,7 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::super::view::tests::make_test_view;
+    use super::mermaid_key;
 
     const KEY: &str = "call_1#0";
 
@@ -594,6 +595,48 @@ mod tests {
                     && v.assets.diff_stats.is_empty()
                     && v.assets.diff_editor_sources.is_empty(),
                 "a tool call that left `items` must not leak its diff entries"
+            );
+        });
+    }
+
+    /// A mermaid fence inside a subagent-launch's `prompt` (rendered as
+    /// markdown in the "Instructions" section, `render/tool.rs`) must be
+    /// scanned the same as one in assistant text or tool output — proven
+    /// end-to-end through the real reconciler, not just the pure
+    /// `chat_item_mermaid_texts` helper it calls. Checked via
+    /// `mermaid_inflight` (set synchronously, before the background
+    /// rasterization task is even spawned) rather than `mermaid_images`, so
+    /// the test doesn't depend on the real rasterizer completing.
+    #[gpui::test]
+    fn reconcile_mermaid_scans_a_subagent_prompt(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        let source = "flowchart TD\n  A-->B";
+        view.update(cx, |v, cx| {
+            v.items = vec![ChatItem::ToolCall(ToolCallItem {
+                id: "call_1".to_string(),
+                title: "Implement Task 2".to_string(),
+                kind: ToolKindView::Think,
+                tool_name: None,
+                status: ToolStatusView::InProgress,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: Some(serde_json::json!({
+                    "subagent_type": "general-purpose",
+                    "prompt": format!("Draw it:\n```mermaid\n{source}\n```"),
+                })),
+                parent_tool_id: None,
+                exit: None,
+            })];
+            v.reconcile_mermaid(false, cx);
+        });
+
+        let key = mermaid_key(source, false);
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.mermaid_inflight.contains(&key),
+                "the prompt's mermaid fence must be picked up for rasterization"
             );
         });
     }

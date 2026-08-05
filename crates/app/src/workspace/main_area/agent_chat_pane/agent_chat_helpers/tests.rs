@@ -518,6 +518,33 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
     );
 }
 
+/// A subagent-launch `prompt` is scanned too — it's the text the "Instructions"
+/// section renders as markdown, so a mermaid fence there must be rasterized by
+/// the same reconcile pass, not just handed a `code_block_render` hook that
+/// then finds nothing in the cache.
+#[test]
+fn chat_item_mermaid_texts_includes_subagent_prompt() {
+    let tc = daruda_acp::ToolCallItem {
+        id: "t1".into(),
+        title: "Implement Task 2".into(),
+        kind: daruda_acp::ToolKindView::Think,
+        tool_name: None,
+        status: daruda_acp::ToolStatusView::InProgress,
+        diffs: Vec::new(),
+        output: Vec::new(),
+        raw_input: Some(serde_json::json!({
+            "subagent_type": "general-purpose",
+            "prompt": "Draw the flow:\n```mermaid\nflowchart TD\n  A-->B\n```",
+        })),
+        parent_tool_id: None,
+        exit: None,
+    };
+    let item = daruda_acp::ChatItem::ToolCall(tc);
+    let texts = chat_item_mermaid_texts(&item);
+    assert_eq!(texts.len(), 1);
+    assert!(texts[0].contains("flowchart"));
+}
+
 #[test]
 fn mermaid_sources_extract_closed_multiple_unterminated_and_non_mermaid_cases() {
     // A single closed mermaid fence yields its verbatim body.
@@ -700,9 +727,11 @@ fn raw_input_disclosure_gate_and_fold_coverage() {
 }
 
 /// `renders_subagent_instructions` is the single gate shared by the renderer
-/// and `collect_foldable_keys`; a subagent launch (a `prompt` field present)
-/// gets the purpose-built "Instructions" disclosure instead of the generic
-/// raw-input JSON dump, so the two gates must be mutually exclusive.
+/// and `renders_raw_input`; a subagent launch (a `prompt` field present) gets
+/// the purpose-built, always-visible "Instructions" section instead of the
+/// generic raw-input JSON dump, so the two gates must be mutually exclusive.
+/// Unlike `ToolRawInput`, "Instructions" has no fold key of its own — it isn't
+/// a disclosure — so `collect_foldable_keys` must not contribute one for it.
 #[test]
 fn subagent_instructions_gate_excludes_generic_raw_input() {
     use daruda_acp::{ChatItem, ToolKindView, ToolStatusView};
@@ -726,7 +755,6 @@ fn subagent_instructions_gate_excludes_generic_raw_input() {
     assert!(renders_subagent_instructions(&subagent));
     assert!(!renders_raw_input(&subagent));
     let keys = collect_foldable_keys(&[ChatItem::ToolCall(subagent.clone())]);
-    assert!(keys.contains(&FoldKey::ToolSubagentInstructions("c1".to_owned())));
     assert!(!keys.iter().any(|k| matches!(k, FoldKey::ToolRawInput(_))));
 
     // A `Task`-shaped call without a `prompt` field falls back to the generic
@@ -737,6 +765,48 @@ fn subagent_instructions_gate_excludes_generic_raw_input() {
     };
     assert!(!renders_subagent_instructions(&no_prompt));
     assert!(renders_raw_input(&no_prompt));
+}
+
+/// A live subagent launch's `output` echoes the same `prompt` the always-on
+/// "Instructions" section already shows (see `fold_output`'s replace
+/// semantics), so the generic `Output` section must stay suppressed while it
+/// runs — and reappear once it settles into the subagent's real result.
+#[test]
+fn suppresses_live_subagent_output_only_while_the_launch_is_live() {
+    use daruda_acp::{ToolKindView, ToolOutputBlock, ToolStatusView};
+    let subagent = ToolCallItem {
+        id: "c1".to_owned(),
+        title: "Implement Task 2".to_owned(),
+        kind: ToolKindView::Think,
+        tool_name: None,
+        status: ToolStatusView::InProgress,
+        diffs: Vec::new(),
+        output: vec![ToolOutputBlock::Text {
+            text: "Full instructions…".to_owned(),
+            truncated_from: None,
+        }],
+        raw_input: Some(serde_json::json!({ "prompt": "Full instructions…" })),
+        parent_tool_id: None,
+        exit: None,
+    };
+    assert!(suppresses_live_subagent_output(&subagent));
+
+    let completed = ToolCallItem {
+        status: ToolStatusView::Completed,
+        output: vec![ToolOutputBlock::Text {
+            text: "Done: the result.".to_owned(),
+            truncated_from: None,
+        }],
+        ..subagent.clone()
+    };
+    assert!(!suppresses_live_subagent_output(&completed));
+
+    // A plain (non-subagent) live tool call is never suppressed.
+    let plain = ToolCallItem {
+        raw_input: None,
+        ..subagent
+    };
+    assert!(!suppresses_live_subagent_output(&plain));
 }
 
 #[test]

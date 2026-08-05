@@ -110,13 +110,12 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
                     keys.push(FoldKey::Diff(diff_editor_key(&tc.id, di)));
                 }
                 // Mirror the renderer's raw-input gate (generic tool, no diffs,
-                // has args) so expand/collapse-all covers the disclosure.
+                // has args) so expand/collapse-all covers the disclosure. The
+                // "Instructions" section (`renders_subagent_instructions`) has
+                // no fold key of its own — it is always visible once shown, not
+                // a disclosure — so it contributes nothing here.
                 if renders_raw_input(tc) {
                     keys.push(FoldKey::ToolRawInput(tc.id.clone()));
-                }
-                // Mirror the renderer's subagent-instructions gate likewise.
-                if renders_subagent_instructions(tc) {
-                    keys.push(FoldKey::ToolSubagentInstructions(tc.id.clone()));
                 }
             }
             daruda_acp::ChatItem::UserText(_)
@@ -131,9 +130,9 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
 /// tool (not a terminal `Execute`, whose command is already the title) that
 /// carries args and has no diffs (an edit shows the diff instead). A subagent
 /// launch is excluded too — it gets its own, purpose-built
-/// [`renders_subagent_instructions`] disclosure instead of the generic JSON
-/// dump. Single source shared by the renderer and [`collect_foldable_keys`], so
-/// the fold coverage matches what is actually on screen.
+/// [`renders_subagent_instructions`] section instead of the generic JSON dump.
+/// Single source shared by the renderer and [`collect_foldable_keys`], so the
+/// fold coverage matches what is actually on screen.
 pub(in crate::workspace) fn renders_raw_input(tc: &daruda_acp::ToolCallItem) -> bool {
     tc.raw_input.is_some()
         && tc.diffs.is_empty()
@@ -141,15 +140,28 @@ pub(in crate::workspace) fn renders_raw_input(tc: &daruda_acp::ToolCallItem) -> 
         && !renders_subagent_instructions(tc)
 }
 
-/// Whether a tool card renders its "Instructions" disclosure: the prompt
-/// handed to a spawned subagent, plus its dispatch metadata (type,
-/// background), formatted for a human rather than dumped as raw JSON. Gated on
-/// the prompt actually being present — a `Task`-shaped call that is missing it
-/// falls back to the generic [`renders_raw_input`] disclosure so its args are
-/// still reachable. Single source shared by the renderer and
-/// [`collect_foldable_keys`].
+/// Whether a tool card renders its "Instructions" section: the prompt handed
+/// to a spawned subagent, plus its dispatch metadata (type, background),
+/// formatted for a human rather than dumped as raw JSON. Always visible (no
+/// fold) once shown — the prompt is the spec the subagent's work is judged
+/// against, so hiding it behind a click undersells it. Gated on the prompt
+/// actually being present — a `Task`-shaped call that is missing it falls back
+/// to the generic [`renders_raw_input`] disclosure so its args are still
+/// reachable. Single source shared by the renderer and this module's other
+/// subagent-aware gates.
 pub(in crate::workspace) fn renders_subagent_instructions(tc: &daruda_acp::ToolCallItem) -> bool {
     tc.subagent_prompt().is_some()
+}
+
+/// Whether a tool card's generic `Output` section must stay hidden because it
+/// would just repeat the "Instructions" section above it: a subagent launch
+/// that is still live echoes its own `prompt` back as `output` (the adapter's
+/// content-block content), and that channel is only overwritten with the
+/// subagent's actual result once the call settles (`fold_output`'s replace
+/// semantics — see [`daruda_acp::ToolCallItem::subagent_prompt`]'s doc). Once
+/// settled, `output` holds the distinct result summary and renders normally.
+pub(in crate::workspace) fn suppresses_live_subagent_output(tc: &daruda_acp::ToolCallItem) -> bool {
+    tc.is_subagent_launch() && tc.status.is_live()
 }
 
 /// Cache key for a tool call's `di`-th diff editor: one editor per file. Shared
@@ -338,12 +350,17 @@ pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
 }
 
 /// Every markdown body of a chat item that can carry a ```mermaid fence —
-/// assistant / thinking / user text, plus each `Text` output block of a tool
-/// call (a tool that reads or writes a .md file streams fences there).
-/// Permission / error items carry none. A `RawText` block is excluded on
-/// purpose — it is verbatim shell output, not a markdown body, so a fence-shaped
-/// run of characters a command printed must not become a diagram. Drives the
-/// mermaid scan.
+/// assistant / thinking / user text, each `Text` output block of a tool call
+/// (a tool that reads or writes a .md file streams fences there), and a
+/// subagent launch's `prompt` (rendered as markdown in the "Instructions"
+/// section — see `renders_subagent_instructions`). Permission / error items
+/// carry none. A `RawText` block is excluded on purpose — it is verbatim shell
+/// output, not a markdown body, so a fence-shaped run of characters a command
+/// printed must not become a diagram. Drives the mermaid scan
+/// (`AgentChatView::reconcile_mermaid`) that rasterizes a fence *before* the
+/// render hook (`mermaid_code_block_render`) can show it — a text source
+/// missing here never gets its diagram cached, no matter how the renderer is
+/// wired.
 pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> {
     match item {
         daruda_acp::ChatItem::AssistantText { text, .. }
@@ -358,6 +375,7 @@ pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem)
                 daruda_acp::ToolOutputBlock::Text { text, .. } => Some(text.as_str()),
                 _ => None,
             })
+            .chain(tc.subagent_prompt())
             .collect(),
         daruda_acp::ChatItem::Permission(_) | daruda_acp::ChatItem::Error(_) => Vec::new(),
     }
@@ -643,13 +661,9 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
                     .any(is_active)
             })
             .unwrap_or(false),
-        // Diff (DefaultExpanded), raw-input, subagent, and subagent-instructions
-        // (DefaultCollapsed) all ignore `active` in their policy, so the value is
-        // irrelevant here.
-        FoldKey::Diff(_)
-        | FoldKey::ToolRawInput(_)
-        | FoldKey::Subagent(_)
-        | FoldKey::ToolSubagentInstructions(_) => false,
+        // Diff (DefaultExpanded), raw-input and subagent (DefaultCollapsed) all
+        // ignore `active` in their policy, so the value is irrelevant here.
+        FoldKey::Diff(_) | FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => false,
     }
 }
 
@@ -686,10 +700,9 @@ fn top_level_tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> O
 /// The `self.rows` index a fold toggle on `key` must remeasure so its stale
 /// cached row height doesn't clip/overlap neighboring rows. `Assistant` /
 /// `Thinking` are their own row, keyed directly by item index. `Tool` /
-/// `Subagent` / `ToolRawInput` / `ToolSubagentInstructions` / `Diff` (keyed by
-/// tool-call id, `Diff` as `"{tool_id}#{diff_index}"`) only ever change *their
-/// owning row's* rendered height in place — never a `RenderRow::hidden` flip
-/// anywhere — so
+/// `Subagent` / `ToolRawInput` / `Diff` (keyed by tool-call id, `Diff` as
+/// `"{tool_id}#{diff_index}"`) only ever change *their owning row's* rendered
+/// height in place — never a `RenderRow::hidden` flip anywhere — so
 /// `rebuild_rows`'s hidden-range diff can't see them and falls back to
 /// remeasuring the tail, leaving a stale height on whichever row actually
 /// changed (the diff-collapse clipping bug). `Response` / `ToolGroup`
@@ -701,10 +714,9 @@ pub(in crate::workspace) fn fold_key_item_index(
 ) -> Option<usize> {
     match key {
         FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
-        FoldKey::Tool(id)
-        | FoldKey::Subagent(id)
-        | FoldKey::ToolRawInput(id)
-        | FoldKey::ToolSubagentInstructions(id) => top_level_tool_item_index(items, id),
+        FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::ToolRawInput(id) => {
+            top_level_tool_item_index(items, id)
+        }
         FoldKey::Diff(diff_key) => {
             let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
             top_level_tool_item_index(items, tool_id)
