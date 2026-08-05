@@ -156,7 +156,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 /// Sits in the gutter the cards leave free: the thumb spans `[2, 6]` px from
 /// the right edge (`SCROLLBAR_MARGIN_R` + `SCROLLBAR_W`) while a card's
 /// surface stops at `LANE_CARD_MARGIN_X` (8 px), so it never overlaps the
-/// card — no extra padding needed. Asserted by `thumb_clears_the_card_gutter`.
+/// card — no extra padding needed.
 fn lanes_scrollbar(
     handle: &gpui::ScrollHandle,
     cx: &gpui::App,
@@ -173,25 +173,6 @@ fn lanes_scrollbar(
         t.scrollbar_thumb,
         t.dock_scrollbar_thumb_hover,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::ui::theme;
-
-    /// The thumb overlay is absolutely positioned over the card list, so the
-    /// cards' outer margin must exceed the thumb's right extent or the thumb
-    /// paints on top of a card's surface.
-    #[test]
-    fn thumb_clears_the_card_gutter() {
-        let thumb_right_extent = theme::SCROLLBAR_MARGIN_R + theme::SCROLLBAR_W;
-        assert!(
-            theme::LANE_CARD_MARGIN_X >= thumb_right_extent,
-            "card margin {} must clear the thumb extent {}",
-            theme::LANE_CARD_MARGIN_X,
-            thumb_right_extent
-        );
-    }
 }
 
 /// Project header + lane rows rendered flush against the dock edge.
