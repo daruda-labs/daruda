@@ -432,6 +432,7 @@ fn upsert_tool_call(
         exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
     };
     classify_source_output(&mut item);
+    strip_redundant_edit_output(&mut item);
     let dropped = unreported_terminal && lost_output(&item);
     match find_tool_call(items, &id) {
         Some(existing) => *existing = item,
@@ -463,6 +464,20 @@ fn classify_source_output(item: &mut ToolCallItem) {
     };
     for block in &mut item.output {
         crate::output_highlight::retype_as_source(block, language);
+    }
+}
+
+/// Drop a *successful* edit's textual output. On completion an Edit/Write call
+/// carries nothing beyond what the diff and the "Done" badge already say:
+/// claude-agent-acp's only channel there is a self-referential `raw_output`
+/// confirmation meant for the model's own context (e.g. "...no need to Read it
+/// back"), and codex-acp reports none at all. A failed edit is left untouched —
+/// that status's `output` carries the real rejection/error text via `content`,
+/// which has no diff-shaped substitute. Idempotent, so safe to run after every
+/// insert or update.
+fn strip_redundant_edit_output(item: &mut ToolCallItem) {
+    if item.kind == ToolKindView::Edit && item.status == ToolStatusView::Completed {
+        item.output.clear();
     }
 }
 
@@ -517,6 +532,7 @@ fn apply_tool_call_update(
     // Run last: kind / raw_input (source of the language) and output text are
     // both current by now, and the retype is idempotent.
     classify_source_output(item);
+    strip_redundant_edit_output(item);
     unreported_terminal && lost_output(item)
 }
 
@@ -1078,6 +1094,76 @@ mod tests {
                 code: Some(0),
                 signal: None
             })
+        );
+    }
+
+    #[test]
+    fn successful_edit_drops_raw_output_confirmation() {
+        // Mirrors a captured claude-agent-acp wire session: the initial insert
+        // carries only the diff, and completion carries no `content` at all —
+        // just a self-referential `rawOutput` confirmation string with nothing
+        // the diff and the "Done" badge don't already say.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "Edit /tmp/x.txt")
+                    .kind(ToolKind::Edit)
+                    .content(vec![ToolCallContent::Diff(Diff::new("/tmp/x.txt", "hi\n"))]),
+            ),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .raw_output(serde_json::json!(
+                        "The file /tmp/x.txt has been updated successfully. \
+                         (file state is current in your context — no need to Read it back)"
+                    )),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert!(tc.output.is_empty());
+        assert_eq!(tc.diffs.len(), 1);
+    }
+
+    #[test]
+    fn failed_edit_keeps_its_error_output() {
+        // A rejected/failed edit reports the real reason via `content`, which
+        // has no diff-shaped substitute — must survive the success-only strip.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "Edit /tmp/x.txt")
+                    .kind(ToolKind::Edit)
+                    .content(vec![ToolCallContent::Diff(Diff::new("/tmp/x.txt", "hi\n"))]),
+            ),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Failed)
+                    .content(vec![ToolCallContent::Content(Content::new(
+                        ContentBlock::Text(TextContent::new("The user rejected this edit.")),
+                    ))]),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Text {
+                text: "The user rejected this edit.".to_string(),
+                truncated_from: None,
+            }]
         );
     }
 
