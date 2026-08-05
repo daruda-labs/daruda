@@ -264,6 +264,8 @@ agent_chat:
   tool_exit_signal: "시그널 %{signal}"
   subagent_label: "서브에이전트"
   subagent_label_typed: "서브에이전트: %{kind}"
+  subagent_instructions_label: "지시사항"
+  subagent_type_chip: "유형: %{kind}"
   permission_title: "권한 필요"
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."

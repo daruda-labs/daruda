@@ -1287,6 +1287,19 @@ pub fn agent_chat_subagent_label_typed(kind: &str) -> String {
     rust_i18n::t!("agent_chat.subagent_label_typed", kind = kind).into_owned()
 }
 
+/// Disclosure label for a subagent launch's "Instructions" section (the full
+/// task spec it was dispatched with), distinct from the generic
+/// [`agent_chat_raw_input_label`] JSON dump.
+pub fn agent_chat_subagent_instructions_label() -> String {
+    rust_i18n::t!("agent_chat.subagent_instructions_label").into_owned()
+}
+
+/// Metadata chip inside a subagent's "Instructions" section naming its type,
+/// e.g. "Type: general-purpose".
+pub fn agent_chat_subagent_type_chip(kind: &str) -> String {
+    rust_i18n::t!("agent_chat.subagent_type_chip", kind = kind).into_owned()
+}
+
 /// Pinned working-footer label while the agent is generating a response.
 pub fn agent_chat_working() -> String {
     rust_i18n::t!("agent_chat.working").into_owned()

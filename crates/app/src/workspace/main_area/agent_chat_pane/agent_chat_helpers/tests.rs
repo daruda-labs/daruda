@@ -10,20 +10,14 @@ fn asst(text: &str) -> ChatItem {
 }
 
 #[test]
-fn has_conversation_is_false_for_an_empty_pane() {
+fn has_conversation_distinguishes_empty_error_only_and_real_transcript() {
     assert!(!has_conversation(&[]));
-}
 
-#[test]
-fn has_conversation_ignores_error_only_content() {
     // The pane that hit a usage limit holds nothing but the notice — the
     // switch that follows has no transcript to protect.
     let items = [ChatItem::Error("session limit reached".to_owned())];
     assert!(!has_conversation(&items));
-}
 
-#[test]
-fn has_conversation_counts_any_real_transcript_item() {
     for item in [
         ChatItem::UserText("hi".to_owned()),
         asst("hello"),
@@ -37,16 +31,13 @@ fn has_conversation_counts_any_real_transcript_item() {
 }
 
 #[test]
-fn activity_bar_title_prefers_the_session_title() {
+fn activity_bar_title_prefers_session_title_then_prompt_preview() {
     let items = [ChatItem::UserText("run the tests".to_owned())];
     assert_eq!(
         activity_bar_title(Some("Refactor fold state"), &items).as_deref(),
         Some("Refactor fold state")
     );
-}
 
-#[test]
-fn activity_bar_title_falls_back_to_first_user_prompt() {
     // No session title yet (pre first turn-end): the first prompt stands in.
     let items = [
         ChatItem::UserText("  fix the   parser  ".to_owned()),
@@ -57,19 +48,26 @@ fn activity_bar_title_falls_back_to_first_user_prompt() {
         activity_bar_title(None, &items).as_deref(),
         Some("fix the parser")
     );
-}
 
-#[test]
-fn activity_bar_title_ignores_blank_session_title_and_falls_back() {
     let items = [ChatItem::UserText("hello".to_owned())];
     assert_eq!(
         activity_bar_title(Some("   "), &items).as_deref(),
         Some("hello")
     );
+
+    // Neither a session title nor a user prompt → blank bar (no placeholder).
+    assert_eq!(activity_bar_title(None, &[]), None);
+    // Non-user leading items don't seed a title.
+    assert_eq!(activity_bar_title(None, &[asst("greeting")]), None);
+    // A whitespace-only prompt yields nothing.
+    assert_eq!(
+        activity_bar_title(None, &[ChatItem::UserText("   ".to_owned())]),
+        None
+    );
 }
 
 #[test]
-fn summary_preview_line_flattens_inline_markdown() {
+fn summary_preview_line_flattens_inline_markdown_and_blanks() {
     // Bold one-liner (the common reasoning-block opener) reads as prose.
     assert_eq!(
         summary_preview_line("**Planning the change** and more").as_deref(),
@@ -90,39 +88,19 @@ fn summary_preview_line_flattens_inline_markdown() {
         summary_preview_line("- first item\n- second").as_deref(),
         Some("first item")
     );
-}
-
-#[test]
-fn summary_preview_line_is_none_when_empty() {
     assert_eq!(summary_preview_line(""), None);
     assert_eq!(summary_preview_line("   \n\t\n"), None);
 }
 
 #[test]
-fn activity_bar_title_is_none_for_an_empty_session() {
-    // Neither a session title nor a user prompt → blank bar (no placeholder).
-    assert_eq!(activity_bar_title(None, &[]), None);
-    // Non-user leading items don't seed a title.
-    assert_eq!(activity_bar_title(None, &[asst("greeting")]), None);
-    // A whitespace-only prompt yields nothing.
-    assert_eq!(
-        activity_bar_title(None, &[ChatItem::UserText("   ".to_owned())]),
-        None
-    );
-}
+fn normalize_prompt_title_keeps_short_and_truncates_long_on_char_boundary() {
+    assert_eq!(normalize_prompt_title("short one"), "short one");
 
-#[test]
-fn normalize_prompt_title_truncates_long_prompts_on_a_char_boundary() {
     let long = "가".repeat(100);
     let title = normalize_prompt_title(&long);
     // 69 kept glyphs + the ellipsis (never a split multibyte char).
     assert_eq!(title.chars().count(), FALLBACK_TITLE_HEAD + 1);
     assert!(title.ends_with('…'));
-}
-
-#[test]
-fn normalize_prompt_title_keeps_short_prompts_verbatim() {
-    assert_eq!(normalize_prompt_title("short one"), "short one");
 }
 
 fn modes(ids: &[&str], current: &str) -> ModeStateView {
@@ -140,7 +118,7 @@ fn modes(ids: &[&str], current: &str) -> ModeStateView {
 }
 
 #[test]
-fn next_mode_id_wraps_through_advertised_order() {
+fn next_mode_id_handles_cycle_edge_and_stale_current() {
     let m = modes(&["default", "acceptEdits", "bypassPermissions"], "default");
     assert_eq!(next_mode_id(&m).as_deref(), Some("acceptEdits"));
     let m = modes(
@@ -154,17 +132,11 @@ fn next_mode_id_wraps_through_advertised_order() {
         "bypassPermissions",
     );
     assert_eq!(next_mode_id(&m).as_deref(), Some("default"));
-}
 
-#[test]
-fn next_mode_id_none_when_not_cyclable() {
     // Zero or one advertised mode → nothing to cycle.
     assert_eq!(next_mode_id(&modes(&[], "")), None);
     assert_eq!(next_mode_id(&modes(&["default"], "default")), None);
-}
 
-#[test]
-fn next_mode_id_starts_from_first_when_current_unknown() {
     let m = modes(&["default", "acceptEdits"], "stale-id");
     assert_eq!(next_mode_id(&m).as_deref(), Some("acceptEdits"));
 }
@@ -238,35 +210,16 @@ fn diff_view_model_builds_rows_and_decorations() {
     );
 }
 
-/// A newly created file (`old_text == None`) diffs against an empty old
-/// side — every line is an addition, so the model is built (non-empty).
+/// Diff model creation covers created files, unchanged input, and the gutter
+/// policy for creation-vs-edit snippets.
 #[test]
-fn diff_view_model_handles_created_file() {
-    let d = diff(None, "line one\nline two\n", "new.txt");
-    let (m, _) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
-        .expect("a created file produces an all-added hunk");
-    assert!(m.text.contains("line one"));
-    assert!(m.text.contains("line two"));
-}
-
-/// Identical sides yield no hunks, so the adapter returns `None` and the
-/// caller keeps the inline fallback.
-#[test]
-fn diff_view_model_none_when_unchanged() {
-    let d = diff(Some("same\n"), "same\n", "same.txt");
-    assert!(build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors()).is_none());
-}
-
-/// A file creation (`old_text == None`) keeps its gutter line numbers —
-/// they are the real file lines (1..N). An edit (`old_text == Some`) sends
-/// only the replaced snippet, so its numbers would be relative to the
-/// snippet, not the file; the gutter is blanked for it.
-#[test]
-fn line_numbers_shown_for_creation_hidden_for_edit_snippet() {
+fn diff_view_model_handles_created_unchanged_and_line_number_policy() {
     // Creation: gutter carries a non-empty number for the added line.
     let created = diff(None, "line one\nline two\n", "new.txt");
     let (m, _) = build_diff_view_model(&created, TEST_SYNTAX_THEME, false, &diff_colors())
         .expect("a created file produces hunks");
+    assert!(m.text.contains("line one"));
+    assert!(m.text.contains("line two"));
     assert!(
         m.decorations
             .iter()
@@ -284,12 +237,18 @@ fn line_numbers_shown_for_creation_hidden_for_edit_snippet() {
             .all(|d| d.gutter.as_deref() == Some("")),
         "an edit snippet blanks every gutter"
     );
+
+    // Identical sides yield no hunks, so the adapter returns `None` and the
+    // caller keeps the inline fallback.
+    let unchanged = diff(Some("same\n"), "same\n", "same.txt");
+    assert!(build_diff_view_model(&unchanged, TEST_SYNTAX_THEME, false, &diff_colors()).is_none());
 }
 
-/// A simple one-line modification must report the *changed* line on each
-/// side — `added = 1, removed = 1` — not the file's total line counts.
+/// Diff stats cover modified, created, deleted, and unchanged inputs.
 #[test]
-fn diff_stat_counts_changed_lines_not_totals() {
+fn diff_stats_cover_modified_created_deleted_and_empty_hunks() {
+    // A simple one-line modification must report the changed line on each side,
+    // not the file's total line counts.
     let d = diff(
         Some("fn a() {}\nlet x = 1;\nfn b() {}\n"),
         "fn a() {}\nlet y = 2;\nfn b() {}\n",
@@ -304,12 +263,9 @@ fn diff_stat_counts_changed_lines_not_totals() {
             removed: 1
         }
     );
-}
 
-/// A newly created file (`old_text == None`) diffs against an empty old
-/// side, so every line is an addition: `added = N, removed = 0`.
-#[test]
-fn diff_stat_new_file_is_all_added() {
+    // A newly created file diffs against an empty old side, so every line is an
+    // addition.
     let d = diff(None, "line one\nline two\nline three\n", "new.txt");
     let (_, stat) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
         .expect("a created file produces an all-added hunk");
@@ -320,12 +276,8 @@ fn diff_stat_new_file_is_all_added() {
             removed: 0
         }
     );
-}
 
-/// A pure deletion — the new side drops every line of the old — reports
-/// `added = 0, removed = N`, the mirror of the all-added created-file case.
-#[test]
-fn diff_stat_deleted_lines_are_all_removed() {
+    // A pure deletion is the mirror of the all-added created-file case.
     let d = diff(Some("first\nsecond\n"), "", "old.rs");
     let (_, stat) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
         .expect("a fully-deleted file produces an all-removed hunk");
@@ -336,12 +288,8 @@ fn diff_stat_deleted_lines_are_all_removed() {
             removed: 2
         }
     );
-}
 
-/// Identical sides produce no hunks → no editor and no stat. This pins the
-/// pure tally directly on empty hunks for clarity.
-#[test]
-fn diff_stat_unchanged_is_zero() {
+    // Identical sides produce no hunks -> no editor and no stat.
     assert_eq!(diff_stat_from_hunks(&[]), DiffStat::default());
 }
 
@@ -429,6 +377,17 @@ fn tool_fold_key_routes_subagent_launch_to_subagent_variant() {
     let mut empty = tool_call("task-2", InProgress, 0);
     empty.raw_input = Some(serde_json::json!({ "subagent_type": "" }));
     assert_eq!(tool_fold_key(&empty), FoldKey::Tool("task-2".to_owned()));
+
+    // `prompt` alone (no `subagent_type`) still routes to `Subagent` — the two
+    // fields are checked together via `is_subagent_launch` so this classification
+    // can't drift out of step with `renders_subagent_instructions`, which is
+    // gated on `prompt` alone.
+    let mut prompt_only = tool_call("task-3", InProgress, 0);
+    prompt_only.raw_input = Some(serde_json::json!({ "prompt": "Do the thing." }));
+    assert_eq!(
+        tool_fold_key(&prompt_only),
+        FoldKey::Subagent("task-3".to_owned())
+    );
 }
 
 /// `is_active` is true while a block is streaming, or a tool call is live
@@ -559,36 +518,26 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
     );
 }
 
-/// A single closed mermaid fence yields its verbatim body.
 #[test]
-fn mermaid_sources_extracts_a_closed_fence() {
+fn mermaid_sources_extract_closed_multiple_unterminated_and_non_mermaid_cases() {
+    // A single closed mermaid fence yields its verbatim body.
     let text = "intro\n```mermaid\ngraph TD\nA-->B\n```\noutro";
     assert_eq!(mermaid_sources(text), vec!["graph TD\nA-->B".to_string()]);
-}
 
-/// Multiple closed fences are returned in document order.
-#[test]
-fn mermaid_sources_extracts_multiple_fences() {
+    // Multiple closed fences are returned in document order.
     let text = "```mermaid\nA\n```\nmid\n```mermaid\nB\n```";
     assert_eq!(
         mermaid_sources(text),
         vec!["A".to_string(), "B".to_string()]
     );
-}
 
-/// An unterminated trailing fence (still streaming) is skipped — only the
-/// already-closed fence before it is returned.
-#[test]
-fn mermaid_sources_skips_unterminated_trailing_fence() {
+    // An unterminated trailing fence (still streaming) is skipped.
     let text = "```mermaid\nA\n```\n```mermaid\nstill streaming";
     assert_eq!(mermaid_sources(text), vec!["A".to_string()]);
     // A lone unterminated fence yields nothing.
     assert!(mermaid_sources("```mermaid\ngraph TD").is_empty());
-}
 
-/// Non-mermaid fences (other languages, or none) are ignored.
-#[test]
-fn mermaid_sources_ignores_non_mermaid_fences() {
+    // Non-mermaid fences (other languages, or none) are ignored.
     let text = "```rust\nfn main() {}\n```\n```\nplain\n```";
     assert!(mermaid_sources(text).is_empty());
 }
@@ -750,27 +699,61 @@ fn raw_input_disclosure_gate_and_fold_coverage() {
     }));
 }
 
+/// `renders_subagent_instructions` is the single gate shared by the renderer
+/// and `collect_foldable_keys`; a subagent launch (a `prompt` field present)
+/// gets the purpose-built "Instructions" disclosure instead of the generic
+/// raw-input JSON dump, so the two gates must be mutually exclusive.
 #[test]
-fn rollup_of_run_is_ok_when_every_member_settled_successfully() {
+fn subagent_instructions_gate_excludes_generic_raw_input() {
+    use daruda_acp::{ChatItem, ToolKindView, ToolStatusView};
+    let subagent = ToolCallItem {
+        id: "c1".to_owned(),
+        title: "Implement Task 2".to_owned(),
+        kind: ToolKindView::Think,
+        tool_name: None,
+        status: ToolStatusView::InProgress,
+        diffs: Vec::new(),
+        output: Vec::new(),
+        raw_input: Some(serde_json::json!({
+            "description": "Implement Task 2",
+            "subagent_type": "general-purpose",
+            "run_in_background": false,
+            "prompt": "Full instructions…",
+        })),
+        parent_tool_id: None,
+        exit: None,
+    };
+    assert!(renders_subagent_instructions(&subagent));
+    assert!(!renders_raw_input(&subagent));
+    let keys = collect_foldable_keys(&[ChatItem::ToolCall(subagent.clone())]);
+    assert!(keys.contains(&FoldKey::ToolSubagentInstructions("c1".to_owned())));
+    assert!(!keys.iter().any(|k| matches!(k, FoldKey::ToolRawInput(_))));
+
+    // A `Task`-shaped call without a `prompt` field falls back to the generic
+    // disclosure so its args stay reachable.
+    let no_prompt = ToolCallItem {
+        raw_input: Some(serde_json::json!({ "subagent_type": "general-purpose" })),
+        ..subagent
+    };
+    assert!(!renders_subagent_instructions(&no_prompt));
+    assert!(renders_raw_input(&no_prompt));
+}
+
+#[test]
+fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
     let items = [
         ChatItem::UserText("go".to_owned()),
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Completed, 0)),
         asst("done"),
     ];
     assert_eq!(Rollup::of_run(&items, 1..3), Rollup::Ok);
-}
 
-#[test]
-fn rollup_of_run_lets_running_outrank_a_settled_failure() {
     let items = [
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
         ChatItem::ToolCall(tool_call("c2", daruda_acp::ToolStatusView::InProgress, 0)),
     ];
     assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Running);
-}
 
-#[test]
-fn rollup_of_run_reads_partial_when_output_accompanies_a_failure() {
     // Produced prose counts as success, so an answered turn that also hit a tool
     // failure warns rather than reading as a hard failure.
     let items = [
@@ -778,10 +761,7 @@ fn rollup_of_run_reads_partial_when_output_accompanies_a_failure() {
         asst("here is what I found anyway"),
     ];
     assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Partial);
-}
 
-#[test]
-fn rollup_of_run_is_failed_when_nothing_succeeded() {
     let items = [
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
         ChatItem::Error("boom".to_owned()),
@@ -789,10 +769,7 @@ fn rollup_of_run_is_failed_when_nothing_succeeded() {
         asst("   "),
     ];
     assert_eq!(Rollup::of_run(&items, 0..3), Rollup::Failed);
-}
 
-#[test]
-fn rollup_of_run_ignores_a_cancelled_member() {
     // Settled but neither success nor failure: the run stops pulsing without
     // turning the glyph red.
     let items = [ChatItem::ToolCall(tool_call(
@@ -801,20 +778,14 @@ fn rollup_of_run_ignores_a_cancelled_member() {
         0,
     ))];
     assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Ok);
-}
 
-#[test]
-fn rollup_of_run_streaming_prose_reads_running() {
     let items = [ChatItem::AssistantText {
         text: "thinking out loud".to_owned(),
         streaming: true,
         message_id: None,
     }];
     assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Running);
-}
 
-#[test]
-fn rollup_of_run_tolerates_an_out_of_bounds_range() {
     // A single-item run is addressed as `ix..ix + 1` by the top-level assistant
     // block, and group ranges come from a projection — neither should have to
     // clamp against `items.len()`.
@@ -824,7 +795,7 @@ fn rollup_of_run_tolerates_an_out_of_bounds_range() {
 }
 
 #[test]
-fn agent_run_ends_before_the_next_user_message() {
+fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
     let items = [
         ChatItem::UserText("q1".to_owned()),
         asst("a1"),
@@ -836,20 +807,14 @@ fn agent_run_ends_before_the_next_user_message() {
     assert_eq!(agent_run(&items, 1), 1..3);
     // The last turn runs to the end of the conversation.
     assert_eq!(agent_run(&items, 4), 4..5);
-}
 
-#[test]
-fn agent_run_is_empty_for_a_prompt_with_no_reply_yet() {
     // `anchor + 1 == items.len()` — the in-flight first turn. Must be an empty
     // range rather than a panic or an inverted one.
     let items = [ChatItem::UserText("q".to_owned())];
     let run = agent_run(&items, 1);
     assert!(run.is_empty(), "{run:?} should be empty");
     assert_eq!(run, 1..1);
-}
 
-#[test]
-fn agent_run_is_empty_when_a_user_message_follows_immediately() {
     // Two prompts back to back (a re-prompt before any output): the first turn's
     // run is empty, not the whole tail.
     let items = [
@@ -858,10 +823,7 @@ fn agent_run_is_empty_when_a_user_message_follows_immediately() {
         asst("a"),
     ];
     assert_eq!(agent_run(&items, 1), 1..1);
-}
 
-#[test]
-fn agent_run_clamps_a_start_past_the_end() {
     let items = [asst("only")];
     assert_eq!(agent_run(&items, 9), 1..1);
 }

@@ -21,7 +21,8 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    diff_editor_key, fold_active, renders_raw_input, tool_fold_key, tool_image_key,
+    diff_editor_key, fold_active, renders_raw_input, renders_subagent_instructions, tool_fold_key,
+    tool_image_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::output_editor::{
@@ -201,6 +202,97 @@ pub(super) fn tool_card(
                                 .text_size(font_size),
                             )
                             .into_any_element()
+                    },
+                )
+                .toggle_on_chevron()
+                .render(dim, cx),
+            );
+        }
+        if renders_subagent_instructions(tc)
+            && let Some(prompt) = tc.subagent_prompt()
+        {
+            // Purpose-built disclosure for a subagent launch: the prompt is the
+            // spec the subagent's work is judged against, and — unlike `output`,
+            // which a completion event overwrites with the subagent's own result
+            // summary — `raw_input` (and so `prompt`) survives for the card's
+            // whole lifetime. Kept out of the generic raw-input JSON dump
+            // (`renders_raw_input` excludes this case) so the instructions read
+            // as prose, not technical args sharing a section with
+            // `subagent_type`/`run_in_background`.
+            let instructions_key = FoldKey::ToolSubagentInstructions(tc.id.clone());
+            let instructions_expanded = fold.is_expanded(&instructions_key, false);
+            let instructions_header = FoldHeader::bare().leading(
+                div()
+                    .flex_none()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_size(font_size)
+                    .child(SharedString::from(
+                        s::agent_chat_subagent_instructions_label(),
+                    ))
+                    .into_any_element(),
+            );
+            // Borrowed, not cloned: like the raw-input block above, the actual
+            // string work (`format!`/`SharedString::from`) is deferred into the
+            // `FoldRow::block` body closure, which only runs when this
+            // disclosure — independently foldable, default collapsed — is
+            // itself expanded. Cloning `prompt` here instead would pay for a
+            // multi-KB copy on every repaint of the (already-expanded) parent
+            // card regardless of whether this section is even open.
+            let subagent_type = tc.subagent_type();
+            let run_in_background = tc.subagent_run_in_background().unwrap_or(false);
+            let tool_id = tc.id.as_str();
+            body = body.child(
+                FoldRow::block(
+                    SharedString::from(format!("agent-chat-subagent-instructions-{}", tc.id)),
+                    instructions_key,
+                    instructions_expanded,
+                    instructions_header,
+                    move |cx| {
+                        let mut col = div().flex().flex_col().gap(px(theme::AGENT_CHAT_MSG_GAP));
+                        let mut meta = div().flex().flex_row().flex_wrap().gap(px(theme::GAP_SM));
+                        let mut has_meta = false;
+                        let chip_bg = theme::dim_toward_gray(theme::agent_chat_tint(cx), dim);
+                        let chip_border =
+                            theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
+                        let chip_fg = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
+                        if let Some(kind) = subagent_type {
+                            has_meta = true;
+                            meta = meta.child(
+                                crate::ui::Badge::new(SharedString::from(
+                                    s::agent_chat_subagent_type_chip(kind),
+                                ))
+                                .bg_color(chip_bg)
+                                .border_color(chip_border)
+                                .text_color(chip_fg)
+                                .into_any_element(),
+                            );
+                        }
+                        if run_in_background {
+                            has_meta = true;
+                            meta = meta.child(
+                                crate::ui::Badge::new(SharedString::from(
+                                    s::agent_chat_tool_background(),
+                                ))
+                                .bg_color(chip_bg)
+                                .border_color(chip_border)
+                                .text_color(chip_fg)
+                                .into_any_element(),
+                            );
+                        }
+                        if has_meta {
+                            col = col.child(meta);
+                        }
+                        col = col.child(
+                            crate::ui::markdown(
+                                SharedString::from(format!(
+                                    "agent-chat-subagent-instructions-{tool_id}"
+                                )),
+                                SharedString::from(prompt.to_string()),
+                            )
+                            .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                            .text_size(px(theme::agent_chat_font_size(cx))),
+                        );
+                        col.into_any_element()
                     },
                 )
                 .toggle_on_chevron()

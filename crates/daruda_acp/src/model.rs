@@ -113,6 +113,38 @@ impl ToolCallItem {
             .as_str()
             .filter(|s| !s.is_empty())
     }
+
+    /// The full task spec handed to a spawned subagent (Claude Code's `Task`
+    /// tool carries it as `prompt`) — the thing a user actually needs to audit
+    /// "did the subagent do what I asked", as opposed to the one-line `title`.
+    /// Unlike the tool call's `output`, which a completion event overwrites with
+    /// the subagent's own result summary (see `fold_output`'s replace
+    /// semantics), `raw_input` is never touched by a completion update, so this
+    /// stays available for the lifetime of the card.
+    pub fn subagent_prompt(&self) -> Option<&str> {
+        self.raw_input
+            .as_ref()?
+            .get("prompt")?
+            .as_str()
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Whether a subagent launch was dispatched to run detached
+    /// (`run_in_background: true`). Distinct from [`Self::is_background`],
+    /// which is scoped to shell (`Execute`) calls.
+    pub fn subagent_run_in_background(&self) -> Option<bool> {
+        self.raw_input.as_ref()?.get("run_in_background")?.as_bool()
+    }
+
+    /// Whether this call is shaped like a subagent launch at all — either
+    /// input field is enough, since an adapter is not guaranteed to send both.
+    /// The single source for "does this card get subagent-card treatment"
+    /// (currently: default-collapsed fold), so that classification can't drift
+    /// out of step with [`Self::subagent_type`] / [`Self::subagent_prompt`]
+    /// being checked individually elsewhere.
+    pub fn is_subagent_launch(&self) -> bool {
+        self.subagent_type().is_some() || self.subagent_prompt().is_some()
+    }
 }
 
 /// A single block of tool-call output. Typed so non-text content (images,
@@ -730,6 +762,62 @@ mod tests {
         use serde_json::json;
         let tc = tool(ToolKindView::Other, Some(json!({ "subagent_type": "" })));
         assert_eq!(tc.subagent_type(), None, "empty type is not a real label");
+    }
+
+    #[test]
+    fn subagent_prompt_reads_task_input_field() {
+        use serde_json::json;
+        let tc = tool(
+            ToolKindView::Think,
+            Some(json!({ "subagent_type": "general-purpose", "prompt": "Implement X." })),
+        );
+        assert_eq!(tc.subagent_prompt(), Some("Implement X."));
+    }
+
+    #[test]
+    fn subagent_prompt_is_none_without_the_field() {
+        use serde_json::json;
+        let tc = tool(ToolKindView::Think, Some(json!({ "description": "x" })));
+        assert_eq!(tc.subagent_prompt(), None);
+    }
+
+    #[test]
+    fn subagent_run_in_background_reads_task_input_field() {
+        use serde_json::json;
+        let tc = tool(
+            ToolKindView::Think,
+            Some(json!({ "run_in_background": true })),
+        );
+        assert_eq!(tc.subagent_run_in_background(), Some(true));
+    }
+
+    #[test]
+    fn subagent_run_in_background_is_none_without_the_field() {
+        let tc = tool(ToolKindView::Think, Some(serde_json::json!({})));
+        assert_eq!(tc.subagent_run_in_background(), None);
+    }
+
+    #[test]
+    fn is_subagent_launch_true_with_either_field_alone() {
+        use serde_json::json;
+        assert!(
+            tool(
+                ToolKindView::Think,
+                Some(json!({ "subagent_type": "general-purpose" }))
+            )
+            .is_subagent_launch(),
+            "subagent_type alone is enough"
+        );
+        assert!(
+            tool(ToolKindView::Think, Some(json!({ "prompt": "Do it." }))).is_subagent_launch(),
+            "prompt alone is enough"
+        );
+    }
+
+    #[test]
+    fn is_subagent_launch_false_without_either_field() {
+        let tc = tool(ToolKindView::Think, Some(serde_json::json!({ "x": 1 })));
+        assert!(!tc.is_subagent_launch());
     }
 
     #[test]
