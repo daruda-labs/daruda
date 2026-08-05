@@ -1959,29 +1959,33 @@ mod agent_row_validation_tests {
     use super::agent_row_is_valid;
 
     #[test]
-    fn ssh_requires_non_blank_host() {
-        assert!(!agent_row_is_valid("ssh", "", ""));
-        assert!(!agent_row_is_valid("ssh", "   ", ""));
-        assert!(agent_row_is_valid("ssh", "vm-work", ""));
-    }
+    fn agent_row_validation_cases() {
+        let cases = [
+            ("ssh empty host", "ssh", "", "", false),
+            ("ssh blank host", "ssh", "   ", "", false),
+            ("ssh host", "ssh", "vm-work", "", true),
+            ("docker empty container", "docker", "", "", false),
+            ("docker blank container", "docker", "", "   ", false),
+            ("docker container", "docker", "", "ubuntu-dev", true),
+            ("raw empty", "raw", "", "", true),
+            (
+                "raw ignores host and container",
+                "raw",
+                "irrelevant",
+                "irrelevant",
+                true,
+            ),
+            ("empty kind", "", "", "", true),
+            ("bogus kind", "bogus", "", "", true),
+        ];
 
-    #[test]
-    fn docker_requires_non_blank_container() {
-        assert!(!agent_row_is_valid("docker", "", ""));
-        assert!(!agent_row_is_valid("docker", "", "   "));
-        assert!(agent_row_is_valid("docker", "", "ubuntu-dev"));
-    }
-
-    #[test]
-    fn raw_is_always_valid_regardless_of_host_or_container() {
-        assert!(agent_row_is_valid("raw", "", ""));
-        assert!(agent_row_is_valid("raw", "irrelevant", "irrelevant"));
-    }
-
-    #[test]
-    fn unrecognized_kind_is_treated_as_valid() {
-        assert!(agent_row_is_valid("", "", ""));
-        assert!(agent_row_is_valid("bogus", "", ""));
+        for (name, kind, host, container, expected) in cases {
+            assert_eq!(
+                agent_row_is_valid(kind, host, container),
+                expected,
+                "{name}"
+            );
+        }
     }
 }
 
@@ -1993,61 +1997,48 @@ mod agent_command_path_warning_tests {
     const MISSING_COMMAND: &str = "daruda-settings-path-warning-test-missing-binary";
 
     #[test]
-    fn npx_prefixed_commands_skip_the_check() {
-        assert_eq!(path_check_token("npx -y some-pkg@latest --acp"), None);
+    fn path_check_token_cases() {
+        let cases = [
+            ("npx", "npx -y some-pkg@latest --acp", None),
+            ("uvx", "uvx some-pkg@latest -x", None),
+            ("json stdio", r#"{"command": "some-binary"}"#, None),
+            (
+                "env npx",
+                "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y pkg@latest --acp",
+                None,
+            ),
+            (
+                "env local command",
+                "FOO=1 my-local-cli acp",
+                Some("my-local-cli"),
+            ),
+            ("local command", "my-local-cli acp", Some("my-local-cli")),
+        ];
+
+        for (name, command, expected) in cases {
+            assert_eq!(path_check_token(command).as_deref(), expected, "{name}");
+        }
     }
 
     #[test]
-    fn uvx_prefixed_commands_skip_the_check() {
-        assert_eq!(path_check_token("uvx some-pkg@latest -x"), None);
-    }
+    fn agent_command_path_warning_cases() {
+        let cases = [
+            ("found on path", "sh -c true", None),
+            ("missing", MISSING_COMMAND, Some(MISSING_COMMAND)),
+            (
+                "npx unavailable",
+                "npx -y definitely-nonexistent-package@latest",
+                None,
+            ),
+        ];
 
-    #[test]
-    fn json_stdio_configs_skip_the_check() {
-        assert_eq!(path_check_token(r#"{"command": "some-binary"}"#), None);
-    }
-
-    #[test]
-    fn env_prefix_is_stripped_before_testing_the_launcher_token() {
-        // The env-prefixed form of an npx preset (e.g. Augment) must not warn.
-        assert_eq!(
-            path_check_token("AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y pkg@latest --acp"),
-            None
-        );
-        // A plain local command behind an env prefix still gets checked.
-        assert_eq!(
-            path_check_token("FOO=1 my-local-cli acp"),
-            Some("my-local-cli".to_string())
-        );
-    }
-
-    #[test]
-    fn a_plain_local_command_is_checked() {
-        assert_eq!(
-            path_check_token("my-local-cli acp"),
-            Some("my-local-cli".to_string())
-        );
-    }
-
-    #[test]
-    fn a_command_found_on_path_gets_no_warning() {
-        assert_eq!(agent_command_path_warning("sh -c true"), None);
-    }
-
-    #[test]
-    fn a_command_missing_from_path_gets_a_warning() {
-        assert_eq!(
-            agent_command_path_warning(MISSING_COMMAND),
-            Some(MISSING_COMMAND.to_string())
-        );
-    }
-
-    #[test]
-    fn npx_never_warns_even_when_npm_is_unavailable_in_the_test_sandbox() {
-        assert_eq!(
-            agent_command_path_warning("npx -y definitely-nonexistent-package@latest"),
-            None
-        );
+        for (name, command, expected) in cases {
+            assert_eq!(
+                agent_command_path_warning(command).as_deref(),
+                expected,
+                "{name}"
+            );
+        }
     }
 }
 

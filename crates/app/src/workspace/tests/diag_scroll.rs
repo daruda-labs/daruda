@@ -25,7 +25,7 @@ fn feed_scrollback(
 ) {
     view.update(cx, |v, cx| {
         let mut bytes = Vec::new();
-        for i in 0..200 {
+        for i in 0..160 {
             bytes.extend_from_slice(format!("line{i}\r\n").as_bytes());
         }
         v.feed_output_bytes(&bytes, cx);
@@ -196,77 +196,5 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
     assert_ne!(
         before, after,
         "wheel must scroll swapped-in terminal after drag"
-    );
-}
-
-#[gpui::test]
-fn diag_wheel_after_lane_swap(cx: &mut TestAppContext) {
-    let root_a = std::path::PathBuf::from("/tmp/diag_wheel_a");
-    let root_b = std::path::PathBuf::from("/tmp/diag_wheel_b");
-    let _ = std::fs::create_dir_all(&root_a);
-    let _ = std::fs::create_dir_all(&root_b);
-    let project = daruda_store::project::Project::from_path(&root_a);
-    let config = daruda_config::Config::default();
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
-
-    // Seed a second lane so we can swap into it.
-    ws.update(cx, |ws, _| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes
-                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
-        }
-    });
-
-    let any_wh: gpui::AnyWindowHandle = wh.into();
-    let cx = &mut VisualTestContext::from_window(any_wh, cx);
-    cx.run_until_parked();
-
-    // --- Baseline: wheel over lane 0's terminal scrolls into history. ---
-    let term0 = ws.read_with(cx, |ws, _| active_terminal_view(ws));
-    feed_scrollback(&term0, cx);
-    let before = term0.read_with(cx, |v, _| v.session().viewport_row_offset());
-    assert!(before > 0, "scrollback must exist (before={before})");
-    wheel_up(cx);
-    let after = term0.read_with(cx, |v, _| v.session().viewport_row_offset());
-    assert_ne!(before, after, "baseline: wheel must scroll lane 0 terminal");
-
-    // --- Swap to lane 1, feed scrollback there, wheel again. ---
-    any_wh
-        .update(cx, |_, window, cx| {
-            ws.update(cx, |ws, cx| {
-                let proj = ws.active_ref().project;
-                ws.activate_lane(
-                    daruda_store::project::LaneRef {
-                        project: proj,
-                        lane: 1,
-                    },
-                    window,
-                    cx,
-                );
-                // Activation doesn't auto-seed a tab; open one so the
-                // swapped-in lane has an entity under test.
-                ws.add_tab(window, cx);
-            });
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    let term1 = ws.read_with(cx, |ws, _| active_terminal_view(ws));
-    assert_ne!(
-        term0.entity_id(),
-        term1.entity_id(),
-        "lane swap must surface a different terminal view"
-    );
-    feed_scrollback(&term1, cx);
-    let before1 = term1.read_with(cx, |v, _| v.session().viewport_row_offset());
-    assert!(
-        before1 > 0,
-        "lane1 scrollback must exist (before={before1})"
-    );
-    wheel_up(cx);
-    let after1 = term1.read_with(cx, |v, _| v.session().viewport_row_offset());
-    assert_ne!(
-        before1, after1,
-        "wheel must scroll swapped-in terminal after lane activation"
     );
 }

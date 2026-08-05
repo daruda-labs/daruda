@@ -37,7 +37,7 @@ fn two_terminals(
 }
 
 #[gpui::test]
-async fn menu_points_model_focus_at_the_right_clicked_terminal(cx: &mut TestAppContext) {
+async fn menu_focus_tracks_right_clicked_pane_without_click_side_effects(cx: &mut TestAppContext) {
     // The terminal swallows the right-click (`cx.stop_propagation()` in
     // `view/mouse.rs`) before any ancestor handler runs, so the menu entry
     // point cannot lean on the click-to-focus path — it must move the model
@@ -50,6 +50,7 @@ async fn menu_points_model_focus_at_the_right_clicked_terminal(cx: &mut TestAppC
         workspace.update(cx, |ws, cx| {
             ws.set_focused_pane(second, window, cx);
             assert_eq!(ws.active_runtime().focused_pane_id, second);
+            ws.terminal_input_visible = false;
 
             ws.open_pane_context_menu_at(first, Point::new(px(0.), px(0.)), window, cx);
 
@@ -58,18 +59,21 @@ async fn menu_points_model_focus_at_the_right_clicked_terminal(cx: &mut TestAppC
                 first,
                 "the right-clicked terminal owns the model focus"
             );
-        });
-    })
-    .unwrap();
-}
+            assert!(
+                ws.main_area.popup_menu_deploy.is_some(),
+                "terminal pane context menu should deploy"
+            );
+            assert!(
+                !ws.terminal_input_visible,
+                "opening a context menu must not surface the bottom input"
+            );
+            ws.open_pane_context_menu_at(first, Point::new(px(0.), px(0.)), window, cx);
+            assert_eq!(
+                ws.active_runtime().focused_pane_id,
+                first,
+                "opening the menu on the focused pane is idempotent"
+            );
 
-#[gpui::test]
-async fn menu_points_model_focus_at_the_right_clicked_agent_chat(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            let terminal = ws.active_runtime().focused_pane_id;
             ws.split_focused_pane_kind(
                 NewPaneKind::AgentChat,
                 SplitDirection::Horizontal,
@@ -91,51 +95,14 @@ async fn menu_points_model_focus_at_the_right_clicked_agent_chat(cx: &mut TestAp
                 Some(PaneContent::AgentChat(_))
             ));
 
-            ws.set_focused_pane(terminal, window, cx);
+            ws.set_focused_pane(first, window, cx);
             ws.open_pane_context_menu_at(chat, Point::new(px(0.), px(0.)), window, cx);
 
-            assert_eq!(ws.active_runtime().focused_pane_id, chat);
-        });
-    })
-    .unwrap();
-}
-
-#[gpui::test]
-async fn menu_does_not_run_the_click_focus_side_effects(cx: &mut TestAppContext) {
-    // `focus_pane_on_click` also runs `focus_pane`, which surfaces the bottom
-    // dock and lazily connects an idle Agent chat session. Opening a menu is
-    // not activating the pane, so the menu path must stop at the model field.
-    let (window_handle, workspace) = build_workspace(cx);
-    let (first, second) = two_terminals(window_handle, &workspace, cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.set_focused_pane(second, window, cx);
-            ws.terminal_input_visible = false;
-
-            ws.open_pane_context_menu_at(first, Point::new(px(0.), px(0.)), window, cx);
-
-            assert_eq!(ws.active_runtime().focused_pane_id, first);
-            assert!(
-                !ws.terminal_input_visible,
-                "opening a context menu must not surface the bottom input"
+            assert_eq!(
+                ws.active_runtime().focused_pane_id,
+                chat,
+                "the right-clicked agent chat pane owns the model focus"
             );
-        });
-    })
-    .unwrap();
-}
-
-#[gpui::test]
-async fn menu_focus_is_idempotent_for_the_focused_pane(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-    let (_first, second) = two_terminals(window_handle, &workspace, cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.set_focused_pane(second, window, cx);
-            ws.open_pane_context_menu_at(second, Point::new(px(0.), px(0.)), window, cx);
-            ws.open_pane_context_menu_at(second, Point::new(px(0.), px(0.)), window, cx);
-            assert_eq!(ws.active_runtime().focused_pane_id, second);
         });
     })
     .unwrap();
@@ -185,17 +152,7 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
                 ws.terminal_input.read(cx).value().contains("cargo test"),
                 "the captured text lands in the target's composer"
             );
-        });
-    })
-    .unwrap();
-}
 
-#[gpui::test]
-async fn send_pane_selection_reports_a_vanished_target(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
             let gone = ws
                 .active_runtime()
                 .panes

@@ -209,17 +209,14 @@ mod tests {
     }
 
     #[test]
-    fn search_open_and_close() {
+    fn search_lifecycle_and_query_editing() {
         let mut fv = raw_viewer(&["alpha", "beta"]);
         assert!(fv.search.is_none());
         fv.search_open();
         assert!(fv.search.is_some());
         fv.search_close();
         assert!(fv.search.is_none());
-    }
 
-    #[test]
-    fn search_clear_resets_query_and_matches() {
         let mut fv = diff_viewer(&["hello world", "foo bar"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
@@ -235,10 +232,7 @@ mod tests {
         assert!(s.focused.is_none());
         // Panel remains open after clear.
         assert!(fv.search.is_some());
-    }
 
-    #[test]
-    fn search_insert_and_backspace() {
         let mut fv = raw_viewer(&["hello world", "foo bar"]);
         fv.search_open();
         fv.search_insert_char('h');
@@ -253,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn search_matches_rows() {
+    fn search_matching_cases() {
         let mut fv = diff_viewer(&["hello world", "nothing here", "hello again"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
@@ -261,20 +255,33 @@ mod tests {
         // rows 0 and 2 contain "hello"; row 1 does not
         assert_eq!(s.matches, vec![0, 2]);
         assert_eq!(s.focused, Some(0));
-    }
 
-    #[test]
-    fn search_no_match() {
         let mut fv = raw_viewer(&["alpha", "beta"]);
         fv.search_open();
         "zzz".chars().for_each(|c| fv.search_insert_char(c));
         let s = fv.search.as_ref().unwrap();
         assert!(s.matches.is_empty());
         assert!(s.focused.is_none());
+
+        let mut fv = diff_viewer(&["Hello", "world", "HELLO"]);
+        fv.search_open();
+        "hello".chars().for_each(|c| fv.search_insert_char(c));
+        let s = fv.search.as_ref().unwrap();
+        assert_eq!(s.matches, vec![0, 2]);
+
+        let mut fv = diff_viewer(&["hello", "world"]);
+        fv.search_open();
+        "hello".chars().for_each(|c| fv.search_insert_char(c));
+        assert_eq!(fv.search.as_ref().unwrap().matches, vec![0]);
+        for _ in 0.."hello".len() {
+            fv.search_backspace();
+        }
+        assert!(fv.search.as_ref().unwrap().matches.is_empty());
+        assert!(fv.search.as_ref().unwrap().focused.is_none());
     }
 
     #[test]
-    fn search_next_and_prev_match() {
+    fn search_focus_navigation_cases() {
         let mut fv = diff_viewer(&["aaa", "bbb", "aaa", "aaa"]);
         fv.search_open();
         fv.search_insert_char('a');
@@ -287,10 +294,7 @@ mod tests {
         assert_eq!(fv.search.as_ref().unwrap().focused, Some(0));
         fv.search_prev_match();
         assert_eq!(fv.search.as_ref().unwrap().focused, Some(2));
-    }
 
-    #[test]
-    fn search_focused_row_returns_correct_row_index() {
         let mut fv = diff_viewer(&["aaa", "bbb", "aaa"]);
         fv.search_open();
         fv.search_insert_char('a');
@@ -299,28 +303,5 @@ mod tests {
         fv.search_next_match();
         // focused = Some(1) → row 2
         assert_eq!(fv.search_focused_row(), Some(2));
-    }
-
-    #[test]
-    fn search_case_insensitive() {
-        let mut fv = diff_viewer(&["Hello", "world", "HELLO"]);
-        fv.search_open();
-        "hello".chars().for_each(|c| fv.search_insert_char(c));
-        let s = fv.search.as_ref().unwrap();
-        assert_eq!(s.matches, vec![0, 2]);
-    }
-
-    #[test]
-    fn search_recomputes_on_query_change() {
-        let mut fv = diff_viewer(&["hello", "world"]);
-        fv.search_open();
-        "hello".chars().for_each(|c| fv.search_insert_char(c));
-        assert_eq!(fv.search.as_ref().unwrap().matches, vec![0]);
-        // clear query
-        for _ in 0.."hello".len() {
-            fv.search_backspace();
-        }
-        assert!(fv.search.as_ref().unwrap().matches.is_empty());
-        assert!(fv.search.as_ref().unwrap().focused.is_none());
     }
 }

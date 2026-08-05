@@ -38,39 +38,36 @@ fn seed_running_task(
 }
 
 #[gpui::test]
-fn bump_below_threshold_keeps_task_running(cx: &mut TestAppContext) {
+fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task(&workspace, cx, "sess-1");
+    let below_id = seed_running_task(&workspace, cx, "sess-below");
+    let threshold_id = seed_running_task(&workspace, cx, "sess-threshold");
 
     workspace.update(cx, |ws, cx| {
         // Bump just under the threshold — task must stay Running and
         // the counter must reflect the bumps.
         for _ in 0..(TASK_TOOL_USE_FAILURE_THRESHOLD - 1) {
-            ws.bump_tool_use_failure("sess-1", cx);
+            ws.bump_tool_use_failure("sess-below", cx);
         }
         assert_eq!(
-            ws.claude.tool_use_failure_counts.get("sess-1"),
+            ws.claude.tool_use_failure_counts.get("sess-below"),
             Some(&(TASK_TOOL_USE_FAILURE_THRESHOLD - 1))
         );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let task = g.get(&task_id).unwrap();
+        let task = g.get(&below_id).unwrap();
         assert!(matches!(task.state, TaskState::Running { .. }));
-    });
-}
 
-#[gpui::test]
-fn bump_at_threshold_escalates_to_error(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task(&workspace, cx, "sess-1");
-
-    workspace.update(cx, |ws, cx| {
         for _ in 0..TASK_TOOL_USE_FAILURE_THRESHOLD {
-            ws.bump_tool_use_failure("sess-1", cx);
+            ws.bump_tool_use_failure("sess-threshold", cx);
         }
         // Counter is removed once escalation fires.
-        assert!(!ws.claude.tool_use_failure_counts.contains_key("sess-1"));
+        assert!(
+            !ws.claude
+                .tool_use_failure_counts
+                .contains_key("sess-threshold")
+        );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let task = g.get(&task_id).unwrap();
+        let task = g.get(&threshold_id).unwrap();
         match &task.state {
             TaskState::Error { message, .. } => {
                 assert!(
@@ -84,18 +81,7 @@ fn bump_at_threshold_escalates_to_error(cx: &mut TestAppContext) {
         assert!(task.session_ids.is_empty());
         // finished_at marks the escalation moment.
         assert!(task.finished_at.is_some());
-    });
-}
 
-#[gpui::test]
-fn bump_for_unowned_session_is_ignored(cx: &mut TestAppContext) {
-    // No Running task owns "sess-orphan" — this models the case where
-    // Claude is running outside daruda's task system (CLI, IDE plugin,
-    // or a task that already moved out of Running). The counter must
-    // not grow, so the orphan-escalation warning never fires.
-    let (_wh, workspace) = build_workspace(cx);
-
-    workspace.update(cx, |ws, cx| {
         for _ in 0..(TASK_TOOL_USE_FAILURE_THRESHOLD + 2) {
             ws.bump_tool_use_failure("sess-orphan", cx);
         }
@@ -169,8 +155,8 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
     });
 }
 
-#[gpui::test]
-fn classify_hook_end_reason_maps_known_events(_cx: &mut TestAppContext) {
+#[test]
+fn classify_hook_end_reason_maps_known_events() {
     use crate::workspace::Workspace;
 
     assert_eq!(
@@ -194,7 +180,7 @@ fn classify_hook_end_reason_maps_known_events(_cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn apply_task_session_changed_attaches_session_idempotently(cx: &mut TestAppContext) {
+fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
     workspace.update(cx, |ws, cx| {
         let mut task = Task::new("a".into(), "b".into(), None);
@@ -212,16 +198,8 @@ fn apply_task_session_changed_attaches_session_idempotently(cx: &mut TestAppCont
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
         let t = g.get(&id).unwrap();
         assert_eq!(t.session_ids.as_slice(), &["sess-2".to_string()]);
-    });
-}
 
-#[gpui::test]
-fn apply_task_session_ended_with_error_uses_session_error_message(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let id = seed_running_task(&workspace, cx, "sess-3");
-
-    workspace.update(cx, |ws, cx| {
-        ws.apply_task_session_ended("sess-3", SessionEndReason::Error, cx);
+        ws.apply_task_session_ended("sess-2", SessionEndReason::Error, cx);
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
         let t = g.get(&id).unwrap();
         match &t.state {
@@ -428,127 +406,12 @@ fn seed_running_task_with_subtasks(
 }
 
 #[gpui::test]
-fn apply_todo_write_pushes_new_auto_subtasks(cx: &mut TestAppContext) {
+fn apply_todo_write_merges_auto_items_and_keeps_boundaries(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-1");
-
-    workspace.update(cx, |ws, cx| {
-        let payload = serde_json::json!({
-            "todos": [
-                { "content": "Inspect session.rs", "status": "in_progress" },
-                { "content": "Add refresh logic", "status": "completed" },
-            ]
-        });
-        ws.apply_todo_write("sess-todo-1", &payload, cx);
-
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 2);
-        assert_eq!(t.subtasks[0].title, "Inspect session.rs");
-        assert!(!t.subtasks[0].completed);
-        assert_eq!(
-            t.subtasks[0].source_session_id.as_deref(),
-            Some("sess-todo-1"),
-            "hook-injected items carry the session id (auto namespace)",
-        );
-        assert!(
-            t.subtasks[1].completed,
-            "status: completed → SubTask.completed = true",
-        );
-    });
-}
-
-#[gpui::test]
-fn apply_todo_write_toggles_completed_on_repeat_emission(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-2");
-
-    workspace.update(cx, |ws, cx| {
-        let first = serde_json::json!({
-            "todos": [{ "content": "step A", "status": "in_progress" }]
-        });
-        ws.apply_todo_write("sess-todo-2", &first, cx);
-        let second = serde_json::json!({
-            "todos": [{ "content": "step A", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-todo-2", &second, cx);
-
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 1, "second emission folds into row 1");
-        assert!(t.subtasks[0].completed);
-    });
-}
-
-#[gpui::test]
-fn apply_todo_write_never_overwrites_manual_subtask(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-3");
-
-    workspace.update(cx, |ws, cx| {
-        // User typed an identical title manually first.
-        ws.add_subtask(&task_id, "step A".into(), cx);
-        let manual_id = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .get(&task_id)
-            .unwrap()
-            .subtasks[0]
-            .id
-            .clone();
-
-        let payload = serde_json::json!({
-            "todos": [{ "content": "step A", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-todo-3", &payload, cx);
-
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 2, "manual + auto coexist");
-        let manual = t.subtasks.iter().find(|s| s.id == manual_id).unwrap();
-        assert!(
-            !manual.completed,
-            "manual subtask completion is left alone by the hook",
-        );
-        assert!(manual.source_session_id.is_none());
-        let auto = t
-            .subtasks
-            .iter()
-            .find(|s| s.source_session_id.as_deref() == Some("sess-todo-3"))
-            .unwrap();
-        assert!(auto.completed);
-    });
-}
-
-#[gpui::test]
-fn apply_todo_write_keeps_items_dropped_in_later_emission(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-4");
-
-    workspace.update(cx, |ws, cx| {
-        let first = serde_json::json!({
-            "todos": [
-                { "content": "alpha", "status": "in_progress" },
-                { "content": "beta",  "status": "in_progress" },
-            ]
-        });
-        ws.apply_todo_write("sess-todo-4", &first, cx);
-        // Second emission drops "beta" — no stale marking, the row stays put.
-        let second = serde_json::json!({
-            "todos": [{ "content": "alpha", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-todo-4", &second, cx);
-
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 2, "dropped item is preserved");
-        assert!(t.subtasks.iter().any(|s| s.title == "beta"));
-    });
-}
-
-#[gpui::test]
-fn apply_todo_write_isolates_sessions_on_same_task(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = workspace.update(cx, |_ws, cx| {
+    let auto_task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-1");
+    let manual_task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-3");
+    let bad_task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-bad");
+    let isolated_task_id = workspace.update(cx, |_ws, cx| {
         let mut task = Task::new("host".into(), "".into(), None);
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
@@ -564,15 +427,88 @@ fn apply_todo_write_isolates_sessions_on_same_task(cx: &mut TestAppContext) {
 
     workspace.update(cx, |ws, cx| {
         let payload = serde_json::json!({
+            "todos": [
+                { "content": "Inspect session.rs", "status": "in_progress" },
+                { "content": "Add refresh logic", "status": "completed" },
+            ]
+        });
+        ws.apply_todo_write("sess-todo-1", &payload, cx);
+
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        let t = g.get(&auto_task_id).unwrap();
+        assert_eq!(t.subtasks.len(), 2);
+        assert_eq!(t.subtasks[0].title, "Inspect session.rs");
+        assert!(!t.subtasks[0].completed);
+        assert_eq!(
+            t.subtasks[0].source_session_id.as_deref(),
+            Some("sess-todo-1"),
+            "hook-injected items carry the session id (auto namespace)",
+        );
+        assert!(
+            t.subtasks[1].completed,
+            "status: completed -> SubTask.completed = true",
+        );
+
+        let second = serde_json::json!({
+            "todos": [{ "content": "Inspect session.rs", "status": "completed" }]
+        });
+        ws.apply_todo_write("sess-todo-1", &second, cx);
+
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        let t = g.get(&auto_task_id).unwrap();
+        assert_eq!(t.subtasks.len(), 2, "second emission folds into row 1");
+        let inspect = t
+            .subtasks
+            .iter()
+            .find(|s| s.title == "Inspect session.rs")
+            .unwrap();
+        assert!(inspect.completed);
+        assert!(
+            t.subtasks.iter().any(|s| s.title == "Add refresh logic"),
+            "dropped items are preserved"
+        );
+
+        // User typed an identical title manually first.
+        ws.add_subtask(&manual_task_id, "step A".into(), cx);
+        let manual_id = cx
+            .global::<crate::agent::tasks_global::GlobalTasks>()
+            .get(&manual_task_id)
+            .unwrap()
+            .subtasks[0]
+            .id
+            .clone();
+
+        let payload = serde_json::json!({
+            "todos": [{ "content": "step A", "status": "completed" }]
+        });
+        ws.apply_todo_write("sess-todo-3", &payload, cx);
+
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        let t = g.get(&manual_task_id).unwrap();
+        assert_eq!(t.subtasks.len(), 2, "manual + auto coexist");
+        let manual = t.subtasks.iter().find(|s| s.id == manual_id).unwrap();
+        assert!(
+            !manual.completed,
+            "manual subtask completion is left alone by the hook",
+        );
+        assert!(manual.source_session_id.is_none());
+        let auto = t
+            .subtasks
+            .iter()
+            .find(|s| s.source_session_id.as_deref() == Some("sess-todo-3"))
+            .unwrap();
+        assert!(auto.completed);
+
+        let payload = serde_json::json!({
             "todos": [{ "content": "shared title", "status": "in_progress" }]
         });
         ws.apply_todo_write("sess-A", &payload, cx);
-        // Same title from a different session → must push a *new* row,
-        // not fold into the sess-A entry.
+        // Same title from a different session -> must push a new row, not fold
+        // into the sess-A entry.
         ws.apply_todo_write("sess-B", &payload, cx);
 
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
+        let t = g.get(&isolated_task_id).unwrap();
         assert_eq!(t.subtasks.len(), 2);
         let owners: Vec<&str> = t
             .subtasks
@@ -581,38 +517,22 @@ fn apply_todo_write_isolates_sessions_on_same_task(cx: &mut TestAppContext) {
             .collect();
         assert!(owners.contains(&"sess-A"));
         assert!(owners.contains(&"sess-B"));
-    });
-}
 
-#[gpui::test]
-fn apply_todo_write_silently_skips_unparseable_payload(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-bad");
-
-    workspace.update(cx, |ws, cx| {
         // `todos` is a string instead of an array — schema drift.
         let payload = serde_json::json!({ "todos": "not-an-array" });
         ws.apply_todo_write("sess-todo-bad", &payload, cx);
 
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
+        let t = g.get(&bad_task_id).unwrap();
         assert!(t.subtasks.is_empty(), "parse failure must not mutate state");
-    });
-}
 
-#[gpui::test]
-fn apply_todo_write_no_matching_session_is_noop(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-known");
-
-    workspace.update(cx, |ws, cx| {
         let payload = serde_json::json!({
             "todos": [{ "content": "x", "status": "completed" }]
         });
         ws.apply_todo_write("sess-unknown", &payload, cx);
 
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&task_id).unwrap();
+        let t = g.get(&bad_task_id).unwrap();
         assert!(
             t.subtasks.is_empty(),
             "no task owns sess-unknown, so the merge is a no-op",

@@ -23,18 +23,6 @@ use super::build_workspace;
 use crate::ui;
 use crate::workspace::dialog_helpers;
 
-#[gpui::test]
-async fn tab_with_no_dialog_does_not_panic(cx: &mut TestAppContext) {
-    let (window_handle, _ws) = build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        window.focus_next(cx);
-        window.focus_prev(cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-}
-
 /// With a zero-tab-stop dialog open (confirm dialog body is plain
 /// text), Tab + Shift+Tab via `window.focus_next` / `focus_prev`
 /// must not panic and must not oscillate into an infinite loop.

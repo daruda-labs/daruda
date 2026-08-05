@@ -154,30 +154,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_hunk_header_no_context() {
-        let (h, c) = split_hunk_header("@@ -1,6 +1,8 @@");
-        assert_eq!(h, "@@ -1,6 +1,8 @@");
-        assert_eq!(c, "");
-    }
+    fn hunk_header_helpers_cases() {
+        for (raw, expected_header, expected_context, expected_old, expected_new) in [
+            ("@@ -1,6 +1,8 @@", "@@ -1,6 +1,8 @@", "", 1, 1),
+            (
+                "@@ -10,4 +12,6 @@ fn foo() {",
+                "@@ -10,4 +12,6 @@",
+                "fn foo() {",
+                10,
+                12,
+            ),
+        ] {
+            let (header, context) = split_hunk_header(raw);
+            assert_eq!(header, expected_header);
+            assert_eq!(context, expected_context);
 
-    #[test]
-    fn split_hunk_header_with_context() {
-        let (h, c) = split_hunk_header("@@ -10,4 +12,6 @@ fn foo() {");
-        assert_eq!(h, "@@ -10,4 +12,6 @@");
-        assert_eq!(c, "fn foo() {");
-    }
-
-    #[test]
-    fn parse_hunk_coords_basic() {
-        let (old, new) = parse_hunk_coords("@@ -1,6 +1,8 @@");
-        assert_eq!(old, 1);
-        assert_eq!(new, 1);
-    }
-
-    #[test]
-    fn parse_hunk_coords_with_context() {
-        let (old, new) = parse_hunk_coords("@@ -10,4 +12,6 @@ fn foo() {");
-        assert_eq!(old, 10);
-        assert_eq!(new, 12);
+            let (old, new) = parse_hunk_coords(raw);
+            assert_eq!((old, new), (expected_old, expected_new));
+        }
     }
 }

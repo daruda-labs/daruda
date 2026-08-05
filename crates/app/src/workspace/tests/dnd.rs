@@ -64,10 +64,11 @@ fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
 // ---- reorder_lane ----
 
 #[gpui::test]
-fn reorder_lane_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
+fn reorder_lane_moves_within_project_and_rejects_cross_project(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_reorder_wt");
     let ws = wh.root(cx).unwrap();
-    let (project_id, ref_a, ref_b) = ws.update(cx, |ws, _| {
+    let (project_id, ref_a, ref_b, other_project_id) = ws.update(cx, |ws, _cx| {
+        let other_project_id = push_project_in_memory(ws, "/tmp/daruda_dnd_wt_cross_b");
         let p = &mut ws.projects[0];
         let pid = p.id;
         // Bootstrapped lane already sits at id 0 / tab_order 0.
@@ -83,6 +84,7 @@ fn reorder_lane_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
                 project: pid,
                 lane: 100,
             },
+            other_project_id,
         )
     });
     ws.update(cx, |ws, cx| ws.reorder_lane(ref_a, ref_b, cx));
@@ -92,16 +94,7 @@ fn reorder_lane_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
         let order: Vec<(LaneId, u32)> = p.lanes.iter().map(|w| (w.id, w.tab_order)).collect();
         assert_eq!(order, vec![(0, 0), (200, 1), (100, 2)]);
     });
-}
 
-#[gpui::test]
-fn reorder_lane_rejects_cross_project(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_wt_cross_a");
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, _cx| {
-        push_project_in_memory(ws, "/tmp/daruda_dnd_wt_cross_b");
-    });
-    // Snapshot tab_order before the cross-project move attempt.
     let before: Vec<(ProjectId, LaneId, u32)> = ws.read_with(cx, |ws, _| {
         ws.projects
             .iter()
@@ -113,14 +106,12 @@ fn reorder_lane_rejects_cross_project(cx: &mut TestAppContext) {
             })
             .collect()
     });
-    let (from_project, to_project) =
-        ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[1].id));
     let from = LaneRef {
-        project: from_project,
+        project: project_id,
         lane: 0,
     };
     let to = LaneRef {
-        project: to_project,
+        project: other_project_id,
         lane: 0,
     };
     ws.update(cx, |ws, cx| ws.reorder_lane(from, to, cx));
@@ -143,7 +134,9 @@ fn reorder_lane_rejects_cross_project(cx: &mut TestAppContext) {
 // ---- reorder_project_before ----
 
 #[gpui::test]
-fn reorder_project_before_in_top_level_swaps_positions(cx: &mut TestAppContext) {
+fn reorder_project_before_top_level_handles_upward_and_downward_adjacent_moves(
+    cx: &mut TestAppContext,
+) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_top_a");
     let ws = wh.root(cx).unwrap();
     ws.update(cx, |ws, _cx| {
@@ -160,10 +153,51 @@ fn reorder_project_before_in_top_level_swaps_positions(cx: &mut TestAppContext) 
         orders.sort();
         assert_eq!(orders, vec![0, 1]);
     });
+
+    // Move b downward onto a's slot. Downward drops land after the target.
+    ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
+    ws.read_with(cx, |ws, _| {
+        let pa_order = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
+        let pb_order = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        assert!(pa_order < pb_order, "b must sit after a after the move");
+        let mut orders: Vec<u32> = vec![pa_order, pb_order];
+        orders.sort();
+        assert_eq!(orders, vec![0, 1]);
+    });
+
+    let before = ws.read_with(cx, |ws, _| {
+        ws.projects
+            .iter()
+            .map(|p| (p.id, p.group_id, p.tab_order))
+            .collect::<Vec<_>>()
+    });
+    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, 9_999, cx));
+    let after = ws.read_with(cx, |ws, _| {
+        ws.projects
+            .iter()
+            .map(|p| (p.id, p.group_id, p.tab_order))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(before, after, "unknown targets are no-ops");
+
+    let before = ws.read_with(cx, |ws, _| {
+        ws.projects
+            .iter()
+            .map(|p| (p.id, p.group_id, p.tab_order))
+            .collect::<Vec<_>>()
+    });
+    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pa, cx));
+    let after = ws.read_with(cx, |ws, _| {
+        ws.projects
+            .iter()
+            .map(|p| (p.id, p.group_id, p.tab_order))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(before, after, "self-target drops are no-ops");
 }
 
 #[gpui::test]
-fn reorder_project_before_inherits_target_group(cx: &mut TestAppContext) {
+fn reorder_project_before_inherits_target_group_and_swaps_inside_it(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_inherit_a");
     let ws = wh.root(cx).unwrap();
     ws.update(cx, |ws, _cx| {
@@ -180,8 +214,13 @@ fn reorder_project_before_inherits_target_group(cx: &mut TestAppContext) {
     // pa → pb re-parents into `gid` at pa's position.
     ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
     ws.read_with(cx, |ws, _| {
+        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
         let pb_after = ws.projects.iter().find(|p| p.id == pb).unwrap();
         assert_eq!(pb_after.group_id, Some(gid));
+        assert!(
+            pb_after.tab_order < pa_t,
+            "pb must land before pa after inheriting the group"
+        );
         // Both projects in the group must occupy 0..1 contiguously.
         let mut orders: Vec<u32> = ws
             .projects
@@ -192,61 +231,18 @@ fn reorder_project_before_inherits_target_group(cx: &mut TestAppContext) {
         orders.sort();
         assert_eq!(orders, vec![0, 1]);
     });
-}
 
-#[gpui::test]
-fn reorder_project_before_inside_same_group_swaps_order(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_same_grp_a");
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, _cx| {
-        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_same_grp_b");
-    });
-    let (pa, pb, gid) = ws.update(cx, |ws, cx| {
-        let gid = ws.add_group("g".to_string(), None, cx);
-        let pa = ws.projects[0].id;
-        let pb = ws.projects[1].id;
-        ws.move_project_to_group(pa, Some(gid), cx);
-        ws.move_project_to_group(pb, Some(gid), cx);
-        (pa, pb, gid)
-    });
-    // After moves both projects share the same per-group pool. pa was
-    // pushed in first (tab_order < pb). Drop pb before pa to verify the
-    // intra-group code path actually swaps them and persists 0..N.
-    ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
+    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pb, cx));
     ws.read_with(cx, |ws, _| {
         let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
         let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
-        assert!(pb_t < pa_t, "pb must land before pa within the group");
+        assert!(pa_t < pb_t, "pa must land before pb within the group");
         let mut orders: Vec<u32> = ws
             .projects
             .iter()
             .filter(|p| p.group_id == Some(gid))
             .map(|p| p.tab_order)
             .collect();
-        orders.sort();
-        assert_eq!(orders, vec![0, 1]);
-    });
-}
-
-#[gpui::test]
-fn reorder_project_before_downward_lands_after_target(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_down_adj_a");
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, _cx| {
-        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_down_adj_b");
-    });
-    // Before: [pa=0, pb=1]. Drag pa downward onto pb's slot. Standard
-    // list-DnD convention: dropping X onto Y makes X take Y's row, so
-    // pa must land AFTER pb → [pb=0, pa=1]. Regression guard for the
-    // "drag-down silently no-ops because insert-before reproduces the
-    // original order" bug.
-    let (pa, pb) = ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[1].id));
-    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pb, cx));
-    ws.read_with(cx, |ws, _| {
-        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
-        assert!(pb_t < pa_t, "pa must land after pb on a downward drop");
-        let mut orders: Vec<u32> = vec![pa_t, pb_t];
         orders.sort();
         assert_eq!(orders, vec![0, 1]);
     });
@@ -278,29 +274,6 @@ fn reorder_project_before_downward_across_multiple_lands_after_target(cx: &mut T
     });
 }
 
-#[gpui::test]
-fn reorder_project_before_unknown_id_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_unknown");
-    let ws = wh.root(cx).unwrap();
-    let (pa, before) = ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[0].tab_order));
-    // Unknown `to` must leave state untouched — no group_id mutation,
-    // no tab_order shift.
-    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, 9_999, cx));
-    let after = ws.read_with(cx, |ws, _| ws.projects[0].tab_order);
-    assert_eq!(before, after);
-}
-
-#[gpui::test]
-fn reorder_project_before_self_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_self");
-    let ws = wh.root(cx).unwrap();
-    let pa = ws.read_with(cx, |ws, _| ws.projects[0].id);
-    let before = ws.read_with(cx, |ws, _| ws.projects[0].tab_order);
-    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pa, cx));
-    let after = ws.read_with(cx, |ws, _| ws.projects[0].tab_order);
-    assert_eq!(before, after);
-}
-
 // ---- move_project_to_group_end ----
 
 #[gpui::test]
@@ -321,7 +294,7 @@ fn move_project_to_group_end_appends_and_renumbers_top_pool(cx: &mut TestAppCont
     // pb is ungrouped before the call. After: pb appended at end of
     // group's member list, and the top-level pool renumbers without pb.
     ws.update(cx, |ws, cx| ws.move_project_to_group_end(pb, gid, cx));
-    ws.read_with(cx, |ws, _| {
+    let pb_order_after_append = ws.read_with(cx, |ws, _| {
         let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
         let pb_p = ws.projects.iter().find(|p| p.id == pb).unwrap();
         assert_eq!(pb_p.group_id, Some(gid));
@@ -330,39 +303,26 @@ fn move_project_to_group_end_appends_and_renumbers_top_pool(cx: &mut TestAppCont
         // entry must sit at tab_order 0.
         let group_order = ws.groups.iter().find(|g| g.id == gid).unwrap().tab_order;
         assert_eq!(group_order, 0);
+        pb_p.tab_order
     });
-}
 
-#[gpui::test]
-fn move_project_to_group_end_same_group_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_move_same");
-    let ws = wh.root(cx).unwrap();
-    let (pa, gid) = ws.update(cx, |ws, cx| {
-        let gid = ws.add_group("g".to_string(), None, cx);
-        let pa = ws.projects[0].id;
-        ws.move_project_to_group(pa, Some(gid), cx);
-        (pa, gid)
-    });
-    let before = ws.read_with(cx, |ws, _| {
-        ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order
-    });
-    ws.update(cx, |ws, cx| ws.move_project_to_group_end(pa, gid, cx));
+    ws.update(cx, |ws, cx| ws.move_project_to_group_end(pb, gid, cx));
     let after = ws.read_with(cx, |ws, _| {
-        ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order
+        ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order
     });
-    assert_eq!(before, after);
+    assert_eq!(pb_order_after_append, after);
 }
 
 // ---- reorder_group_before_top_row ----
 
 #[gpui::test]
-fn reorder_group_before_group_target_swaps_at_top_level(cx: &mut TestAppContext) {
+fn reorder_group_before_top_level_group_or_project_target(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_group_g2g");
     let ws = wh.root(cx).unwrap();
-    let (ga, gb) = ws.update(cx, |ws, cx| {
+    let (pa, ga, gb) = ws.update(cx, |ws, cx| {
         let ga = ws.add_group("a".to_string(), None, cx);
         let gb = ws.add_group("b".to_string(), None, cx);
-        (ga, gb)
+        (ws.projects[0].id, ga, gb)
     });
     let (ga_t_before, gb_t_before) = ws.read_with(cx, |ws, _| {
         (
@@ -380,22 +340,10 @@ fn reorder_group_before_group_target_swaps_at_top_level(cx: &mut TestAppContext)
         let gb_t = ws.groups.iter().find(|g| g.id == gb).unwrap().tab_order;
         assert!(gb_t < ga_t);
     });
-}
 
-#[gpui::test]
-fn reorder_group_before_ungrouped_project_target(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_group_p");
-    let ws = wh.root(cx).unwrap();
-    let (gid, pa) = ws.update(cx, |ws, cx| {
-        // Group is added AFTER the bootstrapped project, so it sits
-        // after the ungrouped project in the shared pool.
-        let gid = ws.add_group("g".to_string(), None, cx);
-        let pa = ws.projects[0].id;
-        (gid, pa)
-    });
     let (group_t_before, proj_t_before) = ws.read_with(cx, |ws, _| {
         (
-            ws.groups.iter().find(|g| g.id == gid).unwrap().tab_order,
+            ws.groups.iter().find(|g| g.id == ga).unwrap().tab_order,
             ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order,
         )
     });
@@ -403,62 +351,34 @@ fn reorder_group_before_ungrouped_project_target(cx: &mut TestAppContext) {
     // Move group before the ungrouped project → group's tab_order
     // drops below the project's.
     ws.update(cx, |ws, cx| {
-        ws.reorder_group_before_top_row(gid, TopRow::Project(pa), cx)
+        ws.reorder_group_before_top_row(ga, TopRow::Project(pa), cx)
     });
     ws.read_with(cx, |ws, _| {
-        let group_t = ws.groups.iter().find(|g| g.id == gid).unwrap().tab_order;
+        let group_t = ws.groups.iter().find(|g| g.id == ga).unwrap().tab_order;
         let proj_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
         assert!(group_t < proj_t);
     });
-}
 
-#[gpui::test]
-fn reorder_group_before_grouped_project_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_group_grouped");
-    let ws = wh.root(cx).unwrap();
-    let (gid_anchor, gid_drag, pa) = ws.update(cx, |ws, cx| {
-        let anchor = ws.add_group("anchor".to_string(), None, cx);
-        let drag = ws.add_group("drag".to_string(), None, cx);
-        let pa = ws.projects[0].id;
-        ws.move_project_to_group(pa, Some(anchor), cx);
-        (anchor, drag, pa)
-    });
-    let before = ws.read_with(cx, |ws, _| {
+    ws.update(cx, |ws, cx| ws.move_project_to_group(pa, Some(ga), cx));
+    let group_order = |ws: &Workspace| {
         ws.groups
             .iter()
-            .find(|g| g.id == gid_drag)
-            .unwrap()
-            .tab_order
-    });
+            .map(|g| (g.id, g.tab_order))
+            .collect::<Vec<_>>()
+    };
+    let before = ws.read_with(cx, |ws, _| group_order(ws));
     // Attempt to drop the drag group on the grouped project — must be
     // rejected because groups never sit inside groups.
     ws.update(cx, |ws, cx| {
-        ws.reorder_group_before_top_row(gid_drag, TopRow::Project(pa), cx)
+        ws.reorder_group_before_top_row(gb, TopRow::Project(pa), cx)
     });
-    let after = ws.read_with(cx, |ws, _| {
-        ws.groups
-            .iter()
-            .find(|g| g.id == gid_drag)
-            .unwrap()
-            .tab_order
-    });
+    let after = ws.read_with(cx, |ws, _| group_order(ws));
     assert_eq!(before, after);
-    let _ = gid_anchor;
-}
 
-#[gpui::test]
-fn reorder_group_self_target_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_group_self");
-    let ws = wh.root(cx).unwrap();
-    let gid = ws.update(cx, |ws, cx| ws.add_group("g".to_string(), None, cx));
-    let before = ws.read_with(cx, |ws, _| {
-        ws.groups.iter().find(|g| g.id == gid).unwrap().tab_order
-    });
+    let before = ws.read_with(cx, |ws, _| group_order(ws));
     ws.update(cx, |ws, cx| {
-        ws.reorder_group_before_top_row(gid, TopRow::Group(gid), cx)
+        ws.reorder_group_before_top_row(gb, TopRow::Group(gb), cx)
     });
-    let after = ws.read_with(cx, |ws, _| {
-        ws.groups.iter().find(|g| g.id == gid).unwrap().tab_order
-    });
+    let after = ws.read_with(cx, |ws, _| group_order(ws));
     assert_eq!(before, after);
 }

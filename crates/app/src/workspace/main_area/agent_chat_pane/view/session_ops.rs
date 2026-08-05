@@ -13,6 +13,7 @@ use super::super::agent_chat_helpers::{
     permission_card_mut,
 };
 use super::super::fold::{FoldKey, FoldState};
+use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
 use super::super::session_config::SessionConfig;
 use super::{AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
@@ -143,7 +144,23 @@ impl AgentChatView {
         // clips or overlaps the next row). Remeasure it explicitly whenever we
         // can resolve which row owns the toggled key.
         let item_ix = fold_key_item_index(&key, &self.items);
+        // A card's own fold decides whether its body — and so its embed editors —
+        // is on screen at all. Narrow the follow-up reconcile to that card;
+        // response / tool-group folds only flip row visibility, leaving each
+        // card's own state (and its embeds) untouched.
+        let embed_scope = match &key {
+            FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
+            FoldKey::Assistant(_)
+            | FoldKey::Thinking(_)
+            | FoldKey::Response(_)
+            | FoldKey::ToolGroup(_)
+            | FoldKey::Diff(_)
+            | FoldKey::ToolRawInput(_) => None,
+        };
         self.fold.toggle(key, active);
+        if let Some(scope) = embed_scope {
+            self.reconcile_embeds_after_fold(&scope, cx);
+        }
         // A fold change flips row `hidden` flags (and may collapse a group):
         // reproject + reflow the affected span.
         self.rebuild_rows();
@@ -163,6 +180,9 @@ impl AgentChatView {
     pub(in crate::workspace) fn set_all_folds(&mut self, expanded: bool, cx: &mut Context<Self>) {
         let keys = collect_foldable_keys(&self.items);
         self.fold.set_all(keys, expanded);
+        // Every card's fold just moved, so every card's embeds may need building
+        // (expand-all) or releasing (collapse-all).
+        self.reconcile_embeds_after_fold(&ReconcileScope::All, cx);
         // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
         self.rebuild_rows();
         // Unlike a single `toggle_fold`, this can change dozens of rows' inner

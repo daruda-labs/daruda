@@ -411,6 +411,10 @@ pub struct Workspace {
     pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::LaneRef>,
     /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
     pub(in crate::workspace) git_changes_scroll_handle: gpui::ScrollHandle,
+    /// Scroll handle for the Lanes view card list — shared with the
+    /// scrollbar overlay. The view header stays outside the scroll
+    /// region, so only the group / project cards move.
+    pub(in crate::workspace) lanes_scroll_handle: gpui::ScrollHandle,
     /// Scroll handle for the right-dock panel body — shared with the
     /// scrollbar overlay. Used by every right-panel tab (Usage / Skills
     /// / Tools / Tasks) that wraps its body in `overflow_y_scroll`.
@@ -1145,6 +1149,7 @@ impl Workspace {
             git_status_in_flight: HashSet::new(),
             git_status_pending_repeat: HashSet::new(),
             git_changes_scroll_handle: gpui::ScrollHandle::new(),
+            lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
             git_commit_input,
             _git_commit_subscription: git_commit_sub,

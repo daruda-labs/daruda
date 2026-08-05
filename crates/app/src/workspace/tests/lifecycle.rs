@@ -1,22 +1,5 @@
 use super::*;
 
-// ---- Render regression ----
-
-#[gpui::test]
-async fn test_workspace_renders_without_reentrant_panic(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, _cx| {
-        window.refresh();
-    })
-    .unwrap();
-
-    workspace.update(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
-    });
-}
-
 // ---- Modal layer ----
 //
 // Modal lifecycle is owned by `gpui_component::Root`, which requires a real
@@ -25,29 +8,16 @@ async fn test_workspace_renders_without_reentrant_panic(cx: &mut TestAppContext)
 // ---- Tab add / close / switch ----
 
 #[gpui::test]
-async fn test_add_tab(cx: &mut TestAppContext) {
+async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut TestAppContext) {
+    use gpui::size;
+
     let (window_handle, workspace) = build_workspace(cx);
 
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-    });
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-        });
+    cx.update_window(window_handle.into(), |_, window, _cx| {
+        window.refresh();
     })
     .unwrap();
-
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 2);
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
-    });
-}
-
-#[gpui::test]
-async fn test_set_window_label_sets_then_clears(cx: &mut TestAppContext) {
-    let (_window_handle, workspace) = build_workspace(cx);
+    cx.simulate_window_resize(window_handle.into(), size(gpui::px(800.0), gpui::px(600.0)));
 
     workspace.update(cx, |ws, cx| {
         ws.set_window_label(Some("daruda — review".into()), cx);
@@ -69,74 +39,28 @@ async fn test_set_window_label_sets_then_clears(cx: &mut TestAppContext) {
             "window_user_label was not cleared by None"
         );
     });
-}
-
-#[gpui::test]
-async fn test_close_tab_removes_tab(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 3);
-        assert_eq!(ws.active_runtime().active_tab_index, 2);
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().active_tab_index, 0);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.on_close_tab(&CloseTab, window, cx);
+            ws.add_tab(window, cx);
+            ws.add_tab(window, cx);
+            ws.resize_all_tabs(window, cx);
         });
     })
     .unwrap();
 
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 2);
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
+    let ids_before: Vec<u64> = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
     });
-}
-
-#[gpui::test]
-async fn test_close_non_active_tab_preserves_active(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.close_tab_at(0, window, cx);
-        });
-    })
-    .unwrap();
-
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 2);
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
-    });
-}
-
-#[gpui::test]
-async fn test_next_prev_tab_cycles(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
+    assert_eq!(ids_before.len(), 3);
+    assert_ne!(ids_before[0], ids_before[1]);
+    assert_ne!(ids_before[0], ids_before[2]);
+    assert_ne!(ids_before[1], ids_before[2]);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -157,19 +81,6 @@ async fn test_next_prev_tab_cycles(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().active_tab_index, 2)
     });
-}
-
-#[gpui::test]
-async fn test_activate_tab_by_index(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -191,26 +102,6 @@ async fn test_activate_tab_by_index(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().active_tab_index, 0)
     });
-}
-
-#[gpui::test]
-async fn test_cmd9_activates_last_tab(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.activate_tab(0, window, cx);
-        });
-    })
-    .unwrap();
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -221,25 +112,6 @@ async fn test_cmd9_activates_last_tab(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().active_tab_index, 2)
     });
-}
-
-#[gpui::test]
-async fn test_tab_ids_are_unique_and_stable(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    let ids_before: Vec<u64> = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
-    assert_eq!(ids_before.len(), 3);
-    assert!(ids_before[0] != ids_before[1] && ids_before[1] != ids_before[2]);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -252,46 +124,25 @@ async fn test_tab_ids_are_unique_and_stable(cx: &mut TestAppContext) {
         ws.active_runtime().tabs.iter().map(|t| t.id).collect()
     });
     assert_eq!(ids_after, vec![ids_before[0], ids_before[2]]);
-}
-
-// ---- Resize regression ----
-
-#[gpui::test]
-async fn test_resize_all_tabs_no_reentrant_panic(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.resize_all_tabs(window, cx);
-        });
-    })
-    .unwrap();
-
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert_eq!(
+            ws.active_runtime().active_tab_index,
+            1,
+            "closing a non-active tab preserves the active tab"
+        );
     });
-}
 
-#[gpui::test]
-async fn test_observe_window_bounds_no_reentrant_panic(cx: &mut TestAppContext) {
-    use gpui::size;
-
-    let config = daruda_config::Config::default();
-    let window_handle =
-        cx.add_window(|window, cx| Workspace::new(&config, fresh_test_data_dir(), window, cx));
-    let workspace = window_handle.root(cx).unwrap();
-
-    cx.simulate_window_resize(window_handle.into(), size(gpui::px(800.0), gpui::px(600.0)));
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_close_tab(&CloseTab, window, cx);
+        });
+    })
+    .unwrap();
 
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs[0].id, ids_before[0]);
     });
 }
 
@@ -310,63 +161,6 @@ fn pane_spawn_error_display_and_std_error() {
     let boxed: Box<dyn std::error::Error> =
         Box::new(PaneSpawnError::Pty(PtyError::OpenPty("boom".into())));
     assert!(!boxed.to_string().is_empty());
-}
-
-#[gpui::test]
-fn report_pane_error_sets_last_error_without_mutating_layout(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneSpawnError;
-    use daruda_terminal::pty::PtyError;
-
-    let (window_handle, workspace) = build_workspace(cx);
-
-    let (tabs_before, panes_before) = workspace.read_with(cx, |ws, _| {
-        (
-            ws.active_runtime().tabs.len(),
-            ws.active_runtime().panes.len(),
-        )
-    });
-
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.report_pane_error(
-                "new tab",
-                PaneSpawnError::Pty(PtyError::SpawnShell("exec fail".into())),
-                cx,
-            );
-        });
-    })
-    .unwrap();
-
-    workspace.read_with(cx, |ws, _| {
-        let msg = ws.last_error.as_ref().expect("last_error should be set");
-        assert!(msg.contains("new tab"), "context missing: {msg}");
-        assert!(msg.contains("exec fail"), "cause missing: {msg}");
-    });
-
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.report_pane_error(
-                "split",
-                PaneSpawnError::Vt(daruda_terminal::VtError::CreateFailed),
-                cx,
-            );
-        });
-    })
-    .unwrap();
-
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_runtime().tabs.len(),
-            tabs_before,
-            "tabs should be untouched"
-        );
-        assert_eq!(
-            ws.active_runtime().panes.len(),
-            panes_before,
-            "panes should be untouched"
-        );
-        assert!(ws.last_error.is_some());
-    });
 }
 
 // ---- close_pane_on_exit config plumbing ----
@@ -394,39 +188,6 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1, "one tab should remain");
         assert_eq!(ws.active_runtime().panes.len(), 1, "one pane should remain");
-    });
-}
-
-#[gpui::test]
-fn apply_config_updates_shell_mirrors(cx: &mut TestAppContext) {
-    let (window_handle, ws) = build_workspace(cx);
-    let mut cfg = daruda_config::Config::default();
-    ws.read_with(cx, |ws, _| {
-        assert!(ws.mirrors.close_pane_on_exit);
-        assert!(ws.shell_program.is_none());
-    });
-
-    cfg.shell.close_pane_on_exit = false;
-    cfg.shell.program = Some("/bin/test-shell".into());
-
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
-    })
-    .unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert!(!ws.mirrors.close_pane_on_exit);
-        assert_eq!(ws.shell_program.as_deref(), Some("/bin/test-shell"));
-    });
-
-    cfg.shell.close_pane_on_exit = true;
-    cfg.shell.program = None;
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
-    })
-    .unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert!(ws.mirrors.close_pane_on_exit);
-        assert!(ws.shell_program.is_none());
     });
 }
 

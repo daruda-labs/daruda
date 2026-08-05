@@ -57,14 +57,11 @@ mod tests {
     }
 
     #[test]
-    fn identical_inputs_produce_no_hunks() {
+    fn unified_diff_text_cases() {
         let s = "fn a() {}\nlet x = 1;\n";
         let text = unified_diff_text(s, s);
         assert!(parse_diff_hunks(&text).is_empty());
-    }
 
-    #[test]
-    fn single_line_modification_round_trips_through_parser() {
         let old = "fn a() {}\nlet x = 1;\nfn b() {}\n";
         let new = "fn a() {}\nlet y = 2;\nfn b() {}\n";
         let text = unified_diff_text(old, new);
@@ -73,10 +70,7 @@ mod tests {
         assert_eq!(added, 1, "one line added");
         assert_eq!(rem_txt, vec!["let x = 1;".to_owned()]);
         assert_eq!(add_txt, vec!["let y = 2;".to_owned()]);
-    }
 
-    #[test]
-    fn pure_insertion_has_no_removals() {
         let old = "a\nb\n";
         let new = "a\nb\nc\n";
         let text = unified_diff_text(old, new);
@@ -84,10 +78,7 @@ mod tests {
         assert_eq!(removed, 0);
         assert_eq!(added, 1);
         assert_eq!(add_txt, vec!["c".to_owned()]);
-    }
 
-    #[test]
-    fn unequal_block_emits_valid_hunk() {
         // 2 removed → 3 added; parser must still produce a coherent hunk.
         let old = "x\ny\n";
         let new = "p\nq\nr\n";

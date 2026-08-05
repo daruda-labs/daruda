@@ -29,7 +29,7 @@ use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    SUBAGENT_NEST_DEPTH_CAP, subagent_subtree_live,
+    LiveSubagentUnits, SUBAGENT_NEST_DEPTH_CAP,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
@@ -47,6 +47,7 @@ pub(super) fn tool_card(
     expanded: bool,
     tc: &ToolCallItem,
     items: &[ChatItem],
+    live_units: &LiveSubagentUnits,
     assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
@@ -57,15 +58,14 @@ pub(super) fn tool_card(
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
     // `Completed` when its SDK call returns, but the child tool calls stream in
-    // and run afterward (see `subagent_subtree_live`). While any nested
+    // and run afterward (see `LiveSubagentUnits`). While any nested
     // descendant is live the unit is still working, so the badge reads
     // in-progress until the whole subtree settles.
-    let effective_status =
-        if !tc.status.is_live() && subagent_subtree_live(items, &tc.id, SUBAGENT_NEST_DEPTH_CAP) {
-            ToolStatusView::InProgress
-        } else {
-            tc.status
-        };
+    let effective_status = if !tc.status.is_live() && live_units.contains(&tc.id) {
+        ToolStatusView::InProgress
+    } else {
+        tc.status
+    };
     let (badge_text, badge_fg) = tool_status_badge(effective_status, t, dim, cx);
     // A live tool gets animated trailing dots (Running. / .. / ...) so the
     // in-progress state reads as live, not just a static amber label. `Pending`
@@ -350,6 +350,7 @@ pub(super) fn tool_card(
                         child_expanded,
                         child,
                         items,
+                        live_units,
                         assets,
                         fold,
                         t,

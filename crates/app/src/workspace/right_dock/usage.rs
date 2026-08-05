@@ -872,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn exactly_wins_over_any_override_or_section_list() {
+    fn resolve_displayed_domain_cases() {
         let sections = [section(AccountRecipeId::Codex)];
         assert_eq!(
             resolve_displayed_domain(
@@ -883,10 +883,7 @@ mod tests {
             Some(AccountRecipeId::Claude),
             "auto mode always wins, even when it names a domain absent from `sections`"
         );
-    }
 
-    #[test]
-    fn ambiguous_focus_respects_a_valid_override() {
         let sections = [
             section(AccountRecipeId::Claude),
             section(AccountRecipeId::Codex),
@@ -895,10 +892,7 @@ mod tests {
             resolve_displayed_domain(AccountDomain::Any, Some(AccountRecipeId::Codex), &sections),
             Some(AccountRecipeId::Codex)
         );
-    }
 
-    #[test]
-    fn ambiguous_focus_falls_back_to_the_first_section_on_a_stale_override() {
         // The override names a domain that has since signed out (absent from
         // `sections`) — it must not be tracked/cleared separately, just
         // ignored in favor of the default.
@@ -907,19 +901,13 @@ mod tests {
             resolve_displayed_domain(AccountDomain::Any, Some(AccountRecipeId::Codex), &sections),
             Some(AccountRecipeId::Claude)
         );
-    }
 
-    #[test]
-    fn ambiguous_focus_falls_back_to_the_first_section_with_no_override() {
         let sections = [section(AccountRecipeId::Codex)];
         assert_eq!(
             resolve_displayed_domain(AccountDomain::Unsupported, None, &sections),
             Some(AccountRecipeId::Codex)
         );
-    }
 
-    #[test]
-    fn no_sections_is_no_domain_regardless_of_focus() {
         assert_eq!(
             resolve_displayed_domain(AccountDomain::Any, None, &[]),
             None
@@ -945,31 +933,22 @@ mod tests {
     }
 
     #[test]
-    fn session_row_label_prefers_the_captured_title() {
+    fn session_row_label_fallback_cases() {
         let mut session =
             restorable_session(Some("Fix the bug"), "/Users/x/proj", SystemTime::now());
         session.prompt_preview = Some(SharedString::from("Raw prompt"));
         assert_eq!(session_row_label(&session).as_ref(), "Fix the bug");
-    }
 
-    #[test]
-    fn session_row_label_falls_back_to_the_prompt_preview_before_cwd() {
         let mut session = restorable_session(None, "/Users/x/proj", SystemTime::now());
         session.prompt_preview = Some(SharedString::from("Improve recent sessions"));
         assert_eq!(
             session_row_label(&session).as_ref(),
             "Improve recent sessions"
         );
-    }
 
-    #[test]
-    fn session_row_label_falls_back_to_the_cwd_file_name() {
         let session = restorable_session(None, "/Users/x/proj", SystemTime::now());
         assert_eq!(session_row_label(&session).as_ref(), "proj");
-    }
 
-    #[test]
-    fn session_row_label_falls_back_to_the_full_cwd_when_it_has_no_file_name() {
         let session = restorable_session(None, "/", SystemTime::now());
         assert_eq!(session_row_label(&session).as_ref(), "/");
     }
@@ -1008,38 +987,25 @@ mod tests {
     }
 
     #[test]
-    fn switcher_hidden_when_focus_names_a_domain_exactly() {
+    fn show_domain_switcher_cases() {
         assert!(!show_domain_switcher(
             AccountDomain::Exactly(AccountRecipeId::Claude),
             2
         ));
-    }
-
-    #[test]
-    fn switcher_hidden_with_only_one_signed_in_domain() {
         assert!(!show_domain_switcher(AccountDomain::Any, 1));
-    }
 
-    #[test]
-    fn switcher_shown_when_focus_is_ambiguous_and_multiple_domains_are_signed_in() {
         assert!(show_domain_switcher(AccountDomain::Any, 2));
         assert!(show_domain_switcher(AccountDomain::Unsupported, 2));
     }
 
     #[test]
-    fn chart_heights_normalize_to_max() {
+    fn chart_heights_cases() {
         let h = chart_heights(&[10, 20, 0, 5], 44.0, 3.0);
         assert_eq!(h, vec![22.0, 44.0, 3.0, 11.0]);
-    }
 
-    #[test]
-    fn chart_heights_all_zero_floor_to_min() {
         let h = chart_heights(&[0, 0, 0], 44.0, 3.0);
         assert_eq!(h, vec![3.0, 3.0, 3.0]);
-    }
 
-    #[test]
-    fn chart_heights_empty_is_empty() {
         assert!(chart_heights(&[], 44.0, 3.0).is_empty());
     }
 

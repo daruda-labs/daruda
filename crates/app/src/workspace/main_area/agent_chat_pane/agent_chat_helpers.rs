@@ -70,7 +70,14 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     // projection the renderer uses, so expand/collapse-all covers exactly the
     // headers on screen. Neither the fold state nor live progress changes
     // which headers exist, so project with defaults for both.
-    let rows = project(items, &FoldState::default(), false);
+    // Subagent liveness only flips a row's `hidden`, never whether it exists, so
+    // an empty index is the right input here too.
+    let rows = project(
+        items,
+        &FoldState::default(),
+        false,
+        &super::rows::LiveSubagentUnits::default(),
+    );
     // Assistant prose rendered under a response bar is inline (no per-block
     // header/fold — the response bar owns the speaker label), so its
     // `FoldKey::Assistant` would be a dead toggle. Such rows are `AgentItem`s at

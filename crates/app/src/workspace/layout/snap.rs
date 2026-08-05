@@ -121,6 +121,9 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// "selected" background when this triple matches.
     pub focused_file_selection: Option<(daruda_store::project::LaneId, std::path::PathBuf, bool)>,
     pub git_changes_scroll_handle: gpui::ScrollHandle,
+    /// Scroll handle for the Lanes view card list — the body below the
+    /// (fixed) view header. Shared with its scrollbar thumb overlay.
+    pub lanes_scroll_handle: gpui::ScrollHandle,
     pub git_commit_input: gpui::Entity<crate::ui::InputPanel>,
     pub files_panel_focus: FocusHandle,
     pub files_scroll_handle: UniformListScrollHandle,
@@ -168,8 +171,9 @@ impl LeftDockSnapshot {
     ///   instance for the workspace's lifetime, so they are
     ///   content-irrelevant and intentionally EXCLUDED: `git_changes_panel_focus`,
     ///   `git_changes_scroll_handle`, `git_commit_input`, `files_panel_focus`,
-    ///   `files_scroll_handle`, `workspace`. `active_project_name` is also
-    ///   excluded — it is `#[allow(dead_code)]`, unused by the render.
+    ///   `files_scroll_handle`, `lanes_scroll_handle`, `workspace`.
+    ///   `active_project_name` is also excluded — it is
+    ///   `#[allow(dead_code)]`, unused by the render.
     ///
     /// Wired into left-dock render staging (`render/mod.rs`) as the
     /// notify-on-change comparator: the cached dock is marked dirty only
@@ -529,6 +533,7 @@ mod tests {
             git_changes_panel_focus: cx.focus_handle(),
             focused_file_selection: None,
             git_changes_scroll_handle: ScrollHandle::new(),
+            lanes_scroll_handle: ScrollHandle::new(),
             git_commit_input,
             files_panel_focus: cx.focus_handle(),
             files_scroll_handle: UniformListScrollHandle::new(),

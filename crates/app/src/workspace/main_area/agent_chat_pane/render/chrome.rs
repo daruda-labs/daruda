@@ -440,22 +440,15 @@ mod tests {
     }
 
     #[test]
-    fn format_last_active_slices_canonical_iso_to_date_and_hh_mm() {
-        assert_eq!(
-            format_last_active("2026-07-01T14:32:05.123Z"),
-            "2026-07-01 14:32"
-        );
-        assert_eq!(
-            format_last_active("2026-12-25T09:00:00+09:00"),
-            "2026-12-25 09:00"
-        );
-    }
-
-    #[test]
-    fn format_last_active_returns_unrecognized_input_unchanged() {
-        // No 'T' separator / wrong shape → best-effort passthrough, not a panic.
-        assert_eq!(format_last_active("not-a-timestamp"), "not-a-timestamp");
-        assert_eq!(format_last_active("2026-07-01"), "2026-07-01");
+    fn format_last_active_cases() {
+        for (input, expected) in [
+            ("2026-07-01T14:32:05.123Z", "2026-07-01 14:32"),
+            ("2026-12-25T09:00:00+09:00", "2026-12-25 09:00"),
+            ("not-a-timestamp", "not-a-timestamp"),
+            ("2026-07-01", "2026-07-01"),
+        ] {
+            assert_eq!(format_last_active(input), expected);
+        }
     }
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
@@ -474,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn running_tool_title_is_none_without_an_in_progress_call() {
+    fn running_tool_title_cases() {
         let items = [
             ChatItem::AssistantText {
                 text: "a".into(),
@@ -484,10 +477,7 @@ mod tests {
             tool("c1", ToolStatusView::Completed),
         ];
         assert_eq!(running_tool_title(&items), None);
-    }
 
-    #[test]
-    fn running_tool_title_picks_the_last_live_call() {
         // Settled (Completed) calls are skipped; the latest *live* one wins.
         // `Pending` counts as live (see `ToolStatusView::is_live`), so a trailing
         // Pending call outranks an earlier InProgress one.
@@ -500,45 +490,33 @@ mod tests {
     }
 
     #[test]
-    fn format_elapsed_zero_seconds() {
-        assert_eq!(format_elapsed(std::time::Duration::from_secs(0)), "0s");
+    fn format_elapsed_cases() {
+        for (secs, expected) in [
+            (0, "0s"),
+            (5, "5s"),
+            (60, "1m00s"),
+            (65, "1m05s"),
+            (600, "10m00s"),
+        ] {
+            assert_eq!(
+                format_elapsed(std::time::Duration::from_secs(secs)),
+                expected
+            );
+        }
     }
 
     #[test]
-    fn format_elapsed_five_seconds() {
-        assert_eq!(format_elapsed(std::time::Duration::from_secs(5)), "5s");
-    }
-
-    #[test]
-    fn format_elapsed_sixty_five_seconds() {
-        assert_eq!(format_elapsed(std::time::Duration::from_secs(65)), "1m05s");
-    }
-
-    #[test]
-    fn format_elapsed_at_one_minute_boundary() {
-        assert_eq!(format_elapsed(std::time::Duration::from_secs(60)), "1m00s");
-    }
-
-    #[test]
-    fn format_elapsed_six_hundred_seconds() {
-        assert_eq!(
-            format_elapsed(std::time::Duration::from_secs(600)),
-            "10m00s"
-        );
-    }
-
-    #[test]
-    fn format_token_count_is_exact_below_one_thousand() {
-        assert_eq!(format_token_count(0), "0");
-        assert_eq!(format_token_count(512), "512");
-        assert_eq!(format_token_count(999), "999");
-    }
-
-    #[test]
-    fn format_token_count_rounds_to_nearest_thousand_with_k() {
-        assert_eq!(format_token_count(1000), "1k");
-        assert_eq!(format_token_count(1500), "2k");
-        assert_eq!(format_token_count(53_000), "53k");
-        assert_eq!(format_token_count(200_000), "200k");
+    fn format_token_count_cases() {
+        for (tokens, expected) in [
+            (0, "0"),
+            (512, "512"),
+            (999, "999"),
+            (1000, "1k"),
+            (1500, "2k"),
+            (53_000, "53k"),
+            (200_000, "200k"),
+        ] {
+            assert_eq!(format_token_count(tokens), expected);
+        }
     }
 }

@@ -48,24 +48,18 @@ fn thinking(text: &str) -> daruda_acp::ChatItem {
 }
 
 #[test]
-fn resolve_ignores_thinking_and_still_streaming_text() {
+fn first_response_watch_resolve_covers_text_tool_anchor_and_ignored_items() {
     let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
     let items = vec![thinking("pondering"), assistant_text("partial", true)];
     assert_eq!(watch.resolve(&items), None);
-}
 
-#[test]
-fn resolve_returns_the_first_completed_assistant_text() {
     let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
     let items = vec![thinking("hmm"), assistant_text("done", false)];
     assert_eq!(
         watch.resolve(&items),
         Some(super::FirstResponseOutcome::Text("done".to_string()))
     );
-}
 
-#[test]
-fn resolve_returns_a_tool_call_with_no_preceding_text() {
     let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
     let items = vec![thinking("hmm"), tool_call("Write /tmp/x.rs")];
     assert_eq!(
@@ -74,10 +68,7 @@ fn resolve_returns_a_tool_call_with_no_preceding_text() {
             tool_title: Some("Write /tmp/x.rs".to_string())
         })
     );
-}
 
-#[test]
-fn resolve_only_scans_items_appended_after_the_watch_started() {
     // A prior turn's completed AssistantText, present *before* the watch's
     // anchor point, must not be mistaken for this turn's first response.
     let items = vec![assistant_text("previous turn's answer", false)];
@@ -142,7 +133,7 @@ fn push_deferred_evicts_oldest_beyond_cap() {
 }
 
 #[test]
-fn partition_deferred_drops_stale_permission() {
+fn partition_deferred_filters_stale_permissions_and_holds_unready_entries() {
     use super::DeferKind;
     let now = std::time::Instant::now();
     let q = vec![
@@ -158,12 +149,7 @@ fn partition_deferred_drops_stale_permission() {
     assert_eq!(ready.len(), 1);
     assert_eq!(ready[0].kind, DeferKind::Completion);
     assert!(still_holding.is_empty());
-}
 
-#[test]
-fn partition_deferred_keeps_each_outstanding_permission() {
-    use super::DeferKind;
-    let now = std::time::Instant::now();
     let q = vec![
         mk_relay(DeferKind::Permission { perm_id: 7 }),
         mk_relay(DeferKind::Permission { perm_id: 8 }),
@@ -177,15 +163,10 @@ fn partition_deferred_keeps_each_outstanding_permission() {
     assert_eq!(ready[0].kind, DeferKind::Permission { perm_id: 7 });
     assert_eq!(ready[1].kind, DeferKind::Permission { perm_id: 9 });
     assert!(still_holding.is_empty());
-}
 
-#[test]
-fn partition_deferred_holds_back_entries_not_yet_ready() {
     // Still foregrounded, just queued (age 0), currently idle — not ready:
     // the quiet window anchors to this entry's own `queued_at`, not to the
     // (already-past-threshold) idle reading alone.
-    use super::DeferKind;
-    let now = std::time::Instant::now();
     let q = vec![mk_relay(DeferKind::Completion)];
     let live = std::collections::HashSet::new();
     let (ready, still_holding) = super::partition_deferred(q, &live, now, true, 90.0, 60);
@@ -194,15 +175,12 @@ fn partition_deferred_holds_back_entries_not_yet_ready() {
 }
 
 #[test]
-fn ready_to_deliver_fires_immediately_once_app_is_not_active() {
+fn ready_to_deliver_covers_inactive_and_foreground_quiet_window_rules() {
     let now = std::time::Instant::now();
     // Just queued, and idle_secs is 0 (input this instant) — would fail
     // every other condition, but leaving the app delivers regardless.
     assert!(super::ready_to_deliver(now, now, false, 0.0, 60));
-}
 
-#[test]
-fn ready_to_deliver_requires_both_elapsed_and_idle_while_foregrounded() {
     let queued_at = std::time::Instant::now();
     let past_window = queued_at + std::time::Duration::from_secs(61);
 
@@ -245,15 +223,12 @@ fn ready_to_deliver_requires_both_elapsed_and_idle_while_foregrounded() {
 }
 
 #[test]
-fn permission_wait_tail_appends_the_tool_title_when_present() {
+fn permission_wait_tail_formats_title_summary_fallback_and_empty_values() {
     assert_eq!(
         permission_wait_tail(Some("Write /tmp/x.rs"), None),
         format!("{}\n{}", s::agent_notification_waiting(), "Write /tmp/x.rs")
     );
-}
 
-#[test]
-fn permission_wait_tail_appends_the_raw_input_summary_after_the_title() {
     assert_eq!(
         permission_wait_tail(Some("Run npm install"), Some("command: npm install")),
         format!(
@@ -263,26 +238,17 @@ fn permission_wait_tail_appends_the_raw_input_summary_after_the_title() {
             "command: npm install"
         )
     );
-}
 
-#[test]
-fn permission_wait_tail_appends_only_the_raw_input_summary_without_a_title() {
     assert_eq!(
         permission_wait_tail(None, Some("file: /tmp/x.rs")),
         format!("{}\n{}", s::agent_notification_waiting(), "file: /tmp/x.rs")
     );
-}
 
-#[test]
-fn permission_wait_tail_falls_back_to_plain_waiting_text_without_a_title_or_summary() {
     assert_eq!(
         permission_wait_tail(None, None),
         s::agent_notification_waiting()
     );
-}
 
-#[test]
-fn permission_wait_tail_treats_empty_strings_as_absent() {
     assert_eq!(
         permission_wait_tail(Some(""), Some("")),
         s::agent_notification_waiting()
@@ -290,7 +256,7 @@ fn permission_wait_tail_treats_empty_strings_as_absent() {
 }
 
 #[test]
-fn first_tool_ack_tail_appends_the_title_when_present() {
+fn first_tool_ack_tail_formats_title_empty_and_absent_cases() {
     assert_eq!(
         super::first_tool_ack_tail(Some("Write /tmp/x.rs")),
         format!(
@@ -299,18 +265,12 @@ fn first_tool_ack_tail_appends_the_title_when_present() {
             "Write /tmp/x.rs"
         )
     );
-}
 
-#[test]
-fn first_tool_ack_tail_treats_an_empty_title_as_absent() {
     assert_eq!(
         super::first_tool_ack_tail(Some("")),
         s::agent_notification_telegram_first_tool_ack()
     );
-}
 
-#[test]
-fn first_tool_ack_tail_without_a_title() {
     assert_eq!(
         super::first_tool_ack_tail(None),
         s::agent_notification_telegram_first_tool_ack()
@@ -326,13 +286,10 @@ fn choice(option_id: &str, name: &str, kind: PermissionKindView) -> PermissionCh
 }
 
 #[test]
-fn preview_for_under_threshold_is_verbatim() {
+fn preview_for_keeps_short_text_and_truncates_long_text_char_safely() {
     let text = "a".repeat(2000);
     assert_eq!(preview_for(&text, "…(marker)…"), text);
-}
 
-#[test]
-fn preview_for_over_threshold_keeps_head_and_tail_around_marker() {
     // 1000 'a's + 1000 'b's = 2001 chars, one over the threshold.
     let text = format!("{}{}", "a".repeat(1000), "b".repeat(1001));
     let result = preview_for(&text, "…(marker)…");
@@ -340,10 +297,7 @@ fn preview_for_over_threshold_keeps_head_and_tail_around_marker() {
         result,
         format!("{}\n…(marker)…\n{}", "a".repeat(1000), "b".repeat(1000))
     );
-}
 
-#[test]
-fn preview_for_is_char_safe_with_multibyte_text() {
     // Korean text well past the threshold — must not panic on a
     // byte-boundary split, and must actually keep 1000 *characters*
     // (not bytes) on each side.
@@ -354,7 +308,7 @@ fn preview_for_is_char_safe_with_multibyte_text() {
 }
 
 #[test]
-fn permission_buttons_exposes_every_option_not_just_first_of_kind() {
+fn permission_buttons_exposes_every_option_and_maps_rejects() {
     // The real motivating case (codex-acp): more than one Allow-shaped
     // option (Once, session-scoped, an execpolicy amendment) alongside
     // Reject — all four must become their own button, in order, not
@@ -397,10 +351,7 @@ fn permission_buttons_exposes_every_option_not_just_first_of_kind() {
             ),
         ]
     );
-}
 
-#[test]
-fn permission_buttons_maps_reject_always_to_reject_decision() {
     let options = vec![choice(
         "reject_always",
         "Always Reject",
@@ -413,18 +364,16 @@ fn permission_buttons_maps_reject_always_to_reject_decision() {
             PermissionDecision::Reject("reject_always".to_string())
         )]
     );
-}
 
-#[test]
-fn permission_buttons_empty_options_is_empty() {
     assert!(permission_buttons(&[]).is_empty());
 }
 
-/// A phone reply injected into a pane that has never connected (no
-/// `handle`, so `send_prompt_text_for_telegram` always queues) sends the
-/// "queued" notice — there's nothing yet to watch a first response for.
+/// Telegram reply acknowledgement paths on a pane with no live handle:
+/// queued replies get the queued notice; overdue first-response watches send a
+/// one-shot fallback ack; and a permission wait with no buttons also falls back
+/// to the same ack instead of leaving the phone silent.
 #[gpui::test]
-async fn inject_bot_reply_sends_the_queued_notice_when_it_has_to_wait(
+async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     cx: &mut gpui::TestAppContext,
 ) {
     let mut outbound =
@@ -485,6 +434,66 @@ async fn inject_bot_reply_sends_the_queued_notice_when_it_has_to_wait(
     assert_eq!(
         sent.tail,
         super::TelegramTail::Plain(s::agent_notification_telegram_reply_queued())
+    );
+
+    let started = std::time::Instant::now()
+        - std::time::Duration::from_secs(super::FIRST_RESPONSE_FALLBACK_SECS + 1);
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view present");
+        view.update(cx, |v, _| {
+            v.start_telegram_first_response_watch_for_test(started)
+        });
+        ws.flush_telegram_first_response_fallbacks(cx);
+    });
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().unwrap();
+        assert!(
+            !view.read(cx).is_waiting_for_telegram_first_response(),
+            "the overdue fallback consumes the watch"
+        );
+    });
+    let sent = outbound
+        .next()
+        .await
+        .expect("the fallback ack should be sent");
+    assert_eq!(sent.pane.pane, pane_id);
+    assert_eq!(
+        sent.tail,
+        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
+    );
+
+    workspace.update(cx, |ws, cx| {
+        ws.flush_telegram_first_response_fallbacks(cx);
+    });
+    cx.run_until_parked();
+    assert!(outbound.next().now_or_never().is_none());
+
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view present");
+        view.update(cx, |v, _| {
+            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+        });
+        ws.relay_permission_wait_to_telegram(
+            pane_id,
+            7,
+            &[],
+            Some("Tool without choices"),
+            None,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    let sent = outbound
+        .next()
+        .await
+        .expect("empty-button first response should still ack the phone");
+    assert_eq!(sent.pane.pane, pane_id);
+    assert_eq!(
+        sent.tail,
+        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
     );
 }
 
@@ -667,7 +676,7 @@ async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_an
     workspace.read_with(cx, |ws, _| {
         assert!(
             ws.deferred_telegram.is_empty(),
-            "the queue drains after delivery"
+            "delivery should drain closed, stale, and sent entries from the held queue"
         );
     });
 
@@ -685,298 +694,6 @@ async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_an
     assert!(
         outbound.next().now_or_never().is_none(),
         "closed panes and stale permissions must not emit extra pings"
-    );
-}
-
-/// A ping that hasn't cleared its own quiet window yet stays queued, then
-/// drains once the same foregrounded/idle pane has cleared that window.
-#[gpui::test]
-async fn deliver_deferred_telegram_holds_until_entry_quiet_window_clears(
-    cx: &mut gpui::TestAppContext,
-) {
-    let mut outbound =
-        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
-    let mut config = daruda_config::Config::default();
-    config.telegram.enabled = true;
-    config.telegram.authorized_chat_id = Some(42);
-    let (handle, workspace) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane = cx
-        .update_window(handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    workspace.update(cx, |ws, _| {
-        ws.deferred_telegram
-            .entry(pane)
-            .or_default()
-            .push(super::DeferredRelay {
-                kind: super::DeferKind::Completion,
-                header: "header".to_string(),
-                tail: super::TelegramTail::Plain("completion".to_string()),
-                permission: None,
-                queued_at: std::time::Instant::now(),
-            });
-    });
-
-    // Foregrounded, and `idle_secs` alone would already clear the
-    // threshold — but the entry was just queued, so its own window
-    // hasn't elapsed yet.
-    workspace.update(cx, |ws, cx| {
-        ws.deliver_deferred_telegram(true, 90.0, 60, cx);
-    });
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.deferred_telegram.get(&pane).map(Vec::len),
-            Some(1),
-            "the entry stays queued instead of firing early"
-        );
-    });
-    assert!(
-        outbound.next().now_or_never().is_none(),
-        "nothing should have been sent yet"
-    );
-
-    workspace.update(cx, |ws, _| {
-        ws.deferred_telegram
-            .get_mut(&pane)
-            .and_then(|q| q.get_mut(0))
-            .expect("held entry should still be queued")
-            .queued_at = std::time::Instant::now() - std::time::Duration::from_secs(61);
-    });
-
-    workspace.update(cx, |ws, cx| {
-        ws.deliver_deferred_telegram(true, 60.0, 60, cx);
-    });
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, _| {
-        assert!(
-            ws.deferred_telegram.is_empty(),
-            "the entry drains once its foreground quiet window clears"
-        );
-    });
-    let sent = outbound
-        .next()
-        .await
-        .expect("the quiet-window-cleared entry should be sent");
-    assert_eq!(sent.pane.pane, pane);
-    assert_eq!(sent.header, "header");
-    assert_eq!(
-        sent.tail,
-        super::TelegramTail::Plain("completion".to_string())
-    );
-}
-
-/// Turning off active-window deferral should release already-held pings on
-/// the next flush instead of leaving them governed by the old foreground
-/// quiet-window rules.
-#[gpui::test]
-async fn flush_deferred_telegram_drains_existing_queue_when_defer_disabled(
-    cx: &mut gpui::TestAppContext,
-) {
-    let mut outbound =
-        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
-    let mut config = daruda_config::Config::default();
-    config.telegram.enabled = true;
-    config.telegram.authorized_chat_id = Some(42);
-    config.telegram.defer_while_active = false;
-    let (handle, workspace) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane = cx
-        .update_window(handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    workspace.update(cx, |ws, _| {
-        ws.deferred_telegram
-            .entry(pane)
-            .or_default()
-            .push(super::DeferredRelay {
-                kind: super::DeferKind::Completion,
-                header: "header".to_string(),
-                tail: super::TelegramTail::Plain("completion".to_string()),
-                permission: None,
-                queued_at: std::time::Instant::now(),
-            });
-    });
-
-    workspace.update(cx, |ws, cx| {
-        ws.flush_deferred_telegram(cx);
-    });
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, _| {
-        assert!(
-            ws.deferred_telegram.is_empty(),
-            "defer-disabled flush should drain the held queue"
-        );
-    });
-
-    let sent = outbound
-        .next()
-        .await
-        .expect("the held completion entry should be sent");
-    assert_eq!(sent.pane.pane, pane);
-    assert_eq!(sent.header, "header");
-    assert_eq!(
-        sent.tail,
-        super::TelegramTail::Plain("completion".to_string())
-    );
-    assert!(outbound.next().now_or_never().is_none());
-}
-
-#[gpui::test]
-async fn flush_telegram_first_response_fallbacks_sends_once_for_overdue_watch(
-    cx: &mut gpui::TestAppContext,
-) {
-    let mut outbound =
-        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
-    let mut config = daruda_config::Config::default();
-    config.telegram.enabled = true;
-    config.telegram.authorized_chat_id = Some(42);
-    let (handle, workspace) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane = cx
-        .update_window(handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                let view = ws.agent_chat_view(id).cloned().expect("view present");
-                view.update(cx, |v, _| {
-                    let started = std::time::Instant::now()
-                        - std::time::Duration::from_secs(super::FIRST_RESPONSE_FALLBACK_SECS + 1);
-                    v.start_telegram_first_response_watch_for_test(started);
-                });
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    workspace.update(cx, |ws, cx| {
-        ws.flush_telegram_first_response_fallbacks(cx);
-    });
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane).cloned().unwrap();
-        assert!(
-            !view.read(cx).is_waiting_for_telegram_first_response(),
-            "the overdue fallback consumes the watch"
-        );
-    });
-
-    let sent = outbound
-        .next()
-        .await
-        .expect("the fallback ack should be sent");
-    assert_eq!(sent.pane.pane, pane);
-    assert_eq!(
-        sent.tail,
-        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
-    );
-
-    workspace.update(cx, |ws, cx| {
-        ws.flush_telegram_first_response_fallbacks(cx);
-    });
-    cx.run_until_parked();
-    assert!(outbound.next().now_or_never().is_none());
-}
-
-#[gpui::test]
-async fn first_response_permission_without_buttons_sends_fallback_ack(
-    cx: &mut gpui::TestAppContext,
-) {
-    let mut outbound =
-        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
-    let mut config = daruda_config::Config::default();
-    config.telegram.enabled = true;
-    config.telegram.authorized_chat_id = Some(42);
-    let (handle, workspace) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane = cx
-        .update_window(handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                let view = ws.agent_chat_view(id).cloned().expect("view present");
-                view.update(cx, |v, _| {
-                    v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
-                });
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    workspace.update(cx, |ws, cx| {
-        ws.relay_permission_wait_to_telegram(pane, 7, &[], Some("Tool without choices"), None, cx);
-    });
-    cx.run_until_parked();
-
-    let sent = outbound
-        .next()
-        .await
-        .expect("empty-button first response should still ack the phone");
-    assert_eq!(sent.pane.pane, pane);
-    assert_eq!(
-        sent.tail,
-        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
     );
 }
 

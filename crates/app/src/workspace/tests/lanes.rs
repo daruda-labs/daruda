@@ -3,14 +3,6 @@ use super::*;
 // ---- Lanes ----
 
 #[gpui::test]
-fn test_workspace_without_project_has_no_lanes(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.read_with(cx, |ws, _| {
-        assert!(ws.active_lanes().is_empty());
-    });
-}
-
-#[gpui::test]
 fn test_workspace_with_project_bootstraps_one_default_lane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_bootstrap_wt");
@@ -36,23 +28,27 @@ fn test_workspace_with_project_bootstraps_one_default_lane(cx: &mut TestAppConte
             ws.active_lanes()[0].path,
             std::path::PathBuf::from("/tmp/test_bootstrap_wt")
         );
-    });
-}
+        assert!(
+            ws.git_repo_root().is_none(),
+            "a non-git Default lane must not expose a repo root"
+        );
 
-#[gpui::test]
-fn test_activate_lane_requires_existing_id(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_wt_activate");
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
+        let proj = ws.active_ref().project;
+        let unknown = daruda_store::project::LaneRef {
+            project: proj,
+            lane: 999,
+        };
+        let err = ws.validate_remove_lane(unknown).unwrap_err();
+        assert!(err.contains("not found"));
+
+        let default_lane = daruda_store::project::LaneRef {
+            project: proj,
+            lane: 0,
+        };
+        let err = ws.validate_remove_lane(default_lane).unwrap_err();
+        assert!(err.contains("cannot be removed"));
     });
-    let ws = wh.root(cx).unwrap();
+
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             // Nonexistent id → no-op.
@@ -72,7 +68,7 @@ fn test_activate_lane_requires_existing_id(cx: &mut TestAppContext) {
 }
 
 #[test]
-fn test_lane_removable_excludes_main_and_default() {
+fn lane_removable_respects_default_main_and_kind_updates() {
     let default_wt = crate::lane::Lane::default_for_project(0, std::path::PathBuf::from("/tmp"));
     assert!(!Workspace::lane_removable(&default_wt));
 
@@ -95,14 +91,11 @@ fn test_lane_removable_excludes_main_and_default() {
         1,
     );
     assert!(Workspace::lane_removable(&linked));
-}
 
-/// Regression: `path != repo_root` wrongly made a main lane removable when
-/// the user opened a subdirectory and `Lane.path` was anchored to that
-/// subdirectory. `worktree_root == repo_root` is the correct signal.
-#[test]
-fn test_lane_removable_subdir_anchored_main_not_removable() {
-    let lane = crate::lane::Lane::git(
+    // Regression: `path != repo_root` wrongly made a main lane removable when
+    // the user opened a subdirectory. `worktree_root == repo_root` is the
+    // correct signal.
+    let subdir_main = crate::lane::Lane::git(
         0,
         std::path::PathBuf::from("/repo/sub"),
         Some("main".into()),
@@ -111,21 +104,16 @@ fn test_lane_removable_subdir_anchored_main_not_removable() {
         0,
     );
     assert!(
-        lane.is_main,
+        subdir_main.is_main,
         "precondition: subdir-anchored main lane must have is_main=true"
     );
     assert!(
-        !Workspace::lane_removable(&lane),
+        !Workspace::lane_removable(&subdir_main),
         "subdir-anchored main lane must NOT be removable"
     );
-}
 
-/// Regression: `set_kind` must recompute `is_main` atomically so that a lane
-/// promoted from `Default` to `Git` (via `git init`) with `worktree_root ==
-/// repo_root` becomes non-removable immediately, without going through a
-/// constructor.
-#[test]
-fn test_set_kind_recomputes_is_main_and_blocks_removal() {
+    // Regression: `set_kind` must recompute `is_main` atomically so a lane
+    // promoted from `Default` to `Git` becomes non-removable immediately.
     let mut lane = crate::lane::Lane::default_for_project(0, std::path::PathBuf::from("/tmp/repo"));
     assert!(!lane.is_main, "precondition: Default lane is not main");
     assert!(
@@ -205,59 +193,6 @@ fn reconcile_lane_branch_updates_kind_on_drift(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_git_repo_root_returns_none_for_non_git_workspace(cx: &mut TestAppContext) {
-    // Non-git Default lane → git_repo_root() is the gate the
-    // `[+]` button uses to short-circuit before opening the modal.
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_modal_non_git");
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert!(ws.git_repo_root().is_none());
-    });
-}
-
-#[gpui::test]
-fn validate_remove_lane_rejects_unknown_and_default_lane(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_remove_lane_guards");
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
-        let proj = ws.active_ref().project;
-        let unknown = daruda_store::project::LaneRef {
-            project: proj,
-            lane: 999,
-        };
-        let err = ws.validate_remove_lane(unknown).unwrap_err();
-        assert!(err.contains("not found"));
-
-        let default_lane = daruda_store::project::LaneRef {
-            project: proj,
-            lane: 0,
-        };
-        let err = ws.validate_remove_lane(default_lane).unwrap_err();
-        assert!(err.contains("cannot be removed"));
-    });
-}
-
-#[gpui::test]
 fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     // Both lane roots must exist on disk so activation classifies them as
@@ -305,6 +240,8 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
             assert_eq!(ws.active.lane, 1);
             // Freshly activated lane starts empty (no auto-seed).
             assert!(ws.active_runtime().tabs.is_empty());
+            assert!(ws.active_runtime().panes.is_empty());
+            assert!(!ws.has_focused_pane());
             ws.add_tab(window, cx);
             // Now exactly one tab/pane for lane 1.
             assert_eq!(ws.active_runtime().tabs.len(), 1);
@@ -312,6 +249,23 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
             // Both lanes registered in the single store.
             assert_eq!(ws.main_area.runtimes.len(), 2);
             let proj = ws.active_ref().project;
+            let lane0 = daruda_store::project::LaneRef {
+                project: proj,
+                lane: 0,
+            };
+            let lane1 = daruda_store::project::LaneRef {
+                project: proj,
+                lane: 1,
+            };
+            let index = ws.pane_lane_index();
+            assert!(
+                index.iter().any(|(_, lane)| *lane == lane0),
+                "parked lane 0's pane must remain in the index"
+            );
+            assert!(
+                index.iter().any(|(_, lane)| *lane == lane1),
+                "active lane 1's pane must be in the index"
+            );
             // Lane 0 is now the parked entry; its runtime is untouched.
             let parked = ws
                 .main_area
@@ -333,6 +287,10 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let proj = ws.active_ref().project;
+            let lane1 = daruda_store::project::LaneRef {
+                project: proj,
+                lane: 1,
+            };
             ws.activate_lane(
                 daruda_store::project::LaneRef {
                     project: proj,
@@ -345,20 +303,43 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
             assert_eq!(ws.active_runtime().tabs.len(), 1);
             assert_eq!(ws.active_runtime().panes.len(), 1);
             assert_eq!(ws.main_area.runtimes.len(), 2);
-            let parked = ws
-                .main_area
-                .runtimes
-                .get(&daruda_store::project::LaneRef {
-                    project: proj,
-                    lane: 1,
-                })
-                .unwrap();
+            let parked = ws.main_area.runtimes.get(&lane1).unwrap();
             // Lane 1 carries its lazy-spawned pane now.
             assert_eq!(parked.tabs.len(), 1);
             assert_eq!(parked.panes.len(), 1);
+
+            // Closing the active lane's last tab must not close the window
+            // while a sibling lane still holds content.
+            ws.activate_lane(lane1, window, cx);
+            ws.close_tab_at(0, window, cx);
+            assert!(
+                ws.active_runtime().tabs.is_empty(),
+                "active lane must be emptied, not closed with the window"
+            );
+            assert!(ws.active_runtime().panes.is_empty());
+            assert!(!ws.has_focused_pane());
+            assert_eq!(
+                ws.main_area
+                    .runtimes
+                    .get(&daruda_store::project::LaneRef {
+                        project: proj,
+                        lane: 0,
+                    })
+                    .map(|rt| rt.tabs.len()),
+                Some(1),
+                "the sibling lane's runtime must survive"
+            );
+            ws.add_tab(window, cx);
+            assert_eq!(
+                ws.active_runtime().tabs.len(),
+                1,
+                "a fresh tab is reopened in the emptied lane"
+            );
+            assert!(ws.has_focused_pane(), "the reopened tab is focused");
         });
     })
     .unwrap();
+    assert_eq!(cx.windows().len(), 1, "the window must stay open");
 }
 
 #[gpui::test]
@@ -377,6 +358,7 @@ fn welcome_workspace_has_seeded_active_runtime(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         assert!(ws.projects.is_empty());
+        assert!(ws.active_lanes().is_empty());
         assert_eq!(ws.active, daruda_store::project::LaneRef::default());
         // The accessor would `expect`-panic if the default ref had no
         // entry; a clean empty read proves the constructor seed ran.
@@ -387,69 +369,6 @@ fn welcome_workspace_has_seeded_active_runtime(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn pane_lane_index_spans_active_and_parked_lanes(cx: &mut TestAppContext) {
-    // Regression: a parked lane's panes must stay visible to the
-    // workspace-wide aggregators (here `pane_lane_index`, which feeds the
-    // ACP/PTY status indicators) after a lane switch — the bug the
-    // single-store unification fixes at its root.
-    let config = daruda_config::Config::default();
-    let root_a = std::path::PathBuf::from("/tmp/test_pane_index_a");
-    let root_b = std::path::PathBuf::from("/tmp/test_pane_index_b");
-    let _ = std::fs::create_dir_all(&root_a);
-    let _ = std::fs::create_dir_all(&root_b);
-    let project = daruda_store::project::Project::from_path(&root_a);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, _cx| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes
-                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
-        }
-    });
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            let proj = ws.active_ref().project;
-            let lane0 = daruda_store::project::LaneRef {
-                project: proj,
-                lane: 0,
-            };
-            let lane1 = daruda_store::project::LaneRef {
-                project: proj,
-                lane: 1,
-            };
-            ws.activate_lane(lane1, window, cx);
-            // Activation doesn't auto-seed a tab; open one in lane 1.
-            ws.add_tab(window, cx);
-            // After the switch, lane 0 is parked and lane 1 is active. Both
-            // must appear in the index — a parked lane's panes must not be
-            // dropped from the workspace-wide scan.
-            let index = ws.pane_lane_index();
-            assert!(
-                index.iter().any(|(_, lane)| *lane == lane0),
-                "parked lane 0's pane must remain in the index"
-            );
-            assert!(
-                index.iter().any(|(_, lane)| *lane == lane1),
-                "active lane 1's pane must be in the index"
-            );
-        });
-    })
-    .unwrap();
-
-    let _ = std::fs::remove_dir_all(&root_a);
-    let _ = std::fs::remove_dir_all(&root_b);
-}
-
-#[gpui::test]
 fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
     // Removing the *active* lane must re-point to a sibling and refill
     // the viewport — never leave the main area blank.
@@ -457,6 +376,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
     let repo = std::path::PathBuf::from("/tmp/daruda_remove_active_lane_repo");
     let feature = std::path::PathBuf::from("/tmp/daruda_remove_active_lane_repo-feature");
     let _ = std::fs::create_dir_all(&repo);
+    let _ = std::fs::create_dir_all(&feature);
     let project = daruda_store::project::Project::from_path(&repo);
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project_for_test_full(
@@ -505,14 +425,34 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
         lane: 1,
     };
 
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.activate_lane(lane1, window, cx);
-            assert_eq!(ws.active, lane1, "removable lane is active before removal");
-            ws.finalize_remove_lane(lane1, window, cx);
-        });
-    })
-    .unwrap();
+    let pane_ids = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.activate_lane(lane1, window, cx);
+                assert_eq!(ws.active, lane1, "removable lane is active before removal");
+                ws.add_tab(window, cx);
+                let pane_ids: Vec<_> = ws
+                    .active_runtime()
+                    .tabs
+                    .iter()
+                    .flat_map(|t| t.layout.pane_ids())
+                    .collect();
+                assert!(!pane_ids.is_empty(), "opened tab spawns panes");
+                for id in &pane_ids {
+                    ws.claude.pty_tracker.register(*id, 4242);
+                    ws.claude.pty_claude_bindings.insert(
+                        *id,
+                        crate::hooks::pty_tracker::PtyBinding {
+                            claude_pid: 4242,
+                            session_id: format!("sess-{id}"),
+                        },
+                    );
+                }
+                ws.finalize_remove_lane(lane1, window, cx);
+                pane_ids
+            })
+        })
+        .unwrap();
 
     ws.read_with(cx, |ws, _| {
         // Fell back to the surviving main lane.
@@ -531,106 +471,18 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
             !ws.main_area.runtimes.contains_key(&lane1),
             "removed lane's runtime must be cleared"
         );
-    });
-
-    let _ = std::fs::remove_dir_all(&repo);
-}
-
-#[gpui::test]
-fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
-    // Dropping a lane's runtime must also release its panes from PTY
-    // tracking — otherwise the tracker's poll loop walks the dead
-    // shell PIDs forever (its idle guard never re-arms) and the
-    // panes' claude bindings linger until the next poll.
-    let config = daruda_config::Config::default();
-    let repo = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo");
-    let feature = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo-feature");
-    let _ = std::fs::create_dir_all(&repo);
-    // The feature lane root must exist so activation classifies it as
-    // `Present` and the lazy-seed spawns the panes this test removes.
-    let _ = std::fs::create_dir_all(&feature);
-    let project = daruda_store::project::Project::from_path(&repo);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    ws.update(cx, |ws, _| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes = vec![
-                crate::lane::Lane::git(
-                    0,
-                    repo.clone(),
-                    Some("main".into()),
-                    repo.clone(),
-                    repo.clone(),
-                    0,
-                ),
-                crate::lane::Lane::git(
-                    1,
-                    feature.clone(),
-                    Some("feature".into()),
-                    repo.clone(),
-                    feature.clone(),
-                    1,
-                ),
-            ];
+        let tracked = ws.claude.pty_tracker.tracked_pane_ids();
+        for id in &pane_ids {
+            assert!(
+                !ws.claude.pty_claude_bindings.contains_key(id),
+                "removed lane's pane binding must be dropped"
+            );
+            assert!(
+                !tracked.contains(id),
+                "removed lane's pane must be unregistered from the tracker"
+            );
         }
     });
-    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
-    let lane1 = daruda_store::project::LaneRef {
-        project: proj,
-        lane: 1,
-    };
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.activate_lane(lane1, window, cx);
-            // Open a tab so the lane has panes to track (activation no
-            // longer auto-seeds one).
-            ws.add_tab(window, cx);
-            // Seed tracker registrations + bindings for the lane's
-            // panes the way pane spawn and the tracker pump would.
-            let pane_ids: Vec<_> = ws
-                .active_runtime()
-                .tabs
-                .iter()
-                .flat_map(|t| t.layout.pane_ids())
-                .collect();
-            assert!(!pane_ids.is_empty(), "opened tab spawns panes");
-            for id in &pane_ids {
-                ws.claude.pty_tracker.register(*id, 4242);
-                ws.claude.pty_claude_bindings.insert(
-                    *id,
-                    crate::hooks::pty_tracker::PtyBinding {
-                        claude_pid: 4242,
-                        session_id: format!("sess-{id}"),
-                    },
-                );
-            }
-
-            ws.finalize_remove_lane(lane1, window, cx);
-
-            let tracked = ws.claude.pty_tracker.tracked_pane_ids();
-            for id in &pane_ids {
-                assert!(
-                    !ws.claude.pty_claude_bindings.contains_key(id),
-                    "removed lane's pane binding must be dropped"
-                );
-                assert!(
-                    !tracked.contains(id),
-                    "removed lane's pane must be unregistered from the tracker"
-                );
-            }
-        });
-    })
-    .unwrap();
 
     let _ = std::fs::remove_dir_all(&repo);
     let _ = std::fs::remove_dir_all(&feature);
@@ -761,11 +613,12 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&root_b);
 }
 
-/// Two input-capable panes in the *same* lane keep independent drafts:
-/// text typed for pane A is saved on focus-away and restored when A is
-/// focused again, while pane B shows only its own (empty) draft.
+/// Same-lane input panes keep independent drafts, non-input panes leave the
+/// active draft owner alone, and closing an input pane drops its saved draft.
 #[gpui::test]
-fn input_draft_round_trips_between_panes(cx: &mut TestAppContext) {
+fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
+
     let config = daruda_config::Config::default();
     let root = std::path::PathBuf::from("/tmp/test_input_draft_roundtrip");
     let _ = std::fs::create_dir_all(&root);
@@ -822,43 +675,6 @@ fn input_draft_round_trips_between_panes(cx: &mut TestAppContext) {
                 None,
                 "pane B has no stored draft"
             );
-        });
-    })
-    .unwrap();
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-/// Focusing a non-input pane (File / TaskEdit) is a no-op for the shared
-/// draft: the visible text and its `input_owner` are left in place, and a
-/// later edit still saves to the original owner when an input pane is
-/// focused again.
-#[gpui::test]
-fn focusing_non_input_pane_keeps_draft(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::file_view_pane::FileViewMode;
-
-    let config = daruda_config::Config::default();
-    let root = std::path::PathBuf::from("/tmp/test_input_draft_noninput");
-    let _ = std::fs::create_dir_all(&root);
-    let project = daruda_store::project::Project::from_path(&root);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            let pane_a = ws.active_runtime().focused_pane_id;
-            ws.terminal_input
-                .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
-            assert_eq!(ws.input_owner, Some(pane_a));
 
             // A File pane is not input-capable. Focusing it must not touch
             // the visible draft or the owner pointer.
@@ -904,50 +720,14 @@ fn focusing_non_input_pane_keeps_draft(cx: &mut TestAppContext) {
                 None,
                 "the file pane never stores a draft"
             );
-        });
-    })
-    .unwrap();
 
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-/// Closing a pane drops its stored draft and clears `input_owner` if it
-/// pointed at that pane — no lingering entry until the lane is deleted.
-#[gpui::test]
-fn closing_pane_drops_its_draft(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let root = std::path::PathBuf::from("/tmp/test_input_draft_close");
-    let _ = std::fs::create_dir_all(&root);
-    let project = daruda_store::project::Project::from_path(&root);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            // Two single-leaf tabs so closing pane A does not close the
-            // window (last-tab close removes the window): the constructor
-            // opens tab 0 (pane A), a second `add_tab` opens tab 1.
-            let pane_a = ws.active_runtime().focused_pane_id;
-            ws.add_tab(window, cx);
-
-            // Give pane A a stored draft: type on A, focus B (saves), back to A.
-            ws.activate_tab(0, window, cx);
-            ws.terminal_input
-                .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
-            ws.activate_tab(1, window, cx);
+            // Closing an input pane drops its stored draft and clears the owner
+            // if it pointed at that pane.
             ws.activate_tab(0, window, cx);
             assert_eq!(ws.input_owner, Some(pane_a));
             assert_eq!(
                 ws.input_drafts.get(&pane_a).map(String::as_str),
-                Some("foo"),
+                Some("foobar"),
                 "pane A has a stored draft before close"
             );
 
@@ -967,99 +747,6 @@ fn closing_pane_drops_its_draft(cx: &mut TestAppContext) {
     .unwrap();
 
     let _ = std::fs::remove_dir_all(&root);
-}
-
-#[gpui::test]
-fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
-    use daruda_store::project::{
-        DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
-    };
-    use std::collections::BTreeMap;
-
-    let config = daruda_config::Config::default();
-    // The lane root must exist on disk: restore classifies a missing
-    // root as inaccessible and skips its pane/tab rebuild (the active
-    // lane then renders the inaccessible empty-state with zero tabs).
-    // This test exercises the healthy "rebuild the persisted tab" path.
-    std::fs::create_dir_all("/tmp/test_restore_wt_tabs").unwrap();
-    let project = daruda_store::project::Project::from_path("/tmp/test_restore_wt_tabs");
-    let wh = cx.add_window(|window, cx| {
-        let mut ws = Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        );
-        let lane = daruda_store::project::SerializedLane {
-            id: 0,
-            kind: daruda_store::project::LaneKind::Default,
-            path: std::path::PathBuf::from("/tmp/test_restore_wt_tabs"),
-            name: None,
-            tab_order: 0,
-            is_unread: false,
-            last_activity: 0,
-            tabs: vec![daruda_store::project::SerializedTab {
-                layout: daruda_store::project::SerializedLayout::Leaf {
-                    pane_id: 1,
-                    cwd: Some(std::path::PathBuf::from("/tmp/test_restore_wt_tabs")),
-                    file: None,
-                    agent_chat: None,
-                    account_id: None,
-                },
-                last_focused_pane: 1,
-                user_label: None,
-            }],
-            active_tab_index: 0,
-            base_ref: None,
-            description: None,
-            remote_cwd: None,
-            session_host: None,
-        };
-        let project_uuid = ProjectUuid::new();
-        let project_state = ProjectState {
-            schema_version: WORKSPACE_SCHEMA_VERSION,
-            uuid: project_uuid,
-            root: std::path::PathBuf::from("/tmp/test_restore_wt_tabs"),
-            name: None,
-            lanes: vec![lane],
-            last_active_lane_id: 0,
-            next_lane_id: 1,
-            default_branch: None,
-            base_branch: None,
-        };
-        let mut project_overrides = BTreeMap::new();
-        project_overrides.insert(project_uuid, ProjectOverride::default());
-        let workspace_state = WorkspaceState {
-            schema_version: WORKSPACE_SCHEMA_VERSION,
-            uuid: WorkspaceUuid::new(),
-            project_ids: vec![project_uuid],
-            project_overrides,
-            groups: Vec::new(),
-            active_project: Some(project_uuid),
-            active_lane: Some(0),
-            docks: DockStates::default(),
-            window: WindowState::default(),
-            font_size: 13.0,
-            vertical_spacing: 1.0,
-            horizontal_spacing: 1.0,
-            focused_pane_id: 1,
-            active_dock_view: LeftDockView::default(),
-            active_right_panel_view: RightDockView::default(),
-            window_open_policy: WindowOpenPolicy::default(),
-            next_group_id: 0,
-            project_tabs: BTreeMap::new(),
-        };
-        ws.restore_from_disk(&workspace_state, &[project_state], window, cx);
-        ws
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_lanes().len(), 1);
-        assert_eq!(ws.active.lane, 0);
-    });
 }
 
 #[gpui::test]
@@ -1233,197 +920,6 @@ fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn dock_views_switch_and_snapshot(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_save_dock_views");
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, cx| {
-        assert_eq!(
-            ws.left_dock_view,
-            daruda_store::project::LeftDockView::Lanes
-        );
-
-        ws.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
-        assert_eq!(
-            ws.left_dock_view,
-            daruda_store::project::LeftDockView::GitChanges
-        );
-        ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
-        assert_eq!(
-            ws.left_dock_view,
-            daruda_store::project::LeftDockView::Files
-        );
-        ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
-        assert_eq!(
-            ws.left_dock_view,
-            daruda_store::project::LeftDockView::Files
-        );
-
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Tools, cx);
-    });
-
-    let (workspace_state, _) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
-    assert_eq!(
-        workspace_state.active_dock_view,
-        daruda_store::project::LeftDockView::Files
-    );
-    assert_eq!(
-        workspace_state.active_right_panel_view,
-        daruda_store::project::RightDockView::Tools
-    );
-}
-
-#[gpui::test]
-fn restore_state_applies_left_and_right_dock_views(cx: &mut TestAppContext) {
-    use daruda_store::project::{
-        DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
-    };
-    use std::collections::BTreeMap;
-
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_restore_dock_views");
-    let wh = cx.add_window(|window, cx| {
-        let mut ws = Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        );
-        let project_uuid = ProjectUuid::new();
-        let project_state = ProjectState {
-            schema_version: WORKSPACE_SCHEMA_VERSION,
-            uuid: project_uuid,
-            root: std::path::PathBuf::from("/tmp/test_restore_dock_views"),
-            name: None,
-            lanes: Vec::new(),
-            last_active_lane_id: 0,
-            next_lane_id: 0,
-            default_branch: None,
-            base_branch: None,
-        };
-        let mut project_overrides = BTreeMap::new();
-        project_overrides.insert(project_uuid, ProjectOverride::default());
-        let workspace_state = WorkspaceState {
-            schema_version: WORKSPACE_SCHEMA_VERSION,
-            uuid: WorkspaceUuid::new(),
-            project_ids: vec![project_uuid],
-            project_overrides,
-            groups: Vec::new(),
-            active_project: Some(project_uuid),
-            active_lane: None,
-            docks: DockStates::default(),
-            window: WindowState::default(),
-            font_size: 13.0,
-            vertical_spacing: 1.0,
-            horizontal_spacing: 1.0,
-            focused_pane_id: 0,
-            active_dock_view: LeftDockView::GitChanges,
-            active_right_panel_view: RightDockView::Tasks,
-            window_open_policy: WindowOpenPolicy::default(),
-            next_group_id: 0,
-            project_tabs: BTreeMap::new(),
-        };
-        ws.restore_from_disk(&workspace_state, &[project_state], window, cx);
-        ws
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.left_dock_view,
-            daruda_store::project::LeftDockView::GitChanges
-        );
-        assert_eq!(
-            ws.right_dock_view,
-            daruda_store::project::RightDockView::Tasks
-        );
-    });
-}
-
-// ---- Inaccessible active lane: action guards + self-healing ----
-
-/// Build a workspace whose single bootstrapped lane is forced to
-/// `Missing` with an empty runtime (no tabs / panes / focused pane) —
-/// the inaccessible empty-state. Returns the live window handle + entity.
-fn workspace_with_inaccessible_active_lane(
-    cx: &mut TestAppContext,
-    root: &str,
-) -> (gpui::WindowHandle<Workspace>, gpui::Entity<Workspace>) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path(root);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, _| {
-        let r = ws.active_ref();
-        ws.set_lane_availability(r, crate::lane::availability::LaneAvailability::Missing);
-        // Drop the bootstrapped runtime so the lane is paneless — mirrors
-        // the restored inaccessible-lane empty-state.
-        ws.active_runtime_mut().tabs.clear();
-        ws.active_runtime_mut().panes.clear();
-        ws.active_runtime_mut().active_tab_index = 0;
-        ws.active_runtime_mut().focused_pane_id = u64::default();
-        ws.main_area.zoomed_pane_id = None;
-    });
-    (wh, ws)
-}
-
-#[gpui::test]
-fn inaccessible_active_lane_rejects_add_split_and_zoom(cx: &mut TestAppContext) {
-    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, "/tmp/daruda_lane_inaccessible");
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_tab(window, cx);
-            assert_eq!(
-                ws.active_runtime().tabs.len(),
-                0,
-                "add_tab on a non-Present lane must not spawn a tab/PTY"
-            );
-            assert_eq!(ws.active_runtime().panes.len(), 0);
-
-            ws.split_focused_pane_kind(
-                NewPaneKind::Terminal,
-                SplitDirection::Horizontal,
-                window,
-                cx,
-            );
-            assert_eq!(
-                ws.active_runtime().panes.len(),
-                0,
-                "split on a non-Present / paneless lane must not push an orphan PTY"
-            );
-            assert_eq!(ws.active_runtime().tabs.len(), 0);
-
-            ws.on_toggle_zoom_pane(&ToggleZoomPane, window, cx);
-            assert_eq!(
-                ws.main_area.zoomed_pane_id, None,
-                "zoom must stay None when focused_pane_id matches no real pane"
-            );
-        });
-    })
-    .unwrap();
-}
-
-#[gpui::test]
 fn activate_inaccessible_lane_persists_active_ref(cx: &mut TestAppContext) {
     // Two lanes: lane 0 present (a hermetic tempdir), lane 1 pointing at
     // a directory that does not exist. Activating lane 1 must flip
@@ -1481,31 +977,41 @@ fn activate_inaccessible_lane_persists_active_ref(cx: &mut TestAppContext) {
                 0,
                 "inaccessible lane must not seed a fallback tab"
             );
+
+            ws.add_tab(window, cx);
+            assert_eq!(
+                ws.active_runtime().tabs.len(),
+                0,
+                "add_tab on a non-Present lane must not spawn a tab/PTY"
+            );
+            assert_eq!(ws.active_runtime().panes.len(), 0);
+
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+            assert_eq!(
+                ws.active_runtime().panes.len(),
+                0,
+                "split on a non-Present / paneless lane must not push an orphan PTY"
+            );
+            assert_eq!(ws.active_runtime().tabs.len(), 0);
+
+            ws.on_toggle_zoom_pane(&ToggleZoomPane, window, cx);
+            assert_eq!(
+                ws.main_area.zoomed_pane_id, None,
+                "zoom must stay None when focused_pane_id matches no real pane"
+            );
         });
     })
     .unwrap();
-}
 
-#[gpui::test]
-fn same_lane_reactivate_self_heals_to_empty_state(cx: &mut TestAppContext) {
-    // Active lane starts Missing with an empty runtime. The directory is
-    // then (re)created and a same-lane activate re-probes it: availability
-    // recovers to Present. Under the unified rule the recovered lane is
-    // NOT auto-seeded — it lands on the "No open tabs" empty-state and the
-    // user opens content via its buttons.
-    let root = "/tmp/daruda_same_lane_self_heal";
-    let _ = std::fs::remove_dir_all(root);
-    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, root);
-    // Sanity: starts Missing + paneless.
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_lane().map(|l| l.availability),
-            Some(crate::lane::availability::LaneAvailability::Missing),
-        );
-        assert_eq!(ws.active_runtime().tabs.len(), 0);
-    });
-    // The user recreates the directory (or grants access).
-    std::fs::create_dir_all(root).unwrap();
+    // The user recreates the missing directory (or grants access), then clicks
+    // the same lane again. The active ref stays put, but availability must be
+    // re-probed and recovered without auto-seeding a shell.
+    std::fs::create_dir_all(&root_b).unwrap();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
@@ -1523,64 +1029,12 @@ fn same_lane_reactivate_self_heals_to_empty_state(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let _ = std::fs::remove_dir_all(root);
-}
 
-/// Switching to a lane that has never been opened does NOT auto-seed a
-/// shell (unified rule): the lane stays empty and renders the empty-state.
-/// A tab appears only when the user asks for one.
-#[gpui::test]
-fn activate_never_opened_lane_does_not_seed(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let root_a = std::path::PathBuf::from("/tmp/test_activate_no_seed_a");
-    let root_b = std::path::PathBuf::from("/tmp/test_activate_no_seed_b");
-    let _ = std::fs::create_dir_all(&root_a);
-    let _ = std::fs::create_dir_all(&root_b);
-    let project = daruda_store::project::Project::from_path(&root_a);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    ws.update(cx, |ws, _cx| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes
-                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
-        }
-    });
-
-    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
-    let lane1 = daruda_store::project::LaneRef {
-        project: proj,
-        lane: 1,
-    };
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.activate_lane(lane1, window, cx);
-            assert_eq!(ws.active, lane1);
-            assert!(
-                ws.active_runtime().tabs.is_empty(),
-                "a never-opened lane must not be seeded on activation"
-            );
-            assert!(ws.active_runtime().panes.is_empty());
-            assert!(!ws.has_focused_pane());
-        });
-    })
-    .unwrap();
-
-    let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
 }
 
 #[gpui::test]
-fn apply_discovered_lanes_rekeys_active_ref_and_snap_target(cx: &mut TestAppContext) {
+fn apply_discovered_lanes_rekeys_active_ref_and_preserves_non_git_noop(cx: &mut TestAppContext) {
     // Construction now seeds a pure placeholder (single Default lane,
     // id 0). Discovery assigns ids before sorting the project-root
     // lane first, so the incoming active lane may carry a non-zero id;
@@ -1642,10 +1096,7 @@ fn apply_discovered_lanes_rekeys_active_ref_and_snap_target(cx: &mut TestAppCont
         });
     })
     .unwrap();
-}
 
-#[gpui::test]
-fn apply_discovered_lanes_non_git_is_noop(cx: &mut TestAppContext) {
     // A genuinely non-git root probes back the same single-Default
     // shape — the placeholder must stay untouched (no churn, no
     // active-ref movement).
@@ -1672,119 +1123,6 @@ fn apply_discovered_lanes_non_git_is_noop(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-}
-
-/// Closing the active lane's last tab must NOT tear down the whole window
-/// when another lane still holds content. The active lane is emptied in
-/// place (0 tabs → empty-state) while the sibling lane's runtime survives
-/// untouched. Regression: `close_tab_at` used to `remove_window` whenever
-/// the *active* lane hit its last tab, ignoring every other parked runtime.
-#[gpui::test]
-fn closing_last_tab_with_other_lane_keeps_window(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let repo = std::path::PathBuf::from("/tmp/daruda_close_last_tab_keep_repo");
-    let feature = std::path::PathBuf::from("/tmp/daruda_close_last_tab_keep_repo-feature");
-    let _ = std::fs::create_dir_all(&repo);
-    let _ = std::fs::create_dir_all(&feature);
-    let project = daruda_store::project::Project::from_path(&repo);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    ws.update(cx, |ws, _| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes = vec![
-                crate::lane::Lane::git(
-                    0,
-                    repo.clone(),
-                    Some("main".into()),
-                    repo.clone(),
-                    repo.clone(),
-                    0,
-                ),
-                crate::lane::Lane::git(
-                    1,
-                    feature.clone(),
-                    Some("feature".into()),
-                    repo.clone(),
-                    feature.clone(),
-                    1,
-                ),
-            ];
-        }
-    });
-
-    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
-    let lane0 = daruda_store::project::LaneRef {
-        project: proj,
-        lane: 0,
-    };
-    let lane1 = daruda_store::project::LaneRef {
-        project: proj,
-        lane: 1,
-    };
-
-    // Activate lane1 (no auto-seed) and open one tab in it; lane0 keeps the
-    // tab the constructor bootstrapped. Both runtimes now hold one tab.
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.activate_lane(lane1, window, cx);
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active, lane1);
-        assert_eq!(ws.active_runtime().tabs.len(), 1, "lane1 has one open tab");
-        assert_eq!(
-            ws.main_area.runtimes.get(&lane0).map(|rt| rt.tabs.len()),
-            Some(1),
-            "lane0 keeps its bootstrapped tab"
-        );
-    });
-
-    // Close lane1's only tab.
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.close_tab_at(0, window, cx);
-        });
-    })
-    .unwrap();
-
-    ws.read_with(cx, |ws, _| {
-        // Window is NOT removed: the active (lane1) runtime is emptied in
-        // place, and lane0's parked runtime is untouched.
-        assert!(
-            ws.active_runtime().tabs.is_empty(),
-            "active lane must be emptied, not closed with the window"
-        );
-        assert!(
-            ws.active_runtime().panes.is_empty(),
-            "active lane's panes must be dropped"
-        );
-        assert!(
-            !ws.has_focused_pane(),
-            "the emptied lane has no focused pane"
-        );
-        assert_eq!(
-            ws.main_area.runtimes.get(&lane0).map(|rt| rt.tabs.len()),
-            Some(1),
-            "the sibling lane's runtime must survive"
-        );
-    });
-    // The window is still open.
-    assert_eq!(cx.windows().len(), 1, "the window must stay open");
-
-    let _ = std::fs::remove_dir_all(&repo);
-    let _ = std::fs::remove_dir_all(&feature);
 }
 
 /// The single-lane convention is preserved: when the active lane's last
@@ -1825,91 +1163,4 @@ fn closing_last_tab_of_only_lane_closes_window(cx: &mut TestAppContext) {
     );
 
     let _ = std::fs::remove_dir_all(&root);
-}
-
-/// After the active lane is emptied (its last tab closed while another
-/// lane kept the window open) the user is not stuck in a blank hole:
-/// `add_tab` opens a working tab, and the window stays open. Guards the
-/// empty-state's "New Terminal" recovery path against the reset runtime.
-#[gpui::test]
-fn emptied_lane_can_reopen_a_tab(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let repo = std::path::PathBuf::from("/tmp/daruda_emptied_lane_reopen_repo");
-    let feature = std::path::PathBuf::from("/tmp/daruda_emptied_lane_reopen_repo-feature");
-    let _ = std::fs::create_dir_all(&repo);
-    let _ = std::fs::create_dir_all(&feature);
-    let project = daruda_store::project::Project::from_path(&repo);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test_full(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
-    });
-    let ws = wh.root(cx).unwrap();
-
-    ws.update(cx, |ws, _| {
-        if let Some(p) = ws.active_project_mut() {
-            p.lanes = vec![
-                crate::lane::Lane::git(
-                    0,
-                    repo.clone(),
-                    Some("main".into()),
-                    repo.clone(),
-                    repo.clone(),
-                    0,
-                ),
-                crate::lane::Lane::git(
-                    1,
-                    feature.clone(),
-                    Some("feature".into()),
-                    repo.clone(),
-                    feature.clone(),
-                    1,
-                ),
-            ];
-        }
-    });
-
-    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
-    let lane1 = daruda_store::project::LaneRef {
-        project: proj,
-        lane: 1,
-    };
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.activate_lane(lane1, window, cx);
-            // Open a tab, then close it — emptying the active lane while
-            // lane0 keeps the window alive.
-            ws.add_tab(window, cx);
-            assert_eq!(
-                ws.active_runtime().tabs.len(),
-                1,
-                "lane1 has a tab to close"
-            );
-            ws.close_tab_at(0, window, cx);
-            assert!(ws.active_runtime().tabs.is_empty(), "lane emptied");
-
-            // The empty-state's New Terminal button dispatches here.
-            ws.add_tab(window, cx);
-        });
-    })
-    .unwrap();
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active, lane1);
-        assert_eq!(
-            ws.active_runtime().tabs.len(),
-            1,
-            "a fresh tab is reopened in the emptied lane"
-        );
-        assert!(ws.has_focused_pane(), "the reopened tab is focused");
-    });
-    assert_eq!(cx.windows().len(), 1, "the window stays open throughout");
-
-    let _ = std::fs::remove_dir_all(&repo);
-    let _ = std::fs::remove_dir_all(&feature);
 }

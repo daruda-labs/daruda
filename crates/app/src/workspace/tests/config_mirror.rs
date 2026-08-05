@@ -13,6 +13,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
     let mut new_config = Config::default();
     new_config.panels.grid_columns = baseline.panels_grid_columns.wrapping_add(1);
     new_config.shell.close_pane_on_exit = !baseline.close_pane_on_exit;
+    new_config.shell.program = Some("/bin/test-shell".into());
     new_config.left_dock.files_show_hidden = !baseline.files_show_hidden;
     new_config.left_dock.files_use_gitignore = !baseline.files_use_gitignore;
     new_config.left_dock.file_icon_color_mode = match baseline.files_icon_color_mode {
@@ -34,6 +35,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
             ws.mirrors.close_pane_on_exit,
             new_config.shell.close_pane_on_exit
         );
+        assert_eq!(ws.shell_program.as_deref(), Some("/bin/test-shell"));
         assert_eq!(
             ws.mirrors.files_show_hidden,
             new_config.left_dock.files_show_hidden
@@ -51,11 +53,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
             new_config.agent.hidden_config_option_descriptions
         );
     });
-}
 
-#[gpui::test]
-async fn toggle_files_show_hidden_flips_mirror(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
     let before = ws.read_with(cx, |ws, _| ws.mirrors.files_show_hidden);
     ws.update(cx, |ws, cx| ws.toggle_files_show_hidden(cx));
     let after = ws.read_with(cx, |ws, _| ws.mirrors.files_show_hidden);

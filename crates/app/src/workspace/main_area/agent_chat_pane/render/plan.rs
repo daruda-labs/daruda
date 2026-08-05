@@ -267,12 +267,9 @@ mod tests {
     }
 
     #[test]
-    fn plan_progress_empty_is_zero_over_zero() {
+    fn plan_progress_cases() {
         assert_eq!(plan_progress(&[]), (0, 0));
-    }
 
-    #[test]
-    fn plan_progress_counts_only_completed() {
         let plan = [
             plan_entry(PlanStatus::Completed),
             plan_entry(PlanStatus::InProgress),
@@ -280,10 +277,7 @@ mod tests {
             plan_entry(PlanStatus::Completed),
         ];
         assert_eq!(plan_progress(&plan), (2, 4));
-    }
 
-    #[test]
-    fn plan_progress_all_completed_is_total_over_total() {
         let plan = [
             plan_entry(PlanStatus::Completed),
             plan_entry(PlanStatus::Completed),

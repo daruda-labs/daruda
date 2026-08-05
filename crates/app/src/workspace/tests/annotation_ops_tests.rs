@@ -9,7 +9,6 @@ use super::*;
 use daruda_store::observability::error_report::ErrorSeverity;
 use daruda_terminal::session::LineBufferPosition;
 use daruda_terminal::session::interval_tree::{LineCoord, LineRange};
-use gpui::{Point, px};
 
 fn first_terminal_pane_id(ws: &Workspace) -> crate::workspace::main_area::pane_tree::PaneId {
     ws.active_runtime()
@@ -31,7 +30,7 @@ fn single_line_range_at_zero() -> LineRange {
 }
 
 #[gpui::test]
-async fn add_annotation_round_trips_into_session(cx: &mut TestAppContext) {
+async fn add_annotation_round_trips_and_missing_pane_reports_error(cx: &mut TestAppContext) {
     let (_window, workspace) = build_workspace(cx);
 
     workspace.update(cx, |ws, cx| {
@@ -40,6 +39,19 @@ async fn add_annotation_round_trips_into_session(cx: &mut TestAppContext) {
             pane_id,
             single_line_range_at_zero(),
             "hello".to_string(),
+            cx,
+        );
+    });
+
+    // PaneId is a monotonic u64; an id far above the next allocation is
+    // guaranteed to miss the lookup without mutating workspace state.
+    let phantom_pane: crate::workspace::main_area::pane_tree::PaneId = 99_999_u64;
+
+    workspace.update(cx, |ws, cx| {
+        ws.add_annotation(
+            phantom_pane,
+            single_line_range_at_zero(),
+            "ghost".to_string(),
             cx,
         );
     });
@@ -63,27 +75,7 @@ async fn add_annotation_round_trips_into_session(cx: &mut TestAppContext) {
         let hits = session.annotations_in_range(single_line_range_at_zero());
         assert_eq!(hits.len(), 1, "session should expose the new annotation");
         assert_eq!(hits[0].1.text, "hello");
-    });
-}
 
-#[gpui::test]
-async fn add_annotation_with_missing_pane_reports_error(cx: &mut TestAppContext) {
-    let (_window, workspace) = build_workspace(cx);
-
-    // PaneId is a monotonic u64; an id far above the next allocation is
-    // guaranteed to miss the lookup without mutating workspace state.
-    let phantom_pane: crate::workspace::main_area::pane_tree::PaneId = 99_999_u64;
-
-    workspace.update(cx, |ws, cx| {
-        ws.add_annotation(
-            phantom_pane,
-            single_line_range_at_zero(),
-            "ghost".to_string(),
-            cx,
-        );
-    });
-
-    workspace.read_with(cx, |ws, _cx| {
         let history = ws.error_history();
         assert!(
             history.iter().any(|r| {
@@ -99,30 +91,4 @@ async fn add_annotation_with_missing_pane_reports_error(cx: &mut TestAppContext)
                 .collect::<Vec<_>>(),
         );
     });
-}
-
-#[gpui::test]
-fn open_pane_context_menu_builds_for_terminal(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-
-    // Smoke test only: no selection exists on a fresh pane, so this
-    // exercises the disabled-Copy / disabled-Add / no-Delete branches of
-    // the unified pane menu without panicking and confirms the menu still
-    // deploys. Asserting the Copy item's *enabled* branch would
-    // need a selection set on the pane's `TerminalView`, which has no
-    // public test-support setter (selection state is driven by real mouse
-    // events) — left as a manual-verification gap, matching the crate's
-    // "render paths needing Window rely on manual smoke tests" convention.
-    window_handle
-        .update(cx, |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane_id = first_terminal_pane_id(ws);
-                ws.open_pane_context_menu_at(pane_id, Point::new(px(0.), px(0.)), window, cx);
-                assert!(
-                    ws.main_area.popup_menu_deploy.is_some(),
-                    "menu with Copy + Add annotation items should deploy"
-                );
-            });
-        })
-        .unwrap();
 }

@@ -62,60 +62,49 @@ fn set_input(
 }
 
 #[gpui::test]
-fn validate_rejects_invalid_font_size(cx: &mut TestAppContext) {
+fn validate_scalar_fields_cover_boundaries(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     set_input(&wh, &win, cx, |w| w.font_size_input.clone(), "999");
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("72"));
     });
-}
+    set_input(&wh, &win, cx, |w| w.font_size_input.clone(), "13");
 
-#[gpui::test]
-fn validate_rejects_invalid_spacing(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
     set_input(&wh, &win, cx, |w| w.vertical_spacing_input.clone(), "5.0");
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("2.0"));
     });
-}
+    set_input(&wh, &win, cx, |w| w.vertical_spacing_input.clone(), "1.0");
 
-#[gpui::test]
-fn validate_rejects_invalid_opacity(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
     set_input(&wh, &win, cx, |w| w.opacity_input.clone(), "0.0");
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("0.1"));
     });
-}
+    set_input(&wh, &win, cx, |w| w.opacity_input.clone(), "1.0");
 
-#[gpui::test]
-fn validate_rejects_invalid_clipboard(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    // 0 bytes < 4096 minimum
+    // 0 bytes < 4096 minimum.
     set_input(&wh, &win, cx, |w| w.clipboard_streaming_input.clone(), "0");
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("4 096") || err.contains("4096"));
     });
-}
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |w| w.clipboard_streaming_input.clone(),
+        "4096",
+    );
 
-#[gpui::test]
-fn validate_rejects_invalid_grid_columns(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    // 0 columns < 1 minimum
+    // 0 columns < 1 minimum.
     set_input(&wh, &win, cx, |w| w.panels_grid_columns_input.clone(), "0");
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("1") && err.contains("16"));
     });
-}
-
-#[gpui::test]
-fn validate_accepts_grid_columns_in_range(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
     set_input(&wh, &win, cx, |w| w.panels_grid_columns_input.clone(), "8");
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("8 columns must validate");
@@ -576,16 +565,16 @@ fn a_launchable_preset_shows_no_install_guidance(cx: &mut TestAppContext) {
 /// longer knows) must survive a Save — the alternative is silently deleting
 /// part of the user's config on an unrelated settings change.
 #[gpui::test]
-fn validate_preserves_an_unresolved_catalog_entry(cx: &mut TestAppContext) {
+fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) {
     let unresolved = daruda_config::AgentEntry::Preset {
         preset: "retired-agent".to_string(),
         overrides: daruda_config::PresetOverrides::default(),
     };
+    let claude =
+        daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default());
     let config = daruda_config::Config {
-        agents: vec![
-            unresolved.clone(),
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
-        ],
+        // Unresolved first, editable second.
+        agents: vec![unresolved.clone(), claude.clone()],
         ..daruda_config::Config::default()
     };
     let (_wh, win) = build_window_with_config(cx, config);
@@ -601,16 +590,14 @@ fn validate_preserves_an_unresolved_catalog_entry(cx: &mut TestAppContext) {
             vec![unresolved.clone()]
         );
         let cfg = w.validate(cx).expect("agent catalog must validate");
-        // …and it is still there after a save.
-        assert!(cfg.agents.contains(&unresolved), "{:?}", cfg.agents);
+        // …and it is still there after a save, in its original position.
+        assert_eq!(cfg.agents, vec![unresolved, claude], "order preserved");
     });
-}
 
-/// A catalog whose every entry is unresolvable still has entries, so a Save of
-/// any unrelated setting must go through. `preset = "cursor"` reaches this with
-/// a preset daruda ships today — the manual-install ones resolve to nothing.
-#[gpui::test]
-fn validate_accepts_a_catalog_of_only_unresolved_entries(cx: &mut TestAppContext) {
+    // A catalog whose every entry is unresolvable still has entries, so a Save
+    // of any unrelated setting must go through. `preset = "cursor"` reaches
+    // this with a preset daruda ships today — the manual-install ones resolve
+    // to nothing.
     let needs_install = daruda_config::AgentEntry::Preset {
         preset: "cursor".to_string(),
         overrides: daruda_config::PresetOverrides::default(),
@@ -638,30 +625,6 @@ fn validate_accepts_a_catalog_of_only_unresolved_entries(cx: &mut TestAppContext
         // The one predicate the section's placeholder reads too, so it cannot
         // call this catalog empty while the Save above succeeds.
         assert!(!w.agent_catalog_is_empty());
-    });
-}
-
-/// A non-editable entry keeps its config position across a Save. It used to be
-/// appended after the editable rows, so an entry the user had listed first came
-/// back last — and would silently become a different default agent the day its
-/// preset resolves again.
-#[gpui::test]
-fn an_unresolved_entry_keeps_its_position_across_a_save(cx: &mut TestAppContext) {
-    let unresolved = daruda_config::AgentEntry::Preset {
-        preset: "retired-agent".to_string(),
-        overrides: daruda_config::PresetOverrides::default(),
-    };
-    let claude =
-        daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default());
-    let config = daruda_config::Config {
-        // Unresolved first, editable second.
-        agents: vec![unresolved.clone(), claude.clone()],
-        ..daruda_config::Config::default()
-    };
-    let (_wh, win) = build_window_with_config(cx, config);
-    win.read_with(cx, |w, cx| {
-        let cfg = w.validate(cx).expect("agent catalog must validate");
-        assert_eq!(cfg.agents, vec![unresolved, claude], "order preserved");
     });
 }
 
@@ -694,17 +657,14 @@ fn removing_a_row_after_an_unresolved_entry_drops_the_right_one(cx: &mut TestApp
 }
 
 #[gpui::test]
-fn validate_rejects_empty_agent_catalog(cx: &mut TestAppContext) {
+fn validate_rejects_agent_catalog_errors(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.update(cx, |w, cx| w.remove_agent_catalog_item(0, cx));
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("agent") || err.contains("에이전트"));
     });
-}
 
-#[gpui::test]
-fn validate_rejects_duplicate_agent_id(cx: &mut TestAppContext) {
     let config = daruda_config::Config {
         agents: vec![
             daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
@@ -717,10 +677,7 @@ fn validate_rejects_duplicate_agent_id(cx: &mut TestAppContext) {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("codex"));
     });
-}
 
-#[gpui::test]
-fn validate_rejects_invalid_agent_id(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     let id_input = win.read_with(cx, |w, _| w.agent_editable_row(0).unwrap().id_input.clone());
     wh.update(cx, |_root, window, cx| {
@@ -762,40 +719,25 @@ fn default_mode_input_change_clears_error_for_constructor_seeded_row(cx: &mut Te
 }
 
 #[gpui::test]
-fn cursor_blinking_toggle(cx: &mut TestAppContext) {
-    let (_wh, win) = build_window(cx);
-    let initial = win.read_with(cx, |w, _| w.cursor_blinking);
-    win.update(cx, |w, cx| {
-        w.cursor_blinking = !w.cursor_blinking;
-        cx.notify();
-    });
-    let after = win.read_with(cx, |w, _| w.cursor_blinking);
-    assert_ne!(initial, after);
-}
-
-#[gpui::test]
-fn close_on_exit_toggle(cx: &mut TestAppContext) {
-    let (_wh, win) = build_window(cx);
-    let initial = win.read_with(cx, |w, _| w.close_pane_on_exit);
-    win.update(cx, |w, cx| {
-        w.close_pane_on_exit = !w.close_pane_on_exit;
-        cx.notify();
-    });
-    let after = win.read_with(cx, |w, _| w.close_pane_on_exit);
-    assert_ne!(initial, after);
-}
-
-#[gpui::test]
-fn default_section_is_general(cx: &mut TestAppContext) {
-    let (_wh, win) = build_window(cx);
+fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
     win.read_with(cx, |w, _| {
         assert_eq!(w.active_section(), BuiltinSection::General);
     });
-}
 
-#[gpui::test]
-fn focus_section_updates_active(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
+    let (initial_cursor, initial_close) =
+        win.read_with(cx, |w, _| (w.cursor_blinking, w.close_pane_on_exit));
+    win.update(cx, |w, cx| {
+        w.cursor_blinking = !w.cursor_blinking;
+        w.close_pane_on_exit = !w.close_pane_on_exit;
+        cx.notify();
+    });
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("toggled settings must validate");
+        assert_eq!(cfg.cursor.blinking, !initial_cursor);
+        assert_eq!(cfg.shell.close_pane_on_exit, !initial_close);
+    });
+
     let win_clone = win.clone();
     cx.update_window(wh.into(), |_, window, cx| {
         win_clone.update(cx, |w, cx| {
@@ -806,11 +748,7 @@ fn focus_section_updates_active(cx: &mut TestAppContext) {
     win.read_with(cx, |w, _| {
         assert_eq!(w.active_section(), BuiltinSection::Font);
     });
-}
 
-#[gpui::test]
-fn new_with_section_lands_on_target(cx: &mut TestAppContext) {
-    init_gpui_component(cx);
     let settings_for_root = std::cell::RefCell::new(None);
     let _wh = cx.add_window(|window, cx| {
         let settings =
@@ -883,7 +821,7 @@ fn telegram_enabled_toggle_round_trips_through_validate(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-async fn copy_telegram_pair_command_writes_full_command_to_clipboard(cx: &mut TestAppContext) {
+async fn copy_telegram_pair_command_writes_clipboard_and_reverts_label(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
 
     // Write something else first so we can verify the copy overwrites it.
@@ -905,24 +843,6 @@ async fn copy_telegram_pair_command_writes_full_command_to_clipboard(cx: &mut Te
         assert!(
             w.telegram_pair_command_copied(),
             "Copied confirmation should be active"
-        );
-    });
-}
-
-#[gpui::test]
-async fn copy_telegram_pair_command_copied_label_reverts_after_one_second(cx: &mut TestAppContext) {
-    let (_wh, win) = build_window(cx);
-
-    cx.update(|cx| {
-        win.update(cx, |w, cx| {
-            w.copy_telegram_pair_command_for_test("AB12CD", cx)
-        });
-    });
-
-    win.read_with(cx, |w, _cx| {
-        assert!(
-            w.telegram_pair_command_copied(),
-            "Copied label should be up immediately"
         );
     });
 
@@ -992,21 +912,17 @@ fn set_session_host_row_input(
 }
 
 #[gpui::test]
-fn validate_accepts_an_empty_session_host_catalog(cx: &mut TestAppContext) {
+fn validate_session_host_catalog_cases(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("an empty registry is a valid state");
         assert!(cfg.session_hosts.is_empty());
     });
-}
 
-#[gpui::test]
-fn validate_collects_an_added_ssh_session_host(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build box");
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
-
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("a filled-in ssh row must validate");
         assert_eq!(cfg.session_hosts.len(), 1);
@@ -1018,16 +934,12 @@ fn validate_collects_an_added_ssh_session_host(cx: &mut TestAppContext) {
             }
         );
     });
-}
 
-#[gpui::test]
-fn validate_collects_an_added_docker_session_host(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     select_session_host_kind(&wh, &win, cx, 0, "docker");
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Dev container");
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
-
     win.read_with(cx, |w, cx| {
         let cfg = w
             .validate(cx)
@@ -1040,10 +952,7 @@ fn validate_collects_an_added_docker_session_host(cx: &mut TestAppContext) {
             }
         );
     });
-}
 
-#[gpui::test]
-fn validate_rejects_an_empty_session_host_label(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
@@ -1051,10 +960,7 @@ fn validate_rejects_an_empty_session_host_label(cx: &mut TestAppContext) {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains('1'));
     });
-}
 
-#[gpui::test]
-fn validate_rejects_a_duplicate_label_case_insensitively(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build Box");
@@ -1062,18 +968,13 @@ fn validate_rejects_a_duplicate_label_case_insensitively(cx: &mut TestAppContext
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 1, |r| r.label_input.clone(), "  build box  ");
     set_session_host_row_input(&wh, &win, cx, 1, |r| r.target_input.clone(), "vm-other");
-
     win.read_with(cx, |w, cx| {
         let err = w.validate(cx).unwrap_err();
         assert!(err.contains("build box") || err.contains("Build Box"));
     });
-}
 
-/// `target`/`container` are validated through the exact same
-/// `lane::session_host::checked_bare_word` [`SessionHostModal`] uses — a
-/// value that would break `wrap`'s shell quoting must be rejected here too.
-#[gpui::test]
-fn validate_rejects_a_target_that_breaks_shell_quoting(cx: &mut TestAppContext) {
+    // `target`/`container` are validated through the exact same
+    // `lane::session_host::checked_bare_word` `SessionHostModal` uses.
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
@@ -1088,10 +989,7 @@ fn validate_rejects_a_target_that_breaks_shell_quoting(cx: &mut TestAppContext) 
     win.read_with(cx, |w, cx| {
         assert!(w.validate(cx).is_err());
     });
-}
 
-#[gpui::test]
-fn validate_rejects_an_empty_target(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     add_session_host(&wh, &win, cx);
     set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
@@ -1370,7 +1268,7 @@ fn one_ssh_row_config() -> daruda_config::Config {
 /// precomputed focus list holds only the first field, so the cycle is built
 /// from the live rows instead.
 #[gpui::test]
-fn tab_walks_from_a_session_host_label_to_its_value_field(cx: &mut TestAppContext) {
+fn tab_cycle_covers_session_host_rows(cx: &mut TestAppContext) {
     let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
     open_session_hosts_section(&wh, &win, cx);
     assert!(
@@ -1389,16 +1287,9 @@ fn tab_walks_from_a_session_host_label_to_its_value_field(cx: &mut TestAppContex
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
         "Shift-Tab must walk back to the label"
     );
-}
 
-/// Two rows, the second one Docker: the cycle spans both rows and only ever
-/// stops on the value field the row actually renders.
-#[gpui::test]
-fn tab_wraps_across_two_session_host_rows(cx: &mut TestAppContext) {
-    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
     add_session_host(&wh, &win, cx);
     select_session_host_kind(&wh, &win, cx, 1, "docker");
-    open_session_hosts_section(&wh, &win, cx);
 
     press_tab(&wh, &win, cx, true);
     assert!(
@@ -1424,28 +1315,7 @@ fn tab_wraps_across_two_session_host_rows(cx: &mut TestAppContext) {
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
         "the cycle wraps back to the first row"
     );
-}
 
-/// A row added after the window opened is in the cycle too — it can't be, if
-/// the cycle comes from the list built at construction.
-#[gpui::test]
-fn a_session_host_row_added_at_runtime_joins_the_tab_cycle(cx: &mut TestAppContext) {
-    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
-    open_session_hosts_section(&wh, &win, cx);
-    add_session_host(&wh, &win, cx);
-
-    press_tab(&wh, &win, cx, true);
-    press_tab(&wh, &win, cx, true);
-    assert!(
-        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.label_input.clone()),
-        "the row added at runtime must be reachable by Tab"
-    );
-}
-
-/// An empty catalog leaves the section with no precomputed focus target at
-/// all, so Tab has to pick the cycle up from the rows the user just added.
-#[gpui::test]
-fn tab_cycles_session_host_rows_added_to_an_empty_catalog(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     open_session_hosts_section(&wh, &win, cx);
     add_session_host(&wh, &win, cx);

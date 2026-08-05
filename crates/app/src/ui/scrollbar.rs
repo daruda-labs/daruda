@@ -458,15 +458,11 @@ mod tests {
     }
 
     #[test]
-    fn content_fits_viewport_draws_no_thumb() {
+    fn thumb_geometry_absence_cases() {
         assert_eq!(thumb_geometry(px(100.), px(100.), px(0.), px(0.)), None);
         assert_eq!(thumb_geometry(px(100.), px(80.), px(0.), px(0.)), None);
         // Bounds not yet measured (zero viewport).
         assert_eq!(thumb_geometry(px(0.), px(200.), px(0.), px(0.)), None);
-    }
-
-    #[test]
-    fn tiny_viewport_where_min_thumb_exceeds_height_draws_no_thumb() {
         // viewport_h (20) < SCROLLBAR_MIN_THUMB_H (24): after clamping the
         // thumb would be taller than the track, producing a negative
         // track_h. No thumb is more useful than an inverted one.
@@ -474,25 +470,19 @@ mod tests {
     }
 
     #[test]
-    fn thumb_sits_at_top_when_unscrolled() {
+    fn thumb_geometry_position_cases() {
         // viewport 100 of 200 → half-height thumb at the track origin.
         assert_eq!(
             thumb_geometry(px(100.), px(200.), px(0.), px(0.)),
             Some((px(0.), px(50.)))
         );
-    }
 
-    #[test]
-    fn thumb_sits_at_track_bottom_when_fully_scrolled() {
         // offset = -(content - viewport) = -100 → scroll_frac 1 → top = track_h.
         assert_eq!(
             thumb_geometry(px(100.), px(200.), px(-100.), px(0.)),
             Some((px(50.), px(50.)))
         );
-    }
 
-    #[test]
-    fn top_offset_shifts_the_thumb_down() {
         assert_eq!(
             thumb_geometry(px(100.), px(200.), px(-100.), px(30.)),
             Some((px(80.), px(50.)))
@@ -553,22 +543,16 @@ mod tests {
     }
 
     #[test]
-    fn thumb_height_is_clamped_to_the_minimum() {
+    fn thumb_geometry_clamping_cases() {
         // viewport 100 of 10000 → 1px raw thumb, clamped up to the min.
         let (_, thumb_h) = thumb_geometry(px(100.), px(10000.), px(0.), px(0.)).unwrap();
         assert_eq!(thumb_h, px(theme::SCROLLBAR_MIN_THUMB_H));
-    }
 
-    #[test]
-    fn over_scroll_clamps_to_the_track_bottom() {
         // offset beyond the scrollable range must not push the thumb past
         // the track; track_h = 100 - 24 = 76.
         let (thumb_top, _) = thumb_geometry(px(100.), px(10000.), px(-99999.), px(0.)).unwrap();
         assert_eq!(thumb_top, px(100.) - px(theme::SCROLLBAR_MIN_THUMB_H));
-    }
 
-    #[test]
-    fn clamped_thumb_at_partial_scroll_with_top_offset() {
         // The file viewer's path: minimum-clamped thumb, a mid-track scroll
         // fraction, and a non-zero top offset, all at once. raw thumb =
         // 100 * (100/500) = 20 → clamped to 24; track_h = 76; frac = 0.25;
@@ -580,22 +564,16 @@ mod tests {
         );
     }
 
-    /// A thumb that fills most of its track has little room to travel, but the
-    /// content it stands for has just as little to scroll — the two shrink
-    /// together, so cursor travel must still map roughly 1:1 and never fling the
-    /// region to one end. This is the horizontal case in practice: lines are
-    /// usually only a little wider than the viewport.
     #[test]
-    fn a_nearly_full_thumb_maps_travel_about_one_to_one() {
+    fn thumb_scroll_delta_cases() {
+        // A thumb that fills most of its track has little room to travel, but
+        // the content it stands for has just as little to scroll.
         // viewport 800, content 808 → scrollable 8, proportional thumb 792.
         let delta = thumb_scroll_delta(px(4.), px(8.), px(8.));
         assert_eq!(delta, px(-4.), "a 4px drag on an 8px track must scroll 4px");
-    }
 
-    /// The mirror: a long line makes the thumb tiny, so a short drag covers a lot
-    /// of content. Still proportional, just the other way.
-    #[test]
-    fn a_tiny_thumb_maps_travel_to_a_large_scroll() {
+        // The mirror: a long line makes the thumb tiny, so a short drag covers
+        // a lot of content. Still proportional, just the other way.
         // viewport 800, content 80_000 → scrollable 79_200, thumb 8 → travel 792.
         let delta = thumb_scroll_delta(px(79.2), px(792.), px(79_200.));
         // A ratio this large amplifies f32 rounding, so compare within a pixel.
@@ -603,18 +581,12 @@ mod tests {
             (f32::from(delta) + 7_920.).abs() < 1.0,
             "expected about -7920px, got {delta:?}"
         );
-    }
 
-    /// Dragging back up scrolls back toward the start.
-    #[test]
-    fn travel_is_signed() {
+        // Dragging back up scrolls back toward the start.
         assert_eq!(thumb_scroll_delta(px(-10.), px(100.), px(500.)), px(50.));
-    }
 
-    /// A degenerate track carries no information: any division would send the
-    /// region to an end on the first pixel of jitter.
-    #[test]
-    fn a_degenerate_track_or_fitting_content_scrolls_nothing() {
+        // A degenerate track carries no information: any division would send the
+        // region to an end on the first pixel of jitter.
         assert_eq!(thumb_scroll_delta(px(20.), px(0.), px(500.)), px(0.));
         assert_eq!(thumb_scroll_delta(px(20.), px(-3.), px(500.)), px(0.));
         assert_eq!(thumb_scroll_delta(px(20.), px(100.), px(0.)), px(0.));

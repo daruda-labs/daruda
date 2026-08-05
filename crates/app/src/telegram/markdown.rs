@@ -496,133 +496,86 @@ mod tests {
     use super::to_telegram_html;
 
     #[test]
-    fn bold_italic_and_strikethrough_map_to_their_html_tags() {
-        assert_eq!(
-            to_telegram_html("**bold** _italic_ ~~gone~~"),
-            "<b>bold</b> <i>italic</i> <s>gone</s>"
-        );
-    }
+    fn markdown_constructs_render_to_telegram_html() {
+        let cases = [
+            (
+                "emphasis",
+                "**bold** _italic_ ~~gone~~",
+                "<b>bold</b> <i>italic</i> <s>gone</s>",
+            ),
+            (
+                "inline code escape",
+                "run `a < b && c > d`",
+                "run <code>a &lt; b &amp;&amp; c &gt; d</code>",
+            ),
+            (
+                "fenced code language",
+                "```rust\nfn main() {}\n```",
+                "<pre><code class=\"language-rust\">fn main() {}</code></pre>",
+            ),
+            (
+                "fenced code no language",
+                "```\nplain\n```",
+                "<pre>plain</pre>",
+            ),
+            (
+                "mermaid fence stays source",
+                "```mermaid\ngraph TD\nA-->B\n```",
+                "<pre><code class=\"language-mermaid\">graph TD\nA--&gt;B</code></pre>",
+            ),
+            (
+                "link",
+                "[daruda](https://example.com/a?b=1&c=2)",
+                "<a href=\"https://example.com/a?b=1&amp;c=2\">daruda</a>",
+            ),
+            ("heading", "# Title", "<b>Title</b>"),
+            (
+                "blockquote",
+                "> quoted text",
+                "<blockquote>quoted text</blockquote>",
+            ),
+            ("thematic break", "---", "———"),
+            ("bullet list", "- one\n- two", "- one\n- two"),
+            ("ordered list", "5. five\n6. six", "5. five\n6. six"),
+            ("nested list", "- outer\n  - inner", "- outer\n  - inner"),
+            ("task list", "- [x] done\n- [ ] todo", "☑ done\n☐ todo"),
+            (
+                "table",
+                "| a | b |\n|---|---|\n| 1 | 2 |",
+                "<pre>a | b\n--- | ---\n1 | 2</pre>",
+            ),
+            (
+                "table formatting flattened",
+                "| a |\n|---|\n| **bold** |",
+                "<pre>a\n---\nbold</pre>",
+            ),
+            (
+                "image alt",
+                "![a diagram](https://example.com/x.png)",
+                "<a href=\"https://example.com/x.png\">[image: a diagram]</a>",
+            ),
+            (
+                "image generic",
+                "![](https://example.com/x.png)",
+                "<a href=\"https://example.com/x.png\">[image]</a>",
+            ),
+            (
+                "raw html escaped",
+                "<div>hello</div>",
+                "&lt;div&gt;hello&lt;/div&gt;",
+            ),
+            (
+                "plain text escape",
+                "a < b & c > d, no markdown here",
+                "a &lt; b &amp; c &gt; d, no markdown here",
+            ),
+            ("paragraphs", "first\n\nsecond", "first\n\nsecond"),
+            ("empty", "", ""),
+        ];
 
-    #[test]
-    fn inline_code_is_wrapped_and_html_escaped() {
-        assert_eq!(
-            to_telegram_html("run `a < b && c > d`"),
-            "run <code>a &lt; b &amp;&amp; c &gt; d</code>"
-        );
-    }
-
-    #[test]
-    fn fenced_code_block_keeps_language_as_a_class() {
-        assert_eq!(
-            to_telegram_html("```rust\nfn main() {}\n```"),
-            "<pre><code class=\"language-rust\">fn main() {}</code></pre>"
-        );
-    }
-
-    #[test]
-    fn fenced_code_block_without_language_has_no_class() {
-        assert_eq!(to_telegram_html("```\nplain\n```"), "<pre>plain</pre>");
-    }
-
-    #[test]
-    fn a_mermaid_fence_is_shown_as_plain_source_not_rasterized() {
-        // Unlike the in-app renderer, Telegram gets no diagram image — a
-        // text message can't embed one — so it degrades to a normal code
-        // block showing the diagram source.
-        // The `>` in the arrow is escaped like any other `<pre>` content.
-        assert_eq!(
-            to_telegram_html("```mermaid\ngraph TD\nA-->B\n```"),
-            "<pre><code class=\"language-mermaid\">graph TD\nA--&gt;B</code></pre>"
-        );
-    }
-
-    #[test]
-    fn link_becomes_an_anchor_tag() {
-        assert_eq!(
-            to_telegram_html("[daruda](https://example.com/a?b=1&c=2)"),
-            "<a href=\"https://example.com/a?b=1&amp;c=2\">daruda</a>"
-        );
-    }
-
-    #[test]
-    fn heading_degrades_to_bold_text() {
-        assert_eq!(to_telegram_html("# Title"), "<b>Title</b>");
-    }
-
-    #[test]
-    fn blockquote_wraps_content_in_one_tag() {
-        assert_eq!(
-            to_telegram_html("> quoted text"),
-            "<blockquote>quoted text</blockquote>"
-        );
-    }
-
-    #[test]
-    fn thematic_break_becomes_a_plain_divider_line() {
-        assert_eq!(to_telegram_html("---"), "———");
-    }
-
-    #[test]
-    fn bullet_list_becomes_dash_prefixed_lines() {
-        assert_eq!(to_telegram_html("- one\n- two"), "- one\n- two");
-    }
-
-    #[test]
-    fn ordered_list_keeps_its_starting_number() {
-        assert_eq!(to_telegram_html("5. five\n6. six"), "5. five\n6. six");
-    }
-
-    #[test]
-    fn nested_list_item_is_indented_two_spaces_per_level() {
-        assert_eq!(to_telegram_html("- outer\n  - inner"), "- outer\n  - inner");
-    }
-
-    #[test]
-    fn task_list_items_use_unicode_checkboxes() {
-        assert_eq!(to_telegram_html("- [x] done\n- [ ] todo"), "☑ done\n☐ todo");
-    }
-
-    #[test]
-    fn table_degrades_to_a_monospace_block() {
-        assert_eq!(
-            to_telegram_html("| a | b |\n|---|---|\n| 1 | 2 |"),
-            "<pre>a | b\n--- | ---\n1 | 2</pre>"
-        );
-    }
-
-    #[test]
-    fn table_cell_formatting_is_flattened_to_plain_text_not_leaked_tags() {
-        // If a cell's `**bold**` produced literal `<b>` tags here, they'd
-        // show as visible, un-rendered angle brackets inside the <pre>
-        // block instead of being interpreted — flattening avoids that.
-        assert_eq!(
-            to_telegram_html("| a |\n|---|\n| **bold** |"),
-            "<pre>a\n---\nbold</pre>"
-        );
-    }
-
-    #[test]
-    fn image_downgrades_to_a_link_with_an_alt_text_label() {
-        assert_eq!(
-            to_telegram_html("![a diagram](https://example.com/x.png)"),
-            "<a href=\"https://example.com/x.png\">[image: a diagram]</a>"
-        );
-    }
-
-    #[test]
-    fn image_without_alt_text_uses_a_generic_label() {
-        assert_eq!(
-            to_telegram_html("![](https://example.com/x.png)"),
-            "<a href=\"https://example.com/x.png\">[image]</a>"
-        );
-    }
-
-    #[test]
-    fn raw_html_is_shown_escaped_as_literal_text() {
-        assert_eq!(
-            to_telegram_html("<div>hello</div>"),
-            "&lt;div&gt;hello&lt;/div&gt;"
-        );
+        for (name, source, expected) in cases {
+            assert_eq!(to_telegram_html(source), expected, "{name}");
+        }
     }
 
     #[test]
@@ -630,24 +583,6 @@ mod tests {
         let html = to_telegram_html("See it.[^1]\n\n[^1]: the footnote body");
         assert!(html.contains("See it.[^1]"));
         assert!(html.contains("[^1]: the footnote body"));
-    }
-
-    #[test]
-    fn plain_text_with_no_markdown_is_only_html_escaped() {
-        assert_eq!(
-            to_telegram_html("a < b & c > d, no markdown here"),
-            "a &lt; b &amp; c &gt; d, no markdown here"
-        );
-    }
-
-    #[test]
-    fn multiple_paragraphs_are_separated_by_a_blank_line() {
-        assert_eq!(to_telegram_html("first\n\nsecond"), "first\n\nsecond");
-    }
-
-    #[test]
-    fn empty_input_yields_empty_output() {
-        assert_eq!(to_telegram_html(""), "");
     }
 
     #[test]

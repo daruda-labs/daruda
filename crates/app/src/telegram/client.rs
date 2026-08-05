@@ -645,72 +645,48 @@ mod tests {
     }
 
     #[test]
-    fn ok_false_top_level_is_http_error() {
-        let body = r#"{ "ok": false, "description": "Unauthorized" }"#;
-        let err = parse_updates(body).expect_err("should error");
-        match err {
-            ClientError::Http(msg) => assert!(msg.contains("Unauthorized")),
-            other => panic!("expected Http error, got {other:?}"),
+    fn endpoint_envelope_parsers_handle_ok_and_http_errors() {
+        fn assert_http_contains<T: std::fmt::Debug>(result: Result<T, ClientError>, needle: &str) {
+            match result.expect_err("should error") {
+                ClientError::Http(msg) => {
+                    assert!(msg.contains(needle), "{msg:?} should contain {needle:?}")
+                }
+                other => panic!("expected Http error, got {other:?}"),
+            }
         }
-    }
 
-    #[test]
-    fn parse_send_message_response_extracts_message_id() {
-        let body = r#"{ "ok": true, "result": { "message_id": 44 } }"#;
-        assert_eq!(parse_send_message_response(body).expect("parse ok"), 44);
-    }
+        assert_http_contains(
+            parse_updates(r#"{ "ok": false, "description": "Unauthorized" }"#),
+            "Unauthorized",
+        );
 
-    #[test]
-    fn parse_send_message_response_ok_false_is_http_error() {
-        let body = r#"{ "ok": false, "description": "chat not found" }"#;
-        let err = parse_send_message_response(body).expect_err("should error");
-        match err {
-            ClientError::Http(msg) => assert!(msg.contains("chat not found")),
-            other => panic!("expected Http error, got {other:?}"),
-        }
-    }
+        assert_eq!(
+            parse_send_message_response(r#"{ "ok": true, "result": { "message_id": 44 } }"#)
+                .expect("parse ok"),
+            44
+        );
+        assert_http_contains(
+            parse_send_message_response(r#"{ "ok": false, "description": "chat not found" }"#),
+            "chat not found",
+        );
 
-    #[test]
-    fn parse_answer_callback_response_ok_true_is_ok() {
-        let body = r#"{ "ok": true, "result": true }"#;
-        assert!(parse_answer_callback_response(body).is_ok());
-    }
+        assert!(parse_answer_callback_response(r#"{ "ok": true, "result": true }"#).is_ok());
+        assert_http_contains(
+            parse_answer_callback_response(r#"{ "ok": false, "description": "query is too old" }"#),
+            "query is too old",
+        );
+        assert_http_contains(
+            parse_answer_callback_response(r#"{ "ok": false }"#),
+            "answerCallbackQuery failed",
+        );
 
-    #[test]
-    fn parse_answer_callback_response_ok_false_with_description_is_http_error() {
-        let body = r#"{ "ok": false, "description": "query is too old" }"#;
-        let err = parse_answer_callback_response(body).expect_err("should error");
-        match err {
-            ClientError::Http(msg) => assert!(msg.contains("query is too old")),
-            other => panic!("expected Http error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_answer_callback_response_ok_false_without_description_uses_fallback() {
-        let body = r#"{ "ok": false }"#;
-        let err = parse_answer_callback_response(body).expect_err("should error");
-        match err {
-            ClientError::Http(msg) => assert!(msg.contains("answerCallbackQuery failed")),
-            other => panic!("expected Http error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_edit_message_response_ok_true_is_ok() {
         assert!(parse_edit_message_response(r#"{ "ok": true, "result": {} }"#).is_ok());
-    }
-
-    #[test]
-    fn parse_edit_message_response_ok_false_is_http_error() {
-        let err = parse_edit_message_response(
-            r#"{ "ok": false, "description": "message to edit not found" }"#,
-        )
-        .expect_err("should error");
-        match err {
-            ClientError::Http(msg) => assert!(msg.contains("message to edit not found")),
-            other => panic!("expected Http error, got {other:?}"),
-        }
+        assert_http_contains(
+            parse_edit_message_response(
+                r#"{ "ok": false, "description": "message to edit not found" }"#,
+            ),
+            "message to edit not found",
+        );
     }
 
     #[test]

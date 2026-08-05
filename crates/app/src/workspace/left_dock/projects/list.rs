@@ -38,6 +38,8 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     // `_any_git` is unused inside `section_header` — pass `false` unconditionally.
     let header = section_header(false, snap, cx);
 
+    // Banner + header stay outside the scroll region so the section
+    // actions remain reachable no matter where the card list is scrolled.
     let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
     if snap.agent_install_banner_visible {
         body = body.child(agent_install_banner(snap, cx));
@@ -78,6 +80,16 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     }
     top_rows.sort_by_key(|r| r.tab_order());
 
+    let scroll_handle = snap.lanes_scroll_handle.clone();
+    let mut cards = div()
+        .id("lanes-scroll")
+        .flex()
+        .flex_col()
+        .size_full()
+        .gap(px(theme::LANE_CARD_GAP))
+        .overflow_y_scroll()
+        .track_scroll(&scroll_handle);
+
     for row in &top_rows {
         match row {
             TopRow::Group(group, members) => {
@@ -103,7 +115,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                     }
                     inner.into_any_element()
                 };
-                body = body.child(super::card::group_card(
+                cards = cards.child(super::card::group_card(
                     header,
                     members_block,
                     card_is_active,
@@ -113,17 +125,73 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             TopRow::UngroupedProject(project) => {
                 let inner = ungrouped_project_block(project, active_project, active_lane, snap, cx)
                     .into_any_element();
-                body = body.child(super::card::ungrouped_shell(inner, cx));
+                cards = cards.child(super::card::ungrouped_shell(inner, cx));
             }
         }
     }
 
     // Non-git project hint — surfaces the `git init` path.
     if !any_git {
-        body = body.child(non_git_placeholder(cx));
+        cards = cards.child(non_git_placeholder(cx));
     }
 
+    // Thumb overlay needs a `.relative()` parent; the cards' own
+    // `LANE_CARD_MARGIN_X` gutter already clears the thumb (see
+    // `lanes_scrollbar`).
+    body = body.child(
+        div()
+            .flex_1()
+            .relative()
+            .overflow_hidden()
+            .child(cards)
+            .children(lanes_scrollbar(&scroll_handle, cx)),
+    );
+
     body.into_any_element()
+}
+
+/// Scrollbar thumb for the card list. Display-only (no `on_drag`), matching
+/// the Git Changes / Files dock views.
+///
+/// Sits in the gutter the cards leave free: the thumb spans `[2, 6]` px from
+/// the right edge (`SCROLLBAR_MARGIN_R` + `SCROLLBAR_W`) while a card's
+/// surface stops at `LANE_CARD_MARGIN_X` (8 px), so it never overlaps the
+/// card — no extra padding needed. Asserted by `thumb_clears_the_card_gutter`.
+fn lanes_scrollbar(
+    handle: &gpui::ScrollHandle,
+    cx: &gpui::App,
+) -> Option<crate::ui::scrollbar::Thumb> {
+    let viewport_h = handle.bounds().size.height;
+    let max_offset = handle.max_offset().y;
+    let t = theme::current(cx);
+    crate::ui::scrollbar::vertical_thumb(
+        "lanes-scrollbar-thumb",
+        viewport_h,
+        viewport_h + max_offset,
+        handle.offset().y,
+        px(0.),
+        t.scrollbar_thumb,
+        t.dock_scrollbar_thumb_hover,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui::theme;
+
+    /// The thumb overlay is absolutely positioned over the card list, so the
+    /// cards' outer margin must exceed the thumb's right extent or the thumb
+    /// paints on top of a card's surface.
+    #[test]
+    fn thumb_clears_the_card_gutter() {
+        let thumb_right_extent = theme::SCROLLBAR_MARGIN_R + theme::SCROLLBAR_W;
+        assert!(
+            theme::LANE_CARD_MARGIN_X >= thumb_right_extent,
+            "card margin {} must clear the thumb extent {}",
+            theme::LANE_CARD_MARGIN_X,
+            thumb_right_extent
+        );
+    }
 }
 
 /// Project header + lane rows rendered flush against the dock edge.

@@ -9,6 +9,46 @@ fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
     }
 }
 
+fn tool_call(
+    id: &str,
+    status: daruda_acp::ToolStatusView,
+    parent_tool_id: Option<&str>,
+) -> daruda_acp::ChatItem {
+    daruda_acp::ChatItem::ToolCall(daruda_acp::ToolCallItem {
+        id: id.to_string(),
+        title: format!("Tool {id}"),
+        kind: daruda_acp::ToolKindView::Read,
+        tool_name: None,
+        status,
+        diffs: Vec::new(),
+        output: Vec::new(),
+        raw_input: None,
+        parent_tool_id: parent_tool_id.map(str::to_string),
+        exit: None,
+    })
+}
+
+fn permission_card(id: u64) -> daruda_acp::ChatItem {
+    daruda_acp::ChatItem::Permission(daruda_acp::PermissionItem {
+        id,
+        tool_title: Some(format!("Write /tmp/{id}")),
+        raw_input_summary: None,
+        options: vec![
+            daruda_acp::PermissionChoice {
+                option_id: "allow_once".to_string(),
+                name: "Allow".to_string(),
+                kind: daruda_acp::PermissionKindView::AllowOnce,
+            },
+            daruda_acp::PermissionChoice {
+                option_id: "reject_once".to_string(),
+                name: "Reject".to_string(),
+                kind: daruda_acp::PermissionKindView::RejectOnce,
+            },
+        ],
+        resolved: None,
+    })
+}
+
 /// Build a minimal, offline `AgentChatView` (no cwd → `Idle` status, no
 /// adapter spawned) as its own window root, so the post-turn marker
 /// methods (`&mut self` + `Instant`/`Duration`, no `Workspace`) can be
@@ -145,14 +185,37 @@ fn texts(prompts: &[super::QueuedPrompt]) -> Vec<String> {
     prompts.iter().map(|q| q.text.clone()).collect()
 }
 
-/// Stop must NOT discard the queue. A turn in flight with prompts buffered
-/// behind it: `cancel_turn` settles the turn and moves the whole live queue
-/// into the parked queue (preserved), leaving the live queue empty.
+/// Stop must preserve queued work and completion bookkeeping across the local
+/// cancel paths.
 #[gpui::test]
-fn cancel_turn_parks_the_queue_instead_of_clearing(cx: &mut gpui::TestAppContext) {
+fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
+    cx: &mut gpui::TestAppContext,
+) {
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
+            let reset = |view: &mut super::AgentChatView| {
+                view.queue = Default::default();
+                view.items.clear();
+                view.activity = Default::default();
+            };
+            let running_child = || {
+                ChatItem::ToolCall(ToolCallItem {
+                    id: "child".into(),
+                    title: "child".into(),
+                    kind: ToolKindView::Read,
+                    tool_name: None,
+                    status: ToolStatusView::InProgress,
+                    diffs: Vec::new(),
+                    output: Vec::new(),
+                    raw_input: None,
+                    parent_tool_id: Some("parent".into()),
+                    exit: None,
+                })
+            };
+
             view.set_turn_in_flight();
             view.queue.pending_prompts.push(queued(1, "a"));
             view.queue.pending_prompts.push(queued(2, "b"));
@@ -168,6 +231,168 @@ fn cancel_turn_parks_the_queue_instead_of_clearing(cx: &mut gpui::TestAppContext
                 texts(&view.queue.paused_prompts),
                 vec!["a".to_string(), "b".to_string()],
                 "Stop parks the queue (FIFO) instead of dropping it"
+            );
+
+            reset(view);
+            view.set_turn_idle();
+            view.items = vec![running_child()];
+            view.activity.pending_completion = Some(super::TurnOutcome::Completed);
+            assert!(
+                view.is_busy(),
+                "a running child subagent keeps the pane busy"
+            );
+
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.activity.pending_completion,
+                Some(super::TurnOutcome::Completed),
+                "Stop with no foreground turn keeps the already-captured completion"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert!(view.turn_is_idle(), "Stop settles the live turn locally");
+            assert_eq!(
+                view.activity.pending_completion,
+                Some(super::TurnOutcome::Stopped),
+                "Stop of a live turn stashes Stopped"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert!(
+                view.activity.cancel_in_flight,
+                "the cancel window stays open until the ack"
+            );
+
+            view.send_prompt_text("again".into(), cx);
+            assert!(
+                view.turn_is_idle(),
+                "the re-prompt is buffered, not raced onto the wire, during cancel"
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["again".to_string()],
+                "the re-prompt buffers client-side"
+            );
+
+            view.cancel_turn(cx);
+            assert!(
+                view.queue.pending_prompts.is_empty(),
+                "the second Stop empties the live queue"
+            );
+            assert_eq!(
+                texts(&view.queue.paused_prompts),
+                vec!["again".to_string()],
+                "the re-prompt is parked, not dropped"
+            );
+
+            view.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: false,
+                    stop_reason: "Cancelled".into(),
+                },
+                "",
+                false,
+                cx,
+            );
+            assert!(
+                !view.activity.cancel_in_flight,
+                "the ack closes the cancel window"
+            );
+            assert!(view.turn_is_idle(), "nothing left to run after both Stops");
+        })
+        .unwrap();
+}
+
+/// Activity reconciliation turns `is_busy()` into idle->busy / busy->idle
+/// edges, tracks one busy span across contiguous turns, and fires captured
+/// completion exactly once when the pane settles.
+#[gpui::test]
+fn reconcile_activity_edges_and_completion_delivery(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            let reset = |view: &mut super::AgentChatView| {
+                view.set_turn_idle();
+                view.items.clear();
+                view.activity = super::ActivityTracker::default();
+            };
+
+            assert!(view.activity_elapsed().is_none(), "idle -> no span");
+            view.set_turn_in_flight();
+            let edge = view.reconcile_activity(std::time::Instant::now());
+            assert_eq!(edge, None, "the busy edge fires no completion");
+            assert!(view.activity.was_busy, "reconcile records the busy level");
+            assert!(
+                view.activity_elapsed().is_some(),
+                "the span start is stamped on idle->busy"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            assert_eq!(view.reconcile_activity(std::time::Instant::now()), None);
+            view.activity.pending_completion = Some(super::TurnOutcome::Completed);
+            view.set_turn_idle();
+            let edge = view.reconcile_activity(std::time::Instant::now());
+            assert_eq!(
+                edge,
+                Some(super::TurnOutcome::Completed),
+                "the busy->idle edge returns the stashed outcome"
+            );
+            assert!(
+                view.activity_elapsed().is_none(),
+                "the span start clears on settle"
+            );
+            assert_eq!(
+                view.reconcile_activity(std::time::Instant::now()),
+                None,
+                "the outcome fires exactly once"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            assert_eq!(view.reconcile_activity(std::time::Instant::now()), None);
+            view.set_turn_idle();
+            assert_eq!(
+                view.reconcile_activity(std::time::Instant::now()),
+                None,
+                "a settle with no pending outcome fires nothing"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            assert_eq!(view.reconcile_activity(std::time::Instant::now()), None);
+            view.activity.pending_completion = Some(super::TurnOutcome::Stopped);
+            view.set_turn_in_flight();
+            assert_eq!(
+                view.reconcile_activity(std::time::Instant::now()),
+                None,
+                "still busy across the turn boundary -> no settle edge"
+            );
+            view.activity.pending_completion = Some(super::TurnOutcome::Completed);
+            view.set_turn_idle();
+            assert_eq!(
+                view.reconcile_activity(std::time::Instant::now()),
+                Some(super::TurnOutcome::Completed),
+                "the span fires the latest outcome exactly once at the final settle"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            assert_eq!(view.reconcile_activity(std::time::Instant::now()), None);
+            assert!(
+                view.activity.was_busy,
+                "the connect-time reconcile stamps the busy level"
+            );
+            view.activity.pending_completion = Some(super::TurnOutcome::Completed);
+            view.set_turn_idle();
+            assert_eq!(
+                view.reconcile_activity(std::time::Instant::now()),
+                Some(super::TurnOutcome::Completed),
+                "connect-time pump completion fires at settle instead of stranding"
             );
         })
         .unwrap();
@@ -235,13 +460,45 @@ fn remove_and_clear_reach_parked_prompts(cx: &mut gpui::TestAppContext) {
         .unwrap();
 }
 
-/// Editing a parked prompt then sending replaces it in place (order kept),
-/// rather than falling through and enqueuing a duplicate as a new prompt.
+/// Editing a queued prompt replaces its slot in place, whether it is still live
+/// or parked. If the edited row has already left the queue, sending falls
+/// through to a brand-new queued prompt so the typed text is not lost.
 #[gpui::test]
-fn editing_a_parked_prompt_replaces_it_in_place(cx: &mut gpui::TestAppContext) {
+fn editing_prompt_replaces_live_or_parked_and_falls_through_when_stale(
+    cx: &mut gpui::TestAppContext,
+) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
+            view.send_prompt_text("first".into(), cx);
+            view.send_prompt_text("second".into(), cx);
+            view.send_prompt_text("third".into(), cx);
+            let middle = view.queue.pending_prompts[1].id;
+            view.begin_edit(middle, cx);
+            assert_eq!(
+                view.queue.editing_prompt,
+                Some(middle),
+                "begin_edit records the target"
+            );
+
+            view.send_prompt_text("edited".into(), cx);
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec![
+                    "first".to_string(),
+                    "edited".to_string(),
+                    "third".to_string()
+                ],
+                "editing replaces the live slot in place, order preserved"
+            );
+            assert!(
+                view.queue.editing_prompt.is_none(),
+                "send clears the editing flag"
+            );
+            assert!(view.items.is_empty(), "an in-place edit does not echo");
+
+            view.queue = Default::default();
+            view.items.clear();
             view.queue.paused_prompts.push(queued(1, "old"));
             view.begin_edit(super::PromptId(1), cx);
 
@@ -257,6 +514,313 @@ fn editing_a_parked_prompt_replaces_it_in_place(cx: &mut gpui::TestAppContext) {
                 "editing does not enqueue a new prompt"
             );
             assert_eq!(view.queue.editing_prompt, None, "the edit flag is cleared");
+
+            view.queue = Default::default();
+            view.items.clear();
+            view.send_prompt_text("only".into(), cx);
+            let id = view.queue.pending_prompts[0].id;
+            view.begin_edit(id, cx);
+            // Model the target leaving the queue while the composer still targets it.
+            view.remove_queued(id, cx);
+            assert_eq!(
+                view.queue.editing_prompt,
+                Some(id),
+                "removing a row does not by itself clear the editing flag"
+            );
+            assert!(view.queue.pending_prompts.is_empty());
+
+            view.send_prompt_text("typed".into(), cx);
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["typed".to_string()],
+                "a drained edit target falls through to a new queued prompt"
+            );
+            assert!(
+                view.queue.editing_prompt.is_none(),
+                "the stale editing flag is cleared on send"
+            );
+            assert!(
+                view.items.is_empty(),
+                "no handle means the new prompt is queued, not echoed"
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{ChatItem, PermissionKindView, PermissionResolution, ToolStatusView};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![permission_card(100), permission_card(200)];
+            view.pending_permissions.insert(100);
+            view.pending_permissions.insert(200);
+
+            view.respond_permission(
+                100,
+                "allow_once".to_string(),
+                PermissionKindView::AllowOnce,
+                cx,
+            );
+
+            let ChatItem::Permission(first) = &view.items[0] else {
+                panic!("expected first permission card");
+            };
+            let ChatItem::Permission(second) = &view.items[1] else {
+                panic!("expected second permission card");
+            };
+            assert_eq!(
+                first.resolved,
+                Some(PermissionResolution::Chosen("allow_once".to_string())),
+                "the answered card resolves by id"
+            );
+            assert_eq!(
+                second.resolved, None,
+                "answering one permission leaves the other live"
+            );
+            assert!(!view.is_permission_outstanding(100));
+            assert!(view.is_permission_outstanding(200));
+
+            view.respond_permission(
+                200,
+                "reject_once".to_string(),
+                PermissionKindView::RejectOnce,
+                cx,
+            );
+            let ChatItem::Permission(second) = &view.items[1] else {
+                panic!("expected second permission card");
+            };
+            assert_eq!(
+                second.resolved,
+                Some(PermissionResolution::Chosen("reject_once".to_string()))
+            );
+            assert!(!view.has_pending_permission());
+
+            view.items = vec![
+                ChatItem::UserText("q".into()),
+                tool_call("a", ToolStatusView::Completed, None),
+                tool_call("b", ToolStatusView::Completed, None),
+                permission_card(7),
+            ];
+            view.pending_permissions.insert(7);
+            view.set_all_folds(false, cx);
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|r| matches!(r.kind, RowKind::AgentItem(3)) && !r.hidden),
+                "a pending permission stays visible under a collapsed response"
+            );
+
+            view.respond_permission(
+                7,
+                "allow_once".to_string(),
+                PermissionKindView::AllowOnce,
+                cx,
+            );
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|r| matches!(r.kind, RowKind::AgentItem(3)) && r.hidden),
+                "a resolved permission folds back into the collapsed response immediately"
+            );
+
+            view.items = vec![
+                permission_card(10),
+                permission_card(20),
+                permission_card(30),
+            ];
+            view.pending_permissions.extend([10, 20, 30]);
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+
+            for item in &view.items {
+                let ChatItem::Permission(card) = item else {
+                    panic!("expected a permission card");
+                };
+                assert_eq!(
+                    card.resolved,
+                    Some(PermissionResolution::Cancelled),
+                    "Stop cancels every outstanding permission"
+                );
+            }
+            assert!(!view.has_pending_permission());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::ToolStatusView;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            view.status = super::AgentSessionStatus::Connected;
+
+            view.set_turn_in_flight();
+            view.items.clear();
+            assert_eq!(view.activity_state(), super::ActivityState::Working);
+            assert_eq!(
+                view.to_session_status(),
+                Some(daruda_agent::SessionStatus::Working)
+            );
+
+            view.set_turn_idle();
+            view.items = vec![tool_call(
+                "child",
+                ToolStatusView::InProgress,
+                Some("parent"),
+            )];
+            assert_eq!(
+                view.activity_state(),
+                super::ActivityState::Working,
+                "a running background child tool keeps the pane Working after end_turn"
+            );
+            assert_eq!(
+                view.to_session_status(),
+                Some(daruda_agent::SessionStatus::Working)
+            );
+
+            view.set_turn_idle();
+            view.items.clear();
+            view.pending_permissions.insert(7);
+            assert_eq!(
+                view.activity_state(),
+                super::ActivityState::AwaitingPermission
+            );
+            assert_eq!(
+                view.to_session_status(),
+                Some(daruda_agent::SessionStatus::NeedsAttention)
+            );
+
+            view.set_turn_idle();
+            view.pending_permissions.clear();
+            view.items = vec![
+                tool_call("child", ToolStatusView::Completed, Some("parent")),
+                tool_call("top", ToolStatusView::InProgress, None),
+            ];
+            assert_eq!(
+                view.activity_state(),
+                super::ActivityState::Idle,
+                "a completed child and a top-level running tool are not background activity"
+            );
+            assert_eq!(
+                view.to_session_status(),
+                Some(daruda_agent::SessionStatus::Idle)
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn mode_state_updates_replace_and_survive_config_refresh(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{
+        AcpEvent, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView, ModeStateView,
+        SessionModeView,
+    };
+
+    let mode = |id: &str| SessionModeView {
+        id: id.to_string(),
+        name: id.to_uppercase(),
+        description: None,
+    };
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.session_config.modes = Some(ModeStateView {
+                available: vec![
+                    SessionModeView {
+                        id: "auto".to_string(),
+                        name: "Auto".to_string(),
+                        description: None,
+                    },
+                    SessionModeView {
+                        id: "plan".to_string(),
+                        name: "Plan".to_string(),
+                        description: Some("Plan mode".to_string()),
+                    },
+                ],
+                current: "auto".to_string(),
+            });
+            view.set_mode("plan".to_string(), cx);
+            assert_eq!(
+                view.session_config
+                    .modes
+                    .as_ref()
+                    .expect("modes were injected")
+                    .current,
+                "plan",
+                "set_mode flips current immediately (optimistic)"
+            );
+
+            // Connect-time state: the model in use advertises no `auto`.
+            view.session_config.modes = Some(ModeStateView {
+                available: vec![mode("default"), mode("plan")],
+                current: "plan".to_string(),
+            });
+            // The agent switched to a model that supports `auto` and
+            // re-advertised — list and current mode both move.
+            view.apply_event(
+                AcpEvent::ModeChanged {
+                    state: ModeStateView {
+                        available: vec![mode("auto"), mode("default"), mode("plan")],
+                        current: "auto".to_string(),
+                    },
+                },
+                "",
+                false,
+                cx,
+            );
+            let modes = view
+                .session_config
+                .modes
+                .as_ref()
+                .expect("modes stay advertised");
+            assert_eq!(
+                modes
+                    .available
+                    .iter()
+                    .map(|m| m.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["auto", "default", "plan"],
+                "the rebuilt list replaces the connect-time one"
+            );
+            assert_eq!(
+                modes.current, "auto",
+                "a mode absent from the connect-time list still applies"
+            );
+
+            view.apply_event(
+                AcpEvent::ConfigOptionsChanged(vec![ConfigOptionView {
+                    id: "model".to_string(),
+                    name: "Model".to_string(),
+                    description: None,
+                    category: ConfigOptionCategoryView::Model,
+                    kind: daruda_acp::ConfigOptionKindView::Select {
+                        current_value: "sonnet".to_string(),
+                        options: vec![ConfigChoiceView {
+                            value: "sonnet".to_string(),
+                            name: "Sonnet".to_string(),
+                            description: None,
+                        }],
+                    },
+                }]),
+                "",
+                false,
+                cx,
+            );
+            assert_eq!(
+                view.session_config
+                    .modes
+                    .as_ref()
+                    .expect("modes untouched")
+                    .current,
+                "auto"
+            );
+            assert_eq!(view.session_config.config_options.len(), 1);
         })
         .unwrap();
 }
@@ -386,6 +950,164 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
             assert!(
                 !view.is_waiting_for_telegram_first_response(),
                 "the resolved watch is cleared at the terminal boundary"
+            );
+        })
+        .unwrap();
+}
+
+/// A `session/load` replay coalesces row rebuilding until it reaches a
+/// terminal resume signal. The same gate must also release on failure paths so
+/// replayed content is not left invisible.
+#[gpui::test]
+fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            // Simulate a resume mid-replay: gate set, items populated by the
+            // replayed updates, rows not yet projected.
+            view.restoring = true;
+            view.items = vec![ChatItem::UserText("q".into()), assistant_text_item("a")];
+            view.rows.clear();
+
+            // A non-terminal event during the replay must NOT rebuild rows.
+            view.apply_event(AcpEvent::Notice("still loading".into()), "", false, cx);
+            assert!(view.restoring, "gate stays set until Connected/Error");
+            assert!(
+                view.rows.is_empty(),
+                "row rebuild is coalesced while restoring"
+            );
+            assert_eq!(view.items.len(), 2, "items still accumulate during replay");
+
+            // Connected clears the gate and runs the catch-up rebuild.
+            view.apply_event(
+                AcpEvent::Connected {
+                    session_id: "sess-1".into(),
+                    modes: None,
+                    config_options: Vec::new(),
+                    capabilities: Default::default(),
+                },
+                "",
+                false,
+                cx,
+            );
+            assert!(!view.restoring, "Connected releases the gate");
+            assert_eq!(view.session_id.as_deref(), Some("sess-1"));
+            assert!(
+                !view.rows.is_empty(),
+                "the catch-up rebuild projects the replayed items"
+            );
+            assert_eq!(
+                view.items.len(),
+                2,
+                "resume keeps the replayed conversation"
+            );
+
+            // A terminal Error mid-restore also clears the gate.
+            view.restoring = true;
+            view.apply_event(AcpEvent::Error("load rejected".into()), "", false, cx);
+            assert!(!view.restoring, "Error releases the restore gate");
+
+            // The end-of-stream guard releases a gate stuck with no terminal
+            // event, projecting whatever accumulated.
+            view.restoring = true;
+            view.items = vec![ChatItem::UserText("q".into())];
+            view.rows.clear();
+            view.abort_restore(cx);
+            assert!(!view.restoring, "abort_restore releases the gate");
+            assert!(
+                !view.rows.is_empty(),
+                "abort_restore projects the accumulated items"
+            );
+        })
+        .unwrap();
+}
+
+/// A `session/prompt` JSON-RPC failure keeps the ACP session alive: it shows an
+/// inline error, settles the foreground turn, and records an errored completion
+/// without switching the pane to terminal `Error`.
+#[gpui::test]
+fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.status = super::AgentSessionStatus::Connected;
+            view.set_turn_in_flight();
+
+            view.apply_event(
+                AcpEvent::TurnFailed("session limit reached".into()),
+                "",
+                false,
+                cx,
+            );
+
+            assert!(
+                matches!(view.status, super::AgentSessionStatus::Connected),
+                "a per-turn failure must not kill the session, got {:?}",
+                view.status
+            );
+            assert!(view.turn_is_idle(), "the failed turn must settle to idle");
+            assert_eq!(
+                view.items.last(),
+                Some(&ChatItem::Error("session limit reached".to_string())),
+                "the failure is surfaced as an inline Error item"
+            );
+            assert_eq!(
+                view.activity.pending_completion,
+                Some(super::TurnOutcome::Errored)
+            );
+        })
+        .unwrap();
+}
+
+/// `/clear` resets the local session model before the workspace starts the
+/// fresh connection.
+#[gpui::test]
+fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{ChatItem, PlanEntryView, PlanPriority, PlanStatus};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.session_id = Some("abc".to_string());
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.items.push(ChatItem::UserText("again".into()));
+            view.set_turn_in_flight();
+            view.plan.push(PlanEntryView {
+                content: "step 1".into(),
+                priority: PlanPriority::Medium,
+                status: PlanStatus::Pending,
+            });
+            view.fold.toggle(FoldKey::Tool("call-1".into()), true);
+            assert!(
+                !view.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                "sanity: override collapsed the block while active"
+            );
+
+            view.reset_for_new_session(cx);
+
+            assert!(view.items.is_empty(), "reset clears the conversation items");
+            assert!(
+                view.rows.is_empty(),
+                "reset splices the projected rows to 0"
+            );
+            assert_eq!(
+                view.session_id, None,
+                "reset clears the persisted session id"
+            );
+            assert_eq!(
+                view.status,
+                super::AgentSessionStatus::Connecting,
+                "reset parks the view in Connecting for the fresh session/new"
+            );
+            assert!(view.turn_is_idle(), "reset clears the in-flight turn flag");
+            assert!(view.plan.is_empty(), "reset clears the execution plan");
+            assert!(
+                view.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                "reset drops fold overrides back to the natural default"
             );
         })
         .unwrap();

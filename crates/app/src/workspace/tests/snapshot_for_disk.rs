@@ -8,16 +8,13 @@ use super::*;
 use daruda_store::project::WORKSPACE_SCHEMA_VERSION;
 
 #[gpui::test]
-fn snapshot_of_empty_workspace_returns_none(cx: &mut TestAppContext) {
+fn snapshot_for_disk_short_circuits_empty_and_emits_project_schema(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, app_cx| {
         // No projects opened — same short-circuit as `save_state`.
         assert!(ws.snapshot_for_disk(app_cx).is_none());
     });
-}
 
-#[gpui::test]
-fn snapshot_with_project_emits_new_schema(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_snapshot_for_disk");
     let window_handle = cx.add_window(|window, cx| {
@@ -30,6 +27,11 @@ fn snapshot_with_project_emits_new_schema(cx: &mut TestAppContext) {
         )
     });
     let ws = window_handle.root(cx).unwrap();
+
+    ws.update(cx, |ws, cx| {
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+    });
 
     ws.read_with(cx, |ws, app_cx| {
         let (workspace, projects) = ws.snapshot_for_disk(app_cx).expect("snapshot");
@@ -63,6 +65,14 @@ fn snapshot_with_project_emits_new_schema(cx: &mut TestAppContext) {
         let active_uuid = workspace.active_project.expect("active project");
         assert_eq!(active_uuid, projects[0].uuid);
         assert_eq!(workspace.active_lane, Some(ws.active.lane));
+        assert_eq!(
+            workspace.active_dock_view,
+            daruda_store::project::LeftDockView::GitChanges
+        );
+        assert_eq!(
+            workspace.active_right_panel_view,
+            daruda_store::project::RightDockView::Tasks
+        );
 
         // ProjectState carries intrinsic fields from the runtime Project.
         assert_eq!(projects[0].root, ws.projects[0].root);

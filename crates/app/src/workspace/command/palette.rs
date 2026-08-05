@@ -614,14 +614,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn palette_starts_closed() {
+    fn palette_open_close_lifecycle() {
         let state = CommandPaletteState::default();
         assert!(!state.is_open);
         assert!(state.query.is_empty());
-    }
 
-    #[test]
-    fn open_clears_query() {
         let mut state = CommandPaletteState {
             query: "old".to_string(),
             ..Default::default()
@@ -630,10 +627,7 @@ mod tests {
         assert!(state.is_open);
         assert!(state.query.is_empty());
         assert_eq!(state.focused_index, 0);
-    }
 
-    #[test]
-    fn close_resets_state() {
         let mut state = CommandPaletteState::default();
         state.open();
         state.append('a');
@@ -646,14 +640,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_returns_all_entries() {
+    fn palette_filter_cases() {
         let state = CommandPaletteState::default();
         let filtered = state.filtered_entries();
         assert_eq!(filtered.len(), PALETTE_ENTRIES.len());
-    }
 
-    #[test]
-    fn filter_matches_substring() {
         let mut state = CommandPaletteState::default();
         state.append('s');
         state.append('p');
@@ -675,20 +666,14 @@ mod tests {
                 PALETTE_ENTRIES[idx].label
             );
         }
-    }
 
-    #[test]
-    fn filter_is_case_insensitive() {
         let state = CommandPaletteState {
             query: "QUIT".to_string(),
             ..Default::default()
         };
         let filtered = state.filtered_entries();
         assert!(filtered.iter().any(|&i| PALETTE_ENTRIES[i].id == "quit"));
-    }
 
-    #[test]
-    fn no_match_returns_empty() {
         let state = CommandPaletteState {
             query: "zzzzzzz".to_string(),
             ..Default::default()
@@ -705,32 +690,23 @@ mod tests {
     }
 
     #[test]
-    fn move_down_clamps_to_max() {
+    fn palette_editing_and_focus_movement_cases() {
         let mut state = CommandPaletteState::default();
         for _ in 0..100 {
             state.move_down(3);
         }
         assert_eq!(state.focused_index, 2);
-    }
 
-    #[test]
-    fn move_up_clamps_to_zero() {
         let mut state = CommandPaletteState::default();
         state.move_up();
         assert_eq!(state.focused_index, 0);
-    }
 
-    #[test]
-    fn backspace_removes_last_char() {
         let mut state = CommandPaletteState::default();
         state.append('a');
         state.append('b');
         state.backspace();
         assert_eq!(state.query, "a");
-    }
 
-    #[test]
-    fn append_resets_focused_index() {
         let mut state = CommandPaletteState {
             focused_index: 5,
             ..Default::default()

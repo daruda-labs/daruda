@@ -99,6 +99,7 @@ impl Workspace {
                 .focused_file_view()
                 .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged)),
             git_changes_scroll_handle: self.git_changes_scroll_handle.clone(),
+            lanes_scroll_handle: self.lanes_scroll_handle.clone(),
             git_commit_input: self.git_commit_input.clone(),
             files_panel_focus: self.file_tree.files_panel_focus.clone(),
             files_scroll_handle: self.file_tree.files_scroll_handle.clone(),

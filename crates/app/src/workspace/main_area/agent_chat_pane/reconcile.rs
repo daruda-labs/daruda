@@ -22,7 +22,8 @@ use gpui::Context;
 
 use super::agent_chat_helpers::{
     DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor, diff_editor_key,
-    diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources, tool_image_key,
+    diff_editor_language, diff_source_fingerprint, is_active, mermaid_key, mermaid_sources,
+    tool_fold_key, tool_image_key,
 };
 use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
@@ -33,7 +34,94 @@ use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
 
+/// Which tool calls a reconcile pass must revisit.
+///
+/// The passes below detect "did this content change" by fingerprinting it, so
+/// visiting a call is not free — it costs the call's whole diff / output text.
+/// A streamed `ToolCallUpdate` replaces exactly one call (`apply_tool_call_update`
+/// in `daruda_acp::mapping`) and names it, so re-fingerprinting the rest of the
+/// conversation buys nothing and makes a long turn quadratic: every chunk
+/// re-hashed every diff the turn had produced so far.
+#[derive(Debug, Clone)]
+pub(in crate::workspace) enum ReconcileScope {
+    /// Every tool call. Required whenever `items` moved as a whole (connect,
+    /// `session/load` catch-up) or a theme swap invalidated the built editors —
+    /// only a full pass can see that a call left the conversation.
+    All,
+    /// Just this call. Nothing else in `items` changed, so no other cached key
+    /// can have gone stale.
+    Tool(String),
+}
+
+impl ReconcileScope {
+    /// Whether this pass visits `tool_id`.
+    fn covers(&self, tool_id: &str) -> bool {
+        match self {
+            ReconcileScope::All => true,
+            ReconcileScope::Tool(id) => id == tool_id,
+        }
+    }
+
+    /// Whether a cached key may be evicted by this pass. A scoped pass only
+    /// visited its own call, so it can only judge that call's keys — every other
+    /// key is unexamined, not stale. Keys are `"{tool_call_id}#{index}"`.
+    fn owns_key(&self, key: &str) -> bool {
+        match self {
+            ReconcileScope::All => true,
+            ReconcileScope::Tool(id) => key
+                .rsplit_once('#')
+                .is_some_and(|(tool_id, _)| tool_id == id),
+        }
+    }
+}
+
 impl AgentChatView {
+    /// Whether `tc`'s card body is on screen, and so whether its embed editors
+    /// need to exist at all.
+    ///
+    /// Each embed editor is an `InputState`, and each `InputState` costs ~2 gpui
+    /// focus handles. gpui walks the *whole* focus-handle slotmap on every effect
+    /// drain (`App::release_dropped_focus_handles`, once per drained effect), and
+    /// `slotmap`'s `retain` visits every slot ever allocated — the map never
+    /// shrinks. So a handle that exists for a card nobody can see is a permanent
+    /// per-frame tax for the rest of the session.
+    ///
+    /// A collapsed card renders no body: `FoldRow::block` only runs its body
+    /// closure when expanded, and the diff / output blocks (with the `+N −M`
+    /// stat) are built inside it. Since `FoldKey::Tool` is `ExpandedWhileActive`,
+    /// every settled past card is collapsed — which is most of a long
+    /// conversation. Mirrors the render's own gate exactly
+    /// (`fold.is_expanded(&tool_fold_key(tc), is_active(item))`); a nested
+    /// subagent child is judged by its own key alone, which can only *over*-build
+    /// (a child expanded under a collapsed parent), never leave a rendered body
+    /// without its editor.
+    fn tool_body_on_screen(&self, item: &ChatItem) -> bool {
+        let ChatItem::ToolCall(tc) = item else {
+            return false;
+        };
+        self.fold.is_expanded(&tool_fold_key(tc), is_active(item))
+    }
+
+    /// Re-run the embed reconcilers after a fold change, which is the other way
+    /// (besides an ACP event) a card body can arrive on or leave the screen.
+    ///
+    /// `scope` narrows it to the toggled card when the caller knows which one it
+    /// was; expand-all / collapse-all pass [`ReconcileScope::All`]. Diff embeds
+    /// need the Workspace-resolved syntax theme, so they are skipped until the
+    /// view has seen one — until then those diffs render through the inline
+    /// fallback, which is correct, just unhighlighted.
+    pub(in crate::workspace) fn reconcile_embeds_after_fold(
+        &mut self,
+        scope: &ReconcileScope,
+        cx: &mut Context<Self>,
+    ) {
+        self.reconcile_output_editors(scope, cx);
+        if let Some(theme) = self.syntax_theme().map(str::to_owned) {
+            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+            self.reconcile_diff_editors(&theme, is_light, scope, cx);
+        }
+    }
+
     /// Build the read-only diff editor entity for every tool-call file
     /// modification whose current diff content doesn't match the editor
     /// already cached for it. Called from `apply_event` after `items` mutates,
@@ -60,6 +148,7 @@ impl AgentChatView {
         &mut self,
         syntax_theme: &str,
         is_light: bool,
+        scope: &ReconcileScope,
         cx: &mut Context<Self>,
     ) {
         let Some(colors) = cx
@@ -91,6 +180,9 @@ impl AgentChatView {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
+            if !scope.covers(&tc.id) || !self.tool_body_on_screen(item) {
+                continue;
+            }
             for (di, diff) in tc.diffs.iter().enumerate() {
                 let key = diff_editor_key(&tc.id, di);
                 let fingerprint = diff_source_fingerprint(diff);
@@ -113,7 +205,7 @@ impl AgentChatView {
                 pending.push((key, fingerprint, language, model, stat));
             }
         }
-        let stale = stale_keys(self.assets.diff_editors.keys(), &live);
+        let stale = stale_keys(self.assets.diff_editors.keys(), &live, scope);
         if pending.is_empty() && stale.is_empty() {
             return;
         }
@@ -164,7 +256,11 @@ impl AgentChatView {
     /// key with growing text. A key whose fingerprint moved is rebuilt; a cached
     /// key the walk no longer visits is dropped, which covers both a block that
     /// stopped qualifying and an index a shrunken `output` vec no longer reaches.
-    pub(in crate::workspace) fn reconcile_output_editors(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn reconcile_output_editors(
+        &mut self,
+        scope: &ReconcileScope,
+        cx: &mut Context<Self>,
+    ) {
         // Collect the pure work first; entity creation re-enters the window,
         // which can't happen while the immutable `items` borrow is live.
         let mut pending: Vec<(String, u64, String, Option<String>)> = Vec::new();
@@ -173,6 +269,9 @@ impl AgentChatView {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
+            if !scope.covers(&tc.id) || !self.tool_body_on_screen(item) {
+                continue;
+            }
             for (bi, block) in tc.output.iter().enumerate() {
                 let Some(src) = output_editor_source(block) else {
                     continue;
@@ -193,7 +292,7 @@ impl AgentChatView {
                 pending.push((key, fingerprint, text, language));
             }
         }
-        let stale = stale_keys(self.assets.output_editors.keys(), &live);
+        let stale = stale_keys(self.assets.output_editors.keys(), &live, scope);
         if pending.is_empty() && stale.is_empty() {
             return;
         }
@@ -316,7 +415,11 @@ impl AgentChatView {
     /// A decode failure caches `None` under the key rather than leaving it
     /// absent, so a malformed payload renders a failure label once instead of
     /// retrying forever.
-    pub(in crate::workspace) fn reconcile_tool_images(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn reconcile_tool_images(
+        &mut self,
+        scope: &ReconcileScope,
+        cx: &mut Context<Self>,
+    ) {
         // Collect the not-yet-cached, not-in-flight images first; the spawn
         // re-enters the view, which can't happen while the `items` borrow is
         // live.
@@ -325,6 +428,9 @@ impl AgentChatView {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
+            if !scope.covers(&tc.id) {
+                continue;
+            }
             for block in &tc.output {
                 let ToolOutputBlock::Image { data, .. } = block else {
                     continue;
@@ -400,8 +506,15 @@ impl AgentChatView {
 /// tool call that left `items`, or a block that stopped qualifying. Shared so
 /// both reconcilers invalidate by the same rule; left behind, an entry would
 /// either freeze the old content on screen or leak for the session.
-fn stale_keys<'a>(cached: impl Iterator<Item = &'a String>, live: &HashSet<String>) -> Vec<String> {
-    cached.filter(|key| !live.contains(*key)).cloned().collect()
+fn stale_keys<'a>(
+    cached: impl Iterator<Item = &'a String>,
+    live: &HashSet<String>,
+    scope: &ReconcileScope,
+) -> Vec<String> {
+    cached
+        .filter(|key| scope.owns_key(key) && !live.contains(*key))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -412,7 +525,7 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::super::view::tests::make_test_view;
-    use super::mermaid_key;
+    use super::{ReconcileScope, mermaid_key};
 
     const KEY: &str = "call_1#0";
 
@@ -427,13 +540,18 @@ mod tests {
         tool_call_with(Vec::new(), diffs)
     }
 
+    /// Live (`InProgress`), so `ExpandedWhileActive` leaves the card expanded and
+    /// its body — the diff / output blocks the embeds back — is on screen. A
+    /// settled card is collapsed and by design has no embeds at all (see
+    /// `a_collapsed_tool_card_gets_no_embed_editors`), so the editor-lifecycle
+    /// tests below have to start from a live card.
     fn tool_call_with(output: Vec<ToolOutputBlock>, diffs: Vec<DiffView>) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
             id: "call_1".to_string(),
             title: "Bash".to_string(),
             kind: ToolKindView::Execute,
             tool_name: None,
-            status: ToolStatusView::Completed,
+            status: ToolStatusView::InProgress,
             diffs,
             output,
             raw_input: None,
@@ -457,6 +575,298 @@ mod tests {
         }
     }
 
+    /// Settled, so its card is collapsed and renders no body.
+    fn settled_tool(id: &str, output: Vec<ToolOutputBlock>) -> ChatItem {
+        let ChatItem::ToolCall(mut tc) = tool_named(id, output) else {
+            unreachable!("tool_named builds a ToolCall")
+        };
+        tc.status = ToolStatusView::Completed;
+        ChatItem::ToolCall(tc)
+    }
+
+    /// Each embed editor is an `InputState`, and each `InputState` costs ~2 gpui
+    /// focus handles whose slot gpui's `release_dropped_focus_handles` walks on
+    /// every effect drain — a per-conversation, never-shrinking tax. A collapsed
+    /// tool card renders no body at all (`FoldRow::block` only runs the body
+    /// closure when expanded), so an editor built for one is pure cost.
+    #[gpui::test]
+    fn a_collapsed_tool_card_gets_no_embed_editors(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            // Settled → `ExpandedWhileActive` derives collapsed, and no user
+            // override says otherwise.
+            v.items = vec![settled_tool("call_a", vec![raw("big output")])];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.output_editors.is_empty(),
+                "a collapsed card renders no body, so it needs no editor"
+            );
+        });
+    }
+
+    /// The counterpart: a card whose body *is* on screen must have its editor, or
+    /// the body falls back to the inline per-line text walk the embed exists to
+    /// avoid. A live card is expanded by `ExpandedWhileActive`.
+    #[gpui::test]
+    fn a_live_tool_cards_editors_are_materialized(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![tool_named("call_a", vec![raw("streaming output")])];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(v.assets.output_editors.contains_key("call_a#0"));
+        });
+    }
+
+    /// Materialization has to follow the fold both ways: expanding a settled card
+    /// builds its editors, collapsing it again releases them (and their focus
+    /// handles).
+    #[gpui::test]
+    fn folding_a_tool_card_materializes_and_releases_its_editors(cx: &mut TestAppContext) {
+        use super::super::fold::FoldKey;
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![settled_tool("call_a", vec![raw("out")])];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| assert!(v.assets.output_editors.is_empty()));
+
+        view.update(cx, |v, cx| {
+            v.toggle_fold(FoldKey::Tool("call_a".into()), cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.output_editors.contains_key("call_a#0"),
+                "expanding a card must build the editor its body needs"
+            );
+        });
+
+        view.update(cx, |v, cx| {
+            v.toggle_fold(FoldKey::Tool("call_a".into()), cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.output_editors.is_empty(),
+                "collapsing releases the editor again"
+            );
+        });
+    }
+
+    /// The property the fix is for: live editors — and so live focus handles —
+    /// track what is on screen, not how long the conversation has run.
+    #[gpui::test]
+    fn live_embed_editors_stay_bounded_as_the_conversation_grows(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        let mut items: Vec<ChatItem> = (0..200)
+            .map(|i| settled_tool(&format!("call_{i}"), vec![raw("settled output")]))
+            .collect();
+        items.push(tool_named("call_live", vec![raw("streaming")]));
+        view.update(cx, |v, cx| {
+            v.items = items;
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert_eq!(
+                v.assets.output_editors.len(),
+                1,
+                "only the in-flight card's body is on screen"
+            );
+        });
+    }
+
+    fn tool_named(id: &str, output: Vec<ToolOutputBlock>) -> ChatItem {
+        let ChatItem::ToolCall(mut tc) = tool_call(output) else {
+            unreachable!("tool_call builds a ToolCall")
+        };
+        tc.id = id.to_string();
+        ChatItem::ToolCall(tc)
+    }
+
+    /// A `ToolCallUpdate` names the one call it replaced, so a reconcile pass
+    /// scoped to it must not touch — least of all evict — any other call's cached
+    /// editors. Getting this wrong is the failure mode scoping introduces: the
+    /// full pass derived staleness from a whole-conversation `live` set, and a
+    /// scoped pass that kept doing so would drop every other tool's editor.
+    #[gpui::test]
+    fn a_scoped_reconcile_leaves_other_tools_editors_alone(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![
+                tool_named("call_a", vec![raw("a output")]),
+                tool_named("call_b", vec![raw("b output")]),
+            ];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        let a_editor = view.read_with(cx, |v, _| {
+            v.assets
+                .output_editors
+                .get("call_a#0")
+                .map(|e| e.entity_id())
+                .expect("the full pass builds both editors")
+        });
+
+        // Only call_b streamed more output.
+        view.update(cx, |v, cx| {
+            v.items = vec![
+                tool_named("call_a", vec![raw("a output")]),
+                tool_named("call_b", vec![raw("b output\nmore")]),
+            ];
+            v.reconcile_output_editors(&ReconcileScope::Tool("call_b".into()), cx);
+        });
+        view.read_with(cx, |v, cx| {
+            assert_eq!(
+                v.assets
+                    .output_editors
+                    .get("call_a#0")
+                    .map(|e| e.entity_id()),
+                Some(a_editor),
+                "an untouched tool keeps its editor entity"
+            );
+            assert_eq!(
+                v.assets.output_editors["call_b#0"].read(cx).value(),
+                "b output\nmore",
+                "the scoped tool still rebuilds on grown content"
+            );
+        });
+    }
+
+    /// Scoping narrows *which* calls are visited, not the eviction guarantee for
+    /// the call being visited: a shrunken `output` vec must still drop the keys
+    /// its indexes no longer reach.
+    #[gpui::test]
+    fn a_scoped_reconcile_still_evicts_its_own_vanished_keys(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![
+                tool_named("call_a", vec![raw("keep me")]),
+                tool_named("call_b", vec![raw("first"), raw("second")]),
+            ];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| assert_eq!(v.assets.output_editors.len(), 3));
+
+        view.update(cx, |v, cx| {
+            v.items = vec![
+                tool_named("call_a", vec![raw("keep me")]),
+                tool_named("call_b", vec![raw("first")]),
+            ];
+            v.reconcile_output_editors(&ReconcileScope::Tool("call_b".into()), cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(
+                !v.assets.output_editors.contains_key("call_b#1"),
+                "an index the shrunken output vec no longer reaches is dropped"
+            );
+            assert!(v.assets.output_editors.contains_key("call_b#0"));
+            assert!(
+                v.assets.output_editors.contains_key("call_a#0"),
+                "the untouched tool is unaffected by the eviction"
+            );
+        });
+    }
+
+    /// `All` is what a wholesale `items` replacement (connect / load catch-up)
+    /// needs: a tool that left the conversation entirely takes its editors with
+    /// it. No scoped pass can see that, which is why the variant exists.
+    #[gpui::test]
+    fn the_all_scope_evicts_a_tool_that_left_the_conversation(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![
+                tool_named("call_a", vec![raw("a")]),
+                tool_named("call_b", vec![raw("b")]),
+            ];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.update(cx, |v, cx| {
+            v.items = vec![tool_named("call_a", vec![raw("a")])];
+            v.reconcile_output_editors(&ReconcileScope::All, cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(v.assets.output_editors.contains_key("call_a#0"));
+            assert!(
+                !v.assets.output_editors.contains_key("call_b#0"),
+                "a vanished tool's editors are dropped by the full pass"
+            );
+        });
+    }
+
+    /// The cost this scoping exists to remove: the full pass fingerprints every
+    /// diff's whole `old_text` + `new_text` in the conversation, so a streamed
+    /// `ToolCallUpdate` re-hashed every diff ever produced — quadratic over a
+    /// turn. A scoped pass must touch one call's content, not all of it.
+    #[gpui::test]
+    fn a_scoped_diff_reconcile_does_not_rehash_the_whole_conversation(cx: &mut TestAppContext) {
+        use super::diff_source_fingerprint;
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        // 200 settled calls, ~128 KiB of diff text each: ~25 MiB the full pass
+        // re-fingerprints per event.
+        let body = "fn main() { let x = 1; }\n".repeat(5_000);
+        let seeded: Vec<ChatItem> = (0..200)
+            .map(|i| {
+                let ChatItem::ToolCall(mut tc) = diff_tool_call(vec![diff("a.rs", &body)]) else {
+                    unreachable!("diff_tool_call builds a ToolCall")
+                };
+                tc.id = format!("call_{i}");
+                ChatItem::ToolCall(tc)
+            })
+            .collect();
+        view.update(cx, |v, _| {
+            v.items = seeded;
+            // Pre-seed matching fingerprints so neither pass builds an editor.
+            // What is left is exactly the change-detection walk — the cost
+            // scoping exists to remove, isolated from the one legitimate rebuild
+            // a real update would also do.
+            for item in &v.items {
+                let ChatItem::ToolCall(tc) = item else {
+                    unreachable!("every seeded item is a tool call")
+                };
+                for (di, d) in tc.diffs.iter().enumerate() {
+                    v.assets.diff_editor_sources.insert(
+                        super::diff_editor_key(&tc.id, di),
+                        diff_source_fingerprint(d),
+                    );
+                }
+            }
+        });
+
+        let time = |cx: &mut TestAppContext, scope: ReconcileScope| {
+            let started = std::time::Instant::now();
+            view.update(cx, |v, cx| {
+                v.reconcile_diff_editors(SYNTAX_THEME, false, &scope, cx);
+            });
+            started.elapsed()
+        };
+        let full = time(cx, ReconcileScope::All);
+        let scoped = time(cx, ReconcileScope::Tool("call_0".into()));
+        assert!(
+            scoped * 10 < full,
+            "scoped {scoped:?} vs full {full:?} — the scoped pass is still \
+             walking the whole conversation"
+        );
+    }
+
     /// The reconciler owns the whole editor lifecycle: one entity per
     /// qualifying output block, reused while the content is unchanged, rebuilt
     /// when a streamed output grows, and dropped once the block (or its index)
@@ -470,7 +880,7 @@ mod tests {
         let reconcile_with = |cx: &mut TestAppContext, output: Vec<ToolOutputBlock>| {
             view.update(cx, |v, cx| {
                 v.items = vec![tool_call(output)];
-                v.reconcile_output_editors(cx);
+                v.reconcile_output_editors(&ReconcileScope::All, cx);
             });
         };
         let editor_id = |cx: &mut TestAppContext| {
@@ -545,7 +955,7 @@ mod tests {
         let reconcile_with = |cx: &mut TestAppContext, items: Vec<ChatItem>| {
             view.update(cx, |v, cx| {
                 v.items = items;
-                v.reconcile_diff_editors(SYNTAX_THEME, false, cx);
+                v.reconcile_diff_editors(SYNTAX_THEME, false, &ReconcileScope::All, cx);
             });
         };
         let cached = |cx: &mut TestAppContext, key: &str| {

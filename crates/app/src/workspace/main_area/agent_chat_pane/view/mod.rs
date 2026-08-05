@@ -3,7 +3,10 @@
 //! Like `TerminalView`, this pane owns its conversation model plus UI/runtime
 //! state, renders itself, and notifies itself. Workspace ops create the pane,
 //! own the ACP pump/error pipeline, and pass config-derived inputs into
-//! `apply_event` so the view does not mirror workspace config.
+//! `apply_event` so the view does not mirror workspace config — with one
+//! deliberate exception, `syntax_theme`: a fold expand has to materialize diff
+//! embeds outside any ACP event, so the view records that one resolved value
+//! (single update site, [`AgentChatView::set_syntax_theme`]).
 //!
 //! ## SAFETY(MVU): self-contained pane entity
 //!
@@ -25,7 +28,7 @@ use gpui::{
 
 use super::fold::FoldState;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
-use super::rows::RenderRow;
+use super::rows::{LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -452,6 +455,19 @@ pub(in crate::workspace) struct AgentChatView {
     /// [`Self::rebuild_rows`] on every change. The virtualized list indexes
     /// over this. Derived cache — single rebuild site.
     pub(in crate::workspace) rows: Vec<RenderRow>,
+    /// Which subagent units still have work running, derived from `items` in one
+    /// pass. Read by the projection *and* by every tool card's badge, so it is
+    /// cached here rather than recomputed per query. Derived cache — rebuilt in
+    /// [`Self::rebuild_rows`] alongside `rows`, its single update site.
+    pub(in crate::workspace) live_units: LiveSubagentUnits,
+    /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
+    /// The Workspace owns the resolved value (user + project config layers), so it
+    /// cannot be derived here — but a fold expand materializes diff editors
+    /// outside any ACP event, so the view has to know it on its own. `None` until
+    /// the first event; a fold expand before that builds output embeds only and
+    /// the diffs fall back to inline until the next event.
+    /// Single update site: [`Self::set_syntax_theme`].
+    syntax_theme: Option<String>,
     /// What the connected agent advertises: modes, config options, slash
     /// commands. Established at `Connected`, cleared together on teardown.
     pub(in crate::workspace) session_config: SessionConfig,
@@ -540,7 +556,9 @@ impl AgentChatView {
             this.assets.clear_mermaid();
             let dark = Self::host_is_dark(cx);
             this.reconcile_mermaid(dark, cx);
-            this.reconcile_tool_images(cx);
+            // A theme swap invalidates the whole conversation's cached artifacts,
+            // not one call's — the only correct scope here is the full pass.
+            this.reconcile_tool_images(&super::reconcile::ReconcileScope::All, cx);
         });
         Self {
             pane_id,
@@ -576,6 +594,8 @@ impl AgentChatView {
                 state
             },
             rows: Vec::new(),
+            live_units: LiveSubagentUnits::default(),
+            syntax_theme: None,
             session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
             session_usage: None,
@@ -597,6 +617,20 @@ impl AgentChatView {
             _theme_observer: theme_observer,
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
+        }
+    }
+
+    /// The recorded syntax theme, if the view has seen one yet.
+    pub(in crate::workspace) fn syntax_theme(&self) -> Option<&str> {
+        self.syntax_theme.as_deref()
+    }
+
+    /// Record the Workspace-resolved syntax theme id. Single update site for
+    /// `syntax_theme`, called by `apply_event` with the value the Workspace
+    /// already passes it each event.
+    pub(in crate::workspace) fn set_syntax_theme(&mut self, theme: &str) {
+        if self.syntax_theme.as_deref() != Some(theme) {
+            self.syntax_theme = Some(theme.to_owned());
         }
     }
 

@@ -6,80 +6,7 @@
 use super::*;
 
 #[gpui::test]
-fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
-    let tmp = tempfile::tempdir().unwrap();
-    let data_dir = tmp.path().to_path_buf();
-
-    // Disposable /tmp roots. Lane bootstrap inspects the path with
-    // `fs::metadata`; a missing dir degrades to a `Default` lane,
-    // which is fine for persistence-shape verification.
-    let root_a = std::env::temp_dir().join("daruda_regression_ns_a");
-    let root_b = std::env::temp_dir().join("daruda_regression_ns_b");
-    let _ = std::fs::create_dir_all(&root_a);
-    let _ = std::fs::create_dir_all(&root_b);
-
-    let config = daruda_config::Config::default();
-    let project_a = daruda_store::project::Project::from_path(&root_a);
-
-    // First project via `new_with_project`, second via `add_project`,
-    // so the workspace owns two runtime projects.
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test(&config, Some(project_a), data_dir.clone(), window, cx)
-    });
-    let ws = wh.root(cx).unwrap();
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(root_b.clone(), window, cx);
-        })
-    })
-    .unwrap();
-
-    // `add_project` schedules persist via `cx.defer`; run an explicit
-    // synchronous persist so assertions see the post-add-project shape.
-    ws.read_with(cx, |w, cx| w.persist_state(cx));
-
-    let workspaces_dir = daruda_store::project::workspaces_dir_in(&data_dir);
-    let workspace_count = std::fs::read_dir(&workspaces_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|s| s == "json").unwrap_or(false))
-        .count();
-    assert_eq!(
-        workspace_count, 1,
-        "expected exactly 1 workspace file, found {workspace_count}"
-    );
-
-    let projects_dir = daruda_store::project::projects_dir_in(&data_dir);
-    let project_count = std::fs::read_dir(&projects_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let stem = e
-                .path()
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            daruda_store::project::is_uuid_filename_stem(&stem)
-        })
-        .count();
-    assert_eq!(
-        project_count, 2,
-        "expected 2 project files, found {project_count}"
-    );
-
-    // recent-workspaces.json holds a single entry for this UUID.
-    let recent = daruda_store::project::load_recent_in(&data_dir);
-    assert_eq!(recent.len(), 1, "exactly one recent entry");
-    let ws_uuid = ws.read_with(cx, |w, _| w.uuid);
-    assert_eq!(recent[0].workspace_uuid, ws_uuid);
-
-    let _ = std::fs::remove_dir_all(&root_a);
-    let _ = std::fs::remove_dir_all(&root_b);
-}
-
-#[gpui::test]
-fn two_workspaces_sharing_a_project_do_not_clobber_each_other(cx: &mut TestAppContext) {
+fn persist_state_namespaces_workspace_and_project_files(cx: &mut TestAppContext) {
     // Two workspaces sharing a project root:
     // - W1: projects A + B, persist
     // - W2: project A alone, persist (distinct workspace_uuid)
@@ -121,6 +48,42 @@ fn two_workspaces_sharing_a_project_do_not_clobber_each_other(cx: &mut TestAppCo
         (w.uuid, ids)
     });
     assert_eq!(w1_project_ids.len(), 2, "W1 holds two projects");
+    let workspaces_dir = daruda_store::project::workspaces_dir_in(&data_dir);
+    let workspace_count = std::fs::read_dir(&workspaces_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|s| s == "json").unwrap_or(false))
+        .count();
+    assert_eq!(
+        workspace_count, 1,
+        "expected exactly 1 workspace file after W1, found {workspace_count}"
+    );
+
+    let projects_dir = daruda_store::project::projects_dir_in(&data_dir);
+    let project_count = std::fs::read_dir(&projects_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let stem = e
+                .path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            daruda_store::project::is_uuid_filename_stem(&stem)
+        })
+        .count();
+    assert_eq!(
+        project_count, 2,
+        "expected 2 project files after W1, found {project_count}"
+    );
+    let recent_after_w1 = daruda_store::project::load_recent_in(&data_dir);
+    assert_eq!(
+        recent_after_w1.len(),
+        1,
+        "W1 writes exactly one recent entry"
+    );
+    assert_eq!(recent_after_w1[0].workspace_uuid, w1_uuid);
 
     // ---- W2: A alone ----
     // Fresh `from_path` so W2 mints its own ProjectUuid for A.

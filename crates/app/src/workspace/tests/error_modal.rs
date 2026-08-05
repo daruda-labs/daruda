@@ -24,10 +24,11 @@ fn synthetic_report() -> ErrorReport {
 }
 
 #[gpui::test]
-async fn modal_captures_full_report_at_construction(cx: &mut TestAppContext) {
+async fn modal_captures_copies_and_resets_copied_state(cx: &mut TestAppContext) {
     let (window_handle, _workspace) = build_workspace(cx);
     let report = synthetic_report();
     let original_title = report.title.clone();
+    let expected_body = report.to_plain_text();
 
     let modal = cx
         .update_window(window_handle.into(), |_, window, cx| {
@@ -56,19 +57,6 @@ async fn modal_captures_full_report_at_construction(cx: &mut TestAppContext) {
             "body trailer should carry OS",
         );
     });
-}
-
-#[gpui::test]
-async fn copy_report_writes_full_plain_text_to_clipboard(cx: &mut TestAppContext) {
-    let (window_handle, _workspace) = build_workspace(cx);
-    let report = synthetic_report();
-    let expected_body = report.to_plain_text();
-
-    let modal = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            cx.new(|cx_modal| ErrorReportModal::new(report, window, cx_modal))
-        })
-        .unwrap();
 
     // Write something else first so we can verify the modal overwrites.
     cx.update(|cx| {
@@ -85,26 +73,6 @@ async fn copy_report_writes_full_plain_text_to_clipboard(cx: &mut TestAppContext
 
     modal.read_with(cx, |m, _cx| {
         assert!(m.copied(), "Copied confirmation should be active");
-    });
-}
-
-#[gpui::test]
-async fn copied_label_reverts_after_one_second(cx: &mut TestAppContext) {
-    let (window_handle, _workspace) = build_workspace(cx);
-    let report = synthetic_report();
-
-    let modal = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            cx.new(|cx_modal| ErrorReportModal::new(report, window, cx_modal))
-        })
-        .unwrap();
-
-    cx.update(|cx| {
-        modal.update(cx, |m, cx| m.copy_to_clipboard_for_test(cx));
-    });
-
-    modal.read_with(cx, |m, _cx| {
-        assert!(m.copied(), "Copied label should be up immediately");
     });
 
     // Past the 1 s revert window — virtual clock so the test is

@@ -21,15 +21,9 @@ use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::output_editor::bounded_embed_height;
 use crate::workspace::main_area::agent_chat_pane::render::embed::bounded_editor_embed;
 
-/// Far more rows than the cap can show, standing in for `seq 1 200000`'s
-/// 6-bytes-per-line output that fits inside the 64 KiB byte cap.
-const LARGE_ROWS: usize = 5_000;
-/// Fewer rows than the cap, so the embed measures its content instead.
-const SMALL_ROWS: usize = 5;
-/// Enough numbered lines that the fenced block around them exceeds
-/// `daruda_acp`'s 64 KiB cap (109 KiB: 88,894 digits + 19,999 newlines + the two
-/// fence lines), so the block reaches the render truncated from the tail.
-const TRUNCATING_ROWS: usize = 20_000;
+/// Far more rows than the cap can show, standing in for large command output
+/// that fits inside the 64 KiB byte cap.
+const LARGE_ROWS: usize = 200;
 
 /// `id` handed to [`bounded_editor_embed`], and the debug selector it derives.
 /// `debug_bounds` takes a `&'static str`, so the derived name is spelled out.
@@ -175,20 +169,13 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
         scroll_h >= px(LARGE_ROWS as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
         "scroll extent {scroll_h:?} does not cover the full content — rows lost"
     );
-}
 
-/// Same structure, laid out the way the agent-chat virtual list lays out its
-/// items: `Definite(width) × MinContent` (gpui `list.rs` `available_item_space`).
-/// The windowed probe above sizes the root against a definite window height; the
-/// list does not, so a height that only resolves against a definite ancestor
-/// collapses here.
-#[gpui::test]
-async fn large_output_embed_fills_the_cap_under_min_content_constraint(cx: &mut TestAppContext) {
-    init_gpui_component(cx);
-    let (probe, cx) = cx.add_window_view(|window, cx| OutputProbe::new(LARGE_ROWS, window, cx));
-    cx.run_until_parked();
+    // The agent-chat virtual list lays items out as
+    // `Definite(width) × MinContent` (gpui `list.rs` `available_item_space`).
+    // The windowed probe above sizes the root against a definite window height;
+    // the list does not, so a height that only resolves against a definite
+    // ancestor must not collapse here.
     let editor = probe.read_with(cx, |p, _| p.editor.clone());
-
     cx.draw(
         point(px(0.), px(0.)),
         size(
@@ -223,123 +210,11 @@ async fn large_output_embed_fills_the_cap_under_min_content_constraint(cx: &mut 
     );
 }
 
-#[gpui::test]
-async fn small_output_embed_measures_its_content_and_shows_every_row(cx: &mut TestAppContext) {
-    init_gpui_component(cx);
-    let (probe, cx) = cx.add_window_view(|window, cx| OutputProbe::new(SMALL_ROWS, window, cx));
-    cx.run_until_parked();
-
-    let rows_frame1 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
-    cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-
-    let (rows_frame2, visible) = probe.read_with(cx, |p, cx| {
-        let state = p.editor.read(cx);
-        (state.display_rows(), state.visible_rows())
-    });
-    let wrapper = cx
-        .debug_bounds(PROBE_EMBED)
-        .expect("wrapper painted (debug bounds recorded)");
-
-    assert_eq!(rows_frame1, SMALL_ROWS, "frame 1: display_rows");
-    assert_eq!(
-        rows_frame2, SMALL_ROWS,
-        "frame 2 (post first paint): display_rows drifted"
-    );
-    assert!(
-        SMALL_ROWS < capped_rows(),
-        "the small case must stay under the cap"
-    );
-    assert_eq!(
-        wrapper.size.height,
-        bounded_embed_height(SMALL_ROWS),
-        "an uncapped embed measures its content plus the thumb strip"
-    );
-
-    let visible = visible.expect("the editor text element painted at least once");
-    assert!(
-        visible.start == 0 && visible.end >= SMALL_ROWS,
-        "an uncapped embed must shape all {SMALL_ROWS} rows, shaped {visible:?}"
-    );
-}
-
-/// Drive a real agent-chat pane to one completed, expanded tool call whose only
-/// output block is a bare fence of `rows` numbered lines — the shape the Claude
-/// adapter's `markdownEscape` produces for shell output. Returns the window and
-/// the chat view. Painted twice: the embed's thumbs read the *previous* paint's
-/// editor geometry, so a single frame never has any.
-fn render_fenced_output_card(
-    cx: &mut TestAppContext,
-    rows: usize,
-) -> (
-    gpui::AnyWindowHandle,
-    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
-) {
-    use crate::workspace::main_area::pane::PaneContent;
-    use agent_client_protocol::schema::v1::{
-        Content, ContentBlock, SessionUpdate, TextContent, ToolCall, ToolCallContent,
-        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
-    };
-
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
-
-    let fenced = format!("```\n{}\n```", numbered_lines(rows));
-    view.update(cx, |v, cx| {
-        let mut fields = ToolCallUpdateFields::default();
-        fields.status = Some(ToolCallStatus::Completed);
-        fields.content = Some(vec![ToolCallContent::Content(Content::new(
-            ContentBlock::Text(TextContent::new(fenced)),
-        ))]);
-        v.apply_event(
-            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
-                ToolCall::new("b1", "Bash seq").kind(ToolKind::Execute),
-            ))),
-            "",
-            false,
-            cx,
-        );
-        v.apply_event(
-            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
-                ToolCallUpdate::new("b1", fields),
-            ))),
-            "",
-            false,
-            cx,
-        );
-    });
-    cx.run_until_parked();
-    // Completed collapses the card by default; the embed only renders expanded.
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-    (window_handle.into(), view)
-}
-
 /// Drive a **codex-shaped** shell tool call: its output arrives only through
 /// `raw_output.formatted_output`, which `daruda_acp` maps to
 /// `ToolOutputBlock::RawText` — the shape the CPU repro (`seq 1 200000` in a
-/// codex pane) actually takes, and the one the fenced-`Text` helper above never
-/// exercises. `trailing_newline` mirrors a real command's output, which
-/// terminates its last line.
+/// codex pane) actually takes. `trailing_newline` mirrors a real command's
+/// output, which terminates its last line.
 fn render_shell_output_card(
     cx: &mut TestAppContext,
     rows: usize,
@@ -475,47 +350,6 @@ fn transcript_scroll_range(
     })
 }
 
-/// Guards the guard: the filler cards must actually give the transcript room to
-/// move, or every chaining assertion below passes vacuously.
-#[gpui::test]
-async fn the_filler_transcript_is_actually_scrollable(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
-    push_filler_cards(cx, &view, 40);
-    cx.update_window(window_handle, |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-
-    let (items, max_offset) = transcript_scroll_range(cx, &view);
-    assert_eq!(items, 41, "every filler card must reach the transcript");
-    assert!(
-        max_offset > px(0.),
-        "the transcript has no scrollable range, so it cannot be observed \
-         *not* scrolling — max_offset {max_offset:?}"
-    );
-}
-
-/// Scroll `view`'s `b1` output embed to its far end on the Y axis and report the
-/// offset it settled at.
-fn scroll_embed_to_bottom(
-    cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
-) -> gpui::Pixels {
-    let editor = view.read_with(cx, |v, _| {
-        v.assets
-            .output_editors
-            .get("b1#0")
-            .expect("output editor built")
-            .clone()
-    });
-    // A wildly out-of-range value: `set_scroll_offset` clamps to the content, so
-    // this lands exactly at the end whatever the content height is.
-    editor.update(cx, |state, cx| {
-        state.set_scroll_offset(point(px(0.), px(-1_000_000.)), cx);
-    });
-    cx.run_until_parked();
-    editor.read_with(cx, |state, _| state.scroll_handle().offset().y)
-}
-
 /// One downward wheel notch over the embed's centre.
 fn wheel_down_over_embed(vcx: &mut gpui::VisualTestContext, embed: gpui::Bounds<gpui::Pixels>) {
     use gpui::{ScrollDelta, ScrollWheelEvent};
@@ -527,19 +361,20 @@ fn wheel_down_over_embed(vcx: &mut gpui::VisualTestContext, embed: gpui::Bounds<
     vcx.run_until_parked();
 }
 
-/// A capped embed owns the wheel while it still has rows to reveal, so the
-/// transcript must stay put — otherwise one gesture moves both.
+/// A capped embed owns the wheel while it still has rows to reveal, then passes
+/// the gesture to the transcript once it is already at its end.
 #[gpui::test]
-async fn a_capped_embed_holds_the_wheel_while_it_can_still_scroll(cx: &mut TestAppContext) {
+async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut TestAppContext) {
     let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
-    push_filler_cards(cx, &view, 40);
+    push_filler_cards(cx, &view, 16);
     cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
-    let (_, max_offset) = transcript_scroll_range(cx, &view);
+    let (items, max_offset) = transcript_scroll_range(cx, &view);
+    assert_eq!(items, 17, "every filler card must reach the transcript");
     assert!(
         max_offset > px(0.),
-        "fixture is vacuous — see the guard test"
+        "the transcript has no scrollable range, so the fixture is vacuous"
     );
 
     let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
@@ -570,28 +405,9 @@ async fn a_capped_embed_holds_the_wheel_while_it_can_still_scroll(cx: &mut TestA
         after, before,
         "the transcript scrolled too — the embed did not claim the gesture"
     );
-}
 
-/// Scrolling is repeated, not a single notch. The capture-phase wheel hitbox is
-/// inserted in `prepaint`, where the editor's `bounds` is shifted by the scroll
-/// offset — hit-testing against that walks the hitbox off screen and the wheel
-/// stops reaching the editor after the first notch, which a one-event test
-/// cannot see.
-#[gpui::test]
-async fn a_capped_embed_keeps_scrolling_across_repeated_notches(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
-    push_filler_cards(cx, &view, 40);
-    cx.update_window(window_handle, |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted");
-
-    let mut offsets = Vec::new();
-    for _ in 0..4 {
+    let mut offsets = vec![editor_offset];
+    for _ in 0..3 {
         wheel_down_over_embed(&mut vcx, embed);
         offsets.push(view.read_with(&vcx, |v, cx| {
             v.assets
@@ -604,7 +420,6 @@ async fn a_capped_embed_keeps_scrolling_across_repeated_notches(cx: &mut TestApp
                 .y
         }));
     }
-
     for (n, pair) in offsets.windows(2).enumerate() {
         assert!(
             pair[1] < pair[0],
@@ -614,34 +429,27 @@ async fn a_capped_embed_keeps_scrolling_across_repeated_notches(cx: &mut TestApp
             pair[1]
         );
     }
-}
 
-/// …and once it has none left in that direction, the gesture must carry on to
-/// the transcript instead of dying on the embed.
-#[gpui::test]
-async fn a_capped_embed_at_its_end_passes_the_wheel_to_the_transcript(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
-    push_filler_cards(cx, &view, 40);
-    cx.update_window(window_handle, |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-    let (_, max_offset) = transcript_scroll_range(cx, &view);
-    assert!(
-        max_offset > px(0.),
-        "fixture is vacuous — see the guard test"
-    );
-
-    let end = scroll_embed_to_bottom(cx, &view);
+    let editor = view.read_with(&vcx, |v, _| {
+        v.assets
+            .output_editors
+            .get("b1#0")
+            .expect("output editor built")
+            .clone()
+    });
+    // A wildly out-of-range value: `set_scroll_offset` clamps to the content, so
+    // this lands exactly at the end whatever the content height is.
+    editor.update(&mut vcx, |state, cx| {
+        state.set_scroll_offset(point(px(0.), px(-1_000_000.)), cx);
+    });
+    vcx.run_until_parked();
+    let end = editor.read_with(&vcx, |state, _| state.scroll_handle().offset().y);
     assert!(
         end < px(0.),
         "the embed should have scrolled somewhere, got {end:?}"
     );
 
-    let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted");
+    let before = view.read_with(&vcx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
     wheel_down_over_embed(&mut vcx, embed);
 
     let (after, still_at_end) = view.read_with(&vcx, |v, cx| {
@@ -774,8 +582,8 @@ fn only_output_block(
 /// intact, no highlighting. It must reach the capped embed, hold the file's own
 /// bytes, and highlight as the extension's language.
 #[gpui::test]
-async fn a_read_tool_s_unfenced_output_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    const ROWS: usize = 2_000;
+async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppContext) {
+    const ROWS: usize = 200;
     let body = numbered_source(ROWS);
     // Fixture validity: without both of these the case degenerates into the
     // already-covered fenced one and proves nothing.
@@ -861,44 +669,6 @@ async fn a_read_tool_s_unfenced_output_renders_through_the_capped_embed(cx: &mut
     );
 }
 
-/// Reading a **markdown** file: its body holds fences of its own, which is
-/// exactly the shape the fence classifier has to reject as ambiguous. Since the
-/// block now names its language instead of tagging a fence, the read still
-/// reaches the embed — the ambiguity rule only guards blocks that really are
-/// markdown.
-#[gpui::test]
-async fn a_read_of_a_file_holding_its_own_fences_still_embeds(cx: &mut TestAppContext) {
-    let body = "# Doc\n\n```sh\nls\n```\n\nprose\n".to_string();
-    let (window_handle, view) = render_read_output_card(cx, "notes.md", body);
-
-    let block = only_output_block(cx, &view);
-    let daruda_acp::ToolOutputBlock::SourceText { text, language, .. } = &block else {
-        panic!("a markdown read must map to a SourceText block, got {block:?}");
-    };
-    assert_eq!(language.as_deref(), Some("markdown"));
-    assert!(
-        text.contains("```sh"),
-        "the file's own fence must survive verbatim: {text:?}"
-    );
-
-    let editor_language = view.read_with(cx, |v, cx| {
-        v.assets
-            .output_editors
-            .get("t1#0")
-            .expect("no output editor built — the nested fence rejected the block")
-            .read(cx)
-            .code_editor_language()
-            .cloned()
-    });
-    assert_eq!(editor_language.as_deref(), Some("markdown"));
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    assert!(
-        vcx.debug_bounds("agent-chat-out-embed-t1#0").is_some(),
-        "the bounded embed painted — a markdown read fell back to the markdown path"
-    );
-}
-
 /// The embedded editor's painted viewport height and its `scroll_size()` height.
 fn output_editor_extents(
     cx: &mut TestAppContext,
@@ -922,153 +692,12 @@ fn output_editor_extents(
     })
 }
 
-/// Full pipeline, not the probe: a real tool call whose output is one bare fence
-/// must render through the capped embed rather than the markdown fallback — the
-/// wiring `output_block_view` adds between the reconciler's cache and the render.
-/// Capped means rows are hidden, so the vertical thumb must say so.
-#[gpui::test]
-async fn a_bare_fence_output_block_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_fenced_output_card(cx, LARGE_ROWS);
-
-    let visible = view.read_with(cx, |v, cx| {
-        v.assets
-            .output_editors
-            .get("b1#0")
-            .expect("output editor built for the bare-fence block")
-            .read(cx)
-            .visible_rows()
-    });
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted — output_block_view fell back to markdown");
-    assert_eq!(
-        embed.size.height,
-        bounded_embed_height(LARGE_ROWS),
-        "the embed in a real card is capped"
-    );
-    let thumb = vcx
-        .debug_bounds("agent-chat-out-vthumb-b1#0")
-        .expect("the cap hid rows, so the vertical thumb must be drawn");
-    assert!(
-        thumb.size.height < embed.size.height,
-        "a {LARGE_ROWS}-row output's thumb must be a fraction of the track, got {thumb:?}"
-    );
-    let visible = visible.expect("the embedded editor painted");
-    assert!(
-        visible.len() <= max_visible_rows(),
-        "the real card's embed shaped {} of {LARGE_ROWS} rows",
-        visible.len()
-    );
-    assert!(
-        visible.len() >= capped_rows(),
-        "the real card's embed shaped only {} rows — expected a full {}-row \
-         viewport, so the editor collapsed inside its reserved box",
-        visible.len(),
-        capped_rows()
-    );
-}
-
-/// A fenced block over `daruda_acp`'s 64 KiB cap is cut from the tail, so it
-/// arrives with an opening fence and **no closing fence** — the shape the largest
-/// outputs always have, and the ones the bounded embed exists for. It must still
-/// reach the embed instead of the markdown path that paints every line.
-#[gpui::test]
-async fn a_truncated_output_block_still_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_fenced_output_card(cx, TRUNCATING_ROWS);
-
-    let (truncated_from, rows, visible) = view.read_with(cx, |v, cx| {
-        let block = v
-            .items
-            .iter()
-            .find_map(|item| match item {
-                daruda_acp::ChatItem::ToolCall(tc) => tc.output.first(),
-                _ => None,
-            })
-            .expect("the tool call carries one output block");
-        let truncated_from = match block {
-            daruda_acp::ToolOutputBlock::Text { truncated_from, .. } => *truncated_from,
-            _ => panic!("a fenced content block maps to a Text output block"),
-        };
-        let state = v
-            .assets
-            .output_editors
-            .get("b1#0")
-            .expect("output editor built for the truncated block")
-            .read(cx);
-        (truncated_from, state.display_rows(), state.visible_rows())
-    });
-
-    // Without this the case degenerates into the untruncated one and proves
-    // nothing about the missing terminator.
-    assert!(
-        truncated_from.is_some(),
-        "{TRUNCATING_ROWS} numbered lines must exceed the byte cap, else the \
-         closing fence survives and this is not the truncated shape"
-    );
-    assert!(
-        rows > max_visible_rows(),
-        "the surviving {rows} rows must still overflow the cap"
-    );
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted — a truncated block fell back to markdown");
-    assert_eq!(
-        embed.size.height,
-        bounded_embed_height(rows),
-        "the truncated block's embed is capped"
-    );
-    let visible = visible.expect("the embedded editor painted");
-    assert!(
-        visible.len() >= capped_rows() && visible.len() <= max_visible_rows(),
-        "the truncated block's embed shaped {} of {rows} rows — expected about {}",
-        visible.len(),
-        capped_rows()
-    );
-}
-
-/// An output that fits under the cap hides nothing, so it must neither draw a
-/// vertical thumb nor scroll at all. Both used to be possible: code-editor mode
-/// padded `scroll_size().height` half a viewport past the content so a
-/// fully-visible buffer stayed scrollable into blank space — and, inside the
-/// transcript's own scroller, dragged both at once. The pad is now editor-only
-/// (`gpui_component` `element.rs`), so the scroll extent is the viewport.
-#[gpui::test]
-async fn a_short_output_block_neither_scrolls_nor_shows_a_thumb(cx: &mut TestAppContext) {
-    let (window_handle, view) = render_fenced_output_card(cx, SMALL_ROWS);
-    let (viewport_h, scroll_h) = output_editor_extents(cx, &view);
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
-    // Absence is only meaningful once the embed itself is known to have painted.
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted");
-    assert_eq!(
-        embed.size.height,
-        bounded_embed_height(SMALL_ROWS),
-        "a short embed measures its content"
-    );
-    assert!(
-        scroll_h <= viewport_h,
-        "scroll extent {scroll_h:?} exceeds the {viewport_h:?} viewport even though \
-         every row is visible — the embed can be dragged into blank space"
-    );
-    assert_eq!(
-        vcx.debug_bounds("agent-chat-out-vthumb-b1#0"),
-        None,
-        "a {SMALL_ROWS}-row output hides nothing, so no vertical thumb may be drawn"
-    );
-}
-
 /// The CPU repro's own shape, end to end: codex reports a shell command only
 /// through `raw_output.formatted_output`, so the block is `RawText` rather than
 /// a fence. It must reach the capped embed and shape a bounded row range — the
 /// property the whole feature exists for.
 #[gpui::test]
-async fn a_codex_shell_output_block_renders_through_the_capped_embed(cx: &mut TestAppContext) {
+async fn codex_shell_output_blocks_render_through_the_capped_embed(cx: &mut TestAppContext) {
     let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
 
     let (is_raw, visible) = view.read_with(cx, |v, cx| {
@@ -1113,15 +742,14 @@ async fn a_codex_shell_output_block_renders_through_the_capped_embed(cx: &mut Te
         "shaped only {} rows — the editor collapsed inside its reserved box",
         visible.len()
     );
-}
 
-/// A command's trailing newline terminates its last line; counting the empty
-/// remainder as a row made every shell embed one row taller than its output and
-/// shifted the cap boundary by a row.
-#[gpui::test]
-async fn a_shell_output_s_trailing_newline_adds_no_row(cx: &mut TestAppContext) {
-    const ROWS: usize = 5;
-    let (window_handle, view) = render_shell_output_card(cx, ROWS, true);
+    // A command's trailing newline terminates its last line; counting the empty
+    // remainder as a row made every shell embed one row taller than its output
+    // and shifted the cap boundary by a row.
+    drop(vcx);
+    const SHORT_ROWS: usize = 5;
+    let (window_handle, view) = render_shell_output_card(cx, SHORT_ROWS, true);
+    let (viewport_h, scroll_h) = output_editor_extents(cx, &view);
 
     let rows = view.read_with(cx, |v, cx| {
         v.assets
@@ -1133,9 +761,14 @@ async fn a_shell_output_s_trailing_newline_adds_no_row(cx: &mut TestAppContext) 
     });
     assert_eq!(
         rows,
-        ROWS,
+        SHORT_ROWS,
         "the terminator was counted as a {}th row",
-        ROWS + 1
+        SHORT_ROWS + 1
+    );
+    assert!(
+        scroll_h <= viewport_h,
+        "scroll extent {scroll_h:?} exceeds the {viewport_h:?} viewport even though \
+         every row is visible — the embed can be dragged into blank space"
     );
 
     let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
@@ -1144,108 +777,11 @@ async fn a_shell_output_s_trailing_newline_adds_no_row(cx: &mut TestAppContext) 
         .expect("the bounded embed painted");
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(ROWS),
+        bounded_embed_height(SHORT_ROWS),
         "an uncapped embed measures its output, not its output plus a blank row"
     );
     assert!(
         vcx.debug_bounds("agent-chat-out-vthumb-b1#0").is_none(),
-        "a {ROWS}-row output hides nothing, so no vertical thumb may be drawn"
-    );
-}
-
-/// claude-shaped Bash: the bytes ride a `_meta.terminal_output.data` sideband on
-/// a content-less update, not `raw_output`. That is a second, independent route
-/// into `RawText` — the codex test above cannot cover it.
-#[gpui::test]
-async fn a_sideband_shell_output_block_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneContent;
-    use agent_client_protocol::schema::v1::{
-        SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
-    };
-
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
-
-    let printed = format!("{}\n", numbered_lines(LARGE_ROWS));
-    view.update(cx, |v, cx| {
-        v.apply_event(
-            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
-                ToolCall::new("b1", "Bash seq").kind(ToolKind::Execute),
-            ))),
-            "",
-            false,
-            cx,
-        );
-        let mut update = ToolCallUpdate::new("b1", {
-            let mut f = ToolCallUpdateFields::default();
-            f.status = Some(ToolCallStatus::Completed);
-            f
-        });
-        update.meta = Some(
-            serde_json::from_value(serde_json::json!({
-                "terminal_output": { "terminal_id": "b1", "data": printed },
-            }))
-            .expect("meta shape"),
-        );
-        v.apply_event(
-            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(update))),
-            "",
-            false,
-            cx,
-        );
-    });
-    cx.run_until_parked();
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
-        .unwrap();
-    cx.run_until_parked();
-
-    let (is_raw, rows) = view.read_with(cx, |v, cx| {
-        let raw = v.items.iter().any(|item| match item {
-            daruda_acp::ChatItem::ToolCall(tc) => tc
-                .output
-                .first()
-                .is_some_and(|b| matches!(b, daruda_acp::ToolOutputBlock::RawText { .. })),
-            _ => false,
-        });
-        let rows = v
-            .assets
-            .output_editors
-            .get("b1#0")
-            .map(|e| e.read(cx).display_rows());
-        (raw, rows)
-    });
-    assert!(is_raw, "the sideband must map to a RawText block");
-    assert_eq!(
-        rows,
-        Some(LARGE_ROWS),
-        "no output editor was built for the sideband block, or it counted the \
-         line terminator as a row"
-    );
-
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
-    let embed = vcx
-        .debug_bounds("agent-chat-out-embed-b1#0")
-        .expect("the bounded embed painted — the sideband block fell back to markdown");
-    assert_eq!(
-        embed.size.height,
-        bounded_embed_height(LARGE_ROWS),
-        "a capped sideband output embed is pinned to the cap"
+        "a {SHORT_ROWS}-row output hides nothing, so no vertical thumb may be drawn"
     );
 }

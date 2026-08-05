@@ -50,21 +50,30 @@ fn seed_and_focus_agent_pane(
     id
 }
 
-/// A pane already switched to a managed account must be switchable back to
-/// the system default — the bug this test guards: before the fix,
-/// `switch_pane_account`'s target could not express "system default", so a
-/// managed-account pane had no path back to `~/.claude`. With
-/// [`AccountSelection`] the two states are distinct and both reachable.
+/// Account switching handles the three local guard cases: a blank managed pane
+/// can return to the system default, re-selecting the current account is a
+/// no-op, and an idle pane with a transcript is protected until confirmation.
 #[gpui::test]
-async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mut TestAppContext) {
+async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
+    cx: &mut TestAppContext,
+) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
-    let managed = AccountId::new();
-    let pane_id = cx
+    let revert_account = AccountId::new();
+    let guarded_account = AccountId::new();
+    let (revert_pane, guarded_pane, panes_before) = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx)
+                let revert =
+                    seed_agent_pane(ws, AccountSelection::Managed(revert_account), window, cx);
+                let guarded =
+                    seed_agent_pane(ws, AccountSelection::Managed(guarded_account), window, cx);
+                agent_view(ws, guarded).update(cx, |v, _| {
+                    v.items
+                        .push(ChatItem::UserText("a long investigation".into()));
+                });
+                (revert, guarded, ws.active_runtime().panes.len())
             })
         })
         .unwrap();
@@ -75,125 +84,56 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
             .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == pane_id)
+            .find(|p| p.id == revert_pane)
             .unwrap();
         assert_eq!(
             pane.account_selection(),
-            Some(AccountSelection::Managed(managed))
+            Some(AccountSelection::Managed(revert_account))
         );
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx);
+            ws.switch_pane_account(revert_pane, AccountSelection::SystemDefault, window, cx);
+            ws.switch_pane_account(
+                guarded_pane,
+                AccountSelection::Managed(guarded_account),
+                window,
+                cx,
+            );
+            ws.switch_pane_account(guarded_pane, AccountSelection::SystemDefault, window, cx);
         });
     })
     .unwrap();
     cx.run_until_parked();
 
-    workspace.read_with(cx, |ws, _| {
-        let pane = ws
+    workspace.read_with(cx, |ws, cx| {
+        let reverted = ws
             .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == pane_id)
+            .find(|p| p.id == revert_pane)
             .unwrap();
         assert_eq!(
-            pane.account_selection(),
+            reverted.account_selection(),
             Some(AccountSelection::SystemDefault),
             "switching to SystemDefault must revert the pane to the system default"
         );
-    });
-}
 
-/// Picking the account the pane is already on must change nothing. Before the
-/// guard, the click ran the full in-place switch — `/clear`'s teardown — so
-/// re-selecting the checked entry in the status-bar dropdown destroyed the
-/// conversation for no gain.
-#[gpui::test]
-async fn switch_pane_account_to_the_current_selection_is_a_no_op(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-
-    let managed = AccountId::new();
-    let pane_id = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let id = seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx);
-                agent_view(ws, id).update(cx, |v, _| {
-                    v.items.push(ChatItem::UserText("keep me".into()));
-                });
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.switch_pane_account(pane_id, AccountSelection::Managed(managed), window, cx);
-        })
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).items.len(),
+            agent_view(ws, guarded_pane).read(cx).items.len(),
             1,
-            "re-selecting the account the pane already uses must not reset the session"
-        );
-    });
-}
-
-/// An idle pane holding a conversation must not be wiped by a switch. The new
-/// account needs its own ACP session and the transcript cannot move to it, so
-/// the switch confirms first and opens a *new* pane — until that confirmation
-/// the source pane keeps both its conversation and its own account.
-#[gpui::test]
-async fn switch_pane_account_keeps_an_idle_conversation(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-
-    let managed = AccountId::new();
-    let pane_id = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let id = seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx);
-                agent_view(ws, id).update(cx, |v, _| {
-                    v.items
-                        .push(ChatItem::UserText("a long investigation".into()));
-                });
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-    let panes_before = workspace.read_with(cx, |ws, _| ws.active_runtime().panes.len());
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx);
-        })
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, cx| {
-        assert_eq!(
-            agent_view(ws, pane_id).read(cx).items.len(),
-            1,
-            "an idle pane's conversation must survive an account switch"
+            "re-selecting or switching a guarded pane must not reset the session"
         );
         let pane = ws
             .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == pane_id)
+            .find(|p| p.id == guarded_pane)
             .unwrap();
         assert_eq!(
             pane.account_selection(),
-            Some(AccountSelection::Managed(managed)),
+            Some(AccountSelection::Managed(guarded_account)),
             "the source pane keeps its own account — the new one goes to the new pane"
         );
         assert_eq!(
@@ -238,9 +178,31 @@ fn seed_default_account(
 /// resolve-time fallback (`SystemDefault` is the explicit "System" choice).
 /// A terminal has no agent, so no domain default applies to it.
 #[gpui::test]
-async fn new_panes_seed_the_default_only_for_a_matching_agent(cx: &mut TestAppContext) {
+async fn new_panes_use_system_default_until_matching_domain_default_exists(
+    cx: &mut TestAppContext,
+) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
+
+    let (terminal, agent_chat) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let terminal = ws.create_pane(window, cx).expect("fresh pane spawn");
+                let agent_chat = ws.create_new_agent_chat_pane(
+                    daruda_config::AgentDefinition::claude_default().id,
+                    Some(std::env::temp_dir()),
+                    None,
+                    None,
+                    window,
+                    cx,
+                );
+                (terminal.account_selection(), agent_chat.account_selection())
+            })
+        })
+        .unwrap();
+
+    assert_eq!(terminal, Some(AccountSelection::SystemDefault));
+    assert_eq!(agent_chat, Some(AccountSelection::SystemDefault));
 
     let default_id = AccountId::new();
     workspace.update(cx, |ws, _| {
@@ -278,33 +240,6 @@ async fn new_panes_seed_the_default_only_for_a_matching_agent(cx: &mut TestAppCo
         Some(AccountSelection::SystemDefault),
         "a terminal has no agent, so no auth domain's default applies to it"
     );
-}
-
-/// With no configured default, every new pane starts on the system default.
-#[gpui::test]
-async fn new_panes_without_a_default_start_on_the_system_default(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-
-    let (terminal, agent_chat) = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let terminal = ws.create_pane(window, cx).expect("fresh pane spawn");
-                let agent_chat = ws.create_new_agent_chat_pane(
-                    daruda_config::AgentDefinition::claude_default().id,
-                    Some(std::env::temp_dir()),
-                    None,
-                    None,
-                    window,
-                    cx,
-                );
-                (terminal.account_selection(), agent_chat.account_selection())
-            })
-        })
-        .unwrap();
-
-    assert_eq!(terminal, Some(AccountSelection::SystemDefault));
-    assert_eq!(agent_chat, Some(AccountSelection::SystemDefault));
 }
 
 /// Write a Codex credential fixture (`auth.json` with an `id_token` JWT) into
@@ -356,40 +291,11 @@ fn finish_codex_login(
     account_id
 }
 
-/// Adding an account must never change which account new panes get. Before
-/// the fix the first login for a domain silently became its default, so a
-/// user who only wanted a second account found every new pane switched off
-/// System with nothing in the UI saying so.
+/// The login-success path must accept Codex's auth.json credentials without
+/// promoting the newly added account, while rejecting a login that produced no
+/// credentials.
 #[gpui::test]
-async fn login_success_does_not_promote_the_new_account_to_default(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    write_codex_auth_json(dir.path(), "alice@openai.com");
-
-    let account_id = workspace.update(cx, |ws, cx| {
-        finish_codex_login(ws, dir.path().to_path_buf(), cx)
-    });
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, _| {
-        assert!(
-            ws.accounts.accounts.iter().any(|a| a.id == account_id),
-            "the account itself is filed"
-        );
-        assert!(
-            ws.accounts.default_by_recipe.is_empty(),
-            "the first account for a domain must not become its default"
-        );
-    });
-}
-
-/// The login-success path must accept a Codex login, whose credentials are a
-/// plaintext `auth.json` and never a Keychain item — i.e. it asks the account's
-/// recipe rather than calling Claude's scoped-Keychain read directly.
-#[gpui::test]
-async fn login_success_accepts_a_codex_account_from_its_auth_json(cx: &mut TestAppContext) {
+async fn login_success_accepts_codex_auth_and_rejects_missing_credentials(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
@@ -415,28 +321,28 @@ async fn login_success_accepts_a_codex_account_from_its_auth_json(cx: &mut TestA
             Some("alice@openai.com"),
             "identity comes from the recipe's own reader"
         );
+        assert!(
+            ws.accounts.accounts.iter().any(|a| a.id == account_id),
+            "the account itself is filed"
+        );
+        assert!(
+            ws.accounts.default_by_recipe.is_empty(),
+            "the first account for a domain must not become its default"
+        );
     });
     assert!(
         dir.path().join("auth.json").exists(),
         "a kept account's config dir must survive"
     );
-}
 
-/// A Codex login that produced no credentials must still be rejected — the
-/// recipe check has to actually gate, not wave everything through.
-#[gpui::test]
-async fn login_success_without_credentials_is_rejected(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-
-    let dir = tempfile::tempdir().expect("tempdir").keep();
-    let account_id = workspace.update(cx, |ws, cx| finish_codex_login(ws, dir.clone(), cx));
+    let empty_dir = tempfile::tempdir().expect("tempdir").keep();
+    let rejected = workspace.update(cx, |ws, cx| finish_codex_login(ws, empty_dir.clone(), cx));
     cx.run_until_parked();
 
     workspace.read_with(cx, |ws, _| {
-        assert!(ws.accounts.find(account_id).is_none());
+        assert!(ws.accounts.find(rejected).is_none());
     });
-    assert!(!dir.exists(), "the throwaway dir is cleaned up");
+    assert!(!empty_dir.exists(), "the throwaway dir is cleaned up");
 }
 
 #[gpui::test]
@@ -737,7 +643,7 @@ async fn a_terminal_pane_prepares_its_managed_accounts_config_dir(cx: &mut TestA
 /// signed into contributes none — that is what keeps a Claude-only user from
 /// seeing a permanently empty Codex block, and vice versa.
 #[gpui::test]
-async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
+async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
 
     let sections = |ws: &mut Workspace, cx: &mut gpui::Context<Workspace>| {
@@ -777,48 +683,16 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
             .usage_by_account
             .advance_usage(codex_key, Err(daruda_agent::FetchError::NoToken));
 
-        assert_eq!(
-            sections(ws, cx),
-            vec![daruda_store::accounts::AccountRecipeId::Claude],
-            "a signed-out domain must leave no section behind"
-        );
-
-        // Signing out of both leaves nothing, which the renderer replaces with
-        // a single "no provider" notice.
         ws.claude
             .usage_by_account
-            .advance_usage(claude_key, Err(daruda_agent::FetchError::NoToken));
-        assert!(sections(ws, cx).is_empty());
-    });
-}
-
-#[gpui::test]
-async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.update(cx, |ws, cx| {
-        let key = UsageKey {
-            recipe: daruda_store::accounts::AccountRecipeId::Claude,
-            account: AccountSelection::SystemDefault,
-        };
-        ws.claude.usage_by_account.advance_usage(
-            key,
-            Ok(daruda_agent::ProviderUsage::new(
-                daruda_store::accounts::AccountRecipeId::Claude,
-                Vec::new(),
-                None,
-            )),
-        );
-
-        ws.claude
-            .usage_by_account
-            .set_activity(key, daruda_agent::ActivityStats::default());
+            .set_activity(claude_key, daruda_agent::ActivityStats::default());
         assert!(
             ws.prepare_right_dock_snapshot(cx).activity.is_empty(),
             "empty activity should not render chart headings"
         );
 
         ws.claude.usage_by_account.set_activity(
-            key,
+            claude_key,
             daruda_agent::ActivityStats {
                 daily: vec![daruda_agent::DayActivity {
                     date: "2026-07-29".to_string(),
@@ -829,6 +703,32 @@ async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContex
             },
         );
         assert_eq!(ws.prepare_right_dock_snapshot(cx).activity.len(), 1);
+
+        assert_eq!(
+            sections(ws, cx),
+            vec![daruda_store::accounts::AccountRecipeId::Claude],
+            "a signed-out domain must leave no section behind"
+        );
+
+        ws.claude.usage_by_account.advance_usage(
+            claude_key,
+            Err(daruda_agent::FetchError::Http("500".into())),
+        );
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        let claude = snap
+            .usage
+            .iter()
+            .find(|s| s.recipe == daruda_store::accounts::AccountRecipeId::Claude)
+            .expect("the section survives a failed refresh");
+        assert!(claude.outcome.is_stale());
+        assert!(claude.outcome.snapshot().is_some());
+
+        // Signing out of both leaves nothing, which the renderer replaces with
+        // a single "no provider" notice.
+        ws.claude
+            .usage_by_account
+            .advance_usage(claude_key, Err(daruda_agent::FetchError::NoToken));
+        assert!(sections(ws, cx).is_empty());
     });
 }
 
@@ -1018,83 +918,10 @@ async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut Te
     });
 }
 
-/// `restore_session` must focus an already-open pane for the same session
-/// id rather than opening a duplicate tab.
-///
-/// The existing pane is seeded with `cwd: None` (mirrors `seed_agent_pane`'s
-/// "no cwd keeps the pane offline" trick above) so it parks in `Error`
-/// rather than `Idle` — `restore_session` ends in a real `focus_pane` call,
-/// and `maybe_connect_agent_chat` only skips a live ACP connect attempt for
-/// a non-`Idle` pane. No test in this suite may risk a real subprocess
-/// connect; that's the whole reason `seed_agent_pane` exists.
-#[gpui::test]
-async fn restore_session_focuses_an_already_open_pane_instead_of_duplicating(
-    cx: &mut TestAppContext,
-) {
-    let temp = tempfile::tempdir().unwrap();
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path(temp.path());
-    let (window_handle, workspace) = build_workspace_with(cx, &config, Some(project));
-    cx.run_until_parked();
-
-    let (lane_ref, existing_pane_id) = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    None,
-                    Some("existing-session".to_string()),
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                (ws.active, id)
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    // `cwd` here is never read — the dedupe match on `session_id` short-
-    // circuits `restore_session` before it would otherwise build a pane
-    // from this field.
-    let session = crate::workspace::layout::snap::RestorableSession {
-        session_id: "existing-session".to_string(),
-        agent_id: daruda_config::AgentDefinition::claude_default().id,
-        account: AccountSelection::SystemDefault,
-        lane_ref,
-        title: None,
-        prompt_preview: None,
-        git_branch: None,
-        cwd: temp.path().to_path_buf(),
-        last_active: std::time::SystemTime::now(),
-    };
-    let panes_before = workspace.read_with(cx, |ws, _| ws.active_runtime().panes.len());
-
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.restore_session(session, window, cx);
-        });
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_runtime().panes.len(),
-            panes_before,
-            "must focus the existing pane, not add a duplicate"
-        );
-        assert_eq!(ws.active_runtime().focused_pane_id, existing_pane_id);
-    });
-}
-
 /// `restore_session` activates the session's Lane first when it isn't
-/// already the active one — combined with the dedupe path above (an
-/// offline, `cwd: None` existing pane in the target lane) so the only
-/// `focus_pane` call this test exercises lands on a non-`Idle` pane, same
-/// safety requirement as the sibling test above.
+/// already the active one, then focuses an existing pane instead of opening a
+/// duplicate tab. The existing pane is offline (`cwd: None`) so the only
+/// `focus_pane` call this test exercises lands on a non-`Idle` pane.
 #[gpui::test]
 async fn restore_session_activates_the_sessions_lane_before_focusing(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
@@ -1176,38 +1003,5 @@ async fn restore_session_activates_the_sessions_lane_before_focusing(cx: &mut Te
             "must reuse the pre-existing pane, not add a duplicate"
         );
         assert_eq!(ws.active_runtime().focused_pane_id, existing_pane_id);
-    });
-}
-
-/// A failed refresh is not a sign-out: the section stays, showing the last
-/// numbers, so a network blip doesn't collapse the dashboard.
-#[gpui::test]
-async fn a_failed_refresh_keeps_its_usage_section(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.update(cx, |ws, cx| {
-        let key = UsageKey {
-            recipe: daruda_store::accounts::AccountRecipeId::Claude,
-            account: AccountSelection::SystemDefault,
-        };
-        ws.claude.usage_by_account.advance_usage(
-            key,
-            Ok(daruda_agent::ProviderUsage::new(
-                daruda_store::accounts::AccountRecipeId::Claude,
-                Vec::new(),
-                None,
-            )),
-        );
-        ws.claude
-            .usage_by_account
-            .advance_usage(key, Err(daruda_agent::FetchError::Http("500".into())));
-
-        let snap = ws.prepare_right_dock_snapshot(cx);
-        let claude = snap
-            .usage
-            .iter()
-            .find(|s| s.recipe == daruda_store::accounts::AccountRecipeId::Claude)
-            .expect("the section survives a failed refresh");
-        assert!(claude.outcome.is_stale());
-        assert!(claude.outcome.snapshot().is_some());
     });
 }

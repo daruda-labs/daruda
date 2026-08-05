@@ -4,52 +4,13 @@ use daruda_store::project::{LeftDockView, RightDockView};
 // ---- Dock integration ----
 
 #[gpui::test]
-fn docks_start_closed_and_toggle_open(cx: &mut TestAppContext) {
+fn dock_defaults_toggles_and_view_selection(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
         assert!(!ws.left_dock.read(cx).is_open);
         assert!(!ws.bottom_dock.read(cx).is_open);
         assert!(!ws.right_dock.read(cx).is_open);
 
-        ws.left_dock.update(cx, |d, _| d.toggle());
-        assert!(ws.left_dock.read(cx).is_open);
-        ws.left_dock.update(cx, |d, _| d.toggle());
-        assert!(!ws.left_dock.read(cx).is_open);
-
-        ws.bottom_dock.update(cx, |d, _| d.toggle());
-        assert!(ws.bottom_dock.read(cx).is_open);
-
-        ws.right_dock.update(cx, |d, _| d.toggle());
-        assert!(ws.right_dock.read(cx).is_open);
-    });
-}
-
-/// The status bar's usage chip offers "open the Usage panel". Usage is
-/// the right dock's default selected view, so selecting the tab alone is
-/// a no-op — the reveal path has to open the closed dock too.
-#[gpui::test]
-fn right_dock_reveal_opens_switches_and_stays_open(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.update(cx, |ws, cx| {
-        assert!(!ws.right_dock.read(cx).is_open);
-        assert_eq!(ws.right_dock_view, RightDockView::Usage);
-        ws.reveal_right_dock_view(RightDockView::Usage, cx);
-        assert!(ws.right_dock.read(cx).is_open);
-        assert_eq!(ws.right_dock_view, RightDockView::Usage);
-
-        ws.reveal_right_dock_view(RightDockView::Skills, cx);
-        assert!(ws.right_dock.read(cx).is_open);
-        assert_eq!(ws.right_dock_view, RightDockView::Skills);
-
-        ws.reveal_right_dock_view(RightDockView::Skills, cx);
-        assert!(ws.right_dock.read(cx).is_open);
-    });
-}
-
-#[gpui::test]
-fn dock_panels_register_expected_defaults(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.read_with(cx, |ws, cx| {
         let left = ws.left_dock.read(cx);
         assert_eq!(left.panels.len(), 3);
         assert_eq!(
@@ -83,13 +44,32 @@ fn dock_panels_register_expected_defaults(cx: &mut TestAppContext) {
             right.panels[0].name(),
             crate::surface::strings::DOCK_PANEL_AGENT_TASKS
         );
-    });
-}
 
-#[gpui::test]
-fn left_dock_view_updates_and_same_view_noops(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    ws.update(cx, |ws, cx| {
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.left_dock.read(cx).is_open);
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        assert!(!ws.left_dock.read(cx).is_open);
+
+        ws.bottom_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.bottom_dock.read(cx).is_open);
+
+        assert!(!ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Usage);
+        ws.reveal_right_dock_view(RightDockView::Usage, cx);
+        assert!(ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Usage);
+
+        ws.reveal_right_dock_view(RightDockView::Skills, cx);
+        assert!(ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Skills);
+
+        ws.reveal_right_dock_view(RightDockView::Skills, cx);
+        assert!(ws.right_dock.read(cx).is_open);
+        ws.right_dock.update(cx, |d, _| d.toggle());
+        assert!(!ws.right_dock.read(cx).is_open);
+        ws.right_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.right_dock.read(cx).is_open);
+
         for view in [
             LeftDockView::GitChanges,
             LeftDockView::Files,

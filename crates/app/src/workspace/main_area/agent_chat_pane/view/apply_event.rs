@@ -10,7 +10,8 @@ use daruda_store::project::PaneCwd;
 use gpui::Context;
 
 use super::super::agent_chat_helpers::apply_info_field;
-use super::super::rows::{RowKind, project};
+use super::super::reconcile::ReconcileScope;
+use super::super::rows::{LiveSubagentUnits, RowKind, project};
 use super::{
     ActivityState, AgentChatView, AgentSessionStatus, TelegramFirstResponseEffect,
     TelegramWatchAction, TurnOutcome, debug_list_trace_enabled,
@@ -28,6 +29,9 @@ impl AgentChatView {
         is_light: bool,
         cx: &mut Context<Self>,
     ) -> TelegramFirstResponseEffect {
+        // Record the Workspace-resolved theme so a later fold expand can
+        // materialize diff embeds without an event to carry it.
+        self.set_syntax_theme(syntax_theme);
         // Session errors surface inline in the status banner (the `Error` arm
         // below sets `status`), so this only records to the NDJSON log — no
         // toast. A toast here is pure noise: it duplicates the banner, and on
@@ -58,6 +62,10 @@ impl AgentChatView {
         // these; every other event leaves both false.
         let mut touched_tool = false;
         let mut touched_text = false;
+        // Which tool calls the reconciles below must revisit. A streamed update
+        // names the single call it replaced, so the default is the whole
+        // conversation and the `Update` arm narrows it.
+        let mut reconcile_scope = ReconcileScope::All;
         // Set only when a `session/load` replay just finished (the `Connected`
         // reply cleared `restoring`), so the tail runs the single catch-up.
         let mut finished_restore = false;
@@ -206,12 +214,17 @@ impl AgentChatView {
                 {
                     self.activity.post_turn_dirty_at = Some(std::time::Instant::now());
                 }
-                // Bump the subagent (parent) whose child just produced this
-                // tool-call event, so its run span stays "active" across the
-                // gaps between the subagent's sequential child calls. Only child
-                // tools carry a `parent_tool_id`; a top-level tool has none, so
-                // nothing is bumped for the turn's own (foreground) work.
                 if let Some(tool_id) = touched_tool_id(&update) {
+                    // Narrow the reconciles to the one call this update replaced.
+                    // Without a named call (an update shape that touches tools
+                    // but reports no id) the scope stays `All` — always correct,
+                    // just more expensive.
+                    reconcile_scope = ReconcileScope::Tool(tool_id.to_string());
+                    // Bump the subagent (parent) whose child just produced this
+                    // tool-call event, so its run span stays "active" across the
+                    // gaps between the subagent's sequential child calls. Only
+                    // child tools carry a `parent_tool_id`; a top-level tool has
+                    // none, so nothing is bumped for the turn's own work.
                     let parent = self.items.iter().rev().find_map(|it| match it {
                         ChatItem::ToolCall(tc) if tc.id == tool_id => tc.parent_tool_id.clone(),
                         _ => None,
@@ -402,22 +415,23 @@ impl AgentChatView {
                 telegram_first_response_effect = self.finish_telegram_first_response_watch();
             }
         }
-        // Gate the full-conversation reconciles on what the event actually
-        // changed: diff editors only when a tool call moved, mermaid raster
-        // whenever either tool or message content moved. Running these on every
-        // streamed chunk would rescan the whole `items` vec per chunk — O(n²)
-        // over a long turn.
+        // Gate the reconciles on what the event actually changed: diff editors
+        // only when a tool call moved, mermaid raster whenever either tool or
+        // message content moved. The gate alone is not enough — a `ToolCallUpdate`
+        // fires per streamed chunk, so an unscoped pass would still re-fingerprint
+        // every diff in the conversation per chunk, O(n²) over a long turn. Hence
+        // `reconcile_scope`, which narrows each pass to the call that moved.
         if touched_tool {
-            self.reconcile_diff_editors(syntax_theme, is_light, cx);
+            self.reconcile_diff_editors(syntax_theme, is_light, &reconcile_scope, cx);
             // Tool-output images arrive on a `ToolCall`/`ToolCallUpdate`
             // (`touched_tool`), never on `touched_text` (that flag is set only
             // for assistant/thinking/user message text) — gate here, not next
             // to `reconcile_mermaid` below, or an image-only tool update would
             // never get scanned.
-            self.reconcile_tool_images(cx);
+            self.reconcile_tool_images(&reconcile_scope, cx);
             // Verbatim output blocks arrive on the same tool events as the
             // images above, so the same gate applies.
-            self.reconcile_output_editors(cx);
+            self.reconcile_output_editors(&reconcile_scope, cx);
         }
         // Mermaid fences arrive in message text AND in tool `Text` output blocks
         // (a tool writing/reading a .md file), so both flags trigger the scan.
@@ -530,7 +544,11 @@ impl AgentChatView {
         // The inline working indicator means "answering" — suppress it while
         // blocked on a permission prompt (the card + footer already say so).
         let awaiting_response = matches!(self.activity_state(), ActivityState::Working);
-        self.rows = project(&self.items, &self.fold, awaiting_response);
+        // Single rebuild site for the subagent-liveness index too: the projection
+        // and every tool card's badge read this one, instead of each re-deriving
+        // it by scanning `items`.
+        self.live_units = LiveSubagentUnits::build(&self.items);
+        self.rows = project(&self.items, &self.fold, awaiting_response, &self.live_units);
 
         if let Some(at) = old
             .iter()

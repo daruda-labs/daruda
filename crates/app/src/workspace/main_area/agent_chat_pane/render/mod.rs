@@ -107,7 +107,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, activity_bar_title, agent_run, is_active, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
-use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
+use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AssetCache};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -541,6 +541,7 @@ fn render_agent_item(
             under_response,
             rollup,
             &this.items,
+            &this.live_units,
             RenderAssets::of(&this.assets),
             &this.fold,
             t,
@@ -564,6 +565,7 @@ fn render_item(
     under_response: bool,
     rollup: Option<Rollup>,
     items: &[ChatItem],
+    live_units: &LiveSubagentUnits,
     assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
@@ -604,7 +606,10 @@ fn render_item(
         ChatItem::ToolCall(tc) => {
             let key = tool_fold_key(tc);
             let expanded = fold.is_expanded(&key, is_active(item));
-            tool_card(key, expanded, tc, items, assets, fold, t, dim, 0, cx).into_any_element()
+            tool_card(
+                key, expanded, tc, items, live_units, assets, fold, t, dim, 0, cx,
+            )
+            .into_any_element()
         }
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t, cx).into_any_element(),

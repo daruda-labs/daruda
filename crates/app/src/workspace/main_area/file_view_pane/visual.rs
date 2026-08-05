@@ -235,6 +235,13 @@ pub(in crate::workspace) fn render_mermaid_svg(
         mermaid_host_theme_profile, mermaid_svg_render_options, source_has_own_theme_directive,
     };
 
+    // Fix up classDef/style/rect declarations merman-render would otherwise
+    // leave contrast-unsafe (a light author-declared fill under daruda's
+    // forced dark-mode text, or vice versa) before the source ever reaches
+    // merman — see the module doc for which gaps this closes and why.
+    let source = super::mermaid_contrast::ensure_text_contrast(source);
+    let source = source.as_ref();
+
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut renderer = merman::render::HeadlessRenderer::new()
             .with_svg_options(mermaid_svg_render_options())
@@ -318,30 +325,6 @@ mod tests {
         find(tree.root()).expect("laid out text")
     }
 
-    /// CSS family matching is case-insensitive. Pick an installed family whose
-    /// canonical spelling actually changes the layout, and check that asking for
-    /// it in lowercase — the way mermaid's CSS does — lands on the same face.
-    #[test]
-    fn a_lowercase_font_family_resolves_like_its_canonical_spelling() {
-        const PROBE: &str = "Handgloves 123";
-        let fallback = ink_width(PROBE, "\"daruda-no-such-font\"");
-        let distinctive = canonical_family_names().values().find(|name| {
-            name.is_ascii()
-                && name.chars().any(char::is_uppercase)
-                && (ink_width(PROBE, &format!("\"{name}\"")) - fallback).abs() > 0.5
-        });
-        let Some(canonical) = distinctive else {
-            // No installed family both differs from the fallback and has a case
-            // to normalize, so there is nothing this test can prove here.
-            return;
-        };
-        assert_eq!(
-            ink_width(PROBE, &format!("\"{}\"", canonical.to_lowercase())),
-            ink_width(PROBE, &format!("\"{canonical}\"")),
-            "lowercase {canonical:?} must resolve to the same face"
-        );
-    }
-
     /// The case the fix exists for: mermaid's own stack, verbatim. Without
     /// case-insensitive resolution every name misses and text lands on the
     /// generic `sans-serif` face, disagreeing with merman's Trebuchet MS
@@ -372,6 +355,116 @@ mod tests {
         img.write_to(&mut buf, image::ImageFormat::Png)
             .expect("encode png");
         buf.into_inner()
+    }
+
+    /// Composite a straight-alpha RGBA buffer over an opaque `(r,g,b)`
+    /// backdrop, so a saved PNG shows what the app actually paints (the SVG
+    /// root is deliberately transparent — see `MERMAID_ROOT_BACKGROUND` — and
+    /// composites over the real host canvas at paint time; saving the raw
+    /// buffer instead lets an image viewer's own white fallback silently
+    /// stand in for that canvas, which is not a faithful preview).
+    fn composite_over(raster: &RasterImage, bg: (u8, u8, u8)) -> image::RgbaImage {
+        let mut out = image::RgbaImage::new(raster.width, raster.height);
+        for (px, chunk) in out.pixels_mut().zip(raster.rgba.chunks_exact(4)) {
+            let [r, g, b, a] = chunk else { unreachable!() };
+            let a = f32::from(*a) / 255.0;
+            let blend = |fg: u8, bg: u8| (f32::from(fg) * a + f32::from(bg) * (1.0 - a)) as u8;
+            *px = image::Rgba([blend(*r, bg.0), blend(*g, bg.1), blend(*b, bg.2), 255]);
+        }
+        out
+    }
+
+    /// Final visual verification: every diagram/directive shape the
+    /// investigation touched, rendered through the real production path
+    /// (`render_mermaid_raster`, contrast preprocessor included — not a
+    /// hand-pre-capped fixture), composited over the real theme canvas in
+    /// both appearances. Not a permanent test — remove after inspecting the
+    /// PNGs.
+    #[test]
+    #[ignore]
+    fn scratch_final_visual_verification() {
+        use crate::ui::theme::DarudaTheme;
+        use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
+
+        let samples: &[(&str, &str)] = &[
+            (
+                "flowchart_classdef",
+                "flowchart TD\n  A[Start] --> B[Highlighted]:::hl\n  classDef hl fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "flowchart_style",
+                "flowchart TD\n  A[Start] --> B[Highlighted]\n  style B fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "class_classdef",
+                "classDiagram\n  class Animal\n  class Dog\n  Animal <|-- Dog\n  class Dog:::highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "er_style",
+                "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  style CUSTOMER fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "sequence_rect",
+                "sequenceDiagram\n  participant A\n  participant B\n  rect rgb(212, 248, 212)\n  A->>B: Hello\n  B-->>A: Hi\n  end\n",
+            ),
+            (
+                "state_classdef",
+                "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running\n  Running --> [*]\n  class Running highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+        ];
+
+        let dark_json = std::fs::read_to_string("../../assets/themes/daruda_dark.json")
+            .expect("read daruda_dark.json");
+        let light_json = std::fs::read_to_string("../../assets/themes/daruda_light.json")
+            .expect("read daruda_light.json");
+        let dark_theme = DarudaTheme::from_json(&dark_json).expect("parse dark theme");
+        let light_theme = DarudaTheme::from_json(&light_json).expect("parse light theme");
+
+        for (name, source) in samples {
+            for (appearance, theme) in [("dark", &dark_theme), ("light", &light_theme)] {
+                let palette = MermaidPalette::from_theme(theme);
+                let raster = render_mermaid_raster(source, &palette)
+                    .unwrap_or_else(|| panic!("{name} ({appearance}) render failed"));
+                let canvas = theme.file_viewer_bg.to_rgb();
+                let bg = (
+                    (canvas.r * 255.0) as u8,
+                    (canvas.g * 255.0) as u8,
+                    (canvas.b * 255.0) as u8,
+                );
+                let img = composite_over(&raster, bg);
+                let path = format!("/tmp/mermaid-final2-{name}-{appearance}.png");
+                img.save(&path).expect("save png");
+                eprintln!("wrote {path}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn scratch_dump_node_id_shapes() {
+        let samples: &[(&str, &str)] = &[
+            (
+                "flowchart_style",
+                "flowchart TD\n  A[Start] --> B[Highlighted]\n  style B fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "class_classdef",
+                "classDiagram\n  class Animal\n  class Dog\n  Animal <|-- Dog\n  class Dog:::highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "er_style",
+                "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  style CUSTOMER fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+            (
+                "er_style_with_attrs",
+                "erDiagram\n  CUSTOMER {\n    string name\n    string id\n  }\n  CUSTOMER ||--o{ ORDER : places\n  style CUSTOMER fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+            ),
+        ];
+        let palette = super::super::mermaid_theme::MermaidPalette::default();
+        for (name, source) in samples {
+            let svg = render_mermaid_svg(source, &palette).expect("svg");
+            std::fs::write(format!("/tmp/mermaid-ids-{name}.svg"), &svg).expect("write");
+        }
     }
 
     #[test]

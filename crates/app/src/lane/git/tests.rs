@@ -43,40 +43,28 @@ fn require_git() -> bool {
 // ----------------------------------------------------------------
 
 #[test]
-fn status_staged_modified() {
-    let out = "M  file.rs\n";
-    let data = parse_git_status_output(out);
+fn status_output_parses_index_worktree_renames_and_conflicts() {
+    let data = parse_git_status_output("M  file.rs\n");
     assert_eq!(data.staged.len(), 1, "should have one staged entry");
     assert_eq!(data.staged[0].x, 'M');
     assert_eq!(data.staged[0].path.to_str().unwrap(), "file.rs");
+    assert!(data.staged[0].original_path.is_none());
     assert!(data.unstaged.is_empty());
-}
 
-#[test]
-fn status_unstaged_modified() {
-    let out = " M file.rs\n";
-    let data = parse_git_status_output(out);
+    let data = parse_git_status_output(" M file.rs\n");
     assert!(data.staged.is_empty());
     assert_eq!(data.unstaged.len(), 1);
     assert_eq!(data.unstaged[0].y, 'M');
     assert_eq!(data.unstaged[0].path.to_str().unwrap(), "file.rs");
-}
 
-#[test]
-fn status_untracked() {
-    let out = "?? new.rs\n";
-    let data = parse_git_status_output(out);
+    let data = parse_git_status_output("?? new.rs\n");
     assert!(data.staged.is_empty());
     assert_eq!(data.unstaged.len(), 1);
     assert_eq!(data.unstaged[0].x, '?');
     assert_eq!(data.unstaged[0].path.to_str().unwrap(), "new.rs");
-}
 
-#[test]
-fn status_renamed_staged() {
     // Renamed: destination path appears after " -> ".
-    let out = "R  old.rs -> new.rs\n";
-    let data = parse_git_status_output(out);
+    let data = parse_git_status_output("R  old.rs -> new.rs\n");
     assert_eq!(data.staged.len(), 1);
     assert_eq!(data.staged[0].x, 'R');
     assert_eq!(data.staged[0].path.to_str().unwrap(), "new.rs");
@@ -89,12 +77,15 @@ fn status_renamed_staged() {
         "rename keeps the source path on `original_path`"
     );
     assert!(data.unstaged.is_empty());
-}
 
-#[test]
-fn status_non_rename_has_no_original_path() {
-    let data = parse_git_status_output("M  file.rs\n");
-    assert!(data.staged[0].original_path.is_none());
+    // MM = staged modified + unstaged modified.
+    let data = parse_git_status_output("MM file.rs\n");
+    assert_eq!(data.staged.len(), 1, "one staged entry for MM");
+    assert_eq!(data.unstaged.len(), 1, "one unstaged entry for MM");
+
+    let data = parse_git_status_output("UU file.rs\n");
+    assert!(data.staged.is_empty(), "UU must not appear in staged");
+    assert_eq!(data.unstaged.len(), 1, "UU must appear in unstaged");
 }
 
 // ----------------------------------------------------------------
@@ -102,60 +93,24 @@ fn status_non_rename_has_no_original_path() {
 // ----------------------------------------------------------------
 
 #[test]
-fn numstat_single_text_file() {
-    let stats = parse_numstat("13\t3\tsrc/lib.rs\n");
-    assert_eq!(stats, vec![(13, 3, PathBuf::from("src/lib.rs"))]);
-}
-
-#[test]
-fn numstat_multiple_files() {
+fn numstat_parses_text_binary_and_empty_input() {
     let stats = parse_numstat("13\t3\tsrc/lib.rs\n2\t1\tCargo.toml\n");
     assert_eq!(stats.len(), 2);
     assert_eq!(stats[0], (13, 3, PathBuf::from("src/lib.rs")));
     assert_eq!(stats[1], (2, 1, PathBuf::from("Cargo.toml")));
-}
 
-#[test]
-fn numstat_binary_file_maps_to_zero_zero() {
     // git emits `-\t-\t<path>` for binary files. Caller decides
-    // whether to skip rendering "+0 −0".
+    // whether to skip rendering "+0 -0".
     let stats = parse_numstat("-\t-\tassets/icon.png\n");
     assert_eq!(stats, vec![(0, 0, PathBuf::from("assets/icon.png"))]);
-}
 
-#[test]
-fn numstat_pure_addition() {
     let stats = parse_numstat("42\t0\tnew.rs\n");
     assert_eq!(stats[0], (42, 0, PathBuf::from("new.rs")));
-}
 
-#[test]
-fn numstat_pure_deletion() {
     let stats = parse_numstat("0\t8\told.rs\n");
     assert_eq!(stats[0], (0, 8, PathBuf::from("old.rs")));
-}
 
-#[test]
-fn numstat_empty_input() {
-    let stats = parse_numstat("");
-    assert!(stats.is_empty());
-}
-
-#[test]
-fn status_both_modified() {
-    // MM = staged modified + unstaged modified.
-    let out = "MM file.rs\n";
-    let data = parse_git_status_output(out);
-    assert_eq!(data.staged.len(), 1, "one staged entry for MM");
-    assert_eq!(data.unstaged.len(), 1, "one unstaged entry for MM");
-}
-
-#[test]
-fn status_conflict_uu_only_in_unstaged() {
-    let out = "UU file.rs\n";
-    let data = parse_git_status_output(out);
-    assert!(data.staged.is_empty(), "UU must not appear in staged");
-    assert_eq!(data.unstaged.len(), 1, "UU must appear in unstaged");
+    assert!(parse_numstat("").is_empty());
 }
 
 // ----------------------------------------------------------------
@@ -163,73 +118,46 @@ fn status_conflict_uu_only_in_unstaged() {
 // ----------------------------------------------------------------
 
 #[test]
-fn branch_line_no_upstream() {
+fn branch_line_parses_upstream_divergence_and_special_states() {
     let data = parse_git_status_output("## main\n");
     assert_eq!(data.branch.as_deref(), Some("main"));
     assert!(data.upstream.is_none());
     assert_eq!(data.ahead, 0);
     assert_eq!(data.behind, 0);
-}
 
-#[test]
-fn branch_line_with_upstream_no_divergence() {
     let data = parse_git_status_output("## main...origin/main\n");
     assert_eq!(data.branch.as_deref(), Some("main"));
     assert_eq!(data.upstream.as_deref(), Some("origin/main"));
     assert_eq!(data.ahead, 0);
     assert_eq!(data.behind, 0);
-}
 
-#[test]
-fn branch_line_ahead_only() {
     let data = parse_git_status_output("## main...origin/main [ahead 3]\n");
     assert_eq!(data.ahead, 3);
     assert_eq!(data.behind, 0);
-}
 
-#[test]
-fn branch_line_behind_only() {
     let data = parse_git_status_output("## main...origin/main [behind 2]\n");
     assert_eq!(data.ahead, 0);
     assert_eq!(data.behind, 2);
-}
 
-#[test]
-fn branch_line_ahead_and_behind() {
     let data = parse_git_status_output("## main...origin/main [ahead 1, behind 2]\n");
     assert_eq!(data.ahead, 1);
     assert_eq!(data.behind, 2);
-}
 
-#[test]
-fn branch_line_gone_keeps_upstream() {
-    // Upstream was deleted on the remote — git annotates with `[gone]`.
-    // We still record the upstream string so the user can see what's
-    // missing; ahead/behind stay at 0.
+    // Upstream was deleted on the remote; keep the upstream string visible.
     let data = parse_git_status_output("## main...origin/main [gone]\n");
     assert_eq!(data.upstream.as_deref(), Some("origin/main"));
     assert_eq!(data.ahead, 0);
     assert_eq!(data.behind, 0);
-}
 
-#[test]
-fn branch_line_detached_head() {
     let data = parse_git_status_output("## HEAD (no branch)\n");
     assert!(data.branch.is_none());
     assert!(data.upstream.is_none());
-}
 
-#[test]
-fn branch_line_initial_empty_repo() {
     let data = parse_git_status_output("## No commits yet on main\n");
     assert_eq!(data.branch.as_deref(), Some("main"));
     assert!(data.upstream.is_none());
-}
 
-#[test]
-fn branch_line_combined_with_files() {
-    let out = "## main...origin/main [ahead 2]\n M file.rs\n?? new.rs\n";
-    let data = parse_git_status_output(out);
+    let data = parse_git_status_output("## main...origin/main [ahead 2]\n M file.rs\n?? new.rs\n");
     assert_eq!(data.branch.as_deref(), Some("main"));
     assert_eq!(data.ahead, 2);
     assert_eq!(data.unstaged.len(), 2);
@@ -240,18 +168,15 @@ fn branch_line_combined_with_files() {
 // ----------------------------------------------------------------
 
 #[test]
-fn parse_porcelain_single_worktree() {
-    let sample = "worktree /repo\nHEAD abcd1234\nbranch refs/heads/main\n\n";
-    let wts = parse_worktree_list(sample).unwrap();
+fn parse_worktree_list_covers_porcelain_shapes() {
+    let wts =
+        parse_worktree_list("worktree /repo\nHEAD abcd1234\nbranch refs/heads/main\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].path, PathBuf::from("/repo"));
     assert_eq!(wts[0].branch.as_deref(), Some("main"));
     assert_eq!(wts[0].head.as_deref(), Some("abcd1234"));
     assert!(!wts[0].bare);
-}
 
-#[test]
-fn parse_porcelain_multiple_worktrees() {
     let sample = "\
 worktree /repo
 HEAD aaa
@@ -266,37 +191,24 @@ branch refs/heads/feat/sidebar
     assert_eq!(wts.len(), 2);
     assert_eq!(wts[0].branch.as_deref(), Some("main"));
     assert_eq!(wts[1].branch.as_deref(), Some("feat/sidebar"));
-}
 
-#[test]
-fn parse_porcelain_detached_head_has_no_branch() {
-    let sample = "worktree /repo/wt-detached\nHEAD ccc\ndetached\n\n";
-    let wts = parse_worktree_list(sample).unwrap();
+    let wts = parse_worktree_list("worktree /repo/wt-detached\nHEAD ccc\ndetached\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert!(wts[0].branch.is_none());
-}
 
-#[test]
-fn parse_porcelain_bare_flagged() {
-    let sample = "worktree /repo-bare\nHEAD ddd\nbare\n\n";
-    let wts = parse_worktree_list(sample).unwrap();
+    let wts = parse_worktree_list("worktree /repo-bare\nHEAD ddd\nbare\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert!(wts[0].bare);
-}
 
-#[test]
-fn parse_porcelain_unknown_keys_ignored() {
     let sample = "worktree /repo\nHEAD abcd\nbranch refs/heads/main\nlocked locked-reason\nprunable stuff\n\n";
     let wts = parse_worktree_list(sample).unwrap();
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].path, PathBuf::from("/repo"));
-}
 
-#[test]
-fn parse_porcelain_stray_head_before_worktree_errors() {
-    let sample = "HEAD abcd\n\n";
-    let err = parse_worktree_list(sample);
-    assert!(matches!(err, Err(GitError::Parse(_))));
+    assert!(matches!(
+        parse_worktree_list("HEAD abcd\n\n"),
+        Err(GitError::Parse(_))
+    ));
 }
 
 #[test]

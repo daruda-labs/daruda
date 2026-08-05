@@ -8,6 +8,8 @@
 //! and `same_slot` lets `rebuild_rows` splice only the changed tail, preserving
 //! scroll.
 
+use std::collections::{HashMap, HashSet};
+
 use daruda_acp::{ChatItem, ToolCallItem};
 
 use super::agent_chat_helpers::{agent_run, fold_active};
@@ -121,11 +123,26 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 /// trailing [`RowKind::WorkingIndicator`] pinned to the last turn's tail for the
 /// whole turn. Suppressed only when blocked on a permission prompt; stays
 /// visible when the response is manually collapsed, pinned below the conclusion.
+///
+/// `live_units` is the precomputed subagent-liveness index (see
+/// [`LiveSubagentUnits`]); it is passed in rather than derived here so the render
+/// path reads the same one instead of recomputing it per tool card.
 pub(in crate::workspace) fn project(
     items: &[ChatItem],
     fold: &FoldState,
     awaiting_response: bool,
+    live_units: &LiveSubagentUnits,
 ) -> Vec<RenderRow> {
+    // Presence index for `is_nested_child`: a `parent_tool_id` naming a call
+    // that is actually in `items` means the child renders nested and earns no
+    // row. Scanning `items` per call made this quadratic.
+    let tool_ids: HashSet<&str> = items
+        .iter()
+        .filter_map(|it| match it {
+            ChatItem::ToolCall(tc) => Some(tc.id.as_str()),
+            _ => None,
+        })
+        .collect();
     let mut rows = Vec::with_capacity(items.len() + 4);
     let mut i = 0;
     while i < items.len() {
@@ -186,6 +203,8 @@ pub(in crate::workspace) fn project(
                 collapsed,
                 conclusion_ix,
                 false,
+                &tool_ids,
+                live_units,
                 &mut rows,
             );
             1u8
@@ -205,6 +224,8 @@ pub(in crate::workspace) fn project(
                 false,
                 conclusion_ix,
                 solo,
+                &tool_ids,
+                live_units,
                 &mut rows,
             );
             0u8
@@ -242,6 +263,8 @@ fn project_run(
     response_collapsed: bool,
     conclusion_ix: Option<usize>,
     solo_response: bool,
+    tool_ids: &HashSet<&str>,
+    live_units: &LiveSubagentUnits,
     rows: &mut Vec<RenderRow>,
 ) {
     let mut k = run.start;
@@ -249,7 +272,7 @@ fn project_run(
         // A subagent's inner tool call renders nested inside its parent's card
         // (see `tool_card`), so it earns no row of its own — skip it. The Claude
         // adapter links a child to its parent via `parent_tool_id`.
-        if matches!(&items[k], ChatItem::ToolCall(tc) if is_nested_child(items, tc)) {
+        if matches!(&items[k], ChatItem::ToolCall(tc) if is_nested_child(tool_ids, tc)) {
             k += 1;
             continue;
         }
@@ -259,7 +282,7 @@ fn project_run(
             // Extend over consecutive *top-level* tool calls; a nested child
             // belongs to the preceding parent, so it ends the run.
             while k < run.end
-                && matches!(&items[k], ChatItem::ToolCall(t) if !is_nested_child(items, t))
+                && matches!(&items[k], ChatItem::ToolCall(t) if !is_nested_child(tool_ids, t))
             {
                 k += 1;
             }
@@ -269,7 +292,7 @@ fn project_run(
             // response, so a folded in-flight turn shows *what* is running;
             // members stay hidden until the group is expanded.
             let group_live = grun.clone().any(
-                |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(items, tc)),
+                |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
             );
             if grun.len() >= TOOL_GROUP_MIN {
                 let gid = tool_id(&items[gstart]);
@@ -333,49 +356,82 @@ fn project_run(
 /// (such a child renders nested inside its parent's card, so it earns no row).
 /// A child with a dangling `parent_tool_id` (no matching parent) is nested by
 /// nobody, so it is treated as top-level and keeps its row rather than vanishing.
-fn is_nested_child(items: &[ChatItem], tc: &ToolCallItem) -> bool {
-    let Some(pid) = tc.parent_tool_id.as_deref() else {
-        return false;
-    };
-    items
-        .iter()
-        .any(|it| matches!(it, ChatItem::ToolCall(p) if p.id == pid))
+fn is_nested_child(tool_ids: &HashSet<&str>, tc: &ToolCallItem) -> bool {
+    tc.parent_tool_id
+        .as_deref()
+        .is_some_and(|pid| tool_ids.contains(pid))
 }
 
 /// Recursion cap for walking flattened subagent nesting (`parent_tool_id`
 /// links). Real nesting is one or two levels; the cap only fires on a malformed
-/// / cyclic id from the adapter, bounding the stack. Shared by the render's card
-/// nesting and `subagent_subtree_live`.
+/// / cyclic id from the adapter, bounding the walk. Shared by the render's card
+/// nesting and [`LiveSubagentUnits`].
 pub(in crate::workspace) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
 
-/// Whether a tool call is still working as a unit — its own status is live, or a
-/// flattened descendant is still running (a subagent parent the adapter marked
-/// `Completed` when its SDK call returned). Keeps a running tool / group visible
-/// under a collapsed response and its card badge reading in-progress.
-pub(in crate::workspace) fn tool_or_subtree_live(items: &[ChatItem], tc: &ToolCallItem) -> bool {
-    tc.status.is_live() || subagent_subtree_live(items, &tc.id, SUBAGENT_NEST_DEPTH_CAP)
+/// Tool-call ids that still have a live descendant within
+/// [`SUBAGENT_NEST_DEPTH_CAP`] levels — "is this subagent unit still working",
+/// answered for the whole conversation at once.
+///
+/// A subagent parent the adapter marked `Completed` when its SDK call returned
+/// keeps reading in-progress while its flattened children stream in and run
+/// afterward, so the predicate has to consult descendants. Asking it per query
+/// meant re-scanning all `items` recursively per tool call — O(items² · depth)
+/// per projection, on every streamed tool event. Built bottom-up instead: each
+/// live call walks *up* its `parent_tool_id` chain, marking the ancestors it
+/// keeps working. The depth cap bounds the walk, which is also what makes a
+/// malformed / cyclic id safe.
+#[derive(Default)]
+pub(in crate::workspace) struct LiveSubagentUnits {
+    ids: HashSet<String>,
 }
 
-/// Whether the subagent unit rooted at `parent_id` is still working — some
-/// transitive, depth-bounded descendant linked via `parent_tool_id` is live.
-/// `remaining_depth` bounds the walk so a malformed / cyclic id can't recurse
-/// without bound. Lets a subagent parent the adapter marked `Completed` still
-/// read as running while its flattened children stream in and run afterward.
-pub(in crate::workspace) fn subagent_subtree_live(
-    items: &[ChatItem],
-    parent_id: &str,
-    remaining_depth: usize,
-) -> bool {
-    if remaining_depth == 0 {
-        return false;
+impl LiveSubagentUnits {
+    pub(in crate::workspace) fn build(items: &[ChatItem]) -> Self {
+        let live = || {
+            items.iter().filter_map(|it| match it {
+                ChatItem::ToolCall(tc) if tc.status.is_live() => tc.parent_tool_id.as_deref(),
+                _ => None,
+            })
+        };
+        // A settled conversation (every tool done) marks nothing, so skip the
+        // parent-link index entirely — the common idle case stays one scan.
+        if live().next().is_none() {
+            return Self::default();
+        }
+        let parent_of: HashMap<&str, &str> = items
+            .iter()
+            .filter_map(|it| match it {
+                ChatItem::ToolCall(tc) => Some((tc.id.as_str(), tc.parent_tool_id.as_deref()?)),
+                _ => None,
+            })
+            .collect();
+        let mut ids = HashSet::new();
+        for parent in live() {
+            let mut cur = Some(parent);
+            for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
+                let Some(id) = cur else { break };
+                ids.insert(id.to_owned());
+                cur = parent_of.get(id).copied();
+            }
+        }
+        Self { ids }
     }
-    items.iter().any(|it| {
-        matches!(it,
-            ChatItem::ToolCall(c)
-                if c.parent_tool_id.as_deref() == Some(parent_id)
-                    && (c.status.is_live()
-                        || subagent_subtree_live(items, &c.id, remaining_depth - 1)))
-    })
+
+    /// Whether the unit rooted at `tool_id` has a live descendant. Descendants
+    /// only — [`tool_or_subtree_live`] ors in the call's own status.
+    pub(in crate::workspace) fn contains(&self, tool_id: &str) -> bool {
+        self.ids.contains(tool_id)
+    }
+}
+
+/// Whether a tool call is still working as a unit — its own status is live, or a
+/// flattened descendant is still running. Keeps a running tool / group visible
+/// under a collapsed response and its card badge reading in-progress.
+pub(in crate::workspace) fn tool_or_subtree_live(
+    tc: &ToolCallItem,
+    live_units: &LiveSubagentUnits,
+) -> bool {
+    tc.status.is_live() || live_units.contains(&tc.id)
 }
 
 /// First tool call's id for a `ToolCall` item (the group's stable key); empty

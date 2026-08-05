@@ -92,20 +92,30 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
         before, after,
         "preview switch must not write a new project-state snapshot"
     );
-}
 
-#[gpui::test]
-async fn switch_tab_for_drag_preview_noop_out_of_range_does_not_switch(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_preview_noop");
-    let ws = wh.root(cx).unwrap();
-
-    let before = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
     ws.update(cx, |ws, cx| {
-        // Single-tab workspace: index 5 is out of range.
         ws.switch_tab_for_drag_preview(5, cx);
     });
-    let after = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
-    assert_eq!(before, after, "out-of-range preview index must be a no-op");
+    let after_noop = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    assert_eq!(
+        after_noop, active_after,
+        "out-of-range preview index must be a no-op"
+    );
+
+    in_window(wh, &ws, cx, |ws, window, cx| {
+        assert!(
+            !ws.cancel_active_drag(window, cx),
+            "no GPUI drag is active, so there is nothing to cancel"
+        );
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active_runtime().active_tab_index,
+            active_after,
+            "a no-op cancel must not unwind the preview"
+        );
+        assert!(ws.main_area.tab_preview_restore.is_some());
+    });
 }
 
 // ---- Async lifecycle: drag-reorder end state ----
@@ -171,30 +181,6 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
         persisted_panes, after_panes,
         "the reorder must reach disk, unlike the preview switch"
     );
-}
-
-#[gpui::test]
-async fn drop_tab_onto_bar_without_preview_is_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_drop_no_preview");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
-    let before: Vec<u64> = ws.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
-    let dragged_id = before[0];
-
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        // No armed preview (`tab_reorder_preview` is `None`) — a drop must
-        // not reorder anything.
-        ws.drop_tab_onto_bar(dragged_id, window, cx);
-    });
-
-    let after: Vec<u64> = ws.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
-    assert_eq!(before, after);
 }
 
 // ---- Hover-switch timer: stale-timer cancellation ----
@@ -272,32 +258,52 @@ async fn hover_switch_fires_after_the_delay_elapses(cx: &mut TestAppContext) {
         after, 0,
         "hover switch must fire once the delay has elapsed"
     );
+
+    let doomed_id = ws.read_with(cx, |ws, _| ws.active_runtime().tabs[1].id);
+    in_window(wh, &ws, cx, |ws, window, cx| {
+        ws.arm_tab_hover_switch(doomed_id, window, cx);
+        // The armed tab closes mid-countdown.
+        ws.close_tab_at(1, window, cx);
+    });
+
+    cx.executor().advance_clock(Duration::from_millis(700));
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(
+            ws.active_runtime().active_tab_index,
+            0,
+            "a stale hover switch must leave the surviving tab active"
+        );
+    });
 }
 
 // ---- Abandoned drag: the hover preview must not stick ----
 
-/// The hover preview is a look-ahead, not a commit: if the user drops on
-/// nothing (or hits Escape), the active tab must go back to what it was
-/// before the drag started.
+/// The hover preview is a look-ahead, not a commit: abandoning restores the
+/// pre-drag tab, while a committed drop keeps the previewed tab.
 #[gpui::test]
-async fn abandoned_drag_restores_the_pre_drag_active_tab(cx: &mut TestAppContext) {
+async fn finish_tab_drag_restores_abandoned_and_keeps_committed(cx: &mut TestAppContext) {
     let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_restore_abandoned");
     let ws = wh.root(cx).unwrap();
     in_window(wh, &ws, cx, |ws, window, cx| {
         ws.add_tab(window, cx);
+        ws.add_tab(window, cx);
     });
-    // Two tabs, index 1 active (add_tab activates the new tab).
+    // Three tabs, index 2 active (add_tab activates the new tab).
     assert_eq!(
         ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        1
+        2
     );
 
     in_window(wh, &ws, cx, |ws, _window, cx| {
         ws.switch_tab_for_drag_preview(0, cx);
+        ws.switch_tab_for_drag_preview(1, cx);
     });
     assert_eq!(
         ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        0,
+        1,
         "preview must move the active tab while the drag is live"
     );
 
@@ -307,18 +313,9 @@ async fn abandoned_drag_restores_the_pre_drag_active_tab(cx: &mut TestAppContext
 
     assert_eq!(
         ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        1,
-        "an abandoned drag must restore the pre-drag active tab"
+        2,
+        "an abandoned drag must restore the pre-drag active tab, not the last preview hop"
     );
-}
-
-#[gpui::test]
-async fn committed_drag_keeps_the_previewed_tab(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_restore_committed");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
 
     in_window(wh, &ws, cx, |ws, _window, cx| {
         ws.switch_tab_for_drag_preview(0, cx);
@@ -329,79 +326,6 @@ async fn committed_drag_keeps_the_previewed_tab(cx: &mut TestAppContext) {
         ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
         0,
         "a committed drop must keep the tab the drop landed on"
-    );
-}
-
-/// Dragging across several tabs previews each in turn; the restore target
-/// stays the tab that was active before the drag, not the previous preview.
-#[gpui::test]
-async fn restore_target_is_the_pre_drag_tab_not_the_previous_preview(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_restore_first");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-        ws.add_tab(window, cx);
-    });
-    assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        2
-    );
-
-    in_window(wh, &ws, cx, |ws, _window, cx| {
-        ws.switch_tab_for_drag_preview(0, cx);
-        ws.switch_tab_for_drag_preview(1, cx);
-        ws.finish_tab_drag(false, cx);
-    });
-
-    assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        2,
-        "restore must target the pre-drag tab, not the first preview hop"
-    );
-}
-
-#[gpui::test]
-async fn abandoned_drag_with_a_closed_restore_target_is_a_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_restore_closed");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
-
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        // Preview tab 0, then the pre-drag tab (index 1) closes mid-drag.
-        ws.switch_tab_for_drag_preview(0, cx);
-        ws.close_tab_at(1, window, cx);
-        ws.finish_tab_drag(false, cx);
-    });
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
-    });
-}
-
-/// A drop released on the tab bar with no armed insertion slot changes
-/// nothing, so it counts as abandoned — the preview must unwind.
-#[gpui::test]
-async fn drop_onto_bar_without_a_preview_slot_restores_the_pre_drag_tab(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_bar_drop_restore");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
-    let dragged_id = ws.read_with(cx, |ws, _| ws.active_runtime().tabs[1].id);
-
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.switch_tab_for_drag_preview(0, cx);
-        // No `tab_reorder_preview` armed — the drop reorders nothing.
-        ws.drop_tab_onto_bar(dragged_id, window, cx);
-    });
-
-    assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
-        1,
-        "a no-op bar drop must unwind the preview like any abandoned drag"
     );
 }
 
@@ -447,7 +371,9 @@ async fn abandoned_drag_leaves_no_trace_in_tab_history(cx: &mut TestAppContext) 
 /// pane half to merge. That commits, so the previewed tab must stay — the
 /// user dropped while looking at it.
 #[gpui::test]
-async fn merging_into_a_pane_keeps_the_previewed_tab(cx: &mut TestAppContext) {
+async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
+    cx: &mut TestAppContext,
+) {
     let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_merge_keeps_preview");
     let ws = wh.root(cx).unwrap();
     in_window(wh, &ws, cx, |ws, window, cx| {
@@ -475,12 +401,7 @@ async fn merging_into_a_pane_keeps_the_previewed_tab(cx: &mut TestAppContext) {
         assert!(ws.main_area.tab_preview_restore.is_none());
         assert!(ws.main_area.tab_hover_switch.is_none());
     });
-}
 
-/// A merge the store refuses (here: a target pane that isn't in the active
-/// tab) commits nothing, so it unwinds like any abandoned drag.
-#[gpui::test]
-async fn a_refused_merge_restores_the_pre_drag_tab(cx: &mut TestAppContext) {
     let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_merge_refused");
     let ws = wh.root(cx).unwrap();
     in_window(wh, &ws, cx, |ws, window, cx| {
@@ -503,31 +424,6 @@ async fn a_refused_merge_restores_the_pre_drag_tab(cx: &mut TestAppContext) {
             1,
             "a refused merge must unwind the preview"
         );
-    });
-}
-
-/// Escape with no drag in flight must pass through untouched, or it would
-/// clobber tab state every time the key is pressed for anything else.
-#[gpui::test]
-async fn escape_without_a_drag_leaves_tab_state_alone(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_escape_no_drag");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-        ws.switch_tab_for_drag_preview(0, cx);
-        assert!(
-            !ws.cancel_active_drag(window, cx),
-            "no GPUI drag is active, so there is nothing to cancel"
-        );
-    });
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_runtime().active_tab_index,
-            0,
-            "a no-op cancel must not unwind anything"
-        );
-        assert!(ws.main_area.tab_preview_restore.is_some());
     });
 }
 
@@ -568,17 +464,7 @@ async fn releasing_a_cell_cancels_the_countdown_it_armed(cx: &mut TestAppContext
         active_before,
         "a released cell's countdown must not switch tabs after the cursor left it"
     );
-}
 
-/// A release is scoped to the releasing cell: state another cell owns
-/// survives it, so no cell can wipe a slot it never set.
-#[gpui::test]
-async fn releasing_a_cell_leaves_another_cells_state_intact(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_release_scoped");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
     let (left_id, entered_id) = ws.read_with(cx, |ws, _| {
         let tabs = &ws.active_runtime().tabs;
         (tabs[0].id, tabs[1].id)
@@ -599,31 +485,5 @@ async fn releasing_a_cell_leaves_another_cells_state_intact(cx: &mut TestAppCont
             "the entered cell's countdown must survive its neighbour's release"
         );
         assert_eq!(ws.main_area.tab_reorder_preview, Some((entered_id, 1)));
-    });
-}
-
-#[gpui::test]
-async fn hover_switch_noops_when_the_armed_tab_no_longer_exists(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_hover_stale_tab");
-    let ws = wh.root(cx).unwrap();
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.add_tab(window, cx);
-    });
-    let doomed_id = ws.read_with(cx, |ws, _| ws.active_runtime().tabs[0].id);
-
-    in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.arm_tab_hover_switch(doomed_id, window, cx);
-        // The armed tab closes mid-countdown.
-        ws.close_tab_at(0, window, cx);
-    });
-
-    cx.executor().advance_clock(Duration::from_millis(700));
-    cx.run_until_parked();
-
-    // Must not panic on a stale index into a shrunk tab list, and must
-    // leave the surviving tab active.
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
     });
 }

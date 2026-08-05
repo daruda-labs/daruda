@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn an_answered_lane_never_consults_the_legacy_pair() {
+    fn effective_session_host_precedence_cases() {
         let legacy_launch = AgentLaunch::Ssh {
             adapter_command: ADAPTER.into(),
             host: "old-box".into(),
@@ -495,17 +495,7 @@ mod tests {
             ),
             answered
         );
-    }
 
-    /// The rev1 defect: turning a remote lane back to local brought its old
-    /// `remote_cwd` back to life, because "local" and "unanswered" were the
-    /// same value.
-    #[test]
-    fn answering_local_retires_the_legacy_pair() {
-        let legacy_launch = AgentLaunch::Ssh {
-            adapter_command: ADAPTER.into(),
-            host: "old-box".into(),
-        };
         assert_eq!(
             effective_session_host(
                 Some(&LaneSessionHost::Local),
@@ -516,10 +506,7 @@ mod tests {
             ),
             LaneSessionHost::Local
         );
-    }
 
-    #[test]
-    fn an_unanswered_lane_still_honours_the_legacy_pair() {
         let launch = AgentLaunch::Ssh {
             adapter_command: ADAPTER.into(),
             host: "box".into(),
@@ -540,12 +527,7 @@ mod tests {
                 registry_id: None,
             }
         );
-    }
 
-    /// Either half missing means neither applies — a blank `remote_cwd` used to
-    /// flow into `wrap` and produce `cd  && …`.
-    #[test]
-    fn a_half_configured_legacy_pair_stays_local() {
         let remote_launch = AgentLaunch::Ssh {
             adapter_command: ADAPTER.into(),
             host: "box".into(),
@@ -987,7 +969,7 @@ mod tests {
     /// `old_id`), this reports the *live* id so a caller can correct the
     /// lane's cache to it.
     #[test]
-    fn resolved_registry_id_reports_the_redirected_to_id() {
+    fn resolved_registry_id_cases() {
         let old_id = SessionHostId::new();
         let new_id = SessionHostId::new();
         let cached = LaneSessionHost::Ssh {
@@ -1007,10 +989,7 @@ mod tests {
             resolved_registry_id(&cached, &catalog, &tombstones),
             Some(new_id)
         );
-    }
 
-    #[test]
-    fn resolved_registry_id_is_unchanged_on_a_direct_catalog_hit() {
         let id = SessionHostId::new();
         let cached = LaneSessionHost::Ssh {
             target: "cached-target".into(),
@@ -1025,10 +1004,7 @@ mod tests {
             },
         }];
         assert_eq!(resolved_registry_id(&cached, &catalog, &[]), Some(id));
-    }
 
-    #[test]
-    fn resolved_registry_id_is_none_when_orphaned() {
         let id = SessionHostId::new();
         let cached = LaneSessionHost::Ssh {
             target: "cached-target".into(),
@@ -1036,10 +1012,7 @@ mod tests {
             registry_id: Some(id),
         };
         assert_eq!(resolved_registry_id(&cached, &[], &[]), None);
-    }
 
-    #[test]
-    fn resolved_registry_id_is_none_for_a_free_text_or_local_host() {
         let free_text = LaneSessionHost::Ssh {
             target: "vm-work".into(),
             session_path: "/srv/app".into(),

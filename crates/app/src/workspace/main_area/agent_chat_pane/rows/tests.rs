@@ -63,7 +63,12 @@ fn turn_with_tools_nests_response_and_group() {
         tool("c", Completed),
         asst("done"),
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     // user anchor, response header (last turn → expanded), then the run at
     // indent 1: assistant, tool-group header, 3 settled tool members
     // (group collapsed → hidden), trailing assistant.
@@ -91,7 +96,12 @@ fn trivial_response_has_no_bar() {
     // block stands for the whole response, so it is a `SoloResponse` and carries
     // the rollup glyph the absent bar would have shown.
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert_eq!(kinds(&rows), vec![("user", false), ("solo", false)]);
 }
 
@@ -108,7 +118,12 @@ fn past_turn_collapses_current_expands() {
         tool("t3", Completed),
         tool("t4", Completed),
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     // Past response (first turn, settled, not last) collapses → its process
     // hides but its conclusion (a1, the run's last assistant text) stays
     // visible; current response (last turn) expands → its run visible.
@@ -142,7 +157,12 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
         tool("a", Completed),
         tool("b", Completed),
     ];
-    let rows = project(&items, &FoldState::default(), true);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        true,
+        &LiveSubagentUnits::build(&items),
+    );
     assert_eq!(
         kinds(&rows),
         vec![
@@ -174,7 +194,12 @@ fn working_indicator_present_while_streaming() {
             message_id: None,
         },
     ];
-    let rows = project(&items, &FoldState::default(), true);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        true,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(
         kinds(&rows).iter().any(|(k, _)| *k == "working"),
         "a working turn keeps the indicator even while streaming"
@@ -191,7 +216,12 @@ fn working_indicator_only_when_awaiting_response() {
         tool("b", Completed),
     ];
     // Settled turn, nothing in flight → no indicator.
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(!kinds(&rows).iter().any(|(k, _)| *k == "working"));
 }
 
@@ -200,7 +230,12 @@ fn working_indicator_on_first_token_wait() {
     // Prompt sent, no agent output yet, turn in flight → indicator under the
     // user message at top level (no response bar for an empty run).
     let items = [ChatItem::UserText("q".into())];
-    let rows = project(&items, &FoldState::default(), true);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        true,
+        &LiveSubagentUnits::build(&items),
+    );
     assert_eq!(kinds(&rows), vec![("user", false), ("working", false)]);
     assert_eq!(rows.last().unwrap().indent, 0);
 }
@@ -217,7 +252,7 @@ fn working_indicator_visible_when_response_collapsed() {
     let mut fold = FoldState::default();
     // User manually collapses the (last, in-flight) response.
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, true);
+    let rows = project(&items, &fold, true, &LiveSubagentUnits::build(&items));
     let working = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::WorkingIndicator))
@@ -242,7 +277,7 @@ fn conclusion_stays_visible_when_response_collapsed() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true); // collapse the response
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     assert_eq!(
         kinds(&rows),
         vec![
@@ -267,7 +302,12 @@ fn conclusion_under_a_response_is_a_separately_foldable_item() {
         tool("b", Completed),
         asst("done"),
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     // The final assistant block projects as a ConclusionItem (its own fold
     // toggle); the earlier prose stays a plain AgentItem.
     assert!(
@@ -286,7 +326,12 @@ fn trivial_reply_is_not_a_conclusion_item() {
     // A lone reply has no response bar, so it renders as the normal
     // (labeled) foldable assistant block, not a bare-chevron ConclusionItem.
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(
         rows.iter()
             .any(|r| matches!(r.kind, RowKind::SoloResponse(1)))
@@ -310,7 +355,7 @@ fn only_the_last_assistant_message_is_the_conclusion() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     assert_eq!(
         kinds(&rows),
         vec![
@@ -335,7 +380,7 @@ fn conclusion_is_last_assistant_even_before_trailing_tool() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     assert_eq!(
         kinds(&rows),
         vec![
@@ -359,7 +404,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     assert_eq!(
         kinds(&rows),
         vec![
@@ -373,7 +418,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
 }
 
 #[test]
-fn pending_permission_stays_visible_when_response_collapsed() {
+fn permission_visibility_tracks_actionability_when_response_collapsed() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -383,7 +428,7 @@ fn pending_permission_stays_visible_when_response_collapsed() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true); // collapse the response
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     let perm_row = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
@@ -399,11 +444,7 @@ fn pending_permission_stays_visible_when_response_collapsed() {
             .all(|r| r.hidden),
         "the tool group still folds"
     );
-}
 
-#[test]
-fn resolved_permission_folds_with_the_response() {
-    use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
         tool("a", Completed),
@@ -412,7 +453,7 @@ fn resolved_permission_folds_with_the_response() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     let perm_row = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
@@ -439,7 +480,12 @@ fn subagent_child_tool_calls_get_no_row() {
         tool("parent", Completed),
         child,
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
         "the parent tool call still renders as a row"
@@ -474,7 +520,12 @@ fn multiple_subagent_children_all_skip_and_parent_stays_single() {
         c1,
         c2,
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
     assert!(
         !rows
@@ -501,7 +552,12 @@ fn orphan_child_keeps_its_row() {
         tc.parent_tool_id = Some("missing-parent".to_owned());
     }
     let items = [ChatItem::UserText("q".into()), orphan];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
         "an orphan child (no present parent) still renders as a row"
@@ -517,23 +573,25 @@ fn child_of(id: &str, parent: &str, status: ToolStatusView) -> ChatItem {
 }
 
 #[test]
-fn subagent_parent_reads_live_while_a_child_runs() {
+fn live_subagent_units_marks_every_ancestor_of_a_live_descendant() {
     use ToolStatusView::{Completed, InProgress};
-    // The adapter marks the parent Task `Completed` (its SDK call returned)
-    // while a flattened child keeps running — the unit is still working,
-    // so the subtree must read live.
+    // parent → child(done) → grandchild(running): both ancestors are still
+    // working units, so one pass must mark both.
     let items = [
         tool("task", Completed),
-        child_of("child", "task", InProgress),
+        child_of("child", "task", Completed),
+        child_of("grand", "child", InProgress),
     ];
-    assert!(
-        subagent_subtree_live(&items, "task", 8),
-        "a live child keeps the subagent parent reading as running"
-    );
+    let units = LiveSubagentUnits::build(&items);
+    assert!(units.contains("task"));
+    assert!(units.contains("child"));
+    // A live node is not its own ancestor — `tool_or_subtree_live` ors in the
+    // call's own status, so the set carries descendant liveness only.
+    assert!(!units.contains("grand"));
 }
 
 #[test]
-fn subagent_parent_settles_when_all_children_terminal() {
+fn live_subagent_units_excludes_a_fully_settled_subtree() {
     use ToolStatusView::{Completed, Failed};
     let items = [
         tool("task", Completed),
@@ -541,37 +599,89 @@ fn subagent_parent_settles_when_all_children_terminal() {
         child_of("b", "task", Failed),
     ];
     assert!(
-        !subagent_subtree_live(&items, "task", 8),
+        !LiveSubagentUnits::build(&items).contains("task"),
         "no live descendant → the parent unit is done"
     );
 }
 
 #[test]
-fn subagent_liveness_is_transitive() {
+fn live_subagent_units_stops_at_the_nesting_depth_cap() {
     use ToolStatusView::{Completed, InProgress};
-    // parent → child(done) → grandchild(running): the running grandchild
-    // still makes the whole unit live.
+    // A chain deeper than the cap: the live leaf marks only the `cap` nearest
+    // ancestors, matching the depth-bounded recursive walk this replaces.
+    let live_leaf = SUBAGENT_NEST_DEPTH_CAP + 2;
+    let mut items = vec![tool("n0", Completed)];
+    for d in 1..=live_leaf {
+        let status = if d == live_leaf {
+            InProgress
+        } else {
+            Completed
+        };
+        items.push(child_of(&format!("n{d}"), &format!("n{}", d - 1), status));
+    }
+    let units = LiveSubagentUnits::build(&items);
+    assert!(units.contains(&format!("n{}", live_leaf - SUBAGENT_NEST_DEPTH_CAP)));
+    assert!(
+        !units.contains(&format!("n{}", live_leaf - SUBAGENT_NEST_DEPTH_CAP - 1)),
+        "an ancestor past the cap stays unmarked"
+    );
+}
+
+#[test]
+fn live_subagent_units_terminates_on_a_cyclic_parent_id() {
+    use ToolStatusView::{Completed, InProgress};
+    // A malformed self-parent must not walk without bound.
+    let items = [child_of("x", "x", Completed)];
+    assert!(!LiveSubagentUnits::build(&items).contains("x"));
+    // A live self-parent is its own ancestor here, so it marks itself — and
+    // still terminates.
+    let items = [child_of("y", "y", InProgress)];
+    assert!(LiveSubagentUnits::build(&items).contains("y"));
+}
+
+#[test]
+fn projection_of_a_long_tool_conversation_stays_linear() {
+    use ToolStatusView::Completed;
+    // The predicate this replaces re-scanned all `items` per group member,
+    // recursively: projecting a long tool-heavy conversation was
+    // O(items² · depth) and ran on every streamed tool event.
+    let items: Vec<ChatItem> = (0..4000)
+        .map(|i| tool(&format!("t{i}"), Completed))
+        .collect();
+    let started = std::time::Instant::now();
+    let units = LiveSubagentUnits::build(&items);
+    let rows = project(&items, &FoldState::default(), false, &units);
+    let elapsed = started.elapsed();
+    assert_eq!(
+        rows.len(),
+        items.len() + 1,
+        "one group header + every member"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "projecting 4000 items took {elapsed:?} — the quadratic scan is back"
+    );
+}
+
+#[test]
+fn live_subagent_units_marks_a_running_child_of_a_completed_parent() {
+    use ToolStatusView::{Completed, InProgress};
+    // The adapter marks the parent Task `Completed` (its SDK call returned)
+    // while a flattened child keeps running — the unit is still working.
     let items = [
         tool("task", Completed),
-        child_of("child", "task", Completed),
-        child_of("grand", "child", InProgress),
+        child_of("child", "task", InProgress),
     ];
-    assert!(subagent_subtree_live(&items, "task", 8));
-}
+    assert!(
+        LiveSubagentUnits::build(&items).contains("task"),
+        "a live child keeps the subagent parent reading as running"
+    );
 
-#[test]
-fn subagent_liveness_no_children_is_false() {
-    let items = [tool("task", ToolStatusView::Completed)];
-    assert!(!subagent_subtree_live(&items, "task", 8));
-}
-
-#[test]
-fn subagent_liveness_depth_cap_terminates_on_cycle() {
-    use ToolStatusView::Completed;
-    // A malformed self-parent (id == parent_tool_id) with a terminal status
-    // must not recurse without bound; the depth budget forces `false`.
-    let items = [child_of("x", "x", Completed)];
-    assert!(!subagent_subtree_live(&items, "x", 8));
+    let items = [tool("task", Completed)];
+    assert!(
+        !LiveSubagentUnits::build(&items).contains("task"),
+        "a childless settled tool is not a live unit"
+    );
 }
 
 #[test]
@@ -587,7 +697,7 @@ fn collapsed_response_surfaces_a_live_tool_group() {
     ];
     let mut fold = FoldState::default();
     fold.set_all([FoldKey::Response(0)], false); // force the response collapsed
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     let header = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
@@ -614,7 +724,7 @@ fn collapsed_response_hides_a_settled_tool_group() {
     ];
     let mut fold = FoldState::default();
     fold.set_all([FoldKey::Response(0)], false);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     let header = rows
         .iter()
         .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
@@ -628,7 +738,12 @@ fn collapsed_response_hides_a_settled_tool_group() {
 #[test]
 fn lone_tool_call_is_not_grouped() {
     let items = [asst("x"), tool("a", ToolStatusView::Completed), asst("y")];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert_eq!(
         kinds(&rows),
         vec![("item", false), ("item", false), ("item", false)],
@@ -640,7 +755,12 @@ fn lone_tool_call_is_not_grouped() {
 fn in_progress_group_defaults_expanded() {
     use ToolStatusView::{Completed, InProgress};
     let items = [tool("a", Completed), tool("b", InProgress)];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     // group active (one tool in progress) → members visible.
     assert_eq!(
         kinds(&rows),
@@ -655,7 +775,7 @@ fn group_member_visibility_follows_fold_override() {
     let mut fold = FoldState::default();
     // Force-expand the (otherwise collapsed) settled group.
     fold.toggle(FoldKey::ToolGroup("a".into()), false);
-    let rows = project(&items, &fold, false);
+    let rows = project(&items, &fold, false, &LiveSubagentUnits::build(&items));
     assert_eq!(
         kinds(&rows),
         vec![("group", false), ("item", false), ("item", false)],
@@ -726,7 +846,7 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
     ];
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Response(0), true);
-    let rows = project(&items, &fold, true);
+    let rows = project(&items, &fold, true, &LiveSubagentUnits::build(&items));
 
     for row in rows.iter().filter(|r| !r.hidden) {
         let expected = match row.kind {
@@ -762,7 +882,12 @@ fn leading_run_without_a_user_anchor_gets_no_solo_response() {
     // here would let the assistant header report ✓ over itself while the sibling
     // tool call sitting right next to it has failed.
     let items = [asst("here is what I found"), tool("c1", Failed)];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
 
     assert!(
         !rows
@@ -788,7 +913,12 @@ fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
         asst("thinking out loud"),
         asst("done"),
     ];
-    let rows = project(&items, &FoldState::default(), false);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::build(&items),
+    );
     assert!(
         !rows
             .iter()
