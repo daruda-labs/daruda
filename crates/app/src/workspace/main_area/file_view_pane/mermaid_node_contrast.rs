@@ -2,11 +2,13 @@
 //! `classDef`/`style` fill, without touching that fill.
 //!
 //! merman's own CSS emission for a `classDef`/`style` declaration only
-//! reaches the label text in the flowchart `classDef` case (a class-scoped
-//! `.hl tspan{fill:...}` rule). For flowchart `style`, class diagram
-//! `classDef`, and ER diagram `style`, the whole declaration lands as an
-//! inline `style="fill:...;stroke:...;color:..."` on the node's SHAPE only —
-//! the injected `color:` never reaches the label, so the text keeps
+//! reaches the label text for a flowchart `classDef` that also declares an
+//! explicit `color:` (a class-scoped `.hl tspan{fill:...}` rule reflecting
+//! that color). Without an explicit `color:`, flowchart `classDef` is just
+//! as broken as the other three paths below. For flowchart `style`, class
+//! diagram `classDef`, and ER diagram `style`, the whole declaration lands
+//! as an inline `style="fill:...;stroke:...;color:..."` on the node's SHAPE
+//! only — the injected `color:` never reaches the label, so the text keeps
 //! whatever daruda's forced dark/light default is, which can collide with a
 //! light (or dark) author-declared fill.
 //!
@@ -46,6 +48,13 @@ use resvg::usvg;
 /// their absolute position can be read back after the measuring parse. Not
 /// present in merman output, so it cannot collide.
 const PROBE_PREFIX: &str = "daruda-mermaid-node-contrast";
+
+/// Below this alpha, a declared fill barely tints the surface — computing a
+/// black-or-white decision against its raw RGB would answer the wrong
+/// question (contrast against a color that isn't really what's rendered;
+/// the host canvas dominates instead). Nodes this faint are left to whatever
+/// text color the host default already provides for them.
+const MIN_SIGNIFICANT_ALPHA: f64 = 0.2;
 
 /// A node whose shape carries an author-declared fill (`classDef`/`style`),
 /// found on the un-probed source SVG.
@@ -94,6 +103,10 @@ impl Box2 {
     fn center(&self) -> (f32, f32) {
         (self.x + self.w / 2.0, self.y + self.h / 2.0)
     }
+
+    fn area(&self) -> f32 {
+        self.w * self.h
+    }
 }
 
 /// Rewrite `svg` so every custom-fill node's label text is contrast-safe.
@@ -121,10 +134,16 @@ pub(in crate::workspace) fn force_node_label_contrast(
             continue;
         };
         let (cx, cy) = text_box.center();
+        // Prefer the smallest containing box, not the first match: a
+        // subgraph/cluster can be a custom-fill node itself and wrap a
+        // nested custom-fill node, so more than one box may contain the
+        // point — the innermost one is the label's actual owner.
         let hit = nodes
             .iter()
-            .find(|n| boxes.get(&n.id).is_some_and(|b| b.contains_point(cx, cy)));
-        if let Some(node) = hit {
+            .filter_map(|n| boxes.get(&n.id).map(|b| (n, b)))
+            .filter(|(_, b)| b.contains_point(cx, cy))
+            .min_by(|(_, a), (_, b)| a.area().total_cmp(&b.area()));
+        if let Some((node, _)) = hit {
             rewrites.push((fallback.fill_value.clone(), node.contrast.as_str()));
         }
     }
@@ -162,7 +181,10 @@ fn scan_custom_fill_nodes(svg: &str) -> Vec<CustomNode> {
         if !id.starts_with("merman-") {
             continue;
         }
-        if !extract_attr(tag, "class").is_some_and(|class| has_class_token(class, "node")) {
+        let Some(class) = extract_attr(tag, "class") else {
+            continue;
+        };
+        if !has_class_token(class, "node") {
             continue;
         }
         let body_end = if tag.trim_end().ends_with("/>") {
@@ -177,9 +199,22 @@ fn scan_custom_fill_nodes(svg: &str) -> Vec<CustomNode> {
         let Some(fill) = extract_style_fill(body) else {
             continue;
         };
-        let Some((r, g, b, _a)) = super::mermaid_contrast::parse_color_with_alpha(&fill) else {
+        let Some((r, g, b, a)) = super::mermaid_contrast::parse_color_with_alpha(&fill) else {
             continue;
         };
+        // Below the crossover the fill barely tints the surface, so the
+        // host's default text color already reads fine against it — nothing
+        // to fix.
+        if a < MIN_SIGNIFICANT_ALPHA {
+            continue;
+        }
+        // An author who declared an explicit `color:` in a flowchart
+        // `classDef` already gets a correctly-wired `.CLASS tspan{fill:...}`
+        // rule from merman itself (the one case it wires end-to-end) —
+        // respect that choice instead of overriding it with our own.
+        if class_already_has_tspan_fill_rule(svg, class) {
+            continue;
+        }
         nodes.push(CustomNode {
             id: id.to_owned(),
             contrast: contrast_text_color(r, g, b),
@@ -188,6 +223,25 @@ fn scan_custom_fill_nodes(svg: &str) -> Vec<CustomNode> {
         from = body_end;
     }
     nodes
+}
+
+/// merman's own structural classes — present on every node regardless of any
+/// author `classDef`/`style`, so they can never be the signal
+/// [`class_already_has_tspan_fill_rule`] is looking for. Checking them too
+/// would risk a diagram-wide false positive: if merman ever ships a generic
+/// `.node tspan{fill:...}` rule for an unrelated reason, every custom-fill
+/// node in the diagram would silently stop getting this module's fix.
+const STRUCTURAL_NODE_CLASSES: [&str; 2] = ["node", "default"];
+
+/// True when merman's own `<style>` block already defines a working
+/// `.TOKEN tspan{fill:...}` rule for one of this node's *author-declared*
+/// classes — the signature of an explicit `color:` that merman wired
+/// correctly on its own, which this module must not clobber.
+fn class_already_has_tspan_fill_rule(svg: &str, class_list: &str) -> bool {
+    class_list
+        .split_whitespace()
+        .filter(|token| !STRUCTURAL_NODE_CLASSES.contains(token))
+        .any(|token| svg.contains(&format!(".{token} tspan{{fill:")))
 }
 
 /// Locate every `foreignObject`-fallback label `<text>` — the sibling-text
@@ -199,7 +253,7 @@ fn scan_fallback_texts(svg: &str) -> Vec<FallbackText> {
     while let Some(rel) = svg[from..].find("<text") {
         let start = from + rel;
         match svg.as_bytes().get(start + 5) {
-            Some(b' ' | b'>' | b'/') => {}
+            Some(b' ' | b'>' | b'/' | b'\t' | b'\n' | b'\r') => {}
             _ => {
                 from = start + 5;
                 continue;
@@ -241,7 +295,12 @@ fn tag_end(svg: &str, start: usize) -> Option<usize> {
 /// (there are none in merman output today, but the check is cheap).
 fn find_group_open(s: &str) -> Option<usize> {
     s.match_indices("<g")
-        .find(|(i, _)| matches!(s.as_bytes().get(i + 2), Some(b' ' | b'>' | b'/')))
+        .find(|(i, _)| {
+            matches!(
+                s.as_bytes().get(i + 2),
+                Some(b' ' | b'>' | b'/' | b'\t' | b'\n' | b'\r')
+            )
+        })
         .map(|(i, _)| i)
 }
 
@@ -283,19 +342,20 @@ fn has_class_token(class: &str, token: &str) -> bool {
     class.split_whitespace().any(|t| t == token)
 }
 
-/// The first `fill:` value inside any `style="..."` attribute in `body`.
+/// The first `fill:` *declaration* (not a longer property merely ending in
+/// `fill`, e.g. a hypothetical `background-fill:`) inside any `style="..."`
+/// attribute in `body`.
 fn extract_style_fill(body: &str) -> Option<String> {
     let mut from = 0usize;
     while let Some(rel) = body[from..].find(r#"style=""#) {
         let value_start = from + rel + r#"style=""#.len();
         let len = body[value_start..].find('"')?;
         let value = &body[value_start..value_start + len];
-        if let Some(fill_rel) = value.find("fill:") {
-            let fill_start = fill_rel + "fill:".len();
-            let end = value[fill_start..]
-                .find(';')
-                .map_or(value.len(), |i| fill_start + i);
-            return Some(value[fill_start..end].trim().to_owned());
+        for decl in value.split(';') {
+            let decl = decl.trim();
+            if let Some(color) = decl.strip_prefix("fill:") {
+                return Some(color.trim().to_owned());
+            }
         }
         from = value_start + len + 1;
     }
@@ -371,18 +431,23 @@ fn apply_rewrites(svg: &str, rewrites: &[(Range<usize>, &str)]) -> String {
     out
 }
 
-/// Append `css` immediately before the document's closing `</style>`.
-/// Returns `svg` unchanged if it carries no `<style>` block (never happens
-/// for a merman render, but `force_node_label_contrast` only reaches this
-/// path when there is at least one custom-fill node to style).
+/// Append `css` immediately before the document's closing `</style>`. Every
+/// merman render carries a `<style>` block already (the host theme profile
+/// guarantees it), but a document with none is given its own — right after
+/// the root `<svg ...>` tag — rather than silently dropping the fix.
 fn inject_rules(svg: &str, css: &str) -> String {
-    let Some(pos) = svg.rfind("</style>") else {
-        return svg.to_owned();
-    };
-    let mut out = String::with_capacity(svg.len() + css.len());
-    out.push_str(&svg[..pos]);
-    out.push_str(css);
-    out.push_str(&svg[pos..]);
+    let mut out = String::with_capacity(svg.len() + css.len() + "<style></style>".len());
+    if let Some(pos) = svg.rfind("</style>") {
+        out.push_str(&svg[..pos]);
+        out.push_str(css);
+        out.push_str(&svg[pos..]);
+    } else if let Some(svg_tag_end) = svg.find("<svg").and_then(|s| tag_end(svg, s)) {
+        out.push_str(&svg[..svg_tag_end]);
+        let _ = write!(out, "<style>{css}</style>");
+        out.push_str(&svg[svg_tag_end..]);
+    } else {
+        out.push_str(svg);
+    }
     out
 }
 
@@ -416,7 +481,11 @@ fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
 }
 
 fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
-    let (r, g, b) = (f64::from(r) / 255.0, f64::from(g) / 255.0, f64::from(b) / 255.0);
+    let (r, g, b) = (
+        f64::from(r) / 255.0,
+        f64::from(g) / 255.0,
+        f64::from(b) / 255.0,
+    );
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let l = (max + min) / 2.0;
@@ -516,7 +585,7 @@ mod tests {
         let svg = concat!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">"#,
             r#"<g class="node default" id="merman-flowchart-A-0">"#,
-            r#"<rect fill="#414243"/></g></svg>"#,
+            r##"<rect fill="#414243"/></g></svg>"##,
         );
         assert_eq!(force_node_label_contrast(svg, &options()), svg);
     }
@@ -549,7 +618,7 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
             r#"<style></style>"#,
             r#"<g class="node default" id="merman-flowchart-A-0" transform="translate(50, 50)">"#,
-            r#"<rect fill="#414243" x="-40" y="-20" width="80" height="40"/>"#,
+            r##"<rect fill="#414243" x="-40" y="-20" width="80" height="40"/>"##,
             r#"<g class="label"><text><tspan>Start</tspan></text></g>"#,
             r#"</g></svg>"#,
         );
@@ -567,7 +636,7 @@ mod tests {
         r#"<g class="label" transform="translate(-40, -20)"></g>"#,
         r#"</g>"#,
         r#"<g data-merman-foreignobject="fallback" class="merman-foreignobject-fallback root nodes node default label nodeLabel">"#,
-        r#"<text x="100" y="80" fill="#d5d7db" class="merman-foreignobject-fallback-text root nodes node default nodeLabel">CUSTOMER</text>"#,
+        r##"<text x="100" y="80" fill="#d5d7db" class="merman-foreignobject-fallback-text root nodes node default nodeLabel">CUSTOMER</text>"##,
         r#"</g></svg>"#,
     );
 
@@ -575,7 +644,7 @@ mod tests {
     fn sibling_fallback_text_fill_is_rewritten_when_it_overlaps_a_custom_fill_node() {
         let out = force_node_label_contrast(SIBLING_FALLBACK_SHAPE, &options());
         assert!(
-            !out.contains(r#"fill="#d5d7db""#),
+            !out.contains(r##"fill="#d5d7db""##),
             "the fallback text's original fill should have been replaced: {out}"
         );
         // No in-subtree tspan in this shape, so no CSS rule should be injected.
@@ -591,11 +660,171 @@ mod tests {
             r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-60" y="-40" width="120" height="80"/>"#,
             r#"</g>"#,
             r#"<g data-merman-foreignobject="fallback" class="merman-foreignobject-fallback root nodes node default label nodeLabel">"#,
-            r#"<text x="350" y="10" fill="#d5d7db" class="merman-foreignobject-fallback-text root nodes node default nodeLabel">Unrelated</text>"#,
+            r##"<text x="350" y="10" fill="#d5d7db" class="merman-foreignobject-fallback-text root nodes node default nodeLabel">Unrelated</text>"##,
             r#"</g></svg>"#,
         );
         let out = force_node_label_contrast(svg, &options());
-        assert!(out.contains(r#"fill="#d5d7db""#));
+        assert!(out.contains(r##"fill="#d5d7db""##));
+    }
+
+    #[test]
+    fn a_node_whose_class_already_has_a_working_tspan_rule_is_left_alone() {
+        // Reproduces a flowchart `classDef` with an explicit author `color:`
+        // — the one case merman wires correctly on its own (a real
+        // `.hl tspan{fill:...}` rule reflecting the declared color).
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style>.hl tspan{fill:#0d4f0d;}</style>"#,
+            r#"<g class="node default hl" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan class="text-inner-tspan">Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert_eq!(
+            force_node_label_contrast(svg, &options()),
+            svg,
+            "must not add a second, conflicting rule over the author's own explicit color"
+        );
+    }
+
+    #[test]
+    fn a_node_with_a_different_working_class_rule_still_gets_fixed() {
+        // A `.hl tspan{...}` rule for a *different* class must not suppress
+        // the fix for this node's own (uncolored) class.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style>.hl tspan{fill:#0d4f0d;}</style>"#,
+            r#"<g class="node default other" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan class="text-inner-tspan">Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert!(
+            force_node_label_contrast(svg, &options())
+                .contains("#merman-flowchart-B-1 tspan{fill:")
+        );
+    }
+
+    #[test]
+    fn a_generic_structural_rule_does_not_suppress_every_custom_node() {
+        // A hypothetical future merman emitting a *generic* `.node
+        // tspan{fill:...}` (or `.default tspan{...}`) rule — for some
+        // unrelated structural reason, not an author `color:` — must not be
+        // mistaken for this node's own explicit color and suppress its fix.
+        // Every node carries "node"/"default" in its class list, so getting
+        // this wrong would silently disable the fix diagram-wide.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style>.node tspan{fill:#d5d7db;}.default tspan{fill:#d5d7db;}</style>"#,
+            r#"<g class="node default" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan>Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert!(
+            force_node_label_contrast(svg, &options())
+                .contains("#merman-flowchart-B-1 tspan{fill:"),
+            "a generic structural-class rule must not suppress this node's fix"
+        );
+    }
+
+    #[test]
+    fn a_near_invisible_fill_is_left_alone() {
+        // Alpha well under MIN_SIGNIFICANT_ALPHA: the fill barely tints the
+        // surface, so there is nothing worth forcing a contrast decision
+        // against.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style></style>"#,
+            r#"<g class="node default" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:rgba(212,248,212,0.05);stroke:#2d8a2d" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan>Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert_eq!(force_node_label_contrast(svg, &options()), svg);
+    }
+
+    #[test]
+    fn a_property_name_merely_ending_in_fill_is_not_mistaken_for_the_fill_declaration() {
+        // A hypothetical `background-fill:` property (never emitted by
+        // merman today) must not be parsed as if it were `fill:`.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style></style>"#,
+            r#"<g class="node default" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="background-fill:#000000;fill:#d4f8d4;stroke:#2d8a2d" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan>Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        let out = force_node_label_contrast(svg, &options());
+        assert!(
+            out.contains("#merman-flowchart-B-1 tspan{fill:#0"),
+            "expected a dark contrast color derived from the light fill, got: {out}"
+        );
+    }
+
+    #[test]
+    fn the_smallest_containing_box_wins_when_boxes_overlap() {
+        // A cluster/subgraph can itself be a custom-fill node wrapping a
+        // nested custom-fill node — the fallback text at their shared
+        // center must attribute to the innermost (smaller) box, not
+        // whichever node happens to be scanned first.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">"#,
+            r#"<style></style>"#,
+            r#"<g id="merman-cluster-outer-0" class="node default" transform="translate(100, 100)">"#,
+            r#"<rect style="fill:#1a331a;stroke:#2d8a2d" x="-90" y="-90" width="180" height="180"/>"#,
+            r#"<g class="label" transform="translate(-40, -20)"></g>"#,
+            r#"</g>"#,
+            r#"<g id="merman-entity-CUSTOMER-1" class="node default" transform="translate(100, 100)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d" x="-60" y="-40" width="120" height="80"/>"#,
+            r#"<g class="label" transform="translate(-40, -20)"></g>"#,
+            r#"</g>"#,
+            r#"<g data-merman-foreignobject="fallback" class="merman-foreignobject-fallback root nodes node default label nodeLabel">"#,
+            r##"<text x="100" y="100" fill="#d5d7db" class="merman-foreignobject-fallback-text root nodes node default nodeLabel">CUSTOMER</text>"##,
+            r#"</g></svg>"#,
+        );
+        let out = force_node_label_contrast(svg, &options());
+        // The inner node's fill (#d4f8d4, light) demands a dark contrast
+        // color; the outer node's fill (#1a331a, dark) would demand light —
+        // picking the outer (larger) box would produce a light/near-white fill.
+        let start = out.find("fill=\"#").expect("rewritten fill attribute");
+        let value = &out[start + 6..start + 13];
+        let r = u8::from_str_radix(&value[1..3], 16).unwrap();
+        assert!(
+            r < 60,
+            "expected the inner (smaller) node's dark contrast, got {value}"
+        );
+    }
+
+    #[test]
+    fn css_is_injected_even_without_an_existing_style_block() {
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<g class="node default" id="merman-flowchart-B-1" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan>Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        let out = force_node_label_contrast(svg, &options());
+        assert!(out.contains("<style>#merman-flowchart-B-1 tspan{fill:"));
+        assert!(out.contains("</style>"));
+    }
+
+    /// The end-to-end regression this module's own history warns about:
+    /// when a flowchart `classDef` explicitly declares `color:`, merman
+    /// already wires it correctly — the module must not override it with a
+    /// second, computed rule.
+    #[test]
+    fn real_classdef_with_explicit_author_color_is_not_overridden() {
+        let palette = super::super::mermaid_theme::MermaidPalette::default();
+        let source = "flowchart TD\n  A[Start] --> B[Highlighted]:::hl\n  classDef hl fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px,color:#0d4f0d\n";
+        let svg = super::super::visual::render_mermaid_svg(source, &palette).expect("svg");
+        let fixed = force_node_label_contrast(&svg, &options());
+        assert_eq!(
+            fixed, svg,
+            "an explicit author color already wired by merman must be left untouched"
+        );
     }
 
     /// Every diagram/directive shape the investigation found broken,

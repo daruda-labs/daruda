@@ -14,6 +14,7 @@ pub(in crate::workspace) mod line_diff;
 pub(in crate::workspace) mod markdown_viewer;
 mod mermaid_contrast;
 mod mermaid_label_geometry;
+mod mermaid_node_contrast;
 mod mermaid_text_measurer;
 pub(in crate::workspace) mod mermaid_theme;
 pub(in crate::workspace) mod search_ops;
