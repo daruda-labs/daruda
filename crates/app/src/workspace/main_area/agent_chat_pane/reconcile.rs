@@ -42,7 +42,7 @@ use crate::workspace::main_area::file_view_pane::visual;
 /// in `daruda_acp::mapping`) and names it, so re-fingerprinting the rest of the
 /// conversation buys nothing and makes a long turn quadratic: every chunk
 /// re-hashed every diff the turn had produced so far.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(in crate::workspace) enum ReconcileScope {
     /// Every tool call. Required whenever `items` moved as a whole (connect,
     /// `session/load` catch-up) or a theme swap invalidated the built editors —

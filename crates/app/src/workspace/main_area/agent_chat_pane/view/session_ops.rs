@@ -158,13 +158,23 @@ impl AgentChatView {
             | FoldKey::ToolRawInput(_) => None,
         };
         self.fold.toggle(key, active);
+        let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {
             self.reconcile_embeds_after_fold(&scope, cx);
         }
         // A fold change flips row `hidden` flags (and may collapse a group):
         // reproject + reflow the affected span.
         self.rebuild_rows();
-        if let Some(item_ix) = item_ix
+        if reconciled {
+            // The reconcilers end in `remeasure()` — a *Proportional* re-anchor —
+            // and the targeted call below only overrides `pending_scroll` when the
+            // toggled row happens to be the scroll top. Reading history and
+            // expanding a card would otherwise shift the viewport. Re-derive the
+            // same full span through the Absolute-anchored API instead, matching
+            // `apply_event`'s tool-update / turn-settled remeasures.
+            let n = self.rows.len();
+            self.list_state.remeasure_items(0..n);
+        } else if let Some(item_ix) = item_ix
             && let Some(row_ix) = self
                 .rows
                 .iter()

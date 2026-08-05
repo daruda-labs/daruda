@@ -679,7 +679,7 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
 /// `parent_tool_id` to the ancestor `rows::project` actually gives a row
 /// (nested subagent children render inside their parent's card and earn no
 /// row of their own — see `is_nested_child`). Depth-bounded like
-/// `subagent_subtree_live`, for the same malformed/cyclic-id safety.
+/// `LiveSubagentUnits`, for the same malformed/cyclic-id safety.
 fn top_level_tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usize> {
     use daruda_acp::ChatItem;
     let mut current = tool_id;
