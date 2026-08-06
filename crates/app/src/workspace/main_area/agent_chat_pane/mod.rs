@@ -31,3 +31,4 @@ pub(in crate::workspace) mod session_config;
 pub(in crate::workspace) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
 pub(in crate::workspace) mod view;
+pub(in crate::workspace) mod window_access;

@@ -6,7 +6,7 @@
 use daruda_acp::{
     PermissionDecision, PermissionKindView, cancel_pending_tools, finalize_streaming,
 };
-use gpui::Context;
+use gpui::{Context, Window};
 
 use super::super::agent_chat_helpers::{
     cancel_pending_permission, collect_foldable_keys, fold_active, fold_key_item_index,
@@ -130,7 +130,12 @@ impl AgentChatView {
     /// Toggle the fold state of one block. Resolves the `active` flag the same
     /// way `render` derives it, so the first click flips the *visible* state
     /// rather than re-deriving from a stale default.
-    pub(in crate::workspace) fn toggle_fold(&mut self, key: FoldKey, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn toggle_fold(
+        &mut self,
+        key: FoldKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Resolve `active` via the shared `fold_active` — the same source
         // `rows::project` uses to derive the default collapsed state — so the
         // first click flips the *visible* state rather than a stale re-derivation.
@@ -160,7 +165,7 @@ impl AgentChatView {
         self.fold.toggle(key, active);
         let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {
-            self.reconcile_embeds_after_fold(&scope, cx);
+            self.reconcile_embeds_after_fold(&scope, window, cx);
         }
         // A fold change flips row `hidden` flags (and may collapse a group):
         // reproject + reflow the affected span.
@@ -187,12 +192,17 @@ impl AgentChatView {
 
     /// Expand or collapse every currently-visible foldable block at once (the
     /// fold toolbar's expand-all / collapse-all).
-    pub(in crate::workspace) fn set_all_folds(&mut self, expanded: bool, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn set_all_folds(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let keys = collect_foldable_keys(&self.items);
         self.fold.set_all(keys, expanded);
         // Every card's fold just moved, so every card's embeds may need building
         // (expand-all) or releasing (collapse-all).
-        self.reconcile_embeds_after_fold(&ReconcileScope::All, cx);
+        self.reconcile_embeds_after_fold(&ReconcileScope::All, window, cx);
         // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
         self.rebuild_rows();
         // Unlike a single `toggle_fold`, this can change dozens of rows' inner

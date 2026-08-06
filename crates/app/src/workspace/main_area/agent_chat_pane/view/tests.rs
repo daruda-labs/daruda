@@ -185,11 +185,11 @@ fn echo_prompt_preserves_visible_tail_response(cx: &mut gpui::TestAppContext) {
 fn echo_prompt_respects_collapsed_tail_response(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, live_window, cx| {
             view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
             view.items.push(assistant_text_item("process"));
             view.items.push(assistant_text_item("final"));
-            view.toggle_fold(FoldKey::Response(0), cx);
+            view.toggle_fold(FoldKey::Response(0), live_window, cx);
 
             view.echo_prompt("q2".to_string(), cx);
 
@@ -589,7 +589,7 @@ fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui
 
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, live_window, cx| {
             view.items = vec![permission_card(100), permission_card(200)];
             view.pending_permissions.insert(100);
             view.pending_permissions.insert(200);
@@ -641,7 +641,7 @@ fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui
                 permission_card(7),
             ];
             view.pending_permissions.insert(7);
-            view.set_all_folds(false, cx);
+            view.set_all_folds(false, live_window, cx);
             assert!(
                 view.rows
                     .iter()

@@ -145,7 +145,7 @@ pub(super) fn plan_region(
     // chevron, collapsed-only preview) is the shared one.
     let block = FoldRow::block(
         SharedString::from(format!("agent-chat-plan-{pane_id}")),
-        FoldToggle::external(|view, cx| view.toggle_plan_collapsed(cx)),
+        FoldToggle::external(|view, _window, cx| view.toggle_plan_collapsed(cx)),
         !collapsed,
         header,
         |cx| plan_list(pane_id, plan, plan_scroll, t, dim, cx),

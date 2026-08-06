@@ -54,14 +54,14 @@ pub(super) fn activity_bar(
     )
     .ghost()
     .xsmall()
-    .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(true, cx)));
+    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
     let collapse = crate::ui::button(
         ("agent-chat-collapse-all", props.pane_id as usize),
         SharedString::from(s::agent_chat_collapse_all()),
     )
     .ghost()
     .xsmall()
-    .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(false, cx)));
+    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
 
     div()
         .flex_none()

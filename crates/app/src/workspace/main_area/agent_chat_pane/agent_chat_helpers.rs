@@ -12,11 +12,12 @@
 
 use daruda_acp::DiffView;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{AnyWindowHandle, AppContext as _, Context, Entity};
+use gpui::{AppContext as _, Context, Entity};
 
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RowKind, SUBAGENT_NEST_DEPTH_CAP, project};
 use super::view::AgentChatView;
+use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, DiffEditorModel, build_diff_editor_model,
@@ -551,26 +552,25 @@ fn diff_stat_from_hunks(
     DiffStat { added, removed }
 }
 
-/// Create + configure a read-only diff editor entity inside a single window
-/// re-entry against the view's stored `window_handle`. Mirrors the File
-/// viewer's editor construction (`multi_line` + `soft_wrap(false)` +
-/// `code_editor`) and the diff-config it applies (`set_disabled(true)` for
-/// read-only + decorations + injected highlight spans). Returns `None` if the
-/// owning window is gone.
+/// Create + configure a read-only diff editor entity against the live window
+/// `access` resolves. Mirrors the File viewer's editor construction
+/// (`multi_line` + `soft_wrap(false)` + `code_editor`) and the diff-config it
+/// applies (`set_disabled(true)` for read-only + decorations + injected
+/// highlight spans). Returns `None` if the owning window is gone.
 ///
-/// Uses the stored `window_handle` rather than
-/// `WindowRegistry::handle_for_workspace(cx.entity_id())` because after the
+/// The by-handle half of [`WindowAccess`] uses the view's stored handle rather
+/// than `WindowRegistry::handle_for_workspace(cx.entity_id())` because after the
 /// pane became its own entity `cx.entity_id()` is the view, not the Workspace,
 /// so the registry would no longer resolve the window.
 pub(in crate::workspace) fn create_diff_editor(
     cx: &mut Context<AgentChatView>,
-    window_handle: AnyWindowHandle,
+    access: &mut WindowAccess<'_>,
     pane_id: PaneId,
     language: &str,
     model: DiffEditorModel,
 ) -> Option<Entity<gpui_component::input::InputState>> {
     let language = language.to_owned();
-    match cx.update_window(window_handle, move |_, window, cx_w| {
+    match access.with(cx, move |window, cx_w| {
         cx_w.new(|cx_state| {
             // One synthetic-buffer line per decoration (no trailing newline in
             // `model.text`), so this is the editor's display-row count. Seeding

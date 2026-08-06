@@ -261,7 +261,9 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     cx.run_until_parked();
     // Completed flips the tool card to its collapsed default; the screenshot
     // repro has the card expanded — expand everything before measuring.
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
     cx.run_until_parked();
     cx.update_window(window_handle.into(), |_, window, _| window.refresh())
         .unwrap();
@@ -337,9 +339,13 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     cx.run_until_parked();
     // Expand the completed card (screenshot state), then collapse just the
     // diff — the reported clipping fold state.
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
     cx.run_until_parked();
-    view.update(cx, |v, cx| v.toggle_fold(FoldKey::Diff("e1#0".into()), cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.toggle_fold(FoldKey::Diff("e1#0".into()), window, cx)
+    });
     cx.run_until_parked();
     cx.update_window(window_handle.into(), |_, window, _| window.refresh())
         .unwrap();
@@ -423,7 +429,9 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
     });
     cx.run_until_parked();
     // Completed collapses the card by default; the embed only renders expanded.
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
     cx.run_until_parked();
     cx.update_window(window_handle.into(), |_, window, _| window.refresh())
         .unwrap();
@@ -475,4 +483,23 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
         scroll_h >= px(rows as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
         "scroll extent {scroll_h:?} does not cover the full diff — rows lost"
     );
+}
+
+/// Drive a fold the way the app does — from inside the window's own update
+/// cycle, where `cx.listener` handlers run. Materializing a card's embed
+/// editors needs that live `Window`; resolving one by handle there fails.
+fn fold_in_window<R>(
+    cx: &mut TestAppContext,
+    window_handle: gpui::AnyWindowHandle,
+    view: &gpui::Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    f: impl FnOnce(
+        &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
+        &mut gpui::Window,
+        &mut gpui::Context<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    ) -> R,
+) -> R {
+    cx.update_window(window_handle, |_, window, cx| {
+        view.update(cx, |v, cx| f(v, window, cx))
+    })
+    .expect("the window is open")
 }

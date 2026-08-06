@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use daruda_acp::{ChatItem, ToolOutputBlock};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::Context;
+use gpui::{Context, Window};
 
 use super::agent_chat_helpers::{
     DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor, diff_editor_key,
@@ -29,6 +29,7 @@ use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
 };
 use super::view::AgentChatView;
+use super::window_access::WindowAccess;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
@@ -45,8 +46,9 @@ use crate::workspace::main_area::file_view_pane::visual;
 #[derive(Debug)]
 pub(in crate::workspace) enum ReconcileScope {
     /// Every tool call. Required whenever `items` moved as a whole (connect,
-    /// `session/load` catch-up) or a theme swap invalidated the built editors —
-    /// only a full pass can see that a call left the conversation.
+    /// `session/load` catch-up) or every card's fold moved at once (expand-all /
+    /// collapse-all) — only a full pass can see that a call left the
+    /// conversation.
     All,
     /// Just this call. Nothing else in `items` changed, so no other cached key
     /// can have gone stale.
@@ -113,12 +115,17 @@ impl AgentChatView {
     pub(in crate::workspace) fn reconcile_embeds_after_fold(
         &mut self,
         scope: &ReconcileScope,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.reconcile_output_editors(scope, cx);
+        // A fold click runs inside the window's own update cycle, so the editors
+        // have to be built against the borrow the caller already holds — see
+        // [`WindowAccess`].
+        let mut access = WindowAccess::Live(window);
+        self.reconcile_output_editors(scope, &mut access, cx);
         if let Some(theme) = self.syntax_theme().map(str::to_owned) {
             let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
-            self.reconcile_diff_editors(&theme, is_light, scope, cx);
+            self.reconcile_diff_editors(&theme, is_light, scope, &mut access, cx);
         }
     }
 
@@ -149,6 +156,7 @@ impl AgentChatView {
         syntax_theme: &str,
         is_light: bool,
         scope: &ReconcileScope,
+        access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
     ) {
         let Some(colors) = cx
@@ -216,10 +224,9 @@ impl AgentChatView {
             self.assets.diff_editor_sources.remove(&key);
         }
 
-        let window_handle = self.window_handle;
         let pane_id = self.pane_id;
         for (key, fingerprint, language, model, stat) in pending {
-            if let Some(editor) = create_diff_editor(cx, window_handle, pane_id, &language, model) {
+            if let Some(editor) = create_diff_editor(cx, access, pane_id, &language, model) {
                 // Cache the stat under the same key as the editor so the fold
                 // summary (`+N −M`) reads it back via `diff_editor_key`. Stored
                 // only when the editor builds — a no-change diff yields no
@@ -259,6 +266,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn reconcile_output_editors(
         &mut self,
         scope: &ReconcileScope,
+        access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
     ) {
         // Collect the pure work first; entity creation re-enters the window,
@@ -302,11 +310,10 @@ impl AgentChatView {
             self.assets.output_editor_sources.remove(&key);
         }
 
-        let window_handle = self.window_handle;
         let pane_id = self.pane_id;
         for (key, fingerprint, text, language) in pending {
             if let Some(editor) =
-                create_output_editor(cx, window_handle, pane_id, text, language.as_deref())
+                create_output_editor(cx, access, pane_id, text, language.as_deref())
             {
                 self.assets
                     .output_editor_sources
@@ -525,9 +532,17 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::super::view::tests::make_test_view;
+    use super::super::window_access::WindowAccess;
     use super::{ReconcileScope, mermaid_key};
 
     const KEY: &str = "call_1#0";
+
+    /// The reconcilers' non-fold caller (an async ACP event) resolves the window
+    /// from the stored handle. `window_handle` is `Copy`, so this borrows nothing
+    /// the caller still needs.
+    fn by_handle(v: &super::AgentChatView) -> WindowAccess<'static> {
+        WindowAccess::ByHandle(v.window_handle)
+    }
 
     /// A syntax theme id the diff reconciler's highlight pass can resolve.
     const SYNTAX_THEME: &str = "base16-ocean.dark";
@@ -598,7 +613,7 @@ mod tests {
             // Settled → `ExpandedWhileActive` derives collapsed, and no user
             // override says otherwise.
             v.items = vec![settled_tool("call_a", vec![raw("big output")])];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| {
             assert!(
@@ -618,7 +633,7 @@ mod tests {
 
         view.update(cx, |v, cx| {
             v.items = vec![tool_named("call_a", vec![raw("streaming output")])];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| {
             assert!(v.assets.output_editors.contains_key("call_a#0"));
@@ -628,6 +643,14 @@ mod tests {
     /// Materialization has to follow the fold both ways: expanding a settled card
     /// builds its editors, collapsing it again releases them (and their focus
     /// handles).
+    ///
+    /// Driven through `window.update`, which is where the app drives it from: a
+    /// fold click arrives via `cx.listener`, i.e. from *inside* the window's own
+    /// update cycle. gpui takes the window out of `App::windows` for the duration
+    /// of an update, so an editor built by re-entering `update_window` there is
+    /// silently dropped ("window not found") and the body falls back to the
+    /// markdown walk the embed exists to avoid. Toggling through `Entity::update`
+    /// instead is outside that cycle and cannot see it.
     #[gpui::test]
     fn folding_a_tool_card_materializes_and_releases_its_editors(cx: &mut TestAppContext) {
         use super::super::fold::FoldKey;
@@ -637,13 +660,19 @@ mod tests {
 
         view.update(cx, |v, cx| {
             v.items = vec![settled_tool("call_a", vec![raw("out")])];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| assert!(v.assets.output_editors.is_empty()));
 
-        view.update(cx, |v, cx| {
-            v.toggle_fold(FoldKey::Tool("call_a".into()), cx);
-        });
+        let click = |cx: &mut TestAppContext| {
+            window
+                .update(cx, |v, window, cx| {
+                    v.toggle_fold(FoldKey::Tool("call_a".into()), window, cx);
+                })
+                .expect("the window is open");
+        };
+
+        click(cx);
         view.read_with(cx, |v, _| {
             assert!(
                 v.assets.output_editors.contains_key("call_a#0"),
@@ -651,9 +680,7 @@ mod tests {
             );
         });
 
-        view.update(cx, |v, cx| {
-            v.toggle_fold(FoldKey::Tool("call_a".into()), cx);
-        });
+        click(cx);
         view.read_with(cx, |v, _| {
             assert!(
                 v.assets.output_editors.is_empty(),
@@ -675,7 +702,7 @@ mod tests {
         items.push(tool_named("call_live", vec![raw("streaming")]));
         view.update(cx, |v, cx| {
             v.items = items;
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| {
             assert_eq!(
@@ -709,7 +736,7 @@ mod tests {
                 tool_named("call_a", vec![raw("a output")]),
                 tool_named("call_b", vec![raw("b output")]),
             ];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         let a_editor = view.read_with(cx, |v, _| {
             v.assets
@@ -725,7 +752,11 @@ mod tests {
                 tool_named("call_a", vec![raw("a output")]),
                 tool_named("call_b", vec![raw("b output\nmore")]),
             ];
-            v.reconcile_output_editors(&ReconcileScope::Tool("call_b".into()), cx);
+            v.reconcile_output_editors(
+                &ReconcileScope::Tool("call_b".into()),
+                &mut by_handle(v),
+                cx,
+            );
         });
         view.read_with(cx, |v, cx| {
             assert_eq!(
@@ -757,7 +788,7 @@ mod tests {
                 tool_named("call_a", vec![raw("keep me")]),
                 tool_named("call_b", vec![raw("first"), raw("second")]),
             ];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| assert_eq!(v.assets.output_editors.len(), 3));
 
@@ -766,7 +797,11 @@ mod tests {
                 tool_named("call_a", vec![raw("keep me")]),
                 tool_named("call_b", vec![raw("first")]),
             ];
-            v.reconcile_output_editors(&ReconcileScope::Tool("call_b".into()), cx);
+            v.reconcile_output_editors(
+                &ReconcileScope::Tool("call_b".into()),
+                &mut by_handle(v),
+                cx,
+            );
         });
         view.read_with(cx, |v, _| {
             assert!(
@@ -794,11 +829,11 @@ mod tests {
                 tool_named("call_a", vec![raw("a")]),
                 tool_named("call_b", vec![raw("b")]),
             ];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.update(cx, |v, cx| {
             v.items = vec![tool_named("call_a", vec![raw("a")])];
-            v.reconcile_output_editors(&ReconcileScope::All, cx);
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| {
             assert!(v.assets.output_editors.contains_key("call_a#0"));
@@ -854,7 +889,7 @@ mod tests {
         let time = |cx: &mut TestAppContext, scope: ReconcileScope| {
             let started = std::time::Instant::now();
             view.update(cx, |v, cx| {
-                v.reconcile_diff_editors(SYNTAX_THEME, false, &scope, cx);
+                v.reconcile_diff_editors(SYNTAX_THEME, false, &scope, &mut by_handle(v), cx);
             });
             started.elapsed()
         };
@@ -870,8 +905,10 @@ mod tests {
     /// The reconciler owns the whole editor lifecycle: one entity per
     /// qualifying output block, reused while the content is unchanged, rebuilt
     /// when a streamed output grows, and dropped once the block (or its index)
-    /// is gone. Driven through the view entity rather than `window.update` —
-    /// editor creation re-enters the window, which a held window update blocks.
+    /// is gone. Driven the way an ACP event drives it — outside any window
+    /// update, resolving the window from the stored handle. The fold-click path
+    /// (inside the cycle) is covered by
+    /// `a_fold_click_inside_the_window_update_cycle_builds_its_editors`.
     #[gpui::test]
     fn output_editors_are_built_reused_rebuilt_and_dropped(cx: &mut TestAppContext) {
         let window = make_test_view(cx);
@@ -880,7 +917,7 @@ mod tests {
         let reconcile_with = |cx: &mut TestAppContext, output: Vec<ToolOutputBlock>| {
             view.update(cx, |v, cx| {
                 v.items = vec![tool_call(output)];
-                v.reconcile_output_editors(&ReconcileScope::All, cx);
+                v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
             });
         };
         let editor_id = |cx: &mut TestAppContext| {
@@ -955,7 +992,13 @@ mod tests {
         let reconcile_with = |cx: &mut TestAppContext, items: Vec<ChatItem>| {
             view.update(cx, |v, cx| {
                 v.items = items;
-                v.reconcile_diff_editors(SYNTAX_THEME, false, &ReconcileScope::All, cx);
+                v.reconcile_diff_editors(
+                    SYNTAX_THEME,
+                    false,
+                    &ReconcileScope::All,
+                    &mut by_handle(v),
+                    cx,
+                );
             });
         };
         let cached = |cx: &mut TestAppContext, key: &str| {

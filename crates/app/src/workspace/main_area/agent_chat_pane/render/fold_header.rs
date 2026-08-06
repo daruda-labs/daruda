@@ -18,7 +18,8 @@
 //! [`FoldKey`] and so arrives as [`FoldToggle::External`].
 
 use gpui::{
-    AnyElement, Context, Div, ElementId, IntoElement, SharedString, Stateful, div, prelude::*, px,
+    AnyElement, Context, Div, ElementId, IntoElement, SharedString, Stateful, Window, div,
+    prelude::*, px,
 };
 
 use super::pulse_opacity;
@@ -184,8 +185,11 @@ enum FoldBody<'a> {
     SiblingRows,
 }
 
-/// Applies a header's collapse flip to the view.
-type ToggleFn = Box<dyn Fn(&mut AgentChatView, &mut Context<AgentChatView>) + 'static>;
+/// Applies a header's collapse flip to the view. Carries the click's live
+/// `&mut Window`: expanding a card materializes its embed editors, and building
+/// an editor needs a window the handler is already inside (see
+/// `agent_chat_pane::window_access`).
+type ToggleFn = Box<dyn Fn(&mut AgentChatView, &mut Window, &mut Context<AgentChatView>) + 'static>;
 
 /// What flipping a header's chevron changes. Every conversation header keys into
 /// the pane's [`FoldState`](super::FoldState); the plan region is collapsed by its
@@ -202,16 +206,16 @@ pub(super) enum FoldToggle {
 
 impl FoldToggle {
     pub(super) fn external(
-        f: impl Fn(&mut AgentChatView, &mut Context<AgentChatView>) + 'static,
+        f: impl Fn(&mut AgentChatView, &mut Window, &mut Context<AgentChatView>) + 'static,
     ) -> Self {
         Self::External(Box::new(f))
     }
 
     fn into_fn(self) -> ToggleFn {
         match self {
-            Self::Fold(key) => {
-                Box::new(move |view: &mut AgentChatView, cx| view.toggle_fold(key.clone(), cx))
-            }
+            Self::Fold(key) => Box::new(move |view: &mut AgentChatView, window, cx| {
+                view.toggle_fold(key.clone(), window, cx)
+            }),
             Self::External(f) => f,
         }
     }
@@ -414,12 +418,13 @@ fn disclosure_row(
     match target {
         ToggleTarget::Row => row
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| toggle(this, cx)))
+            .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
             .child(chevron),
         // Bind the click to the chevron itself; the row carries no click
         // handler, so selectable header content stays freely selectable.
-        ToggleTarget::Chevron => row
-            .child(chevron.on_toggle(cx.listener(move |this, _ev, _window, cx| toggle(this, cx)))),
+        ToggleTarget::Chevron => row.child(
+            chevron.on_toggle(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx))),
+        ),
     }
 }
 

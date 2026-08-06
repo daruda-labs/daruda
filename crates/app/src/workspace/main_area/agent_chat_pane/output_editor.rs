@@ -7,9 +7,10 @@
 
 use daruda_acp::ToolOutputBlock;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{AnyWindowHandle, AppContext as _, Context, Entity, Pixels, SharedString, px};
+use gpui::{AppContext as _, Context, Entity, Pixels, SharedString, px};
 
 use super::view::AgentChatView;
+use super::window_access::WindowAccess;
 use crate::ui::highlighter::{PLAIN_LANGUAGE, language_for_name};
 use crate::ui::theme;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -190,22 +191,22 @@ fn without_trailing_terminator(mut text: String) -> String {
     text
 }
 
-/// Create + configure the read-only editor for a verbatim output block inside a
-/// single window re-entry against the view's stored `window_handle`. `text` is
-/// taken by value — it moves straight into the editor state, which is why the
-/// reconciler owns it rather than borrowing. `language` is a fence tag or the
-/// name a `SourceText` block carries; `None` (or one the registry cannot colour)
-/// renders un-highlighted. Returns `None` if the owning window is gone.
+/// Create + configure the read-only editor for a verbatim output block against
+/// the live window `access` resolves. `text` is taken by value — it moves
+/// straight into the editor state, which is why the reconciler owns it rather
+/// than borrowing. `language` is a fence tag or the name a `SourceText` block
+/// carries; `None` (or one the registry cannot colour) renders un-highlighted.
+/// Returns `None` if the owning window is gone.
 pub(in crate::workspace) fn create_output_editor(
     cx: &mut Context<AgentChatView>,
-    window_handle: AnyWindowHandle,
+    access: &mut WindowAccess<'_>,
     pane_id: PaneId,
     text: String,
     language: Option<&str>,
 ) -> Option<Entity<crate::ui::InputState>> {
     let language = language.map_or_else(|| SharedString::from(PLAIN_LANGUAGE), language_for_name);
     let text = without_trailing_terminator(text);
-    match cx.update_window(window_handle, move |_, window, cx_w| {
+    match access.with(cx, move |window, cx_w| {
         cx_w.new(|cx_state| {
             // Wrapping re-wraps the whole text on every width change and makes
             // `display_rows()` width-dependent, so the chat list's measured row

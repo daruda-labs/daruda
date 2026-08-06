@@ -276,7 +276,9 @@ fn render_shell_output_card(
         );
     });
     cx.run_until_parked();
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
     cx.run_until_parked();
     cx.update_window(window_handle.into(), |_, window, _| window.refresh())
         .unwrap();
@@ -291,6 +293,7 @@ fn render_shell_output_card(
 /// cannot move, so "the transcript did not scroll" holds for free.
 fn push_filler_cards(
     cx: &mut TestAppContext,
+    window_handle: gpui::AnyWindowHandle,
     view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
     count: usize,
 ) {
@@ -326,8 +329,8 @@ fn push_filler_cards(
         });
     }
     cx.run_until_parked();
-    view.update(cx, |v, cx| {
-        v.set_all_folds(true, cx);
+    fold_in_window(cx, window_handle, view, |v, window, cx| {
+        v.set_all_folds(true, window, cx);
         // The transcript follows its tail, so the filler would push the card
         // under test out of the virtualized window and it would never paint.
         v.list_state.scroll_to(gpui::ListOffset {
@@ -366,7 +369,7 @@ fn wheel_down_over_embed(vcx: &mut gpui::VisualTestContext, embed: gpui::Bounds<
 #[gpui::test]
 async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut TestAppContext) {
     let (window_handle, view) = render_shell_output_card(cx, LARGE_ROWS, true);
-    push_filler_cards(cx, &view, 16);
+    push_filler_cards(cx, window_handle, &view, 16);
     cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
@@ -626,7 +629,9 @@ fn render_read_output_card(
         );
     });
     cx.run_until_parked();
-    view.update(cx, |v, cx| v.set_all_folds(true, cx));
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
     cx.run_until_parked();
     cx.update_window(window_handle.into(), |_, window, _| window.refresh())
         .unwrap();
@@ -766,4 +771,23 @@ fn output_editor_extents(
             state.scroll_size().height,
         )
     })
+}
+
+/// Drive a fold the way the app does — from inside the window's own update
+/// cycle, where `cx.listener` handlers run. Materializing a card's embed
+/// editors needs that live `Window`; resolving one by handle there fails.
+fn fold_in_window<R>(
+    cx: &mut TestAppContext,
+    window_handle: gpui::AnyWindowHandle,
+    view: &gpui::Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    f: impl FnOnce(
+        &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
+        &mut gpui::Window,
+        &mut gpui::Context<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    ) -> R,
+) -> R {
+    cx.update_window(window_handle, |_, window, cx| {
+        view.update(cx, |v, cx| f(v, window, cx))
+    })
+    .expect("the window is open")
 }

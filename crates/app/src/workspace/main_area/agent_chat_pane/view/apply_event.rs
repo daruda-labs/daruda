@@ -12,6 +12,7 @@ use gpui::Context;
 use super::super::agent_chat_helpers::{activity_bar_title, apply_info_field};
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::{LiveSubagentUnits, RowKind, project};
+use super::super::window_access::WindowAccess;
 use super::{
     ActivityState, AgentChatView, AgentSessionStatus, TelegramFirstResponseEffect,
     TelegramWatchAction, TurnOutcome, debug_list_trace_enabled,
@@ -422,7 +423,11 @@ impl AgentChatView {
         // every diff in the conversation per chunk, O(n²) over a long turn. Hence
         // `reconcile_scope`, which narrows each pass to the call that moved.
         if touched_tool {
-            self.reconcile_diff_editors(syntax_theme, is_light, &reconcile_scope, cx);
+            // An ACP event lands from a spawned task, outside any window update
+            // cycle, so the window is resolved from the stored handle — see
+            // [`WindowAccess`].
+            let mut access = WindowAccess::ByHandle(self.window_handle);
+            self.reconcile_diff_editors(syntax_theme, is_light, &reconcile_scope, &mut access, cx);
             // Tool-output images arrive on a `ToolCall`/`ToolCallUpdate`
             // (`touched_tool`), never on `touched_text` (that flag is set only
             // for assistant/thinking/user message text) — gate here, not next
@@ -431,7 +436,7 @@ impl AgentChatView {
             self.reconcile_tool_images(&reconcile_scope, cx);
             // Verbatim output blocks arrive on the same tool events as the
             // images above, so the same gate applies.
-            self.reconcile_output_editors(&reconcile_scope, cx);
+            self.reconcile_output_editors(&reconcile_scope, &mut access, cx);
         }
         // Mermaid fences arrive in message text AND in tool `Text` output blocks
         // (a tool writing/reading a .md file), so both flags trigger the scan.
