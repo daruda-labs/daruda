@@ -69,6 +69,26 @@ impl DiffColors {
             ..Self::from_theme(t)
         }
     }
+
+    /// Every colour channel this palette carries, so a caller can fingerprint the
+    /// palette without restating the field list (and silently missing one a later
+    /// field addition brings). Ordered; only the set of values matters to a hash.
+    pub(in crate::workspace) fn channels(&self) -> impl Iterator<Item = f32> {
+        [
+            self.add_bg,
+            self.del_bg,
+            self.hunk_bg,
+            self.add_text,
+            self.del_text,
+            self.ctx_text,
+            self.hunk_text,
+            self.hunk_ctx_text,
+            self.word_add_bg,
+            self.word_del_bg,
+        ]
+        .into_iter()
+        .flat_map(|c| [c.h, c.s, c.l, c.a])
+    }
 }
 
 /// Editor inputs derived from a diff's `VisualRow`s.

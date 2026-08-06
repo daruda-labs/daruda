@@ -568,6 +568,8 @@ impl AgentChatView {
             // A theme swap invalidates the whole conversation's cached artifacts,
             // not one call's — the only correct scope here is the full pass.
             this.reconcile_tool_images(&super::reconcile::ReconcileScope::All, cx);
+            // Diff embeds bake their palette in and cannot re-theme themselves.
+            this.reconcile_embeds_after_theme_change(cx);
         });
         Self {
             pane_id,
@@ -643,8 +645,10 @@ impl AgentChatView {
     }
 
     /// Record the Workspace-resolved syntax theme id. Single update site for
-    /// `syntax_theme`, called by `apply_event` with the value the Workspace
-    /// already passes it each event.
+    /// `syntax_theme`; `apply_event` writes the value the Workspace passes it
+    /// each event, and the config-reload path writes the new palette name
+    /// directly — an idle pane gets no events, so waiting for one would leave the
+    /// diff embeds fingerprinted against a palette the user already left.
     pub(in crate::workspace) fn set_syntax_theme(&mut self, theme: &str) {
         if self.syntax_theme.as_deref() != Some(theme) {
             self.syntax_theme = Some(theme.to_owned());

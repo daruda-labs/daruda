@@ -144,7 +144,7 @@ pub(in crate::workspace) fn output_editor_key(tool_id: &str, ix: usize) -> Strin
 /// Content fingerprint (text + language) so the reconciler rebuilds a streamed
 /// output that grew and skips one that did not change. Not cryptographic — a
 /// collision would only skip a rebuild, the same trade
-/// [`diff_source_fingerprint`](super::agent_chat_helpers::diff_source_fingerprint)
+/// [`diff_build_fingerprint`](super::agent_chat_helpers::diff_build_fingerprint)
 /// accepts.
 pub(in crate::workspace) fn output_source_fingerprint(src: &OutputEditorSource<'_>) -> u64 {
     use std::hash::{Hash, Hasher};

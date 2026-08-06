@@ -185,7 +185,20 @@ impl Workspace {
         let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
         let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
         let agent_chat_mermaid_theme_changed = bg_color_changed || fg_color_changed;
-        if bg_alpha_changed || agent_chat_mermaid_theme_changed || agent_chat_font_changed {
+        // The agent-chat diff embeds bake their palette in, so they only track a
+        // palette move through a rebuild. Both of these move it: the terminal
+        // mirror feeds the hunk-row colours *and* the light/dark syntax variant,
+        // and the syntax-palette name feeds the token colours. A UI-preset switch
+        // needs no entry here — it re-sets the `DarudaTheme` global, and each
+        // view's own observer covers that.
+        let agent_chat_diff_palette_changed =
+            agent_chat_mermaid_theme_changed || syntax_theme_changed;
+        if bg_alpha_changed
+            || agent_chat_mermaid_theme_changed
+            || agent_chat_font_changed
+            || agent_chat_diff_palette_changed
+        {
+            let syntax_theme = self.syntax_theme.clone();
             let views: Vec<_> = self
                 .main_area
                 .runtimes
@@ -201,6 +214,12 @@ impl Workspace {
                             !crate::ui::theme::agent_chat_syntax_is_light(cx),
                             cx,
                         );
+                    }
+                    if agent_chat_diff_palette_changed {
+                        // Push the new palette name before the pass reads it: an
+                        // idle pane sees no ACP event to carry it in.
+                        view.set_syntax_theme(&syntax_theme);
+                        view.reconcile_embeds_after_theme_change(cx);
                     }
                     cx.notify();
                 });

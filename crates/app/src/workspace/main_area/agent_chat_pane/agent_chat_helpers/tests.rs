@@ -335,7 +335,7 @@ fn diff_editor_keys_are_per_file() {
 /// editor. Same content must fingerprint identically so an unrelated
 /// tool-call touch doesn't churn the editor every pass.
 #[test]
-fn diff_source_fingerprint_changes_when_content_changes() {
+fn diff_build_fingerprint_tracks_content_and_theme() {
     let partial = DiffView {
         path: std::path::PathBuf::from("/tmp/x.rs"),
         old_text: None,
@@ -351,13 +351,20 @@ fn diff_source_fingerprint_changes_when_content_changes() {
         old_text: None,
         new_text: "fn greet() {}\n".to_owned(),
     };
+    const THEME: u64 = 7;
     assert_ne!(
-        diff_source_fingerprint(&partial),
-        diff_source_fingerprint(&full)
+        diff_build_fingerprint(&partial, THEME),
+        diff_build_fingerprint(&full, THEME)
     );
     assert_eq!(
-        diff_source_fingerprint(&partial),
-        diff_source_fingerprint(&partial_again)
+        diff_build_fingerprint(&partial, THEME),
+        diff_build_fingerprint(&partial_again, THEME)
+    );
+    // The theme is an input too: same diff, swapped palette, must not be
+    // mistaken for unchanged — a built diff embed cannot re-theme itself.
+    assert_ne!(
+        diff_build_fingerprint(&partial, THEME),
+        diff_build_fingerprint(&partial, THEME + 1)
     );
 }
 

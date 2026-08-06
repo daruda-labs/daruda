@@ -178,20 +178,57 @@ pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> St
     format!("{tool_call_id}#{di}")
 }
 
-/// Content fingerprint of a diff's editor-relevant fields (`old_text` +
-/// `new_text`). `reconcile_diff_editors` stores this alongside each built
-/// editor and compares it against the diff's *current* fingerprint on every
-/// pass: unchanged means the cached editor still matches; changed means a
-/// `ToolCallUpdate` replaced the diff since the editor was built (e.g. a
-/// streaming write growing from a partial snapshot to the final content) and
-/// the editor is stale and must be rebuilt. Not cryptographic — a same-key
-/// collision would only skip a rebuild it should have done, an acceptable
-/// cost for a `DefaultHasher` over ordinary diff sizes.
-pub(in crate::workspace) fn diff_source_fingerprint(diff: &DiffView) -> u64 {
+/// Fingerprint of **every input** `build_diff_view_model` consumes for one
+/// diff: its content, the `path` the editor's language comes from, and `theme`
+/// from [`diff_theme_fingerprint`].
+///
+/// `reconcile_diff_editors` stores this alongside each built editor and compares
+/// it against the current one on every pass, so one rule — "the fingerprint
+/// moved" — covers every reason a built editor can be stale: a `ToolCallUpdate`
+/// replaced the diff (a streaming write growing from a partial snapshot), the
+/// path changed the language, or the theme swapped under it. Covering the theme
+/// is what an earlier content-only fingerprint missed, and a diff embed cannot
+/// recover from that on its own — see [`diff_theme_fingerprint`].
+///
+/// Not cryptographic — a same-key collision would only skip a rebuild it should
+/// have done, an acceptable cost for a `DefaultHasher` over ordinary diff sizes.
+pub(in crate::workspace) fn diff_build_fingerprint(diff: &DiffView, theme: u64) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    diff.path.hash(&mut hasher);
     diff.old_text.hash(&mut hasher);
     diff.new_text.hash(&mut hasher);
+    theme.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Fingerprint of the theme inputs every diff in one pass shares — the syntax
+/// theme id, its light/dark variant, and the snapshotted palette.
+///
+/// A diff embed's colours are baked into `set_highlight_override` at build time,
+/// and that override is what the editor reads *instead of* resolving
+/// `cx.theme().highlight_theme` on every paint (`gpui_component`'s
+/// `input/element.rs`) — deliberately, since an interleaved +/- buffer is not
+/// valid source for any grammar. The consequence is that a built diff embed
+/// cannot follow a theme swap the way an output embed does; only a rebuild moves
+/// it. Folding this into [`diff_build_fingerprint`] is what makes the swap look
+/// like any other staleness to the reconciler.
+pub(in crate::workspace) fn diff_theme_fingerprint(
+    syntax_theme: &str,
+    is_light: bool,
+    colors: &DiffColors,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    syntax_theme.hash(&mut hasher);
+    is_light.hash(&mut hasher);
+    // `Hsla` is `f32`-based and so not `Hash`; hash the bit patterns. Equal
+    // colours always share a bit pattern here — these are copied straight out of
+    // the theme, never arithmetic results that could differ by a NaN or a signed
+    // zero.
+    for c in colors.channels() {
+        c.to_bits().hash(&mut hasher);
+    }
     hasher.finish()
 }
 

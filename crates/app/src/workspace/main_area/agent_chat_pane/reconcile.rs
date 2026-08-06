@@ -21,9 +21,9 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
 use super::agent_chat_helpers::{
-    DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor, diff_editor_key,
-    diff_editor_language, diff_source_fingerprint, is_active, mermaid_key, mermaid_sources,
-    tool_fold_key, tool_image_key,
+    DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
+    diff_build_fingerprint, diff_editor_key, diff_editor_language, diff_theme_fingerprint,
+    is_active, mermaid_key, mermaid_sources, tool_fold_key, tool_image_key,
 };
 use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
@@ -129,6 +129,36 @@ impl AgentChatView {
         }
     }
 
+    /// Rebuild the theme-dependent embeds after a UI theme swap.
+    ///
+    /// Only the diff embeds need it. They bake their palette into
+    /// `set_highlight_override`, which is what the editor reads *instead of*
+    /// resolving `cx.theme().highlight_theme` per paint — so a built diff embed
+    /// cannot follow a swap on its own, and a dark→light switch would otherwise
+    /// leave dark foregrounds on light hunk rows for the rest of the
+    /// conversation. An output embed keeps the built-in highlighter and is
+    /// already theme-live; rebuilding one would only churn it and drop its
+    /// scroll position. Mermaid rasters are re-themed by their own pass.
+    ///
+    /// The swap reaches the reconciler as a moved fingerprint (see
+    /// [`diff_theme_fingerprint`]), so this is a plain full pass — every embed
+    /// whose inputs actually changed rebuilds, and nothing else does.
+    ///
+    /// Runs outside any window update: a global observer and the config-reload
+    /// path both fire from `flush_effects`, after gpui has put the window back.
+    pub(in crate::workspace) fn reconcile_embeds_after_theme_change(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(theme) = self.syntax_theme().map(str::to_owned) else {
+            // No syntax theme seen yet, so no diff embed has been built either.
+            return;
+        };
+        let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+        let mut access = WindowAccess::ByHandle(self.window_handle);
+        self.reconcile_diff_editors(&theme, is_light, &ReconcileScope::All, &mut access, cx);
+    }
+
     /// Build the read-only diff editor entity for every tool-call file
     /// modification whose current diff content doesn't match the editor
     /// already cached for it. Called from `apply_event` after `items` mutates,
@@ -144,7 +174,7 @@ impl AgentChatView {
     /// (`daruda_acp::mapping`) replaces a tool call's `diffs` wholesale on every
     /// `ToolCallUpdate`, so a streaming write/edit can hand this the same
     /// `{tool_call_id}#{diff_index}` key with growing content across several
-    /// events. Comparing `diff_source_fingerprint` against the fingerprint
+    /// events. Comparing `diff_build_fingerprint` against the fingerprint
     /// stored when the cached editor was built catches that case — an
     /// unchanged fingerprint skips the rebuild, a changed one replaces the
     /// stale editor so it doesn't stay frozen on an early partial snapshot
@@ -179,6 +209,9 @@ impl AgentChatView {
             return;
         };
 
+        // Shared by every diff in this pass, so hashed once rather than per diff.
+        let theme = diff_theme_fingerprint(syntax_theme, is_light, &colors);
+
         // Collect the pure work first; entity creation re-enters the window,
         // which can't happen while the immutable `items` borrow is live.
         let mut pending: Vec<(String, u64, gpui::SharedString, DiffEditorModel, DiffStat)> =
@@ -193,7 +226,7 @@ impl AgentChatView {
             }
             for (di, diff) in tc.diffs.iter().enumerate() {
                 let key = diff_editor_key(&tc.id, di);
-                let fingerprint = diff_source_fingerprint(diff);
+                let fingerprint = diff_build_fingerprint(diff, theme);
                 if self.assets.diff_editor_sources.get(&key) == Some(&fingerprint) {
                     // Unchanged still counts as live, or the next pass would
                     // destroy and rebuild its editor.
@@ -534,6 +567,7 @@ mod tests {
     use super::super::view::tests::make_test_view;
     use super::super::window_access::WindowAccess;
     use super::{ReconcileScope, mermaid_key};
+    use crate::workspace::main_area::file_view_pane::diff_editor::DiffColors;
 
     const KEY: &str = "call_1#0";
 
@@ -546,6 +580,104 @@ mod tests {
 
     /// A syntax theme id the diff reconciler's highlight pass can resolve.
     const SYNTAX_THEME: &str = "base16-ocean.dark";
+
+    /// A theme swap has to reach the diff embeds, and reach *only* them.
+    ///
+    /// A diff embed bakes its palette in at build time: `set_highlight_override`
+    /// replaces the editor's own highlighter, and that override is what
+    /// `input/element.rs` reads instead of resolving
+    /// `cx.theme().highlight_theme` per paint. So nothing about a swap reaches a
+    /// built diff embed unless the reconciler rebuilds it — a dark→light swap
+    /// would otherwise leave dark foregrounds on light hunk rows for the rest of
+    /// the conversation. An output embed keeps the built-in highlighter and is
+    /// already theme-live, so rebuilding one would be pure churn (and would drop
+    /// its scroll position).
+    #[gpui::test]
+    fn a_theme_swap_rebuilds_diff_embeds_and_leaves_output_embeds_alone(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        cx.update(|cx| crate::ui::theme::set_agent_chat_bg(cx, 0, 0, 0));
+        view.update(cx, |v, cx| {
+            v.set_syntax_theme(SYNTAX_THEME);
+            v.items = vec![tool_call_with(
+                vec![raw("out")],
+                vec![diff("a.rs", "first\n")],
+            )];
+            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+            v.reconcile_diff_editors(
+                SYNTAX_THEME,
+                is_light,
+                &ReconcileScope::All,
+                &mut by_handle(v),
+                cx,
+            );
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
+        });
+        let built = |cx: &mut TestAppContext| {
+            view.read_with(cx, |v, _| {
+                (
+                    v.assets.diff_editors[KEY].entity_id(),
+                    v.assets.output_editors[KEY].entity_id(),
+                )
+            })
+        };
+        let dark = built(cx);
+
+        // Same diff, different theme — the content-only rule would skip this.
+        cx.update(|cx| crate::ui::theme::set_agent_chat_bg(cx, 255, 255, 255));
+        view.update(cx, |v, cx| v.reconcile_embeds_after_theme_change(cx));
+        let light = built(cx);
+
+        assert_ne!(
+            dark.0, light.0,
+            "a diff embed's baked palette only tracks a theme swap through a rebuild"
+        );
+        assert_eq!(
+            dark.1, light.1,
+            "an output embed resolves colours per paint, so a swap must not churn it"
+        );
+    }
+
+    /// And the swap has to *reach* that pass on its own. A UI-preset switch goes
+    /// through `apply_ui_theme`, which only re-sets the `DarudaTheme` global — so
+    /// the view's own observer is the whole delivery path.
+    #[gpui::test]
+    fn setting_the_theme_global_rebuilds_diff_embeds_through_the_observer(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.set_syntax_theme(SYNTAX_THEME);
+            v.items = vec![diff_tool_call(vec![diff("a.rs", "first\n")])];
+            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+            v.reconcile_diff_editors(
+                SYNTAX_THEME,
+                is_light,
+                &ReconcileScope::All,
+                &mut by_handle(v),
+                cx,
+            );
+        });
+        let before = view.read_with(cx, |v, _| v.assets.diff_editors[KEY].entity_id());
+
+        cx.update(|cx| {
+            // Any diff colour the palette snapshot carries will do; this one is
+            // read straight into `DiffColors::add_bg`.
+            cx.set_global(crate::ui::theme::DarudaTheme {
+                file_diff_add_bg: gpui::hsla(0.5, 0.5, 0.5, 1.0),
+                ..Default::default()
+            });
+        });
+        cx.run_until_parked();
+
+        assert_ne!(
+            before,
+            view.read_with(cx, |v, _| v.assets.diff_editors[KEY].entity_id()),
+            "replacing the theme global must reach the diff embeds through the \
+             view's own observer — nothing else delivers a UI-preset switch"
+        );
+    }
 
     fn tool_call(output: Vec<ToolOutputBlock>) -> ChatItem {
         tool_call_with(output, Vec::new())
@@ -850,8 +982,6 @@ mod tests {
     /// turn. A scoped pass must touch one call's content, not all of it.
     #[gpui::test]
     fn a_scoped_diff_reconcile_does_not_rehash_the_whole_conversation(cx: &mut TestAppContext) {
-        use super::diff_source_fingerprint;
-
         let window = make_test_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
@@ -867,6 +997,13 @@ mod tests {
                 ChatItem::ToolCall(tc)
             })
             .collect();
+        // The pass will fingerprint each diff against this same palette, so the
+        // pre-seed below has to use it too or every key would look changed.
+        let theme = cx.update(|cx| {
+            let colors =
+                DiffColors::from_agent_chat_theme(cx.global::<crate::ui::theme::DarudaTheme>(), cx);
+            super::diff_theme_fingerprint(SYNTAX_THEME, false, &colors)
+        });
         view.update(cx, |v, _| {
             v.items = seeded;
             // Pre-seed matching fingerprints so neither pass builds an editor.
@@ -880,7 +1017,7 @@ mod tests {
                 for (di, d) in tc.diffs.iter().enumerate() {
                     v.assets.diff_editor_sources.insert(
                         super::diff_editor_key(&tc.id, di),
-                        diff_source_fingerprint(d),
+                        super::diff_build_fingerprint(d, theme),
                     );
                 }
             }
