@@ -30,6 +30,7 @@ pub(crate) fn init_all(cx: &mut App) {
         let syntax = user.file_viewer.syntax_theme.clone();
         let editor_font_size = user.font.editor_size;
         let agent_chat_font_size = user.font.agent_chat_size;
+        let agent_chat_reading_width = user.agent.reading_width;
         let window_opacity = user.window.opacity;
         let term_colors = user.effective_colors();
         let term_bg = term_colors.background;
@@ -48,6 +49,9 @@ pub(crate) fn init_all(cx: &mut App) {
         // Seed the agent-chat font size so the conversation pane renders at the
         // configured size from the first paint.
         ui::theme::set_agent_chat_font_size(cx, agent_chat_font_size);
+        // Seed the reading-mode content width for AgentChat panes from the
+        // first paint.
+        ui::theme::set_agent_chat_reading_width(cx, agent_chat_reading_width);
         // Seed the background opacity so the agent-chat pane renders at the
         // configured window opacity from the first paint (mirrors the terminal
         // pane, whose alpha is seeded via its own construction path).

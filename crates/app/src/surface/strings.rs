@@ -1105,6 +1105,16 @@ pub fn agent_chat_collapse_all() -> String {
     rust_i18n::t!("agent_chat.collapse_all").into_owned()
 }
 
+/// Toolbar button tooltip when clicking will enable reading-width mode.
+pub fn agent_chat_reading_width_on() -> String {
+    rust_i18n::t!("agent_chat.reading_width_on").into_owned()
+}
+
+/// Toolbar button tooltip when clicking will return to full-width mode.
+pub fn agent_chat_reading_width_off() -> String {
+    rust_i18n::t!("agent_chat.reading_width_off").into_owned()
+}
+
 /// Section label for the bottom plan region.
 pub fn agent_chat_plan_label() -> String {
     rust_i18n::t!("agent_chat.plan_label").into_owned()

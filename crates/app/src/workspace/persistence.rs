@@ -677,9 +677,11 @@ impl Workspace {
                         // id was dropped above (fresh session applies
                         // `initial_modes` instead).
                         let mode_id = ac.mode_id.clone();
-                        content
-                            .view
-                            .update(cx, |v, _| v.last_known_mode_id = mode_id);
+                        let content_width = deserialize_chat_content_width(ac.content_width);
+                        content.view.update(cx, |v, _| {
+                            v.last_known_mode_id = mode_id;
+                            v.content_width = content_width;
+                        });
                     }
                     restored
                 } else {
@@ -831,6 +833,26 @@ pub(in crate::workspace) fn deserialize_view_mode(
     }
 }
 
+fn serialize_chat_content_width(
+    mode: crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth,
+) -> daruda_store::project::SerializedChatContentWidth {
+    use crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth;
+    match mode {
+        ChatContentWidth::Full => daruda_store::project::SerializedChatContentWidth::Full,
+        ChatContentWidth::Reading => daruda_store::project::SerializedChatContentWidth::Reading,
+    }
+}
+
+fn deserialize_chat_content_width(
+    mode: daruda_store::project::SerializedChatContentWidth,
+) -> crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth {
+    use crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth;
+    match mode {
+        daruda_store::project::SerializedChatContentWidth::Full => ChatContentWidth::Full,
+        daruda_store::project::SerializedChatContentWidth::Reading => ChatContentWidth::Reading,
+    }
+}
+
 /// Select the cwd to use when spawning a restored terminal pane.
 ///
 /// `saved` is the path serialized at the time of the last save (reported
@@ -920,6 +942,7 @@ fn serialize_layout(
                     agent_id: Some(v.agent_id.clone()),
                     account_id: ac.account.to_persisted(),
                     mode_id: v.last_known_mode_id.clone(),
+                    content_width: serialize_chat_content_width(v.content_width),
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {

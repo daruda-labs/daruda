@@ -735,3 +735,25 @@ fn input_max_rows_defaults_and_clamps() {
     let omitted: AgentConfig = toml::from_str("use_modifier_to_send = false").expect("deserialize");
     assert_eq!(omitted.input_max_rows, INPUT_MAX_ROWS_DEFAULT);
 }
+
+#[test]
+fn reading_width_defaults_round_trips_and_clamps() {
+    assert_eq!(AgentConfig::default().reading_width, READING_WIDTH_DEFAULT);
+
+    let cfg: AgentConfig = toml::from_str("reading_width = 840.5").expect("deserialize");
+    assert_eq!(cfg.reading_width, 840.5);
+    let toml_str = toml::to_string(&cfg).expect("serialize");
+    let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back.reading_width, 840.5);
+
+    let mut too_low: AgentConfig = toml::from_str("reading_width = 120.0").expect("deserialize");
+    too_low.clamp();
+    assert_eq!(too_low.reading_width, READING_WIDTH_MIN);
+
+    let mut too_high: AgentConfig = toml::from_str("reading_width = 5000.0").expect("deserialize");
+    too_high.clamp();
+    assert_eq!(too_high.reading_width, READING_WIDTH_MAX);
+
+    let omitted: AgentConfig = toml::from_str("use_modifier_to_send = false").expect("deserialize");
+    assert_eq!(omitted.reading_width, READING_WIDTH_DEFAULT);
+}

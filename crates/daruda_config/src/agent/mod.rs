@@ -532,6 +532,10 @@ pub struct AgentConfig {
     /// then clips and scrolls. Clamped to
     /// [`INPUT_MAX_ROWS_MIN`]..=[`INPUT_MAX_ROWS_MAX`] at load time.
     pub input_max_rows: u8,
+    /// Fixed content-column width used when an AgentChat pane is toggled into
+    /// reading-width mode. Clamped to
+    /// [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
+    pub reading_width: f32,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
     /// the option stays in the session state and the agent can still change it.
@@ -568,6 +572,12 @@ pub const INPUT_MAX_ROWS_MIN: u8 = 2;
 pub const INPUT_MAX_ROWS_MAX: u8 = 20;
 /// Default maximum rows for the bottom input before it scrolls.
 pub const INPUT_MAX_ROWS_DEFAULT: u8 = 8;
+/// Minimum readable-content column width for AgentChat.
+pub const READING_WIDTH_MIN: f32 = 360.0;
+/// Maximum readable-content column width for AgentChat.
+pub const READING_WIDTH_MAX: f32 = 2400.0;
+/// Default readable-content column width for AgentChat.
+pub const READING_WIDTH_DEFAULT: f32 = 700.0;
 
 impl Default for AgentConfig {
     fn default() -> Self {
@@ -575,6 +585,7 @@ impl Default for AgentConfig {
             default_permission_mode: DefaultPermissionMode::default(),
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
+            reading_width: READING_WIDTH_DEFAULT,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }
@@ -608,10 +619,13 @@ impl AgentConfig {
         priority
     }
 
-    /// Clamp `input_max_rows` to its valid range.
+    /// Clamp numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
         self.input_max_rows = self
             .input_max_rows
             .clamp(INPUT_MAX_ROWS_MIN, INPUT_MAX_ROWS_MAX);
+        self.reading_width = self
+            .reading_width
+            .clamp(READING_WIDTH_MIN, READING_WIDTH_MAX);
     }
 }

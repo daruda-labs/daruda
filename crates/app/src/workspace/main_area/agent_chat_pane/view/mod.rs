@@ -153,6 +153,29 @@ pub(in crate::workspace) enum ActivityState {
     AwaitingPermission,
 }
 
+/// AgentChat conversation content-column width mode. `Full` preserves the
+/// existing pane-wide layout; `Reading` constrains each row to the configured
+/// reading width.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) enum ChatContentWidth {
+    #[default]
+    Full,
+    Reading,
+}
+
+impl ChatContentWidth {
+    pub(in crate::workspace) fn is_reading(self) -> bool {
+        matches!(self, Self::Reading)
+    }
+
+    pub(in crate::workspace) fn toggle(self) -> Self {
+        match self {
+            Self::Full => Self::Reading,
+            Self::Reading => Self::Full,
+        }
+    }
+}
+
 /// Stable identity of a queued prompt, minted per pane. Lets the strip target
 /// an entry for removal independent of its position, which shifts as earlier
 /// entries drain.
@@ -447,6 +470,9 @@ pub(in crate::workspace) struct AgentChatView {
     /// Per-conversation fold state — which blocks the user has explicitly
     /// expanded / collapsed. Transient / session-only; never serialized.
     pub(in crate::workspace) fold: FoldState,
+    /// Per-pane content-column width mode. Persisted by the workspace snapshot;
+    /// default `Full` keeps existing pane-wide wrapping.
+    pub(in crate::workspace) content_width: ChatContentWidth,
     /// Virtualized conversation list state (gpui `list`). [`FollowMode::Tail`]
     /// auto-scrolls with streaming output and re-engages when the user scrolls
     /// back to the bottom. Synced with `items` via [`Self::sync_list_after`].
@@ -594,6 +620,7 @@ impl AgentChatView {
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
             fold: FoldState::default(),
+            content_width: ChatContentWidth::Full,
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
                 // arrive. `Top` alignment + `Tail` follow = scroll history up

@@ -172,6 +172,10 @@ impl Workspace {
             (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat_size).abs()
                 > f32::EPSILON;
         crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat_size);
+        let agent_chat_reading_width_changed =
+            (crate::ui::theme::agent_chat_reading_width(cx) - config.agent.reading_width).abs()
+                > f32::EPSILON;
+        crate::ui::theme::set_agent_chat_reading_width(cx, config.agent.reading_width);
 
         // Background opacity drives both the terminal pane fill (pushed above)
         // and the agent-chat pane background. Mirror to the GPUI-side global;
@@ -196,6 +200,7 @@ impl Workspace {
         if bg_alpha_changed
             || agent_chat_mermaid_theme_changed
             || agent_chat_font_changed
+            || agent_chat_reading_width_changed
             || agent_chat_diff_palette_changed
         {
             let syntax_theme = self.syntax_theme.clone();
@@ -220,6 +225,9 @@ impl Workspace {
                         // idle pane sees no ACP event to carry it in.
                         view.set_syntax_theme(&syntax_theme);
                         view.reconcile_embeds_after_theme_change(cx);
+                    }
+                    if agent_chat_reading_width_changed && view.content_width.is_reading() {
+                        view.list_state.remeasure();
                     }
                     cx.notify();
                 });

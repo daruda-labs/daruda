@@ -176,6 +176,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         agent_id: Some("claude".to_string()),
         account_id: Some(id),
         mode_id: None,
+        content_width: SerializedChatContentWidth::Full,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -199,6 +200,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: Some("acceptEdits".to_string()),
+        content_width: SerializedChatContentWidth::Full,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -208,6 +210,26 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert!(legacy.mode_id.is_none());
+}
+
+#[test]
+fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: Some("sess-abc123".to_string()),
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        content_width: SerializedChatContentWidth::Reading,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.content_width, SerializedChatContentWidth::Reading);
+
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(legacy.content_width, SerializedChatContentWidth::Full);
 }
 
 #[test]
@@ -226,6 +248,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             agent_id: Some("claude".to_string()),
             account_id: None,
             mode_id: None,
+            content_width: SerializedChatContentWidth::Full,
         }),
         account_id: None,
     };
@@ -265,6 +288,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             agent_id: None,
             account_id: None,
             mode_id: None,
+            content_width: SerializedChatContentWidth::Full,
         }),
         account_id: None,
     };

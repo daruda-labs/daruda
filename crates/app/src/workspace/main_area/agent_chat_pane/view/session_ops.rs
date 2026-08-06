@@ -214,6 +214,25 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Toggle this pane between pane-wide wrapping and the configured reading
+    /// column. Width changes can reflow every row, so invalidate all list
+    /// measurements and persist the pane-local preference.
+    pub(in crate::workspace) fn toggle_content_width(&mut self, cx: &mut Context<Self>) {
+        self.content_width = self.content_width.toggle();
+        self.list_state.remeasure();
+        cx.notify();
+
+        let window_handle = self.window_handle;
+        cx.defer(move |cx| {
+            if let Some(workspace) =
+                crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+            {
+                // SILENT-OK: the window may close before the deferred save runs.
+                let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
+            }
+        });
+    }
+
     /// Collapse / expand the bottom plan region. The plan is a derived render
     /// of `plan` (full-replaced by the agent), so this only flips the local
     /// presentation flag and notifies — no model rebuild needed.

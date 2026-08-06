@@ -237,6 +237,8 @@ agent_chat:
   empty: "에이전트에게 무엇이든 물어보세요."
   expand_all: "모두 펼치기"
   collapse_all: "모두 접기"
+  reading_width_on: "읽기 폭 사용"
+  reading_width_off: "전체 폭 사용"
   last_active_tooltip: "마지막 활동: %{time}"
   context_tooltip: "컨텍스트: %{used} / %{size} 토큰 (%{percent}%)%{cost}"
   plan_label: "계획"

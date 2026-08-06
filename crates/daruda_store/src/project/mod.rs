@@ -334,6 +334,25 @@ pub struct SerializedAgentChatContent {
     /// `restore_mode` parameter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode_id: Option<String>,
+    /// Per-pane AgentChat content width mode. Missing in pre-feature state
+    /// files, defaulting to `Full` so existing panes keep using the whole pane.
+    #[serde(default, skip_serializing_if = "SerializedChatContentWidth::is_full")]
+    pub content_width: SerializedChatContentWidth,
+}
+
+/// Serializable mirror of the app-side AgentChat content-width mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerializedChatContentWidth {
+    #[default]
+    Full,
+    Reading,
+}
+
+impl SerializedChatContentWidth {
+    fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

@@ -1,5 +1,5 @@
 //! Pane chrome around the conversation: the top status banner, the activity
-//! bar (title + expand/collapse), and the inline "agent is working" indicator
+//! bar (title + icon controls), and the inline "agent is working" indicator
 //! with its animated pulse dots and elapsed clock.
 
 use daruda_acp::{ChatItem, ConnectPhase, UsageView};
@@ -9,18 +9,24 @@ use gpui::{
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Sizable as _, StatusPulseClock};
+use crate::ui::{
+    ButtonVariants as _, Icon, Selectable as _, Sizable as _, StatusPulseClock, button_bare,
+};
 use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, RuntimePrepPhase,
+    AgentChatView, AgentSessionStatus, ChatContentWidth, RuntimePrepPhase,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Pane activity bar: resolved session title on the LEFT, "Expand all" /
-/// "Collapse all" ghost buttons on the RIGHT. Always rendered — it holds the
-/// fold buttons even while the conversation is empty or still connecting. The
-/// `title` is already resolved by the caller (`activity_bar_title`, falling
-/// back to the agent name). The fold buttons appear only when `has_items` is
-/// true (render purity: no logic here, just `.when()`).
+const ICON_UNFOLD_MORE: &str = "icons/ui/unfold-more.svg";
+const ICON_UNFOLD_LESS: &str = "icons/ui/unfold-less.svg";
+const ICON_READING_WIDTH: &str = "icons/ui/chrome-reader-mode.svg";
+
+/// Pane activity bar: resolved session title on the left, icon controls on the
+/// right. Always rendered: the reading-width toggle is available even while the
+/// conversation is empty or still connecting. The `title` is already resolved
+/// by the caller (`activity_bar_title`, falling back to the agent name). The
+/// fold buttons appear only when `has_items` is true (render purity: no logic
+/// here, just `.when()`).
 /// A bottom hairline separates the bar from the conversation body.
 pub(super) struct ActivityBarProps<'a> {
     pub pane_id: PaneId,
@@ -29,6 +35,7 @@ pub(super) struct ActivityBarProps<'a> {
     pub last_active: Option<&'a str>,
     pub usage: Option<&'a UsageView>,
     pub has_items: bool,
+    pub content_width: ChatContentWidth,
     pub dim: f32,
 }
 
@@ -48,20 +55,31 @@ pub(super) fn activity_bar(
         .map(format_last_active)
         .map(|when| SharedString::from(s::agent_chat_last_active_tooltip(&when)));
 
-    let expand = crate::ui::button(
-        ("agent-chat-expand-all", props.pane_id as usize),
-        SharedString::from(s::agent_chat_expand_all()),
-    )
-    .ghost()
-    .xsmall()
-    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
-    let collapse = crate::ui::button(
-        ("agent-chat-collapse-all", props.pane_id as usize),
-        SharedString::from(s::agent_chat_collapse_all()),
-    )
-    .ghost()
-    .xsmall()
-    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
+    let expand = button_bare(("agent-chat-expand-all", props.pane_id as usize))
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path(ICON_UNFOLD_MORE))
+        .tooltip(SharedString::from(s::agent_chat_expand_all()))
+        .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
+    let collapse = button_bare(("agent-chat-collapse-all", props.pane_id as usize))
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path(ICON_UNFOLD_LESS))
+        .tooltip(SharedString::from(s::agent_chat_collapse_all()))
+        .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
+    let reading_selected = props.content_width.is_reading();
+    let reading_tooltip = if reading_selected {
+        s::agent_chat_reading_width_off()
+    } else {
+        s::agent_chat_reading_width_on()
+    };
+    let reading_width = button_bare(("agent-chat-reading-width", props.pane_id as usize))
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path(ICON_READING_WIDTH))
+        .tooltip(SharedString::from(reading_tooltip))
+        .selected(reading_selected)
+        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_content_width(cx)));
 
     div()
         .flex_none()
@@ -146,22 +164,20 @@ pub(super) fn activity_bar(
                     .tooltip(crate::ui::tooltip::text(SharedString::from(tip))),
             )
         })
-        .when(props.has_items, |row| {
-            row.child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                    .text_color(theme::dim_toward_gray(
-                        theme::agent_chat_fg_muted(cx),
-                        props.dim,
-                    ))
-                    .child(expand)
-                    .child(collapse),
-            )
-        })
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::AGENT_CHAT_MSG_GAP))
+                .text_color(theme::dim_toward_gray(
+                    theme::agent_chat_fg_muted(cx),
+                    props.dim,
+                ))
+                .when(props.has_items, |bar| bar.child(expand).child(collapse))
+                .child(reading_width),
+        )
 }
 
 fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {

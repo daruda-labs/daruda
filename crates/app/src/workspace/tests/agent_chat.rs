@@ -8,7 +8,9 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
+use crate::workspace::main_area::agent_chat_pane::view::{
+    AgentChatView, AgentSessionStatus, ChatContentWidth,
+};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -615,6 +617,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     .expect("agent chat view present");
                 view.update(cx, |v, cx| {
                     v.session_title = Some("Investigate flaky test".to_string());
+                    v.content_width = ChatContentWidth::Reading;
                     cx.notify();
                 });
 
@@ -674,12 +677,13 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     view.session_title.clone(),
                     view.restoring,
                     view.handle.is_none(),
+                    view.content_width,
                 )
             })
             .collect::<Vec<_>>();
         let titled = views
             .iter()
-            .find(|(_, session_id, _, _, _)| session_id.as_deref() == Some("sess-restore-123"))
+            .find(|(_, session_id, _, _, _, _)| session_id.as_deref() == Some("sess-restore-123"))
             .expect("restored titled agent chat pane present");
         assert_eq!(
             titled.2.as_deref(),
@@ -688,10 +692,15 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
         );
         assert!(!titled.3, "a restored dormant pane is not yet loading");
         assert!(titled.4, "no live session until first focus connects");
+        assert_eq!(
+            titled.5,
+            ChatContentWidth::Reading,
+            "per-pane reading-width mode must round-trip"
+        );
 
         let codex = views
             .iter()
-            .find(|(agent_id, _, _, _, _)| agent_id == "codex")
+            .find(|(agent_id, _, _, _, _, _)| agent_id == "codex")
             .expect("restored codex-owned pane present");
         assert_eq!(
             codex.0, "codex",
@@ -733,24 +742,28 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     view.agent_id.clone(),
                     view.session_id.clone(),
                     view.session_title.clone(),
+                    view.content_width,
                 )
             })
             .collect::<Vec<_>>();
         assert!(
-            views.iter().all(|(agent_id, _, _)| *agent_id == default_id),
+            views
+                .iter()
+                .all(|(agent_id, _, _, _)| *agent_id == default_id),
             "every restored agent-chat pane falls back to or keeps the default agent"
         );
         assert!(
-            views.iter().any(|(_, session_id, title)| {
+            views.iter().any(|(_, session_id, title, content_width)| {
                 session_id.as_deref() == Some("sess-restore-123")
                     && title.as_deref() == Some("Investigate flaky test")
+                    && *content_width == ChatContentWidth::Reading
             }),
-            "a default-agent session keeps its persisted id and title"
+            "a default-agent session keeps its persisted id, title, and content width"
         );
         assert!(
             views
                 .iter()
-                .any(|(_, session_id, title)| { session_id.is_none() && title.is_none() }),
+                .any(|(_, session_id, title, _)| { session_id.is_none() && title.is_none() }),
             "session id is dropped when its owning agent is absent (resume invalid)"
         );
     });

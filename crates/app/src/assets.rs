@@ -7,6 +7,9 @@
 //! File icons are sourced from material-icon-theme (MIT).
 //! Copyright (c) 2025 Material Extensions / Philipp Kief.
 //! See LICENSES/material-icon-theme-MIT.txt for the full attribution.
+//!
+//! UI control icons under `icons/ui/` are sourced from Google Material
+//! Symbols (Apache-2.0). See LICENSES/material-symbols-Apache-2.0.txt.
 
 use std::borrow::Cow;
 
@@ -68,6 +71,11 @@ impl AssetSource for DarudaAssets {
             "icons/agents/sigit.svg" => icon!("agents/sigit.svg"),
             "icons/agents/stakpak.svg" => icon!("agents/stakpak.svg"),
             "icons/agents/vtcode.svg" => icon!("agents/vtcode.svg"),
+
+            // ── UI controls ───────────────────────────────────────────────
+            "icons/ui/chrome-reader-mode.svg" => icon!("ui/chrome-reader-mode.svg"),
+            "icons/ui/unfold-less.svg" => icon!("ui/unfold-less.svg"),
+            "icons/ui/unfold-more.svg" => icon!("ui/unfold-more.svg"),
 
             // ── Folders ──────────────────────────────────────────────────
             "icons/folder.svg" => icon!("folder.svg"),
@@ -179,5 +187,30 @@ impl AssetSource for DarudaAssets {
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
         gpui_component_assets::Assets.list(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UI_ICON_PATHS: &[&str] = &[
+        "icons/ui/chrome-reader-mode.svg",
+        "icons/ui/unfold-less.svg",
+        "icons/ui/unfold-more.svg",
+    ];
+
+    #[test]
+    fn ui_control_icons_are_embedded_in_the_binary() {
+        for path in UI_ICON_PATHS {
+            let bytes = DarudaAssets
+                .load(path)
+                .unwrap_or_else(|e| panic!("loading {path} errored: {e}"))
+                .unwrap_or_else(|| panic!("{path} is not registered in assets.rs"));
+            assert!(
+                bytes.windows(4).any(|w| w == b"<svg"),
+                "{path} resolved to something that is not an SVG"
+            );
+        }
     }
 }

@@ -417,6 +417,27 @@ pub fn set_agent_chat_font_size(cx: &mut App, size: f32) {
     cx.set_global(AgentChatFontSize(size));
 }
 
+/// Agent-chat reading-mode content width in pixels, mirrored from config
+/// `agent.reading_width`. Single update site:
+/// [`set_agent_chat_reading_width`], called from startup and config reload.
+#[derive(Clone, Copy)]
+struct AgentChatReadingWidth(f32);
+
+impl gpui::Global for AgentChatReadingWidth {}
+
+/// Read the AgentChat reading-mode content width. Defaults to the config
+/// default before startup mirrors are seeded.
+pub fn agent_chat_reading_width(cx: &App) -> f32 {
+    cx.try_global::<AgentChatReadingWidth>()
+        .map(|g| g.0)
+        .unwrap_or(daruda_config::READING_WIDTH_DEFAULT)
+}
+
+/// Mirror the resolved config `agent.reading_width` for AgentChat render.
+pub fn set_agent_chat_reading_width(cx: &mut App, width: f32) {
+    cx.set_global(AgentChatReadingWidth(width));
+}
+
 /// Background opacity (0.1–1.0), mirrored from config `window.opacity` — the
 /// same value that drives terminal-pane background translucency. Lets the
 /// agent-chat pane render its background at the window opacity so it matches

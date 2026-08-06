@@ -496,6 +496,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             agent_id: Some(agent_id),
             account_id: Some(claude_account),
             mode_id: None,
+            content_width: daruda_store::project::SerializedChatContentWidth::Full,
         }),
         account_id: None,
     };

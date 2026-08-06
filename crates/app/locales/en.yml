@@ -237,6 +237,8 @@ agent_chat:
   empty: "Ask the agent anything to get started."
   expand_all: "Expand all"
   collapse_all: "Collapse all"
+  reading_width_on: "Use reading width"
+  reading_width_off: "Use full width"
   last_active_tooltip: "Last active: %{time}"
   context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)%{cost}"
   plan_label: "Plan"

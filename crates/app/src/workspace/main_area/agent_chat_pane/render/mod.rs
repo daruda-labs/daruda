@@ -110,7 +110,9 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, RenderRow, RowKind};
-use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AssetCache};
+use crate::workspace::main_area::agent_chat_pane::view::{
+    AgentChatView, AssetCache, ChatContentWidth,
+};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Build the element tree for an Agent chat pane.
@@ -147,6 +149,7 @@ pub(in crate::workspace) fn render(
             last_active: content.session_updated_at.as_deref(),
             usage: content.session_usage.as_ref(),
             has_items: !content.items.is_empty(),
+            content_width: content.content_width,
             dim,
         },
         cx,
@@ -366,7 +369,7 @@ fn render_row(
     // A new turn (a `User` row past the first) gets extra top space so
     // consecutive turns read as distinct exchanges.
     let turn_break = ix != 0 && matches!(row.kind, RowKind::User(_));
-    div()
+    let row_el = div()
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
@@ -377,8 +380,17 @@ fn render_row(
         .when(row.indent > 0, |d| {
             d.pl(px(theme::AGENT_CHAT_PAD_X * (row.indent as f32 + 1.0)))
         })
-        .child(inner)
-        .into_any_element()
+        .child(inner);
+    match this.content_width {
+        ChatContentWidth::Full => row_el.into_any_element(),
+        ChatContentWidth::Reading => div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .justify_center()
+            .child(row_el.max_w(px(theme::agent_chat_reading_width(cx))))
+            .into_any_element(),
+    }
 }
 
 /// The blink opacity for the shared 2-tick `StatusPulseClock` pulse:
