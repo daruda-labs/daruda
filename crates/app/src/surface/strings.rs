@@ -4018,11 +4018,11 @@ mod tests {
     /// Recursively collect dotted key paths for every scalar leaf in a
     /// YAML mapping tree (e.g. `common.btn_cancel`).
     fn collect_locale_keys(
-        value: &serde_yaml::Value,
+        value: &yaml_serde::Value,
         prefix: &str,
         out: &mut std::collections::BTreeSet<String>,
     ) {
-        if let serde_yaml::Value::Mapping(map) = value {
+        if let yaml_serde::Value::Mapping(map) = value {
             for (k, v) in map {
                 let key = k.as_str().unwrap_or("<non-string-key>");
                 let path = if prefix.is_empty() {
@@ -4042,10 +4042,10 @@ mod tests {
     /// key string at runtime, so key drift must fail the build.
     #[test]
     fn locale_en_ko_key_parity() {
-        let en: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../../locales/en.yml")).unwrap();
-        let ko: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../../locales/ko.yml")).unwrap();
+        let en: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/en.yml")).unwrap();
+        let ko: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/ko.yml")).unwrap();
 
         let mut en_keys = std::collections::BTreeSet::new();
         let mut ko_keys = std::collections::BTreeSet::new();

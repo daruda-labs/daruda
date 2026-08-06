@@ -121,7 +121,7 @@ fn round_trip_preserves_yaml_reserved_scalar_strings() {
 
 #[test]
 fn round_trip_preserves_extra_keys_with_reserved_scalar_values() {
-    // `extra` keys go through serde_yaml directly, so YAML's core
+    // `extra` keys go through yaml_serde directly, so YAML's core
     // schema handles them — but verify a representative sample so we
     // notice if we ever change the extra-key path.
     let yaml = "name: x\ncustom: \"true\"\nother_count: \"42\"\n";
