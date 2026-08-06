@@ -219,6 +219,7 @@ pub(in crate::workspace) fn render_mermaid_raster(
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let options = usvg_options();
         let svg = super::mermaid_node_contrast::force_node_label_contrast(&svg, &options);
+        let svg = super::mermaid_label_stroke::suppress_label_text_stroke(&svg);
         let svg = super::mermaid_label_geometry::align_label_backgrounds(&svg, &options);
         rasterize_svg(&svg).ok()
     }))

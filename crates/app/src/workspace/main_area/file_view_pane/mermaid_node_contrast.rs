@@ -18,11 +18,14 @@
 //! declared; only the label text color is corrected. Two shapes of label
 //! text exist in practice:
 //!
-//! - **In-subtree** (flowchart `style`, class diagram `classDef`): the label
-//!   lives as a `<tspan>` inside the node's own `<g id="merman-...">`. Fixed
-//!   by injecting an ID-scoped `#id tspan{fill:...}` rule into the SVG's
-//!   `<style>` block — a `fill` set directly on an element always wins over
-//!   an inherited one, regardless of the ancestor rule's specificity.
+//! - **In-subtree** (flowchart `style`, class diagram `classDef`, state
+//!   diagram `classDef`): the label lives as a `<tspan>` inside the node's
+//!   own `<g id="...">`. Fixed by injecting an ID-scoped `#id tspan{fill:...}`
+//!   rule into the SVG's `<style>` block — a `fill` set directly on an
+//!   element always wins over an inherited one, regardless of the ancestor
+//!   rule's specificity. Node ids aren't scoped to a `merman-` prefix (state
+//!   diagrams use `state-<name>-<n>`, not `merman-<kind>-<name>-<n>`), so
+//!   detection keys on the node's `class="node ..."` token instead.
 //! - **Sibling fallback** (ER diagram `style`): merman renders ER labels
 //!   through a `foreignObject` HTML fallback path that resvg can't paint, so
 //!   it substitutes a plain `<text fill="...">` positioned to coincide with
@@ -37,6 +40,10 @@
 //! collide with `mermaid_host_scoped_css`'s `text[fill="#000"]` force-rewrite
 //! (a *different* fix, for merman's separately hardcoded black text
 //! elsewhere), silently undoing this one.
+//!
+//! This module only ever sets `fill`. A `stroke` bleeding into label text
+//! from an ancestor's `classDef`/`style` — a separate bug some diagram
+//! types' CSS emission causes — is `mermaid_label_stroke`'s job.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -59,7 +66,8 @@ const MIN_SIGNIFICANT_ALPHA: f64 = 0.2;
 /// A node whose shape carries an author-declared fill (`classDef`/`style`),
 /// found on the un-probed source SVG.
 struct CustomNode {
-    /// merman's own unique id for the node's `<g>`, e.g. `merman-flowchart-B-1`.
+    /// merman's own unique id for the node's `<g>`, e.g. `merman-flowchart-B-1`
+    /// or (state diagrams) `state-Running-2`.
     id: String,
     /// Contrast-safe text color for this node's declared fill.
     contrast: String,
@@ -178,7 +186,9 @@ fn scan_custom_fill_nodes(svg: &str) -> Vec<CustomNode> {
         let Some(id) = extract_attr(tag, "id") else {
             continue;
         };
-        if !id.starts_with("merman-") {
+        if id.is_empty() {
+            // An empty id can't anchor `#id tspan{...}` (a bare `#` isn't a
+            // valid CSS selector), and merman never emits one on a real node.
             continue;
         }
         let Some(class) = extract_attr(tag, "class") else {
@@ -613,6 +623,37 @@ mod tests {
     }
 
     #[test]
+    fn a_node_id_without_the_merman_prefix_still_gets_fixed() {
+        // State diagram node ids look like `state-Running-2`, not
+        // `merman-<kind>-<name>-<n>` — detection must not require the prefix.
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style></style>"#,
+            r#"<g class="node highlighted statediagram-state" id="state-Running-2" transform="translate(50, 50)">"#,
+            r#"<path style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" d="M0 0"/>"#,
+            r#"<g class="label"><text><tspan>Running</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert!(
+            force_node_label_contrast(svg, &options()).contains("#state-Running-2 tspan{fill:"),
+            "a non-merman-prefixed id must still be detected"
+        );
+    }
+
+    #[test]
+    fn an_empty_id_is_never_used_to_build_a_selector() {
+        let svg = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
+            r#"<style></style>"#,
+            r#"<g class="node default" id="" transform="translate(50, 50)">"#,
+            r#"<rect style="fill:#d4f8d4;stroke:#2d8a2d;stroke-width:2px" x="-40" y="-20" width="80" height="40"/>"#,
+            r#"<g class="label"><text><tspan>Highlighted</tspan></text></g>"#,
+            r#"</g></svg>"#,
+        );
+        assert_eq!(force_node_label_contrast(svg, &options()), svg);
+    }
+
+    #[test]
     fn a_node_without_a_custom_fill_gets_no_rule() {
         let svg = concat!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">"#,
@@ -811,8 +852,7 @@ mod tests {
         assert!(out.contains("</style>"));
     }
 
-    /// The end-to-end regression this module's own history warns about:
-    /// when a flowchart `classDef` explicitly declares `color:`, merman
+    /// When a flowchart `classDef` explicitly declares `color:`, merman
     /// already wires it correctly — the module must not override it with a
     /// second, computed rule.
     #[test]
@@ -827,9 +867,9 @@ mod tests {
         );
     }
 
-    /// Every diagram/directive shape the investigation found broken,
-    /// rendered through the real production path — proof the fix reaches
-    /// merman's actual output, not just the synthetic fixtures above.
+    /// Every diagram/directive shape this module fixes, rendered through
+    /// the real production path — proof the fix reaches merman's actual
+    /// output, not just the synthetic fixtures above.
     #[test]
     fn real_broken_diagrams_get_a_contrast_fix() {
         let palette = super::super::mermaid_theme::MermaidPalette::default();
@@ -848,6 +888,11 @@ mod tests {
                 "er diagram style",
                 "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  style CUSTOMER fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
                 "",
+            ),
+            (
+                "state diagram classDef",
+                "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running\n  Running --> [*]\n  class Running highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n",
+                "tspan{fill:",
             ),
         ];
         for (name, source, must_contain) in samples {
