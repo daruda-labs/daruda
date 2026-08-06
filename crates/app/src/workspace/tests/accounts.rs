@@ -173,6 +173,18 @@ fn seed_default_account(
     ws.accounts.default_by_recipe.insert(recipe, default_id);
 }
 
+fn legacy_ssh_claude_agent() -> daruda_config::AgentDefinition {
+    daruda_config::AgentDefinition {
+        id: "legacy-ssh-claude".to_string(),
+        name: "Legacy SSH Claude".to_string(),
+        launch: daruda_config::AgentLaunch::Ssh {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            host: "old-box".to_string(),
+        },
+        default_mode: None,
+    }
+}
+
 /// A freshly created agent-chat pane must be seeded with its own auth
 /// domain's configured default account at creation time, not left to a
 /// resolve-time fallback (`SystemDefault` is the explicit "System" choice).
@@ -239,6 +251,48 @@ async fn new_panes_use_system_default_until_matching_domain_default_exists(
         terminal,
         Some(AccountSelection::SystemDefault),
         "a terminal has no agent, so no auth domain's default applies to it"
+    );
+}
+
+/// A deprecated Ssh/Docker-shaped launch whose lane now resolves Local still
+/// runs a local adapter command, so fresh pane creation must seed that
+/// adapter's configured account default just like the connect path does.
+#[gpui::test]
+async fn new_locally_resolved_legacy_agent_pane_uses_domain_default(cx: &mut TestAppContext) {
+    let legacy_agent = legacy_ssh_claude_agent();
+    let legacy_id = legacy_agent.id.clone();
+    let mut config = daruda_config::Config::default();
+    config
+        .agents
+        .push(daruda_config::AgentEntry::Custom(legacy_agent));
+    let (window_handle, workspace) = build_workspace_with(cx, &config, None);
+    cx.run_until_parked();
+
+    let default_id = AccountId::new();
+    workspace.update(cx, |ws, _| {
+        seed_default_account(ws, AccountRecipeId::Claude, default_id);
+    });
+
+    let account = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.create_new_agent_chat_pane(
+                    legacy_id,
+                    Some(std::env::temp_dir()),
+                    None,
+                    Some(daruda_store::project::LaneSessionHost::Local),
+                    window,
+                    cx,
+                )
+                .account_selection()
+            })
+        })
+        .unwrap();
+
+    assert_eq!(
+        account,
+        Some(AccountSelection::Managed(default_id)),
+        "a locally resolved legacy SSH launch inherits the Claude default"
     );
 }
 
@@ -473,10 +527,15 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
         SerializedAgentChatContent, SerializedLayout, SplitDirectionSerde,
     };
 
+    let legacy_agent = legacy_ssh_claude_agent();
+    let legacy_id = legacy_agent.id.clone();
     let mut config = daruda_config::Config::default();
     config.agents.push(daruda_config::AgentEntry::Custom(
         daruda_config::AgentDefinition::codex_default(),
     ));
+    config
+        .agents
+        .push(daruda_config::AgentEntry::Custom(legacy_agent));
     let (window_handle, workspace) = build_workspace_with(cx, &config, None);
     cx.run_until_parked();
 
@@ -504,15 +563,16 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
         children: vec![
             agent_leaf(1, daruda_config::AgentDefinition::codex_default().id),
             agent_leaf(2, daruda_config::AgentDefinition::claude_default().id),
+            agent_leaf(3, legacy_id),
             SerializedLayout::Leaf {
-                pane_id: 3,
+                pane_id: 4,
                 cwd: Some(std::env::temp_dir()),
                 file: None,
                 agent_chat: None,
                 account_id: Some(claude_account),
             },
         ],
-        ratios: vec![1.0 / 3.0; 3],
+        ratios: vec![0.25; 4],
     };
 
     let mut id_map = std::collections::HashMap::new();
@@ -538,6 +598,11 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
     );
     assert_eq!(
         scratch[2].account_selection(),
+        Some(AccountSelection::Managed(claude_account)),
+        "a locally resolved legacy SSH launch keeps a same-domain pin"
+    );
+    assert_eq!(
+        scratch[3].account_selection(),
         Some(AccountSelection::Managed(claude_account)),
         "a terminal's own account governs — never reset"
     );
