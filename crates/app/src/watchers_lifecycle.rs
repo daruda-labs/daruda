@@ -106,9 +106,14 @@ fn spawn_status_pulse(cx: &mut App) {
             }
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 if ws.has_animating_claude_status(cx) {
-                    cx.notify();
-                    // Cached dock entities must be dirtied explicitly or their
-                    // animated badges freeze (Pitfall #10).
+                    // Dirty *only* the cached dock entities. The animated badge
+                    // (`AgentStatusBadge`) renders solely in the left dock's
+                    // project rows and reads the tick from the global at its own
+                    // render time, so nothing outside the docks needs this tick —
+                    // the status bar, the only other candidate, never reads
+                    // `StatusPulseClock`. A `cx.notify()` on the Workspace here
+                    // instead re-rendered and re-laid-out the entire window tree
+                    // four times a second to advance one badge (Pitfall #10).
                     ws.notify_right_dock(cx);
                     ws.notify_left_dock(cx);
                 }
