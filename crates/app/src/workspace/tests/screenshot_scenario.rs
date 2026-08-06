@@ -77,6 +77,24 @@ async fn drive_pane_context_menu_deploys_the_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn drive_mermaid_lightbox_opens_dialog(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::MermaidLightbox, &workspace, window, cx);
+    })
+    .unwrap();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        assert!(
+            window.has_active_dialog(cx),
+            "mermaid-lightbox scenario should open a dialog",
+        );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
 async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 

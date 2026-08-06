@@ -25,6 +25,34 @@ const NAME_TOAST: &str = "toast";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
+/// CLI token for the mermaid-diagram lightbox scenario.
+const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
+
+/// A wide sample diagram (two side-by-side subgraphs) — the shape that
+/// exercises the lightbox's horizontal scroll/clamp path, not just the
+/// common single-column case.
+const MERMAID_LIGHTBOX_SAMPLE: &str = concat!(
+    "flowchart TD\n",
+    "    subgraph ASIS[\"AS-IS\"]\n",
+    "        A1[registeredUri] --> A2{\"endsWith('/*')?\"}\n",
+    "        A2 -->|no| A3[거부]\n",
+    "        A2 -->|yes| A4[\"substring 으로 '/*' 절단\"]\n",
+    "        A4 --> A5[parse]\n",
+    "        A5 --> A6[\"scheme/host/port/query 일치\"]\n",
+    "        A6 --> A7[\"AntPathMatcher.match(pattern, path)\"]\n",
+    "        A7 --> A8[허용]\n",
+    "    end\n",
+    "    subgraph TOBE[\"TO-BE\"]\n",
+    "        B1[registeredUri] --> B2[parse]\n",
+    "        B2 --> B3{\"path.endsWith('/*')?\"}\n",
+    "        B3 -->|no| B4[\"path 정확 일치\"]\n",
+    "        B3 -->|yes| B5[\"prefix + 단일 세그먼트 직접 비교\"]\n",
+    "        B2 --> B6[\"userInfo/fragment 있으면 거부\"]\n",
+    "        B2 --> B7[\"port: 등록에 없으면 any허용\"]\n",
+    "        B4 --> B8[허용]\n",
+    "        B5 --> B8\n",
+    "    end\n",
+);
 
 /// Where the pane menu is deployed for the capture, in window coordinates.
 /// Near the top-left of the content area so the menu opens downward at its
@@ -48,6 +76,10 @@ pub(crate) enum ScreenshotScenario {
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
     PaneContextMenu,
+    /// Open the mermaid diagram lightbox with a wide (two-subgraph) sample —
+    /// the only way to eyeball the clamp/scroll behavior a unit test can
+    /// only assert numerically.
+    MermaidLightbox,
 }
 
 impl ScreenshotScenario {
@@ -61,6 +93,7 @@ impl ScreenshotScenario {
             NAME_TOAST => Some(Self::Toast),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
+            NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -99,7 +132,26 @@ pub(crate) fn drive(
                 ws.open_pane_context_menu_at(pane_id, anchor, window, cx);
             });
         }
+        ScreenshotScenario::MermaidLightbox => open_mermaid_lightbox_sample(window, cx),
     }
+}
+
+/// Render [`MERMAID_LIGHTBOX_SAMPLE`] and open it in the lightbox — no chat
+/// history needed, the same render path the diagram card's zoom button uses.
+fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
+    use super::main_area::agent_chat_pane::render::mermaid_lightbox;
+    use super::main_area::file_view_pane::mermaid_theme::MermaidPalette;
+    use super::main_area::file_view_pane::render::CachedImage;
+    use super::main_area::file_view_pane::visual::render_mermaid_raster;
+
+    let palette = MermaidPalette::default();
+    let Some(raster) = render_mermaid_raster(MERMAID_LIGHTBOX_SAMPLE, &palette) else {
+        return;
+    };
+    let Some(image) = CachedImage::from_raster(&raster) else {
+        return;
+    };
+    mermaid_lightbox::open(&image, window, cx);
 }
 
 /// Synthetic report for the error-modal scenario — representative of a real
@@ -163,6 +215,14 @@ mod tests {
     #[test]
     fn unknown_settings_slug_maps_to_none() {
         assert_eq!(ScreenshotScenario::from_cli_name("settings:bogus"), None);
+    }
+
+    #[test]
+    fn mermaid_lightbox_name_maps_to_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("mermaid-lightbox"),
+            Some(ScreenshotScenario::MermaidLightbox)
+        );
     }
 
     #[test]

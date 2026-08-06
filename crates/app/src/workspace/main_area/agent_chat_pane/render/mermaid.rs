@@ -1,6 +1,9 @@
 //! Mermaid diagram embeds for the chat transcript: the shared card chrome
 //! (translucent tint + hairline, matching tool cards / code blocks), the
 //! markdown `code_block_render` hook, and the hover zoom / copy affordances.
+//! The diagram bitmap itself is also clickable, opening the same lightbox
+//! as the zoom button — the button stays for discoverability (icon +
+//! hover reveal) and to keep a target that isn't the whole card.
 //! Shared by the assistant prose body and tool-output markdown.
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
@@ -59,6 +62,7 @@ pub(super) fn mermaid_diagram_card(
     let group = SharedString::from(format!("mermaid-{key}"));
     let src_for_copy = source.to_string();
     let image_for_zoom = image.clone();
+    let image_for_click = image.clone();
     div()
         .relative()
         .group(group.clone())
@@ -71,7 +75,15 @@ pub(super) fn mermaid_diagram_card(
             theme::agent_chat_border_tint(cx),
             dim,
         ))
-        .child(image.block_diagram())
+        .child(
+            div()
+                .id(SharedString::from(format!("mermaid-open-{key}")))
+                .cursor_pointer()
+                .on_click(move |_, window, cx| {
+                    super::mermaid_lightbox::open(&image_for_click, window, cx);
+                })
+                .child(image.block_diagram()),
+        )
         .child(
             div()
                 .absolute()

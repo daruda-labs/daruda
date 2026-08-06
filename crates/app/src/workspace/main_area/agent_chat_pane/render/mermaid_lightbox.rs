@@ -1,15 +1,19 @@
 //! Lightbox dialog for a mermaid diagram: the bitmap at its natural logical
-//! size (no fit-to-pane shrink) inside a pannable scroll container. The 2×
-//! raster keeps it crisp at this size. Opened from the diagram card's zoom
-//! button; Dialog supplies Escape/outside-click close, while the body owns the
-//! visible close affordance.
+//! size (no fit-to-pane shrink) inside a scroll container with a visible,
+//! draggable scrollbar on both axes — a diagram wider or taller than the
+//! clamped dialog pans instead of clipping or shrinking below readability.
+//! The 2× raster keeps it crisp at this size. Opened from the diagram
+//! card's zoom button (or a click on the diagram itself); Dialog supplies
+//! Escape/outside-click close, while the body owns the visible close
+//! affordance.
 
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, FocusHandle, Focusable, ParentElement as _, Window,
-    div, prelude::*, px,
+    App, AppContext as _, ClickEvent, Context, FocusHandle, Focusable, ParentElement as _,
+    ScrollHandle, Window, div, prelude::*, px,
 };
 
 use crate::surface::strings as s;
+use crate::ui::scrollbar::Scrollbar;
 use crate::ui::theme;
 use crate::ui::{WindowExt as _, button_close};
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
@@ -36,7 +40,7 @@ fn lightbox_margin_top(viewport_height: f32) -> f32 {
     viewport_height * (1.0 - theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION) / 2.0
 }
 
-pub(super) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
+pub(in crate::workspace) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
     let viewport = window.viewport_size();
     let width = lightbox_width(image.logical_width(), f32::from(viewport.width));
     let margin_top = lightbox_margin_top(f32::from(viewport.height));
@@ -44,6 +48,7 @@ pub(super) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
     let entity = cx.new(|cx_modal| MermaidLightbox {
         image,
         focus_handle: cx_modal.focus_handle(),
+        scroll_handle: ScrollHandle::default(),
     });
     let entity_for_focus = entity.clone();
 
@@ -70,6 +75,10 @@ pub(super) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
 pub(in crate::workspace) struct MermaidLightbox {
     image: CachedImage,
     focus_handle: FocusHandle,
+    /// Tracks the body's scroll offset so the overlay [`Scrollbar`] (both
+    /// axes) can drive and reflect it — a diagram wider or taller than the
+    /// clamped dialog pans instead of clipping.
+    scroll_handle: ScrollHandle,
 }
 
 impl MermaidLightbox {
@@ -104,10 +113,24 @@ impl Render for MermaidLightbox {
             )
             .child(
                 div()
-                    .id("mermaid-lightbox-body")
-                    .max_h(px(max_h))
-                    .overflow_scroll()
-                    .child(div().flex_none().w(px(image_w)).child(self.image.natural())),
+                    .relative()
+                    .child(
+                        div()
+                            .id("mermaid-lightbox-body")
+                            .max_h(px(max_h))
+                            .overflow_scroll()
+                            .track_scroll(&self.scroll_handle)
+                            .child(div().flex_none().w(px(image_w)).child(self.image.natural())),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .child(Scrollbar::new(&self.scroll_handle)),
+                    ),
             )
     }
 }

@@ -12,7 +12,9 @@ mod diff;
 pub(in crate::workspace) mod embed;
 mod fold_header;
 mod mermaid;
-mod mermaid_lightbox;
+/// Reachable from `workspace::screenshot_scenario` so the
+/// `mermaid-lightbox` capture scenario can drive it directly.
+pub(in crate::workspace) mod mermaid_lightbox;
 mod plan;
 mod tool;
 
