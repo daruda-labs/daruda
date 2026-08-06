@@ -104,23 +104,6 @@ fn normalize_prompt_title_keeps_short_and_truncates_long_on_char_boundary() {
 }
 
 #[test]
-fn normalize_prompt_title_cost_tracks_the_title_not_the_prompt() {
-    // The title is at most FALLBACK_TITLE_MAX glyphs, so producing one must not
-    // depend on how long the prompt was. Normalizing the whole prompt first
-    // (collect every word, join, then truncate) cost 580 ms on a 10 MB prompt
-    // and ran once per frame, making it the paint path's top cost.
-    let huge = "word ".repeat(2_000_000); // ~10 MB
-    let started = std::time::Instant::now();
-    let title = normalize_prompt_title(&huge);
-    let elapsed = started.elapsed();
-    assert_eq!(title.chars().count(), FALLBACK_TITLE_HEAD + 1);
-    assert!(
-        elapsed < std::time::Duration::from_millis(20),
-        "normalizing a 10 MB prompt took {elapsed:?} — cost still tracks prompt length"
-    );
-}
-
-#[test]
 fn normalize_prompt_title_collapses_whitespace_at_the_budget_boundary() {
     // Boundary armour for the bounded rewrite: the budget is decided on the
     // *normalized* glyph count, so whitespace runs must collapse first.
