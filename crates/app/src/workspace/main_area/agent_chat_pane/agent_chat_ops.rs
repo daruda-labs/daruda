@@ -84,7 +84,7 @@ enum PaneCwdOutcome {
 
 /// Pure core of [`Workspace::resolve_new_pane_cwd`]: decide `Local` vs.
 /// `Remote` cwd for a fresh pane, mirroring what its first connect will
-/// resolve (`resolve_session_command` in `agent_chat_connect_ops.rs`) so a
+/// resolve (`resolve_session_command` in `crate::agent::launch_resolve`) so a
 /// freshly opened pane's `PaneCwd` — the value the rest of the app reads via
 /// `PaneCwd::as_local`/`into_local` — already agrees with where the session
 /// actually attaches.

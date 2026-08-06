@@ -21,6 +21,7 @@ use portable_pty::MasterPty;
 
 use super::agent_chat_pane::view::AgentChatView;
 use super::file_view_pane::PaneFileView;
+use crate::agent::account::PreparedAccount;
 use crate::path_ext::PathExt;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
@@ -880,22 +881,6 @@ pub(in crate::workspace) fn resolve_default_cwd(
     candidates.active_lane.or(candidates.project_root)
 }
 
-/// A pane's resolved managed account: its isolated config dir plus the env
-/// override its own auth domain requires. The two are built together and
-/// never handed out separately, so a dir can't reach a process under another
-/// domain's env var.
-///
-/// INVARIANT: `config_dir` is only a path until a spawn funnel materializes it
-/// via [`AccountRecipe::prepare_dir`]. There are exactly two such funnels —
-/// [`Workspace::create_pane_with_cwd`] for a shell and the agent-chat connect
-/// pump — and both prep unconditionally, so no resolve site has to remember to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) struct PreparedAccount {
-    pub(in crate::workspace) recipe: daruda_store::accounts::AccountRecipeId,
-    pub(in crate::workspace) config_dir: PathBuf,
-    pub(in crate::workspace) env: daruda_config::AccountEnv,
-}
-
 /// Which auth domains a pane may resolve a managed account from. Three
 /// distinct states, not an `Option<AccountRecipeId>`: "any domain" and "no
 /// domain at all" are opposites, and collapsing both onto `None` let a pane
@@ -952,7 +937,7 @@ impl AccountDomain {
     /// the launch's own shape, but `is_remote` already reflects the lane's
     /// verified locality here, so the recipe is derived from the bare
     /// adapter command directly (mirrors
-    /// `agent_chat_connect_ops::account_recipe_for_connect`, which the
+    /// `crate::agent::launch_resolve::account_recipe_for_connect`, which the
     /// account-switcher display and the actual connect must agree with —
     /// otherwise the switcher would keep hiding accounts the connect can
     /// now use).
@@ -1784,7 +1769,7 @@ mod tests {
                         .into(),
                 )),
                 // The `{{cwd}}` token isn't reflected in `is_remote` at all
-                // (see `agent_chat_connect_ops::account_recipe_for_connect`'s
+                // (see `crate::agent::launch_resolve::account_recipe_for_connect`'s
                 // doc on why `Raw` stays on `account_recipe`'s own,
                 // `needs_remote_cwd()`-based exclusion) — excluded either way.
                 is_remote: false,
@@ -1804,7 +1789,7 @@ mod tests {
     /// Local) must still offer a managed account, exactly like a `Raw`
     /// launch running the same command would — the account-switcher display
     /// must agree with what the actual connect now does (see
-    /// `agent_chat_connect_ops::account_recipe_for_connect`).
+    /// `crate::agent::launch_resolve::account_recipe_for_connect`).
     #[test]
     fn agent_chat_pane_on_a_locally_resolved_legacy_launch_still_has_a_domain() {
         let pane = AccountPane::AgentChat {
