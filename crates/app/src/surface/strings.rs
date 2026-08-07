@@ -1115,6 +1115,44 @@ pub fn agent_chat_reading_width_off() -> String {
     rust_i18n::t!("agent_chat.reading_width_off").into_owned()
 }
 
+/// Tooltip on a diff block's header path — clicking opens it in the file
+/// viewer.
+pub fn diff_open_in_file_view() -> String {
+    rust_i18n::t!("agent_chat.diff_open_in_file_view").into_owned()
+}
+
+/// Tooltip on a diff block header's "open externally" button when no preferred
+/// external editor is configured — the click hands the path to the OS default
+/// handler, which has no name to show.
+pub fn diff_open_externally() -> String {
+    rust_i18n::t!("agent_chat.diff_open_externally").into_owned()
+}
+
+/// Tooltip on a diff block header's "open externally" button when a preferred
+/// external editor is configured. `editor` is the preset's own display name
+/// (a proper noun — not localized).
+pub fn diff_open_in_editor(editor: &str) -> String {
+    rust_i18n::t!("agent_chat.diff_open_in_editor", editor = editor).into_owned()
+}
+
+/// Tooltip on a diff block header's copy-path button.
+pub fn diff_copy_path() -> String {
+    rust_i18n::t!("agent_chat.diff_copy_path").into_owned()
+}
+
+/// Tooltip on a diff block header's copy-path button right after a click.
+pub fn diff_path_copied() -> String {
+    rust_i18n::t!("agent_chat.diff_path_copied").into_owned()
+}
+
+/// Error toast when "open in file view" / "open externally" is clicked on a
+/// diff whose pane's session runs on a remote host — the path is on that
+/// remote filesystem, not this machine's, so opening it locally would either
+/// fail or (worse) show an unrelated local file at the same path.
+pub fn diff_remote_path_unsupported() -> String {
+    rust_i18n::t!("agent_chat.diff_remote_path_unsupported").into_owned()
+}
+
 /// Section label for the bottom plan region.
 pub fn agent_chat_plan_label() -> String {
     rust_i18n::t!("agent_chat.plan_label").into_owned()
@@ -2642,6 +2680,9 @@ pub fn settings_nav_plugin() -> String {
 pub fn settings_nav_agent() -> String {
     rust_i18n::t!("settings.nav_agent").into_owned()
 }
+pub fn settings_nav_external_editor() -> String {
+    rust_i18n::t!("settings.nav_external_editor").into_owned()
+}
 
 pub fn settings_section_general() -> String {
     rust_i18n::t!("settings.section_general").into_owned()
@@ -2672,9 +2713,20 @@ pub fn settings_section_plugin() -> String {
 pub fn settings_section_agent() -> String {
     rust_i18n::t!("settings.section_agent").into_owned()
 }
+pub fn settings_section_external_editor() -> String {
+    rust_i18n::t!("settings.section_external_editor").into_owned()
+}
 
 pub fn settings_label_clipboard_streaming() -> String {
     rust_i18n::t!("settings.label_clipboard_streaming").into_owned()
+}
+/// Field label for the preferred-external-editor dropdown.
+pub fn settings_label_preferred_editor() -> String {
+    rust_i18n::t!("settings.label_preferred_editor").into_owned()
+}
+/// Dropdown option meaning "no preference — use the OS default handler".
+pub fn settings_editor_system_default() -> String {
+    rust_i18n::t!("settings.editor_system_default").into_owned()
 }
 pub fn settings_label_grid_columns() -> String {
     rust_i18n::t!("settings.label_grid_columns").into_owned()

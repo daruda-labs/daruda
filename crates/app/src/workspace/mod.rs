@@ -470,6 +470,10 @@ pub struct Workspace {
     /// existing file-viewer tab instead of opening one per file.
     /// Mirrors `daruda_config::FileViewerConfig::preview_tab`.
     pub(in crate::workspace) file_viewer_preview_tab: bool,
+    /// Preferred external-editor preset name (`daruda_config::editor`), or
+    /// empty for the OS default handler. Mirrors
+    /// `daruda_config::EditorConfig::preferred`.
+    pub(in crate::workspace) preferred_editor: String,
     /// Notification + user-attention gates. Drives whether OSC 9 / 777 /
     /// 1337 RequestAttention surface to the OS. Read by per-pane
     /// `TerminalViewEvent` subscriptions and by the long-running command
@@ -1162,6 +1166,7 @@ impl Workspace {
             shell_program: config.shell.program.clone(),
             syntax_theme: config.file_viewer.syntax_theme.clone(),
             file_viewer_preview_tab: config.file_viewer.preview_tab,
+            preferred_editor: config.editor.preferred.clone(),
             notifications: config.notifications.clone(),
             telegram: config.telegram.clone(),
             clipboard: config.clipboard.clone(),

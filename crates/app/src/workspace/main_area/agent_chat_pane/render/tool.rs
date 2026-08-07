@@ -9,7 +9,10 @@ use daruda_acp::{
     ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
-use gpui::{AnyElement, App, Hsla, IntoElement, Pixels, SharedString, div, prelude::*, px};
+use gpui::{
+    AnyElement, AnyWindowHandle, App, Hsla, IntoElement, Pixels, SharedString, Window, div,
+    prelude::*, px,
+};
 
 use super::RenderAssets;
 use super::chrome::pulse_dots;
@@ -32,6 +35,7 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     LiveSubagentUnits, SUBAGENT_NEST_DEPTH_CAP,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
 /// in progress). The header leads with a fixed-width label (the agent's own tool
@@ -53,6 +57,9 @@ pub(super) fn tool_card(
     t: &theme::DarudaTheme,
     dim: f32,
     depth: usize,
+    pane_id: PaneId,
+    window_handle: AnyWindowHandle,
+    window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     // A subagent parent (Task/Agent) whose flattened children keep running past
@@ -283,6 +290,9 @@ pub(super) fn tool_card(
                 fold,
                 t,
                 dim,
+                pane_id,
+                window_handle,
+                window,
                 cx,
             ));
         }
@@ -356,6 +366,9 @@ pub(super) fn tool_card(
                         t,
                         dim,
                         depth + 1,
+                        pane_id,
+                        window_handle,
+                        window,
                         cx,
                     )
                     .into_any_element(),

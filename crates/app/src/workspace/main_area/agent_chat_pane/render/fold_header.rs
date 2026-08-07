@@ -152,6 +152,19 @@ impl<'a> FoldHeader<'a> {
         }
     }
 
+    /// [`Self::with_title`] for a title that is itself clickable (the diff
+    /// block's file path, which opens the file). A gpui `div` is
+    /// `display: block`, so a lone child of [`stretch_container`] fills the
+    /// slot's whole width — harmless for a label, wrong for a hitbox: it would
+    /// swallow clicks on the empty run out to the trailing slot. Sitting the
+    /// title in a flex row sizes it to its own content; `min_w_0` keeps a long
+    /// one shrinking into the slot's ellipsis instead of pushing `trailing` off
+    /// the row. Named as its own constructor so the geometry stays here rather
+    /// than being restated by each interactive header.
+    pub(super) fn with_interactive_title(title: impl IntoElement) -> Self {
+        Self::with_title(interactive_title(title))
+    }
+
     /// A header with no stretching content — label and trailing only.
     pub(super) fn bare() -> Self {
         Self {
@@ -374,6 +387,17 @@ fn stretch_container(has_leading: bool) -> Div {
         .when(has_leading, |el| el.ml(px(theme::AGENT_CHAT_SUMMARY_GAP)))
 }
 
+/// Shrink-wrap an interactive title to its own content inside the block-level
+/// [`stretch_container`]. See [`FoldHeader::with_interactive_title`] for why.
+fn interactive_title(title: impl IntoElement) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .min_w_0()
+        .child(title)
+        .into_any_element()
+}
+
 /// Render a [`SummaryLine`] into the stretch slot.
 fn summary_element(
     line: SummaryLine,
@@ -461,6 +485,8 @@ pub(super) fn rollup_glyph(rollup: Rollup, t: &theme::DarudaTheme, cx: &gpui::Ap
 
 #[cfg(test)]
 mod tests {
+    use gpui::{Context, IntoElement, SharedString, Window, div, prelude::*, px};
+
     use super::SummaryLine;
 
     #[test]
@@ -480,5 +506,101 @@ mod tests {
     #[test]
     fn plain_summary_is_verbatim() {
         assert_eq!(SummaryLine::plain("3 tool calls").text, "3 tool calls");
+    }
+
+    /// A title dropped straight into the stretch slot spans it; the same title
+    /// through [`interactive_title`] shrink-wraps its glyphs.
+    ///
+    /// This is the hitbox contract behind `FoldHeader::with_interactive_title`:
+    /// [`stretch_container`] is a block box (a gpui `div` defaults to
+    /// `display: block`), so a lone child takes its full width — and the diff
+    /// header's file path carries a click handler that opens the file, which
+    /// therefore fired on a click anywhere in the empty run out to the trailing
+    /// icons. Both sides are asserted because the spanning case is the *default*
+    /// gpui behaviour: without it a passing shrink-wrap assertion could just
+    /// mean the probe never got a wide slot to span in the first place.
+    #[gpui::test]
+    async fn only_an_interactive_title_shrink_wraps_its_slot(cx: &mut gpui::TestAppContext) {
+        use gpui::{
+            AppContext as _, Bounds, InteractiveElement as _, Styled as _, VisualTestContext,
+            WindowBounds, WindowOptions, point, size,
+        };
+
+        const SLOT_W: f32 = 600.;
+
+        struct SlotProbe;
+
+        impl gpui::Render for SlotProbe {
+            fn render(
+                &mut self,
+                _window: &mut Window,
+                _cx: &mut Context<Self>,
+            ) -> impl IntoElement {
+                // Two stretch slots side by side in a column, each pinned to the
+                // same width, so the only difference is how the title is placed.
+                div()
+                    .flex()
+                    .flex_col()
+                    .w(px(SLOT_W))
+                    .child(
+                        super::stretch_container(false)
+                            .debug_selector(|| "plain-slot".into())
+                            .child(
+                                div()
+                                    .debug_selector(|| "plain-title".into())
+                                    .child(SharedString::from("src/main.rs")),
+                            ),
+                    )
+                    .child(
+                        super::stretch_container(false)
+                            .debug_selector(|| "wrapped-slot".into())
+                            .child(super::interactive_title(
+                                div()
+                                    .debug_selector(|| "wrapped-title".into())
+                                    .child(SharedString::from("src/main.rs")),
+                            )),
+                    )
+            }
+        }
+
+        crate::test_support::init_gpui_component(cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(SLOT_W), px(400.)));
+        let window = cx
+            .update(|cx| {
+                cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(bounds)),
+                        ..Default::default()
+                    },
+                    |_window, cx| cx.new(|_cx| SlotProbe),
+                )
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        // Force a second frame so `debug_bounds` reads settled layout, not the
+        // construction-time paint (same rationale as `ui::markdown`'s probe).
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+
+        let width = |vcx: &mut VisualTestContext, sel: &'static str| {
+            vcx.debug_bounds(sel)
+                .unwrap_or_else(|| panic!("{sel} painted"))
+                .size
+                .width
+        };
+        let slot_w = width(&mut vcx, "plain-slot");
+        let plain_w = width(&mut vcx, "plain-title");
+        let wrapped_w = width(&mut vcx, "wrapped-title");
+
+        assert_eq!(
+            plain_w, slot_w,
+            "a bare block child spans the stretch slot ({plain_w:?} of {slot_w:?})"
+        );
+        assert!(
+            wrapped_w < slot_w / 2.,
+            "an interactive title must shrink-wrap its glyphs, not the slot \
+             ({wrapped_w:?} of {slot_w:?})"
+        );
     }
 }

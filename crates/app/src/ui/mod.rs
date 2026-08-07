@@ -60,7 +60,7 @@ pub use button::{
 pub use button_group::{ButtonGroup, button_group};
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
-pub use code_copy_button::code_copy_button;
+pub use code_copy_button::{code_copy_button, copy_button};
 pub use code_editor::{
     LineDecoration, embedded_code_viewer, file_viewer_editor, make_markdown_prose_state,
     make_markdown_state, markdown_editor,

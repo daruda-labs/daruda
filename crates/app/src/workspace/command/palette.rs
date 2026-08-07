@@ -79,6 +79,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "open_settings.external_editor",
+        label: "Settings: External Editor",
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "open_settings.notifications",
         label: "Settings: Notifications",
         shortcut: "",

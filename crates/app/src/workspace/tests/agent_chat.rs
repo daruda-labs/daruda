@@ -1206,3 +1206,72 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// A diff block's "open in file view" / "open externally" actions must
+/// refuse a pane whose session is remote (`PaneCwd::Remote`) rather than
+/// reading `Diff.path` — a remote-host path — off *this* machine's local
+/// disk, which would either fail or silently show an unrelated local file at
+/// the same absolute path.
+#[gpui::test]
+async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_disk(
+    cx: &mut TestAppContext,
+) {
+    use crate::surface::strings as s;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Remote("host:/repo/lane".to_string())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                pane_id
+            })
+        })
+        .unwrap();
+
+    let errors_before = workspace.read_with(cx, |ws, _| ws.error_history().len());
+    let tabs_before = workspace.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.open_diff_in_file_view(
+                pane_id,
+                std::path::PathBuf::from("/repo/lane/src/main.rs"),
+                window,
+                cx,
+            );
+            ws.open_diff_externally(
+                pane_id,
+                std::path::PathBuf::from("/repo/lane/src/main.rs"),
+                cx,
+            );
+        });
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active_runtime().tabs.len(),
+            tabs_before,
+            "must not open a file-viewer tab for a remote pane's path"
+        );
+        assert_eq!(
+            ws.error_history().len(),
+            errors_before + 2,
+            "both actions must report an error, one each"
+        );
+        for report in &ws.error_history()[..2] {
+            assert_eq!(report.title, s::diff_remote_path_unsupported());
+        }
+    });
+}

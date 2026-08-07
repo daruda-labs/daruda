@@ -11,8 +11,9 @@
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 
 use daruda_config::AgentLaunch;
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
-use gpui::{AppContext as _, Context, Entity, Window};
+use gpui::{App, AppContext as _, Context, Entity, Window};
 use std::path::PathBuf;
 
 use super::telegram_ops::DeferKind;
@@ -628,6 +629,81 @@ impl Workspace {
             .iter()
             .find(|(_, rt)| rt.panes.iter().any(|p| p.id == pane_id))
             .map(|(lane_ref, _)| *lane_ref)
+    }
+
+    /// True when `pane_id`'s session runs on a remote host (`PaneCwd::Remote`
+    /// — an SSH/Docker session host, not "pane closed"/"unknown"). ACP paths
+    /// the agent reports (`Diff.path`, tool `raw_input` paths, …) are on
+    /// *that* host's filesystem, not this machine's, so any action that reads
+    /// the path from local disk (the file viewer, an external editor) would
+    /// either fail or — worse — silently show an unrelated local file that
+    /// happens to share the same absolute path.
+    fn diff_pane_is_remote(&self, pane_id: PaneId, cx: &App) -> bool {
+        self.agent_chat_view(pane_id)
+            .is_some_and(|view| matches!(view.read(cx).cwd, Some(PaneCwd::Remote(_))))
+    }
+
+    /// Open a diff block's file in the pane-area file viewer. Dispatched from
+    /// the agent-chat diff header (`render/diff.rs`); `path` is ACP's
+    /// `Diff.path`, which the spec guarantees absolute, so no lane-root join is
+    /// needed. A no-op if `pane_id`'s lane can't be resolved (pane closed
+    /// mid-click — the render that produced this callback is already gone).
+    /// Toasts and returns instead if the pane's session is remote — see
+    /// [`Self::diff_pane_is_remote`].
+    pub(in crate::workspace) fn open_diff_in_file_view(
+        &mut self,
+        pane_id: PaneId,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+            return;
+        };
+        if self.diff_pane_is_remote(pane_id, cx) {
+            let report = ErrorReport::new(s::diff_remote_path_unsupported())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("agent_chat.diff.remote_path_unsupported")
+                .build();
+            self.report_error(report, cx);
+            return;
+        }
+        self.open_pane_file_view(
+            lane.lane,
+            path,
+            false,
+            None,
+            crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+            window,
+            cx,
+        );
+    }
+
+    /// Open a diff block's file externally — the user's preferred editor
+    /// (Settings → External Editor), or the OS default handler when none is
+    /// set. Dispatched from the agent-chat diff header, same shape as
+    /// [`Self::open_diff_in_file_view`], including the no-op-on-missing-lane
+    /// and remote-session guard.
+    pub(in crate::workspace) fn open_diff_externally(
+        &mut self,
+        pane_id: PaneId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+            return;
+        };
+        if self.diff_pane_is_remote(pane_id, cx) {
+            let report = ErrorReport::new(s::diff_remote_path_unsupported())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("agent_chat.diff.remote_path_unsupported")
+                .build();
+            self.report_error(report, cx);
+            return;
+        }
+        self.open_file_externally(lane.lane, path, cx);
     }
 
     /// The AgentChat pane's `AccountSelection`. Same cross-lane scan as

@@ -20,8 +20,8 @@ mod tool;
 
 use daruda_acp::ChatItem;
 use gpui::{
-    AnyElement, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString, canvas, div,
-    list, prelude::*, px,
+    AnyElement, AnyWindowHandle, Entity, IntoElement, ListSizingBehavior, MouseButton,
+    SharedString, Window, canvas, div, list, prelude::*, px,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -186,8 +186,8 @@ pub(in crate::workspace) fn render(
         let last_visible = content.rows.iter().rposition(|r| !r.hidden).unwrap_or(0);
         let list_el = list(
             content.list_state.clone(),
-            cx.processor(move |this, ix, _window, cx| match this.rows.get(ix) {
-                Some(row) => render_row(this, ix, row, last_visible, &t_items, cx),
+            cx.processor(move |this, ix, window, cx| match this.rows.get(ix) {
+                Some(row) => render_row(this, ix, row, last_visible, &t_items, window, cx),
                 None => gpui::Empty.into_any_element(),
             }),
         )
@@ -308,6 +308,7 @@ fn render_row(
     row: &RenderRow,
     last_visible: usize,
     t: &theme::DarudaTheme,
+    window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     if row.hidden {
@@ -325,7 +326,7 @@ fn render_row(
         }
         // One block among siblings — it reports nothing about the run, so no
         // rollup glyph (see `RowKind::SoloResponse`).
-        RowKind::AgentItem(i) => render_agent_item(this, *i, row.indent > 0, None, t, cx),
+        RowKind::AgentItem(i) => render_agent_item(this, *i, row.indent > 0, None, t, window, cx),
         // The whole response in one block: it owns the rollup a response bar would
         // otherwise carry. The run is this single item, so classify over it.
         RowKind::SoloResponse(i) => render_agent_item(
@@ -334,6 +335,7 @@ fn render_row(
             row.indent > 0,
             Some(Rollup::of_run(&this.items, *i..*i + 1)),
             t,
+            window,
             cx,
         ),
         RowKind::ToolGroupHeader {
@@ -547,6 +549,7 @@ fn render_agent_item(
     under_response: bool,
     rollup: Option<Rollup>,
     t: &theme::DarudaTheme,
+    window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match this.items.get(ix) {
@@ -562,6 +565,9 @@ fn render_agent_item(
             t,
             this.dim_amount,
             agent_display_name(this),
+            this.pane_id,
+            this.window_handle,
+            window,
             cx,
         ),
         None => gpui::Empty.into_any_element(),
@@ -586,6 +592,9 @@ fn render_item(
     t: &theme::DarudaTheme,
     dim: f32,
     agent_label: &str,
+    pane_id: PaneId,
+    window_handle: AnyWindowHandle,
+    window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let mermaid_images = assets.mermaid_images;
@@ -622,7 +631,20 @@ fn render_item(
             let key = tool_fold_key(tc);
             let expanded = fold.is_expanded(&key, is_active(item));
             tool_card(
-                key, expanded, tc, items, live_units, assets, fold, t, dim, 0, cx,
+                key,
+                expanded,
+                tc,
+                items,
+                live_units,
+                assets,
+                fold,
+                t,
+                dim,
+                0,
+                pane_id,
+                window_handle,
+                window,
+                cx,
             )
             .into_any_element()
         }

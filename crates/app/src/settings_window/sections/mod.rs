@@ -317,6 +317,22 @@ impl SettingsWindow {
             .into_any_element()
     }
 
+    pub(super) fn render_editor(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::MODAL_PANEL_GAP))
+            .child(Self::section_label(
+                s::settings_section_external_editor(),
+                cx,
+            ))
+            .child(field_row(
+                s::settings_label_preferred_editor(),
+                crate::ui::select::select(&self.editor_select, cx, ()),
+            ))
+            .into_any_element()
+    }
+
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let body_color = theme::current(cx).text_primary;
         let telegram_enabled = self.telegram_enabled;

@@ -42,6 +42,10 @@ impl Workspace {
         let syntax_theme_changed = self.syntax_theme != config.file_viewer.syntax_theme;
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
+        // The agent-chat diff header names this editor in its open-externally
+        // tooltip, so a change has to dirty those cached views below.
+        let preferred_editor_changed = self.preferred_editor != config.editor.preferred;
+        self.preferred_editor = config.editor.preferred.clone();
         self.notifications = config.notifications.clone();
         let previous_telegram_chat_id = self.telegram.authorized_chat_id;
         self.telegram = config.telegram.clone();
@@ -202,6 +206,7 @@ impl Workspace {
             || agent_chat_font_changed
             || agent_chat_reading_width_changed
             || agent_chat_diff_palette_changed
+            || preferred_editor_changed
         {
             let syntax_theme = self.syntax_theme.clone();
             let views: Vec<_> = self

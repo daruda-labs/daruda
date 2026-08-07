@@ -763,6 +763,19 @@ fn patch_config_file_round_trips_language() {
 }
 
 #[test]
+fn patch_config_file_round_trips_preferred_editor() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let mut cfg = Config::default();
+    cfg.editor.preferred = "vscode".to_owned();
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.editor.preferred, "vscode");
+}
+
+#[test]
 fn config_default_language_is_auto() {
     assert_eq!(Config::default().general.language, "auto");
 }

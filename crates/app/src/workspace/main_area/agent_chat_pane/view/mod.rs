@@ -397,6 +397,11 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) pane_id: PaneId,
     /// The workspace window this view renders in, captured at construction so
     /// diff-editor / `InputState` creation can re-enter the workspace window.
+    /// Also the way back to the owning `Workspace` for render-time actions
+    /// this self-owned entity dispatches into it (diff-header "open in file
+    /// view" / "open externally") — resolved on demand via
+    /// `WindowRegistry::workspace_for_window`, the same lookup this view's own
+    /// pane context-menu builder already uses (`render/mod.rs`).
     pub(in crate::workspace) window_handle: AnyWindowHandle,
     /// Pane-level focus handle for `Cmd+W` close routing. The view's `render`
     /// tracks it (like `TerminalView`), so `wrapper_focus_handle` returns

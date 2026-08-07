@@ -53,6 +53,9 @@ pub enum BuiltinSection {
     /// internally (`workspace::layout::Dock` position=Left vs Bottom).
     Dock,
     Clipboard,
+    /// Preferred external editor for "open externally" actions
+    /// (`daruda_config::EditorConfig`).
+    ExternalEditor,
     Agent,
     /// Named, reusable SSH/Docker host registry a lane's `session_host` can
     /// reference by id (`daruda_config::SessionHostEntry`) — companion to
@@ -77,6 +80,7 @@ impl BuiltinSection {
         Self::Terminal,
         Self::Dock,
         Self::Clipboard,
+        Self::ExternalEditor,
         Self::Agent,
         Self::SessionHosts,
         Self::Accounts,
@@ -100,6 +104,7 @@ impl BuiltinSection {
             Self::Terminal => "terminal",
             Self::Dock => "dock",
             Self::Clipboard => "clipboard",
+            Self::ExternalEditor => "external_editor",
             Self::Agent => "agent",
             Self::SessionHosts => "session_hosts",
             Self::Accounts => "accounts",
@@ -234,6 +239,6 @@ mod tests {
         // added or removed. There is no `strum::EnumCount`-style helper
         // in this crate; the count exists precisely to force a manual
         // sync of `ALL` with the enum.
-        assert_eq!(BuiltinSection::ALL.len(), 15);
+        assert_eq!(BuiltinSection::ALL.len(), 16);
     }
 }

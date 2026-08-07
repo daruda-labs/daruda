@@ -100,6 +100,8 @@ pub struct SettingsWindow {
     syntax_theme_select: Entity<SelectState>,
     // Clipboard
     clipboard_streaming_input: Entity<InputState>,
+    // External Editor
+    editor_select: Entity<SelectState>,
     // Panels (bottom-dock macro grid)
     panels_grid_columns_input: Entity<InputState>,
     // Claude Status
@@ -875,6 +877,22 @@ impl SettingsWindow {
             .entry(BuiltinSection::Clipboard)
             .or_default()
             .push(clipboard_streaming_fh);
+        // External editor select — "" (empty, the config default) means the
+        // OS default handler; every other value is a `daruda_config::editor`
+        // preset name.
+        let preferred_editor = SharedString::from(config.editor.preferred.clone());
+        let editor_select = cx.new(|cx| {
+            let mut opts = vec![select::SelectOption::new(
+                "",
+                s::settings_editor_system_default(),
+            )];
+            opts.extend(
+                daruda_config::EXTERNAL_EDITOR_PRESETS
+                    .iter()
+                    .map(|p| select::SelectOption::new(p.name, p.display_name)),
+            );
+            select::state_with_options(opts, Some(&preferred_editor), window, cx)
+        });
         let (panels_grid_columns_input, panels_grid_columns_fh) = Self::new_text_field(
             "1 – 16",
             format!("{}", config.panels.grid_columns),
@@ -1157,6 +1175,7 @@ impl SettingsWindow {
             files_use_gitignore: config.left_dock.files_use_gitignore,
             syntax_theme_select,
             clipboard_streaming_input,
+            editor_select,
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,
             telegram_enabled: config.telegram.enabled,
@@ -1538,6 +1557,13 @@ impl SettingsWindow {
             || SharedString::from(s::settings_err_clipboard()),
             cx,
         )?;
+
+        config.editor.preferred = self
+            .editor_select
+            .read(cx)
+            .selected_value()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
 
         config.panels.grid_columns = Self::parse_bounded_field(
             &self.panels_grid_columns_input,

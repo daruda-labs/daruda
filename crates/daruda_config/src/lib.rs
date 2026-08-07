@@ -10,6 +10,7 @@ pub mod claude_status;
 pub mod clipboard;
 pub mod colors;
 pub mod cursor;
+pub mod editor;
 pub mod file_viewer;
 pub mod font;
 pub mod general;
@@ -50,6 +51,10 @@ pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
 pub use cursor::{CursorConfig, CursorStyle};
+pub use editor::{
+    EditorConfig, ExternalEditorPreset, PRESETS as EXTERNAL_EDITOR_PRESETS,
+    preset as external_editor_preset,
+};
 pub use file_viewer::FileViewerConfig;
 pub use font::FontConfig;
 pub use general::{GeneralConfig, SUPPORTED_LOCALES};
@@ -122,6 +127,7 @@ pub struct Config {
     pub shell: ShellConfig,
     pub left_dock: LeftDockConfig,
     pub file_viewer: FileViewerConfig,
+    pub editor: EditorConfig,
     pub claude_status: ClaudeStatusConfig,
     pub notifications: NotificationsConfig,
     pub clipboard: ClipboardConfig,
@@ -180,6 +186,7 @@ impl Default for Config {
             shell: Default::default(),
             left_dock: Default::default(),
             file_viewer: Default::default(),
+            editor: Default::default(),
             claude_status: Default::default(),
             notifications: Default::default(),
             clipboard: Default::default(),
@@ -398,6 +405,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     patch_section(&mut doc, "file_viewer", |t| {
         t["syntax_theme"] = toml_edit::value(config.file_viewer.syntax_theme.clone());
         t["preview_tab"] = toml_edit::value(config.file_viewer.preview_tab);
+    });
+
+    patch_section(&mut doc, "editor", |t| {
+        t["preferred"] = toml_edit::value(config.editor.preferred.clone());
     });
 
     patch_section(&mut doc, "clipboard", |t| {
