@@ -683,8 +683,7 @@ fn bounded_raw_text(s: String) -> ToolOutputBlock {
 }
 
 /// A bounded `RawText` block wrapped in a `Vec`, or an empty `Vec` when the
-/// command printed nothing — the `RawText` counterpart of
-/// [`bounded_text_blocks`], so a silent command adds no empty block.
+/// command printed nothing, so a silent command adds no empty block.
 fn bounded_raw_text_blocks(text: String) -> Vec<ToolOutputBlock> {
     if text.trim().is_empty() {
         Vec::new()
@@ -772,17 +771,21 @@ fn push_raw_output_fallback(
 /// Render a `raw_output` value as output blocks. codex-acp's command execution
 /// stores the human-facing output as a `formatted_output` string, surfaced as
 /// [`ToolOutputBlock::RawText`] (highest priority — codex-acp relies on it):
-/// those are shell bytes, not markdown, so they must render verbatim. A bare
-/// string is used as is. A JSON **array** is Anthropic's raw content-block shape (e.g.
-/// `[{"type":"image",...}, {"type":"text",...}]`) — each element is parsed via
-/// [`raw_content_block`], in order, and recognized elements (image / audio /
-/// text / embedded resource) are kept while unrecognized ones are skipped; if
-/// *none* of the array's elements are recognized the whole array falls back to
-/// pretty JSON below (so a genuinely unrelated array isn't silently dropped). A
-/// bare JSON object that is itself one recognized content block parses to that
-/// one block. Anything else (a structured object such as an MCP
-/// `{ result, error }`, or an array/object with nothing recognizable) renders
-/// as pretty JSON. Returns an empty `Vec` when there is no visible text.
+/// those are shell bytes, not markdown, so they must render verbatim. Some
+/// adapters use the same shape but call the field `output`; treat that as the
+/// same human-facing stream rather than showing the JSON wrapper. A bare string
+/// is also raw output. A JSON **array** is Anthropic's raw content-block shape
+/// (e.g. `[{"type":"image",...}, {"type":"text",...}]`) — each element is
+/// parsed via [`raw_content_block`], in order, and recognized elements (image /
+/// audio / text / embedded resource) are kept while unrecognized ones are
+/// skipped; if *none* of the array's elements are recognized the whole array
+/// falls back to pretty JSON below (so a genuinely unrelated array isn't
+/// silently dropped). A bare JSON object that is itself one recognized content
+/// block parses to that one block. Anything else (a structured object such as an
+/// MCP `{ result, error }`, or an array/object with nothing recognizable)
+/// renders as pretty JSON, still as raw text so the app shows it in the bounded
+/// editor embed instead of the markdown path. Returns an empty `Vec` when there
+/// is no visible text.
 fn raw_output_blocks(raw: &serde_json::Value) -> Vec<ToolOutputBlock> {
     if let Some(s) = raw
         .get("formatted_output")
@@ -794,8 +797,11 @@ fn raw_output_blocks(raw: &serde_json::Value) -> Vec<ToolOutputBlock> {
         // is literal, not a heading or a horizontal rule.
         return bounded_raw_text_blocks(s.to_string());
     }
+    if let Some(s) = raw.get("output").and_then(serde_json::Value::as_str) {
+        return bounded_raw_text_blocks(s.to_string());
+    }
     match raw {
-        serde_json::Value::String(s) => return bounded_text_blocks(s.clone()),
+        serde_json::Value::String(s) => return bounded_raw_text_blocks(s.clone()),
         serde_json::Value::Array(elements) => {
             let recognized: Vec<ToolOutputBlock> =
                 elements.iter().filter_map(raw_content_block).collect();
@@ -812,19 +818,8 @@ fn raw_output_blocks(raw: &serde_json::Value) -> Vec<ToolOutputBlock> {
         }
     }
     match serde_json::to_string_pretty(raw) {
-        Ok(text) => bounded_text_blocks(text),
+        Ok(text) => bounded_raw_text_blocks(text),
         Err(_) => Vec::new(),
-    }
-}
-
-/// A bounded `Text` block wrapped in a `Vec`, or an empty `Vec` for
-/// whitespace-only text — the shared tail of every [`raw_output_blocks`] path
-/// that renders to text.
-fn bounded_text_blocks(text: String) -> Vec<ToolOutputBlock> {
-    if text.trim().is_empty() {
-        Vec::new()
-    } else {
-        vec![bounded_text(text)]
     }
 }
 
@@ -1780,9 +1775,10 @@ mod tests {
     }
 
     #[test]
-    fn raw_output_object_pretty_printed_when_no_formatted_output() {
+    fn raw_output_object_pretty_printed_as_raw_text_when_no_output_field() {
         // An MCP tool call returns structured `raw_output` (`{ result, error }`)
-        // with no content — fall back to a pretty-printed JSON block.
+        // with no content — fall back to pretty-printed raw text so it renders in
+        // the bounded output editor rather than the markdown path.
         let mut items = Vec::new();
         apply_update(
             &mut items,
@@ -1795,11 +1791,34 @@ mod tests {
         let ChatItem::ToolCall(tc) = &items[0] else {
             panic!("expected a tool call");
         };
-        let [ToolOutputBlock::Text { text, .. }] = tc.output.as_slice() else {
-            panic!("expected one text block, got {:?}", tc.output);
+        let [ToolOutputBlock::RawText { text, .. }] = tc.output.as_slice() else {
+            panic!("expected one raw text block, got {:?}", tc.output);
         };
         assert!(text.contains("\"result\""), "pretty JSON, got: {text}");
         assert!(text.contains("\"ok\": true"), "pretty JSON, got: {text}");
+    }
+
+    #[test]
+    fn raw_output_output_field_is_promoted_to_raw_text() {
+        // Some adapters put the user-facing stream under `output` instead of
+        // codex's `formatted_output`. The wrapper is transport, not content.
+        let printed = "Chunk ID: abc\nOutput:\n# literal heading\n";
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "Read")
+                    .kind(ToolKind::Read)
+                    .raw_output(serde_json::json!({ "output": printed })),
+            ),
+        );
+        assert_eq!(
+            only_tool_call(&items).output,
+            vec![ToolOutputBlock::RawText {
+                text: printed.to_string(),
+                truncated_from: None,
+            }]
+        );
     }
 
     #[test]
@@ -2682,11 +2701,11 @@ mod tests {
     }
 
     #[test]
-    fn raw_output_bare_string_is_bounded() {
+    fn raw_output_bare_string_is_raw_text_and_bounded() {
         let long = "x".repeat(MAX_TOOL_OUTPUT_TEXT_BYTES + 10);
         let blocks = raw_output_blocks(&serde_json::Value::String(long.clone()));
         let [
-            ToolOutputBlock::Text {
+            ToolOutputBlock::RawText {
                 text,
                 truncated_from,
             },
@@ -2699,14 +2718,14 @@ mod tests {
     }
 
     #[test]
-    fn raw_output_pretty_json_is_bounded() {
+    fn raw_output_pretty_json_is_raw_text_and_bounded() {
         // A structured object with no `formatted_output` falls back to
-        // pretty-printed JSON — verify that path is bounded too.
+        // pretty-printed raw text — verify that path is bounded too.
         let big_value: String = "v".repeat(MAX_TOOL_OUTPUT_TEXT_BYTES + 10);
         let raw = serde_json::json!({ "result": big_value });
         let blocks = raw_output_blocks(&raw);
         let [
-            ToolOutputBlock::Text {
+            ToolOutputBlock::RawText {
                 text,
                 truncated_from,
             },
@@ -2807,9 +2826,10 @@ mod tests {
     }
 
     #[test]
-    fn raw_output_array_of_unrecognized_objects_falls_back_to_pretty_json() {
+    fn raw_output_array_of_unrecognized_objects_falls_back_to_pretty_json_raw_text() {
         // No element has a recognized `type` — the whole array must still
-        // surface as pretty JSON, not be silently dropped.
+        // surface as pretty JSON, not be silently dropped. It is raw text so the
+        // app uses the bounded output editor.
         let mut items = Vec::new();
         apply_update(
             &mut items,
@@ -2821,8 +2841,8 @@ mod tests {
         let ChatItem::ToolCall(tc) = &items[0] else {
             panic!("expected a tool call");
         };
-        let [ToolOutputBlock::Text { text, .. }] = tc.output.as_slice() else {
-            panic!("expected one text block, got {:?}", tc.output);
+        let [ToolOutputBlock::RawText { text, .. }] = tc.output.as_slice() else {
+            panic!("expected one raw text block, got {:?}", tc.output);
         };
         assert!(text.contains("\"foo\""), "pretty JSON, got: {text}");
     }
@@ -2992,16 +3012,17 @@ mod tests {
     }
 
     #[test]
-    fn raw_output_array_with_only_empty_text_falls_back_to_pretty_json() {
+    fn raw_output_array_with_only_empty_text_falls_back_to_pretty_json_raw_text() {
         // The one element parses as a recognized "text" type but with empty
         // text — `raw_content_block` drops empty text (mirroring the
         // `ContentBlock::Text` guard in `output_block_of`), so the array has no
         // recognized blocks and falls through to the pretty-JSON fallback
-        // rather than surfacing an empty `Text` block.
+        // rather than surfacing an empty `Text` block. It is raw text so the app
+        // uses the bounded output editor.
         let raw = serde_json::json!([{ "type": "text", "text": "" }]);
         let blocks = raw_output_blocks(&raw);
-        let [ToolOutputBlock::Text { text, .. }] = blocks.as_slice() else {
-            panic!("expected one pretty-JSON text block, got {blocks:?}");
+        let [ToolOutputBlock::RawText { text, .. }] = blocks.as_slice() else {
+            panic!("expected one pretty-JSON raw text block, got {blocks:?}");
         };
         assert!(
             text.contains("\"type\""),
