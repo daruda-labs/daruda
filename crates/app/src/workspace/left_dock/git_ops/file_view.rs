@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{LaneId, LaneRef};
-use gpui::{Context, Window};
+use gpui::{Context, Window, point, px};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
@@ -14,6 +14,73 @@ use crate::workspace::main_area::file_view_pane::diff_editor::{
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
+use crate::workspace::main_area::pane::FileContent;
+
+fn line_to_editor_position(line: usize) -> gpui_component::input::Position {
+    let row = line.saturating_sub(1);
+    gpui_component::input::Position::new(u32::try_from(row).unwrap_or(u32::MAX), 0)
+}
+
+fn markdown_raw_line_scroll_offset(line: usize, cx: &gpui::App) -> gpui::Point<gpui::Pixels> {
+    let row = line.saturating_sub(1);
+    let row_h = crate::ui::theme::editor_font_size(cx) * crate::ui::theme::FILE_VIEWER_LINE_H_RATIO;
+    point(
+        px(crate::ui::theme::FILE_VIEWER_SCROLL_ORIGIN_X),
+        px(-(row as f32 * row_h)),
+    )
+}
+
+fn apply_pending_file_viewer_scroll(
+    fc: &mut FileContent,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(line) = fc.view.pending_scroll_line else {
+        return;
+    };
+
+    match &fc.view.content {
+        PaneFileContent::LoadedRaw | PaneFileContent::LoadedDiff { .. } => {
+            fc.view.pending_scroll_line = None;
+            let editor = fc.editor_state.clone();
+            editor.update(cx, |state, cx| {
+                state.set_cursor_position(line_to_editor_position(line), window, cx);
+            });
+        }
+        PaneFileContent::LoadedMarkdown { .. } => {
+            apply_pending_file_viewer_scroll_without_window(fc, cx);
+        }
+        PaneFileContent::Loading => {}
+        PaneFileContent::Error(_) | PaneFileContent::Binary | PaneFileContent::Deleted => {
+            fc.view.pending_scroll_line = None;
+        }
+    }
+}
+
+fn apply_pending_file_viewer_scroll_without_window(
+    fc: &mut FileContent,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(line) = fc.view.pending_scroll_line else {
+        return;
+    };
+
+    match &fc.view.content {
+        PaneFileContent::LoadedMarkdown { raw_rows, .. }
+            if fc.view.view_mode == FileViewMode::Raw =>
+        {
+            let line = line.min(raw_rows.len().max(1));
+            fc.view.pending_scroll_line = None;
+            fc.scroll_handle
+                .set_offset(markdown_raw_line_scroll_offset(line, cx));
+            cx.notify();
+        }
+        PaneFileContent::Loading => {}
+        _ => {
+            fc.view.pending_scroll_line = None;
+        }
+    }
+}
 
 impl Workspace {
     /// Select a file in the Git Changes view: open the pane-area file viewer
@@ -120,6 +187,7 @@ impl Workspace {
                 fc.view.hide_unchanged = false;
                 fc.view.selection_drag = SelectionDrag::None;
                 fc.view.search = None;
+                fc.view.pending_scroll_line = None;
                 fc.scroll_handle = gpui::ScrollHandle::new();
                 fc.cached_title = new_title;
                 fc.search_input
@@ -303,6 +371,7 @@ impl Workspace {
             // Clear search — match indices are mode-specific.
             fv.search = None;
             fv.selection_drag = SelectionDrag::None;
+            fv.pending_scroll_line = None;
             fc.scroll_handle = gpui::ScrollHandle::new();
 
             if skip_reload {
@@ -413,6 +482,24 @@ impl Workspace {
                 y: px(-target_y),
             });
         }
+    }
+
+    /// Reveal a 1-based source line in the focused file viewer. If the file is
+    /// still loading, store the target and apply it when the load completes.
+    pub(in crate::workspace) fn scroll_focused_file_viewer_to_line(
+        &mut self,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if line == 0 {
+            return;
+        }
+        let Some(fc) = self.focused_file_content_mut() else {
+            return;
+        };
+        fc.view.pending_scroll_line = Some(line);
+        apply_pending_file_viewer_scroll(fc, window, cx);
     }
 
     /// Trigger content loads for every File pane in the active lane's
@@ -568,6 +655,7 @@ impl Workspace {
                         } else {
                             None
                         };
+                        let pending_scroll_line = fc.view.pending_scroll_line;
                         fc.view.content = content;
                         if let Some(model) = diff_model {
                             let editor = fc.editor_state.clone();
@@ -576,7 +664,17 @@ impl Workspace {
                                 state.set_disabled(true, cx_s);
                                 state.set_line_decorations(model.decorations, cx_s);
                                 state.set_highlight_override(Some(model.highlights), cx_s);
+                                if let Some(line) = pending_scroll_line {
+                                    state.set_cursor_position(
+                                        line_to_editor_position(line),
+                                        window,
+                                        cx_s,
+                                    );
+                                }
                             });
+                            fc.view.pending_scroll_line = None;
+                        } else {
+                            apply_pending_file_viewer_scroll_without_window(fc, cx);
                         }
                     }
                     LoadOutcome::Raw { text } => {
@@ -585,12 +683,20 @@ impl Workspace {
                         // over from a previous mode (read-only + decorations).
                         fc.saved_text = text.clone();
                         fc.view.content = PaneFileContent::LoadedRaw;
+                        let pending_scroll_line = fc.view.pending_scroll_line.take();
                         let editor = fc.editor_state.clone();
                         configure_file_editor(cx, editor, move |state, window, cx_s| {
                             state.set_value(text, window, cx_s);
                             state.set_disabled(false, cx_s);
                             state.set_line_decorations(Vec::new(), cx_s);
                             state.set_highlight_override(None, cx_s);
+                            if let Some(line) = pending_scroll_line {
+                                state.set_cursor_position(
+                                    line_to_editor_position(line),
+                                    window,
+                                    cx_s,
+                                );
+                            }
                         });
                     }
                 }

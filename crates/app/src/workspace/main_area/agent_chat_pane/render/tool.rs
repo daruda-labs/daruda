@@ -19,6 +19,7 @@ use super::chrome::pulse_dots;
 use super::diff::diff_block;
 use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
+use super::links::AgentChatMarkdownLinks;
 use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -36,6 +37,14 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+#[derive(Clone, Copy)]
+struct OutputBlockContext<'a> {
+    assets: RenderAssets<'a>,
+    t: &'a theme::DarudaTheme,
+    dim: f32,
+    links: AgentChatMarkdownLinks,
+}
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
 /// in progress). The header leads with a fixed-width label (the agent's own tool
@@ -62,6 +71,7 @@ pub(super) fn tool_card(
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
+    let markdown_links = AgentChatMarkdownLinks::new(pane_id, window_handle);
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
     // `Completed` when its SDK call returns, but the child tool calls stream in
@@ -276,7 +286,8 @@ pub(super) fn tool_card(
                 )
                 .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                 .text_size(font_size)
-                .code_block_render(mermaid_code_block_render(assets.mermaid_images, dim)),
+                .code_block_render(mermaid_code_block_render(assets.mermaid_images, dim))
+                .link_click_handler(markdown_links.handler()),
             );
         }
         for (di, diff) in tc.diffs.iter().enumerate() {
@@ -303,8 +314,14 @@ pub(super) fn tool_card(
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(s::agent_chat_tool_output_label())),
             );
+            let output_context = OutputBlockContext {
+                assets,
+                t,
+                dim,
+                links: markdown_links,
+            };
             for (ix, block) in tc.output.iter().enumerate() {
-                body = body.child(output_block_view(&tc.id, ix, block, assets, t, dim, cx));
+                body = body.child(output_block_view(&tc.id, ix, block, output_context, cx));
             }
         }
 
@@ -484,22 +501,21 @@ fn output_block_view(
     tool_id: &str,
     ix: usize,
     block: &ToolOutputBlock,
-    assets: RenderAssets<'_>,
-    t: &theme::DarudaTheme,
-    dim: f32,
+    context: OutputBlockContext<'_>,
     cx: &App,
 ) -> AnyElement {
     let key = output_editor_key(tool_id, ix);
-    if let Some(editor) = assets.output_editors.get(&key) {
+    if let Some(editor) = context.assets.output_editors.get(&key) {
         // The copy text comes from the same classifier the reconciler fed the
         // editor, so it is the fence body rather than the raw block text — what
         // the user actually sees in the embed.
         let copy = output_editor_source(block).map(|src| SharedString::from(src.text.to_string()));
-        let body = bounded_editor_embed(&key, editor, copy, t, dim, cx);
-        return with_truncation_note(body, output_truncated_from(block), dim, cx);
+        let body = bounded_editor_embed(&key, editor, copy, context.t, context.dim, cx);
+        return with_truncation_note(body, output_truncated_from(block), context.dim, cx);
     }
-    let mermaid_images = assets.mermaid_images;
-    let tool_images = assets.tool_images;
+    let dim = context.dim;
+    let mermaid_images = context.assets.mermaid_images;
+    let tool_images = context.assets.tool_images;
     match block {
         ToolOutputBlock::Text {
             text,
@@ -513,6 +529,7 @@ fn output_block_view(
                 crate::ui::markdown(SharedString::from(plain_id_prefix.clone()), text.clone())
                     .color(plain_color)
                     .text_size(font_size)
+                    .link_click_handler(context.links.handler())
                     .code_block_render(move |lang, source, _window, cx| {
                         // A ```mermaid fence in tool output renders as the same
                         // diagram card as chat prose (shared builder); a cache

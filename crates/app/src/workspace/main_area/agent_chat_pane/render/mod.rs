@@ -11,6 +11,7 @@ mod diff;
 /// layout probe measures the shipped builder rather than a copy of it.
 pub(in crate::workspace) mod embed;
 mod fold_header;
+mod links;
 mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
@@ -95,10 +96,12 @@ impl<'a> RenderAssets<'a> {
 }
 
 use blocks::{
-    assistant_block, assistant_markdown, conclusion_block, error_block, thinking_block, user_bubble,
+    MarkdownRender, assistant_block, assistant_markdown, conclusion_block, error_block,
+    thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
+use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use tool::{permission_card, tool_card};
 
@@ -353,8 +356,11 @@ fn render_row(
                     key,
                     expanded,
                     text,
-                    &this.assets.mermaid_images,
-                    this.dim_amount,
+                    MarkdownRender::new(
+                        &this.assets.mermaid_images,
+                        this.dim_amount,
+                        AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
+                    ),
                     cx,
                 )
                 .into_any_element()
@@ -598,13 +604,18 @@ fn render_item(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let mermaid_images = assets.mermaid_images;
+    let markdown = MarkdownRender::new(
+        mermaid_images,
+        dim,
+        AgentChatMarkdownLinks::new(pane_id, window_handle),
+    );
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),
         // Under a response bar the speaker is already labeled with the agent
         // name; render the prose inline with no redundant per-block header/fold.
         // A trivial / top-level reply keeps the labeled, foldable block.
         ChatItem::AssistantText { text, .. } if under_response => {
-            assistant_markdown(ix, text, mermaid_images, dim, cx)
+            assistant_markdown(ix, text, markdown, cx)
         }
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
@@ -614,18 +625,17 @@ fn render_item(
                 key,
                 expanded,
                 text,
-                mermaid_images,
                 agent_label,
                 rollup,
                 t,
-                dim,
+                markdown,
                 cx,
             )
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            thinking_block(ix, key, expanded, text, mermaid_images, dim, cx).into_any_element()
+            thinking_block(ix, key, expanded, text, markdown, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => {
             let key = tool_fold_key(tc);

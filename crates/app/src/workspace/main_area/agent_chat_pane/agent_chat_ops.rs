@@ -14,7 +14,7 @@ use daruda_config::AgentLaunch;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::telegram_ops::DeferKind;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
@@ -143,6 +143,128 @@ fn should_notify_agent_event(
     is_focused_pane: bool,
 ) -> bool {
     enabled && !(skip_focused_pane && app_active && is_focused_pane)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MarkdownFileLinkTarget {
+    path: PathBuf,
+    line: Option<usize>,
+}
+
+fn markdown_file_link_target(link: &str, cwd: Option<&Path>) -> Option<MarkdownFileLinkTarget> {
+    let path = if let Some(path) = file_url_path(link) {
+        path
+    } else if is_external_url(link) {
+        return None;
+    } else {
+        let path = PathBuf::from(link);
+        if path.is_absolute() {
+            path
+        } else if link.starts_with("./")
+            || link.starts_with("../")
+            || link.contains('/')
+            || cwd
+                .map(|cwd| strip_markdown_line_suffix(cwd.join(&path)).path.is_file())
+                .unwrap_or(false)
+        {
+            cwd?.join(path)
+        } else {
+            return None;
+        }
+    };
+
+    Some(strip_markdown_line_suffix(path))
+}
+
+fn file_url_path(link: &str) -> Option<PathBuf> {
+    let rest = link.strip_prefix("file://")?;
+    let path = if let Some(path) = rest.strip_prefix("localhost/") {
+        format!("/{path}")
+    } else if rest.starts_with('/') {
+        rest.to_string()
+    } else {
+        return None;
+    };
+    Some(PathBuf::from(percent_decode_path(&path)?))
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    if !path.as_bytes().contains(&b'%') {
+        return Some(path.to_string());
+    }
+
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = hex_value(*bytes.get(i + 1)?)?;
+            let lo = hex_value(*bytes.get(i + 2)?)?;
+            out.push((hi << 4) | lo);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn is_external_url(link: &str) -> bool {
+    link.contains("://")
+        || link.starts_with("mailto:")
+        || link.starts_with("tel:")
+        || link.starts_with('#')
+}
+
+fn parse_numeric_suffix(suffix: &str) -> Option<Option<usize>> {
+    if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(suffix.parse::<usize>().ok().filter(|n| *n > 0))
+}
+
+fn strip_markdown_line_suffix(path: PathBuf) -> MarkdownFileLinkTarget {
+    if path.is_file() {
+        return MarkdownFileLinkTarget { path, line: None };
+    }
+
+    let Some(mut s) = path.to_str().map(str::to_owned) else {
+        return MarkdownFileLinkTarget { path, line: None };
+    };
+    let mut line = None;
+    for _ in 0..2 {
+        let Some((prefix, suffix)) = s.rsplit_once(':') else {
+            break;
+        };
+        let Some(parsed) = parse_numeric_suffix(suffix) else {
+            break;
+        };
+        if let Some(n) = parsed {
+            line = Some(n);
+        }
+        s = prefix.to_string();
+        let stripped = PathBuf::from(&s);
+        if stripped.is_file() {
+            return MarkdownFileLinkTarget {
+                path: stripped,
+                line,
+            };
+        }
+    }
+    MarkdownFileLinkTarget {
+        path: PathBuf::from(s),
+        line,
+    }
 }
 
 impl Workspace {
@@ -680,6 +802,58 @@ impl Workspace {
         );
     }
 
+    /// Open a file-shaped link from rendered agent-chat Markdown in the pane
+    /// file viewer. Returns `false` for normal URLs so the caller can fall back
+    /// to the platform URL opener. Handles the file-link shape this app emits
+    /// in chat (`/abs/path:line`) by stripping the line suffix before opening.
+    pub(in crate::workspace) fn open_agent_chat_markdown_file_link(
+        &mut self,
+        pane_id: PaneId,
+        link: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let cwd = self.agent_chat_view(pane_id).and_then(|view| {
+            let view = view.read(cx);
+            match &view.cwd {
+                Some(PaneCwd::Local(path)) => Some(path.clone()),
+                Some(PaneCwd::Remote(_)) | None => None,
+            }
+        });
+        let Some(target) = markdown_file_link_target(link, cwd.as_deref()) else {
+            return false;
+        };
+        let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+            return true;
+        };
+        if self.diff_pane_is_remote(pane_id, cx) {
+            let report = ErrorReport::new(s::diff_remote_path_unsupported())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("agent_chat.markdown_file_link.remote_path_unsupported")
+                .build();
+            self.report_error(report, cx);
+            return true;
+        }
+        self.open_pane_file_view(
+            lane.lane,
+            target.path,
+            false,
+            None,
+            crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+            window,
+            cx,
+        );
+        if let Some(line) = target.line {
+            self.set_file_view_mode(
+                crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                cx,
+            );
+            self.scroll_focused_file_viewer_to_line(line, window, cx);
+        }
+        true
+    }
+
     /// Open a diff block's file externally — the user's preferred editor
     /// (Settings → External Editor), or the OS default handler when none is
     /// set. Dispatched from the agent-chat diff header, same shape as
@@ -727,8 +901,8 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
-        should_notify_agent_event,
+        MarkdownFileLinkTarget, markdown_file_link_target, resolve_new_pane_cwd_core,
+        resolve_open_agent_id, resolve_restored_agent, should_notify_agent_event,
     };
     use daruda_config::{AgentDefinition, AgentLaunch};
     use daruda_store::project::{LaneSessionHost, PaneCwd};
@@ -1039,5 +1213,95 @@ mod tests {
         // No prior choice falls back to catalog[0] = "other".
         let agents = two_agent_catalog();
         assert_eq!(resolve_open_agent_id(&agents, None), "other");
+    }
+
+    #[test]
+    fn markdown_file_link_strips_absolute_line_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diff.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+
+        let link = format!("{}:75", path.display());
+        assert_eq!(
+            markdown_file_link_target(&link, None),
+            Some(MarkdownFileLinkTarget {
+                path,
+                line: Some(75)
+            })
+        );
+    }
+
+    #[test]
+    fn markdown_file_link_strips_line_and_column_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diff.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+
+        let link = format!("{}:75:9", path.display());
+        assert_eq!(
+            markdown_file_link_target(&link, None),
+            Some(MarkdownFileLinkTarget {
+                path,
+                line: Some(75)
+            })
+        );
+    }
+
+    #[test]
+    fn markdown_file_link_keeps_colon_filename_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diff.rs:75");
+        std::fs::write(&path, "literal colon filename\n").unwrap();
+
+        assert_eq!(
+            markdown_file_link_target(path.to_str().unwrap(), None),
+            Some(MarkdownFileLinkTarget { path, line: None })
+        );
+    }
+
+    #[test]
+    fn markdown_file_link_resolves_relative_path_against_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let subdir = dir.path().join("crates/app/src");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let path = subdir.join("diff.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+
+        assert_eq!(
+            markdown_file_link_target("crates/app/src/diff.rs:75", Some(dir.path())),
+            Some(MarkdownFileLinkTarget {
+                path,
+                line: Some(75)
+            })
+        );
+    }
+
+    #[test]
+    fn markdown_file_link_decodes_file_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("with space.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let encoded = path.to_string_lossy().replace(' ', "%20");
+
+        assert_eq!(
+            markdown_file_link_target(&format!("file://{encoded}:75"), None),
+            Some(MarkdownFileLinkTarget {
+                path,
+                line: Some(75)
+            })
+        );
+    }
+
+    #[test]
+    fn markdown_file_link_ignores_external_urls() {
+        assert_eq!(
+            markdown_file_link_target("https://example.com/a.rs:75", None),
+            None
+        );
+        assert_eq!(
+            markdown_file_link_target("mailto:a@example.com", None),
+            None
+        );
+        assert_eq!(markdown_file_link_target("#local-heading", None), None);
     }
 }

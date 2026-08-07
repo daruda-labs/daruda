@@ -17,7 +17,7 @@ use crate::{
     ActiveTheme as _, Icon, IconName, StyledExt, h_flex,
     highlighter::{HighlightTheme, SyntaxHighlighter},
     text::{
-        CodeBlockActionsFn, CodeBlockRenderFn,
+        CodeBlockActionsFn, CodeBlockRenderFn, LinkClickHandlerFn,
         inline::{Inline, InlineState},
     },
     tooltip::Tooltip,
@@ -367,6 +367,7 @@ impl CodeBlock {
         &self,
         options: &NodeRenderOptions,
         node_cx: &NodeContext,
+        _link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -416,6 +417,7 @@ impl CodeBlock {
                         self.state.clone(),
                         vec![],
                         self.styles.clone(),
+                        None,
                     ))
                     .when_some(node_cx.code_block_actions.clone(), |this, actions| {
                         this.child(
@@ -603,6 +605,7 @@ impl Paragraph {
     fn render(
         &self,
         node_cx: &NodeContext,
+        link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         _window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -634,6 +637,7 @@ impl Paragraph {
                             inline_node.state.clone(),
                             links.clone(),
                             highlights.clone(),
+                            link_click_handler.cloned(),
                         )
                         .into_any_element(),
                     );
@@ -646,12 +650,18 @@ impl Paragraph {
                         .when_some(image.width, |this, width| this.w(width))
                         .when_some(image.link.clone(), |this, link| {
                             let title = image.title();
+                            let link_click_handler = link_click_handler.cloned();
                             this.cursor_pointer()
                                 .tooltip(move |window, cx| {
                                     Tooltip::new(title.clone()).build(window, cx)
                                 })
-                                .on_click(move |_, _, cx| {
+                                .on_click(move |_, window, cx| {
                                     cx.stop_propagation();
+                                    if link_click_handler.as_ref().is_some_and(|handler| {
+                                        handler(link.url.as_ref(), window, cx)
+                                    }) {
+                                        return;
+                                    }
                                     cx.open_url(&link.url);
                                 })
                         })
@@ -727,8 +737,16 @@ impl Paragraph {
         // Add the last text node
         if text.len() > 0 {
             self.state.lock().unwrap().set_text(text.into());
-            child_nodes
-                .push(Inline::new(ix, self.state.clone(), links, highlights).into_any_element());
+            child_nodes.push(
+                Inline::new(
+                    ix,
+                    self.state.clone(),
+                    links,
+                    highlights,
+                    link_click_handler.cloned(),
+                )
+                .into_any_element(),
+            );
         }
 
         div().id(span.unwrap_or_default()).children(child_nodes)
@@ -992,6 +1010,7 @@ impl Node {
         ix: usize,
         options: NodeRenderOptions,
         node_cx: &NodeContext,
+        link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -1016,6 +1035,7 @@ impl Node {
                                 ..options
                             },
                             node_cx,
+                            link_click_handler,
                             window,
                             cx,
                         );
@@ -1102,6 +1122,7 @@ impl Node {
     fn render_table(
         item: &Node,
         node_cx: &NodeContext,
+        link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -1209,11 +1230,12 @@ impl Node {
                                                             div()
                                                                 .min_w_0()
                                                                 .overflow_hidden()
-                                                                .child(
-                                                                    cell.children.render(
-                                                                        node_cx, window, cx,
-                                                                    ),
-                                                                ),
+                                                                .child(cell.children.render(
+                                                                    node_cx,
+                                                                    link_click_handler,
+                                                                    window,
+                                                                    cx,
+                                                                )),
                                                         ),
                                                 )
                                             }
@@ -1233,6 +1255,7 @@ impl Node {
         &self,
         list_state: Option<ListState>,
         node_cx: &NodeContext,
+        link_click_handler: Option<Arc<LinkClickHandlerFn>>,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -1243,7 +1266,7 @@ impl Node {
 
         let Some(list_state) = list_state else {
             return self
-                .render_block(options, node_cx, window, cx)
+                .render_block(options, node_cx, link_click_handler.as_ref(), window, cx)
                 .into_any_element();
         };
 
@@ -1254,6 +1277,7 @@ impl Node {
 
         let children = children.clone();
         let node_cx = node_cx.clone();
+        let link_click_handler = link_click_handler.clone();
 
         if list_state.item_count() != children.len() {
             list_state.reset(children.len());
@@ -1262,7 +1286,13 @@ impl Node {
         gpui::list(list_state, move |ix, window, cx| {
             let is_last = ix + 1 == children.len();
             children[ix]
-                .render_block(options.is_last(is_last), &node_cx, window, cx)
+                .render_block(
+                    options.is_last(is_last),
+                    &node_cx,
+                    link_click_handler.as_ref(),
+                    window,
+                    cx,
+                )
                 .into_any_element()
         })
         .size_full()
@@ -1273,6 +1303,7 @@ impl Node {
         &self,
         options: NodeRenderOptions,
         node_cx: &NodeContext,
+        link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -1293,6 +1324,7 @@ impl Node {
                                 .is_first(index == 0)
                                 .is_last(index == children_len - 1),
                             node_cx,
+                            link_click_handler,
                             window,
                             cx,
                         )
@@ -1303,7 +1335,7 @@ impl Node {
                 .id("p")
                 .pb(mb)
                 .line_height(rems(1.3))
-                .child(paragraph.render(node_cx, window, cx))
+                .child(paragraph.render(node_cx, link_click_handler, window, cx))
                 .into_any_element(),
             Node::Heading { level, children } => {
                 let (text_size, font_weight) = match level {
@@ -1335,12 +1367,12 @@ impl Node {
                     // holding its intrinsic max-content width — the same
                     // width-dependent class as the list-item and table-cell
                     // wrap fixes above.
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(children.render(node_cx, window, cx)),
-                    )
+                    .child(div().flex_1().min_w_0().child(children.render(
+                        node_cx,
+                        link_click_handler,
+                        window,
+                        cx,
+                    )))
                     .into_any_element()
             }
             Node::Blockquote { children } => div()
@@ -1366,6 +1398,7 @@ impl Node {
                                         .is_first(index == 0)
                                         .is_last(index == children_len - 1),
                                     node_cx,
+                                    link_click_handler,
                                     window,
                                     cx,
                                 )
@@ -1390,6 +1423,7 @@ impl Node {
                                 ..options
                             },
                             node_cx,
+                            link_click_handler,
                             window,
                             cx,
                         ));
@@ -1401,8 +1435,12 @@ impl Node {
                     items
                 })
                 .into_any_element(),
-            Node::CodeBlock(code_block) => code_block.render(&options, node_cx, window, cx),
-            Node::Table { .. } => Self::render_table(self, node_cx, window, cx).into_any_element(),
+            Node::CodeBlock(code_block) => {
+                code_block.render(&options, node_cx, link_click_handler, window, cx)
+            }
+            Node::Table { .. } => {
+                Self::render_table(self, node_cx, link_click_handler, window, cx).into_any_element()
+            }
             Node::Divider => {
                 // Background-derived rule instead of the fixed `border` hairline,
                 // which is near-invisible on the agent-chat pane's mirrored

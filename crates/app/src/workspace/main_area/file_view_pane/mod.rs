@@ -121,6 +121,9 @@ pub(in crate::workspace) struct PaneFileView {
     pub selection_drag: SelectionDrag,
     /// Active find-panel state. `None` when the panel is closed.
     pub search: Option<FileViewerSearch>,
+    /// One-shot 1-based source line to reveal after opening/loading from an
+    /// external reference such as an agent-chat Markdown file link.
+    pub pending_scroll_line: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

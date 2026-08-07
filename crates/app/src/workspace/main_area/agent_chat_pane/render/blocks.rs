@@ -7,12 +7,34 @@ use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, rela
 
 use super::MermaidImages;
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
+use super::links::AgentChatMarkdownLinks;
 use super::mermaid::mermaid_code_block_render;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+
+#[derive(Clone, Copy)]
+pub(super) struct MarkdownRender<'a> {
+    pub(super) mermaid_images: &'a MermaidImages,
+    pub(super) dim: f32,
+    pub(super) links: AgentChatMarkdownLinks,
+}
+
+impl<'a> MarkdownRender<'a> {
+    pub(super) fn new(
+        mermaid_images: &'a MermaidImages,
+        dim: f32,
+        links: AgentChatMarkdownLinks,
+    ) -> Self {
+        Self {
+            mermaid_images,
+            dim,
+            links,
+        }
+    }
+}
 
 /// User prompt — right-aligned accent-tinted bubble. The body renders as
 /// selectable **plain text** via `crate::ui::selectable_text` (verbatim, no
@@ -58,14 +80,20 @@ pub(super) fn user_bubble(
 pub(super) fn assistant_markdown(
     ix: usize,
     text: &str,
-    mermaid_images: &MermaidImages,
-    dim: f32,
+    markdown: MarkdownRender<'_>,
     cx: &App,
 ) -> AnyElement {
     crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+        .color(theme::dim_toward_gray(
+            theme::agent_chat_fg(cx),
+            markdown.dim,
+        ))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .code_block_render(mermaid_code_block_render(mermaid_images, dim))
+        .code_block_render(mermaid_code_block_render(
+            markdown.mermaid_images,
+            markdown.dim,
+        ))
+        .link_click_handler(markdown.links.handler())
         .into_any_element()
 }
 
@@ -86,17 +114,19 @@ pub(super) fn assistant_block(
     key: FoldKey,
     expanded: bool,
     text: &str,
-    mermaid_images: &MermaidImages,
     agent_label: &str,
     rollup: Option<Rollup>,
     t: &theme::DarudaTheme,
-    dim: f32,
+    markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
         div()
             .flex_none()
-            .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+            .text_color(theme::dim_toward_gray(
+                theme::agent_chat_fg(cx),
+                markdown.dim,
+            ))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_size(px(theme::agent_chat_font_size(cx)))
             .child(SharedString::from(agent_label.to_string()))
@@ -106,9 +136,9 @@ pub(super) fn assistant_block(
         header = header.trailing(rollup_glyph(rollup, t, cx));
     }
     FoldRow::block(("agent-chat-assistant", ix), key, expanded, header, |cx| {
-        assistant_markdown(ix, text, mermaid_images, dim, cx)
+        assistant_markdown(ix, text, markdown, cx)
     })
-    .render(dim, cx)
+    .render(markdown.dim, cx)
 }
 
 /// The turn's conclusion — the run's final assistant message rendered under a
@@ -122,8 +152,7 @@ pub(super) fn conclusion_block(
     key: FoldKey,
     expanded: bool,
     text: &str,
-    mermaid_images: &MermaidImages,
-    dim: f32,
+    markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     FoldRow::block(
@@ -131,9 +160,9 @@ pub(super) fn conclusion_block(
         key,
         expanded,
         FoldHeader::with_summary(|| SummaryLine::from_markdown(text)),
-        |cx| assistant_markdown(ix, text, mermaid_images, dim, cx),
+        |cx| assistant_markdown(ix, text, markdown, cx),
     )
-    .render(dim, cx)
+    .render(markdown.dim, cx)
 }
 
 /// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
@@ -150,8 +179,7 @@ pub(super) fn thinking_block(
     key: FoldKey,
     expanded: bool,
     text: &str,
-    mermaid_images: &MermaidImages,
-    dim: f32,
+    markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let header =
@@ -159,7 +187,10 @@ pub(super) fn thinking_block(
             .leading(
                 div()
                     .flex_none()
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                    .text_color(theme::dim_toward_gray(
+                        theme::agent_chat_fg(cx),
+                        markdown.dim,
+                    ))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(s::agent_chat_thinking_label()))
@@ -167,12 +198,19 @@ pub(super) fn thinking_block(
             );
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
         crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
-            .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
+            .color(theme::dim_toward_gray(
+                theme::agent_chat_fg_subtle(cx),
+                markdown.dim,
+            ))
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .code_block_render(mermaid_code_block_render(mermaid_images, dim))
+            .code_block_render(mermaid_code_block_render(
+                markdown.mermaid_images,
+                markdown.dim,
+            ))
+            .link_click_handler(markdown.links.handler())
             .into_any_element()
     })
-    .render(dim, cx)
+    .render(markdown.dim, cx)
 }
 
 /// Surfaced error item — error-tinted block.

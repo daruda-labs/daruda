@@ -279,6 +279,7 @@ mod tests {
             hide_unchanged: false,
             selection_drag: SelectionDrag::None,
             search: None,
+            pending_scroll_line: None,
         }
     }
 
@@ -311,6 +312,7 @@ mod tests {
             hide_unchanged: false,
             selection_drag: SelectionDrag::None,
             search: None,
+            pending_scroll_line: None,
         }
     }
 

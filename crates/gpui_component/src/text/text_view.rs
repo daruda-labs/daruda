@@ -43,6 +43,7 @@ pub(crate) fn init(cx: &mut App) {
 struct TextViewElement {
     list_state: Option<ListState>,
     state: Entity<TextViewState>,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 }
 
 impl RenderOnce for TextViewElement {
@@ -54,6 +55,7 @@ impl RenderOnce for TextViewElement {
                     Some(Ok(content)) => this.child(content.root_node.render_root(
                         self.list_state.clone(),
                         &content.node_cx,
+                        self.link_click_handler.clone(),
                         window,
                         cx,
                     )),
@@ -77,6 +79,10 @@ pub(crate) type CodeBlockActionsFn =
 /// the default rendering of a code block, or `None` to fall back to default.
 pub(crate) type CodeBlockRenderFn =
     dyn Fn(&CodeBlock, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync;
+
+/// Type for a link-click override. Return `true` when the click was handled;
+/// returning `false` falls back to the platform URL opener.
+pub type LinkClickHandlerFn = dyn Fn(&str, &mut Window, &mut App) -> bool;
 
 /// A text view that can render Markdown or HTML.
 ///
@@ -105,6 +111,7 @@ pub struct TextView {
     scrollable: bool,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     code_block_render: Option<Arc<CodeBlockRenderFn>>,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 }
 
 #[derive(PartialEq)]
@@ -518,6 +525,7 @@ impl TextView {
             scrollable: false,
             code_block_actions: None,
             code_block_render: None,
+            link_click_handler: None,
         }
     }
 
@@ -550,6 +558,7 @@ impl TextView {
             scrollable: false,
             code_block_actions: None,
             code_block_render: None,
+            link_click_handler: None,
         }
     }
 
@@ -583,6 +592,7 @@ impl TextView {
             scrollable: false,
             code_block_actions: None,
             code_block_render: None,
+            link_click_handler: None,
         }
     }
 
@@ -670,6 +680,16 @@ impl TextView {
         self.code_block_render = Some(Arc::new(move |code_block, window, cx| {
             f(code_block, window, cx).map(IntoElement::into_any_element)
         }));
+        self
+    }
+
+    /// Override link clicks. Return `true` to consume the click; return `false`
+    /// to keep the default platform URL opener.
+    pub fn link_click_handler<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&str, &mut Window, &mut App) -> bool + 'static,
+    {
+        self.link_click_handler = Some(Arc::new(f));
         self
     }
 }
@@ -809,6 +829,7 @@ impl Element for TextView {
                     None
                 },
                 state: self.state.clone(),
+                link_click_handler: self.link_click_handler.clone(),
             })
             .refine_style(&self.style)
             .vertical_scrollbar(list_state)

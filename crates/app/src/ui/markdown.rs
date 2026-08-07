@@ -19,6 +19,7 @@ use gpui_component::text::TextView;
 /// Optional code-block override hook kept domain-free for this UI wrapper.
 type CodeBlockRender =
     Arc<dyn Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync>;
+type LinkClickHandler = Arc<dyn Fn(&str, &mut Window, &mut App) -> bool>;
 
 #[derive(IntoElement)]
 pub struct Markdown {
@@ -29,6 +30,7 @@ pub struct Markdown {
     text_size: Option<Pixels>,
     full_width: bool,
     code_block_render: Option<CodeBlockRender>,
+    link_click_handler: Option<LinkClickHandler>,
 }
 
 impl Markdown {
@@ -71,6 +73,16 @@ impl Markdown {
         self.code_block_render = Some(Arc::new(f));
         self
     }
+
+    /// Override link clicks. Return `true` when the link was handled; `false`
+    /// keeps TextView's default platform URL opener.
+    pub fn link_click_handler<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&str, &mut Window, &mut App) -> bool + 'static,
+    {
+        self.link_click_handler = Some(Arc::new(f));
+        self
+    }
 }
 
 impl RenderOnce for Markdown {
@@ -106,6 +118,9 @@ impl RenderOnce for Markdown {
                 cbr(lang, source.as_ref(), window, cx)
             });
         }
+        if let Some(handler) = self.link_click_handler {
+            view = view.link_click_handler(move |url, window, cx| handler(url, window, cx));
+        }
         // A hover-revealed copy button on every rendered code block, on for all
         // markdown. Mermaid fences take the separate `code_block_render`
         // replace-path above, which fully replaces the block's rendering (and
@@ -136,6 +151,7 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
         text_size: None,
         full_width: true,
         code_block_render: None,
+        link_click_handler: None,
     }
 }
 

@@ -12,8 +12,11 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme, global_state::GlobalState, input::Selection, text::node::LinkMark,
-    text::text_view::SelectMode,
+    ActiveTheme,
+    global_state::GlobalState,
+    input::Selection,
+    text::node::LinkMark,
+    text::text_view::{LinkClickHandlerFn, SelectMode},
 };
 use daruda_core::text::{char_cell_hit_x, word_range};
 
@@ -26,6 +29,7 @@ pub(super) struct Inline {
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -52,6 +56,7 @@ impl Inline {
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     ) -> Self {
         let text = state.lock().unwrap().text.clone();
         Self {
@@ -60,6 +65,7 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            link_click_handler,
             state,
         }
     }
@@ -453,9 +459,10 @@ impl Element for Inline {
             // click to open link
             window.on_mouse_event({
                 let links = self.links.clone();
+                let link_click_handler = self.link_click_handler.clone();
                 let text_layout = text_layout.clone();
 
-                move |event: &MouseUpEvent, phase, _, cx| {
+                move |event: &MouseUpEvent, phase, window, cx| {
                     if !bounds.contains(&event.position) || !phase.bubble() {
                         return;
                     }
@@ -464,6 +471,12 @@ impl Element for Inline {
                         Self::link_for_position(&text_layout, &links, event.position)
                     {
                         cx.stop_propagation();
+                        if link_click_handler
+                            .as_ref()
+                            .is_some_and(|handler| handler(link.url.as_ref(), window, cx))
+                        {
+                            return;
+                        }
                         cx.open_url(&link.url);
                     }
                 }
