@@ -133,6 +133,19 @@ pub(in crate::workspace) enum FileViewMode {
     Changes,
 }
 
+impl FileViewMode {
+    pub(in crate::workspace) fn effective_for_path(
+        requested: FileViewMode,
+        path: &std::path::Path,
+    ) -> Self {
+        match (requested, is_markdown_path(path)) {
+            (FileViewMode::Raw, true) => FileViewMode::Preview,
+            (FileViewMode::Preview, false) => FileViewMode::Raw,
+            _ => requested,
+        }
+    }
+}
+
 pub(in crate::workspace) enum PaneFileContent {
     Loading,
     /// Raw file content — owned by the `InputState` editor entity, so the
@@ -160,6 +173,44 @@ pub(in crate::workspace) enum PaneFileContent {
     Error(String),
     Binary,
     Deleted,
+}
+
+impl PaneFileContent {
+    pub(in crate::workspace) fn visible_rows(
+        &self,
+        mode: FileViewMode,
+        hide_unchanged: bool,
+    ) -> &[VisualRow] {
+        match self {
+            PaneFileContent::LoadedRaw => &[],
+            PaneFileContent::LoadedDiff {
+                rows_all,
+                rows_no_ctx,
+                ..
+            } => {
+                if hide_unchanged {
+                    rows_no_ctx
+                } else {
+                    rows_all
+                }
+            }
+            PaneFileContent::LoadedMarkdown { raw_rows, .. } if mode == FileViewMode::Raw => {
+                raw_rows
+            }
+            _ => &[],
+        }
+    }
+
+    pub(in crate::workspace) fn diff_stats(&self) -> Option<(usize, usize)> {
+        match self {
+            PaneFileContent::LoadedDiff { added, removed, .. } => Some((*added, *removed)),
+            _ => None,
+        }
+    }
+
+    pub(in crate::workspace) fn is_loaded_diff(&self) -> bool {
+        matches!(self, PaneFileContent::LoadedDiff { .. })
+    }
 }
 
 // ----------------------------------------------------------------
@@ -304,28 +355,122 @@ pub(in crate::workspace) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usiz
 // ----------------------------------------------------------------
 
 impl PaneFileView {
+    pub(in crate::workspace) fn loading(
+        lane_id: LaneId,
+        path: PathBuf,
+        staged: bool,
+        file_status: Option<char>,
+        view_mode: FileViewMode,
+    ) -> Self {
+        Self {
+            lane_id,
+            path,
+            staged,
+            file_status,
+            content: PaneFileContent::Loading,
+            view_mode,
+            hide_unchanged: false,
+            selection_drag: SelectionDrag::None,
+            search: None,
+            pending_scroll_line: None,
+        }
+    }
+
+    pub(in crate::workspace) fn replace_with_loading(
+        &mut self,
+        lane_id: LaneId,
+        path: PathBuf,
+        staged: bool,
+        file_status: Option<char>,
+        view_mode: FileViewMode,
+    ) {
+        self.lane_id = lane_id;
+        self.path = path;
+        self.staged = staged;
+        self.file_status = file_status;
+        self.content = PaneFileContent::Loading;
+        self.view_mode = view_mode;
+        self.hide_unchanged = false;
+        self.clear_transient_state();
+    }
+
+    pub(in crate::workspace) fn begin_mode_change(&mut self, mode: FileViewMode) -> Option<bool> {
+        if self.view_mode == mode {
+            return None;
+        }
+
+        let can_switch_markdown_without_reload =
+            self.content_loaded_markdown() && mode != FileViewMode::Changes;
+        self.view_mode = mode;
+        self.clear_transient_state();
+
+        if can_switch_markdown_without_reload {
+            Some(false)
+        } else {
+            self.content = PaneFileContent::Loading;
+            Some(true)
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_hide_unchanged(&mut self) -> bool {
+        self.hide_unchanged = !self.hide_unchanged;
+        self.clear_search_and_selection();
+        self.content.is_loaded_diff()
+    }
+
+    pub(in crate::workspace) fn set_content(&mut self, content: PaneFileContent) {
+        self.content = content;
+    }
+
+    pub(in crate::workspace) fn set_pending_scroll_line(&mut self, line: usize) {
+        self.pending_scroll_line = Some(line);
+    }
+
+    pub(in crate::workspace) fn pending_scroll_line(&self) -> Option<usize> {
+        self.pending_scroll_line
+    }
+
+    pub(in crate::workspace) fn clear_pending_scroll_line(&mut self) {
+        self.pending_scroll_line = None;
+    }
+
+    pub(in crate::workspace) fn take_pending_scroll_line(&mut self) -> Option<usize> {
+        self.pending_scroll_line.take()
+    }
+
+    pub(in crate::workspace) fn is_markdown_path(&self) -> bool {
+        is_markdown_path(&self.path)
+    }
+
+    pub(in crate::workspace) fn loaded_diff_stats(&self) -> Option<(usize, usize)> {
+        self.content.diff_stats()
+    }
+
+    pub(in crate::workspace) fn rows_for_content<'a>(
+        &self,
+        content: &'a PaneFileContent,
+    ) -> &'a [VisualRow] {
+        content.visible_rows(self.view_mode, self.hide_unchanged)
+    }
+
+    fn content_loaded_markdown(&self) -> bool {
+        matches!(self.content, PaneFileContent::LoadedMarkdown { .. })
+    }
+
+    fn clear_transient_state(&mut self) {
+        self.clear_search_and_selection();
+        self.pending_scroll_line = None;
+    }
+
+    fn clear_search_and_selection(&mut self) {
+        self.search = None;
+        self.selection_drag = SelectionDrag::None;
+    }
+
     /// Returns a slice over the currently visible rows (respects `hide_unchanged`).
     pub(in crate::workspace) fn active_rows(&self) -> &[VisualRow] {
-        match &self.content {
-            PaneFileContent::LoadedRaw => &[],
-            PaneFileContent::LoadedDiff {
-                rows_all,
-                rows_no_ctx,
-                ..
-            } => {
-                if self.hide_unchanged {
-                    rows_no_ctx
-                } else {
-                    rows_all
-                }
-            }
-            PaneFileContent::LoadedMarkdown { raw_rows, .. }
-                if self.view_mode == FileViewMode::Raw =>
-            {
-                raw_rows
-            }
-            _ => &[],
-        }
+        self.content
+            .visible_rows(self.view_mode, self.hide_unchanged)
     }
 
     /// Text to put in the clipboard for Cmd+C.
@@ -388,4 +533,10 @@ impl PaneFileView {
         }
         parts.join("\n")
     }
+}
+
+fn is_markdown_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
 }

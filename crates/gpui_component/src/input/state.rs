@@ -20,8 +20,9 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    ScrollWheelBehavior, blink_cursor::BlinkCursor, change::Change, element::TextElement,
-    mask_pattern::MaskPattern, mode::InputMode, number_input, text_wrapper::TextWrapper,
+    CodeEditorSurface, ScrollWheelBehavior, blink_cursor::BlinkCursor, change::Change,
+    element::TextElement, mask_pattern::MaskPattern, mode::InputMode, number_input,
+    text_wrapper::TextWrapper,
 };
 use crate::Size;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
@@ -356,10 +357,10 @@ pub struct InputState {
     /// How the scroll wheel is handled — set each frame by the [`super::Input`]
     /// element from its builder. See [`ScrollWheelBehavior`].
     pub(super) scroll_wheel: ScrollWheelBehavior,
-    /// Optional per-instance code-editor background. Hosts use this when a
-    /// code editor sits on a surface that intentionally differs from the
+    /// Optional per-instance code-editor surface. Hosts use this when a code
+    /// editor sits on a surface that intentionally differs from the
     /// process-wide highlight theme background.
-    pub(super) editor_background: Option<gpui::Hsla>,
+    pub(super) code_editor_surface: CodeEditorSurface,
     /// Per-row visual decorations (background + custom gutter) for
     /// read-only render surfaces such as the diff viewer. Empty = the
     /// editor's default sequential gutter with no line backgrounds.
@@ -507,7 +508,7 @@ impl InputState {
             select_anchor: 0..0,
             disabled: false,
             scroll_wheel: ScrollWheelBehavior::default(),
-            editor_background: None,
+            code_editor_surface: CodeEditorSurface::default(),
             line_decorations: Vec::new(),
             highlight_override: None,
             masked: false,
@@ -758,8 +759,7 @@ impl InputState {
 
     #[inline]
     pub(super) fn editor_background(&self, cx: &App) -> gpui::Hsla {
-        self.editor_background
-            .unwrap_or_else(|| cx.theme().editor_background())
+        self.code_editor_surface.background_color(cx)
     }
 
     /// Set the number of rows for the multi-line Textarea.

@@ -189,10 +189,10 @@ impl AgentChatView {
         access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
     ) {
-        let Some(colors) = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(|t| DiffColors::from_agent_chat_theme(t, cx))
-        else {
+        let Some(colors) = cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
+            let surface = crate::ui::theme::PaneSurfaceTokens::agent_chat(cx);
+            DiffColors::from_agent_chat_surface(t, surface)
+        }) else {
             // Theme global not yet installed (transient cold-start) — skip
             // editor creation; every diff renders via the inline fallback.
             // Logged so the blanket fallback isn't a silent no-op.
@@ -1000,8 +1000,11 @@ mod tests {
         // The pass will fingerprint each diff against this same palette, so the
         // pre-seed below has to use it too or every key would look changed.
         let theme = cx.update(|cx| {
-            let colors =
-                DiffColors::from_agent_chat_theme(cx.global::<crate::ui::theme::DarudaTheme>(), cx);
+            let surface = crate::ui::theme::PaneSurfaceTokens::agent_chat(cx);
+            let colors = DiffColors::from_agent_chat_surface(
+                cx.global::<crate::ui::theme::DarudaTheme>(),
+                surface,
+            );
             super::diff_theme_fingerprint(SYNTAX_THEME, false, &colors)
         });
         view.update(cx, |v, _| {

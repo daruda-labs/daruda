@@ -42,6 +42,27 @@ pub enum ScrollWheelBehavior {
     Vertical,
 }
 
+/// Per-instance surface styling for code-editor inputs. The global highlight
+/// theme still owns syntax colours; this object covers editor-owned background
+/// paints such as the body, line-number gutter, and ghost rows.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodeEditorSurface {
+    background: Option<Hsla>,
+}
+
+impl CodeEditorSurface {
+    pub fn background(color: Hsla) -> Self {
+        Self {
+            background: Some(color),
+        }
+    }
+
+    pub fn background_color(self, cx: &App) -> Hsla {
+        self.background
+            .unwrap_or_else(|| cx.theme().editor_background())
+    }
+}
+
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
@@ -62,7 +83,7 @@ pub struct Input {
     show_scrollbar: bool,
     input_padding: bool,
     scroll_wheel: ScrollWheelBehavior,
-    editor_background: Option<Hsla>,
+    code_editor_surface: CodeEditorSurface,
 }
 
 impl Sizable for Input {
@@ -104,7 +125,7 @@ impl Input {
             show_scrollbar: true,
             input_padding: true,
             scroll_wheel: ScrollWheelBehavior::default(),
-            editor_background: None,
+            code_editor_surface: CodeEditorSurface::default(),
         }
     }
 
@@ -141,7 +162,13 @@ impl Input {
     /// drives editor-owned paints such as the line-number gutter and ghost-line
     /// fill; `None` keeps the global theme background.
     pub fn editor_background(mut self, color: Hsla) -> Self {
-        self.editor_background = Some(color);
+        self.code_editor_surface = CodeEditorSurface::background(color);
+        self
+    }
+
+    /// Override code-editor surface styling for this input instance.
+    pub fn code_editor_surface(mut self, surface: CodeEditorSurface) -> Self {
+        self.code_editor_surface = surface;
         self
     }
 
@@ -326,7 +353,7 @@ impl RenderOnce for Input {
             state.disabled = self.disabled;
             state.scroll_wheel = self.scroll_wheel;
             state.size = self.size;
-            state.editor_background = self.editor_background;
+            state.code_editor_surface = self.code_editor_surface;
         });
 
         let state = self.state.read(cx);

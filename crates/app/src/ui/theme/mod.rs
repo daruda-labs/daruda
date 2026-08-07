@@ -480,6 +480,44 @@ struct AgentChatBg {
 
 impl gpui::Global for AgentChatBg {}
 
+/// Cohesive color set for pane-local surfaces that follow the terminal
+/// color theme rather than the workspace chrome theme.
+#[derive(Clone, Copy)]
+pub struct PaneSurfaceTokens {
+    pub background: gpui::Hsla,
+    pub foreground: gpui::Hsla,
+    pub foreground_muted: gpui::Hsla,
+    pub foreground_subtle: gpui::Hsla,
+    pub tint: gpui::Hsla,
+    pub active_tint: gpui::Hsla,
+    pub border_tint: gpui::Hsla,
+    pub syntax_is_light: bool,
+}
+
+impl PaneSurfaceTokens {
+    pub fn agent_chat(cx: &App) -> Self {
+        Self::from_background_and_foreground(agent_chat_bg(cx), agent_chat_fg(cx))
+    }
+
+    pub fn file_viewer(cx: &App) -> Self {
+        Self::from_background_and_foreground(file_viewer_pane_bg(cx), agent_chat_fg(cx))
+    }
+
+    fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
+        let overlay = neutral_overlay_for(background);
+        Self {
+            background,
+            foreground,
+            foreground_muted: foreground.opacity(p::AGENT_CHAT_FG_MUTED_ALPHA),
+            foreground_subtle: foreground.opacity(p::AGENT_CHAT_FG_SUBTLE_ALPHA),
+            tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_TINT_ALPHA),
+            active_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
+            border_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
+            syntax_is_light: background.l >= 0.5,
+        }
+    }
+}
+
 /// Read the agent-chat background color. Defaults to [`BG_EDITOR`](p::BG_EDITOR)
 /// before any config load, so the pane renders on the editor surface until the
 /// terminal color is mirrored in.
@@ -581,17 +619,17 @@ pub fn agent_chat_fg_subtle(cx: &App) -> gpui::Hsla {
 /// File-viewer pane foreground. Mirrors Agent Chat's terminal-derived text
 /// ramp so file-viewer chrome tracks live terminal theme changes.
 pub fn file_viewer_pane_fg(cx: &App) -> gpui::Hsla {
-    agent_chat_fg(cx)
+    PaneSurfaceTokens::file_viewer(cx).foreground
 }
 
 /// Secondary file-viewer pane foreground for counters and inactive controls.
 pub fn file_viewer_pane_fg_muted(cx: &App) -> gpui::Hsla {
-    agent_chat_fg_muted(cx)
+    PaneSurfaceTokens::file_viewer(cx).foreground_muted
 }
 
 /// Tertiary file-viewer pane foreground for low-emphasis labels.
 pub fn file_viewer_pane_fg_subtle(cx: &App) -> gpui::Hsla {
-    agent_chat_fg_subtle(cx)
+    PaneSurfaceTokens::file_viewer(cx).foreground_subtle
 }
 
 /// Mirror the resolved terminal foreground color for the agent-chat render
@@ -619,10 +657,7 @@ fn neutral_overlay_for(bg: gpui::Hsla) -> gpui::Hsla {
 /// translucent, keeps the pane's window opacity showing through. Mirrors the
 /// inline-code tint in the vendored `text/node.rs`.
 pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
-    p::with_alpha(
-        neutral_overlay_for(agent_chat_bg(cx)),
-        p::AGENT_CHAT_CARD_TINT_ALPHA,
-    )
+    PaneSurfaceTokens::agent_chat(cx).tint
 }
 
 /// Background-derived border for the agent-chat tool cards — the same neutral
@@ -630,10 +665,7 @@ pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
 /// tracks the pane background instead of a fixed line color. Pairs with the
 /// fill tint on the same card.
 pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
-    p::with_alpha(
-        neutral_overlay_for(agent_chat_bg(cx)),
-        p::AGENT_CHAT_CARD_BORDER_ALPHA,
-    )
+    PaneSurfaceTokens::agent_chat(cx).border_tint
 }
 
 /// Background-derived tint for file-viewer pane chrome, including the toolbar,
@@ -641,27 +673,18 @@ pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
 /// Agent Chat so the two pane types move together under live terminal theme
 /// changes without leaking this colour into the workspace tab strip.
 pub fn file_viewer_pane_tint(cx: &App) -> gpui::Hsla {
-    p::with_alpha(
-        neutral_overlay_for(file_viewer_pane_bg(cx)),
-        p::AGENT_CHAT_CARD_TINT_ALPHA,
-    )
+    PaneSurfaceTokens::file_viewer(cx).tint
 }
 
 /// Stronger background-derived tint for active controls inside the file-viewer
 /// pane, such as the Raw/Preview/Changes mode chips.
 pub fn file_viewer_pane_active_tint(cx: &App) -> gpui::Hsla {
-    p::with_alpha(
-        neutral_overlay_for(file_viewer_pane_bg(cx)),
-        p::AGENT_CHAT_CARD_BORDER_ALPHA,
-    )
+    PaneSurfaceTokens::file_viewer(cx).active_tint
 }
 
 /// Hairline tint for file-viewer pane chrome.
 pub fn file_viewer_pane_border_tint(cx: &App) -> gpui::Hsla {
-    p::with_alpha(
-        neutral_overlay_for(file_viewer_pane_bg(cx)),
-        p::AGENT_CHAT_CARD_BORDER_ALPHA,
-    )
+    PaneSurfaceTokens::file_viewer(cx).border_tint
 }
 
 /// Whether agent-chat content should pick the *light* variant of a
@@ -674,11 +697,11 @@ pub fn file_viewer_pane_border_tint(cx: &App) -> gpui::Hsla {
 /// source shared by `Workspace::agent_chat_theme_params` (feeds the diff/
 /// mermaid reconcilers) and `ui::code_editor`'s agent-chat diff viewer.
 pub fn agent_chat_syntax_is_light(cx: &App) -> bool {
-    agent_chat_bg(cx).l >= 0.5
+    PaneSurfaceTokens::agent_chat(cx).syntax_is_light
 }
 
 pub fn file_viewer_pane_syntax_is_light(cx: &App) -> bool {
-    file_viewer_pane_bg(cx).l >= 0.5
+    PaneSurfaceTokens::file_viewer(cx).syntax_is_light
 }
 
 #[cfg(test)]

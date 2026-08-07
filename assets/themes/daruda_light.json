@@ -33,8 +33,6 @@
   "modal_input_bg": "#ffffff",
   "dock_icon_active_bg": "#ced0d5",
   "file_viewer_bg": "#f1f2f4",
-  "file_viewer_header_bg": "#e7e8ea",
-  "file_viewer_tab_active_bg": "#ced0d5",
   "file_viewer_scrollbar_thumb_hover": "#00000080",
   "file_viewer_search_empty": "#b33636",
   "file_viewer_search_match_bg": "#f5b94073",

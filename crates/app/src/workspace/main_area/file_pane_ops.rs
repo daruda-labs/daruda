@@ -2,7 +2,7 @@ use gpui::{AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use super::file_view_pane::{CharPos, FileViewMode, PaneFileContent, PaneFileView, SelectionDrag};
+use super::file_view_pane::{CharPos, FileViewMode, PaneFileView};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
 use crate::path_ext::PathExt as _;
@@ -183,18 +183,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
-                view: PaneFileView {
-                    lane_id,
-                    path,
-                    staged,
-                    file_status,
-                    content: PaneFileContent::Loading,
-                    view_mode,
-                    hide_unchanged: false,
-                    selection_drag: SelectionDrag::None,
-                    search: None,
-                    pending_scroll_line: None,
-                },
+                view: PaneFileView::loading(lane_id, path, staged, file_status, view_mode),
                 scroll_handle: gpui::ScrollHandle::new(),
                 search_input,
                 focus_handle,

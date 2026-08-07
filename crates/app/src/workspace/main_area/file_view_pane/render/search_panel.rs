@@ -25,13 +25,14 @@ pub(super) fn render_search_panel(
     let focused_n = search.focused.map(|i| i + 1).unwrap_or(0);
 
     let t = theme::current(cx);
-    let panel_bg = theme::file_viewer_pane_tint(cx);
-    let panel_border = theme::file_viewer_pane_border_tint(cx);
-    let input_bg = theme::file_viewer_pane_active_tint(cx);
-    let count_color = theme::file_viewer_pane_fg_muted(cx);
+    let surface = theme::PaneSurfaceTokens::file_viewer(cx);
+    let panel_bg = surface.tint;
+    let panel_border = surface.border_tint;
+    let input_bg = surface.active_tint;
+    let count_color = surface.foreground_muted;
     let empty_color = t.file_viewer_search_empty;
-    let text_color = theme::file_viewer_pane_fg(cx);
-    let button_color = theme::file_viewer_pane_fg_muted(cx);
+    let text_color = surface.foreground;
+    let button_color = surface.foreground_muted;
 
     let (counter, counter_color) = if !has_query {
         (String::new(), count_color)

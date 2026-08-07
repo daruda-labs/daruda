@@ -47,7 +47,8 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     // Preview has variable-height blocks; derive height from measured offset.
     let is_preview_mode = matches!(&fv.content, PaneFileContent::LoadedMarkdown { .. })
         && fv.view_mode == FileViewMode::Preview;
-    let viewer_bg = theme::file_viewer_pane_bg(cx);
+    let surface = theme::PaneSurfaceTokens::file_viewer(cx);
+    let viewer_bg = surface.background;
 
     // One thin daruda thumb; editor modes use the editor scroll handle.
     let scrollbar: Option<crate::ui::scrollbar::Thumb> = if is_editor_mode {

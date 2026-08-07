@@ -80,19 +80,21 @@ impl MermaidPalette {
 
     pub fn from_file_viewer(cx: &gpui::App) -> Self {
         let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
-        let canvas = theme::file_viewer_pane_bg(cx);
+        let surface = theme::PaneSurfaceTokens::file_viewer(cx);
+        let canvas = surface.background;
+        let line = to_hex_over(surface.foreground_muted, canvas);
         let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
         let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
         let primary_surface_hex = to_hex_over(primary_surface, canvas);
         let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
 
         Self {
-            dark: !theme::file_viewer_pane_syntax_is_light(cx),
+            dark: !surface.syntax_is_light,
             background: to_hex(canvas),
             primary_color: primary_surface_hex.clone(),
-            primary_text_color: to_hex(ui_theme.text_body),
-            primary_border_color: to_hex(ui_theme.border),
-            line_color: to_hex(ui_theme.text_muted),
+            primary_text_color: to_hex(surface.foreground),
+            primary_border_color: to_hex_over(surface.border_tint, canvas),
+            line_color: line,
             secondary_color: secondary_surface_hex.clone(),
             surface_muted: secondary_surface_hex.clone(),
             cluster_background: secondary_surface_hex.clone(),
@@ -111,20 +113,20 @@ impl MermaidPalette {
     /// black Mermaid text onto a dark chat transcript.
     pub fn from_agent_chat(cx: &gpui::App) -> Self {
         let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
-        let canvas = theme::agent_chat_bg(cx);
-        let text = theme::agent_chat_fg(cx);
-        let line = to_hex_over(theme::agent_chat_fg_muted(cx), canvas);
+        let surface = theme::PaneSurfaceTokens::agent_chat(cx);
+        let canvas = surface.background;
+        let line = to_hex_over(surface.foreground_muted, canvas);
         let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
         let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
         let primary_surface_hex = to_hex_over(primary_surface, canvas);
         let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
 
         Self {
-            dark: !theme::agent_chat_syntax_is_light(cx),
+            dark: !surface.syntax_is_light,
             background: to_hex(canvas),
             primary_color: primary_surface_hex.clone(),
-            primary_text_color: to_hex(text),
-            primary_border_color: to_hex_over(theme::agent_chat_border_tint(cx), canvas),
+            primary_text_color: to_hex(surface.foreground),
+            primary_border_color: to_hex_over(surface.border_tint, canvas),
             line_color: line,
             secondary_color: secondary_surface_hex.clone(),
             surface_muted: secondary_surface_hex.clone(),

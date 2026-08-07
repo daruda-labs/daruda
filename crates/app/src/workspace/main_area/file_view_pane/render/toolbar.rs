@@ -5,14 +5,14 @@
 //! so the visual style and the toolbar that uses it move together.
 
 use crate::ui::theme;
-use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
+use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, px};
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
 use crate::ui::{ContextMenuExt as _, Icon, Sizable as _, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileView};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::render::ws_popup_clipboard_item;
 
@@ -22,6 +22,115 @@ const ICON_DIFFERENCE: &str = "icons/ui/difference.svg";
 const ICON_FILTER_ALT: &str = "icons/ui/filter-alt.svg";
 const ICON_FILTER_ALT_OFF: &str = "icons/ui/filter-alt-off.svg";
 
+#[derive(Clone, Copy)]
+struct ToolbarButtonColors {
+    text: gpui::Hsla,
+    active_bg: gpui::Hsla,
+    active_text: gpui::Hsla,
+}
+
+#[derive(Clone, Copy)]
+enum ToolbarAction {
+    ToggleHideUnchanged,
+    SetMode(FileViewMode),
+}
+
+struct ToolbarToggle {
+    label: gpui::SharedString,
+    icon: &'static str,
+    active: bool,
+    action: ToolbarAction,
+}
+
+impl ToolbarToggle {
+    fn new(
+        label: impl Into<gpui::SharedString>,
+        icon: &'static str,
+        active: bool,
+        action: ToolbarAction,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            icon,
+            active,
+            action,
+        }
+    }
+
+    fn render(
+        self,
+        pane_id: PaneId,
+        colors: ToolbarButtonColors,
+        cx: &mut Context<Workspace>,
+    ) -> impl IntoElement {
+        toolbar_toggle_button(self, pane_id, colors, cx)
+    }
+}
+
+struct ToolbarControls {
+    filter_toggle: Option<ToolbarToggle>,
+    mode_toggle: ToolbarToggle,
+    preview_toggle: Option<ToolbarToggle>,
+    diff_stats: Option<(usize, usize)>,
+}
+
+impl ToolbarControls {
+    fn from_view(fv: &PaneFileView) -> Self {
+        let is_preview = fv.view_mode == FileViewMode::Preview;
+        let is_changes = fv.view_mode == FileViewMode::Changes;
+
+        let filter_toggle = is_changes.then(|| {
+            if fv.hide_unchanged {
+                ToolbarToggle::new(
+                    strings::file_viewer_show_all(),
+                    ICON_FILTER_ALT_OFF,
+                    true,
+                    ToolbarAction::ToggleHideUnchanged,
+                )
+            } else {
+                ToolbarToggle::new(
+                    strings::file_viewer_hide_unchanged(),
+                    ICON_FILTER_ALT,
+                    false,
+                    ToolbarAction::ToggleHideUnchanged,
+                )
+            }
+        });
+
+        let mode_toggle = if is_changes {
+            ToolbarToggle::new(
+                strings::file_viewer_tab_raw(),
+                ICON_CODE,
+                true,
+                ToolbarAction::SetMode(FileViewMode::Raw),
+            )
+        } else {
+            ToolbarToggle::new(
+                strings::file_viewer_tab_changes(),
+                ICON_DIFFERENCE,
+                false,
+                ToolbarAction::SetMode(FileViewMode::Changes),
+            )
+        };
+
+        let preview_toggle = fv.is_markdown_path().then(|| {
+            ToolbarToggle::new(
+                strings::file_viewer_tab_preview(),
+                ICON_PREVIEW,
+                is_preview,
+                ToolbarAction::SetMode(FileViewMode::Preview),
+            )
+        });
+
+        Self {
+            filter_toggle,
+            mode_toggle,
+            preview_toggle,
+            diff_stats: fv.loaded_diff_stats(),
+        }
+    }
+}
+
 /// Toolbar: path label on the left, view toggles + optional controls + × on the right.
 pub(super) fn render_file_viewer_toolbar(
     pane_id: PaneId,
@@ -29,15 +138,19 @@ pub(super) fn render_file_viewer_toolbar(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let header_bg = theme::file_viewer_pane_tint(cx);
-    let header_border = theme::file_viewer_pane_border_tint(cx);
-    let header_text = theme::file_viewer_pane_fg(cx);
+    let surface = theme::PaneSurfaceTokens::file_viewer(cx);
+    let header_bg = surface.tint;
+    let header_border = surface.border_tint;
+    let header_text = surface.foreground;
     let stat_add = t.file_diff_stat_add;
     let stat_del = t.file_diff_stat_del;
-    let button_text = theme::file_viewer_pane_fg_muted(cx);
-    let button_active_bg = theme::file_viewer_pane_active_tint(cx);
-    let button_active_text = header_text;
+    let button_colors = ToolbarButtonColors {
+        text: surface.foreground_muted,
+        active_bg: surface.active_tint,
+        active_text: header_text,
+    };
     let close_hover = header_text;
+    let controls = ToolbarControls::from_view(fv);
 
     let file_name = fv.path.file_name_lossy();
     let parent_name = fv
@@ -62,39 +175,9 @@ pub(super) fn render_file_viewer_toolbar(
     let lane_id_for_menu = fv.lane_id;
     let ws_for_menu = cx.entity().downgrade();
 
-    let is_preview = fv.view_mode == FileViewMode::Preview;
-    let is_changes = fv.view_mode == FileViewMode::Changes;
-    // Use the path extension so the Preview button persists across mode switches
-    // (content type changes to LoadedDiff in Changes mode, which would otherwise
-    // hide the button for markdown files).
-    let is_markdown = fv
-        .path
-        .extension_lower()
-        .is_some_and(|e| e == "md" || e == "markdown");
-    let hide_unchanged = fv.hide_unchanged;
-
-    // Extract diff stats when available (Changes mode, file already loaded).
-    let diff_stats = match &fv.content {
-        PaneFileContent::LoadedDiff { added, removed, .. } => Some((*added, *removed)),
-        _ => None,
-    };
     let file_status = fv.file_status;
     let staged = fv.staged;
     let file_status_color = file_status.map(|status| git_status_color(status, staged, cx));
-    let (filter_label, filter_icon) = if hide_unchanged {
-        (strings::file_viewer_show_all(), ICON_FILTER_ALT_OFF)
-    } else {
-        (strings::file_viewer_hide_unchanged(), ICON_FILTER_ALT)
-    };
-    let (mode_label, mode_icon, mode_target) = if is_changes {
-        (strings::file_viewer_tab_raw(), ICON_CODE, FileViewMode::Raw)
-    } else {
-        (
-            strings::file_viewer_tab_changes(),
-            ICON_DIFFERENCE,
-            FileViewMode::Changes,
-        )
-    };
 
     div()
         .flex()
@@ -160,7 +243,7 @@ pub(super) fn render_file_viewer_toolbar(
                 .items_center()
                 .gap(px(theme::FILE_VIEWER_TOOLBAR_GAP))
                 // Diff line stats: +N -N
-                .when_some(diff_stats, |d, (added, removed)| {
+                .when_some(controls.diff_stats, |d, (added, removed)| {
                     d.child(
                         div()
                             .flex()
@@ -193,45 +276,14 @@ pub(super) fn render_file_viewer_toolbar(
                             .child(status.to_string()),
                     )
                 })
-                .child(if is_changes {
-                    toolbar_toggle_button(
-                        filter_label,
-                        filter_icon,
-                        hide_unchanged,
-                        button_text,
-                        button_active_bg,
-                        button_active_text,
-                        cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                            this.toggle_hide_unchanged_for_pane(pane_id, cx);
-                        }),
-                    )
-                    .into_any_element()
+                .child(if let Some(toggle) = controls.filter_toggle {
+                    toggle.render(pane_id, button_colors, cx).into_any_element()
                 } else {
                     toolbar_toggle_spacer().into_any_element()
                 })
-                .child(toolbar_toggle_button(
-                    mode_label,
-                    mode_icon,
-                    is_changes,
-                    button_text,
-                    button_active_bg,
-                    button_active_text,
-                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                        this.set_file_view_mode_for_pane(pane_id, mode_target, cx);
-                    }),
-                ))
-                .when(is_markdown, |d| {
-                    d.child(toolbar_toggle_button(
-                        strings::file_viewer_tab_preview(),
-                        ICON_PREVIEW,
-                        is_preview,
-                        button_text,
-                        button_active_bg,
-                        button_active_text,
-                        cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                            this.set_file_view_mode_for_pane(pane_id, FileViewMode::Preview, cx);
-                        }),
-                    ))
+                .child(controls.mode_toggle.render(pane_id, button_colors, cx))
+                .when_some(controls.preview_toggle, |d, toggle| {
+                    d.child(toggle.render(pane_id, button_colors, cx))
                 })
                 .child(
                     div()
@@ -239,7 +291,7 @@ pub(super) fn render_file_viewer_toolbar(
                         .flex_none()
                         .px(px(theme::FILE_VIEWER_CLOSE_PAD_X))
                         .text_size(px(theme::FILE_VIEWER_CLOSE_FONT_SIZE))
-                        .text_color(button_text)
+                        .text_color(button_colors.text)
                         .cursor_pointer()
                         .hover(move |d| d.text_color(close_hover))
                         .on_mouse_down(
@@ -264,15 +316,13 @@ fn toolbar_toggle_spacer() -> impl IntoElement {
 
 /// A small icon button for file-viewer toolbar toggles.
 fn toolbar_toggle_button(
-    label: impl Into<gpui::SharedString>,
-    icon: &'static str,
-    active: bool,
-    button_text: gpui::Hsla,
-    button_active_bg: gpui::Hsla,
-    button_active_text: gpui::Hsla,
-    on_click: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+    toggle: ToolbarToggle,
+    pane_id: PaneId,
+    colors: ToolbarButtonColors,
+    cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let label: gpui::SharedString = label.into();
+    let label = toggle.label;
+    let action = toggle.action;
     div()
         .id(label.clone())
         .flex_none()
@@ -284,14 +334,24 @@ fn toolbar_toggle_button(
         .rounded(px(theme::FILE_VIEWER_TOOL_BUTTON_RADIUS))
         .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
         .cursor_pointer()
-        .when(active, |d| {
-            d.bg(button_active_bg).text_color(button_active_text)
+        .when(toggle.active, |d| {
+            d.bg(colors.active_bg).text_color(colors.active_text)
         })
-        .when(!active, |d| {
-            d.text_color(button_text)
-                .hover(move |d| d.text_color(button_active_text))
+        .when(!toggle.active, |d| {
+            d.text_color(colors.text)
+                .hover(move |d| d.text_color(colors.active_text))
         })
-        .on_mouse_down(MouseButton::Left, on_click)
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| match action {
+                ToolbarAction::ToggleHideUnchanged => {
+                    this.toggle_hide_unchanged_for_pane(pane_id, window, cx);
+                }
+                ToolbarAction::SetMode(mode) => {
+                    this.set_file_view_mode_for_pane(pane_id, mode, cx);
+                }
+            }),
+        )
         .tooltip(crate::ui::tooltip::text(label))
-        .child(Icon::empty().path(icon).small())
+        .child(Icon::empty().path(toggle.icon).small())
 }

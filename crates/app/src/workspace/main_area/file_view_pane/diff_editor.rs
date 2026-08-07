@@ -7,9 +7,9 @@
 
 use std::ops::Range;
 
-use gpui::{App, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
+use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
 
-use crate::ui::theme::TokenStyle;
+use crate::ui::theme::{PaneSurfaceTokens, TokenStyle};
 
 use crate::ui::LineDecoration;
 
@@ -34,8 +34,8 @@ pub(in crate::workspace) struct DiffColors {
 impl DiffColors {
     /// Snapshot the fixed UI diff palette from the active `DarudaTheme`.
     /// Surface-specific callers should layer their pane-specific hunk header
-    /// colours with [`Self::from_file_viewer_theme`] or
-    /// [`Self::from_agent_chat_theme`] so baked `@@` rows do not keep a stale
+    /// colours with [`Self::from_file_viewer_surface`] or
+    /// [`Self::from_agent_chat_surface`] so baked `@@` rows do not keep a stale
     /// UI surface background.
     pub(in crate::workspace) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
         Self {
@@ -57,14 +57,14 @@ impl DiffColors {
     /// terminal-derived file-viewer pane tint so `@@ -a,b +c,d @@` does not
     /// remain on the fixed UI raised surface after the file viewer body moves
     /// with the terminal theme.
-    pub(in crate::workspace) fn from_file_viewer_theme(
+    pub(in crate::workspace) fn from_file_viewer_surface(
         t: &crate::ui::theme::DarudaTheme,
-        cx: &App,
+        surface: PaneSurfaceTokens,
     ) -> Self {
         Self {
-            hunk_bg: crate::ui::theme::file_viewer_pane_tint(cx),
-            hunk_text: crate::ui::theme::file_viewer_pane_fg(cx),
-            hunk_ctx_text: crate::ui::theme::file_viewer_pane_fg_muted(cx),
+            hunk_bg: surface.tint,
+            hunk_text: surface.foreground,
+            hunk_ctx_text: surface.foreground_muted,
             ..Self::from_theme(t)
         }
     }
@@ -77,14 +77,14 @@ impl DiffColors {
     /// chrome uses (header row, editor background — see `render/diff.rs`),
     /// so the header row blends with its own card instead of standing out as
     /// a UI-theme island.
-    pub(in crate::workspace) fn from_agent_chat_theme(
+    pub(in crate::workspace) fn from_agent_chat_surface(
         t: &crate::ui::theme::DarudaTheme,
-        cx: &App,
+        surface: PaneSurfaceTokens,
     ) -> Self {
         Self {
-            hunk_bg: crate::ui::theme::agent_chat_tint(cx),
-            hunk_text: crate::ui::theme::agent_chat_fg(cx),
-            hunk_ctx_text: crate::ui::theme::agent_chat_fg_muted(cx),
+            hunk_bg: surface.tint,
+            hunk_text: surface.foreground,
+            hunk_ctx_text: surface.foreground_muted,
             ..Self::from_theme(t)
         }
     }

@@ -14,7 +14,7 @@
 use crate::ui::theme;
 use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px};
 use gpui_component::Sizable as _;
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{CodeEditorSurface, Input, InputState};
 
 /// Re-export so app code (the diff viewer) can build per-row editor
 /// decorations without importing `gpui_component` directly.
@@ -134,7 +134,7 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
         theme::file_viewer_pane_syntax_is_light(cx),
     )
     .default;
-    code_editor_chrome(state, fg, cx).editor_background(bg)
+    code_editor_chrome(state, fg, cx).code_editor_surface(CodeEditorSurface::background(bg))
 }
 
 /// Render `state` as a read-only viewer **embedded, height-capped, in the
@@ -159,5 +159,5 @@ pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &A
         theme::agent_chat_syntax_is_light(cx),
     )
     .default;
-    code_editor_chrome(state, fg, cx).editor_background(background)
+    code_editor_chrome(state, fg, cx).code_editor_surface(CodeEditorSurface::background(background))
 }
