@@ -104,12 +104,10 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.welcome_recent_hover_bg, palette::BG_HOVER);
     assert_eq!(t.file_viewer_bg, palette::BG_EDITOR);
-    assert_eq!(t.file_viewer_header_bg, palette::BG_PANEL);
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.text_body, palette::TEXT_BODY);
     assert_eq!(t.text_body, palette::TEXT_BODY);
     assert_eq!(t.text_subtle, palette::TEXT_SUBTLE);
-    assert_eq!(t.file_viewer_tab_active_bg, palette::BG_ACTIVE);
     assert_eq!(t.text_muted, palette::TEXT_MUTE);
     assert_eq!(t.file_diff_add_bg, palette::FILE_DIFF_ADD_BG);
     assert_eq!(t.file_diff_del_bg, palette::FILE_DIFF_DEL_BG);

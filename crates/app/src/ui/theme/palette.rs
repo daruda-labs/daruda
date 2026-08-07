@@ -957,12 +957,14 @@ pub const FILE_VIEWER_LINE_H: f32 = FILE_VIEWER_FONT_SIZE * FILE_VIEWER_LINE_H_R
 pub const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Gap between toolbar button group items (px).
 pub const FILE_VIEWER_TOOLBAR_GAP: f32 = GAP_STANDARD;
-/// Mode tab horizontal padding (px).
-pub const FILE_VIEWER_TAB_PAD_X: f32 = PAD_STANDARD;
-/// Mode tab vertical padding (px).
-pub const FILE_VIEWER_TAB_PAD_Y: f32 = 3.0;
-/// Mode tab corner radius (px).
-pub const FILE_VIEWER_TAB_RADIUS: f32 = RADIUS_SM;
+/// File viewer close button horizontal padding (px).
+pub const FILE_VIEWER_CLOSE_PAD_X: f32 = PAD_STANDARD;
+/// File viewer toolbar button corner radius (px).
+pub const FILE_VIEWER_TOOL_BUTTON_RADIUS: f32 = RADIUS_SM;
+/// Icon-only file viewer toolbar button width (px).
+pub const FILE_VIEWER_TOOL_BUTTON_W: f32 = 26.0;
+/// Icon-only file viewer toolbar button height (px).
+pub const FILE_VIEWER_TOOL_BUTTON_H: f32 = 22.0;
 // Diff line colors track the canonical DESIGN §Git&Diff tokens
 // (`DIFF_*`) so the file-viewer and git-changes diffs read identically
 // to the spec instead of carrying a parallel green/red palette.

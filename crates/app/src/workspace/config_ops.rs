@@ -193,6 +193,7 @@ impl Workspace {
         let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
         let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
         let agent_chat_mermaid_theme_changed = bg_color_changed || fg_color_changed;
+        let file_viewer_pane_palette_changed = bg_color_changed || fg_color_changed;
         // The agent-chat diff embeds bake their palette in, so they only track a
         // palette move through a rebuild. Both of these move it: the terminal
         // mirror feeds the hunk-row colours *and* the light/dark syntax variant,
@@ -254,9 +255,22 @@ impl Workspace {
             );
             self.reload_file_panes(cx);
         }
+        // File-viewer pane chrome reads the terminal-mirrored fg/bg at render
+        // time, so the final workspace notify below is enough for toolbar /
+        // search-panel colour changes. Reload for baked content that captures
+        // the pane palette: Markdown raw highlighting / Mermaid rasters from
+        // bg, and diff hunk-header rows from bg + fg.
+        if file_viewer_pane_palette_changed && !theme_changed && !syntax_theme_changed {
+            self.reload_file_panes(cx);
+        }
         // Reload for a standalone editor-font change, gated to avoid a
-        // double when a theme / syntax switch above already reloaded.
-        if editor_font_changed && !theme_changed && !syntax_theme_changed {
+        // double when a theme / syntax / background switch above already
+        // reloaded.
+        if editor_font_changed
+            && !theme_changed
+            && !syntax_theme_changed
+            && !file_viewer_pane_palette_changed
+        {
             self.reload_file_panes(cx);
         }
         // Mirror for the notification-push freshness gate.

@@ -73,7 +73,7 @@ pub(in crate::workspace) fn bounded_editor_embed(
         // Wrapper and `Input` carry the height redundantly: either alone
         // delivers the bound (`Input::render`'s `h_auto()` stretches to a
         // definite-height parent), setting neither collapses it to one row.
-        .child(crate::ui::embedded_code_viewer(editor, cx).h(height))
+        .child(crate::ui::embedded_code_viewer(editor, surface, cx).h(height))
         // Rows past the cap are reachable only by scrolling inside the embed, so
         // the embed needs a vertical thumb as well as the horizontal one
         // `soft_wrap(false)` calls for.

@@ -80,6 +80,7 @@ impl Render for DiffProbe {
         // goes on both the wrapper and the `Input`.
         let rows = self.editor.read(cx).display_rows().max(1);
         let height = bounded_embed_height(rows);
+        let surface = crate::ui::theme::agent_chat_bg(cx);
         div().flex().flex_col().w_full().child(
             div()
                 .id("diff-wrapper")
@@ -88,7 +89,7 @@ impl Render for DiffProbe {
                 .w_full()
                 .flex_none()
                 .h(height)
-                .child(crate::ui::embedded_code_viewer(&self.editor, cx).h(height)),
+                .child(crate::ui::embedded_code_viewer(&self.editor, surface, cx).h(height)),
         )
     }
 }

@@ -107,8 +107,6 @@ daruda_theme_fields! {
     welcome_button_hover_bg => BG_ACTIVE,
     welcome_recent_hover_bg => BG_HOVER,
     file_viewer_bg => BG_EDITOR,
-    file_viewer_header_bg => BG_PANEL,
-    file_viewer_tab_active_bg => BG_ACTIVE,
     file_diff_add_bg => FILE_DIFF_ADD_BG,
     file_diff_del_bg => FILE_DIFF_DEL_BG,
     file_diff_add_text => FILE_DIFF_ADD_TEXT,

@@ -3,9 +3,13 @@
 //! terminal's scrollback search bar.
 
 use crate::ui::theme;
-use gpui::{AnyElement, Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, px};
+use gpui::{
+    AnyElement, Context, Focusable as _, IntoElement, MouseButton, MouseDownEvent, div, prelude::*,
+    px,
+};
 
 use crate::surface::strings;
+use crate::ui::{Input, Sizable as _};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::FileViewerSearch;
 
@@ -21,10 +25,13 @@ pub(super) fn render_search_panel(
     let focused_n = search.focused.map(|i| i + 1).unwrap_or(0);
 
     let t = theme::current(cx);
-    let count_color = t.text_muted;
+    let panel_bg = theme::file_viewer_pane_tint(cx);
+    let panel_border = theme::file_viewer_pane_border_tint(cx);
+    let input_bg = theme::file_viewer_pane_active_tint(cx);
+    let count_color = theme::file_viewer_pane_fg_muted(cx);
     let empty_color = t.file_viewer_search_empty;
-    let text_color = t.text_body;
-    let button_color = theme::SEARCH_BUTTON;
+    let text_color = theme::file_viewer_pane_fg(cx);
+    let button_color = theme::file_viewer_pane_fg_muted(cx);
 
     let (counter, counter_color) = if !has_query {
         (String::new(), count_color)
@@ -40,6 +47,7 @@ pub(super) fn render_search_panel(
     // The `search_input` entity is rendered as the panel's text field
     // below; clone it for each closure that mutates the input (clear /
     // close buttons). Cloning an Entity is cheap (refcount).
+    let _ = search_input.read(cx).focus_handle(cx).tab_stop(false);
     let input_for_clear = search_input.clone();
     let input_for_close = search_input.clone();
 
@@ -55,9 +63,9 @@ pub(super) fn render_search_panel(
         .flex_row()
         .items_center()
         .gap(px(theme::FILE_VIEWER_SEARCH_ITEM_GAP))
-        .bg(theme::SEARCH_PANEL_BG)
+        .bg(panel_bg)
         .border_1()
-        .border_color(theme::SEARCH_PANEL_BORDER)
+        .border_color(panel_border)
         .rounded(px(theme::SEARCH_PANEL_RADIUS))
         .text_size(px(theme::FILE_VIEWER_SEARCH_FONT_SIZE))
         .on_mouse_down(
@@ -72,11 +80,16 @@ pub(super) fn render_search_panel(
                 .flex()
                 .items_center()
                 .gap(px(theme::FILE_VIEWER_SEARCH_ITEM_GAP))
-                .child(div().flex_1().overflow_hidden().child(crate::ui::input(
-                    &search_input,
-                    cx,
-                    (),
-                )))
+                .child(
+                    div().flex_1().overflow_hidden().child(
+                        Input::new(&search_input)
+                            .small()
+                            .bordered(false)
+                            .w_full()
+                            .bg(input_bg)
+                            .text_color(text_color),
+                    ),
+                )
                 .when(!counter.is_empty(), |d| {
                     d.child(
                         div()

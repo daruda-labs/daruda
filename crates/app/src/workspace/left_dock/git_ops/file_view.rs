@@ -15,10 +15,20 @@ use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
 use crate::workspace::main_area::pane::FileContent;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 fn line_to_editor_position(line: usize) -> gpui_component::input::Position {
     let row = line.saturating_sub(1);
     gpui_component::input::Position::new(u32::try_from(row).unwrap_or(u32::MAX), 0)
+}
+
+struct FilePaneLoadRequest {
+    pane_id: PaneId,
+    owner: LaneRef,
+    path: PathBuf,
+    staged: bool,
+    mode: FileViewMode,
+    file_status: Option<char>,
 }
 
 fn markdown_raw_line_scroll_offset(line: usize, cx: &gpui::App) -> gpui::Point<gpui::Pixels> {
@@ -215,7 +225,17 @@ impl Workspace {
                 project,
                 lane: lane_id,
             };
-            self.load_pane_file_content(owner, path, staged, effective_mode, file_status, cx);
+            self.load_pane_file_content(
+                FilePaneLoadRequest {
+                    pane_id,
+                    owner,
+                    path,
+                    staged,
+                    mode: effective_mode,
+                    file_status,
+                },
+                cx,
+            );
             return;
         }
 
@@ -259,7 +279,17 @@ impl Workspace {
             project: self.active.project,
             lane: lane_id,
         };
-        self.load_pane_file_content(owner, path, staged, effective_mode, file_status, cx);
+        self.load_pane_file_content(
+            FilePaneLoadRequest {
+                pane_id,
+                owner,
+                path,
+                staged,
+                mode: effective_mode,
+                file_status,
+            },
+            cx,
+        );
     }
 
     /// Open `path` as a file viewer in a new pane split to the right of
@@ -340,10 +370,20 @@ impl Workspace {
             project: self.active.project,
             lane: lane_id,
         };
-        self.load_pane_file_content(owner, path, false, effective_mode, None, cx);
+        self.load_pane_file_content(
+            FilePaneLoadRequest {
+                pane_id: new_pane_id,
+                owner,
+                path,
+                staged: false,
+                mode: effective_mode,
+                file_status: None,
+            },
+            cx,
+        );
     }
 
-    /// Switch the focused file pane between Raw / Preview / Changes mode.
+    /// Switch a file pane between Raw / Preview / Changes mode.
     /// For a Markdown file switching between Raw and Preview, the content is
     /// already loaded in both representations — skip the reload.
     pub(in crate::workspace) fn set_file_view_mode(
@@ -351,11 +391,27 @@ impl Workspace {
         mode: FileViewMode,
         cx: &mut Context<Self>,
     ) {
+        let pane_id = self.active_runtime().focused_pane_id;
+        self.set_file_view_mode_for_pane(pane_id, mode, cx);
+    }
+
+    pub(in crate::workspace) fn set_file_view_mode_for_pane(
+        &mut self,
+        pane_id: PaneId,
+        mode: FileViewMode,
+        cx: &mut Context<Self>,
+    ) {
         // Apply the mutation in an inner scope so the focused-pane borrow
         // releases before we call `load_pane_file_content` (which reborrows
         // self for the spawn).
-        let load_args: Option<(LaneId, PathBuf, bool, Option<char>)> = {
-            let Some(fc) = self.focused_file_content_mut() else {
+        let load_args: Option<(PaneId, LaneId, PathBuf, bool, Option<char>)> = {
+            let Some(fc) = self
+                .active_runtime_mut()
+                .panes
+                .iter_mut()
+                .find(|p| p.id == pane_id)
+                .and_then(|p| p.file_content_mut())
+            else {
                 return;
             };
             let fv = &mut fc.view;
@@ -378,23 +434,49 @@ impl Workspace {
                 None
             } else {
                 fv.content = PaneFileContent::Loading;
-                Some((fv.lane_id, fv.path.clone(), fv.staged, fv.file_status))
+                Some((
+                    pane_id,
+                    fv.lane_id,
+                    fv.path.clone(),
+                    fv.staged,
+                    fv.file_status,
+                ))
             }
         };
         cx.notify();
 
-        if let Some((lane_id, path, staged, file_status)) = load_args {
+        if let Some((pane_id, lane_id, path, staged, file_status)) = load_args {
             let owner = daruda_store::project::LaneRef {
                 project: self.active.project,
                 lane: lane_id,
             };
-            self.load_pane_file_content(owner, path, staged, mode, file_status, cx);
+            self.load_pane_file_content(
+                FilePaneLoadRequest {
+                    pane_id,
+                    owner,
+                    path,
+                    staged,
+                    mode,
+                    file_status,
+                },
+                cx,
+            );
         }
     }
 
     /// Toggle whether context lines are hidden in Changes (diff) mode.
-    pub(in crate::workspace) fn toggle_hide_unchanged(&mut self, cx: &mut Context<Self>) {
-        let Some(fc) = self.focused_file_content_mut() else {
+    pub(in crate::workspace) fn toggle_hide_unchanged_for_pane(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(fc) = self
+            .active_runtime_mut()
+            .panes
+            .iter_mut()
+            .find(|p| p.id == pane_id)
+            .and_then(|p| p.file_content_mut())
+        else {
             return;
         };
         fc.view.hide_unchanged = !fc.view.hide_unchanged;
@@ -417,8 +499,9 @@ impl Workspace {
             } else {
                 rows_all
             };
-            cx.try_global::<crate::ui::theme::DarudaTheme>()
-                .map(|t| build_diff_editor_model(rows, &DiffColors::from_theme(t), true))
+            cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
+                build_diff_editor_model(rows, &DiffColors::from_file_viewer_theme(t, cx), true)
+            })
         } else {
             None
         };
@@ -509,19 +592,28 @@ impl Workspace {
     /// Already-loaded panes are skipped, so re-activations are cheap.
     pub(in crate::workspace) fn load_pending_file_panes(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
-        let pending: Vec<(PathBuf, bool, FileViewMode, Option<char>)> = self
+        let pending: Vec<FilePaneLoadRequest> = self
             .active_runtime()
             .panes
             .iter()
-            .filter_map(|p| p.file_view())
-            .filter(|fv| matches!(fv.content, PaneFileContent::Loading))
-            .map(|fv| (fv.path.clone(), fv.staged, fv.view_mode, fv.file_status))
+            .filter_map(|p| {
+                p.file_view()
+                    .filter(|fv| matches!(fv.content, PaneFileContent::Loading))
+                    .map(|fv| FilePaneLoadRequest {
+                        pane_id: p.id,
+                        owner: active,
+                        path: fv.path.clone(),
+                        staged: fv.staged,
+                        mode: fv.view_mode,
+                        file_status: fv.file_status,
+                    })
+            })
             .collect();
         // Every pending pane lives in the active lane, so the owning ref
         // is `self.active` (a file pane always references the lane it
         // lives in — `fv.lane_id == active.lane`).
-        for (path, staged, mode, file_status) in pending {
-            self.load_pane_file_content(active, path, staged, mode, file_status, cx);
+        for request in pending {
+            self.load_pane_file_content(request, cx);
         }
     }
 
@@ -540,7 +632,7 @@ impl Workspace {
         // reload carries its owning `LaneRef` so the loader resolves the
         // right lane path and re-finds the pane in the right runtime.
         let mut raw_editors = Vec::new();
-        let mut reloads: Vec<(LaneRef, PathBuf, bool, FileViewMode, Option<char>)> = Vec::new();
+        let mut reloads: Vec<FilePaneLoadRequest> = Vec::new();
         for (lane_ref, runtime) in &self.main_area.runtimes {
             for pane in &runtime.panes {
                 let Some(f) = pane.file_content() else {
@@ -549,13 +641,14 @@ impl Workspace {
                 match &f.view.content {
                     PaneFileContent::LoadedRaw => raw_editors.push(f.editor_state.clone()),
                     PaneFileContent::LoadedDiff { .. } | PaneFileContent::LoadedMarkdown { .. } => {
-                        reloads.push((
-                            *lane_ref,
-                            f.view.path.clone(),
-                            f.view.staged,
-                            f.view.view_mode,
-                            f.view.file_status,
-                        ));
+                        reloads.push(FilePaneLoadRequest {
+                            pane_id: pane.id,
+                            owner: *lane_ref,
+                            path: f.view.path.clone(),
+                            staged: f.view.staged,
+                            mode: f.view.view_mode,
+                            file_status: f.view.file_status,
+                        });
                     }
                     _ => {}
                 }
@@ -564,25 +657,26 @@ impl Workspace {
         for editor in raw_editors {
             editor.update(cx, |_, cx| cx.notify());
         }
-        for (owner, path, staged, mode, file_status) in reloads {
-            self.load_pane_file_content(owner, path, staged, mode, file_status, cx);
+        for request in reloads {
+            self.load_pane_file_content(request, cx);
         }
     }
 
     /// Spawn a background task to load file content for the given mode
     /// and update the matching file pane's `content` on completion. The
-    /// pane is identified by `(lane_id, path, staged, mode)` — if
-    /// no pane still matches when the load returns (because the user
-    /// switched mode or closed the tab), the result is dropped.
-    fn load_pane_file_content(
-        &mut self,
-        owner: LaneRef,
-        path: PathBuf,
-        staged: bool,
-        mode: FileViewMode,
-        file_status: Option<char>,
-        cx: &mut Context<Self>,
-    ) {
+    /// pane is identified by id and validated against `(lane_id, path, staged,
+    /// mode)` — if no pane still matches when the load returns (because the
+    /// user switched mode or closed the tab), the result is dropped.
+    fn load_pane_file_content(&mut self, request: FilePaneLoadRequest, cx: &mut Context<Self>) {
+        let FilePaneLoadRequest {
+            pane_id,
+            owner,
+            path,
+            staged,
+            mode,
+            file_status,
+        } = request;
+
         // `owner` is the lane that holds the pane *and* the lane the file
         // belongs to (a file pane always lives in the lane it references),
         // so it drives both the path/repo resolution here and the
@@ -595,14 +689,10 @@ impl Workspace {
         let wt_path = wt.path.clone();
         let repo_root = self.git_repo_root_for(target);
         let syntax_theme = self.syntax_theme.clone();
-        // Match rendered diagrams (mermaid) to the host appearance and
-        // palette. Computed here because the loader runs GPUI-free on a
-        // background thread. Falls back to dark (the default theme) if the
-        // global is absent.
-        let mermaid_palette = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(MermaidPalette::from_theme)
-            .unwrap_or_default();
+        // Match rendered diagrams (mermaid) to the file-viewer surface.
+        // Computed here because the loader runs GPUI-free on a background
+        // thread.
+        let mermaid_palette = MermaidPalette::from_file_viewer(cx);
 
         let path_bg = path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -628,12 +718,13 @@ impl Workspace {
                 // changed since the load started).
                 let pane_match = ws.main_area.runtimes.get_mut(&owner).and_then(|rt| {
                     rt.panes.iter_mut().find(|p| {
-                        p.file_view().is_some_and(|fv| {
-                            fv.lane_id == owner.lane
-                                && fv.path == path
-                                && fv.staged == staged
-                                && fv.view_mode == mode
-                        })
+                        p.id == pane_id
+                            && p.file_view().is_some_and(|fv| {
+                                fv.lane_id == owner.lane
+                                    && fv.path == path
+                                    && fv.staged == staged
+                                    && fv.view_mode == mode
+                            })
                     })
                 });
                 let Some(pane) = pane_match else { return };
@@ -646,11 +737,23 @@ impl Workspace {
                         // renderer for raw and diff): convert the rows into a
                         // synthetic buffer + decorations + injected highlight
                         // spans before moving `content`.
-                        let diff_model = if let PaneFileContent::LoadedDiff { rows_all, .. } =
-                            &content
+                        let diff_model = if let PaneFileContent::LoadedDiff {
+                            rows_all,
+                            rows_no_ctx,
+                            ..
+                        } = &content
                         {
+                            let rows = if fc.view.hide_unchanged {
+                                rows_no_ctx
+                            } else {
+                                rows_all
+                            };
                             cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
-                                build_diff_editor_model(rows_all, &DiffColors::from_theme(t), true)
+                                build_diff_editor_model(
+                                    rows,
+                                    &DiffColors::from_file_viewer_theme(t, cx),
+                                    true,
+                                )
                             })
                         } else {
                             None

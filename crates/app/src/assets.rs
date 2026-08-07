@@ -75,8 +75,13 @@ impl AssetSource for DarudaAssets {
             // ── UI controls ───────────────────────────────────────────────
             "icons/ui/check.svg" => icon!("ui/check.svg"),
             "icons/ui/chrome-reader-mode.svg" => icon!("ui/chrome-reader-mode.svg"),
+            "icons/ui/code.svg" => icon!("ui/code.svg"),
             "icons/ui/content-copy.svg" => icon!("ui/content-copy.svg"),
+            "icons/ui/difference.svg" => icon!("ui/difference.svg"),
+            "icons/ui/filter-alt.svg" => icon!("ui/filter-alt.svg"),
+            "icons/ui/filter-alt-off.svg" => icon!("ui/filter-alt-off.svg"),
             "icons/ui/open-in-new.svg" => icon!("ui/open-in-new.svg"),
+            "icons/ui/preview.svg" => icon!("ui/preview.svg"),
             "icons/ui/unfold-less.svg" => icon!("ui/unfold-less.svg"),
             "icons/ui/unfold-more.svg" => icon!("ui/unfold-more.svg"),
 
@@ -200,8 +205,13 @@ mod tests {
     const UI_ICON_PATHS: &[&str] = &[
         "icons/ui/check.svg",
         "icons/ui/chrome-reader-mode.svg",
+        "icons/ui/code.svg",
         "icons/ui/content-copy.svg",
+        "icons/ui/difference.svg",
+        "icons/ui/filter-alt.svg",
+        "icons/ui/filter-alt-off.svg",
         "icons/ui/open-in-new.svg",
+        "icons/ui/preview.svg",
         "icons/ui/unfold-less.svg",
         "icons/ui/unfold-more.svg",
     ];

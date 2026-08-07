@@ -1,6 +1,6 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, InteractiveElement as _,
+    AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, Hsla, InteractiveElement as _,
     IntoElement, IsZero, MouseButton, ParentElement as _, Rems, RenderOnce, StyleRefinement,
     Styled, Window, div, px, relative,
 };
@@ -62,6 +62,7 @@ pub struct Input {
     show_scrollbar: bool,
     input_padding: bool,
     scroll_wheel: ScrollWheelBehavior,
+    editor_background: Option<Hsla>,
 }
 
 impl Sizable for Input {
@@ -103,6 +104,7 @@ impl Input {
             show_scrollbar: true,
             input_padding: true,
             scroll_wheel: ScrollWheelBehavior::default(),
+            editor_background: None,
         }
     }
 
@@ -132,6 +134,14 @@ impl Input {
     /// [`ScrollWheelBehavior`].
     pub fn scroll_wheel(mut self, behavior: ScrollWheelBehavior) -> Self {
         self.scroll_wheel = behavior;
+        self
+    }
+
+    /// Override the code-editor surface for this input instance. This also
+    /// drives editor-owned paints such as the line-number gutter and ghost-line
+    /// fill; `None` keeps the global theme background.
+    pub fn editor_background(mut self, color: Hsla) -> Self {
+        self.editor_background = Some(color);
         self
     }
 
@@ -316,6 +326,7 @@ impl RenderOnce for Input {
             state.disabled = self.disabled;
             state.scroll_wheel = self.scroll_wheel;
             state.size = self.size;
+            state.editor_background = self.editor_background;
         });
 
         let state = self.state.read(cx);
@@ -330,7 +341,7 @@ impl RenderOnce for Input {
             cx.theme().muted
         } else {
             if state.mode.is_code_editor() {
-                cx.theme().editor_background()
+                state.editor_background(cx)
             } else {
                 cx.theme().background
             }

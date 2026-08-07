@@ -323,16 +323,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#0b0c0eff"
     },
-    "file_viewer_header_bg": {
-      "description": "Maps to `palette::BG_PANEL`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#0f1011ff"
-    },
-    "file_viewer_tab_active_bg": {
-      "description": "Maps to `palette::BG_ACTIVE`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#18191aff"
-    },
     "file_diff_add_bg": {
       "description": "Maps to `palette::FILE_DIFF_ADD_BG`.",
       "$ref": "#/$defs/Rgba",

@@ -271,6 +271,7 @@ pub(in crate::workspace) fn render_layout(
                         d.track_focus(fh)
                     })
                     .child(render_pane_file_viewer(
+                        id,
                         &f.view,
                         f.editor_state.clone(),
                         &f.scroll_handle,

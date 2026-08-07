@@ -40,8 +40,8 @@ impl MermaidPalette {
         Self {
             dark: theme.is_dark(),
             background: to_hex(canvas),
-            // `md_code_block_bg`/`md_code_inline_bg`/`dock_bg`/`file_viewer_header_bg`
-            // sit on daruda's panel-elevation ladder, which is deliberately subtle
+            // `md_code_block_bg`/`md_code_inline_bg`/`dock_bg` sit on daruda's
+            // panel-elevation ladder, which is deliberately subtle
             // (a few % lightness apart) for panel-on-panel chrome — too close to
             // `canvas` to read as a filled node/section on open diagram canvas
             // (mindmap topics, timeline sections have no border to compensate, so
@@ -75,6 +75,33 @@ impl MermaidPalette {
             error: to_hex(theme.banner_error_text),
             warning: to_hex(theme.banner_warning_text),
             success: to_hex(theme.banner_success_text),
+        }
+    }
+
+    pub fn from_file_viewer(cx: &gpui::App) -> Self {
+        let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
+        let canvas = theme::file_viewer_pane_bg(cx);
+        let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
+        let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
+        let primary_surface_hex = to_hex_over(primary_surface, canvas);
+        let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
+
+        Self {
+            dark: !theme::file_viewer_pane_syntax_is_light(cx),
+            background: to_hex(canvas),
+            primary_color: primary_surface_hex.clone(),
+            primary_text_color: to_hex(ui_theme.text_body),
+            primary_border_color: to_hex(ui_theme.border),
+            line_color: to_hex(ui_theme.text_muted),
+            secondary_color: secondary_surface_hex.clone(),
+            surface_muted: secondary_surface_hex.clone(),
+            cluster_background: secondary_surface_hex.clone(),
+            note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
+            note_text: to_hex(ui_theme.banner_warning_text),
+            activation_background: secondary_surface_hex,
+            error: to_hex(ui_theme.banner_error_text),
+            warning: to_hex(ui_theme.banner_warning_text),
+            success: to_hex(ui_theme.banner_success_text),
         }
     }
 

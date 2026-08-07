@@ -316,8 +316,9 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // `default_dark()` carries a dark `editor_background`, which the editor
     // element paints behind the line-number gutter (and ghost rows) via
     // `cx.theme().editor_background()`. Left unset it stays dark on the light
-    // theme — a black gutter stripe beside the light content. Pin it to the
-    // file-viewer surface so the gutter matches the content in both modes.
+    // theme — a black gutter stripe beside the light content. Keep the global
+    // default on the UI editor surface; hosts with a different surface can
+    // override it per input instance.
     highlight.style.editor_background = Some(d.file_viewer_bg);
     // The current-line band is one App-wide slot shared by every editor
     // instance (the File viewer's UI-themed surface *and* the agent-chat
@@ -495,6 +496,16 @@ pub fn agent_chat_bg(cx: &App) -> gpui::Hsla {
     }
 }
 
+/// File-viewer pane background. This is intentionally scoped to the file
+/// viewer's own body/editor/toolbar/search-panel surfaces, not workspace chrome
+/// such as the tab strip. It follows the same terminal-mirrored colour source
+/// as Agent Chat so file links opened from a transcript do not land on a
+/// visually unrelated editor surface. Kept opaque because editor internals
+/// repaint sub-areas such as the gutter on top of the pane surface.
+pub fn file_viewer_pane_bg(cx: &App) -> gpui::Hsla {
+    agent_chat_bg(cx)
+}
+
 /// Mirror the resolved terminal background color for the agent-chat render
 /// path. Returns `true` when the value changed, so the reload path can decide
 /// whether to repaint the cached agent-chat views.
@@ -567,6 +578,22 @@ pub fn agent_chat_fg_subtle(cx: &App) -> gpui::Hsla {
     agent_chat_fg(cx).opacity(p::AGENT_CHAT_FG_SUBTLE_ALPHA)
 }
 
+/// File-viewer pane foreground. Mirrors Agent Chat's terminal-derived text
+/// ramp so file-viewer chrome tracks live terminal theme changes.
+pub fn file_viewer_pane_fg(cx: &App) -> gpui::Hsla {
+    agent_chat_fg(cx)
+}
+
+/// Secondary file-viewer pane foreground for counters and inactive controls.
+pub fn file_viewer_pane_fg_muted(cx: &App) -> gpui::Hsla {
+    agent_chat_fg_muted(cx)
+}
+
+/// Tertiary file-viewer pane foreground for low-emphasis labels.
+pub fn file_viewer_pane_fg_subtle(cx: &App) -> gpui::Hsla {
+    agent_chat_fg_subtle(cx)
+}
+
 /// Mirror the resolved terminal foreground color for the agent-chat render
 /// path. Returns `true` when the value changed, so the reload path can decide
 /// whether to repaint the cached agent-chat views.
@@ -577,6 +604,14 @@ pub fn set_agent_chat_fg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
     changed
 }
 
+fn neutral_overlay_for(bg: gpui::Hsla) -> gpui::Hsla {
+    if bg.l < 0.5 {
+        p::OVERLAY_WHITE
+    } else {
+        p::OVERLAY_BLACK
+    }
+}
+
 /// Background-derived elevation tint for the agent-chat tool cards. A
 /// translucent neutral overlay picked by the pane background's *lightness*
 /// (white over a dark background, black over a light one), so a tool card
@@ -584,12 +619,10 @@ pub fn set_agent_chat_fg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
 /// translucent, keeps the pane's window opacity showing through. Mirrors the
 /// inline-code tint in the vendored `text/node.rs`.
 pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
-    let overlay = if agent_chat_bg(cx).l < 0.5 {
-        p::OVERLAY_WHITE
-    } else {
-        p::OVERLAY_BLACK
-    };
-    p::with_alpha(overlay, p::AGENT_CHAT_CARD_TINT_ALPHA)
+    p::with_alpha(
+        neutral_overlay_for(agent_chat_bg(cx)),
+        p::AGENT_CHAT_CARD_TINT_ALPHA,
+    )
 }
 
 /// Background-derived border for the agent-chat tool cards — the same neutral
@@ -597,12 +630,38 @@ pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
 /// tracks the pane background instead of a fixed line color. Pairs with the
 /// fill tint on the same card.
 pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
-    let overlay = if agent_chat_bg(cx).l < 0.5 {
-        p::OVERLAY_WHITE
-    } else {
-        p::OVERLAY_BLACK
-    };
-    p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA)
+    p::with_alpha(
+        neutral_overlay_for(agent_chat_bg(cx)),
+        p::AGENT_CHAT_CARD_BORDER_ALPHA,
+    )
+}
+
+/// Background-derived tint for file-viewer pane chrome, including the toolbar,
+/// mode chips, and floating search panel. Uses the same neutral-overlay rule as
+/// Agent Chat so the two pane types move together under live terminal theme
+/// changes without leaking this colour into the workspace tab strip.
+pub fn file_viewer_pane_tint(cx: &App) -> gpui::Hsla {
+    p::with_alpha(
+        neutral_overlay_for(file_viewer_pane_bg(cx)),
+        p::AGENT_CHAT_CARD_TINT_ALPHA,
+    )
+}
+
+/// Stronger background-derived tint for active controls inside the file-viewer
+/// pane, such as the Raw/Preview/Changes mode chips.
+pub fn file_viewer_pane_active_tint(cx: &App) -> gpui::Hsla {
+    p::with_alpha(
+        neutral_overlay_for(file_viewer_pane_bg(cx)),
+        p::AGENT_CHAT_CARD_BORDER_ALPHA,
+    )
+}
+
+/// Hairline tint for file-viewer pane chrome.
+pub fn file_viewer_pane_border_tint(cx: &App) -> gpui::Hsla {
+    p::with_alpha(
+        neutral_overlay_for(file_viewer_pane_bg(cx)),
+        p::AGENT_CHAT_CARD_BORDER_ALPHA,
+    )
 }
 
 /// Whether agent-chat content should pick the *light* variant of a
@@ -616,6 +675,10 @@ pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
 /// mermaid reconcilers) and `ui::code_editor`'s agent-chat diff viewer.
 pub fn agent_chat_syntax_is_light(cx: &App) -> bool {
     agent_chat_bg(cx).l >= 0.5
+}
+
+pub fn file_viewer_pane_syntax_is_light(cx: &App) -> bool {
+    file_viewer_pane_bg(cx).l >= 0.5
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ use crate::input::{
     text_wrapper::LineLayout,
 };
 use crate::input::{InlineCompletion, RopeExt as _, Selection};
-use crate::{Root, history::History};
+use crate::{ActiveTheme as _, Root, history::History};
 use crate::{highlighter::DiagnosticSet, input::text_wrapper::LineItem};
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
@@ -356,6 +356,10 @@ pub struct InputState {
     /// How the scroll wheel is handled — set each frame by the [`super::Input`]
     /// element from its builder. See [`ScrollWheelBehavior`].
     pub(super) scroll_wheel: ScrollWheelBehavior,
+    /// Optional per-instance code-editor background. Hosts use this when a
+    /// code editor sits on a surface that intentionally differs from the
+    /// process-wide highlight theme background.
+    pub(super) editor_background: Option<gpui::Hsla>,
     /// Per-row visual decorations (background + custom gutter) for
     /// read-only render surfaces such as the diff viewer. Empty = the
     /// editor's default sequential gutter with no line backgrounds.
@@ -503,6 +507,7 @@ impl InputState {
             select_anchor: 0..0,
             disabled: false,
             scroll_wheel: ScrollWheelBehavior::default(),
+            editor_background: None,
             line_decorations: Vec::new(),
             highlight_override: None,
             masked: false,
@@ -749,6 +754,12 @@ impl InputState {
     ) {
         self.highlight_override = spans;
         cx.notify();
+    }
+
+    #[inline]
+    pub(super) fn editor_background(&self, cx: &App) -> gpui::Hsla {
+        self.editor_background
+            .unwrap_or_else(|| cx.theme().editor_background())
     }
 
     /// Set the number of rows for the multi-line Textarea.

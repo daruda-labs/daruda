@@ -32,9 +32,11 @@ pub(in crate::workspace) struct DiffColors {
 }
 
 impl DiffColors {
-    /// Snapshot the diff palette from the active `DarudaTheme`. Used by the
-    /// File viewer's own diff pane, which paints on the UI theme's fixed
-    /// `file_viewer_bg` editor surface.
+    /// Snapshot the fixed UI diff palette from the active `DarudaTheme`.
+    /// Surface-specific callers should layer their pane-specific hunk header
+    /// colours with [`Self::from_file_viewer_theme`] or
+    /// [`Self::from_agent_chat_theme`] so baked `@@` rows do not keep a stale
+    /// UI surface background.
     pub(in crate::workspace) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
         Self {
             add_bg: t.file_diff_add_bg,
@@ -47,6 +49,23 @@ impl DiffColors {
             hunk_ctx_text: t.file_diff_hunk_ctx_text,
             word_add_bg: t.file_diff_word_add_bg,
             word_del_bg: t.file_diff_word_del_bg,
+        }
+    }
+
+    /// [`Self::from_theme`]'s file-viewer-pane variant. Add/remove/word-diff
+    /// colours remain semantic git colours; the hunk-header row follows the
+    /// terminal-derived file-viewer pane tint so `@@ -a,b +c,d @@` does not
+    /// remain on the fixed UI raised surface after the file viewer body moves
+    /// with the terminal theme.
+    pub(in crate::workspace) fn from_file_viewer_theme(
+        t: &crate::ui::theme::DarudaTheme,
+        cx: &App,
+    ) -> Self {
+        Self {
+            hunk_bg: crate::ui::theme::file_viewer_pane_tint(cx),
+            hunk_text: crate::ui::theme::file_viewer_pane_fg(cx),
+            hunk_ctx_text: crate::ui::theme::file_viewer_pane_fg_muted(cx),
+            ..Self::from_theme(t)
         }
     }
 

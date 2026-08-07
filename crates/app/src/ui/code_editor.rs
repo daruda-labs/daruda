@@ -124,19 +124,17 @@ fn code_editor_chrome(state: &Entity<InputState>, fg: Hsla, cx: &App) -> Input {
 /// Render `state` as a full-size code editor for the file-viewer pane (raw +
 /// diff). Standalone in its own pane, so it scrolls both axes
 /// ([`crate::ui::ScrollWheelBehavior::Both`], the default) and fills the body
-/// via `.flex()` at the call site. Paints on the UI theme's fixed
-/// `file_viewer_bg` editor surface, so the fallback text colour is matched to
-/// the *UI* theme's light/dark bit (`HighlightTheme::editor_foreground`, set
-/// light-aware by `apply_daruda_palette`).
+/// via `.flex()` at the call site. Paints on the file-viewer surface, so the
+/// fallback text colour and editor-owned gutter/ghost-line fills are matched
+/// to that surface instead of the process-wide editor background.
 pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
-    use gpui_component::ActiveTheme as _;
-    let fg = cx
-        .theme()
-        .highlight_theme
-        .style
-        .editor_foreground
-        .unwrap_or_else(|| theme::palette::syntax_theme().default);
-    code_editor_chrome(state, fg, cx)
+    let bg = theme::file_viewer_pane_bg(cx);
+    let fg = theme::palette::syntax_theme_of(
+        theme::active_syntax_palette(cx),
+        theme::file_viewer_pane_syntax_is_light(cx),
+    )
+    .default;
+    code_editor_chrome(state, fg, cx).editor_background(bg)
 }
 
 /// Render `state` as a read-only viewer **embedded, height-capped, in the
@@ -152,7 +150,7 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
 /// (`crate::ui::scrollbar::{vertical,horizontal}_thumb`, paired with
 /// `InputState::last_bounds`/`scroll_size`), matching every other scrollable
 /// surface in the app instead of gpui_component's globally-themed bar.
-pub fn embedded_code_viewer(state: &Entity<InputState>, cx: &App) -> Input {
+pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &App) -> Input {
     // The light/dark pick goes through `agent_chat_syntax_is_light` — the same
     // judgment `Workspace::agent_chat_theme_params` feeds the tree-sitter spans,
     // so the fallback colour and the highlighted runs stay in lockstep.
@@ -161,5 +159,5 @@ pub fn embedded_code_viewer(state: &Entity<InputState>, cx: &App) -> Input {
         theme::agent_chat_syntax_is_light(cx),
     )
     .default;
-    code_editor_chrome(state, fg, cx)
+    code_editor_chrome(state, fg, cx).editor_background(background)
 }

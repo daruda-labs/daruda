@@ -1,7 +1,7 @@
-//! File-viewer top toolbar — path label on the left, mode tabs +
-//! diff stats + status badge + close button on the right.
+//! File-viewer top toolbar — path label on the left, diff stats +
+//! status badge + view toggles + close button on the right.
 //!
-//! Mode-tab pill is the only inner widget; `mode_tab` lives here too
+//! Toolbar toggle button is the only inner widget; the helper lives here too
 //! so the visual style and the toolbar that uses it move together.
 
 use crate::ui::theme;
@@ -9,27 +9,35 @@ use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, Window, div, prelu
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
-use crate::ui::{ContextMenuExt as _, menu_builder};
+use crate::ui::{ContextMenuExt as _, Icon, Sizable as _, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::render::ws_popup_clipboard_item;
 
-/// Toolbar: path label on the left, Raw/Changes tabs + optional controls + × on the right.
+const ICON_CODE: &str = "icons/ui/code.svg";
+const ICON_PREVIEW: &str = "icons/ui/preview.svg";
+const ICON_DIFFERENCE: &str = "icons/ui/difference.svg";
+const ICON_FILTER_ALT: &str = "icons/ui/filter-alt.svg";
+const ICON_FILTER_ALT_OFF: &str = "icons/ui/filter-alt-off.svg";
+
+/// Toolbar: path label on the left, view toggles + optional controls + × on the right.
 pub(super) fn render_file_viewer_toolbar(
+    pane_id: PaneId,
     fv: &PaneFileView,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let header_bg = t.file_viewer_header_bg;
-    let header_border = t.border;
-    let header_text = t.text_body;
+    let header_bg = theme::file_viewer_pane_tint(cx);
+    let header_border = theme::file_viewer_pane_border_tint(cx);
+    let header_text = theme::file_viewer_pane_fg(cx);
     let stat_add = t.file_diff_stat_add;
     let stat_del = t.file_diff_stat_del;
-    let tab_text = t.text_muted;
-    let tab_active_bg = t.file_viewer_tab_active_bg;
-    let tab_active_text = t.text_primary;
-    let close_hover = t.text_primary;
+    let button_text = theme::file_viewer_pane_fg_muted(cx);
+    let button_active_bg = theme::file_viewer_pane_active_tint(cx);
+    let button_active_text = header_text;
+    let close_hover = header_text;
 
     let file_name = fv.path.file_name_lossy();
     let parent_name = fv
@@ -54,12 +62,11 @@ pub(super) fn render_file_viewer_toolbar(
     let lane_id_for_menu = fv.lane_id;
     let ws_for_menu = cx.entity().downgrade();
 
-    let is_raw = fv.view_mode == FileViewMode::Raw;
     let is_preview = fv.view_mode == FileViewMode::Preview;
     let is_changes = fv.view_mode == FileViewMode::Changes;
-    // Use the path extension so the Preview tab persists across mode switches
+    // Use the path extension so the Preview button persists across mode switches
     // (content type changes to LoadedDiff in Changes mode, which would otherwise
-    // hide the tab for markdown files).
+    // hide the button for markdown files).
     let is_markdown = fv
         .path
         .extension_lower()
@@ -74,6 +81,20 @@ pub(super) fn render_file_viewer_toolbar(
     let file_status = fv.file_status;
     let staged = fv.staged;
     let file_status_color = file_status.map(|status| git_status_color(status, staged, cx));
+    let (filter_label, filter_icon) = if hide_unchanged {
+        (strings::file_viewer_show_all(), ICON_FILTER_ALT_OFF)
+    } else {
+        (strings::file_viewer_hide_unchanged(), ICON_FILTER_ALT)
+    };
+    let (mode_label, mode_icon, mode_target) = if is_changes {
+        (strings::file_viewer_tab_raw(), ICON_CODE, FileViewMode::Raw)
+    } else {
+        (
+            strings::file_viewer_tab_changes(),
+            ICON_DIFFERENCE,
+            FileViewMode::Changes,
+        )
+    };
 
     div()
         .flex()
@@ -172,51 +193,43 @@ pub(super) fn render_file_viewer_toolbar(
                             .child(status.to_string()),
                     )
                 })
-                .child(mode_tab(
-                    strings::file_viewer_tab_raw(),
-                    is_raw,
-                    tab_text,
-                    tab_active_bg,
-                    tab_active_text,
-                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                        this.set_file_view_mode(FileViewMode::Raw, cx);
+                .child(if is_changes {
+                    toolbar_toggle_button(
+                        filter_label,
+                        filter_icon,
+                        hide_unchanged,
+                        button_text,
+                        button_active_bg,
+                        button_active_text,
+                        cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                            this.toggle_hide_unchanged_for_pane(pane_id, cx);
+                        }),
+                    )
+                    .into_any_element()
+                } else {
+                    toolbar_toggle_spacer().into_any_element()
+                })
+                .child(toolbar_toggle_button(
+                    mode_label,
+                    mode_icon,
+                    is_changes,
+                    button_text,
+                    button_active_bg,
+                    button_active_text,
+                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                        this.set_file_view_mode_for_pane(pane_id, mode_target, cx);
                     }),
                 ))
                 .when(is_markdown, |d| {
-                    d.child(mode_tab(
+                    d.child(toolbar_toggle_button(
                         strings::file_viewer_tab_preview(),
+                        ICON_PREVIEW,
                         is_preview,
-                        tab_text,
-                        tab_active_bg,
-                        tab_active_text,
-                        cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                            this.set_file_view_mode(FileViewMode::Preview, cx);
-                        }),
-                    ))
-                })
-                .child(mode_tab(
-                    strings::file_viewer_tab_changes(),
-                    is_changes,
-                    tab_text,
-                    tab_active_bg,
-                    tab_active_text,
-                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                        this.set_file_view_mode(FileViewMode::Changes, cx);
-                    }),
-                ))
-                .when(is_changes, |d| {
-                    d.child(mode_tab(
-                        if hide_unchanged {
-                            strings::file_viewer_show_all()
-                        } else {
-                            strings::file_viewer_hide_unchanged()
-                        },
-                        true,
-                        tab_text,
-                        tab_active_bg,
-                        tab_active_text,
-                        cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                            this.toggle_hide_unchanged(cx);
+                        button_text,
+                        button_active_bg,
+                        button_active_text,
+                        cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                            this.set_file_view_mode_for_pane(pane_id, FileViewMode::Preview, cx);
                         }),
                     ))
                 })
@@ -224,15 +237,15 @@ pub(super) fn render_file_viewer_toolbar(
                     div()
                         .id("file-viewer-close")
                         .flex_none()
-                        .px(px(theme::FILE_VIEWER_TAB_PAD_X))
+                        .px(px(theme::FILE_VIEWER_CLOSE_PAD_X))
                         .text_size(px(theme::FILE_VIEWER_CLOSE_FONT_SIZE))
-                        .text_color(tab_text)
+                        .text_color(button_text)
                         .cursor_pointer()
                         .hover(move |d| d.text_color(close_hover))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                                this.close_focused_file_pane(window, cx);
+                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                this.request_close_pane(pane_id, window, cx);
                             }),
                         )
                         .child(strings::FILE_VIEWER_CLOSE),
@@ -240,29 +253,45 @@ pub(super) fn render_file_viewer_toolbar(
         )
 }
 
-/// A small pill button for mode tabs in the file viewer toolbar.
-fn mode_tab(
+/// A fixed-width spacer that keeps the Raw/Changes toggle from shifting when
+/// the diff-context toggle is unavailable outside Changes mode.
+fn toolbar_toggle_spacer() -> impl IntoElement {
+    div()
+        .flex_none()
+        .w(px(theme::FILE_VIEWER_TOOL_BUTTON_W))
+        .h(px(theme::FILE_VIEWER_TOOL_BUTTON_H))
+}
+
+/// A small icon button for file-viewer toolbar toggles.
+fn toolbar_toggle_button(
     label: impl Into<gpui::SharedString>,
+    icon: &'static str,
     active: bool,
-    tab_text: gpui::Hsla,
-    tab_active_bg: gpui::Hsla,
-    tab_active_text: gpui::Hsla,
+    button_text: gpui::Hsla,
+    button_active_bg: gpui::Hsla,
+    button_active_text: gpui::Hsla,
     on_click: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     let label: gpui::SharedString = label.into();
     div()
         .id(label.clone())
         .flex_none()
-        .px(px(theme::FILE_VIEWER_TAB_PAD_X))
-        .py(px(theme::FILE_VIEWER_TAB_PAD_Y))
-        .rounded(px(theme::FILE_VIEWER_TAB_RADIUS))
+        .w(px(theme::FILE_VIEWER_TOOL_BUTTON_W))
+        .h(px(theme::FILE_VIEWER_TOOL_BUTTON_H))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(theme::FILE_VIEWER_TOOL_BUTTON_RADIUS))
         .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
         .cursor_pointer()
-        .when(active, |d| d.bg(tab_active_bg).text_color(tab_active_text))
+        .when(active, |d| {
+            d.bg(button_active_bg).text_color(button_active_text)
+        })
         .when(!active, |d| {
-            d.text_color(tab_text)
-                .hover(move |d| d.text_color(tab_active_text))
+            d.text_color(button_text)
+                .hover(move |d| d.text_color(button_active_text))
         })
         .on_mouse_down(MouseButton::Left, on_click)
-        .child(label)
+        .tooltip(crate::ui::tooltip::text(label))
+        .child(Icon::empty().path(icon).small())
 }

@@ -24,10 +24,12 @@ use self::search_panel::render_search_panel;
 use self::toolbar::render_file_viewer_toolbar;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Top-level file-viewer element.
 /// Absolute positioning gives the body a bounded height for scrolling.
 pub(in crate::workspace) fn render_pane_file_viewer(
+    pane_id: PaneId,
     fv: &PaneFileView,
     editor_state: gpui::Entity<gpui_component::input::InputState>,
     scroll_handle: &gpui::ScrollHandle,
@@ -45,7 +47,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     // Preview has variable-height blocks; derive height from measured offset.
     let is_preview_mode = matches!(&fv.content, PaneFileContent::LoadedMarkdown { .. })
         && fv.view_mode == FileViewMode::Preview;
-    let viewer_bg = theme::current(cx).file_viewer_bg;
+    let viewer_bg = theme::file_viewer_pane_bg(cx);
 
     // One thin daruda thumb; editor modes use the editor scroll handle.
     let scrollbar: Option<crate::ui::scrollbar::Thumb> = if is_editor_mode {
@@ -90,7 +92,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
                 .left_0()
                 .right_0()
                 .h(toolbar_h)
-                .child(render_file_viewer_toolbar(fv, cx)),
+                .child(render_file_viewer_toolbar(pane_id, fv, cx)),
         )
         .child(render_file_viewer_body(
             fv,
