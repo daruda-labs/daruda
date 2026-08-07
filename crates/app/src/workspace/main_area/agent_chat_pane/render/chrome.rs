@@ -17,9 +17,9 @@ use crate::workspace::main_area::agent_chat_pane::view::{
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
-const ICON_UNFOLD_MORE: &str = "icons/ui/unfold-more.svg";
-const ICON_UNFOLD_LESS: &str = "icons/ui/unfold-less.svg";
-const ICON_READING_WIDTH: &str = "icons/ui/chrome-reader-mode.svg";
+const ICON_EXPAND: &str = "icons/ui/expand.svg";
+const ICON_COMPRESS: &str = "icons/ui/compress.svg";
+const ICON_WIDTH_WIDE: &str = "icons/ui/width-wide.svg";
 
 /// Pane activity bar: resolved session title on the left, icon controls on the
 /// right. Always rendered: the reading-width toggle is available even while the
@@ -58,13 +58,13 @@ pub(super) fn activity_bar(
     let expand = button_bare(("agent-chat-expand-all", props.pane_id as usize))
         .ghost()
         .xsmall()
-        .icon(Icon::empty().path(ICON_UNFOLD_MORE))
+        .icon(Icon::empty().path(ICON_EXPAND))
         .tooltip(SharedString::from(s::agent_chat_expand_all()))
         .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
     let collapse = button_bare(("agent-chat-collapse-all", props.pane_id as usize))
         .ghost()
         .xsmall()
-        .icon(Icon::empty().path(ICON_UNFOLD_LESS))
+        .icon(Icon::empty().path(ICON_COMPRESS))
         .tooltip(SharedString::from(s::agent_chat_collapse_all()))
         .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
     let reading_selected = props.content_width.is_reading();
@@ -76,7 +76,7 @@ pub(super) fn activity_bar(
     let reading_width = button_bare(("agent-chat-reading-width", props.pane_id as usize))
         .ghost()
         .xsmall()
-        .icon(Icon::empty().path(ICON_READING_WIDTH))
+        .icon(Icon::empty().path(ICON_WIDTH_WIDE))
         .tooltip(SharedString::from(reading_tooltip))
         .selected(reading_selected)
         .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_content_width(cx)));
