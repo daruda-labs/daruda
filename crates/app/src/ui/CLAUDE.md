@@ -51,7 +51,7 @@ ui/
 ├── alert.rs        # error/warning/info/success(id, msg) factories
 ├── badge.rs        # Badge::new(label).monospace()/.bg_color()/... over Tag::custom
 ├── button.rs       # button / button_primary / button_danger / button_bare
-├── button_group.rs # button_group(id) — segmented single-select strip over gpui_component::ButtonGroup (theme-aware selected styling; `.children(buttons.selected(..))` + `.on_click(|indices|..)`)
+├── button_group.rs # button_group(id) — segmented single-select strip over gpui_component::ButtonGroup (theme-aware selected styling; `.children(buttons.selected(..))` + `.on_click(|indices|..)`). button_group_on_surface(id, &PaneSurfaceTokens, cx) is the pane-local variant: upstream's outline path fills segments with `theme().background` (app canvas) and rings them in accent, both wrong on a terminal-mirrored pane — this one derives fill/border/hover from the pane surface instead
 ├── chart.rs        # BarChart re-export over gpui_component::chart (Plot-backed; caller wraps in a fixed-height container)
 ├── checkbox.rs     # checkbox(id, label)
 ├── code_copy_button.rs # copy_button(id, text, icon, tooltip, copied_icon, copied_tooltip, window, cx) -> Button — icon/tooltip-agnostic copy-to-clipboard button (✓ feedback + 2s targeted-notify revert); returns the `Button` so the caller picks its chrome (overlay chip keeps `button_bare`'s fill, an inline chrome-row icon chains `.ghost()`). code_copy_button(id, code, window, cx) is the hover-reveal markdown-code-block wrapper over it, wired globally by markdown.rs and revealed by the node.rs `gpui-code-block` group patch

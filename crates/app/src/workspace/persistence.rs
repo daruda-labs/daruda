@@ -625,9 +625,10 @@ impl Workspace {
             } => {
                 let pane = if let Some(fc) = file {
                     // File pane — `file_status` is not persisted; the git
-                    // badge re-derives on the next git refresh. Content
-                    // stays `Loading` until the owning lane becomes active
-                    // and `load_pending_file_panes` fires.
+                    // badge re-derives on the next `refresh_git_status`, via
+                    // `sync_file_pane_statuses`. Content stays `Loading`
+                    // until the owning lane becomes active and
+                    // `load_pending_file_panes` fires.
                     self.create_file_pane(
                         fc.lane_id,
                         fc.path.clone(),

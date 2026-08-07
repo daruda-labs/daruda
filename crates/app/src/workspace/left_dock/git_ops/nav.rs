@@ -110,9 +110,9 @@ impl Workspace {
         };
         let staged_entry = s.staged.iter().find(|e| e.path == cursor);
         let unstaged_entry = s.unstaged.iter().find(|e| e.path == cursor);
-        let (is_staged, status_char) = match (staged_entry, unstaged_entry) {
-            (Some(se), _) => (true, se.x),
-            (None, Some(ue)) => (false, ue.y),
+        let is_staged = match (staged_entry, unstaged_entry) {
+            (Some(_), _) => true,
+            (None, Some(_)) => false,
             (None, None) => return,
         };
 
@@ -122,7 +122,7 @@ impl Workspace {
             return;
         };
         let abs = wt.paths().from_git_status(&cursor);
-        self.open_git_file_diff(active_id, abs, is_staged, Some(status_char), window, cx);
+        self.open_git_file_diff(active_id, abs, is_staged, window, cx);
     }
 
     /// Toggle the collapse state of a directory group in the Git Changes

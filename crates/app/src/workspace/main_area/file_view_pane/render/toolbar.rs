@@ -1,15 +1,20 @@
 //! File-viewer top toolbar — path label on the left, diff stats +
-//! status badge + view toggles + close button on the right.
+//! status badge + mode strip + diff-context toggle + close button on the right.
 //!
-//! Toolbar toggle button is the only inner widget; the helper lives here too
-//! so the visual style and the toolbar that uses it move together.
+//! The mode strip is a single-select button group over the modes the file
+//! actually has; the diff-context toggle is a standalone latch, so it keeps
+//! its own hand-rolled button (the helper lives here so its visual style and
+//! the toolbar that uses it move together).
 
 use crate::ui::theme;
 use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, px};
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
-use crate::ui::{ContextMenuExt as _, Icon, Sizable as _, menu_builder};
+use crate::ui::{
+    ContextMenuExt as _, Icon, Selectable as _, Sizable as _, button_bare, button_group_on_surface,
+    menu_builder,
+};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileView};
@@ -29,31 +34,18 @@ struct ToolbarButtonColors {
     active_text: gpui::Hsla,
 }
 
-#[derive(Clone, Copy)]
-enum ToolbarAction {
-    ToggleHideUnchanged,
-    SetMode(FileViewMode),
-}
-
 struct ToolbarToggle {
     label: gpui::SharedString,
     icon: &'static str,
     active: bool,
-    action: ToolbarAction,
 }
 
 impl ToolbarToggle {
-    fn new(
-        label: impl Into<gpui::SharedString>,
-        icon: &'static str,
-        active: bool,
-        action: ToolbarAction,
-    ) -> Self {
+    fn new(label: impl Into<gpui::SharedString>, icon: &'static str, active: bool) -> Self {
         Self {
             label: label.into(),
             icon,
             active,
-            action,
         }
     }
 
@@ -69,66 +61,104 @@ impl ToolbarToggle {
 
 struct ToolbarControls {
     filter_toggle: Option<ToolbarToggle>,
-    mode_toggle: ToolbarToggle,
-    preview_toggle: Option<ToolbarToggle>,
+    mode_options: Vec<FileViewMode>,
+    active_mode: FileViewMode,
     diff_stats: Option<(usize, usize)>,
 }
 
 impl ToolbarControls {
     fn from_view(fv: &PaneFileView) -> Self {
-        let is_preview = fv.view_mode == FileViewMode::Preview;
-        let is_changes = fv.view_mode == FileViewMode::Changes;
-
-        let filter_toggle = is_changes.then(|| {
+        let filter_toggle = (fv.view_mode == FileViewMode::Changes).then(|| {
             if fv.hide_unchanged {
-                ToolbarToggle::new(
-                    strings::file_viewer_show_all(),
-                    ICON_FILTER_ALT_OFF,
-                    true,
-                    ToolbarAction::ToggleHideUnchanged,
-                )
+                ToolbarToggle::new(strings::file_viewer_show_all(), ICON_FILTER_ALT_OFF, true)
             } else {
                 ToolbarToggle::new(
                     strings::file_viewer_hide_unchanged(),
                     ICON_FILTER_ALT,
                     false,
-                    ToolbarAction::ToggleHideUnchanged,
                 )
             }
         });
 
-        let mode_toggle = if is_changes {
-            ToolbarToggle::new(
-                strings::file_viewer_tab_raw(),
-                ICON_CODE,
-                true,
-                ToolbarAction::SetMode(FileViewMode::Raw),
-            )
-        } else {
-            ToolbarToggle::new(
-                strings::file_viewer_tab_changes(),
-                ICON_DIFFERENCE,
-                false,
-                ToolbarAction::SetMode(FileViewMode::Changes),
-            )
-        };
-
-        let preview_toggle = fv.is_markdown_path().then(|| {
-            ToolbarToggle::new(
-                strings::file_viewer_tab_preview(),
-                ICON_PREVIEW,
-                is_preview,
-                ToolbarAction::SetMode(FileViewMode::Preview),
-            )
-        });
-
         Self {
             filter_toggle,
-            mode_toggle,
-            preview_toggle,
+            mode_options: mode_options(fv),
+            active_mode: fv.view_mode,
             diff_stats: fv.loaded_diff_stats(),
         }
     }
+}
+
+/// The mode segments offered for a file, in strip order.
+///
+/// Raw is always available, Preview only for Markdown, Changes only when the
+/// file carries a git status. The live mode is kept regardless of that filter
+/// so the strip always marks exactly one segment — a restored pane keeps its
+/// persisted mode but not its `file_status` (see `persistence.rs`).
+fn mode_options(fv: &PaneFileView) -> Vec<FileViewMode> {
+    [
+        (FileViewMode::Raw, true),
+        (FileViewMode::Preview, fv.is_markdown_path()),
+        (FileViewMode::Changes, fv.file_status.is_some()),
+    ]
+    .into_iter()
+    .filter(|(mode, available)| *available || *mode == fv.view_mode)
+    .map(|(mode, _)| mode)
+    .collect()
+}
+
+fn mode_icon(mode: FileViewMode) -> &'static str {
+    match mode {
+        FileViewMode::Raw => ICON_CODE,
+        FileViewMode::Preview => ICON_PREVIEW,
+        FileViewMode::Changes => ICON_DIFFERENCE,
+    }
+}
+
+fn mode_label(mode: FileViewMode) -> String {
+    match mode {
+        FileViewMode::Raw => strings::file_viewer_tab_raw(),
+        FileViewMode::Preview => strings::file_viewer_tab_preview(),
+        FileViewMode::Changes => strings::file_viewer_tab_changes(),
+    }
+}
+
+fn mode_button_id(mode: FileViewMode) -> &'static str {
+    match mode {
+        FileViewMode::Raw => "file-viewer-mode-raw",
+        FileViewMode::Preview => "file-viewer-mode-preview",
+        FileViewMode::Changes => "file-viewer-mode-changes",
+    }
+}
+
+/// Single-select icon strip over `options`; the click handler maps the
+/// reported child index back to its mode. Element ids carry `pane_id` so
+/// split panes don't share the buttons' keyed focus state.
+fn mode_button_group(
+    pane_id: PaneId,
+    options: Vec<FileViewMode>,
+    active: FileViewMode,
+    colors: ToolbarButtonColors,
+    surface: &theme::PaneSurfaceTokens,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement {
+    let values = options.clone();
+    button_group_on_surface(("file-viewer-mode-group", pane_id), surface, cx)
+        .children(options.into_iter().map(|mode| {
+            let is_active = mode == active;
+            button_bare((mode_button_id(mode), pane_id))
+                .icon(Icon::empty().path(mode_icon(mode)))
+                .tooltip(mode_label(mode))
+                .selected(is_active)
+                // The variant carries one foreground; lift only the selected
+                // segment's, matching the diff-context toggle's active state.
+                .when(is_active, |b| b.text_color(colors.active_text))
+        }))
+        .on_click(cx.listener(move |this, ixs: &Vec<usize>, _window, cx| {
+            if let Some(&ix) = ixs.first() {
+                this.set_file_view_mode_for_pane(pane_id, values[ix], cx);
+            }
+        }))
 }
 
 /// Toolbar: path label on the left, view toggles + optional controls + × on the right.
@@ -281,10 +311,14 @@ pub(super) fn render_file_viewer_toolbar(
                 } else {
                     toolbar_toggle_spacer().into_any_element()
                 })
-                .child(controls.mode_toggle.render(pane_id, button_colors, cx))
-                .when_some(controls.preview_toggle, |d, toggle| {
-                    d.child(toggle.render(pane_id, button_colors, cx))
-                })
+                .child(mode_button_group(
+                    pane_id,
+                    controls.mode_options,
+                    controls.active_mode,
+                    button_colors,
+                    &surface,
+                    cx,
+                ))
                 .child(
                     div()
                         .id("file-viewer-close")
@@ -305,8 +339,8 @@ pub(super) fn render_file_viewer_toolbar(
         )
 }
 
-/// A fixed-width spacer that keeps the Raw/Changes toggle from shifting when
-/// the diff-context toggle is unavailable outside Changes mode.
+/// A fixed-width spacer that keeps the mode strip from shifting when the
+/// diff-context toggle is unavailable outside Changes mode.
 fn toolbar_toggle_spacer() -> impl IntoElement {
     div()
         .flex_none()
@@ -314,7 +348,7 @@ fn toolbar_toggle_spacer() -> impl IntoElement {
         .h(px(theme::FILE_VIEWER_TOOL_BUTTON_H))
 }
 
-/// A small icon button for file-viewer toolbar toggles.
+/// A small icon button for the diff-context toggle.
 fn toolbar_toggle_button(
     toggle: ToolbarToggle,
     pane_id: PaneId,
@@ -322,7 +356,6 @@ fn toolbar_toggle_button(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let label = toggle.label;
-    let action = toggle.action;
     div()
         .id(label.clone())
         .flex_none()
@@ -343,15 +376,68 @@ fn toolbar_toggle_button(
         })
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| match action {
-                ToolbarAction::ToggleHideUnchanged => {
-                    this.toggle_hide_unchanged_for_pane(pane_id, window, cx);
-                }
-                ToolbarAction::SetMode(mode) => {
-                    this.set_file_view_mode_for_pane(pane_id, mode, cx);
-                }
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                this.toggle_hide_unchanged_for_pane(pane_id, window, cx);
             }),
         )
         .tooltip(crate::ui::tooltip::text(label))
         .child(Icon::empty().path(toggle.icon).small())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileViewMode, PaneFileView, mode_options};
+    use crate::workspace::main_area::file_view_pane::PaneFileContent;
+
+    fn view(name: &str, file_status: Option<char>, view_mode: FileViewMode) -> PaneFileView {
+        let mut fv = PaneFileView::loading(0, name.into(), false, file_status, view_mode);
+        fv.content = PaneFileContent::LoadedRaw;
+        fv
+    }
+
+    #[test]
+    fn plain_unchanged_file_offers_raw_only() {
+        assert_eq!(
+            mode_options(&view("a.txt", None, FileViewMode::Raw)),
+            vec![FileViewMode::Raw]
+        );
+    }
+
+    #[test]
+    fn plain_changed_file_offers_raw_and_changes() {
+        assert_eq!(
+            mode_options(&view("a.txt", Some('M'), FileViewMode::Raw)),
+            vec![FileViewMode::Raw, FileViewMode::Changes]
+        );
+    }
+
+    #[test]
+    fn unchanged_markdown_offers_raw_and_preview() {
+        assert_eq!(
+            mode_options(&view("a.md", None, FileViewMode::Preview)),
+            vec![FileViewMode::Raw, FileViewMode::Preview]
+        );
+    }
+
+    #[test]
+    fn changed_markdown_offers_all_three_in_strip_order() {
+        assert_eq!(
+            mode_options(&view("a.md", Some('M'), FileViewMode::Preview)),
+            vec![
+                FileViewMode::Raw,
+                FileViewMode::Preview,
+                FileViewMode::Changes
+            ]
+        );
+    }
+
+    /// A restored pane keeps its persisted mode but loses `file_status`, so
+    /// the filter alone would leave the strip with nothing selected.
+    #[test]
+    fn live_mode_survives_a_missing_file_status() {
+        assert_eq!(
+            mode_options(&view("a.txt", None, FileViewMode::Changes)),
+            vec![FileViewMode::Raw, FileViewMode::Changes]
+        );
+    }
 }

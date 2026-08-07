@@ -578,7 +578,8 @@ impl Workspace {
 
     /// Open `path` in a new tab as a `PaneContent::File` viewer (Raw by
     /// default; Markdown in Preview). Re-clicking the same `(lane, path)`
-    /// reactivates the existing tab. Delegates to `open_pane_file_view`.
+    /// reactivates the existing tab. Delegates to `open_pane_file_view`,
+    /// which derives the pane's git `file_status` itself.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
         wt_ref: LaneRef,
@@ -590,7 +591,6 @@ impl Workspace {
             wt_ref.lane,
             path,
             /* staged = */ false,
-            /* file_status = */ None,
             FileViewMode::Raw,
             window,
             cx,
@@ -841,19 +841,22 @@ impl Workspace {
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
-        let (kind, path) = {
+        let (kind, path, tree_root) = {
             let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
                 return;
             };
-            (entry.kind, entry.path.clone())
+            (entry.kind, entry.path.clone(), tree.root.clone())
         };
         if kind.is_dir() {
             self.toggle_files_expand(wt_ref, sel, cx);
         } else {
-            self.open_files_entry(wt_ref, path, window, cx);
+            // Absolutize like the row's click handler does: `open_pane_file_view`
+            // dedupes on `fv.path`, so opening the same file by Enter and by
+            // click must produce the same path or it lands in a second tab.
+            self.open_files_entry(wt_ref, tree_root.join(&path), window, cx);
         }
     }
 

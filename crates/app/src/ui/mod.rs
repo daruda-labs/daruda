@@ -57,7 +57,7 @@ pub use button::{
     button_delete_glyph, button_edit_cancel_glyph, button_edit_glyph, button_header_action,
     button_primary, button_status_pill, button_status_pill_bare, button_toggle,
 };
-pub use button_group::{ButtonGroup, button_group};
+pub use button_group::{ButtonGroup, button_group, button_group_on_surface};
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_copy_button::{code_copy_button, copy_button};

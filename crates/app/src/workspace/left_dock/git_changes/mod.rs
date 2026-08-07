@@ -586,7 +586,6 @@ fn unified_file_row(
     } else {
         git_status_color(status_char, false, cx)
     };
-    let status_char_for_diff = status_char;
     let status_symbol = crate::workspace::left_dock::git_ops::git_status_symbol(status_char);
 
     // `git diff HEAD --numstat` cache for this file. Untracked / fresh
@@ -693,14 +692,7 @@ fn unified_file_row(
                         ws.open_file_externally(lane_id, abs_path, cx);
                     } else {
                         ws.set_git_changes_cursor(lane_id, cursor_path, cx);
-                        ws.open_git_file_diff(
-                            lane_id,
-                            abs_path,
-                            is_staged,
-                            Some(status_char_for_diff),
-                            window,
-                            cx,
-                        );
+                        ws.open_git_file_diff(lane_id, abs_path, is_staged, window, cx);
                         fh.focus(window, cx);
                     }
                 });
@@ -819,7 +811,6 @@ fn unified_file_row(
                                     lane_id,
                                     path_diff.clone(),
                                     is_staged,
-                                    Some(status_char_for_diff),
                                     window,
                                     cx,
                                 )

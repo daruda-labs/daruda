@@ -126,7 +126,7 @@ pub(in crate::workspace) struct PaneFileView {
     pub pending_scroll_line: Option<usize>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FileViewMode {
     Raw,
     Preview,

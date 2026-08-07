@@ -63,6 +63,9 @@ impl Workspace {
                         ws.git_status_cache.insert(target, data);
                         // Refreshed status updates the file badges.
                         ws.invalidate_visible_files_cache(target);
+                        // …and each open file pane's own badge + mode strip,
+                        // whose `file_status` is otherwise frozen at open time.
+                        ws.sync_file_pane_statuses(target, cx);
                         // Commit button reflects the active lane's staged count.
                         if target == ws.active {
                             ws.sync_commit_buttons(cx);

@@ -121,7 +121,6 @@ impl Workspace {
             lane_id,
             path,
             false,
-            None,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
             window,
             cx,

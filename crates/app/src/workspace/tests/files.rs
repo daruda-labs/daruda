@@ -475,7 +475,7 @@ async fn toggle_files_show_hidden_filters_dotfiles(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn keyboard_selection_moves_activates_and_collapses(cx: &mut TestAppContext) {
-    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
     let id = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
@@ -519,7 +519,7 @@ async fn keyboard_selection_moves_activates_and_collapses(cx: &mut TestAppContex
 
     ws.read_with(cx, |ws, _| {
         let fv = ws.focused_file_view().expect("viewer open");
-        assert_eq!(fv.path, std::path::PathBuf::from("a.txt"));
+        assert_eq!(fv.path, temp.path().join("a.txt"));
     });
 
     let sub_id = child_id_by_name(&ws, cx, "sub");
@@ -1148,7 +1148,6 @@ async fn toggle_hide_unchanged_swaps_diff_context_in_the_toggled_pane(cx: &mut T
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
                 false,
-                Some('M'),
                 window,
                 cx,
             );
@@ -1290,7 +1289,6 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
                 false,
-                Some('M'),
                 window,
                 cx,
             );
@@ -1391,7 +1389,6 @@ async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAp
                 bogus_lane,
                 std::path::PathBuf::from("a.txt"),
                 false,
-                None,
                 crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
                 window,
                 cx,
@@ -1399,4 +1396,218 @@ async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAp
         });
     })
     .unwrap();
+}
+
+/// A workspace over a real git repo holding one committed `f.txt`, with the
+/// placeholder lane already upgraded to a Git one (`refresh_git_status` is a
+/// no-op otherwise). Returns the repo root plus `f.txt`'s absolute path joined
+/// onto the *lane* root — the base every opener uses. On macOS the raw tempdir
+/// path is the uncanonical `/var/…` alias of the lane's `/private/var/…`, so
+/// joining onto the tempdir instead would never match a pane's path.
+#[allow(clippy::type_complexity)]
+fn build_committed_git_workspace(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::WindowHandle<Workspace>,
+    gpui::Entity<Workspace>,
+    daruda_store::project::LaneRef,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    tempfile::TempDir,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().to_path_buf();
+    run_git(&root, &["init"]);
+    run_git(&root, &["config", "user.email", "daruda@test"]);
+    run_git(&root, &["config", "user.name", "daruda"]);
+    std::fs::write(root.join("f.txt"), b"one\n").unwrap();
+    run_git(&root, &["add", "f.txt"]);
+    run_git(&root, &["commit", "-m", "initial"]);
+
+    crate::test_support::init_gpui_component(cx);
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    let abs = ws
+        .read_with(cx, |ws, _| ws.lane_for(id).map(|l| l.path.clone()))
+        .expect("lane exists")
+        .join("f.txt");
+    (wh, ws, id, root, abs, temp)
+}
+
+/// `file_status` is written once at open time and is deliberately not
+/// persisted, so a restored pane starts with `None` and a pane held open
+/// across an edit or a commit would otherwise keep whatever the opening click
+/// saw — the toolbar's mode strip reads it to decide whether to offer Changes
+/// at all. `refresh_git_status` re-derives it via `sync_file_pane_statuses`;
+/// this drives the real fetch and pins both directions.
+#[gpui::test]
+async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+
+    let (wh, ws, id, root, abs, _temp) = build_committed_git_workspace(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(id, abs.clone(), window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view()
+                .expect("file viewer open")
+                .file_status,
+            None,
+            "a restore-shaped open carries no status of its own"
+        );
+    });
+
+    // Dirty the file, then let a real status fetch land on the open pane.
+    std::fs::write(&abs, b"two\n").unwrap();
+    ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view()
+                .expect("file viewer open")
+                .file_status,
+            Some('M'),
+            "a refreshed status must reach the open pane"
+        );
+    });
+
+    // Commit it: the pane must drop the badge too, so the toolbar stops
+    // offering a Changes view of a file that no longer has one.
+    run_git(&root, &["add", "f.txt"]);
+    run_git(&root, &["commit", "-m", "second"]);
+    ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view()
+                .expect("file viewer open")
+                .file_status,
+            None,
+            "a cleared status must clear the pane's badge too"
+        );
+    });
+}
+
+/// The Files view opens a row by click with an absolute path; Enter on the
+/// keyboard cursor must produce the same path, or `open_pane_file_view`'s
+/// dedupe misses and the same file lands in a second tab.
+#[gpui::test]
+async fn enter_and_click_open_the_same_files_row_into_one_tab(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    let a_id = child_id_by_name(&ws, cx, "a.txt");
+    ws.update(cx, |ws, _cx| {
+        ws.file_tree.files_selection = Some(a_id);
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.activate_files_selection(window, cx));
+    })
+    .unwrap();
+
+    let abs = temp.path().join("a.txt");
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view().expect("file viewer open").path,
+            abs,
+            "Enter must open the absolute path, like the row's click handler"
+        );
+    });
+    let after_enter = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.open_files_entry(id, abs, window, cx));
+    })
+    .unwrap();
+    assert_eq!(
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len()),
+        after_enter,
+        "clicking the row Enter already opened must reuse its tab"
+    );
+}
+
+/// `file_status` is derived inside `open_pane_file_view`, not supplied by the
+/// caller: the agent-chat diff header, agent-chat Markdown file links, the
+/// skills panel and the task form all open a file with no git context of their
+/// own, and once the toolbar's mode strip started gating the Changes segment
+/// on `file_status.is_some()` a hardcoded `None` meant a changed file opened
+/// that way offered no diff at all. Also covers the dedupe path, which returns
+/// early on an existing tab and so has to re-stamp it rather than leave the
+/// status frozen at whatever the first open saw.
+#[gpui::test]
+async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
+    cx: &mut TestAppContext,
+) {
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
+
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    let (wh, ws, id, _root, abs, _temp) = build_committed_git_workspace(cx);
+
+    std::fs::write(&abs, b"two\n").unwrap();
+    ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+
+    // The shape every context-free opener uses (agent chat / skills / tasks).
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_pane_file_view(id.lane, abs.clone(), false, FileViewMode::Raw, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view()
+                .expect("file viewer open")
+                .file_status,
+            Some('M'),
+            "a context-free open must still resolve the file's status"
+        );
+    });
+
+    // Re-opening lands in the dedupe branch. Move the cache out from under the
+    // pane first, so only a re-stamp there can bring it back in line.
+    ws.update(cx, |ws, _cx| {
+        ws.git_status_cache
+            .insert(id, crate::lane::git::GitStatusData::default());
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_pane_file_view(id.lane, abs.clone(), false, FileViewMode::Raw, window, cx);
+        });
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view()
+                .expect("file viewer open")
+                .file_status,
+            None,
+            "reusing an existing tab must re-stamp it from the current cache"
+        );
+    });
 }

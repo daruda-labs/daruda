@@ -8,6 +8,7 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window, point, px};
 
 use crate::workspace::Workspace;
+use crate::workspace::left_dock::file_tree_ops::build_status_index;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, build_diff_editor_model,
 };
@@ -74,6 +75,17 @@ fn debug_assert_owner_is_active(lane_id: LaneId, active_lane: LaneId) {
          active runtime for lane {active_lane:?} — load_pane_file_content's \
          owner-keyed lookup will silently miss it"
     );
+}
+
+/// Absolutise a file pane's path against its lane root. Every live opener
+/// passes an absolute path; only old session state can still carry a
+/// lane-relative one.
+fn abs_pane_path(lane_root: &std::path::Path, path: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        lane_root.join(path)
+    }
 }
 
 fn title_for_file_path(path: &std::path::Path) -> gpui::SharedString {
@@ -152,6 +164,46 @@ impl Workspace {
             .and_then(|p| p.file_content_mut())
     }
 
+    /// `absolute path → git status char` for `target`.
+    ///
+    /// A file pane's path is absolute, built by one of two bases: the Git
+    /// Changes view joins `LanePaths::from_git_status` (repo root), the Files
+    /// view joins the lane root. Both are indexed so a pane matches whichever
+    /// way it was opened; where the two roots coincide the entries collapse.
+    fn status_index_by_abs(&self, target: LaneRef) -> std::collections::HashMap<PathBuf, char> {
+        let mut by_abs = std::collections::HashMap::new();
+        let Some(lane_root) = self.lane_for(target).map(|w| w.path.clone()) else {
+            return by_abs;
+        };
+        let repo_root = self.git_repo_root_for(target);
+        for (rel, status) in build_status_index(self.git_status_cache.get(&target)) {
+            if let Some(repo) = repo_root.as_ref() {
+                by_abs.insert(repo.join(&rel), status);
+            }
+            by_abs.insert(lane_root.join(&rel), status);
+        }
+        by_abs
+    }
+
+    /// The git status char for `path` in `target` — `None` when the file has
+    /// no pending change, or the lane's status hasn't been fetched yet.
+    ///
+    /// The single derivation of a pane's `file_status`: `open_pane_file_view`
+    /// stamps it on open (including onto a reused tab) and
+    /// [`Self::sync_file_pane_statuses`] re-stamps every open pane on each git
+    /// refresh. Openers deliberately do **not** pass a status in — it is a
+    /// projection of `git_status_cache`, so a caller-supplied copy could only
+    /// ever be the same value or a staler one. Four of the eight call sites
+    /// had no way to know it and passed `None`, which since the toolbar's mode
+    /// strip started gating the Changes segment on `is_some()` meant a changed
+    /// file opened from the agent chat, a skill, or a task offered no diff.
+    fn git_status_for_path(&self, target: LaneRef, path: &std::path::Path) -> Option<char> {
+        let lane_root = self.lane_for(target).map(|w| w.path.clone())?;
+        self.status_index_by_abs(target)
+            .get(&abs_pane_path(&lane_root, path))
+            .copied()
+    }
+
     /// The `owner: LaneRef` for a file pane that is pushed into (or already
     /// lives in) `self.active_runtime_mut()`. Single construction site for
     /// that pairing — see [`debug_assert_owner_is_active`] for why `lane_id`
@@ -171,19 +223,10 @@ impl Workspace {
         lane_id: LaneId,
         path: PathBuf,
         staged: bool,
-        file_status: Option<char>,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_pane_file_view(
-            lane_id,
-            path,
-            staged,
-            file_status,
-            FileViewMode::Changes,
-            window,
-            cx,
-        );
+        self.open_pane_file_view(lane_id, path, staged, FileViewMode::Changes, window, cx);
     }
 
     /// Open the pane-area file viewer for `path`.
@@ -202,19 +245,32 @@ impl Workspace {
     ///
     /// `initial_mode` selects Raw (Files view) or Changes (Git view);
     /// Markdown files open in Preview by default when Raw was requested.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// The pane's `file_status` is derived here via
+    /// [`Self::git_status_for_path`], never supplied by the caller.
     pub(in crate::workspace) fn open_pane_file_view(
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
         staged: bool,
-        file_status: Option<char>,
         initial_mode: FileViewMode,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        let owner = self.owner_lane_ref(lane_id);
+        let file_status = self.git_status_for_path(owner, &path);
+
         // Always dedupe: clicking the same file activates its existing tab.
-        if let Some((tab_idx, _pane_id)) = self.find_existing_file_tab(lane_id, &path, staged) {
+        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, staged) {
+            // Re-stamp the tab being reused. It was opened against an older
+            // `git_status_cache`, and the toolbar's mode strip reads
+            // `file_status` to decide whether Changes is offered at all.
+            if let Some(fc) = self.file_content_mut_for_pane(pane_id)
+                && fc.view.file_status != file_status
+            {
+                fc.view.file_status = file_status;
+                cx.notify();
+            }
             self.activate_tab(tab_idx, window, cx);
             return;
         }
@@ -226,7 +282,6 @@ impl Workspace {
             && let Some((tab_idx, pane_id)) = self.find_any_file_tab()
         {
             let project = self.active.project;
-            let owner = self.owner_lane_ref(lane_id);
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
             let prev_lane = self
@@ -622,6 +677,45 @@ impl Workspace {
         }
         for request in reloads {
             self.load_pane_file_content(request, cx);
+        }
+    }
+
+    /// Re-derive every open file pane's `file_status` for `target` from the
+    /// lane's freshly-fetched `git status`.
+    ///
+    /// `file_status` answers "does this file have a pending change?" — the
+    /// viewer toolbar draws its badge from it and offers the Changes segment
+    /// only when it is `Some` — but it is written once, at open time, and is
+    /// deliberately not persisted. Without this pass a pane restored from disk
+    /// never offers Changes, and a pane left open across an edit or a commit
+    /// keeps whatever the opening click happened to see. The open path stamps
+    /// the same value from the same index — see [`Self::git_status_for_path`].
+    pub(in crate::workspace) fn sync_file_pane_statuses(
+        &mut self,
+        target: LaneRef,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(lane_root) = self.lane_for(target).map(|w| w.path.clone()) else {
+            return;
+        };
+        let by_abs = self.status_index_by_abs(target);
+
+        let Some(runtime) = self.main_area.runtimes.get_mut(&target) else {
+            return;
+        };
+        let mut changed = false;
+        for pane in runtime.panes.iter_mut() {
+            let Some(fv) = pane.file_view_mut() else {
+                continue;
+            };
+            let next = by_abs.get(&abs_pane_path(&lane_root, &fv.path)).copied();
+            if fv.file_status != next {
+                fv.file_status = next;
+                changed = true;
+            }
+        }
+        if changed {
+            cx.notify();
         }
     }
 
