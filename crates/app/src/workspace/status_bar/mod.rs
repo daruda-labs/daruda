@@ -7,6 +7,8 @@
 
 mod account_slot;
 mod context_menu;
+mod flow_segment;
+pub(in crate::workspace) use flow_segment::FlowRunRow;
 mod ports_segment;
 mod usage_chip;
 
@@ -109,6 +111,9 @@ pub(super) struct StatusBarData {
     /// Status associated with `ports`, used to keep the Ports chip
     /// visible for pending, unavailable, and successful-empty scans.
     pub ports_status: PortScanStatus,
+    /// Flow runs this app started, one row each. Empty hides the chip —
+    /// there is no "none running" state anyone is watching for.
+    pub flows: Vec<flow_segment::FlowRunRow>,
     /// One entry per auth domain that has numbers to show, in
     /// `AccountRecipeId::all()` order. A domain nobody is signed into — or whose
     /// first poll hasn't landed — contributes nothing, so the usage area is
@@ -256,6 +261,14 @@ impl RenderOnce for StatusBar {
                     &data.ports,
                     data.ports_status,
                     density,
+                    cx,
+                ))
+            })
+            .when(data.visible.is_visible(StatusBarItem::Flow), |el| {
+                el.children(flow_segment::render(
+                    &data.flows,
+                    density,
+                    data.workspace.clone(),
                     cx,
                 ))
             })

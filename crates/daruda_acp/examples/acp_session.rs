@@ -45,6 +45,9 @@ fn main() {
                 AcpEvent::ConnectProgress(phase) => {
                     eprintln!("[connect-progress] {phase:?}");
                 }
+                AcpEvent::ConfigOptionRejected { config_id, reason } => {
+                    eprintln!("[config-rejected] {config_id}: {reason}");
+                }
                 AcpEvent::Connected {
                     session_id,
                     modes,

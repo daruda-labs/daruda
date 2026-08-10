@@ -2175,6 +2175,9 @@ pub fn status_bar_toggle_project_branch() -> String {
 pub fn status_bar_toggle_account_slot() -> String {
     rust_i18n::t!("settings.status_bar_toggle_account_slot").into_owned()
 }
+pub fn status_bar_toggle_flow() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_flow").into_owned()
+}
 pub fn status_bar_toggle_ports() -> String {
     rust_i18n::t!("settings.status_bar_toggle_ports").into_owned()
 }
@@ -4008,6 +4011,158 @@ pub fn session_host_cancel() -> String {
 }
 pub fn session_host_saving() -> String {
     rust_i18n::t!("session_host.saving_label").into_owned()
+}
+
+// ============================================================================
+// Flow engine
+// ============================================================================
+
+pub fn status_bar_flow_chip_one(doing: &str) -> String {
+    rust_i18n::t!("flow.chip_one", doing => doing).into_owned()
+}
+pub fn status_bar_flow_chip_many(n: usize) -> String {
+    rust_i18n::t!("flow.chip_many", n = n).into_owned()
+}
+pub fn status_bar_flow_summary(n: usize) -> String {
+    rust_i18n::t!("flow.chip_summary", n = n).into_owned()
+}
+pub fn status_bar_flow_stop() -> String {
+    rust_i18n::t!("flow.stop_action").into_owned()
+}
+/// What a run is doing, in the terms `RunStage` keeps.
+pub fn status_bar_flow_stage_starting() -> String {
+    rust_i18n::t!("flow.stage_starting").into_owned()
+}
+pub fn status_bar_flow_stage_node(node: &str) -> String {
+    rust_i18n::t!("flow.stage_node", node => node).into_owned()
+}
+pub fn status_bar_flow_stage_node_retry(node: &str, attempt: u32) -> String {
+    rust_i18n::t!("flow.stage_node_retry", node => node, attempt = attempt).into_owned()
+}
+pub fn status_bar_flow_stage_rederiving(gate: &str) -> String {
+    rust_i18n::t!("flow.stage_rederiving", gate => gate).into_owned()
+}
+pub fn status_bar_flow_stage_fixing(gate: &str) -> String {
+    rust_i18n::t!("flow.stage_fixing", gate => gate).into_owned()
+}
+pub fn flow_picker_prompt_run() -> String {
+    rust_i18n::t!("flow.picker_prompt_run").into_owned()
+}
+pub fn flow_picker_prompt_validate() -> String {
+    rust_i18n::t!("flow.picker_prompt_validate").into_owned()
+}
+pub fn flow_picker_empty() -> String {
+    rust_i18n::t!("flow.picker_empty").into_owned()
+}
+pub fn flow_stop_prompt() -> String {
+    rust_i18n::t!("flow.stop_prompt").into_owned()
+}
+pub fn flow_stop_action() -> String {
+    rust_i18n::t!("flow.stop_action").into_owned()
+}
+pub fn flow_close() -> String {
+    rust_i18n::t!("common.btn_close").into_owned()
+}
+pub fn flow_no_lane() -> String {
+    rust_i18n::t!("flow.no_lane").into_owned()
+}
+pub fn flow_remote_lane(agent: &str) -> String {
+    rust_i18n::t!("flow.remote_lane", agent => agent).into_owned()
+}
+pub fn flow_lock_held(pid: u32) -> String {
+    rust_i18n::t!("flow.lock_held", pid => pid).into_owned()
+}
+pub fn flow_unprovisioned(agent: &str, message: &str) -> String {
+    rust_i18n::t!("flow.unprovisioned", agent => agent, message => message).into_owned()
+}
+/// Which ceiling stopped the run. A `Debug` rendering of the limit would
+/// put a Rust identifier in front of a user.
+pub fn flow_budget_exhausted(limit: daruda_flow::schedule::BudgetLimit) -> String {
+    use daruda_flow::schedule::BudgetLimit as L;
+    match limit {
+        L::WallClock => rust_i18n::t!("flow.budget_wall_clock"),
+        L::NodeRuns => rust_i18n::t!("flow.budget_node_runs"),
+        L::Cost => rust_i18n::t!("flow.budget_cost"),
+    }
+    .into_owned()
+}
+pub fn flow_read_failed_title() -> String {
+    rust_i18n::t!("flow.read_failed_title").into_owned()
+}
+pub fn flow_parse_failed_title() -> String {
+    rust_i18n::t!("flow.parse_failed_title").into_owned()
+}
+pub fn flow_valid_title() -> String {
+    rust_i18n::t!("flow.valid_title").into_owned()
+}
+pub fn flow_valid_body(name: &str) -> String {
+    rust_i18n::t!("flow.valid_body", name => name).into_owned()
+}
+pub fn flow_invalid_title(name: &str, count: usize) -> String {
+    rust_i18n::t!("flow.invalid_title", name => name, count => count).into_owned()
+}
+
+/// One line of a validation report. A node-level problem names the node;
+/// a whole-graph one (a cycle) has no node to name.
+pub fn flow_issue_line(node: Option<&str>, text: &str) -> String {
+    match node {
+        Some(node) => rust_i18n::t!("flow.issue_line_at_node", node => node, text => text),
+        None => rust_i18n::t!("flow.issue_line", text => text),
+    }
+    .into_owned()
+}
+
+/// User-facing wording for one validation problem.
+///
+/// The match lives here rather than at the call site because the whole
+/// point of the split is that `ValidationIssue.message` is developer
+/// detail and never reaches a user — putting the branch anywhere else
+/// invites someone to reach for `.message` instead. Exhaustive on
+/// purpose: a new `ValidationKind` stops compiling until it has wording.
+pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
+    use daruda_flow::error::ValidationKind as K;
+    match kind {
+        K::MissingAgent => rust_i18n::t!("flow.issue_missing_agent"),
+        K::AgentIdWithoutMode => rust_i18n::t!("flow.issue_agent_id_without_mode"),
+        K::UnknownVersion(version) => {
+            rust_i18n::t!("flow.issue_unknown_version", version => version)
+        }
+        K::UnreachableOutputRef { referenced } => {
+            rust_i18n::t!("flow.issue_unreachable_output_ref", referenced => referenced)
+        }
+        K::DuplicateOutput => rust_i18n::t!("flow.issue_duplicate_output"),
+        K::OutputEscapesRunDir => rust_i18n::t!("flow.issue_output_escapes_run_dir"),
+        K::RerunNotAnAncestor { root } => {
+            rust_i18n::t!("flow.issue_rerun_not_an_ancestor", root => root)
+        }
+        K::RepairWithoutFailureContext => {
+            rust_i18n::t!("flow.issue_repair_without_failure_context")
+        }
+        K::RepairWithoutAgent => rust_i18n::t!("flow.issue_repair_without_agent"),
+        K::ReservedNodeId => rust_i18n::t!("flow.issue_reserved_node_id"),
+        K::InvalidNodeId => rust_i18n::t!("flow.issue_invalid_node_id"),
+        K::OutputInReservedDir { reserved } => {
+            rust_i18n::t!("flow.issue_output_in_reserved_dir", reserved => reserved)
+        }
+        K::DuplicateId => rust_i18n::t!("flow.issue_duplicate_id"),
+        K::UnknownDep { dep } => rust_i18n::t!("flow.issue_unknown_dep", dep => dep),
+        K::Cycle => rust_i18n::t!("flow.issue_cycle"),
+        K::UnknownAgent { id } => rust_i18n::t!("flow.issue_unknown_agent", id => id),
+        K::MissingPromptFile { field, path } => rust_i18n::t!(
+            "flow.issue_missing_prompt_file",
+            field => field,
+            path => path.display()
+        ),
+        K::RelativeRequestPath { field } => {
+            rust_i18n::t!("flow.issue_relative_request_path", field => field)
+        }
+        K::PromptFileOutsideFlowDir { field, path } => rust_i18n::t!(
+            "flow.issue_prompt_file_outside_flow_dir",
+            field => field,
+            path => path.display()
+        ),
+    }
+    .into_owned()
 }
 
 #[cfg(test)]

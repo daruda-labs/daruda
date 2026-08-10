@@ -38,6 +38,7 @@ daruda_acp = { path = "../daruda_acp" }
 daruda_agent = { path = "../daruda_agent" }
 daruda_store = { path = "../daruda_store" }
 daruda_config = { path = "../daruda_config" }
+daruda_flow = { path = "../daruda_flow" }
 daruda_terminal = { path = "../daruda_terminal" }
 daruda_update = { path = "../daruda_update" }
 gpui = { workspace = true }
@@ -57,6 +58,9 @@ rust-i18n = { workspace = true }
 semver = "1"
 sys-locale = "0.3"
 schemars = { workspace = true }
+# Named directly, not inherited: a flow run's `FlowEvent` channel is built
+# here, and a transitive dependency has no name in Rust source.
+smol = { workspace = true }
 sysinfo = "0.32"
 tempfile = "3"
 similar = "2"

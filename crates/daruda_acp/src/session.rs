@@ -174,6 +174,14 @@ pub enum AcpEvent {
     /// notification (a change the agent made itself — e.g. a fast-mode toggle).
     /// Either way it is a full replacement of the host's cached options.
     ConfigOptionsChanged(Vec<ConfigOptionView>),
+    /// The agent refused a `set_config_option`. Non-fatal — the session
+    /// keeps the value it had — but named, so a host that *required* the
+    /// change can tell a refusal apart from a confirmation that simply has
+    /// not arrived. A chat pane flipping a model chip wants the old
+    /// behaviour (carry on); a flow node pinned to that model has to fail,
+    /// and without this it can only wait out its settings budget to learn
+    /// the same thing.
+    ConfigOptionRejected { config_id: String, reason: String },
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
     Update(Box<SessionUpdate>),
@@ -1083,10 +1091,16 @@ async fn send_set_config_option(
             );
         }
         Err(e) => {
+            // Both: the `Notice` is what a chat pane already shows, and the
+            // typed event is what a consumer that required the change acts
+            // on. Emitting only the typed one would silently drop the
+            // wording the agent panel puts in front of a user.
+            let reason = format!("{e:?}");
             let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
                 "set_config_option({config_id}={value:?}) failed — the session keeps its \
-                 current value: {e:?}"
+                 current value: {reason}"
             )));
+            let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionRejected { config_id, reason });
         }
     }
 }

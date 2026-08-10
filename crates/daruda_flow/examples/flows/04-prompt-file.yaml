@@ -1,0 +1,16 @@
+# 4 — a file-backed prompt. `run.yaml` must record its *contents*, not its
+# path: the path resolves against the flow file's directory, and the record
+# lands in the run directory.
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: note
+    kind: agent
+    prompt_file: ./prompts/note.md
+    output: note.md

@@ -19,6 +19,7 @@ use gpui::{
 
 use gpui::KeyDownEvent;
 
+use super::command::flow_picker;
 use super::command::lane_switcher;
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
@@ -1036,6 +1037,7 @@ impl Render for Workspace {
             })
             .filter(|(_, outcome)| outcome.has_numbers())
             .collect();
+        let flows = self.flow_status_rows();
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
@@ -1044,6 +1046,7 @@ impl Render for Workspace {
             has_project_config,
             account: focused_account,
             ports: self.attributed_ports.clone(),
+            flows,
             ports_status: self.port_scan_status,
             usage,
             visible: self.mirrors.status_bar.clone(),
@@ -1150,11 +1153,25 @@ impl Render for Workspace {
             })
             // Intercept key events when the command palette is open.
             .when(self.command_palette.is_open, |el| {
-                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                // Capture, not bubble: key events dispatch to the focused
+                // element first, and while an overlay is open that is still
+                // the terminal — which forwards every arrow and character to
+                // its PTY before the root ever sees them. Capture runs root →
+                // leaf, so this intercepts, and `stop_propagation` is what
+                // keeps the keystroke out of the shell.
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     if !this.command_palette.is_open {
                         return;
                     }
                     let key = ev.keystroke.key.as_str();
+                    // A shortcut belongs to the action system, not to this
+                    // overlay: swallowing `platform`/`function` keystrokes
+                    // means the key that opened it can no longer close it,
+                    // and `Cmd+W` stops reaching the window. Same early-out
+                    // the terminal view takes, for the same reason.
+                    if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+                        return;
+                    }
                     match key {
                         "escape" => {
                             this.command_palette.close();
@@ -1189,15 +1206,30 @@ impl Render for Workspace {
                             }
                         }
                     }
+                    cx.stop_propagation();
                 }))
             })
             // Intercept key events when the Lane switcher is open.
             .when(self.lane_switcher.is_open, |el| {
-                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                // Capture, not bubble: key events dispatch to the focused
+                // element first, and while an overlay is open that is still
+                // the terminal — which forwards every arrow and character to
+                // its PTY before the root ever sees them. Capture runs root →
+                // leaf, so this intercepts, and `stop_propagation` is what
+                // keeps the keystroke out of the shell.
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     if !this.lane_switcher.is_open {
                         return;
                     }
                     let key = ev.keystroke.key.as_str();
+                    // A shortcut belongs to the action system, not to this
+                    // overlay: swallowing `platform`/`function` keystrokes
+                    // means the key that opened it can no longer close it,
+                    // and `Cmd+W` stops reaching the window. Same early-out
+                    // the terminal view takes, for the same reason.
+                    if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+                        return;
+                    }
                     match key {
                         "escape" => {
                             this.lane_switcher.close();
@@ -1232,6 +1264,58 @@ impl Render for Workspace {
                             }
                         }
                     }
+                    cx.stop_propagation();
+                }))
+            })
+            // Intercept key events when the flow picker is open.
+            .when(self.flow_picker.is_open(), |el| {
+                // Capture, not bubble: key events dispatch to the focused
+                // element first, and while an overlay is open that is still
+                // the terminal — which forwards every arrow and character to
+                // its PTY before the root ever sees them. Capture runs root →
+                // leaf, so this intercepts, and `stop_propagation` is what
+                // keeps the keystroke out of the shell.
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    if !this.flow_picker.is_open() {
+                        return;
+                    }
+                    // A shortcut belongs to the action system, not to this
+                    // overlay: swallowing `platform`/`function` keystrokes
+                    // means the key that opened it can no longer close it,
+                    // and `Cmd+W` stops reaching the window. Same early-out
+                    // the terminal view takes, for the same reason.
+                    if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+                        return;
+                    }
+                    match ev.keystroke.key.as_str() {
+                        "escape" => this.close_flow_picker(cx),
+                        "enter" => this.execute_flow_picker_selection(window, cx),
+                        "up" => {
+                            this.flow_picker.move_up();
+                            cx.notify();
+                        }
+                        "down" => {
+                            this.flow_picker.move_down();
+                            cx.notify();
+                        }
+                        "backspace" => {
+                            this.flow_picker.backspace();
+                            cx.notify();
+                        }
+                        _ => {
+                            if let Some(ch) = ev
+                                .keystroke
+                                .key_char
+                                .as_deref()
+                                .and_then(|s| s.chars().next())
+                                && (ch.is_ascii_graphic() || ch == ' ')
+                            {
+                                this.flow_picker.append(ch);
+                                cx.notify();
+                            }
+                        }
+                    }
+                    cx.stop_propagation();
                 }))
             })
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
@@ -1305,6 +1389,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_right_dock))
             .on_action(cx.listener(Self::on_toggle_command_palette))
             .on_action(cx.listener(Self::on_toggle_lane_switcher))
+            .on_action(cx.listener(Self::on_run_flow))
+            .on_action(cx.listener(Self::on_validate_flow))
             .on_action(cx.listener(Self::on_show_left_dock_worktrees))
             .on_action(cx.listener(Self::on_show_left_dock_git))
             .on_action(cx.listener(Self::on_show_left_dock_files))
@@ -1371,12 +1457,37 @@ impl Render for Workspace {
                     this.command_palette.close();
                     cx.notify();
                 }),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.command_palette.focus(*index);
+                    this.execute_palette_action(window, cx);
+                }),
             ))
             .child(lane_switcher::LaneSwitcherOverlay::new(
                 self.lane_switcher.clone(),
                 cx.listener(|this, _, _, cx| {
                     this.lane_switcher.close();
                     cx.notify();
+                }),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.lane_switcher.focus(*index);
+                    this.execute_lane_switcher_selection(window, cx);
+                }),
+            ))
+            .child(flow_picker::FlowPickerOverlay::new(
+                self.flow_picker.clone(),
+                match self.flow_picker.choosing().map(|c| c.purpose) {
+                    Some(flow_picker::FlowPurpose::Validate) => {
+                        crate::surface::strings::flow_picker_prompt_validate()
+                    }
+                    _ => crate::surface::strings::flow_picker_prompt_run(),
+                },
+                crate::surface::strings::flow_picker_empty(),
+                crate::surface::strings::flow_stop_prompt(),
+                crate::surface::strings::flow_stop_action(),
+                cx.listener(|this, _, _, cx| this.close_flow_picker(cx)),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.flow_picker.focus(*index);
+                    this.execute_flow_picker_selection(window, cx);
                 }),
             ))
             // Imperative PopupMenu deploy overlay. `PopupMenu` already

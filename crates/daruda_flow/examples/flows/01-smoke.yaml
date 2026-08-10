@@ -1,0 +1,19 @@
+# 1 — one agent node. Does a session open, does the file contract hold?
+#
+# The smallest thing that can fail for a real reason: if this passes, the
+# adapter launched, a turn ran, and the scheduler saw the file it owed.
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: hello
+    kind: agent
+    output: hello.md
+    prompt: |
+      Write exactly one line to {{output}}: the name of this repository.
+      Do not create or modify any other file.

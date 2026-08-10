@@ -1615,6 +1615,7 @@ dependencies = [
  "daruda_agent",
  "daruda_config",
  "daruda_core",
+ "daruda_flow",
  "daruda_store",
  "daruda_terminal",
  "daruda_update",
@@ -1646,6 +1647,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "smol",
  "sys-locale",
  "sysinfo 0.32.1",
  "tempfile",
@@ -1714,6 +1716,22 @@ dependencies = [
 [[package]]
 name = "daruda_core"
 version = "0.2.10"
+
+[[package]]
+name = "daruda_flow"
+version = "0.2.10"
+dependencies = [
+ "daruda_acp",
+ "humantime-serde",
+ "libc",
+ "petgraph",
+ "serde",
+ "shlex",
+ "smol",
+ "tempfile",
+ "thiserror 2.0.18",
+ "yaml_serde",
+]
 
 [[package]]
 name = "daruda_store"
@@ -3433,6 +3451,22 @@ dependencies = [
  "tempfile",
  "url",
  "util",
+]
+
+[[package]]
+name = "humantime"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
 ]
 
 [[package]]
@@ -5175,6 +5209,7 @@ dependencies = [
  "fixedbitset",
  "hashbrown 0.15.5",
  "indexmap 2.13.1",
+ "serde",
 ]
 
 [[package]]

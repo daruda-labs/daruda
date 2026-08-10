@@ -1,0 +1,17 @@
+# 5 — a model the adapter does not advertise. The node must refuse to run
+# rather than fall back to the default, because `run.yaml` records what was
+# asked for and a session on another model makes that record a lie.
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: never
+    kind: agent
+    agent: { model: no-such-model-9000 }
+    output: never.md
+    prompt: Write `x` to {{output}}.

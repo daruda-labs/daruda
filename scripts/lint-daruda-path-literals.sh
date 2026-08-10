@@ -50,6 +50,10 @@ cd "$ROOT"
 #     hook script by design (Claude Code's settings.json only supports
 #     one registration; the script self-resolves whichever daruda binary
 #     is on PATH at hook-fire time regardless of profile).
+#   - tasks/prompt_file.rs, workspace/flow_paths.rs: the per-repo
+#     `.daruda/` directory that holds task prompts and flow definitions.
+#     Committed with the repo and shared by every profile that opens it,
+#     for the same reason as the `task-*.md` files above.
 WHITELIST=(
     "crates/daruda_store/src/persistence.rs"
     "crates/daruda_store/src/profile.rs"
@@ -57,6 +61,8 @@ WHITELIST=(
     "crates/app/src/workspace/main_area/task_edit_pane/mod.rs"
     "crates/app/src/workspace/main_area/task_edit_pane/task_edit_ops.rs"
     "crates/app/src/hooks/installer.rs"
+    "crates/daruda_store/src/tasks/prompt_file.rs"
+    "crates/app/src/workspace/flow_paths.rs"
 )
 
 is_whitelisted() {
@@ -97,7 +103,10 @@ for file in "${FILES[@]}"; do
     # lint-inline-literals.sh) so in-file test modules never trip this.
     hit=$(perl -ne '
         if (/^\s*#\[cfg\(test\)\]/) { last; }
-        if (/\.join\("\.?daruda"\)/) { print "$ARGV:$.:$_"; }
+        # Both shapes: the literal inside a `.join(...)`, and the same
+        # literal hoisted into a `const` — which used to slip past, and
+        # is exactly what an author tidying up a path does.
+        if (/\.join\("\.?daruda"\)/ || /"\.daruda"/) { print "$ARGV:$.:$_"; }
     ' "$file" || true)
     if [ -n "$hit" ]; then
         violations="${violations}${hit}"

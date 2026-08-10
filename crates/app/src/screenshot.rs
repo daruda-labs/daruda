@@ -498,7 +498,9 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         ScreenshotScenario::CommandPalette
         | ScreenshotScenario::ErrorModal
         | ScreenshotScenario::Toast
-        | ScreenshotScenario::PaneContextMenu => None,
+        | ScreenshotScenario::PaneContextMenu
+        | ScreenshotScenario::FlowPicker
+        | ScreenshotScenario::FlowRunning => None,
     }
 }
 

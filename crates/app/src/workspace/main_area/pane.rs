@@ -1152,7 +1152,11 @@ impl Workspace {
     /// config-dir env var is injected either way, so the pane still runs under
     /// the account the user picked — only its mirrored extras are degraded, and
     /// a shell has uses beyond the agent.
-    fn prepare_account_dir(&mut self, prepared: &PreparedAccount, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn prepare_account_dir(
+        &mut self,
+        prepared: &PreparedAccount,
+        cx: &mut Context<Self>,
+    ) {
         if let Err(e) =
             daruda_agent::accounts::recipe_for(prepared.recipe).prepare_dir(&prepared.config_dir)
         {

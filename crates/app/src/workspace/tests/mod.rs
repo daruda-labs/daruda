@@ -12,6 +12,7 @@ mod durable;
 mod error_modal;
 mod error_ops;
 mod files;
+mod flow;
 mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;

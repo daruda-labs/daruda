@@ -25,6 +25,8 @@ const NAME_TOAST: &str = "toast";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
+const NAME_FLOW_PICKER: &str = "flow-picker";
+const NAME_FLOW_RUNNING: &str = "flow-running";
 
 /// Where the pane menu is deployed for the capture, in window coordinates.
 /// Near the top-left of the content area so the menu opens downward at its
@@ -48,6 +50,13 @@ pub(crate) enum ScreenshotScenario {
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
     PaneContextMenu,
+    /// Open the flow picker, listing the active lane's `.daruda/flows/`.
+    /// The only way to see the row highlight, the empty state and the
+    /// prompt line — none of which the state tests can look at.
+    FlowPicker,
+    /// A flow mid-run, so the status bar chip and its dropdown can be seen.
+    /// Nothing else puts a run on screen without one actually running.
+    FlowRunning,
 }
 
 impl ScreenshotScenario {
@@ -61,6 +70,8 @@ impl ScreenshotScenario {
             NAME_TOAST => Some(Self::Toast),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
+            NAME_FLOW_PICKER => Some(Self::FlowPicker),
+            NAME_FLOW_RUNNING => Some(Self::FlowRunning),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -82,6 +93,17 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.on_toggle_command_palette(&ToggleCommandPalette, window, cx);
             });
+        }
+        ScreenshotScenario::FlowPicker => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_flow_picker(
+                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    cx,
+                );
+            });
+        }
+        ScreenshotScenario::FlowRunning => {
+            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(cx));
         }
         ScreenshotScenario::ErrorModal => {
             dialog_helpers::open_error_report_dialog(sample_report(), window, cx);
