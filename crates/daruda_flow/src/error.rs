@@ -76,6 +76,10 @@ pub enum ValidationKind {
     Cycle,
     /// An agent node names a catalog id the host did not supply.
     UnknownAgent { id: String },
+    /// The run could reach `permission: ask` and this host wired nowhere
+    /// to answer. Refused at submission rather than at the request, which
+    /// would park a run nobody can release.
+    NobodyToAsk,
     /// A file-backed prompt that does not exist next to the flow. `field`
     /// names which key it was, because the host renders its wording from
     /// this variant and "prompt file missing" would be wrong for a hint.

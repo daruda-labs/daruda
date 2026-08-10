@@ -839,8 +839,11 @@ pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 pub const DOCK_LEFT_MIN_W: f32 = 220.0;
 /// Left dock maximum width (px).
 pub const DOCK_LEFT_MAX_W: f32 = 400.0;
-/// Right dock default width (px).
-pub const DOCK_RIGHT_DEFAULT_W: f32 = 250.0;
+/// Right dock default width (px). Sized so the five-tab view switcher
+/// shows every label plus its overflow chevron in the widest locale —
+/// measured at 250 the English "Flows" was already clipped. Narrower is
+/// still allowed; the chevron is what keeps the hidden tabs reachable.
+pub const DOCK_RIGHT_DEFAULT_W: f32 = 290.0;
 /// Right dock minimum width (px).
 pub const DOCK_RIGHT_MIN_W: f32 = 220.0;
 /// Right dock maximum width (px).

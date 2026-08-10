@@ -28,6 +28,14 @@ use std::time::Duration;
 pub(super) struct Accounting {
     /// Runner calls made so far — what `max_node_runs` bounds.
     node_runs: Cell<u32>,
+    /// Time the run spent waiting for a person, summed over every call.
+    ///
+    /// The wall-clock ceiling is an absolute `Instant`, so a node clock
+    /// that stops does nothing for it: without this, granting a permission
+    /// after a long think would end the run at the next node boundary.
+    /// Raised only by [`Accounting::account`], like `node_runs` — the
+    /// budget's own rule.
+    parked: Cell<Duration>,
     /// The run's reported cost so far, in the first currency seen.
     cost: RefCell<Option<CostLimit>>,
     /// Set once a second currency appears: the total stops being a total,
@@ -51,6 +59,7 @@ impl Accounting {
     /// cannot drift from the sessions the run actually paid for.
     pub(super) fn account(&self, result: &RunResult) {
         self.node_runs.set(self.node_runs.get() + 1);
+        self.parked.set(self.parked.get() + result.waiting.total);
 
         let Some(cost) = result.usage.as_ref().and_then(|u| u.cost.as_ref()) else {
             return;
@@ -97,12 +106,18 @@ impl Accounting {
             .is_some_and(|total| total.currency == limit.currency && total.amount >= limit.amount)
     }
 
+    /// The run's expiry, pushed out by whatever it spent waiting for a
+    /// person. A budget bounds work, and waiting is the absence of it.
+    pub(super) fn deadline(&self, budget: &Budget) -> Option<std::time::Instant> {
+        budget.deadline.map(|deadline| deadline + self.parked.get())
+    }
+
     /// The defence that tripped, if any.
     fn exhausted(&self, budget: &Budget) -> Option<BudgetLimit> {
         // Comparing against the host's expiry, never building one: a
         // deadline the engine invented could not be tested in under 2h.
-        if budget
-            .deadline
+        if self
+            .deadline(budget)
             .is_some_and(|deadline| std::time::Instant::now() >= deadline)
         {
             return Some(BudgetLimit::WallClock);
@@ -181,7 +196,10 @@ impl Run<'_> {
     /// node then reports a `Timeout`, which is honest — it ran out of time,
     /// and the boundary check that follows names the run's reason.
     pub(super) fn bounded_timeout(&self, node: Duration) -> Duration {
-        let Some(deadline) = self.budget.deadline else {
+        // The run's own deadline, already pushed out by what earlier calls
+        // spent waiting — clipping against the raw one would hand the next
+        // node a zero budget after a long approval.
+        let Some(deadline) = self.spent.deadline(self.budget) else {
             return node;
         };
         node.min(deadline.saturating_duration_since(std::time::Instant::now()))
@@ -200,5 +218,107 @@ impl Run<'_> {
         }
         self.budget_exhausted()
             .map(|limit| RunOutcome::BudgetExhausted { limit })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runner::NodeFailure;
+    use std::time::Instant;
+
+    fn call(parked: Duration) -> RunResult {
+        RunResult {
+            outcome: Ok(()),
+            artifacts: Vec::new(),
+            usage: None,
+            waiting: crate::runner::Waiting {
+                total: parked,
+                answers: Vec::new(),
+            },
+        }
+    }
+
+    fn deadline_in(offset: Duration, past: bool) -> Budget {
+        let now = Instant::now();
+        Budget {
+            deadline: Some(if past { now - offset } else { now + offset }),
+            ..Budget::unlimited()
+        }
+    }
+
+    /// **The run ceiling is an absolute `Instant`**, so the node clock
+    /// stopping while a person thinks does nothing for it. Unless the run's
+    /// own deadline moves by the same waiting, granting a permission after a
+    /// long think ends the run at the very next boundary — the node survives
+    /// its wait and the run dies of it.
+    ///
+    /// Stated against the accounting rather than through a run: what makes
+    /// this correct is arithmetic, and a full run with a fake runner returns
+    /// too fast for any wall clock to prove it either way.
+    #[test]
+    fn waiting_for_a_person_pushes_the_run_deadline_out() {
+        let spent = Accounting::default();
+        let budget = deadline_in(Duration::from_secs(30), true);
+        assert!(
+            matches!(spent.exhausted(&budget), Some(BudgetLimit::WallClock)),
+            "a deadline half an hour gone must trip on its own"
+        );
+
+        spent.account(&call(Duration::from_secs(60)));
+        assert!(
+            spent.exhausted(&budget).is_none(),
+            "an hour of waiting did not move a deadline thirty seconds past"
+        );
+    }
+
+    /// The ceiling is moved, not removed: waiting less than the overrun
+    /// leaves the run over.
+    #[test]
+    fn waiting_less_than_the_overrun_still_ends_the_run() {
+        let spent = Accounting::default();
+        spent.account(&call(Duration::from_secs(5)));
+        let budget = deadline_in(Duration::from_secs(30), true);
+        assert!(matches!(
+            spent.exhausted(&budget),
+            Some(BudgetLimit::WallClock)
+        ));
+    }
+
+    /// A run with no ceiling has nothing to move, and waiting must not
+    /// invent one.
+    #[test]
+    fn a_run_without_a_deadline_never_gets_one() {
+        let spent = Accounting::default();
+        spent.account(&call(Duration::from_secs(60)));
+        assert!(spent.deadline(&Budget::unlimited()).is_none());
+        assert!(spent.exhausted(&Budget::unlimited()).is_none());
+    }
+
+    /// `account` is the only raiser, and it is the funnel every runner call
+    /// already passes through — so what the budget forgives cannot drift
+    /// from what the run actually waited.
+    #[test]
+    fn every_call_s_waiting_adds_up() {
+        let spent = Accounting::default();
+        for _ in 0..3 {
+            spent.account(&call(Duration::from_secs(10)));
+        }
+        let budget = deadline_in(Duration::from_secs(25), true);
+        assert!(
+            spent.exhausted(&budget).is_none(),
+            "three ten-second waits did not add to thirty"
+        );
+        // And the same calls still count against the run-count ceiling: a
+        // parked call is a call.
+        let counted = Budget {
+            max_node_runs: Some(3),
+            ..Budget::unlimited()
+        };
+        assert!(matches!(
+            spent.exhausted(&counted),
+            Some(BudgetLimit::NodeRuns)
+        ));
+        let _ = NodeFailure::Refused;
     }
 }

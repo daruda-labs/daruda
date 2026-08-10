@@ -278,6 +278,7 @@ fn a_node_never_gets_longer_than_the_run_has_left() {
             budget: &budget,
             git_status: None,
             events: None,
+            ask: None,
         },
         &keeper,
     ));

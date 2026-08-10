@@ -402,6 +402,14 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity (G2 / pitfall §4).
     pub mcp: crate::agent::mcp::McpSnapshot,
+    /// Flow runs in the active lane, for the Flows tab. Only this lane's:
+    /// the panel sits beside a per-lane run history, and the status bar
+    /// chip is what spans lanes.
+    pub flows: Vec<crate::workspace::flow_ops::FlowRunRow>,
+    /// The active lane's past runs. `None` when the Flows tab is not
+    /// showing — the read is skipped rather than cached for a tab nobody
+    /// is looking at.
+    pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
 }
 
 /// One auth domain's block in the Usage tab: whose account it is, what the last
@@ -479,6 +487,8 @@ impl RightDockSnapshot {
             || self.claude_status_per_session != prev.claude_status_per_session
             || self.tool_use_failure_counts != prev.tool_use_failure_counts
             || self.mcp != prev.mcp
+            || self.flows != prev.flows
+            || self.flow_history != prev.flow_history
     }
 }
 

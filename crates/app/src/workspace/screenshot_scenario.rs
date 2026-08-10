@@ -27,6 +27,7 @@ const NAME_SETTINGS: &str = "settings";
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 const NAME_FLOW_PICKER: &str = "flow-picker";
 const NAME_FLOW_RUNNING: &str = "flow-running";
+const NAME_FLOW_ASKING: &str = "flow-asking";
 
 /// Where the pane menu is deployed for the capture, in window coordinates.
 /// Near the top-left of the content area so the menu opens downward at its
@@ -57,6 +58,10 @@ pub(crate) enum ScreenshotScenario {
     /// A flow mid-run, so the status bar chip and its dropdown can be seen.
     /// Nothing else puts a run on screen without one actually running.
     FlowRunning,
+    /// A flow parked on a permission question, with the Flows panel showing.
+    /// The buttons a person has to read and hit — the one part of `ask` no
+    /// state test can look at, and the surface Task 1 proved needs eyes.
+    FlowAsking,
 }
 
 impl ScreenshotScenario {
@@ -72,6 +77,7 @@ impl ScreenshotScenario {
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_RUNNING => Some(Self::FlowRunning),
+            NAME_FLOW_ASKING => Some(Self::FlowAsking),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -103,7 +109,16 @@ pub(crate) fn drive(
             });
         }
         ScreenshotScenario::FlowRunning => {
-            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(cx));
+            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, cx));
+        }
+        ScreenshotScenario::FlowAsking => {
+            workspace.update(cx, |ws, cx| {
+                // The tab too: the panel is where the question is answered,
+                // and a capture would otherwise show whichever tab was last
+                // persisted.
+                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+                ws.seed_flow_run_for_shot(true, cx);
+            });
         }
         ScreenshotScenario::ErrorModal => {
             dialog_helpers::open_error_report_dialog(sample_report(), window, cx);

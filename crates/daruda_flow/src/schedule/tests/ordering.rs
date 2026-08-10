@@ -86,6 +86,7 @@ nodes:
             budget: &Budget::unlimited(),
             git_status: None,
             events: None,
+            ask: None,
         },
         &runner,
     ));
@@ -137,6 +138,7 @@ nodes:
             budget: &Budget::unlimited(),
             git_status: None,
             events: None,
+            ask: None,
         },
         &runner,
     ));

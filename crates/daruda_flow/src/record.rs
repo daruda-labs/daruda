@@ -43,6 +43,15 @@ pub struct AttemptRecord {
     /// answers. Best-effort: the design records the tree's state because the
     /// engine deliberately does not manage it.
     pub git_status: Option<String>,
+    /// What this attempt spent waiting for a person, and what they said.
+    ///
+    /// The duration is recorded because the clocks *stop* for it — without
+    /// it the account cannot explain why an attempt took forty minutes. The
+    /// answers are recorded because they are often *why the attempt ended
+    /// the way it did*: an agent refused its tool and then, correctly,
+    /// writing nothing reads as a plain "no output written" unless the
+    /// refusal is on the same page.
+    pub waited: crate::runner::Waiting,
 }
 
 /// The blast radius of one failed attempt. The two travel together because
@@ -154,6 +163,20 @@ fn result_of(outcome: &RunOutcome) -> String {
     }
 }
 
+/// What the person said, when it is worth saying. A refusal is always
+/// worth it — a node that then wrote nothing did not merely fail to write.
+fn said(waiting: &crate::runner::Waiting) -> String {
+    use crate::runner::AskAnswer as A;
+    let count = |want: A| waiting.answers.iter().filter(|a| **a == want).count();
+    let (refused, unanswered) = (count(A::Refused), count(A::Unanswered));
+    match (refused, unanswered) {
+        (0, 0) => String::new(),
+        (r, 0) => format!(", who refused {r}"),
+        (0, u) => format!(", and {u} went unanswered"),
+        (r, u) => format!(", who refused {r} and left {u} unanswered"),
+    }
+}
+
 fn limit_of(limit: &BudgetLimit) -> &'static str {
     match limit {
         BudgetLimit::WallClock => "the run's wall-clock limit",
@@ -201,6 +224,18 @@ fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path)
         attempt.evidence_seq,
         ended_as(&attempt.outcome)
     ));
+    // Said before the evidence, because it changes how every duration on
+    // this attempt reads: the clocks stop while a person is being waited
+    // on, so an attempt that took forty minutes of wall time may have done
+    // three minutes of work. Omitted when nobody was asked, which is most
+    // attempts.
+    if !attempt.waited.total.is_zero() || !attempt.waited.answers.is_empty() {
+        out.push_str(&format!(
+            "  - waited {}s for a person{}\n",
+            attempt.waited.total.as_secs(),
+            said(&attempt.waited)
+        ));
+    }
     // The set first: it says why the attempts below it happened again,
     // which is otherwise only inferable from repeated attempt numbers.
     if !attempt.invalidated.nodes.is_empty() {
@@ -240,6 +275,82 @@ fn ended_as(outcome: &AttemptOutcome) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::runner::{AskAnswer, Waiting};
+    use std::time::Duration;
+
+    fn waited(total_secs: u64, answers: Vec<AskAnswer>) -> Waiting {
+        Waiting {
+            total: Duration::from_secs(total_secs),
+            answers,
+        }
+    }
+
+    /// The gap a real run exposed: a person refused the tool the node
+    /// needed, the agent correctly declined to write a file claiming it had
+    /// done the work, and `run.md` said only "no output written". The
+    /// refusal *is* the reason, and a reader had to open the transcript to
+    /// find it.
+    #[test]
+    fn a_refusal_is_on_the_same_page_as_the_failure_it_caused() {
+        let mut out = String::new();
+        push_attempt_lines(
+            &mut out,
+            &AttemptRecord {
+                attempt: 1,
+                evidence_seq: 1,
+                outcome: AttemptOutcome::Failed(NodeFailure::NoOutput {
+                    expected: PathBuf::from("/run/touched.md"),
+                }),
+                invalidated: Invalidation::default(),
+                git_status: None,
+                waited: waited(1, vec![AskAnswer::Refused]),
+            },
+            Path::new("/run"),
+        );
+        assert!(out.contains("refused"), "{out}");
+        assert!(out.contains("no output written"), "{out}");
+    }
+
+    /// An approval needs no telling — the work went ahead, which the
+    /// outcome already says. Only the duration is worth a line.
+    #[test]
+    fn an_approval_adds_no_commentary() {
+        let mut out = String::new();
+        push_attempt_lines(
+            &mut out,
+            &AttemptRecord {
+                attempt: 1,
+                evidence_seq: 1,
+                outcome: AttemptOutcome::Passed,
+                invalidated: Invalidation::default(),
+                git_status: None,
+                waited: waited(143, vec![AskAnswer::Allowed]),
+            },
+            Path::new("/run"),
+        );
+        assert!(out.contains("waited 143s"), "{out}");
+        assert!(!out.contains("refused"), "{out}");
+    }
+
+    /// An attempt nobody was asked anything in says nothing about waiting.
+    #[test]
+    fn an_attempt_that_asked_nothing_stays_silent() {
+        let mut out = String::new();
+        push_attempt_lines(
+            &mut out,
+            &AttemptRecord {
+                attempt: 1,
+                evidence_seq: 1,
+                outcome: AttemptOutcome::Passed,
+                invalidated: Invalidation::default(),
+                git_status: None,
+                waited: Waiting::default(),
+            },
+            Path::new("/run"),
+        );
+        assert!(!out.contains("waited"), "{out}");
+    }
+
     use super::*;
 
     fn attempt(n: u32) -> AttemptRecord {
@@ -252,6 +363,7 @@ mod tests {
                 archived: Vec::new(),
             },
             git_status: None,
+            waited: Default::default(),
         }
     }
 
@@ -337,6 +449,7 @@ mod tests {
                         archived: vec![PathBuf::from("run/logs/gate.attempt-1.evidence-3.log")],
                     },
                     git_status: None,
+                    waited: Default::default(),
                 },
                 AttemptRecord {
                     attempt: 2,
@@ -347,6 +460,7 @@ mod tests {
                         archived: Vec::new(),
                     },
                     git_status: None,
+                    waited: Default::default(),
                 },
             ],
         }];
@@ -384,6 +498,7 @@ mod tests {
                         archived: Vec::new(),
                     },
                     git_status: Some(" M src/lib.rs\n?? notes.md".to_string()),
+                    waited: Default::default(),
                 },
                 // The host answering "nothing changed" is an answer, not a
                 // silence — a clean tree after an attempt is a fact.
@@ -396,6 +511,7 @@ mod tests {
                         archived: Vec::new(),
                     },
                     git_status: Some(String::new()),
+                    waited: Default::default(),
                 },
             ],
         }];

@@ -131,6 +131,10 @@ struct Fixture {
     command: String,
     timeout: Duration,
     permission: PermissionPolicy,
+    /// Where a `permission: ask` fixture puts its question. Held by the
+    /// fixture because `Permission::Ask` borrows it, so it has to outlive
+    /// the `RunContext` built from it.
+    ask: Option<crate::runner::AskChannel>,
     grace: Duration,
     settings_budget: Duration,
 }
@@ -158,6 +162,7 @@ impl Fixture {
             command,
             timeout: Duration::from_secs(60),
             permission: PermissionPolicy::Deny,
+            ask: None,
             grace: CANCEL_GRACE,
             settings_budget: SETTINGS_BUDGET,
             _dir: dir,
@@ -174,7 +179,14 @@ impl Fixture {
             output: Some(&self.output),
             evidence_seq: 1,
             timeout: self.timeout,
-            permission: self.permission,
+            // The same promotion `Run::permission_for` makes: a policy
+            // becomes a capability, and `Ask` without a port is not one.
+            permission: match (self.permission, self.ask.as_ref()) {
+                (PermissionPolicy::Deny, _) => crate::runner::Permission::Deny,
+                (PermissionPolicy::AllowOnce, _) => crate::runner::Permission::AllowOnce,
+                (PermissionPolicy::Ask, Some(channel)) => crate::runner::Permission::Ask(channel),
+                (PermissionPolicy::Ask, None) => crate::runner::Permission::Deny,
+            },
             cancel: &self.cancel,
         }
     }
@@ -195,6 +207,61 @@ impl Fixture {
 
     /// One run, bounded: a runner that never returns fails this as a
     /// stated result instead of hanging the suite.
+    /// Run a turn with somebody on the other end of the questions.
+    ///
+    /// `answer` is the person: `Some` is what they said, `None` is them
+    /// walking away, which drops the reply channel — the case a host that
+    /// closed its window produces. Everything runs on one thread; the
+    /// answering loop is just a third arm of the race.
+    /// `thinks_for` is how long the person takes, awaited rather than
+    /// slept: everything here shares one thread, and a blocking sleep
+    /// would freeze the very timer the wait is supposed to be racing —
+    /// a test that then passes proves nothing about the clock.
+    fn run_answered(
+        &mut self,
+        agent: &AgentSpec,
+        thinks_for: Duration,
+        answer: impl Fn(&crate::runner::PendingAsk) -> Option<PermissionDecision>,
+    ) -> (RunResult, Vec<(u64, crate::runner::AskRequest)>) {
+        let (tx, rx) = smol::channel::unbounded();
+        self.permission = PermissionPolicy::Ask;
+        self.ask = Some(crate::runner::AskChannel::new(tx));
+
+        let asked = RefCell::new(Vec::new());
+        let runner = self.runner();
+        let ctx = self.context();
+        let result = smol::block_on(smol::future::or(
+            runner.run_agent(&ctx, agent, "write it"),
+            smol::future::or(
+                async {
+                    crate::runner::sleep(HARNESS_GUARD).await;
+                    failed(NEVER_RETURNED.to_string())
+                },
+                async {
+                    while let Ok(pending) = rx.recv().await {
+                        asked
+                            .borrow_mut()
+                            .push((pending.ask_id, pending.request.clone()));
+                        crate::runner::sleep(thinks_for).await;
+                        match answer(&pending) {
+                            Some(decision) => {
+                                let _ = pending.reply.send(decision).await;
+                            }
+                            // Dropping `pending` drops the only sender.
+                            None => drop(pending),
+                        }
+                    }
+                    // The stream is only closed once the run has let go of
+                    // it, so there is nothing left for this arm to do but
+                    // lose the race.
+                    crate::runner::sleep(HARNESS_GUARD).await;
+                    failed(NEVER_RETURNED.to_string())
+                },
+            ),
+        ));
+        (result, asked.into_inner())
+    }
+
     fn run(&self, agent: &AgentSpec) -> RunResult {
         let runner = self.runner();
         let ctx = self.context();

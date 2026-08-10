@@ -497,6 +497,8 @@ impl Workspace {
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
+            flows: self.flow_rows_for_active_lane(),
+            flow_history: self.flow_history_for_panel(),
         }
     }
 }

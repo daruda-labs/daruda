@@ -8,7 +8,6 @@
 mod account_slot;
 mod context_menu;
 mod flow_segment;
-pub(in crate::workspace) use flow_segment::FlowRunRow;
 mod ports_segment;
 mod usage_chip;
 

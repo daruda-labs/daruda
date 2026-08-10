@@ -7,7 +7,7 @@ use crate::NodeId;
 use crate::error::{FlowIoError, IoSite};
 use crate::event::FlowEvent;
 use crate::graph::FlowGraph;
-use crate::model::{Flow, Node, NodeKind, Prompt};
+use crate::model::{AgentSpec, Flow, Node, NodeKind, Prompt};
 use crate::record::{AttemptOutcome, AttemptRecord, GitStatus, Invalidation};
 use crate::request::Budget;
 use crate::runner::{CancelToken, NodeFailure, NodeRunner, RunContext, RunResult};
@@ -58,6 +58,10 @@ struct Run<'a> {
     git_status: GitStatus<'a>,
     /// Where the run narrates itself, or `None` when nobody is watching.
     events: Option<&'a smol::channel::Sender<FlowEvent>>,
+    /// Where a `permission: ask` node puts its question. `None` is a host
+    /// that cannot answer, which `validate_request` has already refused
+    /// for any flow that could reach `Ask`.
+    ask: Option<crate::runner::AskChannel>,
     /// What the run has spent and what it has to say about it. Owned as
     /// one value so the drive loop cannot reach a counter that only
     /// `account` may raise — see [`budget::Accounting`].
@@ -103,6 +107,9 @@ pub(crate) struct RunInputs<'a> {
     pub(crate) git_status: GitStatus<'a>,
     /// Where the run narrates itself. `None` is a host that does not watch.
     pub(crate) events: Option<&'a smol::channel::Sender<FlowEvent>>,
+    /// Where a person is asked for permission. `None` is a host with no
+    /// answering surface.
+    pub(crate) ask: Option<&'a smol::channel::Sender<crate::runner::PendingAsk>>,
 }
 
 /// Run every node in topological order, judging each before the next.
@@ -116,6 +123,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         budget,
         git_status,
         events,
+        ask,
     } = inputs;
     let (flow, graph) = (loaded.flow(), loaded.graph());
     let run = Run {
@@ -135,6 +143,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         budget,
         git_status,
         events,
+        ask: ask.cloned().map(crate::runner::AskChannel::new),
         spent: budget::Accounting::default(),
         executed: RefCell::new(Vec::new()),
         next_seq: Cell::new(1),
@@ -216,7 +225,7 @@ impl<'a> Run<'a> {
                     // one-minute run ceiling would not stop a ten-minute
                     // node if the node's number came through unclipped.
                     timeout: self.bounded_timeout(node.timeout),
-                    permission: permission_of(node),
+                    permission: self.permission_for(node),
                     cancel: self.cancel,
                 };
 
@@ -248,15 +257,30 @@ impl<'a> Run<'a> {
                 // node the user just stopped. Its output goes aside too —
                 // everything left live has to be a completed node's.
                 if self.cancel.is_canceled() {
-                    return Err(self.settle_cancel(&ctx, id, output.as_deref()));
+                    return Err(self.settle_cancel(
+                        &ctx,
+                        id,
+                        output.as_deref(),
+                        result.waiting.clone(),
+                    ));
                 }
                 let artifacts = result.artifacts.clone();
+                // Captured before `judge` consumes the result, like
+                // `artifacts` — every `record` below is for this attempt.
+                // Captured before `judge` consumes the result, like `artifacts`
+                // — every `record` below is for this attempt.
+                let waited = result.waiting.clone();
 
                 let failure = match judge(node, &ctx, result) {
                     Ok(()) => {
                         // A pass archives nothing: its output stays live for
                         // the nodes downstream to read.
-                        self.record(&ctx, AttemptOutcome::Passed, Invalidation::default());
+                        self.record(
+                            &ctx,
+                            AttemptOutcome::Passed,
+                            Invalidation::default(),
+                            waited,
+                        );
                         self.emit(FlowEvent::NodePassed {
                             node: id.clone(),
                             attempt,
@@ -288,6 +312,7 @@ impl<'a> Run<'a> {
                         &ctx,
                         AttemptOutcome::Failed(failure.clone()),
                         Invalidation::default(),
+                        waited,
                     );
                     return Err(RunOutcome::Failed {
                         node: id.clone(),
@@ -311,6 +336,7 @@ impl<'a> Run<'a> {
                                 nodes: set.iter().map(|(id, _)| id.clone()).collect(),
                                 archived: paths.clone(),
                             },
+                            waited.clone(),
                         );
                         evidence.extend(paths);
                     }
@@ -322,6 +348,7 @@ impl<'a> Run<'a> {
                             &ctx,
                             AttemptOutcome::Failed(failure.clone()),
                             Invalidation::default(),
+                            waited.clone(),
                         );
                         return Err(node_io(&ctx, doing::ARCHIVE, e.path, e.source));
                     }
@@ -363,13 +390,20 @@ impl<'a> Run<'a> {
     /// three of them return before `judge` or before any archiving. The
     /// `git_status` ask happens here, so the number of asks equals the
     /// number of attempts.
-    fn record(&self, ctx: &RunContext<'_>, outcome: AttemptOutcome, invalidated: Invalidation) {
+    fn record(
+        &self,
+        ctx: &RunContext<'_>,
+        outcome: AttemptOutcome,
+        invalidated: Invalidation,
+        waited: crate::runner::Waiting,
+    ) {
         let attempt = AttemptRecord {
             attempt: ctx.attempt,
             evidence_seq: ctx.evidence_seq,
             outcome,
             invalidated,
             git_status: self.git_status.and_then(|ask| ask()),
+            waited,
         };
         self.spent
             .record(|records| crate::record::push_attempt(records, ctx.node_id, attempt));
@@ -461,13 +495,19 @@ impl<'a> Run<'a> {
         ctx: &RunContext<'_>,
         id: &NodeId,
         output: Option<&Path>,
+        waited: crate::runner::Waiting,
     ) -> RunOutcome {
         let mut archived = Vec::new();
         if let Some(output) = output {
             match crate::archive::archive_canceled(&self.log_dir, id, output) {
                 Ok(moved) => archived.extend(moved),
                 Err(e) => {
-                    self.record(ctx, AttemptOutcome::Canceled, Invalidation::default());
+                    self.record(
+                        ctx,
+                        AttemptOutcome::Canceled,
+                        Invalidation::default(),
+                        waited,
+                    );
                     return node_io(ctx, doing::ARCHIVE_CANCELED, e.path, e.source);
                 }
             }
@@ -481,6 +521,7 @@ impl<'a> Run<'a> {
                 nodes: Vec::new(),
                 archived,
             },
+            waited,
         );
         RunOutcome::Canceled {
             node: Some(id.clone()),
@@ -566,7 +607,7 @@ impl<'a> Run<'a> {
             // because it only runs `grep` gives its fix session 30s too.
             // An author wanting a longer repair raises the gate's.
             timeout: ctx.timeout,
-            permission: agent.permission,
+            permission: self.permission_for_fix(agent),
             cancel: self.cancel,
         };
         // A fix is a real agent session and can take minutes. With no event
@@ -587,7 +628,12 @@ impl<'a> Run<'a> {
                 Err(failure) => AttemptOutcome::Failed(failure.clone()),
             }
         };
-        self.record(&fix_ctx, recorded, Invalidation::default());
+        self.record(
+            &fix_ctx,
+            recorded,
+            Invalidation::default(),
+            result.waiting.clone(),
+        );
         // Like any node: a cancel that interrupted the session is not a
         // failure of it, and reporting one would be wrong about why the run
         // stopped. The fix owes no output, so there is nothing to archive.
@@ -644,6 +690,37 @@ fn permission_of(node: &Node) -> crate::model::PermissionPolicy {
         // A command node launches no agent, so nothing can ask for
         // permission; the value is inert and never read.
         NodeKind::Command { .. } => crate::model::PermissionPolicy::Deny,
+    }
+}
+
+impl Run<'_> {
+    /// Turn a node's declared policy into the capability the runner gets.
+    ///
+    /// `Ask` without a port cannot be built, so it degrades to `Deny` —
+    /// unreachable in practice because `validate_request` refuses such a
+    /// run before the lock, and safe rather than silent if it ever were.
+    fn permission_for(&self, node: &Node) -> crate::runner::Permission<'_> {
+        match permission_of(node) {
+            crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
+            crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
+            crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {
+                Some(channel) => crate::runner::Permission::Ask(channel),
+                None => crate::runner::Permission::Deny,
+            },
+        }
+    }
+
+    /// The repair's `fix` runs as `flow.default_agent` and inherits its
+    /// policy, so a flow whose defaults say `ask` asks during repair too.
+    fn permission_for_fix(&self, agent: &AgentSpec) -> crate::runner::Permission<'_> {
+        match agent.permission {
+            crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
+            crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
+            crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {
+                Some(channel) => crate::runner::Permission::Ask(channel),
+                None => crate::runner::Permission::Deny,
+            },
+        }
     }
 }
 

@@ -75,6 +75,7 @@ fn run_with(
             budget: &budget,
             git_status: None,
             events: None,
+            ask: None,
         },
         runner,
     ));
@@ -127,6 +128,7 @@ pub(super) fn request_for(text: &str, dir: &std::path::Path) -> crate::request::
         is_alive: Box::new(|_| true),
         git_status: None,
         events: None,
+        ask: None,
     }
 }
 

@@ -9,7 +9,7 @@ pub use acp::AcpRunner;
 pub use process::ProcessRunner;
 
 use crate::NodeId;
-use crate::model::{AgentSpec, PermissionPolicy};
+use crate::model::AgentSpec;
 use daruda_acp::UsageView;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -160,6 +160,132 @@ impl CancelToken {
     }
 }
 
+/// One permission request handed to a person, with the way back.
+///
+/// The reply channel travels inside the request rather than being matched
+/// up by id afterwards: there is no correlation table to get wrong, and
+/// answering a question that is no longer live is impossible rather than
+/// merely unlikely. Bounded to one — the first answer wins, so two
+/// surfaces offering the same buttons cannot both send.
+#[derive(Debug, Clone)]
+pub struct PendingAsk {
+    /// The node, or the gate whose repair is asking (`FIX_SESSION_ID` is
+    /// not a node, so the gate's name is what makes it renderable).
+    pub node: NodeId,
+    pub attempt: u32,
+    /// Distinguishes this question from the next one in the same run —
+    /// what a host compares to tell a stale click from a live one.
+    pub ask_id: u64,
+    pub request: AskRequest,
+    pub reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
+}
+
+/// What a person said to one question. Coarser than the decision that went
+/// on the wire: which option they picked is the transcript's to keep, and
+/// what a *record* has to answer is whether the work was allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskAnswer {
+    Allowed,
+    Refused,
+    /// Nobody answered — the host went away, or the run was stopped while
+    /// the question was still up.
+    Unanswered,
+}
+
+/// What one runner call spent waiting for a person, and what they said.
+///
+/// One value because the two are only meaningful together: a record that
+/// says an attempt waited forty minutes without saying what came of it
+/// leaves the reader to open the transcript, and the answer is often the
+/// reason the attempt ended the way it did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Waiting {
+    pub total: Duration,
+    pub answers: Vec<AskAnswer>,
+}
+
+impl Waiting {
+    /// Whether anybody refused. The one thing a failure line needs from
+    /// this: a node that wrote nothing after a refusal did not simply fail
+    /// to write.
+    pub fn any_refused(&self) -> bool {
+        self.answers.contains(&AskAnswer::Refused)
+    }
+}
+
+/// The question itself, in host terms. Built from the protocol request by
+/// the runner, through `daruda_acp`'s own conversion, so no protocol type
+/// crosses this boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskRequest {
+    pub tool: String,
+    /// What the tool is about to do, when the adapter said. A tool name
+    /// alone ("Bash") is not a question a person can answer.
+    pub detail: Option<String>,
+    pub options: Vec<daruda_acp::PermissionChoice>,
+}
+
+/// The host's answering port, narrowed to the one thing a runner may do
+/// with it. Holding the raw event sender instead would let a runner emit
+/// any event at all.
+pub struct AskChannel {
+    tx: smol::channel::Sender<PendingAsk>,
+    next_id: std::cell::Cell<u64>,
+}
+
+impl AskChannel {
+    pub(crate) fn new(tx: smol::channel::Sender<PendingAsk>) -> Self {
+        Self {
+            tx,
+            next_id: std::cell::Cell::new(1),
+        }
+    }
+
+    /// Put the question to the host. `None` is a host that has gone away,
+    /// which the caller treats as no answer rather than waiting forever.
+    pub(crate) fn ask(
+        &self,
+        node: &NodeId,
+        attempt: u32,
+        request: AskRequest,
+    ) -> Option<smol::channel::Receiver<daruda_acp::PermissionDecision>> {
+        let ask_id = self.next_id.get();
+        self.next_id.set(ask_id + 1);
+        let (reply, rx) = smol::channel::bounded(1);
+        self.tx
+            .try_send(PendingAsk {
+                node: node.clone(),
+                attempt,
+                ask_id,
+                request,
+                reply,
+            })
+            .ok()
+            .map(|()| rx)
+    }
+}
+
+/// What this node does when the agent asks for permission.
+///
+/// `Ask` carries the port rather than sitting beside an `Option` of it:
+/// a policy of "ask a person" with nobody to ask is not a state worth
+/// representing, and [`crate::request::validate_request`] is the one place
+/// that has to rule it out.
+pub enum Permission<'a> {
+    Deny,
+    AllowOnce,
+    Ask(&'a AskChannel),
+}
+
+impl Permission<'_> {
+    /// Whether a request arriving at all means the node was launched in
+    /// the wrong mode. Only `Deny` says that — a person declining one tool
+    /// is a judgement, not a misconfiguration.
+    pub(crate) fn denies(&self) -> bool {
+        matches!(self, Permission::Deny)
+    }
+}
+
 /// Where one attempt runs and where it may write.
 pub struct RunContext<'a> {
     pub node_id: &'a NodeId,
@@ -181,7 +307,7 @@ pub struct RunContext<'a> {
     /// and archived outputs do not collide.
     pub evidence_seq: u32,
     pub timeout: Duration,
-    pub permission: PermissionPolicy,
+    pub permission: Permission<'a>,
     /// The run's stop switch, observable mid-turn: a real runner watches it
     /// alongside the event stream and cancels the session it is holding.
     /// The scheduler only sees it between calls, which is too late to stop
@@ -200,6 +326,14 @@ pub struct RunResult {
     /// Usage at session end. `None` for a command node, and for an agent
     /// whose adapter reports none.
     pub usage: Option<UsageView>,
+    /// What this call spent waiting for a person, and what they said.
+    ///
+    /// The run's own deadline is an absolute `Instant`, so the node clock
+    /// stopping does nothing for it — `total` is what the scheduler
+    /// subtracts so a long approval does not end the run the moment it is
+    /// granted. It rides on the result because every runner call already
+    /// passes through `Run::call` → `account`, which keeps one raiser.
+    pub waiting: Waiting,
 }
 
 /// One attempt at one node. Async because a real runner has to race the

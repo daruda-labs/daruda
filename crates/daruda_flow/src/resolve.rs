@@ -227,6 +227,7 @@ fn agent_override(spec: &AgentSpec) -> AgentOverride {
         permission: Some(match spec.permission {
             PermissionPolicy::Deny => PermissionPolicyFile::Deny,
             PermissionPolicy::AllowOnce => PermissionPolicyFile::AllowOnce,
+            PermissionPolicy::Ask => PermissionPolicyFile::Ask,
         }),
     }
 }
@@ -269,6 +270,7 @@ fn resolve_permission(p: PermissionPolicyFile) -> PermissionPolicy {
     match p {
         PermissionPolicyFile::Deny => PermissionPolicy::Deny,
         PermissionPolicyFile::AllowOnce => PermissionPolicy::AllowOnce,
+        PermissionPolicyFile::Ask => PermissionPolicy::Ask,
     }
 }
 

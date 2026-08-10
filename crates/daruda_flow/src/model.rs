@@ -58,6 +58,13 @@ pub enum PermissionPolicy {
     /// Approve requests offering an allow-once option. An always-allow
     /// answer is never selected — it outlives the session.
     AllowOnce,
+    /// Hand the request to a person and wait for their answer. The node's
+    /// and the run's clocks both stop while it waits, because a budget
+    /// bounds work and waiting is the absence of it.
+    ///
+    /// Only meaningful with a host that can answer — `request` refuses a
+    /// run that could reach this without one, so it can never hang.
+    Ask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

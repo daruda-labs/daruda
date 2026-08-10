@@ -168,6 +168,8 @@ impl FakeRunner {
             outcome,
             artifacts: vec![log],
             usage: self.usage_for(ctx.node_id),
+            // A scripted call never really waits.
+            waiting: crate::runner::Waiting::default(),
         }
     }
 

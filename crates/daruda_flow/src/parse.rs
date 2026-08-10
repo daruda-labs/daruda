@@ -96,6 +96,7 @@ pub struct AgentOverride {
 pub enum PermissionPolicyFile {
     Deny,
     AllowOnce,
+    Ask,
 }
 
 /// A node's prompt: inline prose or a sibling file, under keys `prompt:` /

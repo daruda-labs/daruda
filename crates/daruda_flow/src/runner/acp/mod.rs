@@ -2,8 +2,11 @@
 //! node and dropped when the turn ends, which is what ends the connection
 //! task — so a node cannot inherit another node's context.
 
-use crate::model::{AgentSpec, PermissionPolicy};
-use crate::runner::{CANCELED, NodeFailure, NodeRunner, RunContext, RunResult, canceled, sleep};
+use crate::model::AgentSpec;
+use crate::runner::{
+    AskAnswer, AskRequest, CANCELED, NodeFailure, NodeRunner, Permission, RunContext, RunResult,
+    Waiting, canceled, sleep,
+};
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
     ConfigValueView, LaunchSpec, ModeStateView, PermissionDecision, PermissionOption,
@@ -20,9 +23,13 @@ use transcript::Transcript;
 struct Recording<'a> {
     usage: &'a RefCell<Option<UsageView>>,
     log: &'a RefCell<Transcript>,
+    /// Time this call spent waiting for a person, and the request it is
+    /// waiting on. Per-call state shared between the stream reader and the
+    /// code after it, which is what this struct already collects.
+    park: &'a Park,
 }
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -135,26 +142,37 @@ impl AcpRunner {
             Transcript::create(ctx.log_dir, ctx.node_id, ctx.attempt, ctx.evidence_seq);
         opened.prompt(prompt);
         let log = RefCell::new(opened);
+        let park = Park::default();
         let rec = Recording {
             usage: &usage,
             log: &log,
+            park: &park,
         };
 
         // Scoped so the losing future releases the stream before the wind-down
         // below reads it again.
         let settled = {
             let turn = self.settle(events, session, ctx, agent, prompt, &rec);
-            let stop = interrupted(ctx, started);
+            let stop = interrupted(ctx, started, &park);
             smol::future::or(async { Ok(turn.await) }, async { Err(stop.await) }).await
         };
 
         let outcome = match settled {
             Ok(outcome) => outcome,
             Err(interrupt) => {
+                // Before `cancel`, and never left to teardown: the adapter's
+                // parked request is released only by an answer or by the
+                // whole connection dropping, and dropping happens after the
+                // grace below — the one window the adapter has to stop
+                // mid-write. Left waiting on us, it spends that window doing
+                // nothing.
+                if let Some(id) = park.take_outstanding() {
+                    session.respond_permission(id, PermissionDecision::Cancelled);
+                }
                 session.cancel();
                 // The turn's own verdict is discarded: it is a cancel's, and
                 // the node reports why it was stopped instead.
-                let winding_down = drain(events, session, ctx.permission, &rec);
+                let winding_down = drain(events, session, ctx, &rec);
                 smol::future::or(async { _ = winding_down.await }, sleep(self.grace)).await;
                 Err(interrupt.into_failure())
             }
@@ -168,6 +186,7 @@ impl AcpRunner {
             outcome,
             artifacts: log.artifacts(),
             usage: usage.into_inner(),
+            waiting: park.waiting(Instant::now()),
         }
     }
 
@@ -191,7 +210,7 @@ impl AcpRunner {
         self.apply(events, session, connected.options, agent, rec.usage)
             .await?;
         session.send_prompt(prompt.to_string());
-        drain(events, session, ctx.permission, rec).await
+        drain(events, session, ctx, rec).await
     }
 
     /// Apply each axis the node pinned, in order, and confirm each before
@@ -422,13 +441,96 @@ impl Interrupt {
 }
 
 /// The node's budget and the run's stop switch, whichever comes first.
-async fn interrupted(ctx: &RunContext<'_>, started: Instant) -> Interrupt {
+/// Time this call spent waiting for a person, and the request it is
+/// waiting on. One value because they are two faces of the same "parked
+/// right now": the clock needs the start, and a cancel needs the id.
+///
+/// `Cell` rather than a lock — the turn future and its timer share one
+/// thread, and the whole drive future is `!Send`.
+#[derive(Default)]
+struct Park {
+    /// Waits that have already ended.
+    accumulated: Cell<Duration>,
+    /// When the current wait began, if one is going.
+    since: Cell<Option<Instant>>,
+    /// The ACP request id nobody has answered yet.
+    outstanding: Cell<Option<u64>>,
+    /// What each person said, in the order they were asked.
+    answers: RefCell<Vec<AskAnswer>>,
+}
+
+impl Park {
+    /// Ended waits plus the one in progress. **Including the one in
+    /// progress is the whole point**: a deadline computed from finished
+    /// waits alone expires in the middle of a long one, which is exactly
+    /// when the node must not die.
+    fn total(&self, now: Instant) -> Duration {
+        self.accumulated.get()
+            + self
+                .since
+                .get()
+                .map(|start| now.saturating_duration_since(start))
+                .unwrap_or_default()
+    }
+
+    fn begin(&self, id: u64) {
+        self.since.set(Some(Instant::now()));
+        self.outstanding.set(Some(id));
+    }
+
+    fn end(&self) {
+        if let Some(start) = self.since.take() {
+            self.accumulated
+                .set(self.accumulated.get() + start.elapsed());
+        }
+        self.outstanding.set(None);
+    }
+
+    fn take_outstanding(&self) -> Option<u64> {
+        self.outstanding.take()
+    }
+
+    fn answered(&self, decision: &PermissionDecision) {
+        self.answers.borrow_mut().push(match decision {
+            PermissionDecision::Allow { .. } => AskAnswer::Allowed,
+            PermissionDecision::Reject { .. } => AskAnswer::Refused,
+            PermissionDecision::Cancelled => AskAnswer::Unanswered,
+        });
+    }
+
+    /// What this call waited for, for the record.
+    fn waiting(&self, now: Instant) -> Waiting {
+        Waiting {
+            total: self.total(now),
+            answers: self.answers.borrow().clone(),
+        }
+    }
+}
+
+/// The node's clock, which stops while a person is being waited on.
+///
+/// A loop rather than one `sleep`: the deadline moves as the wait grows,
+/// so each wake re-reads it. A single `sleep(timeout)` fires mid-wait and
+/// kills a node for taking exactly as long as the person it was told to
+/// ask.
+async fn interrupted(ctx: &RunContext<'_>, started: Instant, park: &Park) -> Interrupt {
     let timeout = ctx.timeout;
     smol::future::or(
         async move {
-            sleep(timeout).await;
-            Interrupt::Timeout {
-                elapsed: started.elapsed(),
+            loop {
+                let paused = park.total(Instant::now());
+                let elapsed = started.elapsed();
+                match (timeout + paused).checked_sub(elapsed) {
+                    // Reported without the waiting: a node that worked for
+                    // three minutes and waited forty did not take
+                    // forty-three, and `run.md` would be lying if it said so.
+                    None => {
+                        return Interrupt::Timeout {
+                            elapsed: elapsed.saturating_sub(paused),
+                        };
+                    }
+                    Some(left) => sleep(left).await,
+                }
             }
         },
         async move {
@@ -446,9 +548,10 @@ async fn interrupted(ctx: &RunContext<'_>, started: Instant) -> Interrupt {
 async fn drain(
     events: &mut (impl Stream<Item = AcpEvent> + Unpin),
     session: &AcpSessionHandle,
-    permission: PermissionPolicy,
+    ctx: &RunContext<'_>,
     rec: &Recording<'_>,
 ) -> Result<(), NodeFailure> {
+    let permission = &ctx.permission;
     loop {
         let Some(event) = events.next().await else {
             return Err(NodeFailure::SessionError(ENDED_EARLY.to_string()));
@@ -456,23 +559,47 @@ async fn drain(
         match event {
             AcpEvent::UsageChanged(reported) => *rec.usage.borrow_mut() = Some(reported),
             AcpEvent::PermissionRequested { id, request } => {
-                // Answered before anything else, so a policy that lets the
-                // turn continue never leaves the agent parked on a request.
-                session.respond_permission(id, decide(permission, &request.options));
-                // Under `Deny` the request arriving at all means the mode
-                // this node was launched in was wrong. Refusing and letting
-                // the turn run on would let the agent work around it and
-                // pass — `model.rs` chose failing loud over that. The session
-                // ends here, so whether the refusal reaches the wire is moot.
-                if permission == PermissionPolicy::Deny {
-                    return Err(NodeFailure::PermissionDenied {
-                        tool: request
-                            .tool_call
-                            .fields
-                            .title
-                            .clone()
-                            .unwrap_or_else(|| request.tool_call.tool_call_id.0.to_string()),
-                    });
+                let tool = request
+                    .tool_call
+                    .fields
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| request.tool_call.tool_call_id.0.to_string());
+                match permission {
+                    Permission::Ask(channel) => {
+                        // Converted here, through `daruda_acp`'s own seam, so
+                        // the protocol request never leaves this arm.
+                        let (options, detail) = match daruda_acp::permission_item(id, &request, &[])
+                        {
+                            daruda_acp::ChatItem::Permission(item) => {
+                                (item.options, item.raw_input_summary)
+                            }
+                            // `permission_item` always answers with a
+                            // permission item; the arm exists so a change over
+                            // there cannot silently strip the choices.
+                            _ => (Vec::new(), None),
+                        };
+                        let question = AskRequest {
+                            tool,
+                            detail,
+                            options,
+                        };
+                        ask_a_person(session, channel, ctx, id, question, rec).await;
+                    }
+                    // Answered before anything else, so a policy that lets
+                    // the turn continue never leaves the agent parked.
+                    settled => {
+                        session.respond_permission(id, decide(settled, &request.options));
+                        // Under `Deny` the request arriving at all means the
+                        // mode this node was launched in was wrong. Refusing
+                        // and letting the turn run on would let the agent work
+                        // around it and pass — `model.rs` chose failing loud
+                        // over that. The session ends here, so whether the
+                        // refusal reaches the wire is moot.
+                        if settled.denies() {
+                            return Err(NodeFailure::PermissionDenied { tool });
+                        }
+                    }
                 }
             }
             AcpEvent::TurnEnded { stop_reason, .. } => {
@@ -489,23 +616,62 @@ async fn drain(
     }
 }
 
-/// The node's policy is the whole answer — a run nobody is watching has no
-/// one to ask. `AllowAlways` is never selected: it outlives the session, and
-/// one approval must not become standing policy. An option of the wanted kind
+/// Put the request to a person and wait, with both clocks stopped.
+///
+/// A host that has gone away, or one that drops the reply channel, answers
+/// `Cancelled` — the same thing the adapter defaults to when its park is
+/// released without a decision. There is no path here that waits forever.
+///
+/// The choices are converted through `daruda_acp::permission_item`, the
+/// same seam the chat pane uses, so this crate never hands a raw protocol
+/// type to a host.
+async fn ask_a_person(
+    session: &AcpSessionHandle,
+    channel: &crate::runner::AskChannel,
+    ctx: &RunContext<'_>,
+    id: u64,
+    request: AskRequest,
+    rec: &Recording<'_>,
+) {
+    let park = rec.park;
+    rec.log
+        .borrow_mut()
+        .asked(&request.tool, request.detail.as_deref());
+
+    park.begin(id);
+    let answer = match channel.ask(ctx.node_id, ctx.attempt, request) {
+        Some(reply) => reply.recv().await.unwrap_or(PermissionDecision::Cancelled),
+        None => PermissionDecision::Cancelled,
+    };
+    park.end();
+    park.answered(&answer);
+
+    rec.log.borrow_mut().answered(&answer);
+    session.respond_permission(id, answer);
+}
+
+/// The node's policy is the whole answer, for the policies that have one.
+/// `AllowAlways` is never selected: it outlives the session, and one
+/// approval must not become standing policy. An option of the wanted kind
 /// is the only one selectable, so an agent that offers none gets a cancel
 /// rather than a choice made on its behalf.
-fn decide(policy: PermissionPolicy, options: &[PermissionOption]) -> PermissionDecision {
-    let wanted = match policy {
-        PermissionPolicy::Deny => PermissionOptionKind::RejectOnce,
-        PermissionPolicy::AllowOnce => PermissionOptionKind::AllowOnce,
+///
+/// `Ask` maps to the same refusal as `Deny` here, which only matters if it
+/// ever reached this function: the caller answers it with a person instead,
+/// and a refusal is the safe reading of "nobody said yes".
+fn decide(policy: &Permission<'_>, options: &[PermissionOption]) -> PermissionDecision {
+    let (wanted, allow) = match policy {
+        Permission::Deny | Permission::Ask(_) => (PermissionOptionKind::RejectOnce, false),
+        Permission::AllowOnce => (PermissionOptionKind::AllowOnce, true),
     };
     let Some(option) = options.iter().find(|option| option.kind == wanted) else {
         return PermissionDecision::Cancelled;
     };
     let option_id = option.option_id.0.to_string();
-    match policy {
-        PermissionPolicy::Deny => PermissionDecision::Reject { option_id },
-        PermissionPolicy::AllowOnce => PermissionDecision::Allow { option_id },
+    if allow {
+        PermissionDecision::Allow { option_id }
+    } else {
+        PermissionDecision::Reject { option_id }
     }
 }
 
@@ -536,6 +702,8 @@ fn failed(message: String) -> RunResult {
         outcome: Err(NodeFailure::SessionError(message)),
         artifacts: Vec::new(),
         usage: None,
+        // Nothing opened, so nothing waited.
+        waiting: Waiting::default(),
     }
 }
 

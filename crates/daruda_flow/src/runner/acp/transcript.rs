@@ -93,6 +93,26 @@ impl Transcript {
         }
     }
 
+    /// A permission question put to a person. In the transcript because a
+    /// turn that paused for forty minutes and does not say why cannot be
+    /// read on its own — and because the answer changed what the agent
+    /// was then able to do.
+    pub(super) fn asked(&mut self, tool: &str, detail: Option<&str>) {
+        let about = detail.map(|d| format!(" — {d}")).unwrap_or_default();
+        self.write(&truncated(format!("\n**asked about `{tool}`{about}**\n")));
+    }
+
+    /// What the person said. `Cancelled` covers both a refusal to decide
+    /// and a run that was stopped while waiting.
+    pub(super) fn answered(&mut self, decision: &daruda_acp::PermissionDecision) {
+        let said = match decision {
+            daruda_acp::PermissionDecision::Allow { .. } => "allowed",
+            daruda_acp::PermissionDecision::Reject { .. } => "refused",
+            daruda_acp::PermissionDecision::Cancelled => "left unanswered",
+        };
+        self.write(&format!("\n**{said}**\n\n"));
+    }
+
     /// How the turn ended, in the runner's own words — the stop reason, a
     /// failure, or the fact that it was cancelled.
     pub(super) fn ended(&mut self, how: &str) {

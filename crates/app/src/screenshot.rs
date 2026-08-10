@@ -500,7 +500,8 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::Toast
         | ScreenshotScenario::PaneContextMenu
         | ScreenshotScenario::FlowPicker
-        | ScreenshotScenario::FlowRunning => None,
+        | ScreenshotScenario::FlowRunning
+        | ScreenshotScenario::FlowAsking => None,
     }
 }
 

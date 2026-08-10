@@ -254,6 +254,277 @@ async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut 
     });
 }
 
+/// The chip spans lanes and the panel does not — that split is the whole
+/// reason both exist. A panel showing another lane's run would offer to
+/// answer a question beside a run history that has nothing to do with it.
+#[gpui::test]
+async fn the_panel_lists_only_the_active_lane_while_the_chip_lists_every_one(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    ws.update(cx, |ws, _cx| {
+        let here = ws.active;
+        let elsewhere = daruda_store::project::LaneRef {
+            project: here.project,
+            lane: here.lane + 1,
+        };
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        ws.seed_flow_run_for_test(elsewhere, lane.path().join("run-elsewhere"));
+
+        let panel: Vec<_> = ws
+            .flow_rows_for_active_lane()
+            .into_iter()
+            .map(|row| row.lane)
+            .collect();
+        assert_eq!(panel, vec![here], "the panel reached into another lane");
+
+        assert_eq!(
+            ws.flow_status_rows().len(),
+            2,
+            "the chip must still see both — it is the cross-lane surface"
+        );
+    });
+}
+
+/// The right dock repaints only when `content_differs` says something
+/// changed, and that method is a hand-written list. A field added without
+/// a line there is invisible: the panel simply never updates, with no
+/// error and no failing test anywhere else.
+#[gpui::test]
+async fn a_started_run_makes_the_right_dock_snapshot_differ(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    let (before, after) = ws.update(cx, |ws, cx| {
+        let before = ws.prepare_right_dock_snapshot(cx);
+        let here = ws.active;
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        let after = ws.prepare_right_dock_snapshot(cx);
+        (before, after)
+    });
+
+    assert!(
+        after.content_differs(&before),
+        "the panel would show a stale run list"
+    );
+    assert!(!after.content_differs(&after), "nothing changed");
+}
+
+/// A finished run left on disk by an earlier session is the only way a
+/// crash is visible at all — v1 computed the status and had no caller, so
+/// `kill -9` could only be seen with `ls`.
+#[gpui::test]
+async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    // One that said how it ended, and one that never got to — which is
+    // exactly what a crash leaves behind.
+    let done = runs.join(crate::workspace::flow_request::run_id(
+        1_786_000_000_000,
+        42,
+        1,
+    ));
+    let crashed = runs.join(crate::workspace::flow_request::run_id(
+        1_786_000_001_000,
+        42,
+        1,
+    ));
+    for dir in [&done, &crashed] {
+        std::fs::create_dir_all(dir).expect("run dir");
+    }
+    std::fs::write(done.join("DONE"), "").expect("marker");
+
+    ws.update(cx, |ws, _cx| {
+        // The tab has to be showing: a lane nobody is looking at must not
+        // cost a directory listing.
+        assert!(
+            ws.flow_history_for_panel().is_none(),
+            "read the disk for a tab that is not open"
+        );
+        ws.right_dock_view = daruda_store::project::RightDockView::Flows;
+
+        let history = ws.flow_history_for_panel().expect("read");
+        let statuses: Vec<_> = history.runs().iter().map(|r| r.status).collect();
+        assert_eq!(
+            statuses,
+            vec![
+                daruda_flow::marker::RunStatus::Unknown,
+                daruda_flow::marker::RunStatus::Done
+            ],
+            "newest first; the unmarked one is the crash evidence"
+        );
+    });
+}
+
+/// Retention runs *during* start-up — after the run announces itself and
+/// before its first node — so the history is re-read when a run leaves
+/// `Starting`, and **only** then.
+///
+/// Both halves matter. Refresh too early (on the announcement) and the
+/// pre-sweep listing sticks for the length of the run; refresh on every
+/// node and a twenty-node flow lists the directory twenty times, which is
+/// the per-frame disk read this cache exists to avoid, only slower to
+/// notice.
+#[gpui::test]
+async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    std::fs::create_dir_all(crate::workspace::flow_paths::runs_dir(lane.path())).expect("runs dir");
+
+    ws.update(cx, |ws, cx| {
+        let here = ws.active;
+        ws.right_dock_view = daruda_store::project::RightDockView::Flows;
+        ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        ws.flow_history_for_panel().expect("primed");
+
+        let started = |node: &str| daruda_flow::event::FlowEvent::NodeStarted {
+            node: node.to_string(),
+            attempt: 1,
+        };
+
+        // Leaving `Starting`: the sweep has happened, so the list is stale.
+        ws.apply_flow_event_for_test(here, &started("design"), cx);
+        assert!(
+            ws.flow_history.is_none(),
+            "a swept run would stay on screen for the length of the run"
+        );
+
+        ws.flow_history_for_panel().expect("re-read");
+        // Every node after the first: the directory has not changed, and
+        // re-reading it per node is the cost this cache exists to avoid.
+        for node in ["test", "review"] {
+            ws.apply_flow_event_for_test(here, &started(node), cx);
+            assert!(
+                ws.flow_history.is_some(),
+                "re-read the directory at node `{node}`"
+            );
+        }
+    });
+}
+
+/// A question has to survive being painted more than once, and an answer
+/// has to name the question it is answering: a surface can still be showing
+/// a resolved question, and that click must do nothing rather than answer
+/// whatever came next.
+#[gpui::test]
+async fn an_answer_only_lands_on_the_question_it_names(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    ws.update(cx, |ws, cx| {
+        let here = ws.active;
+        ws.seed_flow_run_for_test(here, lane.path().join("run"));
+        let (reply_tx, reply_rx) = smol::channel::bounded(1);
+        ws.park_flow_ask_for_test(
+            here,
+            daruda_flow::runner::PendingAsk {
+                node: "design".to_string(),
+                attempt: 1,
+                ask_id: 7,
+                request: daruda_flow::runner::AskRequest {
+                    tool: "Bash".to_string(),
+                    detail: Some("rm -rf build".to_string()),
+                    options: Vec::new(),
+                },
+                reply: reply_tx,
+            },
+            cx,
+        );
+
+        // The panel projects the question, and the projection is what a
+        // click quotes back.
+        let row = ws
+            .flow_rows_for_active_lane()
+            .into_iter()
+            .next()
+            .expect("a row for the parked run");
+        let asking = row.asking.expect("the row carries the question");
+        assert_eq!(asking.ask_id, 7);
+        assert_eq!(asking.tool.as_ref(), "Bash");
+
+        // A stale click — right lane, wrong question.
+        ws.answer_flow_ask(
+            here,
+            6,
+            daruda_acp::PermissionDecision::Allow {
+                option_id: "once".to_string(),
+            },
+            cx,
+        );
+        assert!(
+            reply_rx.try_recv().is_err(),
+            "a click on a resolved question answered the live one"
+        );
+
+        ws.answer_flow_ask(
+            here,
+            7,
+            daruda_acp::PermissionDecision::Allow {
+                option_id: "once".to_string(),
+            },
+            cx,
+        );
+        assert!(
+            matches!(
+                reply_rx.try_recv(),
+                Ok(daruda_acp::PermissionDecision::Allow { .. })
+            ),
+            "the answer never reached the run"
+        );
+
+        // And the question is gone at once. The agent goes back to work for
+        // as long as it likes, so waiting for the run's next event leaves
+        // the buttons up with no sign the click did anything — which reads
+        // as a dead button, and gets answered again.
+        let row = ws
+            .flow_rows_for_active_lane()
+            .into_iter()
+            .next()
+            .expect("the run is still there");
+        assert!(
+            row.asking.is_none(),
+            "the answered question stayed on screen"
+        );
+    });
+}
+
+/// The panel is lane-scoped, so a question raised in a lane you are not
+/// looking at is unanswerable until you get there. The chip is the only
+/// surface that spans lanes, and this is the move it exists to offer —
+/// all three parts of it: the lane, the dock, and the tab.
+#[gpui::test]
+async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppContext) {
+    let lane = tempfile::tempdir().expect("tempdir");
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(lane.path());
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+
+    let here = ws.update(cx, |ws, _cx| ws.active);
+    ws.update(cx, |ws, _cx| {
+        ws.seed_flow_run_for_test(here, lane.path().join("run"));
+    });
+
+    wh.update(cx, |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Start from a closed dock on another tab, so both of the
+            // non-lane parts of the move have something to do.
+            ws.right_dock.update(cx, |d, _| d.is_open = false);
+            ws.set_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
+
+            ws.reveal_flow_run(here, window, cx);
+
+            assert!(
+                ws.right_dock.read(cx).is_open,
+                "revealed a run behind a closed dock"
+            );
+            assert_eq!(
+                ws.right_dock_view,
+                daruda_store::project::RightDockView::Flows,
+                "landed on the wrong tab"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
 /// `load` alone is not the whole of stage 1. A `prompt_file` that is not
 /// there is only knowable with the request's own context, so checking less
 /// here than `Run Flow…` checks means "no problems found" followed by a

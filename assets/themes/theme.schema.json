@@ -68,6 +68,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
+    "flow_attention": {
+      "description": "Maps to `palette::ACCENT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5e6ad2ff"
+    },
     "status_bar_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",

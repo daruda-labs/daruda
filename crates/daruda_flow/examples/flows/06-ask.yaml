@@ -1,0 +1,28 @@
+# 6 — a node that asks a person before it uses a tool.
+#
+# **`mode: default` is what makes this ask at all.** `default` is the one
+# Claude mode that prompts for edits and commands; `bypassPermissions` —
+# which every other example here pins, and which is daruda's own config
+# default — never prompts, so `permission: ask` combined with it is asked
+# nothing and nothing reports that. A flow's mode is not filled in from
+# daruda's configured default the way a chat pane's is: what the file says
+# is the whole of it, so it has to say.
+#
+# Run this one from the app. `examples/run_flow` wires no answering
+# surface, so it refuses the flow at submission — which is the refusal
+# worth seeing too.
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: default
+    permission: ask
+nodes:
+  - id: touch
+    kind: agent
+    output: touched.md
+    timeout: 5m
+    prompt: |
+      Run the shell command `date > /tmp/daruda-flow-ask-probe` using your
+      Bash tool — use the tool, do not simulate it. Then write one line to
+      {{output}} saying you did.

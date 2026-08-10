@@ -137,6 +137,7 @@ fn execute_with(
                     .as_ref()
                     .map(|ask| &**ask as &dyn Fn() -> Option<String>),
                 events: request.events.as_ref(),
+                ask: request.ask.as_ref(),
             },
             runner,
         )),

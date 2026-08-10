@@ -21,6 +21,7 @@ pub(crate) mod dialog_helpers;
 mod dnd_ops;
 mod durable;
 pub(in crate::workspace) mod error;
+pub(in crate::workspace) mod flow_history;
 mod flow_ops;
 mod flow_paths;
 pub(in crate::workspace) mod flow_request;
@@ -408,6 +409,11 @@ pub struct Workspace {
     pub(in crate::workspace) flow_config: daruda_config::flow::FlowConfig,
     /// Distinguishes two runs this process starts in the same millisecond.
     pub(in crate::workspace) flow_run_counter: u32,
+    /// The active lane's past runs, read from disk. `None` means "not read
+    /// yet, or something made it wrong" — the snapshot rebuilds it when the
+    /// Flows tab needs it, so invalidating is a single assignment and there
+    /// is no second path that could refresh it into disagreement.
+    pub(in crate::workspace) flow_history: Option<flow_history::FlowHistory>,
     /// Cached git status per (project, lane). Refreshed when the
     /// Git Changes view is activated or after a commit. Only entries
     /// that have been fetched at least once are present; missing =
@@ -1157,6 +1163,7 @@ impl Workspace {
             lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
             flow_picker: command::flow_picker::FlowPicker::default(),
             flow_runs: HashMap::new(),
+            flow_history: None,
             flow_config: config.flow.clone(),
             flow_run_counter: 0,
             git_status_cache: HashMap::new(),

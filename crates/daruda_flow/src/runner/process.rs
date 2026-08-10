@@ -100,6 +100,8 @@ impl ProcessRunner {
             outcome,
             artifacts,
             usage: None,
+            // A shell step opens no session, so nothing can ask.
+            waiting: crate::runner::Waiting::default(),
         }
     }
 
@@ -151,6 +153,7 @@ fn failed(artifacts: Vec<PathBuf>, message: String) -> RunResult {
         outcome: Err(NodeFailure::SessionError(message)),
         artifacts,
         usage: None,
+        waiting: crate::runner::Waiting::default(),
     }
 }
 
@@ -214,7 +217,6 @@ impl NodeRunner for ProcessRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::PermissionPolicy;
     use crate::runner::CancelToken;
     use std::path::Path;
     use std::time::Duration;
@@ -253,7 +255,7 @@ mod tests {
                 output: None,
                 evidence_seq: 1,
                 timeout: self.timeout,
-                permission: PermissionPolicy::Deny,
+                permission: crate::runner::Permission::Deny,
                 cancel: &self.cancel,
             }
         }

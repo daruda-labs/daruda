@@ -100,6 +100,10 @@ fn main() {
             move || git_status(&cwd)
         })),
         events: Some(tx),
+        // No answering surface: this runner prints events, it does not
+        // offer buttons. A flow that could reach `permission: ask` is
+        // refused at submission rather than parking forever.
+        ask: None,
     };
 
     // Drained on another thread: the stream is unbounded and never awaited by

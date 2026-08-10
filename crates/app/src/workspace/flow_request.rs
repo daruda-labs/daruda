@@ -52,6 +52,10 @@ pub(in crate::workspace) struct FlowSubmission {
     pub request: RunRequest,
     pub node_install_dir: PathBuf,
     pub events: smol::channel::Receiver<FlowEvent>,
+    /// Where the run's permission questions arrive. A second pump rather
+    /// than a `FlowEvent` variant: wiring this is what declares the app can
+    /// answer, and the engine's validation reads exactly that field.
+    pub asks: smol::channel::Receiver<daruda_flow::runner::PendingAsk>,
 }
 
 /// Every env var to unset before a command node runs: the union of what
@@ -104,6 +108,27 @@ pub(in crate::workspace) fn referenced_agents(
 /// the same millisecond, and the counter separates two runs from one app.
 pub(in crate::workspace) fn run_id(millis: u128, pid: u32, counter: u32) -> String {
     format!("{millis:016x}-{pid:08x}-{counter:04x}")
+}
+
+/// When a run started, read back out of its id.
+///
+/// Deliberately here rather than beside the reader: the id's layout is the
+/// host's, and `daruda_flow` says so — its retention sweep notes that "a
+/// host using a different id scheme would silently have this delete the
+/// wrong ones". One place builds the format and reads it, so the two
+/// cannot drift.
+///
+/// `None` for any name this host did not make (a hand-created directory,
+/// or a run from a future scheme), which the caller shows without a time
+/// rather than guessing one from the directory's mtime.
+pub(in crate::workspace) fn run_started_at(run_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let (millis, rest) = run_id.split_once('-')?;
+    // Both remaining fields must be there: a bare 16-hex name is not this
+    // scheme, and accepting it would date arbitrary directories.
+    if millis.len() != 16 || !rest.contains('-') {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(i64::from_str_radix(millis, 16).ok()?)
 }
 
 impl Workspace {
@@ -165,6 +190,7 @@ impl Workspace {
         let agents = self.flow_agent_catalog(&cwd, purpose, &referenced_agents(&loaded), cx)?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
         let (tx, rx) = smol::channel::unbounded();
+        let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         let request = RunRequest {
             loaded,
@@ -180,11 +206,13 @@ impl Workspace {
             is_alive: Box::new(process_is_alive),
             git_status: Some(Box::new(move || git_status(&cwd))),
             events: Some(tx),
+            ask: Some(ask_tx),
         };
         Ok(FlowSubmission {
             request,
             node_install_dir,
             events: rx,
+            asks: ask_rx,
         })
     }
 
@@ -392,6 +420,35 @@ nodes:
             union_strip_env(&agents),
             vec!["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
         );
+    }
+
+    /// The panel dates a past run by decoding its directory name, so the
+    /// two halves of that format have to stay one thing. Change the layout
+    /// in `run_id` alone and every past run loses its time.
+    #[test]
+    fn a_run_id_carries_back_the_time_it_was_made() {
+        let millis = 1_786_000_000_000u128;
+        let decoded = run_started_at(&run_id(millis, 42, 1)).expect("decodes");
+        assert_eq!(decoded.timestamp_millis(), millis as i64);
+    }
+
+    /// Anything this host did not name gets no time rather than a wrong
+    /// one — a user's own directory under `flow-runs/` must not be dated
+    /// from whatever its name happens to parse as.
+    #[test]
+    fn a_name_that_is_not_a_run_id_decodes_to_nothing() {
+        for name in [
+            "scratch",
+            "",
+            // Right shape, not hex.
+            "zzzzzzzzzzzzzzzz-0000002a-0001",
+            // Hex, but not the full fixed width.
+            "1786-0000002a-0001",
+            // The clock alone is not the scheme.
+            "0000019fbe1f8a00",
+        ] {
+            assert!(run_started_at(name).is_none(), "{name} was dated");
+        }
     }
 
     /// Retention deletes the oldest runs by sorting directory names, so a

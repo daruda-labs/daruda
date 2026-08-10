@@ -286,6 +286,60 @@ pub fn right_panel_tab_tools() -> String {
 pub fn right_panel_tab_tasks() -> String {
     rust_i18n::t!("dock.right_tab_tasks").into_owned()
 }
+pub fn right_panel_tab_flows() -> String {
+    rust_i18n::t!("dock.right_tab_flows").into_owned()
+}
+
+/// Shown when the active lane has no flow running. Says "this lane"
+/// deliberately: a run in another lane is still going, and the status bar
+/// chip is what says so.
+pub fn right_panel_flow_empty() -> String {
+    rust_i18n::t!("flow.panel_empty").into_owned()
+}
+pub fn right_panel_flow_running() -> String {
+    rust_i18n::t!("flow.panel_running").into_owned()
+}
+pub fn right_panel_flow_stop() -> String {
+    rust_i18n::t!("flow.panel_stop").into_owned()
+}
+pub fn right_panel_flow_live_heading() -> String {
+    rust_i18n::t!("flow.panel_live_heading").into_owned()
+}
+pub fn right_panel_flow_past_heading() -> String {
+    rust_i18n::t!("flow.panel_past_heading").into_owned()
+}
+pub fn right_panel_flow_past_empty() -> String {
+    rust_i18n::t!("flow.panel_past_empty").into_owned()
+}
+/// How many finished runs survive a sweep. Said once under the list so a
+/// run vanishing from it reads as retention rather than as a loss.
+pub fn right_panel_flow_retention(keep: usize) -> String {
+    rust_i18n::t!("flow.panel_retention", keep = keep).into_owned()
+}
+
+/// A past run's start time, decoded from its id. Local time, since the
+/// question it answers is "was that the one I ran before lunch".
+pub fn flow_run_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format("%m-%d %H:%M")
+        .to_string()
+}
+
+/// How a finished run ended. `Running` and `Crashed` are not markers the
+/// engine writes — they are read from the lock, which is why a run that
+/// died with the app can be told from one that is still going.
+pub fn flow_run_status(status: daruda_flow::marker::RunStatus) -> String {
+    use daruda_flow::marker::RunStatus;
+    match status {
+        RunStatus::Done => rust_i18n::t!("flow.status_done"),
+        RunStatus::Failed => rust_i18n::t!("flow.status_failed"),
+        RunStatus::Canceled => rust_i18n::t!("flow.status_canceled"),
+        RunStatus::Running => rust_i18n::t!("flow.status_running"),
+        RunStatus::Crashed => rust_i18n::t!("flow.status_crashed"),
+        RunStatus::Unknown => rust_i18n::t!("flow.status_unknown"),
+    }
+    .into_owned()
+}
 
 // ============================================================================
 // Dock (left dock) tab labels
@@ -4042,6 +4096,16 @@ pub fn status_bar_flow_stage_node_retry(node: &str, attempt: u32) -> String {
 pub fn status_bar_flow_stage_rederiving(gate: &str) -> String {
     rust_i18n::t!("flow.stage_rederiving", gate => gate).into_owned()
 }
+/// Waiting on a person. Names the tool because "waiting for approval" with
+/// no object is not something a user can act on from the chip alone.
+/// The chip while a run is waiting on a person. A count rather than a name:
+/// the row underneath says which, and this has to fit a status bar.
+pub fn status_bar_flow_chip_asking(waiting: usize) -> String {
+    rust_i18n::t!("flow.chip_asking", waiting => waiting).into_owned()
+}
+pub fn status_bar_flow_stage_asking(node: &str, tool: &str) -> String {
+    rust_i18n::t!("flow.stage_asking", node => node, tool => tool).into_owned()
+}
 pub fn status_bar_flow_stage_fixing(gate: &str) -> String {
     rust_i18n::t!("flow.stage_fixing", gate => gate).into_owned()
 }
@@ -4152,6 +4216,7 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::UnknownDep { dep } => rust_i18n::t!("flow.issue_unknown_dep", dep => dep),
         K::Cycle => rust_i18n::t!("flow.issue_cycle"),
         K::UnknownAgent { id } => rust_i18n::t!("flow.issue_unknown_agent", id => id),
+        K::NobodyToAsk => rust_i18n::t!("flow.issue_nobody_to_ask"),
         K::MissingPromptFile { field, path } => rust_i18n::t!(
             "flow.issue_missing_prompt_file",
             field => field,

@@ -4,7 +4,7 @@
 
 use crate::NodeId;
 use crate::error::{ValidationIssue, ValidationKind};
-use crate::model::{AgentFail, NodeKind, Prompt};
+use crate::model::{AgentFail, NodeKind, PermissionPolicy, Prompt};
 use daruda_acp::LaunchSpec;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -41,6 +41,15 @@ pub struct RunRequest {
     /// stops reading cannot slow or stop the run; `None` is a host that does
     /// not watch, which is most of them.
     pub events: Option<smol::channel::Sender<crate::event::FlowEvent>>,
+    /// Where a `permission: ask` node puts its question. Only a host that
+    /// built somewhere to answer wires this, so **its presence is the
+    /// capability declaration** — which is why `validate_request` reads it
+    /// rather than `events`.
+    ///
+    /// The distinction is not academic: `examples/run_flow.rs` passes an
+    /// `events` channel and only prints what arrives, so keying on that
+    /// would let an `ask` flow start there and park forever.
+    pub ask: Option<smol::channel::Sender<crate::runner::PendingAsk>>,
 }
 
 /// A cost ceiling is only meaningful in a currency, and two currencies do
@@ -137,7 +146,39 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
         );
     }
 
+    check_someone_can_answer(request, &mut issues);
     issues
+}
+
+/// Refuse a run that could put a question to a person this host cannot
+/// reach. Without it the run parks and only a Stop ends it.
+///
+/// The default agent counts even when no node names `ask`: a repair's
+/// `fix` session runs as `flow.default_agent` and inherits its policy, so
+/// a flow of nothing but `deny` nodes can still ask.
+fn check_someone_can_answer(request: &RunRequest, issues: &mut Vec<ValidationIssue>) {
+    if request.ask.is_some() {
+        return;
+    }
+    let flow = request.loaded.flow();
+    let node_asks = flow.nodes.iter().find_map(|node| match &node.kind {
+        NodeKind::Agent { agent, .. } if agent.permission == PermissionPolicy::Ask => {
+            Some(node.id.clone())
+        }
+        _ => None,
+    });
+    let repair_asks = flow
+        .default_agent
+        .as_ref()
+        .is_some_and(|agent| agent.permission == PermissionPolicy::Ask);
+    if node_asks.is_none() && !repair_asks {
+        return;
+    }
+    issues.push(ValidationIssue {
+        node: node_asks,
+        kind: ValidationKind::NobodyToAsk,
+        message: "this run asks a person for permission but was given no way to ask".to_string(),
+    });
 }
 
 fn check_agent_id(
@@ -299,6 +340,7 @@ mod tests {
             is_alive: Box::new(|_| true),
             git_status: None,
             events: None,
+            ask: None,
         }
     }
 
@@ -517,5 +559,83 @@ nodes:
                 .iter()
                 .any(|i| matches!(i.kind, ValidationKind::MissingPromptFile { .. }))
         );
+    }
+
+    const ASKS: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: a
+    kind: agent
+    agent: { id: claude, mode: default, permission: ask }
+    output: a.md
+    prompt: write
+";
+
+    /// Only the *repair* can ask: no node names `ask`, but the fix session
+    /// runs as `defaults.agent` and inherits its policy. Checking nodes
+    /// alone lets this flow start and park with nobody to release it.
+    const REPAIR_ASKS: &str = "\
+version: 1
+defaults: { agent: { id: claude, mode: default, permission: ask } }
+nodes:
+  - id: gate
+    kind: command
+    run: \"true\"
+    on_fail:
+      repair:
+        fix: fix it, see {{attempts}}
+        max_attempts: 2
+        wait: 0s
+";
+
+    /// **A channel is not a capability.** `examples/run_flow.rs` hands over
+    /// an `events` sender and only *prints* what arrives — so keying this
+    /// check on `events` would let an `ask` flow start there and park until
+    /// somebody noticed. The port a host wires only to answer questions is
+    /// the one thing that means it can.
+    #[test]
+    fn an_ask_flow_is_refused_when_only_the_narration_channel_is_wired() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut req = request_for(ASKS, &["claude"], dir.path());
+        let (tx, _rx) = smol::channel::unbounded();
+        req.events = Some(tx);
+
+        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
+        assert!(
+            kinds.contains(&ValidationKind::NobodyToAsk),
+            "an ask flow was accepted with nowhere to ask: {kinds:?}"
+        );
+    }
+
+    /// The same refusal for a flow only a repair can make ask.
+    #[test]
+    fn a_flow_whose_only_asker_is_its_repair_is_refused_too() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let req = request_for(REPAIR_ASKS, &["claude"], dir.path());
+        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
+        assert!(kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
+    }
+
+    /// And a host that did wire the port runs.
+    #[test]
+    fn an_ask_flow_with_somewhere_to_ask_is_accepted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut req = request_for(ASKS, &["claude"], dir.path());
+        let (tx, _rx) = smol::channel::unbounded();
+        req.ask = Some(tx);
+
+        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
+        assert!(!kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
+    }
+
+    /// A flow nobody would ever ask about is unaffected — the check must
+    /// not become a reason every host needs an answering surface.
+    #[test]
+    fn a_flow_that_never_asks_needs_no_answering_surface() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let req = request_for(AGENT_FLOW, &["claude"], dir.path());
+        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
+        assert!(!kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
     }
 }
