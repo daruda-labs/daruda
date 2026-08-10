@@ -73,6 +73,28 @@ pub(in crate::workspace) fn union_strip_env(agents: &HashMap<String, LaunchSpec>
     names
 }
 
+/// Every agent id this flow can actually launch: the ones its nodes name,
+/// plus the default the repair's fix session runs as — which may be no
+/// node's agent at all.
+///
+/// Used only to decide what the *lane* has to support. The credential
+/// strip list below stays wider on purpose: a command node should not
+/// inherit any configured account's credentials, whether or not this
+/// particular flow launches that agent.
+pub(in crate::workspace) fn referenced_agents(
+    loaded: &daruda_flow::LoadedFlow,
+) -> std::collections::HashSet<String> {
+    let flow = loaded.flow();
+    flow.nodes
+        .iter()
+        .filter_map(|node| match &node.kind {
+            daruda_flow::model::NodeKind::Agent { agent, .. } => Some(agent.id.clone()),
+            daruda_flow::model::NodeKind::Command { .. } => None,
+        })
+        .chain(flow.default_agent.iter().map(|a| a.id.clone()))
+        .collect()
+}
+
 /// A run id that sorts in the order runs were made.
 ///
 /// Retention sweeps run directories by name and only that ordering makes
@@ -140,7 +162,7 @@ impl Workspace {
         })?;
         let loaded = daruda_flow::load(&text).map_err(FlowSubmitError::Load)?;
 
-        let agents = self.flow_agent_catalog(&cwd, purpose, cx)?;
+        let agents = self.flow_agent_catalog(&cwd, purpose, &referenced_agents(&loaded), cx)?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
         let (tx, rx) = smol::channel::unbounded();
 
@@ -175,6 +197,7 @@ impl Workspace {
         &mut self,
         cwd: &Path,
         purpose: FlowPurpose,
+        referenced: &std::collections::HashSet<String>,
         cx: &mut Context<Self>,
     ) -> Result<HashMap<String, LaunchSpec>, FlowSubmitError> {
         let pane_cwd = PaneCwd::Local(cwd.to_path_buf());
@@ -200,9 +223,14 @@ impl Workspace {
             // the engine's contract has only one field for both. Refusing
             // is honest; running the gates locally and the agents remotely
             // would be a split the user has no way to see.
-            if resolved_host
-                .as_ref()
-                .is_some_and(daruda_store::project::LaneSessionHost::is_remote)
+            // Only for an agent this flow actually names. A catalog entry
+            // that happens to be remote says nothing about a command-only
+            // flow, or one that runs entirely on a local agent — refusing
+            // those would be refusing on a fact the flow does not depend on.
+            if referenced.contains(&id)
+                && resolved_host
+                    .as_ref()
+                    .is_some_and(daruda_store::project::LaneSessionHost::is_remote)
             {
                 return Err(FlowSubmitError::RemoteLane { agent: id });
             }
@@ -311,6 +339,42 @@ mod tests {
             command: "adapter".to_string(),
             strip_env: strip.iter().map(|s| (*s).to_string()).collect(),
         }
+    }
+
+    /// What the lane has to support is what the flow can launch, and a
+    /// command-only flow launches nothing. Keyed off the whole configured
+    /// catalog instead, a single remote agent in the user's settings
+    /// refused every flow in that lane — on a fact none of them depend on.
+    #[test]
+    fn only_the_agents_a_flow_can_launch_are_its_own() {
+        let command_only = daruda_flow::load(
+            "version: 1\nnodes:\n  - id: g\n    kind: command\n    run: \"true\"\n",
+        )
+        .expect("loads");
+        assert!(referenced_agents(&command_only).is_empty());
+
+        // The repair's fix runs as `defaults.agent`, which may be no
+        // node's agent — so the default counts even when nothing names it.
+        let repairing = daruda_flow::load(
+            "\
+version: 1
+defaults:
+  agent: { id: claude, mode: bypassPermissions }
+nodes:
+  - id: g
+    kind: command
+    run: \"true\"
+    on_fail:
+      repair:
+        fix: fix it from {{attempts}}
+        max_attempts: 2
+",
+        )
+        .expect("loads");
+        assert_eq!(
+            referenced_agents(&repairing),
+            std::collections::HashSet::from(["claude".to_string()])
+        );
     }
 
     /// The security property design §9 names: a command node inherits the

@@ -987,6 +987,8 @@ flow:
   issue_agent_id_without_mode: "에이전트는 지정했지만 어떤 모드로 돌릴지는 지정하지 않았습니다"
   issue_unknown_version: "이 빌드는 버전 %{version} 플로우를 실행할 줄 모릅니다"
   issue_unreachable_output_ref: "%{referenced}의 출력을 읽는데, %{referenced}가 먼저 실행된다는 보장이 없습니다"
+  issue_unknown_field: "%{field}이라는 필드가 없습니다 — 철자를 확인하세요"
+  issue_conflicting_field: "%{wins}와 %{field}를 함께 지정했는데, %{wins}만 적용됩니다"
   issue_duplicate_output: "다른 노드와 같은 파일에 씁니다"
   issue_output_escapes_run_dir: "런 디렉터리 밖에 씁니다"
   issue_rerun_not_an_ancestor: "%{root}을(를) 재실행 대상으로 지정했지만, %{root}은(는) 이 게이트보다 먼저 실행되지 않으므로 다시 돌려도 판정이 달라지지 않습니다"

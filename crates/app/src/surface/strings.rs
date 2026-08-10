@@ -4130,6 +4130,10 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::UnreachableOutputRef { referenced } => {
             rust_i18n::t!("flow.issue_unreachable_output_ref", referenced => referenced)
         }
+        K::UnknownField { field } => rust_i18n::t!("flow.issue_unknown_field", field => field),
+        K::ConflictingField { field, wins } => {
+            rust_i18n::t!("flow.issue_conflicting_field", field => field, wins => wins)
+        }
         K::DuplicateOutput => rust_i18n::t!("flow.issue_duplicate_output"),
         K::OutputEscapesRunDir => rust_i18n::t!("flow.issue_output_escapes_run_dir"),
         K::RerunNotAnAncestor { root } => {

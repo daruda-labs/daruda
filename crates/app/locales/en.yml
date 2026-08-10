@@ -987,6 +987,8 @@ flow:
   issue_agent_id_without_mode: "names its own agent but not the mode to run it in"
   issue_unknown_version: "this build does not know how to run a version %{version} flow"
   issue_unreachable_output_ref: "reads %{referenced}'s output, but %{referenced} is not guaranteed to have run first"
+  issue_unknown_field: "has no field %{field} — check the spelling"
+  issue_conflicting_field: "names %{field} as well as %{wins}, and only %{wins} is used"
   issue_duplicate_output: "writes the same file as another node"
   issue_output_escapes_run_dir: "writes outside the run directory"
   issue_rerun_not_an_ancestor: "lists %{root} for rerun, but %{root} does not run before this gate, so re-running it cannot change the verdict"

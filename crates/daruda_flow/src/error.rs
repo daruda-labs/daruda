@@ -55,6 +55,15 @@ pub enum ValidationKind {
     /// from the id, so a `/` or a `..` in one would move a failed
     /// attempt's evidence outside the run directory.
     InvalidNodeId,
+    /// A key the schema does not have. Reported rather than ignored
+    /// because the fields most worth mistyping — `deps`, `timeout`,
+    /// `on_fail` — decide execution order and failure handling, and a
+    /// silently-dropped one runs a different flow than the file describes.
+    UnknownField { field: String },
+    /// Both halves of an either-or pair, where one silently wins:
+    /// `prompt` with `prompt_file`, or `hint` with `hint_file`. The
+    /// ignored one is usually the one the author was editing.
+    ConflictingField { field: String, wins: &'static str },
     /// An `output` under the directory the engine keeps its own artifacts
     /// in. Both would then write the same names, and archiving an output
     /// onto itself leaves the failed attempt's file live.

@@ -38,6 +38,13 @@ impl LoadedFlow {
 /// Parse, merge, build the graph, and run the graph-dependent rules.
 pub fn load(text: &str) -> Result<LoadedFlow, FlowError> {
     let file = parse::parse_flow_file(text)?;
+    // After the shape parses and before anything is merged: these are the
+    // keys serde could not police itself (see `parse::schema_issues`), and
+    // a node whose `deps` was mistyped must not reach the graph builder.
+    let issues = parse::schema_issues(text);
+    if !issues.is_empty() {
+        return Err(FlowError::Validate(issues));
+    }
     let flow = resolve::resolve(file).map_err(FlowError::Validate)?;
     let graph = FlowGraph::build(&flow).map_err(|e| FlowError::Validate(vec![graph_issue(e)]))?;
     let issues = validate::validate(&flow, &graph);
