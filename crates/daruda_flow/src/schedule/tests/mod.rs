@@ -218,6 +218,7 @@ mod budgets;
 mod cancel;
 mod lifecycle;
 mod ordering;
+mod parallel;
 mod records;
 mod repair;
 mod resuming;

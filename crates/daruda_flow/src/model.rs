@@ -13,6 +13,12 @@ pub struct Flow {
     /// resolved. It travels on the flow so a host cannot report a name
     /// other than the one that was actually applied.
     pub profile: Option<String>,
+    /// How many nodes may run at once, at least one.
+    ///
+    /// Nodes sharing a working directory are still run one at a time
+    /// whatever this says — see `crate::schedule`. This is a ceiling, not
+    /// a promise.
+    pub parallel: usize,
     /// The agent a repair's `fix` session runs as. `None` means the file
     /// names no unambiguous repair agent — legal only when it never repairs.
     pub default_agent: Option<AgentSpec>,

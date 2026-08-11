@@ -46,6 +46,12 @@ pub struct Defaults {
     pub timeout: Option<Duration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentOverride>,
+    /// How many nodes may run at once. Absent is one — the flow says when
+    /// it wants more, because the engine cannot know whether two of its
+    /// nodes are safe to overlap and guessing wrong corrupts a working
+    /// tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

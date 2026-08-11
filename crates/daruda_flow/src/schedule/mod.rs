@@ -200,18 +200,36 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         .collect();
 
     while !waiting.is_empty() {
-        let Some(next) = waiting.iter().position(|id| deps_are_done(flow, id, &done)) else {
+        let batch = take_ready_batch(flow, &mut waiting, &done, flow.parallel);
+        if batch.is_empty() {
             // Nothing ready and nothing in flight. Only a cycle can produce
             // that, and `FlowGraph::build` refuses those — so this is a
             // graph nobody could have handed us.
             break;
-        };
-        let id = waiting.remove(next);
-        if let Err(stopped) = run.drive(&id).await {
-            outcome = stopped;
+        }
+        // A wave at a time: everything started together is awaited together
+        // before the next set is chosen. A rolling window would start
+        // newly-ready nodes sooner, and would also mean a node still in
+        // flight when another one fails — which is the case that needs
+        // cancelling half-written work out of a directory. Waves have no
+        // such case: when the run stops, nothing is running.
+        let results = join_all(batch.iter().map(|id| run.drive(id)).collect()).await;
+        for (id, result) in batch.into_iter().zip(results) {
+            match result {
+                Ok(()) => {
+                    done.insert(id);
+                }
+                // The first failure in declaration order, because the batch
+                // was chosen in that order — so which of two simultaneous
+                // failures ends the run does not depend on which agent was
+                // slower.
+                Err(stopped) if matches!(outcome, RunOutcome::Done) => outcome = stopped,
+                Err(_) => {}
+            }
+        }
+        if !matches!(outcome, RunOutcome::Done) {
             break;
         }
-        done.insert(id);
     }
     run.finish(outcome)
 }
@@ -815,6 +833,71 @@ impl Run<'_> {
             },
         }
     }
+}
+
+/// The next set of nodes to run together: ready, in declaration order, at
+/// most `parallel` of them, and **no two sharing a working directory**.
+///
+/// That last rule is the whole safety argument. Two agents editing one tree
+/// at once corrupt each other, and no amount of care inside a node prevents
+/// it — so nodes that would share a directory are simply not put in the
+/// same wave. A flow asking for eight at once still gets one at a time if
+/// all eight work in the same place.
+fn take_ready_batch(
+    flow: &Flow,
+    waiting: &mut Vec<NodeId>,
+    done: &HashSet<NodeId>,
+    parallel: usize,
+) -> Vec<NodeId> {
+    let mut batch: Vec<NodeId> = Vec::new();
+    let mut taken_dirs: Vec<Option<&Path>> = Vec::new();
+    waiting.retain(|id| {
+        if batch.len() >= parallel || !deps_are_done(flow, id, done) {
+            return true;
+        }
+        let dir = flow
+            .nodes
+            .iter()
+            .find(|n| &n.id == id)
+            .and_then(|n| n.cwd.as_deref());
+        if taken_dirs.contains(&dir) {
+            return true;
+        }
+        taken_dirs.push(dir);
+        batch.push(id.clone());
+        false
+    });
+    batch
+}
+
+/// Every future to completion, in one place.
+///
+/// Hand-rolled because `futures-lite` — what `smol` brings — has `zip` for
+/// two and nothing for a list, and one screenful here is a better trade
+/// than a dependency the rest of the crate would inherit. Re-polling the
+/// pending ones on every wake is wasteful in principle and invisible at
+/// eight futures, none of which is CPU-bound.
+async fn join_all<T>(mut futures: Vec<Pin<Box<dyn Future<Output = T> + '_>>>) -> Vec<T> {
+    let mut settled: Vec<Option<T>> = (0..futures.len()).map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (slot, future) in settled.iter_mut().zip(futures.iter_mut()) {
+            if slot.is_some() {
+                continue;
+            }
+            match future.as_mut().poll(cx) {
+                std::task::Poll::Ready(value) => *slot = Some(value),
+                std::task::Poll::Pending => pending = true,
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    settled.into_iter().flatten().collect()
 }
 
 /// Whether everything this node waits on has finished.

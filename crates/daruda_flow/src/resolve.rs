@@ -24,6 +24,10 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(5);
 /// The `max_attempts` floor is 2, not 1: one attempt is what `halt` already
 /// means, so allowing 1 would give the same behaviour two spellings.
 pub const MAX_ATTEMPTS_RANGE: (u32, u32) = (2, 5);
+/// One is serial. The ceiling is not a machine limit — every node here is
+/// an agent session or a subprocess, and a flow asking for dozens at once
+/// has almost certainly mistaken this for a thread pool.
+pub const PARALLEL_RANGE: (usize, usize) = (1, 8);
 /// A retry that waits a full minute is almost certainly a typo; the ceiling
 /// keeps one from parking the run.
 pub const WAIT_RANGE: (Duration, Duration) = (Duration::ZERO, Duration::from_secs(60));
@@ -125,6 +129,13 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
     if issues.is_empty() {
         Ok(Flow {
             version: file.version,
+            // Clamped rather than refused: a number outside the range is a
+            // wish about speed, not a mistake about meaning, and the same
+            // reasoning `max_attempts` is clamped under.
+            parallel: defaults
+                .parallel
+                .unwrap_or(1)
+                .clamp(PARALLEL_RANGE.0, PARALLEL_RANGE.1),
             profile: profile.map(str::to_string),
             default_agent,
             nodes,
@@ -165,6 +176,7 @@ pub fn to_flow_file(flow: &Flow, flow_dir: &Path) -> FlowFile {
         defaults: Defaults {
             timeout: None,
             agent: flow.default_agent.as_ref().map(agent_override),
+            parallel: Some(flow.parallel),
         },
         // Every node below states what it resolved to, so the profile that
         // produced those settings has already been applied. Carrying the
@@ -333,6 +345,7 @@ fn effective_defaults(
     Some(Defaults {
         timeout: over.timeout.or(file.defaults.timeout),
         agent: layer(file.defaults.agent.as_ref(), over.agent.as_ref()),
+        parallel: over.parallel.or(file.defaults.parallel),
     })
 }
 
