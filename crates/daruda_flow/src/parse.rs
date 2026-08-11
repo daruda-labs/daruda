@@ -9,6 +9,7 @@
 use crate::NodeId;
 use crate::error::{FlowError, ValidationIssue, ValidationKind};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,6 +22,16 @@ pub struct FlowFile {
     pub version: u32,
     #[serde(default)]
     pub defaults: Defaults,
+    /// Named layers over `defaults`, chosen at submission. A map rather
+    /// than a list so a profile is named where it is used, and ordered so
+    /// the host offers them the same way twice.
+    ///
+    /// Lives in the flow file rather than in daruda's config for the same
+    /// reason `agent.mode` has no config fallback: the file is committed
+    /// and shared, and a run whose settings came from somewhere else is
+    /// one nobody reading the file can predict.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub profiles: BTreeMap<String, Defaults>,
     pub nodes: Vec<NodeFile>,
 }
 
@@ -425,7 +436,7 @@ nodes:
     /// carries only a count — the per-issue wording is the host's — so a
     /// test asserts on what a consumer matches, not on a string.
     fn kinds_for(text: &str) -> Vec<ValidationKind> {
-        match crate::load(text) {
+        match crate::load(text, None) {
             Err(FlowError::Validate(issues)) => issues.into_iter().map(|i| i.kind).collect(),
             Err(other) => panic!("expected validation issues, got {other}"),
             Ok(_) => panic!("expected the flow to be refused"),
@@ -569,6 +580,7 @@ nodes:
     output: a.md
     prompt: write
 ",
+            None,
         )
         .expect_err("moed is not a known AgentOverride field");
         assert!(matches!(err, FlowError::Parse(_)));
@@ -619,6 +631,7 @@ nodes:
     kind: command
     run: grep -q '^VERDICT: PASS' out.md
 ",
+            None,
         )
         .expect_err("a plain scalar cannot hold \": \"");
         assert!(matches!(err, FlowError::Parse(_)));

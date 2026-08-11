@@ -67,9 +67,9 @@ fn run_yaml_of(text: &str) -> String {
 /// source, which is precisely the un-resolved form.
 #[test]
 fn run_yaml_reloads_as_the_same_resolved_flow() {
-    let loaded = load(INHERITING).expect("valid flow");
+    let loaded = load(INHERITING, None).expect("valid flow");
     let text = run_yaml_of(INHERITING);
-    let reloaded = load(&text).expect("run.yaml is itself a flow file");
+    let reloaded = load(&text, None).expect("run.yaml is itself a flow file");
     assert_eq!(reloaded.flow(), loaded.flow(), "{text}");
 }
 
@@ -715,4 +715,58 @@ fn an_io_failure_writes_the_same_marker_and_still_says_what_it_was() {
         matches!(&end, RunEnd::Io { path, .. } if path.ends_with("prompt.md")),
         "{end:?}"
     );
+}
+
+/// A flow with two ways to run it. `run.yaml` records the settings, but
+/// only `run.md` records *which named way* produced them.
+const PROFILED: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+    model: sonnet
+profiles:
+  cheap:
+    agent:
+      model: haiku
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write it
+";
+
+/// Which profile a run used is not in `run.yaml` — that file states the
+/// resolved settings and deliberately carries no profile list — so `run.md`
+/// is the only place it is written down. Two runs of one flow under two
+/// profiles are otherwise indistinguishable afterwards.
+#[test]
+fn the_record_says_which_profile_the_run_used() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = execute(
+        &request_for_profile(PROFILED, Some("cheap"), dir.path()),
+        &FakeRunner::new(),
+        &CancelToken::default(),
+    );
+    assert_eq!(report.profile.as_deref(), Some("cheap"));
+    let rendered = crate::record::render_run_md(&report);
+    assert!(
+        rendered.contains("**Profile** — `cheap`"),
+        "the report knows, the record does not say: {rendered}"
+    );
+}
+
+/// A run with no profile says nothing about one, rather than inventing a
+/// name for the file as written.
+#[test]
+fn a_run_without_a_profile_leaves_the_line_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = execute(
+        &request_for(PROFILED, dir.path()),
+        &FakeRunner::new(),
+        &CancelToken::default(),
+    );
+    assert_eq!(report.profile, None);
+    assert!(!crate::record::render_run_md(&report).contains("**Profile**"));
 }

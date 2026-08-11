@@ -8,6 +8,11 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Flow {
     pub version: u32,
+    /// The profile these settings were merged under, if one was chosen.
+    /// Provenance rather than an axis — every axis below is already
+    /// resolved. It travels on the flow so a host cannot report a name
+    /// other than the one that was actually applied.
+    pub profile: Option<String>,
     /// The agent a repair's `fix` session runs as. `None` means the file
     /// names no unambiguous repair agent — legal only when it never repairs.
     pub default_agent: Option<AgentSpec>,

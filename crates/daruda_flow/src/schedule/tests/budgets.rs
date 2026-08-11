@@ -262,7 +262,7 @@ fn a_node_never_gets_longer_than_the_run_has_left() {
 
     let keeper = Timekeeper(FakeRunner::new(), std::cell::RefCell::new(Vec::new()));
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load(CHAIN).expect("valid flow");
+    let loaded = load(CHAIN, None).expect("valid flow");
     let budget = Budget {
         // Far less than the nodes' own 10m default.
         deadline: Some(std::time::Instant::now() + Duration::from_secs(2)),
@@ -357,7 +357,7 @@ fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
         std::cell::RefCell::new(Vec::new()),
     );
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load(CHAIN).expect("valid flow");
+    let loaded = load(CHAIN, None).expect("valid flow");
     let budget = Budget {
         deadline: Some(std::time::Instant::now() + Duration::from_secs(1)),
         ..Budget::unlimited()

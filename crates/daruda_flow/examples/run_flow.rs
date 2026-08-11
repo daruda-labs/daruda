@@ -41,7 +41,7 @@ fn main() {
     );
 
     let text = std::fs::read_to_string(&flow_path).expect("the flow file is readable");
-    let loaded = match daruda_flow::load(&text) {
+    let loaded = match daruda_flow::load(&text, None) {
         Ok(loaded) => loaded,
         Err(e) => {
             eprintln!("{e}");

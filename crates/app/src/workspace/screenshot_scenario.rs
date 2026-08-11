@@ -26,6 +26,7 @@ const NAME_SETTINGS: &str = "settings";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 const NAME_FLOW_PICKER: &str = "flow-picker";
+const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
 const NAME_FLOW_RUNNING: &str = "flow-running";
 const NAME_FLOW_ASKING: &str = "flow-asking";
 
@@ -55,6 +56,8 @@ pub(crate) enum ScreenshotScenario {
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
     FlowPicker,
+    /// The second question, for a flow that declares profiles.
+    FlowProfilePicker,
     /// A flow mid-run, so the status bar chip and its dropdown can be seen.
     /// Nothing else puts a run on screen without one actually running.
     FlowRunning,
@@ -76,6 +79,7 @@ impl ScreenshotScenario {
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
+            NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RUNNING => Some(Self::FlowRunning),
             NAME_FLOW_ASKING => Some(Self::FlowAsking),
             _ => name
@@ -107,6 +111,9 @@ pub(crate) fn drive(
                     cx,
                 );
             });
+        }
+        ScreenshotScenario::FlowProfilePicker => {
+            workspace.update(cx, |ws, cx| ws.ask_flow_profile_for_shot(cx));
         }
         ScreenshotScenario::FlowRunning => {
             workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, window, cx));

@@ -106,6 +106,9 @@ pub const RUN_REPORT_FILE: &str = "run.md";
 pub fn render_run_md(report: &RunReport) -> String {
     let mut out = String::from("# Run\n\n");
     out.push_str(&format!("- **Result** — {}\n", result_of(&report.outcome)));
+    if let Some(profile) = &report.profile {
+        out.push_str(&format!("- **Profile** — `{profile}`\n"));
+    }
     out.push_str(&format!(
         "- **Cost limit** — {}\n",
         cost_standing(report.cost.as_ref())

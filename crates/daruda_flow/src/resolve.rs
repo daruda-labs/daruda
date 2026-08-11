@@ -28,16 +28,30 @@ pub const MAX_ATTEMPTS_RANGE: (u32, u32) = (2, 5);
 /// keeps one from parking the run.
 pub const WAIT_RANGE: (Duration, Duration) = (Duration::ZERO, Duration::from_secs(60));
 
-/// Merge `defaults` into every node and produce the executable `Flow`.
-pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
+/// Merge `defaults` — under the chosen profile, if any — into every node
+/// and produce the executable `Flow`.
+pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<ValidationIssue>> {
     let mut issues = Vec::new();
     let mut nodes = Vec::with_capacity(file.nodes.len());
+    if file.profiles.contains_key(RESERVED_PROFILE_NAME) {
+        issues.push(ValidationIssue {
+            node: None,
+            kind: ValidationKind::ReservedProfileName,
+            message: format!(
+                "`{RESERVED_PROFILE_NAME}` is the base layer every profile is folded over, \
+                 so a profile cannot also be called that"
+            ),
+        });
+    }
+    let defaults = match effective_defaults(&file, profile, &mut issues) {
+        Some(defaults) => defaults,
+        // Nothing below can mean anything against settings that were not
+        // resolved, and every issue it found would name the wrong ones.
+        None => return Err(issues),
+    };
 
     for node in file.nodes {
-        let timeout = node
-            .timeout
-            .or(file.defaults.timeout)
-            .unwrap_or(DEFAULT_TIMEOUT);
+        let timeout = node.timeout.or(defaults.timeout).unwrap_or(DEFAULT_TIMEOUT);
         let kind = match node.kind {
             NodeKindFile::Command { run, on_fail } => NodeKind::Command {
                 run,
@@ -62,7 +76,7 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
                             .to_string(),
                     });
                 }
-                match merge_agent(file.defaults.agent.as_ref(), override_.as_ref()) {
+                match merge_agent(defaults.agent.as_ref(), override_.as_ref()) {
                     Some(spec) => NodeKind::Agent {
                         agent: {
                             check_ask_has_a_mode(&spec, Some(&node.id), &mut issues);
@@ -97,8 +111,8 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
     // agent node agrees on the exact same spec; otherwise a repair prompt
     // would run as whichever node happened to appear first, which is not a
     // stable policy.
-    let default_agent = merge_agent(file.defaults.agent.as_ref(), None)
-        .or_else(|| unanimous_agent_from_nodes(&nodes));
+    let default_agent =
+        merge_agent(defaults.agent.as_ref(), None).or_else(|| unanimous_agent_from_nodes(&nodes));
     // A repair's `fix` runs as this one and inherits its policy, so a flow
     // whose nodes never ask can still reach `Ask` through it. Checked
     // before the verdict below, not after — an issue pushed past it would
@@ -110,6 +124,7 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
     if issues.is_empty() {
         Ok(Flow {
             version: file.version,
+            profile: profile.map(str::to_string),
             default_agent,
             nodes,
         })
@@ -122,6 +137,12 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
 /// states the settings it resolved to, so nothing is left to inherit. Lives
 /// here because `resolve` owns the relationship between the two models — a
 /// second module deriving it would be a second thing to keep in step.
+///
+/// [`Flow::profile`] is deliberately **not** round-tripped: it is
+/// provenance, not a setting, and every node below already states what the
+/// profile resolved to. Which named layer produced them is recorded in
+/// `run.md` instead — so a profiled `Flow` reloaded from `run.yaml` differs
+/// from the original in that one field, and only that one.
 ///
 /// `defaults` keeps exactly one thing: [`Flow::default_agent`], the agent a
 /// repair's `fix` runs as. It is not a copy of `defaults.agent` — it also
@@ -144,6 +165,11 @@ pub fn to_flow_file(flow: &Flow, flow_dir: &Path) -> FlowFile {
             timeout: None,
             agent: flow.default_agent.as_ref().map(agent_override),
         },
+        // Every node below states what it resolved to, so the profile that
+        // produced those settings has already been applied. Carrying the
+        // menu into the record would invite reading it as a choice the run
+        // still has.
+        profiles: std::collections::BTreeMap::new(),
         nodes: flow
             .nodes
             .iter()
@@ -255,22 +281,93 @@ fn unanimous_agent_from_nodes(nodes: &[Node]) -> Option<AgentSpec> {
     }
 }
 
-/// Field by field: the node wins per axis, `defaults` fills the rest.
-/// `None` only when neither source names an agent id.
+/// The one name a profile may not take: the file already uses it for the
+/// base layer every profile is folded over.
+const RESERVED_PROFILE_NAME: &str = "defaults";
+
+/// `defaults`, with the named profile folded over it. `None` means the
+/// name is not one of the file's — reported, never silently ignored.
+///
+/// One layer, not two rankings: the order is `defaults` ← `profile` ←
+/// `node`, so a node that pins an axis still wins. A profile that beat the
+/// nodes would make the file unreadable on its own — what a node does
+/// would depend on which profile someone picked.
+fn effective_defaults(
+    file: &FlowFile,
+    profile: Option<&str>,
+    issues: &mut Vec<ValidationIssue>,
+) -> Option<Defaults> {
+    let Some(name) = profile else {
+        return Some(file.defaults.clone());
+    };
+    let Some(over) = file.profiles.get(name) else {
+        issues.push(ValidationIssue {
+            node: None,
+            kind: ValidationKind::UnknownProfile {
+                name: name.to_string(),
+            },
+            message: format!("this flow declares no profile named `{name}`"),
+        });
+        return None;
+    };
+    // The same rule a node follows, for the same reason: a mode carried
+    // over from `defaults` belongs to the agent `defaults` named, so a
+    // layer that switches the agent has to say the mode again.
+    if over.agent.as_ref().and_then(|a| a.id.as_ref()).is_some()
+        && over.agent.as_ref().and_then(|a| a.mode.as_ref()).is_none()
+    {
+        issues.push(ValidationIssue {
+            node: None,
+            kind: ValidationKind::AgentIdWithoutMode,
+            message: format!(
+                "profile `{name}` names its own `agent.id`, so it must also name \
+                              `agent.mode`"
+            ),
+        });
+    }
+    Some(Defaults {
+        timeout: over.timeout.or(file.defaults.timeout),
+        agent: layer(file.defaults.agent.as_ref(), over.agent.as_ref()),
+    })
+}
+
+/// Field by field, the later layer winning per axis. The one merge rule
+/// there is — `defaults` ← `profile` and `defaults` ← `node` are the same
+/// operation, and two copies of it would be two things to keep in step.
+fn layer(base: Option<&AgentOverride>, over: Option<&AgentOverride>) -> Option<AgentOverride> {
+    if base.is_none() {
+        return over.cloned();
+    }
+    if over.is_none() {
+        return base.cloned();
+    }
+    let pick =
+        |f: fn(&AgentOverride) -> Option<String>| over.and_then(f).or_else(|| base.and_then(f));
+    Some(AgentOverride {
+        id: pick(|a| a.id.clone()),
+        model: pick(|a| a.model.clone()),
+        effort: pick(|a| a.effort.clone()),
+        mode: pick(|a| a.mode.clone()),
+        permission: over
+            .and_then(|a| a.permission)
+            .or_else(|| base.and_then(|a| a.permission)),
+    })
+}
+
+/// The node's own layer over the resolved defaults, as the executable
+/// spec. `None` only when neither source names an agent id.
 fn merge_agent(
     defaults: Option<&AgentOverride>,
     node: Option<&AgentOverride>,
 ) -> Option<AgentSpec> {
-    let pick =
-        |f: fn(&AgentOverride) -> Option<String>| node.and_then(f).or_else(|| defaults.and_then(f));
+    let merged = layer(defaults, node)?;
     Some(AgentSpec {
-        id: pick(|a| a.id.clone())?,
-        model: pick(|a| a.model.clone()),
-        effort: pick(|a| a.effort.clone()),
-        mode: pick(|a| a.mode.clone()),
-        permission: node
-            .and_then(|a| a.permission)
-            .or_else(|| defaults.and_then(|a| a.permission))
+        id: merged.id?,
+        model: merged.model,
+        effort: merged.effort,
+        mode: merged.mode,
+        permission: merged
+            .permission
             .map(resolve_permission)
             .unwrap_or(PermissionPolicy::Deny),
     })
@@ -388,6 +485,7 @@ nodes:
     output: a.md
     prompt: write
 ",
+            None,
         )
         .expect_err("a flow that asks with no mode must not resolve");
         let FlowError::Validate(issues) = issues else {
@@ -414,6 +512,7 @@ nodes:
     output: a.md
     prompt: write
 ",
+            None,
         )
         .expect("naming the mode is all it takes");
     }
@@ -436,6 +535,7 @@ nodes:
         max_attempts: 2
         wait: 0s
 ",
+            None,
         )
         .expect_err("the repair agent can ask, so the mode is required");
         let FlowError::Validate(issues) = err else {
@@ -463,6 +563,7 @@ nodes:
     output: a.md
     prompt: write
 ",
+            None,
         )
         .expect("a flow with no `ask` keeps its freedom to omit the mode");
     }
@@ -495,7 +596,7 @@ nodes:
 
     #[test]
     fn node_overrides_merge_field_by_field_against_defaults() {
-        let flow = resolve(parse_flow_file(FLOW).unwrap()).expect("valid flow resolves");
+        let flow = resolve(parse_flow_file(FLOW).unwrap(), None).expect("valid flow resolves");
 
         let design = &flow.nodes[0];
         assert_eq!(
@@ -527,6 +628,7 @@ nodes:
                 "version: 1\nnodes:\n  - id: t\n    kind: command\n    run: \"true\"\n",
             )
             .unwrap(),
+            None,
         )
         .expect("valid flow resolves");
         assert_eq!(flow.nodes[0].timeout, DEFAULT_TIMEOUT);
@@ -549,6 +651,7 @@ nodes:
 ",
             )
             .unwrap(),
+            None,
         )
         .expect("valid flow resolves");
         match &flow.nodes[0].kind {
@@ -582,6 +685,7 @@ nodes:
 ",
             )
             .unwrap(),
+            None,
         )
         .expect_err("no defaults.agent and no node override");
         assert_eq!(issues.len(), 1);
@@ -611,6 +715,7 @@ nodes:
 ",
             )
             .unwrap(),
+            None,
         )
         .expect("valid flow");
         assert_eq!(flow.default_agent.map(|a| a.id), Some("codex".to_string()));
@@ -623,6 +728,7 @@ nodes:
                 "version: 1\nnodes:\n  - id: t\n    kind: command\n    run: \"true\"\n",
             )
             .unwrap(),
+            None,
         )
         .expect("valid flow");
         assert!(flow.default_agent.is_none());
@@ -648,6 +754,7 @@ nodes:
 ",
             )
             .unwrap(),
+            None,
         )
         .expect("valid flow");
         assert!(flow.default_agent.is_none());
@@ -697,10 +804,10 @@ nodes:
 ",
             ),
         ] {
-            let flow = resolve(parse_flow_file(text).unwrap()).expect("valid flow");
+            let flow = resolve(parse_flow_file(text).unwrap(), None).expect("valid flow");
             let regenerated = yaml_serde::to_string(&to_flow_file(&flow, std::path::Path::new("")))
                 .expect("a flow file serializes");
-            let reloaded = resolve(parse_flow_file(&regenerated).expect("parses"))
+            let reloaded = resolve(parse_flow_file(&regenerated).expect("parses"), None)
                 .unwrap_or_else(|issues| panic!("{label}: {issues:?}\n{regenerated}"));
             assert_eq!(reloaded, flow, "{label}: {regenerated}");
         }
@@ -728,6 +835,7 @@ nodes:
 ",
             )
             .unwrap(),
+            None,
         )
         .expect_err("the node names an id but no mode");
         assert!(
@@ -735,5 +843,206 @@ nodes:
                 .iter()
                 .any(|i| matches!(i.kind, ValidationKind::AgentIdWithoutMode))
         );
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use crate::parse::parse_flow_file;
+
+    /// `defaults` names the agent and the mode; the profile changes one
+    /// axis; one node pins another. Every layer is visible in the result.
+    const LAYERED: &str = "\
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: default
+    model: sonnet
+    permission: ask
+profiles:
+  cheap:
+    timeout: 1m
+    agent:
+      model: haiku
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+  - id: b
+    kind: agent
+    output: b.md
+    prompt: write
+    agent:
+      model: opus
+";
+
+    fn resolved(profile: Option<&str>) -> Flow {
+        resolve(parse_flow_file(LAYERED).expect("parses"), profile).expect("resolves")
+    }
+
+    fn model_of(flow: &Flow, id: &str) -> Option<String> {
+        flow.nodes
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| match &n.kind {
+                NodeKind::Agent { agent, .. } => agent.model.clone(),
+                NodeKind::Command { .. } => None,
+            })
+    }
+
+    /// No profile named, nothing changes — the layer costs the flows that
+    /// do not use it nothing.
+    #[test]
+    fn a_run_without_a_profile_resolves_exactly_as_before() {
+        let flow = resolved(None);
+        assert_eq!(model_of(&flow, "a").as_deref(), Some("sonnet"));
+        assert_eq!(flow.nodes[0].timeout, Duration::from_secs(300));
+    }
+
+    /// `defaults` ← `profile` ← `node`. The profile beats `defaults`, and
+    /// the node beats the profile — a profile that won over the nodes
+    /// would make the file unreadable on its own, because what a node does
+    /// would depend on which profile someone picked.
+    #[test]
+    fn a_profile_beats_defaults_and_a_node_beats_the_profile() {
+        let flow = resolved(Some("cheap"));
+        assert_eq!(
+            model_of(&flow, "a").as_deref(),
+            Some("haiku"),
+            "the profile did not reach a node that pins nothing"
+        );
+        assert_eq!(
+            model_of(&flow, "b").as_deref(),
+            Some("opus"),
+            "the profile overrode a node's own choice"
+        );
+    }
+
+    /// A profile names one axis and inherits the rest. Nothing it leaves
+    /// out is cleared — a `model` change must not drop the mode that
+    /// decides whether anyone is ever asked.
+    #[test]
+    fn a_profile_only_replaces_what_it_names() {
+        let flow = resolved(Some("cheap"));
+        let agent = match &flow.nodes[0].kind {
+            NodeKind::Agent { agent, .. } => agent.clone(),
+            NodeKind::Command { .. } => panic!("agent node"),
+        };
+        assert_eq!(agent.id, "claude");
+        assert_eq!(agent.mode.as_deref(), Some("default"));
+        assert_eq!(agent.permission, PermissionPolicy::Ask);
+        assert_eq!(flow.nodes[0].timeout, Duration::from_secs(60), "timeout");
+    }
+
+    /// A name the file does not declare is refused. Falling back to plain
+    /// `defaults` would run the flow with settings nobody picked — under a
+    /// profile named `unattended`, silently attended.
+    #[test]
+    fn a_profile_the_file_does_not_declare_is_refused_by_name() {
+        let issues = resolve(parse_flow_file(LAYERED).expect("parses"), Some("nope"))
+            .expect_err("an unknown profile is not a run");
+        assert!(
+            issues.iter().any(|i| matches!(
+                &i.kind,
+                ValidationKind::UnknownProfile { name } if name == "nope"
+            )),
+            "{issues:?}"
+        );
+    }
+
+    /// The same rule a node follows: a layer that switches the agent has
+    /// to say the mode again, because the one it would inherit belongs to
+    /// the agent it just replaced.
+    #[test]
+    fn a_profile_that_switches_agent_without_a_mode_is_refused() {
+        let file = parse_flow_file(
+            "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: default
+profiles:
+  other:
+    agent:
+      id: codex
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+",
+        )
+        .expect("parses");
+        let issues = resolve(file, Some("other")).expect_err("refused");
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i.kind, ValidationKind::AgentIdWithoutMode)),
+            "{issues:?}"
+        );
+    }
+
+    /// The record says what ran, so the menu of what could have run
+    /// instead has no place in it — every node already states the settings
+    /// the chosen profile produced.
+    #[test]
+    fn the_record_of_a_run_carries_no_profiles() {
+        let flow = resolved(Some("cheap"));
+        let written = to_flow_file(&flow, Path::new("/flow"));
+        assert!(written.profiles.is_empty());
+    }
+
+    /// The host has to know the menu before it can offer it, which is
+    /// before anything can be merged.
+    #[test]
+    fn the_declared_profiles_are_readable_without_resolving() {
+        assert_eq!(crate::load::profiles(LAYERED).expect("parses"), ["cheap"]);
+    }
+}
+
+#[cfg(test)]
+mod reserved_profile_tests {
+    use super::*;
+    use crate::parse::parse_flow_file;
+
+    /// The file spells the base layer `defaults:`, so a profile of that
+    /// name means two things at once — and a host listing the base beside
+    /// the declared ones would show two rows nobody can tell apart, with
+    /// different settings behind them.
+    ///
+    /// Refused whether or not it is the one chosen: the ambiguity is in
+    /// the file, not in the pick.
+    #[test]
+    fn a_profile_cannot_take_the_name_of_the_layer_it_covers() {
+        let text = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+profiles:
+  defaults:
+    timeout: 1m
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+";
+        for chosen in [None, Some("defaults")] {
+            let issues = resolve(parse_flow_file(text).expect("parses"), chosen)
+                .expect_err("a reserved profile name is not a flow");
+            assert!(
+                issues
+                    .iter()
+                    .any(|i| matches!(i.kind, ValidationKind::ReservedProfileName)),
+                "chosen {chosen:?}: {issues:?}"
+            );
+        }
     }
 }

@@ -14,7 +14,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
 use super::Workspace;
-use super::command::flow_picker::{FlowPicker, FlowPurpose};
+use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::flow_request::{FlowSubmission, FlowSubmitError, union_strip_env};
 use crate::surface::strings as s;
 
@@ -199,9 +199,13 @@ impl Workspace {
                 self.report_flow_refusal(FlowSubmitError::LockHeld { pid: holder.pid }, cx);
                 return;
             }
-            _ => self
-                .flow_picker
-                .open(purpose, super::flow_paths::list_flows(&cwd)),
+            _ => self.flow_picker.open(
+                purpose,
+                super::flow_paths::list_flows(
+                    &cwd,
+                    &super::flow_paths::global_flows_dir(&self.data_dir),
+                ),
+            ),
         }
         cx.notify();
     }
@@ -227,6 +231,19 @@ impl Workspace {
     ) {
         let picked = self.flow_picker.focused_pick();
         let was_stopping = matches!(self.flow_picker, FlowPicker::Stopping);
+
+        // A flow that declares profiles has one more question to answer,
+        // so the picker stays up for it. Everything else is decided.
+        if let Some(FlowPick::Flow(purpose, path)) = &picked {
+            let profiles = flow_profiles(path);
+            if !profiles.is_empty() {
+                self.flow_picker
+                    .ask_profile(*purpose, path.clone(), profiles);
+                cx.notify();
+                return;
+            }
+        }
+
         self.flow_picker.close();
         cx.notify();
 
@@ -234,10 +251,12 @@ impl Workspace {
             self.stop_flow_run(cx);
             return;
         }
-        match picked {
-            Some((FlowPurpose::Validate, path)) => self.validate_flow(&path, window, cx),
-            Some((FlowPurpose::Run, path)) => self.submit_flow_run(&path, cx),
-            None => {}
+        let Some((purpose, path, profile)) = acted_on(picked) else {
+            return;
+        };
+        match purpose {
+            FlowPurpose::Validate => self.validate_flow(&path, profile.as_deref(), window, cx),
+            FlowPurpose::Run => self.submit_flow_run(&path, profile.as_deref(), cx),
         }
     }
 
@@ -245,9 +264,15 @@ impl Workspace {
 
     /// Report what can be known without running the flow. Opens no session,
     /// takes no lock, and creates no run directory.
-    fn validate_flow(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    fn validate_flow(
+        &mut self,
+        path: &Path,
+        profile: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let name = file_label(path);
-        let (title, body) = match self.check_flow(path, cx) {
+        let (title, body) = match self.check_flow(path, profile, cx) {
             Ok(issues) if issues.is_empty() => (s::flow_valid_title(), s::flow_valid_body(&name)),
             Ok(issues) => (
                 s::flow_invalid_title(&name, issues.len()),
@@ -272,8 +297,8 @@ impl Workspace {
 
     // ---- Stage 2: the run ----
 
-    fn submit_flow_run(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let submission = match self.build_flow_request(path, cx) {
+    fn submit_flow_run(&mut self, path: &Path, profile: Option<&str>, cx: &mut Context<Self>) {
+        let submission = match self.build_flow_request(path, profile, cx) {
             Ok(submission) => submission,
             Err(e) => {
                 self.report_flow_refusal(e, cx);
@@ -760,6 +785,31 @@ impl Workspace {
         run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
     }
 
+    /// Put the picker on its second question, for `--screenshot`.
+    ///
+    /// Reaches the state directly instead of picking a flow: picking one
+    /// under `FlowPurpose::Run` *submits* it, and a capture that starts a
+    /// real run leaves a run directory behind every time it is taken.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn ask_flow_profile_for_shot(&mut self, cx: &mut Context<Self>) {
+        let Some(cwd) = self.active_lane_root() else {
+            return;
+        };
+        let global = super::flow_paths::global_flows_dir(&self.data_dir);
+        let Some((path, profiles)) = super::flow_paths::list_flows(&cwd, &global)
+            .into_iter()
+            .find_map(|found| {
+                let names = flow_profiles(&found.path);
+                (!names.is_empty()).then_some((found.path, names))
+            })
+        else {
+            return;
+        };
+        self.flow_picker
+            .ask_profile(FlowPurpose::Run, path, profiles);
+        cx.notify();
+    }
+
     /// Put a run on screen without one running, for `--screenshot`. A run
     /// is only visible mid-flight, which no capture can wait for.
     ///
@@ -919,6 +969,29 @@ fn runners_for(request: &daruda_flow::request::RunRequest, node_install_dir: Pat
     }
 }
 
+/// What a pick asks for: the flow, and the profile if a second question
+/// was answered. Separate from the dispatch below so the unpacking is
+/// checkable — the arm that drops the name here is the one that would make
+/// every profiled run silently run as plain `defaults`.
+fn acted_on(picked: Option<FlowPick>) -> Option<(FlowPurpose, PathBuf, Option<String>)> {
+    match picked {
+        Some(FlowPick::Flow(purpose, path)) => Some((purpose, path, None)),
+        Some(FlowPick::Profile(purpose, path, profile)) => Some((purpose, path, profile)),
+        None => None,
+    }
+}
+
+/// The profiles a flow declares, for the second question. A file that
+/// cannot be read or parsed reports none: the run that follows fails on
+/// the same read a moment later and names it properly, and a second
+/// error surface here would say it twice in different words.
+fn flow_profiles(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| daruda_flow::load::profiles(&text).ok())
+        .unwrap_or_default()
+}
+
 /// The run's report, when there is one to open.
 ///
 /// A run the engine refuses before the lock takes nothing and writes
@@ -968,6 +1041,30 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The second question's answer has to survive the unpacking. Dropping
+    /// it here is invisible from either surface — the picker looks right,
+    /// the run starts, and it runs as plain `defaults`.
+    #[test]
+    fn an_answered_profile_reaches_what_the_run_is_built_from() {
+        use super::{FlowPick, FlowPurpose, acted_on};
+        let path = std::path::PathBuf::from("/lane/.daruda/flows/ship.yaml");
+
+        assert_eq!(
+            acted_on(Some(FlowPick::Profile(
+                FlowPurpose::Run,
+                path.clone(),
+                Some("cheap".to_string())
+            ))),
+            Some((FlowPurpose::Run, path.clone(), Some("cheap".to_string())))
+        );
+        // A flow that declares none is run as written, not under a name
+        // invented for it.
+        assert_eq!(
+            acted_on(Some(FlowPick::Flow(FlowPurpose::Validate, path.clone()))),
+            Some((FlowPurpose::Validate, path, None))
+        );
+        assert_eq!(acted_on(None), None);
+    }
     use std::collections::HashMap;
 
     use daruda_acp::LaunchSpec;
@@ -994,7 +1091,7 @@ nodes:
 ";
 
     fn request_with(strip: &[&str]) -> RunRequest {
-        let loaded = daruda_flow::load(MIXED_FLOW).expect("the fixture flow loads");
+        let loaded = daruda_flow::load(MIXED_FLOW, None).expect("the fixture flow loads");
         RunRequest {
             loaded,
             cwd: PathBuf::from("/lane"),

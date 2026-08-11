@@ -73,6 +73,7 @@ nodes:
     deps: [design]
     run: \"grep -q x {{node.design.output}}\"
 ",
+        None,
     )
     .expect("valid flow");
     let runner = FakeRunner::new();
@@ -125,6 +126,7 @@ nodes:
     output: design.md
     prompt_file: gone.md
 ",
+        None,
     )
     .expect("valid flow");
     let runner = FakeRunner::new();
@@ -238,7 +240,7 @@ fn the_shipped_example_flows_still_load() {
         }
         let text = std::fs::read_to_string(&path).expect("readable");
         let loaded =
-            load(&text).unwrap_or_else(|e| panic!("{} does not load: {e}", path.display()));
+            load(&text, None).unwrap_or_else(|e| panic!("{} does not load: {e}", path.display()));
         let flow = loaded.flow();
 
         // A file-backed prompt names a path relative to the flow file, so a

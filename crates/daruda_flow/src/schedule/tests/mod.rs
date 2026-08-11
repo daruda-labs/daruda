@@ -64,7 +64,7 @@ fn run_with(
     budget: Budget,
 ) -> (RunReport, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load(text).expect("valid flow");
+    let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {
             loaded: &loaded,
@@ -110,7 +110,16 @@ nodes:
 /// A run as the host submits it: the lock lives beside the working
 /// directory, and the run id is the run directory's own name.
 pub(super) fn request_for(text: &str, dir: &std::path::Path) -> crate::request::RunRequest {
-    let loaded = load(text).expect("valid flow");
+    request_for_profile(text, None, dir)
+}
+
+/// The same request, run under a named profile.
+pub(super) fn request_for_profile(
+    text: &str,
+    profile: Option<&str>,
+    dir: &std::path::Path,
+) -> crate::request::RunRequest {
+    let loaded = load(text, profile).expect("valid flow");
     crate::request::RunRequest {
         loaded,
         cwd: dir.to_path_buf(),

@@ -227,7 +227,7 @@ mod tests {
                 text.push_str(&format!("    deps: [{}]\n", deps.join(", ")));
             }
         }
-        resolve(parse_flow_file(&text).expect("parses")).expect("resolves")
+        resolve(parse_flow_file(&text).expect("parses"), None).expect("resolves")
     }
 
     //  design --> implement --> test

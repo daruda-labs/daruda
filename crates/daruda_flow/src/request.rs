@@ -328,7 +328,7 @@ mod tests {
     }
 
     fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest {
-        let loaded = load(text).expect("valid flow");
+        let loaded = load(text, None).expect("valid flow");
         RunRequest {
             loaded,
             cwd: dir.to_path_buf(),

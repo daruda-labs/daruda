@@ -139,6 +139,7 @@ impl Accounting {
         outcome: RunOutcome,
         run_dir: std::path::PathBuf,
         budget: &Budget,
+        profile: Option<String>,
     ) -> RunReport {
         // A ceiling the last node crossed is a fact about what the run
         // spent, and every other check asks "may I start more work" — after
@@ -174,14 +175,19 @@ impl Accounting {
             self.cost.into_inner(),
             self.warnings.into_inner(),
             self.records.into_inner(),
+            profile,
         )
     }
 }
 
 impl Run<'_> {
     pub(super) fn finish(self, outcome: RunOutcome) -> RunReport {
-        self.spent
-            .finish(outcome, self.run_dir.to_path_buf(), self.budget)
+        self.spent.finish(
+            outcome,
+            self.run_dir.to_path_buf(),
+            self.budget,
+            self.flow.profile.clone(),
+        )
     }
 
     pub(super) fn account(&self, result: &RunResult) {

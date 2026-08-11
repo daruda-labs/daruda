@@ -140,9 +140,10 @@ impl Workspace {
     pub(in crate::workspace) fn build_flow_request(
         &mut self,
         flow_path: &Path,
+        profile: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let submission = self.assemble_flow_request(flow_path, FlowPurpose::Run, cx)?;
+        let submission = self.assemble_flow_request(flow_path, profile, FlowPurpose::Run, cx)?;
         let issues = daruda_flow::request::validate_request(&submission.request);
         if issues.is_empty() {
             Ok(submission)
@@ -166,15 +167,18 @@ impl Workspace {
     pub(in crate::workspace) fn check_flow(
         &mut self,
         flow_path: &Path,
+        profile: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<Vec<daruda_flow::error::ValidationIssue>, FlowSubmitError> {
-        let submission = self.assemble_flow_request(flow_path, FlowPurpose::Validate, cx)?;
+        let submission =
+            self.assemble_flow_request(flow_path, profile, FlowPurpose::Validate, cx)?;
         Ok(daruda_flow::request::validate_request(&submission.request))
     }
 
     fn assemble_flow_request(
         &mut self,
         flow_path: &Path,
+        profile: Option<&str>,
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
@@ -185,7 +189,7 @@ impl Workspace {
             path: flow_path.to_path_buf(),
             message: e.to_string(),
         })?;
-        let loaded = daruda_flow::load(&text).map_err(FlowSubmitError::Load)?;
+        let loaded = daruda_flow::load(&text, profile).map_err(FlowSubmitError::Load)?;
 
         let agents = self.flow_agent_catalog(&cwd, purpose, &referenced_agents(&loaded), cx)?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
@@ -377,6 +381,7 @@ mod tests {
     fn only_the_agents_a_flow_can_launch_are_its_own() {
         let command_only = daruda_flow::load(
             "version: 1\nnodes:\n  - id: g\n    kind: command\n    run: \"true\"\n",
+            None,
         )
         .expect("loads");
         assert!(referenced_agents(&command_only).is_empty());
@@ -397,6 +402,7 @@ nodes:
         fix: fix it from {{attempts}}
         max_attempts: 2
 ",
+            None,
         )
         .expect("loads");
         assert_eq!(

@@ -52,7 +52,7 @@ async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContex
 
     let issues = ws.update(cx, |ws, cx| {
         let submission = ws
-            .build_flow_request(&flow_path, cx)
+            .build_flow_request(&flow_path, None, cx)
             .unwrap_or_else(|_| panic!("a local lane with a valid flow builds a request"));
         daruda_flow::request::validate_request(&submission.request)
     });
@@ -84,7 +84,7 @@ async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let request = ws
-        .update(cx, |ws, cx| ws.build_flow_request(&flow_path, cx))
+        .update(cx, |ws, cx| ws.build_flow_request(&flow_path, None, cx))
         .expect("a local lane with a valid flow builds a request")
         .request;
 
@@ -114,7 +114,9 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
         "version: 1\nnodes:\n  - id: a\n    kind: command\n    deps: [ghost]\n    run: \"true\"\n",
     );
 
-    let refused = ws.update(cx, |ws, cx| ws.build_flow_request(&flow_path, cx).is_err());
+    let refused = ws.update(cx, |ws, cx| {
+        ws.build_flow_request(&flow_path, None, cx).is_err()
+    });
     assert!(refused, "a node depending on nothing should not run");
     assert!(
         !crate::workspace::flow_paths::runs_dir(lane.path()).exists(),
@@ -140,7 +142,13 @@ async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext)
         );
         ws.flow_picker
             .choosing()
-            .map(|c| c.candidates.iter().map(|f| f.label.clone()).collect())
+            .map(|c| {
+                c.filtered()
+                    .into_iter()
+                    .filter_map(|i| c.stage.row(i))
+                    .map(|r| r.label.to_string())
+                    .collect()
+            })
             .unwrap_or_else(Vec::new)
     });
     assert_eq!(labels, vec!["ship.yaml".to_string()]);
@@ -172,10 +180,12 @@ nodes:
 ",
     );
 
-    let refused = ws.update(cx, |ws, cx| match ws.build_flow_request(&flow_path, cx) {
-        Err(crate::workspace::flow_request::FlowSubmitError::Invalid(issues)) => issues,
-        Err(_) => panic!("refused, but not for the reason under test"),
-        Ok(_) => panic!("a flow naming an unconfigured agent was accepted"),
+    let refused = ws.update(cx, |ws, cx| {
+        match ws.build_flow_request(&flow_path, None, cx) {
+            Err(crate::workspace::flow_request::FlowSubmitError::Invalid(issues)) => issues,
+            Err(_) => panic!("refused, but not for the reason under test"),
+            Ok(_) => panic!("a flow naming an unconfigured agent was accepted"),
+        }
     });
     assert!(
         refused.iter().any(|i| matches!(
@@ -623,7 +633,9 @@ nodes:
 ",
     );
 
-    let issues = ws.update(cx, |ws, cx| ws.check_flow(&flow_path, cx).expect("checked"));
+    let issues = ws.update(cx, |ws, cx| {
+        ws.check_flow(&flow_path, None, cx).expect("checked")
+    });
     assert!(
         issues.iter().any(|i| matches!(
             i.kind,
@@ -824,4 +836,191 @@ async fn stopping_a_run_takes_its_question_down_with_it(cx: &mut TestAppContext)
         });
     })
     .expect("the test window is live");
+}
+
+const WITH_PROFILES: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+profiles:
+  cheap:
+    agent:
+      model: haiku
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+";
+
+/// A flow that declares profiles asks a second question before it runs,
+/// and the file as written stays on the menu — declaring a profile must
+/// not take away the base run.
+#[gpui::test]
+async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_flow_picker(crate::workspace::command::flow_picker::FlowPurpose::Run, cx);
+            ws.execute_flow_picker_selection(window, cx);
+
+            assert!(
+                ws.flow_picker.is_open(),
+                "the picker closed before asking which profile"
+            );
+            let rows = picker_rows(ws);
+            assert_eq!(
+                rows.len(),
+                2,
+                "expected the file's own defaults and one profile: {rows:?}"
+            );
+            assert_eq!(rows[1], "cheap");
+
+            // The second Enter: the half that actually starts the run under
+            // the chosen name. Asserted through `focused_pick` rather than
+            // by executing, because executing submits a real run.
+            ws.flow_picker.move_down();
+            assert_eq!(
+                ws.flow_picker.focused_pick(),
+                Some(crate::workspace::command::flow_picker::FlowPick::Profile(
+                    crate::workspace::command::flow_picker::FlowPurpose::Run,
+                    flow_path.clone(),
+                    Some("cheap".to_string()),
+                )),
+                "the second question answered with something other than the profile"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// And the answer is carried all the way into the run. The pick and the
+/// request are wired by one `match` arm, and dropping the name there leaves
+/// every profiled run silently running as plain `defaults`.
+#[gpui::test]
+async fn answering_the_second_question_runs_under_that_profile(cx: &mut TestAppContext) {
+    let (_lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // `Validate` rather than `Run`: it walks the same two stages and
+            // the same wiring, and takes no lock and starts no session.
+            ws.open_flow_picker(
+                crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                cx,
+            );
+            ws.execute_flow_picker_selection(window, cx);
+            ws.flow_picker.move_down();
+            ws.execute_flow_picker_selection(window, cx);
+            assert!(!ws.flow_picker.is_open(), "the picker is still asking");
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// A flow declaring none runs the moment it is picked. The second question
+/// costs the flows that do not use profiles nothing.
+#[gpui::test]
+async fn a_flow_without_profiles_is_never_asked_about_one(cx: &mut TestAppContext) {
+    let (_lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_flow_picker(
+                crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                cx,
+            );
+            ws.execute_flow_picker_selection(window, cx);
+            assert!(
+                !ws.flow_picker.is_open(),
+                "a flow with no profiles was asked about one"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// The chosen profile reaches the engine. Checked through the request the
+/// app assembles, because that is the only place the two meet.
+#[gpui::test]
+async fn the_chosen_profile_reaches_the_request(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+
+    let (plain, chosen) = ws.update(cx, |ws, cx| {
+        let plain = ws
+            .build_flow_request(&flow_path, None, cx)
+            .expect("builds")
+            .request;
+        let chosen = ws
+            .build_flow_request(&flow_path, Some("cheap"), cx)
+            .expect("builds")
+            .request;
+        (
+            model_of_first_node(&plain),
+            (
+                model_of_first_node(&chosen),
+                chosen.loaded.flow().profile.clone(),
+            ),
+        )
+    });
+    assert_eq!(plain, None, "the base run picked up a profile's model");
+    assert_eq!(
+        chosen.0.as_deref(),
+        Some("haiku"),
+        "the profile did not reach the run"
+    );
+    assert_eq!(
+        chosen.1.as_deref(),
+        Some("cheap"),
+        "the run does not know its profile"
+    );
+}
+
+fn model_of_first_node(request: &daruda_flow::request::RunRequest) -> Option<String> {
+    match &request.loaded.flow().nodes[0].kind {
+        daruda_flow::model::NodeKind::Agent { agent, .. } => agent.model.clone(),
+        daruda_flow::model::NodeKind::Command { .. } => None,
+    }
+}
+
+fn picker_rows(ws: &crate::workspace::Workspace) -> Vec<String> {
+    ws.flow_picker
+        .choosing()
+        .map(|c| {
+            c.filtered()
+                .into_iter()
+                .filter_map(|i| c.stage.row(i))
+                .map(|r| r.label.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The picker offers both places at once. Stated at this level and not
+/// only against `flow_paths` because what the window looks in is a field
+/// it holds — the two can drift, and the way that showed up first was a
+/// test reading the developer's own flows.
+#[gpui::test]
+async fn the_picker_offers_the_person_s_own_flows_beside_the_lane_s(cx: &mut TestAppContext) {
+    let (_lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    // The window's own data directory, which the test fixture already
+    // points at a temp dir — the same one production resolves the global
+    // flows under.
+    let global = ws.update(cx, |ws, _| {
+        crate::workspace::flow_paths::global_flows_dir(&ws.data_dir)
+    });
+    std::fs::create_dir_all(&global).expect("mkdir");
+    std::fs::write(global.join("tidy.yaml"), "version: 1\n").expect("write");
+
+    let rows = ws.update(cx, |ws, cx| {
+        ws.open_flow_picker(
+            crate::workspace::command::flow_picker::FlowPurpose::Validate,
+            cx,
+        );
+        picker_rows(ws)
+    });
+    assert_eq!(rows, vec!["ship.yaml".to_string(), "tidy.yaml".to_string()]);
 }

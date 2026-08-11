@@ -20,7 +20,15 @@ use gpui::{
 };
 
 use crate::fuzzy::fuzzy_match;
+use crate::surface::strings;
 use crate::ui::theme;
+
+/// One line of the overlay's list. The tag is separate from the label so
+/// the query only ever matches the name.
+pub(in crate::workspace) struct Row {
+    pub label: SharedString,
+    tag: Option<SharedString>,
+}
 
 /// What the picked flow is for. The two entries share one list and one
 /// overlay, and differ only in what Enter does.
@@ -38,15 +46,101 @@ pub(in crate::workspace) struct FlowCandidate {
     /// The file name as it is on disk, extension included. A stem would
     /// render two different files (`a.yaml`, `a.yml`) as one row.
     pub label: String,
+    pub origin: crate::workspace::flow_paths::FlowOrigin,
 }
 
 impl FlowCandidate {
-    pub fn from_path(path: PathBuf) -> Self {
-        let label = path
+    pub fn from_found(found: crate::workspace::flow_paths::FoundFlow) -> Self {
+        let label = found
+            .path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        Self { path, label }
+        Self {
+            path: found.path,
+            label,
+            origin: found.origin,
+        }
+    }
+
+    /// The tag beside the name, or none for the ordinary case. Kept out of
+    /// `label` on purpose: the query matches against the label, and a
+    /// searchable "global" would put every one of them in front of the
+    /// person typing the name of a repo flow.
+    fn tag(&self) -> Option<SharedString> {
+        match self.origin {
+            crate::workspace::flow_paths::FlowOrigin::Repo => None,
+            crate::workspace::flow_paths::FlowOrigin::Global => {
+                Some(SharedString::from(strings::flow_picker_global()))
+            }
+        }
+    }
+}
+
+/// One profile a flow declares, plus the file's own `defaults`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) struct ProfileCandidate {
+    /// `None` is the flow as written. Offered because declaring a profile
+    /// must not take away the ability to run the base file — the profiles
+    /// are layers over `defaults`, not replacements for it.
+    pub name: Option<String>,
+    pub label: String,
+}
+
+impl ProfileCandidate {
+    fn defaults() -> Self {
+        Self {
+            name: None,
+            label: strings::flow_picker_profile_defaults(),
+        }
+    }
+
+    fn named(name: String) -> Self {
+        Self {
+            label: name.clone(),
+            name: Some(name),
+        }
+    }
+}
+
+/// Which question the open picker is asking. The rows live inside the
+/// stage rather than beside it, so a list of profiles cannot be shown
+/// while a pick would be read as a flow.
+#[derive(Clone, Debug)]
+pub(in crate::workspace) enum Stage {
+    Flows {
+        candidates: Vec<FlowCandidate>,
+    },
+    /// Which profile to run `flow` under. Only reached for a flow that
+    /// declares any — a file with none is run the moment it is picked.
+    Profiles {
+        flow: PathBuf,
+        candidates: Vec<ProfileCandidate>,
+    },
+}
+
+impl Stage {
+    /// What the query matches against — the names only, never the tag.
+    fn labels(&self) -> Vec<&str> {
+        match self {
+            Stage::Flows { candidates } => candidates.iter().map(|c| c.label.as_str()).collect(),
+            Stage::Profiles { candidates, .. } => {
+                candidates.iter().map(|c| c.label.as_str()).collect()
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn row(&self, index: usize) -> Option<Row> {
+        match self {
+            Stage::Flows { candidates } => candidates.get(index).map(|c| Row {
+                label: SharedString::from(c.label.clone()),
+                tag: c.tag(),
+            }),
+            Stage::Profiles { candidates, .. } => candidates.get(index).map(|c| Row {
+                label: SharedString::from(c.label.clone()),
+                tag: None,
+            }),
+        }
     }
 }
 
@@ -54,9 +148,20 @@ impl FlowCandidate {
 #[derive(Clone, Debug)]
 pub(in crate::workspace) struct Choosing {
     pub purpose: FlowPurpose,
+    pub stage: Stage,
     pub query: String,
     pub focused_index: usize,
-    pub candidates: Vec<FlowCandidate>,
+}
+
+/// What Enter acted on. Two stages, so a pick says which question it
+/// answered — the host runs nothing until it holds the second.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum FlowPick {
+    /// A flow. Whether a profile is asked for next is the host's to decide,
+    /// because only it can read the file.
+    Flow(FlowPurpose, PathBuf),
+    /// A profile for the flow already picked. `None` is the file as written.
+    Profile(FlowPurpose, PathBuf, Option<String>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -72,12 +177,35 @@ pub(in crate::workspace) enum FlowPicker {
 }
 
 impl FlowPicker {
-    pub fn open(&mut self, purpose: FlowPurpose, paths: Vec<PathBuf>) {
+    pub fn open(
+        &mut self,
+        purpose: FlowPurpose,
+        found: Vec<crate::workspace::flow_paths::FoundFlow>,
+    ) {
         *self = FlowPicker::Choosing(Choosing {
             purpose,
+            stage: Stage::Flows {
+                candidates: found.into_iter().map(FlowCandidate::from_found).collect(),
+            },
             query: String::new(),
             focused_index: 0,
-            candidates: paths.into_iter().map(FlowCandidate::from_path).collect(),
+        });
+    }
+
+    /// Ask which profile `flow` runs under. The query and the focus start
+    /// over: they were about a different list, and carrying them would
+    /// filter profile names by whatever was typed to find the file.
+    pub fn ask_profile(&mut self, purpose: FlowPurpose, flow: PathBuf, names: Vec<String>) {
+        *self = FlowPicker::Choosing(Choosing {
+            purpose,
+            stage: Stage::Profiles {
+                flow,
+                candidates: std::iter::once(ProfileCandidate::defaults())
+                    .chain(names.into_iter().map(ProfileCandidate::named))
+                    .collect(),
+            },
+            query: String::new(),
+            focused_index: 0,
         });
     }
 
@@ -142,13 +270,40 @@ impl FlowPicker {
         }
     }
 
-    /// What Enter acts on: the focused flow and what it was opened for.
-    /// One value rather than two `Option`s that are always set together.
-    pub fn focused_pick(&self) -> Option<(FlowPurpose, PathBuf)> {
+    /// The line over the list. Decided here rather than at the render
+    /// site: it follows from which question is being asked, and that is
+    /// this type's to know.
+    pub fn prompt(&self) -> String {
+        let Some(c) = self.choosing() else {
+            return strings::flow_picker_prompt_run();
+        };
+        match (&c.stage, c.purpose) {
+            (Stage::Profiles { flow, .. }, _) => strings::flow_picker_prompt_profile(
+                &flow
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
+            (Stage::Flows { .. }, FlowPurpose::Validate) => strings::flow_picker_prompt_validate(),
+            (Stage::Flows { .. }, FlowPurpose::Run) => strings::flow_picker_prompt_run(),
+        }
+    }
+
+    /// What Enter acts on, and which of the two questions it answered.
+    pub fn focused_pick(&self) -> Option<FlowPick> {
         let c = self.choosing()?;
-        let filtered = c.filtered();
-        let &index = filtered.get(c.focused_index)?;
-        Some((c.purpose, c.candidates[index].path.clone()))
+        let &index = c.filtered().get(c.focused_index)?;
+        match &c.stage {
+            Stage::Flows { candidates } => Some(FlowPick::Flow(
+                c.purpose,
+                candidates.get(index)?.path.clone(),
+            )),
+            Stage::Profiles { flow, candidates } => Some(FlowPick::Profile(
+                c.purpose,
+                flow.clone(),
+                candidates.get(index)?.name.clone(),
+            )),
+        }
     }
 }
 
@@ -156,8 +311,7 @@ impl Choosing {
     /// Candidate indices matching `query`, best match first. An empty
     /// query yields every candidate in original order.
     pub fn filtered(&self) -> Vec<usize> {
-        let labels: Vec<&str> = self.candidates.iter().map(|c| c.label.as_str()).collect();
-        fuzzy_match(&self.query, &labels)
+        fuzzy_match(&self.query, &self.stage.labels())
     }
 }
 
@@ -219,7 +373,13 @@ impl RenderOnce for FlowPickerOverlay {
         // run that is already going.
         let (prompt, rows) = match &self.state {
             FlowPicker::Closed => unreachable!("returned above"),
-            FlowPicker::Stopping => (self.stop_prompt.clone(), vec![self.stop_action.clone()]),
+            FlowPicker::Stopping => (
+                self.stop_prompt.clone(),
+                vec![Row {
+                    label: self.stop_action.clone(),
+                    tag: None,
+                }],
+            ),
             FlowPicker::Choosing(state) => (
                 if state.query.is_empty() {
                     self.prompt.clone()
@@ -230,7 +390,7 @@ impl RenderOnce for FlowPickerOverlay {
                     .filtered()
                     .iter()
                     .take(theme::PALETTE_MAX_VISIBLE)
-                    .map(|&i| SharedString::from(state.candidates[i].label.clone()))
+                    .filter_map(|&i| state.stage.row(i))
                     .collect(),
             ),
         };
@@ -257,7 +417,7 @@ impl RenderOnce for FlowPickerOverlay {
             .flex_col()
             .max_h(px(theme::PALETTE_MAX_HEIGHT))
             .overflow_hidden()
-            .children(rows.iter().enumerate().map(|(index, label)| {
+            .children(rows.iter().enumerate().map(|(index, row)| {
                 let is_focused = index == focused_index;
                 let on_pick = self.on_pick.clone();
                 div()
@@ -285,7 +445,14 @@ impl RenderOnce for FlowPickerOverlay {
                             .border_color(theme::PRIMARY)
                     })
                     .when(!is_focused, |d| d.text_color(t.text_body))
-                    .child(label.clone())
+                    .child(div().flex_1().min_w_0().truncate().child(row.label.clone()))
+                    .children(row.tag.clone().map(|tag| {
+                        div()
+                            .flex_none()
+                            .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                            .text_color(t.text_subtle)
+                            .child(tag)
+                    }))
             }));
 
         let no_results = rows.is_empty().then(|| {
@@ -335,10 +502,47 @@ mod tests {
             purpose,
             names
                 .iter()
-                .map(|n| PathBuf::from("/lane/f").join(n))
+                .map(|n| crate::workspace::flow_paths::FoundFlow {
+                    path: PathBuf::from("/lane/f").join(n),
+                    origin: crate::workspace::flow_paths::FlowOrigin::Repo,
+                })
                 .collect(),
         );
         picker
+    }
+
+    /// A global flow is marked and a repository's is not — and the mark
+    /// never reaches the query, or typing a repo flow's name would rank
+    /// every global one alongside it.
+    #[test]
+    fn only_a_global_flow_carries_a_tag_and_the_tag_is_not_searchable() {
+        let mut picker = FlowPicker::default();
+        picker.open(
+            FlowPurpose::Run,
+            vec![
+                crate::workspace::flow_paths::FoundFlow {
+                    path: PathBuf::from("/lane/.daruda/flows/ship.yaml"),
+                    origin: crate::workspace::flow_paths::FlowOrigin::Repo,
+                },
+                crate::workspace::flow_paths::FoundFlow {
+                    path: PathBuf::from("/home/flows/tidy.yaml"),
+                    origin: crate::workspace::flow_paths::FlowOrigin::Global,
+                },
+            ],
+        );
+        let stage = &picker.choosing().expect("open").stage;
+        assert!(
+            stage.row(0).expect("row").tag.is_none(),
+            "the repo's own was tagged"
+        );
+        assert!(
+            stage.row(1).expect("row").tag.is_some(),
+            "a global flow was not marked"
+        );
+        // `labels` is what the query is matched against, and it is a
+        // different reader of the same field than `row` — asserting the
+        // rendered label alone would leave the searchable half open.
+        assert_eq!(stage.labels(), ["ship.yaml", "tidy.yaml"]);
     }
 
     /// Two entries share one list, so the picked flow is meaningless
@@ -346,7 +550,9 @@ mod tests {
     #[test]
     fn a_pick_carries_what_it_was_opened_for() {
         let picker = opened(FlowPurpose::Validate, &["ship.yaml"]);
-        let (purpose, path) = picker.focused_pick().expect("a pick");
+        let FlowPick::Flow(purpose, path) = picker.focused_pick().expect("a pick") else {
+            panic!("the first question is which flow");
+        };
         assert_eq!(purpose, FlowPurpose::Validate);
         assert!(path.ends_with("ship.yaml"));
     }
@@ -370,7 +576,9 @@ mod tests {
             ],
         );
         picker.move_down();
-        let (_, path) = picker.focused_pick().expect("a pick");
+        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+            panic!("the first question is which flow");
+        };
         assert!(path.ends_with("02-broken.yaml"), "picked {path:?}");
     }
 
@@ -393,7 +601,9 @@ mod tests {
         let mut picker = opened(FlowPurpose::Run, &["build.yaml", "review.yaml"]);
         picker.append('r');
         picker.append('v');
-        let (_, path) = picker.focused_pick().expect("a pick");
+        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+            panic!("the first question is which flow");
+        };
         assert!(path.ends_with("review.yaml"), "{path:?}");
     }
 
@@ -404,7 +614,9 @@ mod tests {
         for _ in 0..5 {
             picker.move_down();
         }
-        let (_, path) = picker.focused_pick().expect("a pick");
+        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+            panic!("the first question is which flow");
+        };
         assert!(path.ends_with("b.yaml"), "{path:?}");
     }
 

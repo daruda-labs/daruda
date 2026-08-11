@@ -228,7 +228,7 @@ mod tests {
     use crate::resolve::resolve;
 
     fn issues_for(text: &str) -> Vec<ValidationIssue> {
-        let flow = resolve(parse_flow_file(text).expect("parses")).expect("resolves");
+        let flow = resolve(parse_flow_file(text).expect("parses"), None).expect("resolves");
         let graph = FlowGraph::build(&flow).expect("acyclic");
         validate(&flow, &graph)
     }

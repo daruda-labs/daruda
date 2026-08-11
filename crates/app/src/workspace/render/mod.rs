@@ -1476,12 +1476,7 @@ impl Render for Workspace {
             ))
             .child(flow_picker::FlowPickerOverlay::new(
                 self.flow_picker.clone(),
-                match self.flow_picker.choosing().map(|c| c.purpose) {
-                    Some(flow_picker::FlowPurpose::Validate) => {
-                        crate::surface::strings::flow_picker_prompt_validate()
-                    }
-                    _ => crate::surface::strings::flow_picker_prompt_run(),
-                },
+                self.flow_picker.prompt(),
                 crate::surface::strings::flow_picker_empty(),
                 crate::surface::strings::flow_stop_prompt(),
                 crate::surface::strings::flow_stop_action(),

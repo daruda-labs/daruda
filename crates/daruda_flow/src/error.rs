@@ -39,6 +39,14 @@ pub enum ValidationKind {
     /// predict, and is silently "never asked" for the mode daruda itself
     /// defaults to.
     AskWithoutMode,
+    /// A profile named `defaults`. The file already spells the base layer
+    /// `defaults:`, so the name refers to two different things at once —
+    /// and a host offering both as rows offers two that read the same.
+    ReservedProfileName,
+    /// A run asked for a profile the file does not declare. Named rather
+    /// than ignored: falling back to plain `defaults` would run the flow
+    /// with settings the person did not pick, and say nothing.
+    UnknownProfile { name: String },
     /// A `version` this build does not know how to execute.
     UnknownVersion(u32),
     /// `{{node.X.output}}` names a node that is not an ancestor, so its

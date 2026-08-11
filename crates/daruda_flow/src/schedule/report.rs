@@ -82,6 +82,10 @@ pub struct RunReport {
     /// Every attempt the run made, in the order the nodes first ran. The
     /// attempt counts here sum to `node_runs`.
     pub nodes: Vec<NodeRecord>,
+    /// The profile the run was submitted under. `run.yaml` records the
+    /// settings it produced, but two runs of one flow under two profiles
+    /// are otherwise indistinguishable to someone reading `run.md`.
+    pub profile: Option<String>,
 }
 
 impl RunReport {
@@ -102,6 +106,7 @@ impl RunReport {
             cost: None,
             warnings: Vec::new(),
             nodes: Vec::new(),
+            profile: None,
         }
     }
 
@@ -116,6 +121,7 @@ impl RunReport {
         cost: Option<CostLimit>,
         warnings: Vec<String>,
         nodes: Vec<NodeRecord>,
+        profile: Option<String>,
     ) -> Self {
         Self {
             outcome,
@@ -124,6 +130,7 @@ impl RunReport {
             cost,
             warnings,
             nodes,
+            profile,
         }
     }
 

@@ -35,8 +35,16 @@ impl LoadedFlow {
     }
 }
 
-/// Parse, merge, build the graph, and run the graph-dependent rules.
-pub fn load(text: &str) -> Result<LoadedFlow, FlowError> {
+/// The profiles this flow declares, in the order a host should offer
+/// them. Parsing only — the choice has to be made before anything can be
+/// merged, so this cannot come out of [`load`].
+pub fn profiles(text: &str) -> Result<Vec<String>, FlowError> {
+    Ok(parse::parse_flow_file(text)?.profiles.into_keys().collect())
+}
+
+/// Parse, merge under `profile`, build the graph, and run the
+/// graph-dependent rules.
+pub fn load(text: &str, profile: Option<&str>) -> Result<LoadedFlow, FlowError> {
     let file = parse::parse_flow_file(text)?;
     // After the shape parses and before anything is merged: these are the
     // keys serde could not police itself (see `parse::schema_issues`), and
@@ -45,7 +53,7 @@ pub fn load(text: &str) -> Result<LoadedFlow, FlowError> {
     if !issues.is_empty() {
         return Err(FlowError::Validate(issues));
     }
-    let flow = resolve::resolve(file).map_err(FlowError::Validate)?;
+    let flow = resolve::resolve(file, profile).map_err(FlowError::Validate)?;
     let graph = FlowGraph::build(&flow).map_err(|e| FlowError::Validate(vec![graph_issue(e)]))?;
     let issues = validate::validate(&flow, &graph);
     if issues.is_empty() {
@@ -98,6 +106,7 @@ nodes:
     deps: [a]
     run: \"true\"
 ",
+            None,
         )
         .expect("valid flow loads");
         assert_eq!(loaded.flow().nodes.len(), 2);
@@ -106,7 +115,7 @@ nodes:
 
     #[test]
     fn a_parse_error_stays_a_parse_error() {
-        assert!(matches!(load("nodes: []"), Err(FlowError::Parse(_))));
+        assert!(matches!(load("nodes: []", None), Err(FlowError::Parse(_))));
     }
 
     /// A cycle is a graph fact, but the host sees one error type. Without
@@ -126,6 +135,7 @@ nodes:
     deps: [a]
     run: \"true\"
 ",
+            None,
         )
         .expect_err("cyclic");
         match err {
@@ -142,7 +152,7 @@ nodes:
 
     #[test]
     fn an_unknown_dep_reaches_the_caller_named() {
-        let err = load("version: 1\nnodes:\n  - id: a\n    kind: command\n    deps: [ghost]\n    run: \"true\"\n")
+        let err = load("version: 1\nnodes:\n  - id: a\n    kind: command\n    deps: [ghost]\n    run: \"true\"\n", None)
             .expect_err("unknown dep");
         match err {
             FlowError::Validate(issues) => {
@@ -158,6 +168,7 @@ nodes:
     fn merge_issues_reach_the_caller_too() {
         let err = load(
             "version: 1\nnodes:\n  - id: a\n    kind: agent\n    output: a.md\n    prompt: write\n",
+            None,
         )
         .expect_err("no agent named anywhere");
         match err {

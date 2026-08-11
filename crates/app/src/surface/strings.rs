@@ -4122,6 +4122,21 @@ pub fn flow_picker_prompt_run() -> String {
 pub fn flow_picker_prompt_validate() -> String {
     rust_i18n::t!("flow.picker_prompt_validate").into_owned()
 }
+/// Marks a flow that is the person's own rather than the repository's.
+/// Only the global ones are tagged — tagging both would be noise on every
+/// row in the ordinary case.
+pub fn flow_picker_global() -> String {
+    rust_i18n::t!("flow.picker_global").into_owned()
+}
+/// The first row of the profile list: the flow as its file is written.
+/// Declaring a profile must not take the base run away.
+pub fn flow_picker_profile_defaults() -> String {
+    rust_i18n::t!("flow.picker_profile_defaults").into_owned()
+}
+/// The prompt over the profile list.
+pub fn flow_picker_prompt_profile(flow: &str) -> String {
+    rust_i18n::t!("flow.picker_prompt_profile", flow => flow).into_owned()
+}
 pub fn flow_picker_empty() -> String {
     rust_i18n::t!("flow.picker_empty").into_owned()
 }
@@ -4196,6 +4211,8 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::MissingAgent => rust_i18n::t!("flow.issue_missing_agent"),
         K::AgentIdWithoutMode => rust_i18n::t!("flow.issue_agent_id_without_mode"),
         K::AskWithoutMode => rust_i18n::t!("flow.issue_ask_without_mode"),
+        K::UnknownProfile { name } => rust_i18n::t!("flow.issue_unknown_profile", name => name),
+        K::ReservedProfileName => rust_i18n::t!("flow.issue_reserved_profile_name"),
         K::UnknownVersion(version) => {
             rust_i18n::t!("flow.issue_unknown_version", version => version)
         }
