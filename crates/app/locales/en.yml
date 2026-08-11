@@ -1009,6 +1009,8 @@ flow:
   issue_line_at_node: "· %{node} — %{text}"
   issue_missing_agent: "needs an agent, and neither the flow's defaults nor this node names one"
   issue_agent_id_without_mode: "names its own agent but not the mode to run it in"
+  issue_cwd_escapes: "a node's `cwd` must stay inside the run's working directory"
+  issue_cwd_missing: "the directory `%{path}` a node runs in is not there"
   issue_reserved_profile_name: "`defaults` is the base every profile layers over, so a profile cannot be named that"
   issue_unknown_profile: "this flow declares no profile named `%{name}`"
   issue_ask_without_mode: "asks a person for permission but names no agent mode, and whether anyone is asked depends on it"

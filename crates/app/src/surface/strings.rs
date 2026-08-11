@@ -4230,6 +4230,8 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::AskWithoutMode => rust_i18n::t!("flow.issue_ask_without_mode"),
         K::UnknownProfile { name } => rust_i18n::t!("flow.issue_unknown_profile", name => name),
         K::ReservedProfileName => rust_i18n::t!("flow.issue_reserved_profile_name"),
+        K::CwdEscapesRunCwd => rust_i18n::t!("flow.issue_cwd_escapes"),
+        K::CwdMissing { path } => rust_i18n::t!("flow.issue_cwd_missing", path => path),
         K::UnknownVersion(version) => {
             rust_i18n::t!("flow.issue_unknown_version", version => version)
         }

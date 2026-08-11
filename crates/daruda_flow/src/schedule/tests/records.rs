@@ -52,7 +52,7 @@ fn the_tree_state_is_recorded_for_each_attempt_the_host_answers_for() {
     // cannot borrow a local (that would put a lifetime on the struct).
     let seen = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
     let counter = seen.clone();
-    let git = move || {
+    let git = move |_: &std::path::Path| {
         let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         Some(format!(" M file-{n}.rs"))
     };

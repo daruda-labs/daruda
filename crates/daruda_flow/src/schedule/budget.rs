@@ -61,7 +61,7 @@ impl Accounting {
             node_runs: Cell::new(spent.node_runs),
             parked: Cell::new(Duration::ZERO),
             cost: RefCell::new(spent.cost),
-            cost_mixed: Cell::new(false),
+            cost_mixed: Cell::new(spent.cost_mixed),
             warnings: RefCell::new(spent.warnings),
             // Carried so the finished run's account covers both halves. A
             // resume that started its record afresh would leave `run.md`
@@ -82,6 +82,7 @@ impl Accounting {
             node_runs: self.node_runs.get(),
             parked: self.parked.get(),
             cost: self.cost.borrow().clone(),
+            cost_mixed: self.cost_mixed.get(),
             warnings: self.warnings.borrow().clone(),
         }
     }

@@ -49,6 +49,25 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 ),
             ));
         }
+        // Every node kind, not only agent nodes: a command node's `cwd` is
+        // the more likely one to be pointed somewhere it should not be.
+        if let Some(cwd) = &node.cwd
+            && cwd.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            })
+        {
+            issues.push(issue(
+                node.id.clone(),
+                ValidationKind::CwdEscapesRunCwd,
+                format!(
+                    "`{}` must stay inside the run's working directory",
+                    cwd.display()
+                ),
+            ));
+        }
         let node_ancestors = &ancestors[&node.id];
         match &node.kind {
             NodeKind::Agent {

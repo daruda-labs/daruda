@@ -167,7 +167,7 @@ fn execute_with(
                 git_status: request
                     .git_status
                     .as_ref()
-                    .map(|ask| &**ask as &dyn Fn() -> Option<String>),
+                    .map(|ask| &**ask as &dyn Fn(&std::path::Path) -> Option<String>),
                 events: request.events.as_ref(),
                 ask: request.ask.as_ref(),
                 resume,

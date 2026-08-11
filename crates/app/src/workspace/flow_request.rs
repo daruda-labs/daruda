@@ -52,6 +52,7 @@ pub(in crate::workspace) enum FlowSubmitError {
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
 pub(in crate::workspace) struct FlowSubmission {
+    pub lane: daruda_store::project::LaneRef,
     pub request: RunRequest,
     pub node_install_dir: PathBuf,
     pub events: smol::channel::Receiver<FlowEvent>,
@@ -187,10 +188,11 @@ impl Workspace {
     /// offers a resume that the lock immediately refuses as held.
     pub(in crate::workspace) fn build_resume_request(
         &mut self,
+        lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let Some(cwd) = self.active_lane_root() else {
+        let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
             return Err(FlowSubmitError::NoLane);
         };
         let is_alive: fn(u32) -> bool = process_is_alive;
@@ -198,6 +200,7 @@ impl Workspace {
             daruda_flow::resume::prepare(run_dir, &is_alive).map_err(FlowSubmitError::Resume)?;
 
         let agents = self.flow_agent_catalog(
+            lane_ref,
             &cwd,
             FlowPurpose::Run,
             &referenced_agents(&resumed.loaded),
@@ -222,12 +225,13 @@ impl Workspace {
             // spent is carried by the journal, not by this.
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(is_alive),
-            git_status: Some(Box::new(move || git_status(&cwd))),
+            git_status: Some(Box::new(git_status)),
             events: Some(tx),
             ask: Some(ask_tx),
             resume: Some(resumed.replay),
         };
         Ok(FlowSubmission {
+            lane: lane_ref,
             request,
             node_install_dir,
             events: rx,
@@ -242,7 +246,8 @@ impl Workspace {
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let Some(cwd) = self.active_lane_root() else {
+        let lane_ref = self.active;
+        let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
             return Err(FlowSubmitError::NoLane);
         };
         let text = std::fs::read_to_string(flow_path).map_err(|e| FlowSubmitError::Read {
@@ -251,7 +256,8 @@ impl Workspace {
         })?;
         let loaded = daruda_flow::load(&text, profile).map_err(FlowSubmitError::Load)?;
 
-        let agents = self.flow_agent_catalog(&cwd, purpose, &referenced_agents(&loaded), cx)?;
+        let agents =
+            self.flow_agent_catalog(lane_ref, &cwd, purpose, &referenced_agents(&loaded), cx)?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
         let (tx, rx) = smol::channel::unbounded();
         let (ask_tx, ask_rx) = smol::channel::unbounded();
@@ -268,7 +274,7 @@ impl Workspace {
             node_install_dir: node_install_dir.clone(),
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(process_is_alive),
-            git_status: Some(Box::new(move || git_status(&cwd))),
+            git_status: Some(Box::new(git_status)),
             events: Some(tx),
             ask: Some(ask_tx),
             // This assembles a run that is starting. Picking one up reads
@@ -276,6 +282,7 @@ impl Workspace {
             resume: None,
         };
         Ok(FlowSubmission {
+            lane: lane_ref,
             request,
             node_install_dir,
             events: rx,
@@ -290,12 +297,14 @@ impl Workspace {
     /// to something else.
     fn flow_agent_catalog(
         &mut self,
+        lane_ref: daruda_store::project::LaneRef,
         cwd: &Path,
         purpose: FlowPurpose,
         referenced: &std::collections::HashSet<String>,
         cx: &mut Context<Self>,
     ) -> Result<HashMap<String, LaunchSpec>, FlowSubmitError> {
         let pane_cwd = PaneCwd::Local(cwd.to_path_buf());
+        let lane = self.lane_for(lane_ref).cloned();
         let definitions: Vec<(String, daruda_config::AgentLaunch)> = self
             .agents
             .iter()
@@ -304,8 +313,7 @@ impl Workspace {
 
         let mut catalog = HashMap::new();
         for (id, launch) in definitions {
-            let lane = self.active_lane();
-            let resolved_host = lane.map(|lane| {
+            let resolved_host = lane.as_ref().map(|lane| {
                 lane.effective_session_host(
                     &launch,
                     &self.session_hosts,
@@ -346,11 +354,10 @@ impl Workspace {
             if let (FlowPurpose::Run, Some(prepared)) = (purpose, prepared.as_ref()) {
                 self.prepare_account_dir(prepared, cx);
             }
-            let lane = self.active_lane();
-            let cached_host = lane.and_then(|lane| lane.session_host.clone());
+            let cached_host = lane.as_ref().and_then(|lane| lane.session_host.clone());
             let resolved = resolve_launch(
                 &launch,
-                lane,
+                lane.as_ref(),
                 &pane_cwd,
                 prepared.as_ref(),
                 cached_host.as_ref(),

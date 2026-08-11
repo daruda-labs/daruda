@@ -50,12 +50,16 @@ nodes:
 async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
-    let issues = ws.update(cx, |ws, cx| {
+    let (lane_ref, issues) = ws.update(cx, |ws, cx| {
         let submission = ws
             .build_flow_request(&flow_path, None, cx)
             .unwrap_or_else(|_| panic!("a local lane with a valid flow builds a request"));
-        daruda_flow::request::validate_request(&submission.request)
+        (
+            submission.lane,
+            daruda_flow::request::validate_request(&submission.request),
+        )
     });
+    assert_eq!(lane_ref, ws.update(cx, |ws, _cx| ws.active_ref()));
 
     let relative: Vec<_> = issues
         .iter()
@@ -1083,12 +1087,15 @@ async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContex
     // The flow file says something else entirely by now.
     std::fs::write(&flow_path, "version: 1\nnodes: []\n").expect("rewrite");
 
-    let request = ws.update(cx, |ws, cx| {
-        ws.build_resume_request(&run_dir, cx)
-            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
-            .request
+    let (lane_ref, request) = ws.update(cx, |ws, cx| {
+        let lane_ref = ws.active_ref();
+        let submission = ws
+            .build_resume_request(lane_ref, &run_dir, cx)
+            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"));
+        (submission.lane, submission.request)
     });
 
+    assert_eq!(lane_ref, ws.update(cx, |ws, _cx| ws.active_ref()));
     assert_eq!(request.run_dir, run_dir, "a resume took a new directory");
     assert!(
         request.resume.is_some(),
@@ -1101,6 +1108,53 @@ async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContex
     );
 }
 
+/// The row's lane, not the lane active when the confirmation is answered,
+/// owns the continuation. Otherwise a lane switch while the dialog is open
+/// pairs one run directory with another lane's cwd and agent resolution.
+#[gpui::test]
+async fn a_resume_request_uses_the_lane_that_owned_the_row(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let run_dir = killed_run_in(lane.path());
+    let other = tempfile::tempdir().expect("tempdir");
+
+    let (original, other_ref) = ws.update(cx, |ws, _cx| {
+        let original = ws.active_ref();
+        let other_id = ws.projects[0]
+            .lanes
+            .iter()
+            .map(|lane| lane.id)
+            .max()
+            .unwrap_or_default()
+            + 1;
+        ws.projects[0]
+            .lanes
+            .push(crate::lane::Lane::default_for_project(
+                other_id,
+                other.path().to_path_buf(),
+            ));
+        (
+            original,
+            daruda_store::project::LaneRef {
+                project: original.project,
+                lane: other_id,
+            },
+        )
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.activate_lane(other_ref, window, cx));
+    })
+    .expect("window exists");
+
+    let submission = ws.update(cx, |ws, cx| {
+        ws.build_resume_request(original, &run_dir, cx)
+            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
+    });
+
+    assert_eq!(submission.lane, original);
+    assert_eq!(submission.request.cwd, lane.path().to_path_buf());
+    assert_ne!(ws.update(cx, |ws, _cx| ws.active_ref()), original);
+}
+
 /// Only a killed run. A finished one ended the way its policy said to, and
 /// continuing it is a different verb — the engine decides that, and the app
 /// asks rather than deciding again.
@@ -1110,7 +1164,9 @@ async fn a_run_that_ended_on_purpose_is_not_continued(cx: &mut TestAppContext) {
     let run_dir = killed_run_in(lane.path());
     std::fs::write(run_dir.join("DONE"), "").expect("marker");
 
-    let refused = ws.update(cx, |ws, cx| ws.build_resume_request(&run_dir, cx).err());
+    let refused = ws.update(cx, |ws, cx| {
+        ws.build_resume_request(ws.active_ref(), &run_dir, cx).err()
+    });
     assert!(
         matches!(
             refused,
@@ -1136,7 +1192,7 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
     let run_dir = killed_run_in(lane.path());
 
     let request = ws.update(cx, |ws, cx| {
-        ws.build_resume_request(&run_dir, cx)
+        ws.build_resume_request(ws.active_ref(), &run_dir, cx)
             .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
             .request
     });

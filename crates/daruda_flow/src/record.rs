@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 /// it. `None` when the host has nothing to say — not a git repo, or the
 /// command failed. Best-effort by design: this is an audit note, and a
 /// missing one must never fail a run.
-pub type GitStatus<'a> = Option<&'a dyn Fn() -> Option<String>>;
+/// How the host reports a working tree's state, asked about the directory
+/// the attempt actually ran in — which is the node's own when it names one,
+/// and not the run's.
+pub type GitStatus<'a> = Option<&'a dyn Fn(&std::path::Path) -> Option<String>>;
 
 /// One node's history this run. A node can appear once (it passed) or many
 /// times over several generations (a gate's repair re-derived it).

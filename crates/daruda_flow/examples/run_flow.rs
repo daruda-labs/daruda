@@ -95,10 +95,9 @@ fn main() {
             ..Budget::unlimited()
         },
         is_alive: Box::new(process_is_alive),
-        git_status: Some(Box::new({
-            let cwd = cwd.clone();
-            move || git_status(&cwd)
-        })),
+        // Asked about the directory the attempt ran in, which is the
+        // node's own when it names one.
+        git_status: Some(Box::new(git_status)),
         events: Some(tx),
         // No answering surface: this runner prints events, it does not
         // offer buttons. A flow that could reach `permission: ask` is

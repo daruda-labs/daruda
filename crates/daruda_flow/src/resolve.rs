@@ -104,6 +104,7 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
             deps: node.deps,
             kind,
             timeout,
+            cwd: node.cwd,
         });
     }
 
@@ -177,6 +178,10 @@ pub fn to_flow_file(flow: &Flow, flow_dir: &Path) -> FlowFile {
                 id: node.id.clone(),
                 deps: node.deps.clone(),
                 timeout: Some(node.timeout),
+                // Kept relative, like the model: the record is read on
+                // whichever machine opens it, and a resolved path would be
+                // the one this run happened to have.
+                cwd: node.cwd.clone(),
                 kind: node_kind_file(&node.kind, flow_dir),
             })
             .collect(),

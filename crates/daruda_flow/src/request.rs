@@ -35,7 +35,7 @@ pub struct RunRequest {
     /// `git status --porcelain` for `cwd`, asked once per attempt. Owned for
     /// the same reason as `is_alive`, and `None` for a host that has nothing
     /// to say — the record then carries no note, and the run is unaffected.
-    pub git_status: Option<Box<dyn Fn() -> Option<String> + Send>>,
+    pub git_status: Option<AskGitStatus>,
     /// Where the run narrates itself, for a host that would otherwise poll
     /// the run directory. Unbounded and never awaited, so a subscriber that
     /// stops reading cannot slow or stop the run; `None` is a host that does
@@ -92,12 +92,48 @@ impl Budget {
 
 /// The two static rules that need context the flow file does not carry.
 /// Collected, not short-circuited.
+/// The directory a node runs in has to be there. Checked here rather than
+/// in `crate::validate` because only a request knows what the node's
+/// relative `cwd` is relative *to*.
+///
+/// Not created: a flow naming a directory that does not exist is a flow
+/// describing a tree it is not looking at, and making one would hide that.
+fn check_node_cwd(
+    request: &RunRequest,
+    node: &crate::model::Node,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let Some(relative) = node.cwd.as_ref() else {
+        return;
+    };
+    let resolved = request.cwd.join(relative);
+    if !resolved.is_dir() {
+        issues.push(ValidationIssue {
+            node: Some(node.id.clone()),
+            kind: ValidationKind::CwdMissing {
+                path: resolved.display().to_string(),
+            },
+            message: format!("`{}` is not a directory", resolved.display()),
+        });
+    }
+}
+
+/// How a host reports a working tree's state, asked about the directory an
+/// attempt ran in. Owned and `Send` because it crosses into the run's
+/// thread; named because the boxed signature is otherwise repeated at every
+/// site that builds one.
+pub type AskGitStatus = Box<dyn Fn(&std::path::Path) -> Option<String> + Send>;
+
 pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     check_absolute(request, &mut issues);
     let mut checked_agents = HashSet::new();
 
     for node in &request.loaded.flow().nodes {
+        // Before the node kinds split: a command node runs somewhere too,
+        // and a missing directory fails it just as surely.
+        check_node_cwd(request, node, &mut issues);
+
         let NodeKind::Agent {
             agent,
             prompt,

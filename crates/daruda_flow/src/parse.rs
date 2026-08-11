@@ -59,6 +59,17 @@ pub struct NodeFile {
         skip_serializing_if = "Option::is_none"
     )]
     pub timeout: Option<Duration>,
+    /// Where this node runs, relative to the run's own working directory.
+    /// Absent is the run's directory itself, which is what every node did
+    /// before this existed.
+    ///
+    /// Relative and inside, enforced by `crate::validate`. That rule is
+    /// what lets the run keep **one** lock: it already holds the directory
+    /// every node works in. A lock per subdirectory would be worse than
+    /// none — a run holding the root and a run holding `sub/` would not
+    /// exclude each other, and both would write to `sub/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
     /// `kind` and the fields it selects sit at the same level as `id` in
     /// the file, so the tag is flattened into this struct rather than
     /// nested under a key of its own.
@@ -174,7 +185,7 @@ pub fn parse_flow_file(text: &str) -> Result<FlowFile, FlowError> {
 }
 
 /// Keys every node may carry, whatever its kind.
-const NODE_KEYS: &[&str] = &["id", "deps", "timeout", "kind"];
+const NODE_KEYS: &[&str] = &["id", "deps", "timeout", "kind", "cwd"];
 /// Keys an agent node adds. `prompt` / `prompt_file` are one choice, and
 /// naming both is its own error below rather than an unknown key.
 const AGENT_KEYS: &[&str] = &["agent", "prompt", "prompt_file", "output", "on_fail"];

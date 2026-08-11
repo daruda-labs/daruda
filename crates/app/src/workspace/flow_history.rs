@@ -95,6 +95,10 @@ impl FlowHistory {
     pub(in crate::workspace) fn runs(&self) -> &[FlowRunEntry] {
         &self.runs
     }
+
+    pub(in crate::workspace) fn lane(&self) -> LaneRef {
+        self.lane
+    }
 }
 
 fn entry_for(dir: &Path) -> FlowRunEntry {

@@ -129,8 +129,14 @@ struct SpentLine {
     cost: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     currency: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    cost_mixed: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// What the run had spent, in the scheduler's own terms.
@@ -139,6 +145,7 @@ pub struct Spent {
     pub node_runs: u32,
     pub parked: Duration,
     pub cost: Option<CostLimit>,
+    pub cost_mixed: bool,
     pub warnings: Vec<String>,
 }
 
@@ -209,6 +216,7 @@ pub(crate) fn append_attempt(
                 parked_ms: millis(spent.parked),
                 cost: spent.cost.as_ref().map(|c| c.amount),
                 currency: spent.cost.as_ref().map(|c| c.currency.clone()),
+                cost_mixed: spent.cost_mixed,
                 warnings: spent.warnings.clone(),
             },
         })),
@@ -278,6 +286,12 @@ pub fn read(run_dir: &Path) -> Replay {
     replay
 }
 
+fn warnings_say_cost_mixed(warnings: &[String]) -> bool {
+    warnings
+        .iter()
+        .any(|warning| warning.contains("costs were reported in both"))
+}
+
 fn absorb(replay: &mut Replay, entry: Entry) {
     match entry {
         Entry::Started { v, profile } if v <= JOURNAL_VERSION => replay.profile = profile,
@@ -298,9 +312,13 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 ..
             } = *line;
             replay.next_seq = replay.next_seq.max(evidence_seq + 1);
+            for id in &invalidated {
+                replay.passed.retain(|passed| passed != id);
+            }
             if matches!(outcome, OutcomeLine::Passed) && !replay.passed.contains(&node) {
                 replay.passed.push(node.clone());
             }
+            let cost_mixed = spent.cost_mixed || warnings_say_cost_mixed(&spent.warnings);
             replay.spent = Spent {
                 node_runs: spent.node_runs,
                 parked: Duration::from_millis(spent.parked_ms),
@@ -308,6 +326,7 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                     (Some(amount), Some(currency)) => Some(CostLimit { amount, currency }),
                     _ => None,
                 },
+                cost_mixed,
                 warnings: spent.warnings,
             };
             crate::record::push_attempt(
@@ -399,6 +418,59 @@ mod tests {
         assert_eq!(replay.spent.node_runs, 2);
         assert_eq!(replay.records.len(), 2, "both nodes have a history");
         assert!(!replay.torn);
+    }
+
+    /// A repair failure invalidates outputs that used to be good. If the
+    /// process dies after that line, a resume must re-run those nodes rather
+    /// than skipping them as already passed.
+    #[test]
+    fn invalidation_takes_nodes_back_out_of_the_passed_set() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None).expect("start");
+        append_attempt(
+            dir.path(),
+            &"design".to_string(),
+            &attempt(1, 1, AttemptOutcome::Passed),
+            &spent(1),
+        )
+        .expect("append");
+        let mut gate = attempt(
+            1,
+            2,
+            AttemptOutcome::Reported("failed: exit status 1".to_string()),
+        );
+        gate.invalidated.nodes = vec!["design".to_string(), "gate".to_string()];
+        append_attempt(dir.path(), &"gate".to_string(), &gate, &spent(2)).expect("append");
+
+        assert!(
+            read(dir.path()).passed.is_empty(),
+            "an invalidated node was still treated as passed"
+        );
+    }
+
+    /// Once currencies mix, later costs are ignored. That is state, not a
+    /// warning alone, so a resume has to keep carrying it.
+    #[test]
+    fn mixed_cost_accounting_reads_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None).expect("start");
+        append_attempt(
+            dir.path(),
+            &"design".to_string(),
+            &attempt(1, 1, AttemptOutcome::Passed),
+            &Spent {
+                node_runs: 1,
+                cost: Some(CostLimit {
+                    amount: 2.0,
+                    currency: "USD".to_string(),
+                }),
+                cost_mixed: true,
+                ..Spent::default()
+            },
+        )
+        .expect("append");
+
+        assert!(read(dir.path()).spent.cost_mixed);
     }
 
     /// The evidence counter continues. Restarting it would make the first

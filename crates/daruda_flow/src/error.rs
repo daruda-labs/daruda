@@ -39,6 +39,18 @@ pub enum ValidationKind {
     /// predict, and is silently "never asked" for the mode daruda itself
     /// defaults to.
     AskWithoutMode,
+    /// A node's `cwd` that is absolute, or that climbs out of the run's
+    /// working directory.
+    ///
+    /// This is the rule the run's single lock rests on: it holds the
+    /// directory the run was given, so every node staying inside it means
+    /// the lock covers everything the run touches. A node that could climb
+    /// out would work in a directory nobody holds.
+    CwdEscapesRunCwd,
+    /// A node names a directory to run in that does not exist. Only the
+    /// request knows the run's working directory, so this cannot be checked
+    /// when the flow is loaded.
+    CwdMissing { path: String },
     /// A profile named `defaults`. The file already spells the base layer
     /// `defaults:`, so the name refers to two different things at once —
     /// and a host offering both as rows offers two that read the same.

@@ -246,10 +246,14 @@ impl<'a> Run<'a> {
 
                 let seq = self.take_seq();
                 let output = self.node_outputs.get(id).cloned();
+                // The node's own, when it names one. Validation has already
+                // established it is inside the run's — which is what keeps
+                // the run's single lock covering everywhere it works.
+                let cwd = self.node_cwd(node);
                 let ctx = RunContext {
                     node_id: id,
                     attempt,
-                    cwd: self.cwd,
+                    cwd: &cwd,
                     run_dir: self.run_dir,
                     log_dir: &self.log_dir,
                     output: output.as_deref(),
@@ -434,7 +438,7 @@ impl<'a> Run<'a> {
             evidence_seq: ctx.evidence_seq,
             outcome,
             invalidated,
-            git_status: self.git_status.and_then(|ask| ask()),
+            git_status: self.git_status.and_then(|ask| ask(ctx.cwd)),
             waited,
         };
         // On disk before the next node starts, through the same funnel the
@@ -453,6 +457,14 @@ impl<'a> Run<'a> {
         }
         self.spent
             .record(|records| crate::record::push_attempt(records, ctx.node_id, attempt));
+    }
+
+    /// Where a node runs: its own directory, or the run's.
+    fn node_cwd(&self, node: &Node) -> PathBuf {
+        match &node.cwd {
+            Some(relative) => self.cwd.join(relative),
+            None => self.cwd.to_path_buf(),
+        }
     }
 
     fn take_seq(&self) -> u32 {

@@ -26,6 +26,14 @@ pub struct Node {
     pub kind: NodeKind,
     /// The only axis every node kind shares.
     pub timeout: Duration,
+    /// Where this node runs, relative to the run's working directory.
+    /// `None` is that directory itself.
+    ///
+    /// Still relative here, unlike every other axis in this model: the
+    /// directory it is relative *to* belongs to the request, not to the
+    /// flow, and resolving it at load time would bake one host's path into
+    /// a file that is committed and shared.
+    pub cwd: Option<PathBuf>,
 }
 
 /// Splitting the execution axes by node kind is deliberate: a command node

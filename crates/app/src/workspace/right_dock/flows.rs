@@ -46,8 +46,14 @@ pub(in crate::workspace) fn render(
                     .text_color(theme::current(cx).text_subtle),
             );
         } else {
+            let lane = history.lane();
             body = body
-                .children(history.runs().iter().map(|run| past_row(run, snap, cx)))
+                .children(
+                    history
+                        .runs()
+                        .iter()
+                        .map(|run| past_row(run, lane, snap, cx)),
+                )
                 .child(retention_note(cx));
         }
     }
@@ -86,6 +92,7 @@ fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla {
 /// the history was read.
 fn past_row(
     run: &crate::workspace::flow_history::FlowRunEntry,
+    lane: daruda_store::project::LaneRef,
     snap: &RightDockSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
@@ -125,7 +132,7 @@ fn past_row(
                 .text_color(status_color(run.status))
                 .child(strings::flow_run_status(run.status)),
         )
-        .children(resume_button(run, snap))
+        .children(resume_button(run, lane, snap))
         .when_some(run.report.clone(), |row, report| {
             row.cursor_pointer()
                 .hover(move |s| s.bg(row_hover_bg))
@@ -156,6 +163,7 @@ fn past_row(
 /// about what may be continued.
 fn resume_button(
     run: &crate::workspace::flow_history::FlowRunEntry,
+    lane: daruda_store::project::LaneRef,
     snap: &RightDockSnapshot,
 ) -> Option<impl IntoElement + use<>> {
     if !daruda_flow::resume::is_resumable(run.status) {
@@ -182,7 +190,8 @@ fn resume_button(
                     crate::ui::ButtonVariant::Primary,
                     move |_, _window, cx| {
                         let run_dir = run_dir.clone();
-                        match workspace.update(cx, |ws, cx| ws.resume_flow_run(&run_dir, cx)) {
+                        match workspace.update(cx, |ws, cx| ws.resume_flow_run(lane, &run_dir, cx))
+                        {
                             Ok(()) => {}
                             Err(e) => daruda_store::observability::log_writer::LogWriter::log(
                                 daruda_store::observability::error_report::ErrorReport::new(
