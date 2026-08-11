@@ -302,6 +302,10 @@ pub fn right_panel_flow_running() -> String {
 pub fn right_panel_flow_stop() -> String {
     rust_i18n::t!("flow.panel_stop").into_owned()
 }
+/// Title of the modal that brings a parked question to the front.
+pub fn flow_ask_modal_title() -> String {
+    rust_i18n::t!("flow.ask_modal_title").into_owned()
+}
 pub fn right_panel_flow_live_heading() -> String {
     rust_i18n::t!("flow.panel_live_heading").into_owned()
 }

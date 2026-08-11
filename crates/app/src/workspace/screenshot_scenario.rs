@@ -109,7 +109,7 @@ pub(crate) fn drive(
             });
         }
         ScreenshotScenario::FlowRunning => {
-            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, cx));
+            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, window, cx));
         }
         ScreenshotScenario::FlowAsking => {
             workspace.update(cx, |ws, cx| {
@@ -117,7 +117,7 @@ pub(crate) fn drive(
                 // and a capture would otherwise show whichever tab was last
                 // persisted.
                 ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
-                ws.seed_flow_run_for_shot(true, cx);
+                ws.seed_flow_run_for_shot(true, window, cx);
             });
         }
         ScreenshotScenario::ErrorModal => {

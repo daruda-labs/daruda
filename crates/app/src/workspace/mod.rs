@@ -21,6 +21,7 @@ pub(crate) mod dialog_helpers;
 mod dnd_ops;
 mod durable;
 pub(in crate::workspace) mod error;
+pub(in crate::workspace) mod flow_ask_modal;
 pub(in crate::workspace) mod flow_history;
 mod flow_ops;
 mod flow_paths;

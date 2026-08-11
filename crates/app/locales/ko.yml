@@ -963,6 +963,7 @@ flow:
   panel_empty: "이 worktree에서 실행 중인 플로우가 없습니다"
   panel_running: "실행 중"
   panel_stop: "중단하기"
+  ask_modal_title: "플로우가 권한을 묻고 있습니다"
   panel_live_heading: "실행 중"
   panel_past_heading: "지난 실행"
   panel_past_empty: "여기서 실행한 플로우가 아직 없습니다"

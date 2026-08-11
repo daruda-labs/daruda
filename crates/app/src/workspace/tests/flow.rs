@@ -15,6 +15,7 @@ fn workspace_with_a_flow(
     tempfile::TempDir,
     gpui::Entity<Workspace>,
     std::path::PathBuf,
+    gpui::WindowHandle<gpui_component::Root>,
 ) {
     let lane = tempfile::tempdir().expect("tempdir");
     let flows = crate::workspace::flow_paths::flows_dir(lane.path());
@@ -24,8 +25,8 @@ fn workspace_with_a_flow(
 
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(lane.path());
-    let (_wh, ws) = build_workspace_with(cx, &config, Some(project));
-    (lane, ws, flow_path)
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    (lane, ws, flow_path, wh)
 }
 
 const ONE_AGENT: &str = "\
@@ -47,7 +48,7 @@ nodes:
 /// never be one of those in the first place.
 #[gpui::test]
 async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContext) {
-    let (_lane, ws, flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let issues = ws.update(cx, |ws, cx| {
         let submission = ws
@@ -80,7 +81,7 @@ async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContex
 /// here is invisible until a flow runs all night.
 #[gpui::test]
 async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
-    let (lane, ws, flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let request = ws
         .update(cx, |ws, cx| ws.build_flow_request(&flow_path, cx))
@@ -108,7 +109,7 @@ async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
 /// directory, and nothing in the lane to clean up afterwards.
 #[gpui::test]
 async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext) {
-    let (lane, ws, flow_path) = workspace_with_a_flow(
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(
         cx,
         "version: 1\nnodes:\n  - id: a\n    kind: command\n    deps: [ghost]\n    run: \"true\"\n",
     );
@@ -125,7 +126,7 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
 /// step between the palette entry and everything above it.
 #[gpui::test]
 async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     std::fs::write(
         crate::workspace::flow_paths::flows_dir(lane.path()).join("notes.md"),
         "not a flow",
@@ -156,7 +157,7 @@ async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext)
 async fn a_node_naming_an_agent_the_catalog_lacks_is_refused_at_submission(
     cx: &mut TestAppContext,
 ) {
-    let (_lane, ws, flow_path) = workspace_with_a_flow(
+    let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(
         cx,
         "\
 version: 1
@@ -191,7 +192,7 @@ nodes:
 /// picker must not offer a button that cannot work.
 #[gpui::test]
 async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let runs = crate::workspace::flow_paths::runs_dir(lane.path());
     std::fs::create_dir_all(&runs).expect("create runs dir");
     // pid 1 is alive on every unix and is emphatically not this process.
@@ -217,7 +218,7 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
 /// and opened the report of — whichever lane happened to be active.
 #[gpui::test]
 async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let dir_here = lane.path().join("run-here");
     let dir_elsewhere = lane.path().join("run-elsewhere");
     for dir in [&dir_here, &dir_elsewhere] {
@@ -261,7 +262,7 @@ async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut 
 async fn the_panel_lists_only_the_active_lane_while_the_chip_lists_every_one(
     cx: &mut TestAppContext,
 ) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     ws.update(cx, |ws, _cx| {
         let here = ws.active;
@@ -293,7 +294,7 @@ async fn the_panel_lists_only_the_active_lane_while_the_chip_lists_every_one(
 /// error and no failing test anywhere else.
 #[gpui::test]
 async fn a_started_run_makes_the_right_dock_snapshot_differ(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let (before, after) = ws.update(cx, |ws, cx| {
         let before = ws.prepare_right_dock_snapshot(cx);
@@ -315,7 +316,7 @@ async fn a_started_run_makes_the_right_dock_snapshot_differ(cx: &mut TestAppCont
 /// `kill -9` could only be seen with `ls`.
 #[gpui::test]
 async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let runs = crate::workspace::flow_paths::runs_dir(lane.path());
     // One that said how it ended, and one that never got to — which is
     // exactly what a crash leaves behind.
@@ -367,7 +368,7 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
 /// notice.
 #[gpui::test]
 async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     std::fs::create_dir_all(crate::workspace::flow_paths::runs_dir(lane.path())).expect("runs dir");
 
     ws.update(cx, |ws, cx| {
@@ -407,83 +408,91 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
 /// whatever came next.
 #[gpui::test]
 async fn an_answer_only_lands_on_the_question_it_names(cx: &mut TestAppContext) {
-    let (lane, ws, _flow_path) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
-    ws.update(cx, |ws, cx| {
-        let here = ws.active;
-        ws.seed_flow_run_for_test(here, lane.path().join("run"));
-        let (reply_tx, reply_rx) = smol::channel::bounded(1);
-        ws.park_flow_ask_for_test(
-            here,
-            daruda_flow::runner::PendingAsk {
-                node: "design".to_string(),
-                attempt: 1,
-                ask_id: 7,
-                request: daruda_flow::runner::AskRequest {
-                    tool: "Bash".to_string(),
-                    detail: Some("rm -rf build".to_string()),
-                    options: Vec::new(),
+    // `cx.update_window`, not `wh.update`: the latter leases the window's
+    // root view, and parking a question opens a dialog — which has to lease
+    // that same root. The real path arrives through the workspace entity,
+    // where nothing is holding it.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let here = ws.active;
+            ws.seed_flow_run_for_test(here, lane.path().join("run"));
+            let (reply_tx, reply_rx) = smol::channel::bounded(1);
+            ws.park_flow_ask_for_test(
+                here,
+                daruda_flow::runner::PendingAsk {
+                    node: "design".to_string(),
+                    attempt: 1,
+                    ask_id: 7,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: Some("rm -rf build".to_string()),
+                        options: Vec::new(),
+                    },
+                    reply: reply_tx,
                 },
-                reply: reply_tx,
-            },
-            cx,
-        );
+                window,
+                cx,
+            );
 
-        // The panel projects the question, and the projection is what a
-        // click quotes back.
-        let row = ws
-            .flow_rows_for_active_lane()
-            .into_iter()
-            .next()
-            .expect("a row for the parked run");
-        let asking = row.asking.expect("the row carries the question");
-        assert_eq!(asking.ask_id, 7);
-        assert_eq!(asking.tool.as_ref(), "Bash");
+            // The panel projects the question, and the projection is what a
+            // click quotes back.
+            let row = ws
+                .flow_rows_for_active_lane()
+                .into_iter()
+                .next()
+                .expect("a row for the parked run");
+            let asking = row.asking.expect("the row carries the question");
+            assert_eq!(asking.ask_id, 7);
+            assert_eq!(asking.tool.as_ref(), "Bash");
 
-        // A stale click — right lane, wrong question.
-        ws.answer_flow_ask(
-            here,
-            6,
-            daruda_acp::PermissionDecision::Allow {
-                option_id: "once".to_string(),
-            },
-            cx,
-        );
-        assert!(
-            reply_rx.try_recv().is_err(),
-            "a click on a resolved question answered the live one"
-        );
+            // A stale click — right lane, wrong question.
+            ws.answer_flow_ask(
+                here,
+                6,
+                daruda_acp::PermissionDecision::Allow {
+                    option_id: "once".to_string(),
+                },
+                cx,
+            );
+            assert!(
+                reply_rx.try_recv().is_err(),
+                "a click on a resolved question answered the live one"
+            );
 
-        ws.answer_flow_ask(
-            here,
-            7,
-            daruda_acp::PermissionDecision::Allow {
-                option_id: "once".to_string(),
-            },
-            cx,
-        );
-        assert!(
-            matches!(
-                reply_rx.try_recv(),
-                Ok(daruda_acp::PermissionDecision::Allow { .. })
-            ),
-            "the answer never reached the run"
-        );
+            ws.answer_flow_ask(
+                here,
+                7,
+                daruda_acp::PermissionDecision::Allow {
+                    option_id: "once".to_string(),
+                },
+                cx,
+            );
+            assert!(
+                matches!(
+                    reply_rx.try_recv(),
+                    Ok(daruda_acp::PermissionDecision::Allow { .. })
+                ),
+                "the answer never reached the run"
+            );
 
-        // And the question is gone at once. The agent goes back to work for
-        // as long as it likes, so waiting for the run's next event leaves
-        // the buttons up with no sign the click did anything — which reads
-        // as a dead button, and gets answered again.
-        let row = ws
-            .flow_rows_for_active_lane()
-            .into_iter()
-            .next()
-            .expect("the run is still there");
-        assert!(
-            row.asking.is_none(),
-            "the answered question stayed on screen"
-        );
-    });
+            // And the question is gone at once. The agent goes back to work for
+            // as long as it likes, so waiting for the run's next event leaves
+            // the buttons up with no sign the click did anything — which reads
+            // as a dead button, and gets answered again.
+            let row = ws
+                .flow_rows_for_active_lane()
+                .into_iter()
+                .next()
+                .expect("the run is still there");
+            assert!(
+                row.asking.is_none(),
+                "the answered question stayed on screen"
+            );
+        });
+    })
+    .expect("the test window is live");
 }
 
 /// The panel is lane-scoped, so a question raised in a lane you are not
@@ -525,13 +534,72 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
     .expect("the test window is live");
 }
 
+/// Dismissing the modal is not an answer.
+///
+/// The question lives on the run, and the modal is one of two views onto
+/// it — so closing it must leave the question in the panel, where it can
+/// wait as long as it likes. If ownership ever moved into the modal, Esc
+/// would silently throw the question away and the run would park forever
+/// with nothing on screen.
+///
+/// Whether the dialog itself is up cannot be asserted here — upstream
+/// keeps `Root::active_dialogs` `pub(crate)` — so the modal's own
+/// rendering is checked with `--screenshot-scenario flow-asking`.
+#[gpui::test]
+async fn closing_the_modal_leaves_the_question_standing(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let here = ws.active;
+            ws.seed_flow_run_for_test(here, lane.path().join("run"));
+            let (reply_tx, reply_rx) = smol::channel::bounded(1);
+            ws.park_flow_ask_for_test(
+                here,
+                daruda_flow::runner::PendingAsk {
+                    node: "design".to_string(),
+                    attempt: 1,
+                    ask_id: 3,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: None,
+                        options: Vec::new(),
+                    },
+                    reply: reply_tx,
+                },
+                window,
+                cx,
+            );
+
+            // What Escape does: closes the dialog and nothing else.
+            crate::ui::WindowExt::close_dialog(window, cx);
+
+            let row = ws
+                .flow_rows_for_active_lane()
+                .into_iter()
+                .next()
+                .expect("the run is still there");
+            assert_eq!(
+                row.asking.map(|a| a.ask_id),
+                Some(3),
+                "dismissing the modal took the question with it"
+            );
+            assert!(
+                reply_rx.try_recv().is_err(),
+                "dismissing the modal answered on the user's behalf"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
 /// `load` alone is not the whole of stage 1. A `prompt_file` that is not
 /// there is only knowable with the request's own context, so checking less
 /// here than `Run Flow…` checks means "no problems found" followed by a
 /// refusal — the split design §12 exists to prevent.
 #[gpui::test]
 async fn checking_a_flow_finds_what_only_the_request_can_see(cx: &mut TestAppContext) {
-    let (lane, ws, flow_path) = workspace_with_a_flow(
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(
         cx,
         "\
 version: 1

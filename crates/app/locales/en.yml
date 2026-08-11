@@ -963,6 +963,7 @@ flow:
   panel_empty: "No flow is running in this worktree"
   panel_running: "Running"
   panel_stop: "Stop"
+  ask_modal_title: "A flow is asking permission"
   panel_live_heading: "Running now"
   panel_past_heading: "Past runs"
   panel_past_empty: "No flow has run here yet"

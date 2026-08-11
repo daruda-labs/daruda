@@ -538,9 +538,12 @@ impl Workspace {
     ) {
         cx.spawn(async move |this, cx| {
             while let Ok(pending) = asks.recv().await {
+                // `update_in` rather than `update`: parking also raises the
+                // question as a modal when its lane is the one in view, and
+                // opening a dialog needs the window.
                 if this
-                    .update(cx, |workspace, cx| {
-                        workspace.park_flow_ask(lane_ref, pending, cx);
+                    .update_in(cx, |workspace, window, cx| {
+                        workspace.park_flow_ask(lane_ref, pending, window, cx);
                     })
                     .is_err()
                 {
@@ -556,6 +559,7 @@ impl Workspace {
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         pending: daruda_flow::runner::PendingAsk,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(handle) = self.flow_runs.get_mut(&lane_ref) else {
@@ -573,6 +577,24 @@ impl Workspace {
             }),
         };
         cx.notify();
+
+        // Brought to the front only for the lane in view — the modal owns
+        // that rule. Everywhere else the chip is what says a run is waiting.
+        if let Some(row) = self
+            .flow_rows_for_active_lane()
+            .into_iter()
+            .find(|row| row.lane == lane_ref)
+            .and_then(|row| row.asking)
+        {
+            super::flow_ask_modal::FlowAskModal::raise_if_in_view(
+                cx.weak_entity(),
+                self.active,
+                lane_ref,
+                row,
+                window,
+                cx,
+            );
+        }
     }
 
     /// Answer the question `lane` is holding.
@@ -722,56 +744,61 @@ impl Workspace {
     pub(in crate::workspace) fn seed_flow_run_for_shot(
         &mut self,
         asking: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         use daruda_acp::{PermissionChoice, PermissionKindView};
         let lane = self.active;
-        let doing = if asking {
-            // Dropped immediately: nothing will read the answer, and the
-            // reply channel exists only so the row has one to offer.
-            let (reply, _rx) = smol::channel::bounded(1);
-            RunStage::Asking {
-                question: std::sync::Arc::new(ParkedAsk {
-                    ask_id: 1,
-                    node: "implement".to_string(),
-                    attempt: 1,
-                    tool: "Bash".to_string(),
-                    detail: Some("rm -rf target/debug/incremental".to_string()),
-                    options: vec![
-                        PermissionChoice {
-                            option_id: "once".to_string(),
-                            name: "Allow once".to_string(),
-                            kind: PermissionKindView::AllowOnce,
-                        },
-                        PermissionChoice {
-                            option_id: "always".to_string(),
-                            name: "Allow always".to_string(),
-                            kind: PermissionKindView::AllowAlways,
-                        },
-                        PermissionChoice {
-                            option_id: "no".to_string(),
-                            name: "Reject".to_string(),
-                            kind: PermissionKindView::RejectOnce,
-                        },
-                    ],
-                    reply,
-                }),
-            }
-        } else {
-            RunStage::Node {
-                id: "verdict".to_string(),
-                attempt: 2,
-            }
-        };
         self.flow_runs.insert(
             lane,
             RunHandle {
                 cancel: CancelToken::default(),
                 run_dir: self.active_lane_root().unwrap_or_default(),
-                doing,
+                doing: RunStage::Node {
+                    id: "verdict".to_string(),
+                    attempt: 2,
+                },
                 _thread: std::thread::spawn(|| {}),
             },
         );
+        if asking {
+            // Through the real parking path, not by writing the stage: the
+            // modal is raised there, and a capture that skipped it would
+            // show only the panel — the half already covered.
+            let (reply, _rx) = smol::channel::bounded(1);
+            self.park_flow_ask(
+                lane,
+                daruda_flow::runner::PendingAsk {
+                    node: "implement".to_string(),
+                    attempt: 1,
+                    ask_id: 1,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: Some("rm -rf target/debug/incremental".to_string()),
+                        options: vec![
+                            PermissionChoice {
+                                option_id: "once".to_string(),
+                                name: "Allow once".to_string(),
+                                kind: PermissionKindView::AllowOnce,
+                            },
+                            PermissionChoice {
+                                option_id: "always".to_string(),
+                                name: "Allow always".to_string(),
+                                kind: PermissionKindView::AllowAlways,
+                            },
+                            PermissionChoice {
+                                option_id: "no".to_string(),
+                                name: "Reject".to_string(),
+                                kind: PermissionKindView::RejectOnce,
+                            },
+                        ],
+                    },
+                    reply,
+                },
+                window,
+                cx,
+            );
+        }
         cx.notify();
     }
 
@@ -795,9 +822,10 @@ impl Workspace {
         &mut self,
         lane: daruda_store::project::LaneRef,
         pending: daruda_flow::runner::PendingAsk,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.park_flow_ask(lane, pending, cx);
+        self.park_flow_ask(lane, pending, window, cx);
     }
 
     #[cfg(test)]
