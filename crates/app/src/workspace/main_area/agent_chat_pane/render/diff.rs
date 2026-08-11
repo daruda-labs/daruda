@@ -58,9 +58,9 @@ pub(super) fn diff_block(
     let path_string = diff.path.display().to_string();
     // The path is the block's identity, shown in both fold states, so it takes
     // the stretch slot; the truncation idiom lives in `fold_header`. It reads as
-    // a link through cursor + hover underline. `GIT_RENAMED` is the existing
-    // muted blue token closest to the desired link tone without borrowing from
-    // the syntax palette. Clicking it opens the file in the pane-area file
+    // a link through cursor + hover underline, and takes the `link_color` role
+    // so it matches markdown link text instead of borrowing a git status hue.
+    // Clicking it opens the file in the pane-area file
     // viewer — dispatched through `Workspace::open_diff_in_file_view`, reached
     // via `WindowRegistry` since this self-owned view has no direct `Workspace`
     // handle (the same lookup its own pane context-menu builder uses,
@@ -72,7 +72,7 @@ pub(super) fn diff_block(
             "agent-chat-diff-path-{diff_key}"
         )))
         .cursor_pointer()
-        .text_color(theme::dim_toward_gray(theme::GIT_RENAMED, dim))
+        .text_color(theme::dim_toward_gray(t.link_color, dim))
         .hover(|s| s.underline())
         .font_family(theme::FONT_FAMILY_MONOSPACE)
         .text_size(px(theme::agent_chat_font_size(cx)))

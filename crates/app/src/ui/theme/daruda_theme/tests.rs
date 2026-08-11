@@ -27,6 +27,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.text_muted, palette::TEXT_MUTE);
     assert_eq!(t.text_subtle, palette::TEXT_SUBTLE);
+    assert_eq!(t.link_color, palette::LINK);
     assert_eq!(t.button_widget_bg, palette::BG_HOVER);
     assert_eq!(t.button_widget_bg_hover, palette::BG_ACTIVE);
     assert_eq!(t.text_body, palette::TEXT_BODY);

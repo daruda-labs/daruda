@@ -399,7 +399,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .into_any_element(),
 
         MdSpan::Link { text, .. } => div()
-            .text_color(theme::PRIMARY)
+            .text_color(t.link_color)
             .child(text.clone())
             .into_any_element(),
 

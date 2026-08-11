@@ -55,6 +55,7 @@ daruda_theme_fields! {
     text_muted => TEXT_MUTE,
     text_body => TEXT_BODY,
     text_subtle => TEXT_SUBTLE,
+    link_color => LINK,
     scrollbar_thumb => SCROLLBAR_THUMB,
     status_bar_bg => BG_BASE,
     status_bar_project_dot => STATUS_BAR_PROJECT_DOT,

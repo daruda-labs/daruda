@@ -63,6 +63,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#797e86ff"
     },
+    "link_color": {
+      "description": "Maps to `palette::LINK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#809ff9ff"
+    },
     "scrollbar_thumb": {
       "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",

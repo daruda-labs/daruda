@@ -217,9 +217,15 @@ pub const TEXT_DISABLED: Hsla = TEXT_SUBTLE; // empty states, lowest emphasis
 // Action role — the single chromatic accent (DESIGN §Colors: accent),
 // surfaced under a clearer semantic name. Feature constants and render
 // reference `PRIMARY` for primary CTA / focus ring / active indicator /
-// link / info tint; [`ACCENT`] stays as the raw design-token value and
+// info tint; [`ACCENT`] stays as the raw design-token value and
 // is referenced only here.
 pub const PRIMARY: Hsla = ACCENT;
+
+/// Link role — clickable *text*: markdown links and the agent-chat diff header's
+/// file path. Not [`PRIMARY`]: DESIGN §Saturation on dark surfaces bans `accent`
+/// as body text (~4.1:1); this reaches ~7.4:1 on [`CANVAS`]. One token so the
+/// link sites can't drift apart again (they borrowed `ACCENT` / [`GIT_RENAMED`]).
+pub const LINK: Hsla = hsla(224.6, 0.905, 0.738, 1.0);
 
 // Overlay roles — white lift at fixed alphas for row hover/active fills that
 // must read over any underlying surface. One step per intensity so every

@@ -44,6 +44,7 @@ colors:
   accent-hover:  "#828fff"   # Hovered accent elements
   accent-muted:  "#1e2050"   # Low-opacity accent fill (badge background)
   accent-fg:     "#ffffff"   # Text/icon on solid accent background
+  link:          "#809ff9"   # Clickable *text*: markdown links, diff header file path (7.4:1 — accent is too dark as text)
 
   # Text — cool light-gray scale (Linear-inspired)
   ink:           "#f7f8f8"   # Primary: active labels, tab titles, focused row
@@ -165,7 +166,8 @@ output, and syntax-highlighted code.
   the near-gray band rather than using raw, fully-saturated source-theme values.
 - `accent` (`#5e6ad2`) clears 3:1 as a UI element but only ~4.1:1 as text — **do not
   use `accent` for small body text** (links, inline labels). Use it for fills, focus
-  rings, icons, and ≥14px-bold emphasis only.
+  rings, icons, and ≥14px-bold emphasis only. Clickable text takes the `link` token
+  (`#809ff9`, 7.4:1) instead.
 
 **Contrast is a scarce resource (syntax highlighting):**
 - Don't color every token. Lean on structure (a string's contents can't be confused
@@ -826,7 +828,7 @@ inline-code:
   radius:     xs (2px)
 
 link:
-  color:      accent (#5e6ad2)
+  color:      link (#809ff9)   -- NOT accent: ~4.1:1 fails as body text
   underline:  on hover only
 
 strong:       ink (#f7f8f8), weight 600

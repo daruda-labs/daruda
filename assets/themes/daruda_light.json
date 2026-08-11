@@ -124,6 +124,7 @@
   "text_muted": "#5e6573",
   "text_body": "#2d2d2d",
   "text_subtle": "#7b818e",
+  "link_color": "#0a3ccc",
   "scrollbar_thumb": "#00000040",
   "text_primary": "#1a1d24"
 }

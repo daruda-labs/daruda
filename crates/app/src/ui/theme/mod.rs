@@ -199,15 +199,19 @@ pub fn apply_daruda_palette(cx: &mut App) {
     t.ring = PRIMARY;
 
     // ---------------------------------------------------------------
-    // Info / link — share the primary blue tint.
+    // Info keeps the primary blue tint; link takes its own pastel so
+    // small body text clears contrast (DESIGN §Saturation on dark
+    // surfaces). All three link slots share one value — the `Link`
+    // widget derives its own hover feedback by opacity, and a hover
+    // that jumped back to `accent` would darken the link instead.
     // ---------------------------------------------------------------
     t.info = PRIMARY;
     t.info_hover = ACCENT_HOVER;
     t.info_active = PRIMARY;
     t.info_foreground = TEXT_PRIMARY;
-    t.link = PRIMARY;
-    t.link_hover = ACCENT_HOVER;
-    t.link_active = ACCENT_HOVER;
+    t.link = d.link_color;
+    t.link_hover = d.link_color;
+    t.link_active = d.link_color;
 
     // ---------------------------------------------------------------
     // Secondary
