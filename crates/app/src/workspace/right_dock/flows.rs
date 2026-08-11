@@ -240,7 +240,7 @@ fn run_row(run: &FlowRunRow, snap: &RightDockSnapshot, cx: &gpui::App) -> impl I
         .children(
             run.asking
                 .as_ref()
-                .map(|ask| ask_block(run.lane, ask, snap, cx)),
+                .map(|ask| ask_block(run.lane, ask, run.also_waiting, snap, cx)),
         )
 }
 
@@ -252,6 +252,7 @@ fn run_row(run: &FlowRunRow, snap: &RightDockSnapshot, cx: &gpui::App) -> impl I
 fn ask_block(
     lane: daruda_store::project::LaneRef,
     ask: &crate::workspace::flow_ops::AskRowData,
+    also_waiting: usize,
     snap: &RightDockSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
@@ -284,6 +285,16 @@ fn ask_block(
                         .map(|(ix, choice)| answer_button(lane, ask_id, ix, choice, snap)),
                 ),
         )
+        // Only when there are: a line saying "0 more waiting" under every
+        // ordinary question is noise on the common case.
+        .when(also_waiting > 0, |block| {
+            block.child(
+                div()
+                    .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+                    .text_color(t.text_subtle)
+                    .child(strings::flow_more_questions_waiting(also_waiting)),
+            )
+        })
 }
 
 /// One answer. Allow kinds take the primary treatment and reject kinds the

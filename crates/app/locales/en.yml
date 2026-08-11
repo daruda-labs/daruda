@@ -968,6 +968,7 @@ flow:
   picker_prompt_profile: "Run %{flow} as…"
   picker_empty: "No flows here yet — add one under .daruda/flows/"
   panel_empty: "No flow is running in this worktree"
+  more_questions_waiting: "%{n} more waiting"
   ask_modal_stop: "Stop the flow"
   panel_stop: "Stop"
   ask_modal_title: "A flow is asking permission"

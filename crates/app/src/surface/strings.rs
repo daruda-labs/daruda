@@ -299,6 +299,12 @@ pub fn right_panel_flow_empty() -> String {
 pub fn right_panel_flow_stop() -> String {
     rust_i18n::t!("flow.panel_stop").into_owned()
 }
+/// Said under a question when more are behind it. Without it a person
+/// answers, sees a different question appear, and cannot tell whether they
+/// answered the wrong one.
+pub fn flow_more_questions_waiting(n: usize) -> String {
+    rust_i18n::t!("flow.more_questions_waiting", n = n).into_owned()
+}
 /// The modal's way out that is not an answer. Names the object because
 /// "Stop" alone, beside three answer buttons, reads as stopping the tool
 /// call rather than the run.

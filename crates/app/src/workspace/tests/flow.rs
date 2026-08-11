@@ -1204,3 +1204,111 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
         "the request would find the lock held by a process the resume just called gone"
     );
 }
+
+/// Park a question on `lane`, with the reply channel handed back so a test
+/// can see whether it was ever answered.
+fn park_question(
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    lane: daruda_store::project::LaneRef,
+    run_dir: &std::path::Path,
+    ask_id: u64,
+) -> smol::channel::Receiver<daruda_acp::PermissionDecision> {
+    let (reply, rx) = smol::channel::bounded(1);
+    cx.update(|window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.park_flow_ask_for_test(
+                lane,
+                run_dir,
+                daruda_flow::runner::PendingAsk {
+                    node: format!("node-{ask_id}"),
+                    attempt: 1,
+                    ask_id,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: None,
+                        options: Vec::new(),
+                    },
+                    reply,
+                },
+                window,
+                cx,
+            );
+        });
+    });
+    rx
+}
+
+/// Nodes running together ask independently, so a second question can
+/// arrive while the first is up. It waits behind it.
+///
+/// Replacing the first is what the single-question stage used to do, and
+/// the cost is not cosmetic: the replaced question's node stays parked on a
+/// reply nobody can send any more, and the run waits forever on something
+/// no longer on screen.
+#[gpui::test]
+async fn a_second_question_waits_behind_the_first(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.update(&mut cx, |ws, _| ws.active);
+    let run_dir = lane.path().join("run");
+    ws.update(&mut cx, |ws, _| {
+        ws.seed_flow_run_for_test(here, run_dir.clone())
+    });
+
+    let first = park_question(&ws, &mut cx, here, &run_dir, 1);
+    let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
+
+    let row = ws.update(&mut cx, |ws, _| {
+        ws.flow_rows_for_active_lane()
+            .into_iter()
+            .next()
+            .expect("the run is listed")
+    });
+    assert_eq!(
+        row.asking.as_ref().map(|a| a.ask_id),
+        Some(1),
+        "the second question replaced the first"
+    );
+    assert_eq!(row.also_waiting, 1, "the second question was dropped");
+    assert!(
+        first.try_recv().is_err(),
+        "the first question was answered by the second one arriving"
+    );
+}
+
+/// Answering promotes the next. Otherwise the run reads as working while a
+/// question nobody can see is still holding a node.
+#[gpui::test]
+async fn answering_brings_the_next_question_forward(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.update(&mut cx, |ws, _| ws.active);
+    let run_dir = lane.path().join("run");
+    ws.update(&mut cx, |ws, _| {
+        ws.seed_flow_run_for_test(here, run_dir.clone())
+    });
+    let _first = park_question(&ws, &mut cx, here, &run_dir, 1);
+    let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
+
+    let row = ws.update(&mut cx, |ws, cx| {
+        ws.answer_flow_ask(
+            here,
+            1,
+            daruda_acp::PermissionDecision::Reject {
+                option_id: "no".to_string(),
+            },
+            cx,
+        );
+        ws.flow_rows_for_active_lane()
+            .into_iter()
+            .next()
+            .expect("the run is listed")
+    });
+    assert_eq!(
+        row.asking.as_ref().map(|a| a.ask_id),
+        Some(2),
+        "answering hid a question that is still waiting"
+    );
+    assert_eq!(row.also_waiting, 0);
+}

@@ -75,7 +75,13 @@ pub(super) fn render(
 fn trigger_label(runs: &[FlowRunRow], density: StatusBarDensity) -> String {
     // A waiting run outranks a working one however many there are: work
     // finishes on its own, a question does not.
-    let waiting = runs.iter().filter(|run| run.asking.is_some()).count();
+    // Questions, not runs: one run can hold several once its nodes run
+    // together, and a chip saying "1" over two unanswered questions is the
+    // reason somebody would leave one of them sitting.
+    let waiting: usize = runs
+        .iter()
+        .map(|run| usize::from(run.asking.is_some()) + run.also_waiting)
+        .sum();
     if waiting > 0 {
         return crate::surface::strings::status_bar_flow_chip_asking(waiting);
     }
@@ -197,6 +203,7 @@ mod tests {
             lane_label: "temp / main".into(),
             doing: doing.to_string().into(),
             asking: None,
+            also_waiting: 0,
         }
     }
 

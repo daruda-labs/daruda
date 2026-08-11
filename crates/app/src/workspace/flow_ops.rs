@@ -40,6 +40,9 @@ pub(in crate::workspace) struct FlowRunRow {
     /// field by field (`RightDockSnapshot::content_differs`) and a channel
     /// has no equality, so it could not travel here even if it should.
     pub asking: Option<AskRowData>,
+    /// How many more are behind the one being shown. Zero for a run with a
+    /// single question, which is every serial run.
+    pub also_waiting: usize,
 }
 
 /// A parked question in the shape a surface draws, plus the id an answer
@@ -92,8 +95,15 @@ pub(in crate::workspace) enum RunStage {
     ///
     /// A variant rather than a flag beside an `Option`: a stage that is
     /// "asking" and has no question is not a state worth representing.
+    ///
+    /// More than one at a time is now possible — nodes running together ask
+    /// independently — so the rest wait behind the one on screen. The queue
+    /// lives *in* the variant because a queue of questions in a run that is
+    /// not asking is not a state either.
     Asking {
         question: std::sync::Arc<ParkedAsk>,
+        /// Arrived while `question` was up. Answering promotes the front.
+        queued: std::collections::VecDeque<std::sync::Arc<ParkedAsk>>,
     },
 }
 
@@ -139,7 +149,7 @@ impl RunStage {
             // asking would leave the one stage that does not say where the
             // run is. For a repair's fix session the engine sends the gate's
             // name, which is what makes that case renderable at all.
-            RunStage::Asking { question } => {
+            RunStage::Asking { question, .. } => {
                 s::status_bar_flow_stage_asking(&question.node, &question.tool)
             }
         }
@@ -394,7 +404,10 @@ impl Workspace {
             // question and its buttons are still on screen with nothing to
             // say the Stop landed. The engine releases its own side — the
             // interrupt arm answers the adapter `Cancelled`.
-            if let RunStage::Asking { question } = &handle.doing {
+            // The queue goes with it. Every question behind this one
+            // belongs to the same stopped run, and the engine releases them
+            // the same way it releases the one on screen.
+            if let RunStage::Asking { question, .. } = &handle.doing {
                 handle.doing = RunStage::Node {
                     id: question.node.clone(),
                     attempt: question.attempt,
@@ -435,13 +448,17 @@ impl Workspace {
                 lane_label: self.lane_label_for(*lane).into(),
                 doing: handle.doing.describe().into(),
                 asking: match &handle.doing {
-                    RunStage::Asking { question } => Some(AskRowData {
+                    RunStage::Asking { question, .. } => Some(AskRowData {
                         ask_id: question.ask_id,
                         tool: question.tool.clone().into(),
                         detail: question.detail.clone().map(Into::into),
                         options: question.options.clone(),
                     }),
                     _ => None,
+                },
+                also_waiting: match &handle.doing {
+                    RunStage::Asking { queued, .. } => queued.len(),
+                    _ => 0,
                 },
             })
             .collect();
@@ -634,17 +651,28 @@ impl Workspace {
         if handle.run_dir != run_dir {
             return;
         }
-        handle.doing = RunStage::Asking {
-            question: std::sync::Arc::new(ParkedAsk {
-                ask_id: pending.ask_id,
-                node: pending.node,
-                attempt: pending.attempt,
-                tool: pending.request.tool,
-                detail: pending.request.detail,
-                options: pending.request.options,
-                reply: pending.reply,
-            }),
-        };
+        let arrived = std::sync::Arc::new(ParkedAsk {
+            ask_id: pending.ask_id,
+            node: pending.node,
+            attempt: pending.attempt,
+            tool: pending.request.tool,
+            detail: pending.request.detail,
+            options: pending.request.options,
+            reply: pending.reply,
+        });
+        // Behind the one already up, never over it. Nodes running together
+        // ask independently, and a second question that replaced the first
+        // would leave that first node parked on a reply nobody can send —
+        // the run would wait forever on a question no longer on screen.
+        match &mut handle.doing {
+            RunStage::Asking { queued, .. } => queued.push_back(arrived),
+            doing => {
+                *doing = RunStage::Asking {
+                    question: arrived,
+                    queued: std::collections::VecDeque::new(),
+                }
+            }
+        }
         cx.notify();
 
         // Rows for *this* lane, not the active one: whether it may take the
@@ -682,7 +710,7 @@ impl Workspace {
         let Some(handle) = self.flow_runs.get_mut(&lane) else {
             return;
         };
-        let RunStage::Asking { question } = &handle.doing else {
+        let RunStage::Asking { question, queued } = &mut handle.doing else {
             return;
         };
         if question.ask_id != ask_id {
@@ -691,14 +719,23 @@ impl Workspace {
         // Bounded to one, so this cannot block and a second send cannot
         // land.
         let _ = question.reply.try_send(decision);
-        // Off `Asking` now, not when the run's next event happens to
+        // Off this question now, not when the run's next event happens to
         // arrive: the agent goes back to work for as long as it likes, and
         // until then the question and its buttons would still be on screen
         // with no sign the click did anything. Observed as "the button does
         // nothing" — and answered again, and again.
-        handle.doing = RunStage::Node {
-            id: question.node.clone(),
-            attempt: question.attempt,
+        //
+        // The next one takes its place if there is one. Answering must not
+        // hide a question that is still waiting for an answer.
+        handle.doing = match queued.pop_front() {
+            Some(next) => RunStage::Asking {
+                question: next,
+                queued: std::mem::take(queued),
+            },
+            None => RunStage::Node {
+                id: question.node.clone(),
+                attempt: question.attempt,
+            },
         };
         cx.notify();
     }
