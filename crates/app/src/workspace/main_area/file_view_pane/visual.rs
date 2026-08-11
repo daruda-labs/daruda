@@ -77,7 +77,40 @@ pub(in crate::workspace) fn usvg_options() -> resvg::usvg::Options<'static> {
         ..Default::default()
     };
     options.font_resolver.select_font = case_insensitive_font_selector();
+    options.font_resolver.select_fallback = glyph_fallback_selector();
     options
+}
+
+/// Keep a glyph fallback from hijacking the whole text run.
+///
+/// usvg reshapes the entire run with the fallback face and, when that face
+/// matched *every* glyph, keeps that shaping wholesale (`usvg::text::layout`,
+/// `shape_text`). macOS's `.LastResort` covers all of Unicode with placeholder
+/// boxes and is the first face the default selector finds for an emoji, so one
+/// `✅` in a mermaid label turned every character on that line into `□?`.
+///
+/// Refusing the dot-prefixed system faces — internal, unnameable from CSS, and
+/// never what a document asked for — lets the real face for that character win
+/// (Apple Color Emoji) and leaves the rest of the run in its own font. A
+/// character no ordinary face covers now falls back to the primary font's
+/// `.notdef` instead of taking its neighbours with it.
+fn glyph_fallback_selector() -> resvg::usvg::FallbackSelectionFn<'static> {
+    let default = resvg::usvg::FontResolver::default_fallback_selector();
+    Box::new(move |c, exclude_fonts, db| {
+        let mut exclude = exclude_fonts.to_vec();
+        loop {
+            let id = default(c, &exclude, db)?;
+            let is_system_internal = db
+                .face(id)
+                .and_then(|face| face.families.first())
+                .is_some_and(|(name, _)| name.starts_with('.'));
+            if !is_system_internal {
+                return Some(id);
+            }
+            // Excluded, so the next round cannot return it again.
+            exclude.push(id);
+        }
+    })
 }
 
 /// Resolve `font-family` names the way CSS does: case-insensitively.
@@ -305,10 +338,13 @@ pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterI
 mod tests {
     use super::*;
 
+    /// Size [`ink_width`] lays its probe out at.
+    const PROBE_FONT_SIZE: f32 = 16.0;
+
     /// Ink width of `text` laid out in `family`, through the app's own options.
     fn ink_width(text: &str, family: &str) -> f32 {
         let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="200"><style>text{{font-family:{family};font-size:16px}}</style><text x="0" y="100">{text}</text></svg>"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="200"><style>text{{font-family:{family};font-size:{PROBE_FONT_SIZE}px}}</style><text x="0" y="100">{text}</text></svg>"#
         );
         let tree = resvg::usvg::Tree::from_str(&svg, &usvg_options()).expect("parses");
         fn find(group: &resvg::usvg::Group) -> Option<f32> {
@@ -346,6 +382,27 @@ mod tests {
             .abs()
                 < 0.05,
             "mermaid's lowercased stack must land on Trebuchet MS"
+        );
+    }
+
+    /// One character the primary font lacks must not drag its neighbours into
+    /// the fallback face. Before `select_fallback` refused `.LastResort` —
+    /// which matches all of Unicode with placeholder boxes — usvg kept that
+    /// whole-run reshaping and a single emoji turned its entire mermaid label
+    /// into `□?`.
+    #[test]
+    fn one_unsupported_char_does_not_reshape_the_whole_run() {
+        if !canonical_family_names().contains_key("trebuchet ms") {
+            // Same guard as the test above: no Trebuchet MS, nothing to assert.
+            return;
+        }
+        const STACK: &str = r#""trebuchet ms",verdana,arial,sans-serif"#;
+        let latin = ink_width("run.yaml", STACK);
+        let with_emoji = ink_width("run.yaml ✅", STACK);
+        assert!(
+            with_emoji < latin + 2.0 * PROBE_FONT_SIZE,
+            "a trailing emoji may add about one em, not reshape the line \
+             (latin={latin}, with_emoji={with_emoji})"
         );
     }
 
