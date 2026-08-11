@@ -1001,6 +1001,7 @@ flow:
   issue_line_at_node: "· %{node} — %{text}"
   issue_missing_agent: "needs an agent, and neither the flow's defaults nor this node names one"
   issue_agent_id_without_mode: "names its own agent but not the mode to run it in"
+  issue_ask_without_mode: "asks a person for permission but names no agent mode, and whether anyone is asked depends on it"
   issue_unknown_version: "this build does not know how to run a version %{version} flow"
   issue_unreachable_output_ref: "reads %{referenced}'s output, but %{referenced} is not guaranteed to have run first"
   issue_unknown_field: "has no field %{field} — check the spelling"

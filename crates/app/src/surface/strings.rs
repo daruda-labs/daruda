@@ -4188,6 +4188,7 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
     match kind {
         K::MissingAgent => rust_i18n::t!("flow.issue_missing_agent"),
         K::AgentIdWithoutMode => rust_i18n::t!("flow.issue_agent_id_without_mode"),
+        K::AskWithoutMode => rust_i18n::t!("flow.issue_ask_without_mode"),
         K::UnknownVersion(version) => {
             rust_i18n::t!("flow.issue_unknown_version", version => version)
         }

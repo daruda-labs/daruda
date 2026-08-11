@@ -64,7 +64,10 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
                 }
                 match merge_agent(file.defaults.agent.as_ref(), override_.as_ref()) {
                     Some(spec) => NodeKind::Agent {
-                        agent: spec,
+                        agent: {
+                            check_ask_has_a_mode(&spec, Some(&node.id), &mut issues);
+                            spec
+                        },
                         prompt: resolve_prompt(prompt),
                         output,
                         on_fail: resolve_agent_fail(on_fail),
@@ -90,14 +93,21 @@ pub fn resolve(file: FlowFile) -> Result<Flow, Vec<ValidationIssue>> {
         });
     }
 
-    if issues.is_empty() {
-        // `defaults.agent` first. Without it, fallback only when every
-        // resolved agent node agrees on the exact same spec; otherwise a
-        // repair prompt would run as whichever node happened to appear
-        // first, which is not a stable policy.
-        let default_agent = merge_agent(file.defaults.agent.as_ref(), None)
-            .or_else(|| unanimous_agent_from_nodes(&nodes));
+    // `defaults.agent` first. Without it, fallback only when every resolved
+    // agent node agrees on the exact same spec; otherwise a repair prompt
+    // would run as whichever node happened to appear first, which is not a
+    // stable policy.
+    let default_agent = merge_agent(file.defaults.agent.as_ref(), None)
+        .or_else(|| unanimous_agent_from_nodes(&nodes));
+    // A repair's `fix` runs as this one and inherits its policy, so a flow
+    // whose nodes never ask can still reach `Ask` through it. Checked
+    // before the verdict below, not after — an issue pushed past it would
+    // be collected and then thrown away with an `Ok`.
+    if let Some(agent) = default_agent.as_ref() {
+        check_ask_has_a_mode(agent, None, &mut issues);
+    }
 
+    if issues.is_empty() {
         Ok(Flow {
             version: file.version,
             default_agent,
@@ -266,6 +276,32 @@ fn merge_agent(
     })
 }
 
+/// A flow that wants a person asked has to say which mode it runs in.
+///
+/// Not a fallback to daruda's own configured default: a flow file is
+/// committed and shared, and filling it in from local config would make
+/// the same file ask on one machine and not another — with `run.yaml`
+/// recording a mode the file never said. What the file says is the whole
+/// of it, so this makes it say.
+///
+/// Names no mode itself. Which modes prompt is the adapter's to advertise
+/// (§8), and this only observes that the deciding axis was left unset.
+fn check_ask_has_a_mode(
+    spec: &AgentSpec,
+    node: Option<&crate::NodeId>,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    if spec.permission != PermissionPolicy::Ask || spec.mode.is_some() {
+        return;
+    }
+    issues.push(ValidationIssue {
+        node: node.cloned(),
+        kind: ValidationKind::AskWithoutMode,
+        message: "`permission: ask` needs an `agent.mode`; whether anyone is asked depends on it"
+            .to_string(),
+    });
+}
+
 fn resolve_permission(p: PermissionPolicyFile) -> PermissionPolicy {
     match p {
         PermissionPolicyFile::Deny => PermissionPolicy::Deny,
@@ -330,6 +366,106 @@ fn resolve_gate_fail(f: GateFailFile) -> GateFail {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::FlowError;
+    use crate::load::load;
+
+    /// The trap a real run walked into: `permission: ask` with no `mode`.
+    ///
+    /// Which modes prompt is the adapter's business, so nothing here can
+    /// say "bypassPermissions never asks". What it can say is that the axis
+    /// deciding whether anyone is *ever* asked was left unset — and the
+    /// mode daruda itself defaults to is one that never prompts, so the
+    /// silent outcome is "you are not asked, and nothing tells you".
+    #[test]
+    fn asking_without_a_mode_is_refused() {
+        let issues = load(
+            "\
+version: 1
+defaults: { agent: { id: claude, permission: ask } }
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+",
+        )
+        .expect_err("a flow that asks with no mode must not resolve");
+        let FlowError::Validate(issues) = issues else {
+            panic!("expected validation issues, got {issues:?}");
+        };
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.kind == ValidationKind::AskWithoutMode),
+            "{issues:?}"
+        );
+    }
+
+    /// Naming the mode is the whole of the fix.
+    #[test]
+    fn asking_with_a_mode_resolves() {
+        load(
+            "\
+version: 1
+defaults: { agent: { id: claude, mode: default, permission: ask } }
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+",
+        )
+        .expect("naming the mode is all it takes");
+    }
+
+    /// A repair's `fix` runs as `defaults.agent` and inherits its policy,
+    /// so a flow of nothing but command nodes can still reach `ask`.
+    #[test]
+    fn a_repair_that_could_ask_needs_the_mode_too() {
+        let err = load(
+            "\
+version: 1
+defaults: { agent: { id: claude, permission: ask } }
+nodes:
+  - id: gate
+    kind: command
+    run: \"true\"
+    on_fail:
+      repair:
+        fix: fix it, see {{attempts}}
+        max_attempts: 2
+        wait: 0s
+",
+        )
+        .expect_err("the repair agent can ask, so the mode is required");
+        let FlowError::Validate(issues) = err else {
+            panic!("expected validation issues");
+        };
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.kind == ValidationKind::AskWithoutMode),
+            "{issues:?}"
+        );
+    }
+
+    /// A flow that never asks is unaffected — the rule must not become a
+    /// reason every flow has to pin a mode.
+    #[test]
+    fn a_flow_that_never_asks_needs_no_mode() {
+        load(
+            "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: a
+    kind: agent
+    output: a.md
+    prompt: write
+",
+        )
+        .expect("a flow with no `ask` keeps its freedom to omit the mode");
+    }
     use super::*;
     use crate::error::ValidationKind;
     use crate::model::{NodeKind, PermissionPolicy};

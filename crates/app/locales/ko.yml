@@ -1001,6 +1001,7 @@ flow:
   issue_line_at_node: "· %{node} — %{text}"
   issue_missing_agent: "에이전트가 필요한데, 플로우 기본값에도 이 노드에도 지정돼 있지 않습니다"
   issue_agent_id_without_mode: "에이전트는 지정했지만 어떤 모드로 돌릴지는 지정하지 않았습니다"
+  issue_ask_without_mode: "사람에게 권한을 묻는데 에이전트 모드를 지정하지 않았습니다 — 실제로 물어보는지가 모드에 달려 있습니다"
   issue_unknown_version: "이 빌드는 버전 %{version} 플로우를 실행할 줄 모릅니다"
   issue_unreachable_output_ref: "%{referenced}의 출력을 읽는데, %{referenced}가 먼저 실행된다는 보장이 없습니다"
   issue_unknown_field: "%{field}이라는 필드가 없습니다 — 철자를 확인하세요"

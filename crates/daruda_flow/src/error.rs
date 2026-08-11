@@ -33,6 +33,12 @@ pub enum ValidationKind {
     MissingAgent,
     /// A node names its own `agent.id` but not `agent.mode`.
     AgentIdWithoutMode,
+    /// `permission: ask` with no `mode`. Whether a person is ever asked is
+    /// decided by the session mode, and leaving it out hands that decision
+    /// to whatever the adapter defaults to — which is not this file's to
+    /// predict, and is silently "never asked" for the mode daruda itself
+    /// defaults to.
+    AskWithoutMode,
     /// A `version` this build does not know how to execute.
     UnknownVersion(u32),
     /// `{{node.X.output}}` names a node that is not an ancestor, so its
