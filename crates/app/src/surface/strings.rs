@@ -962,6 +962,22 @@ pub fn agent_chat_tab_title() -> String {
     rust_i18n::t!("agent_chat.tab_title").into_owned()
 }
 
+/// Tooltip on a mermaid diagram card's zoom button, which opens the lightbox.
+pub fn agent_chat_diagram_zoom() -> String {
+    rust_i18n::t!("agent_chat.diagram_zoom").into_owned()
+}
+
+/// Tooltip on a mermaid diagram card's copy button — it copies the diagram
+/// source, not the rendered image.
+pub fn agent_chat_diagram_copy() -> String {
+    rust_i18n::t!("agent_chat.diagram_copy").into_owned()
+}
+
+/// Tooltip on a mermaid diagram card's copy button right after a copy.
+pub fn agent_chat_diagram_copied() -> String {
+    rust_i18n::t!("agent_chat.diagram_copied").into_owned()
+}
+
 /// Enabled state of a boolean session config option (e.g. "Fast mode"), used
 /// as both the chip label and its dropdown entry. The protocol carries only a
 /// `bool`, so the two labels are the host's to supply.

@@ -214,6 +214,9 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  diagram_zoom: "Enlarge diagram"
+  diagram_copy: "Copy diagram source"
+  diagram_copied: "Copied"
   config_boolean_on: "On"
   config_boolean_off: "Off"
   tab_title: "Agent"

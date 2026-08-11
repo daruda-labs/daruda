@@ -214,6 +214,9 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  diagram_zoom: "다이어그램 확대"
+  diagram_copy: "다이어그램 소스 복사"
+  diagram_copied: "복사됨"
   config_boolean_on: "켬"
   config_boolean_off: "끔"
   tab_title: "에이전트"
