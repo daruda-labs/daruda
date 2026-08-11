@@ -24,6 +24,10 @@ pub(in crate::workspace) struct FlowRunEntry {
     /// When it started, already worded. Empty when the directory's name is
     /// not this host's scheme — better a missing time than a wrong one.
     pub started: SharedString,
+    /// The report to open on click, when there is one. Decided here rather
+    /// than in the panel: this is the pass that is already stat-ing the
+    /// directory, and the panel's is the render path.
+    pub report: Option<PathBuf>,
     pub status: RunStatus,
 }
 
@@ -83,8 +87,17 @@ fn entry_for(dir: &Path) -> FlowRunEntry {
         // predicate submission uses — a run this window is holding must
         // read as `Running`, not `Crashed`.
         status: daruda_flow::marker::run_status(dir, &super::flow_request::process_is_alive),
+        report: report_in(dir),
         dir: dir.to_path_buf(),
     }
+}
+
+/// A run refused before the lock wrote no report, and opening a path that
+/// is not there would replace the question with an unrelated complaint
+/// about a missing file.
+fn report_in(dir: &Path) -> Option<PathBuf> {
+    let report = dir.join(daruda_flow::record::RUN_REPORT_FILE);
+    report.is_file().then_some(report)
 }
 
 #[cfg(test)]
@@ -165,6 +178,26 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let read = FlowHistory::read(lane(), &tmp.path().join("never-created"));
         assert!(read.runs().is_empty());
+    }
+
+    /// Only a run that wrote a report is clickable. A run refused before
+    /// the lock wrote none, and the panel offering it anyway would answer
+    /// the click with a complaint about a missing file.
+    #[test]
+    fn only_a_run_with_a_report_offers_one() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runs = tmp.path();
+        let wrote = run_dir(runs, 2, Some("DONE"));
+        std::fs::write(
+            wrote.join(daruda_flow::record::RUN_REPORT_FILE),
+            "# Ended passed\n",
+        )
+        .expect("report");
+        run_dir(runs, 1, Some("FAILED"));
+
+        let read = FlowHistory::read(lane(), runs);
+        let reports: Vec<bool> = read.runs().iter().map(|r| r.report.is_some()).collect();
+        assert_eq!(reports, vec![true, false]);
     }
 
     /// The cache is only an answer about the lane it was built for.

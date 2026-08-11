@@ -961,7 +961,7 @@ flow:
   picker_prompt_validate: "Check which flow?"
   picker_empty: "No flows here yet — add one under .daruda/flows/"
   panel_empty: "No flow is running in this worktree"
-  panel_running: "Running"
+  ask_modal_stop: "Stop the flow"
   panel_stop: "Stop"
   ask_modal_title: "A flow is asking permission"
   panel_live_heading: "Running now"

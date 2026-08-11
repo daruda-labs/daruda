@@ -219,7 +219,7 @@ fn a_person_s_answer_is_what_reaches_the_agent() {
     let mut fixture = Fixture::with_script(&permission_adapter(&options, &answered));
 
     let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::ZERO, |_| {
-        Some(PermissionDecision::Allow {
+        Person::Answers(PermissionDecision::Allow {
             option_id: "once".to_string(),
         })
     });
@@ -253,7 +253,7 @@ fn a_person_refusing_does_not_fail_the_node() {
     let mut fixture = Fixture::with_script(&permission_adapter(&options, &answered));
 
     let (result, _) = fixture.run_answered(&spec(AGENT), Duration::ZERO, |_| {
-        Some(PermissionDecision::Reject {
+        Person::Answers(PermissionDecision::Reject {
             option_id: "no".to_string(),
         })
     });
@@ -275,7 +275,7 @@ fn a_person_who_walks_away_releases_the_agent() {
     let (_probe, answered) = probe("answer.json");
     let mut fixture = Fixture::with_script(&permission_adapter(ALLOW_ONCE_OPTION, &answered));
 
-    let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::ZERO, |_| None);
+    let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::ZERO, |_| Person::WalksAway);
 
     assert_eq!(asked.len(), 1);
     assert_eq!(
@@ -299,7 +299,7 @@ fn a_wait_longer_than_the_node_s_budget_does_not_time_it_out() {
 
     // A person is slow. The node's budget is for the agent's work.
     let (result, _) = fixture.run_answered(&spec(AGENT), Duration::from_millis(600), |_| {
-        Some(PermissionDecision::Allow {
+        Person::Answers(PermissionDecision::Allow {
             option_id: "once".to_string(),
         })
     });
@@ -327,7 +327,7 @@ fn the_reported_timeout_leaves_out_the_waiting() {
     fixture.timeout = Duration::from_millis(200);
 
     let (result, _) = fixture.run_answered(&spec(AGENT), Duration::from_millis(400), |_| {
-        Some(PermissionDecision::Allow {
+        Person::Answers(PermissionDecision::Allow {
             option_id: "once".to_string(),
         })
     });
@@ -339,4 +339,93 @@ fn the_reported_timeout_leaves_out_the_waiting() {
         ),
         other => panic!("expected a timeout once the agent went quiet, got {other:?}"),
     }
+}
+
+/// An adapter that asks twice: the second question arrives while the first
+/// is still parked, so it is sitting in the stream when a stop lands.
+fn asks_twice(options: &str, answer_file: &Path) -> String {
+    let answer = answer_file.display();
+    format!(
+        r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+{INITIALIZE}
+{NEW_SESSION}
+*'"method":"session/prompt"'*)
+  prompt_id="$id"
+  printf '{{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t1","title":"first"}},"options":[{options}]}}}}\n'
+  printf '{{"jsonrpc":"2.0","id":"perm-2","method":"session/request_permission","params":{{"sessionId":"{SESSION}","toolCall":{{"toolCallId":"t2","title":"second"}},"options":[{options}]}}}}\n' ;;
+*'"id":"perm-1"'*)
+  printf '%s\n' "$line" > "{answer}" ;;
+  esac
+done
+"#
+    )
+}
+
+/// **Stopping a run must not put a new question in front of the person who
+/// stopped it.** The wind-down drain reads the same stream, and a request
+/// already sitting in it would otherwise take the `ask` path — showing a
+/// dialog for a run that is dying, whose buttons the app can no longer
+/// answer, and whose wait spends the grace the adapter needs to stop
+/// mid-write.
+#[test]
+fn a_stop_does_not_raise_another_question() {
+    let (_probe, answered) = probe("answer.json");
+    let mut fixture = Fixture::with_script(&asks_twice(ALLOW_ONCE_OPTION, &answered));
+    let cancel = fixture.cancel.clone();
+
+    // Holds the question rather than answering or walking away, so the
+    // only thing that can release it is the stop.
+    let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::ZERO, move |_| {
+        cancel.cancel();
+        Person::Waits
+    });
+
+    assert_eq!(
+        asked.len(),
+        1,
+        "a second question reached the person after the stop: {:?}",
+        asked
+            .iter()
+            .map(|(_, r)| r.tool.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        matches!(result.outcome, Err(NodeFailure::SessionError(_))),
+        "{:?}",
+        result.outcome
+    );
+}
+
+/// The outstanding request is answered by the *stop*, inside the grace —
+/// not left to session teardown, which happens after it. The adapter is
+/// parked on us until then, spending the one window it has to stop
+/// mid-write doing nothing.
+#[test]
+fn a_stop_releases_the_question_it_interrupted() {
+    let (_probe, answered) = probe("answer.json");
+    let mut fixture = Fixture::with_script(&permission_adapter(ALLOW_ONCE_OPTION, &answered));
+    let cancel = fixture.cancel.clone();
+
+    let (result, _) = fixture.run_answered(&spec(AGENT), Duration::ZERO, move |_| {
+        cancel.cancel();
+        Person::Waits
+    });
+
+    let wire = std::fs::read_to_string(&answered).expect("the adapter recorded an answer");
+    assert!(
+        wire.contains("cancelled"),
+        "the adapter was left waiting on us: {wire}"
+    );
+    // And the record says nobody answered, rather than showing the wait
+    // with nothing said — which reads like a normal approval.
+    assert!(
+        result
+            .waiting
+            .answers
+            .contains(&crate::runner::AskAnswer::Unanswered),
+        "{:?}",
+        result.waiting
+    );
 }

@@ -118,6 +118,19 @@ fn option(id: &'static str, kind: PermissionOptionKind) -> PermissionOption {
     PermissionOption::new(id, id, kind)
 }
 
+/// What the person on the other end does with a question.
+///
+/// `Waits` is distinct from `WalksAway`: walking away drops the reply
+/// channel, which the runner answers `Cancelled` for on its own. Only
+/// holding the question keeps it genuinely outstanding, which is what
+/// the cancel path has to release.
+#[derive(Clone)]
+enum Person {
+    Answers(PermissionDecision),
+    WalksAway,
+    Waits,
+}
+
 /// The owned half of a `RunContext`, plus the adapter the runner will
 /// launch. The script lives in the temp dir so it dies with the test.
 struct Fixture {
@@ -221,13 +234,14 @@ impl Fixture {
         &mut self,
         agent: &AgentSpec,
         thinks_for: Duration,
-        answer: impl Fn(&crate::runner::PendingAsk) -> Option<PermissionDecision>,
+        answer: impl Fn(&crate::runner::PendingAsk) -> Person,
     ) -> (RunResult, Vec<(u64, crate::runner::AskRequest)>) {
         let (tx, rx) = smol::channel::unbounded();
         self.permission = PermissionPolicy::Ask;
         self.ask = Some(crate::runner::AskChannel::new(tx));
 
         let asked = RefCell::new(Vec::new());
+        let held = RefCell::new(Vec::new());
         let runner = self.runner();
         let ctx = self.context();
         let result = smol::block_on(smol::future::or(
@@ -244,11 +258,13 @@ impl Fixture {
                             .push((pending.ask_id, pending.request.clone()));
                         crate::runner::sleep(thinks_for).await;
                         match answer(&pending) {
-                            Some(decision) => {
+                            Person::Answers(decision) => {
                                 let _ = pending.reply.send(decision).await;
                             }
                             // Dropping `pending` drops the only sender.
-                            None => drop(pending),
+                            Person::WalksAway => drop(pending),
+                            // Held, so the question stays outstanding.
+                            Person::Waits => held.borrow_mut().push(pending),
                         }
                     }
                     // The stream is only closed once the run has let go of

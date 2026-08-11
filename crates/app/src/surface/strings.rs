@@ -296,11 +296,14 @@ pub fn right_panel_tab_flows() -> String {
 pub fn right_panel_flow_empty() -> String {
     rust_i18n::t!("flow.panel_empty").into_owned()
 }
-pub fn right_panel_flow_running() -> String {
-    rust_i18n::t!("flow.panel_running").into_owned()
-}
 pub fn right_panel_flow_stop() -> String {
     rust_i18n::t!("flow.panel_stop").into_owned()
+}
+/// The modal's way out that is not an answer. Names the object because
+/// "Stop" alone, beside three answer buttons, reads as stopping the tool
+/// call rather than the run.
+pub fn flow_ask_modal_stop() -> String {
+    rust_i18n::t!("flow.ask_modal_stop").into_owned()
 }
 /// Title of the modal that brings a parked question to the front.
 pub fn flow_ask_modal_title() -> String {
@@ -4100,13 +4103,13 @@ pub fn status_bar_flow_stage_node_retry(node: &str, attempt: u32) -> String {
 pub fn status_bar_flow_stage_rederiving(gate: &str) -> String {
     rust_i18n::t!("flow.stage_rederiving", gate => gate).into_owned()
 }
-/// Waiting on a person. Names the tool because "waiting for approval" with
-/// no object is not something a user can act on from the chip alone.
 /// The chip while a run is waiting on a person. A count rather than a name:
 /// the row underneath says which, and this has to fit a status bar.
 pub fn status_bar_flow_chip_asking(waiting: usize) -> String {
     rust_i18n::t!("flow.chip_asking", waiting => waiting).into_owned()
 }
+/// Waiting on a person. Names the tool because "waiting for approval" with
+/// no object is not something a user can act on from the row alone.
 pub fn status_bar_flow_stage_asking(node: &str, tool: &str) -> String {
     rust_i18n::t!("flow.stage_asking", node => node, tool => tool).into_owned()
 }

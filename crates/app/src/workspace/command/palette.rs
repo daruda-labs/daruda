@@ -350,6 +350,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "switch_right_panel_flows",
+        label: "Right Panel: Flows",
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "new_skill",
         label: "Skills: New skill",
         shortcut: "",

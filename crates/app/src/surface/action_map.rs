@@ -11,9 +11,9 @@ use crate::workspace::{
     MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat,
     OpenCommandHistory, OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject,
     RunFlow, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
-    SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage,
-    ToggleBottomDock, ToggleCommandPalette, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
-    ValidateFlow,
+    SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
+    SwitchRightPanelUsage, ToggleBottomDock, ToggleCommandPalette, ToggleLaneSwitcher,
+    ToggleLeftDock, ToggleRightDock, ValidateFlow,
 };
 use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
@@ -96,6 +96,7 @@ pub fn apply_keybinding_overrides(
             "switch_right_panel_skills" => SwitchRightPanelSkills,
             "switch_right_panel_tools" => SwitchRightPanelTools,
             "switch_right_panel_tasks" => SwitchRightPanelTasks,
+            "switch_right_panel_flows" => SwitchRightPanelFlows,
             "new_skill" => NewSkill,
             "new_task" => NewTask,
             "new_agent_chat" => OpenAgentChat,

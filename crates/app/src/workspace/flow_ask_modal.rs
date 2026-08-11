@@ -64,6 +64,19 @@ impl Render for FlowAskModal {
                             .map(|(ix, choice)| self.answer_button(ix, choice, cx)),
                     ),
             )
+            // Its own row, neutral, and pushed away from the answers: this
+            // is not a fourth answer, and it must not read heavier than the
+            // path most people take. It has to be here at all because the
+            // backdrop puts the panel's Stop out of reach while a question
+            // is up — without it, leaving a run you no longer want means
+            // dismissing the modal first and then going to find it.
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_end()
+                    .child(self.stop_button()),
+            )
     }
 }
 
@@ -98,6 +111,34 @@ impl FlowAskModal {
             window,
             cx,
         );
+    }
+
+    /// Stop the run the question belongs to, and close. Not an answer:
+    /// `stop_flow_run_in` settles the question on its way out, so nothing
+    /// is left waiting on a reply that is never coming.
+    fn stop_button(&self) -> impl IntoElement + use<> {
+        let workspace = self.workspace.clone();
+        let lane = self.lane;
+        crate::ui::button(
+            SharedString::from(format!("flow-ask-modal-stop-{}", self.ask.ask_id)),
+            SharedString::from(crate::surface::strings::flow_ask_modal_stop()),
+        )
+        .on_click(move |_, window, cx| {
+            match workspace.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx)) {
+                Ok(()) => {}
+                Err(e) => daruda_store::observability::log_writer::LogWriter::log(
+                    daruda_store::observability::error_report::ErrorReport::new(
+                        "Flow ask modal: workspace gone while stopping the run",
+                    )
+                    .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context("error", format!("{e}"))
+                    .dedup("flow.ask_modal.stop")
+                    .build(),
+                ),
+            }
+            window.close_dialog(cx);
+        })
     }
 
     /// One answer. The same treatment the panel gives, so a person sees

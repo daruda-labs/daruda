@@ -61,6 +61,10 @@ pub(crate) struct FakeRunner {
     /// separate axis from `Step`, because when a stop lands is independent
     /// of what the interrupted attempt was going to do.
     cancel_at: HashMap<String, u32>,
+    /// Reported by every call as time spent waiting for a person. Scripted
+    /// rather than really waited — what this exercises is the run's ceiling
+    /// arithmetic, and a test that actually slept could not run.
+    parked: std::time::Duration,
     calls: RefCell<Vec<Call>>,
 }
 
@@ -71,8 +75,16 @@ impl FakeRunner {
             default_cost: None,
             cancel_at: HashMap::new(),
             cost: HashMap::new(),
+            parked: std::time::Duration::ZERO,
             calls: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Every call reports this much time waiting for a person, which the
+    /// run's deadline has to be pushed out by.
+    pub(crate) fn parked_per_call(mut self, parked: std::time::Duration) -> Self {
+        self.parked = parked;
+        self
     }
 
     /// Every unscripted node succeeds and writes a one-line output.
@@ -168,8 +180,10 @@ impl FakeRunner {
             outcome,
             artifacts: vec![log],
             usage: self.usage_for(ctx.node_id),
-            // A scripted call never really waits.
-            waiting: crate::runner::Waiting::default(),
+            waiting: crate::runner::Waiting {
+                total: self.parked,
+                answers: Vec::new(),
+            },
         }
     }
 

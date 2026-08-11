@@ -82,18 +82,14 @@ fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla {
 }
 
 /// One past run: when it started, how it ended, and its report on click.
-///
-/// A run with no report is not clickable — a run refused before the lock
-/// wrote none, and opening a path that is not there would replace the
-/// question with an unrelated complaint about a missing file.
+/// A run with no report is not clickable; which those are was decided when
+/// the history was read.
 fn past_row(
     run: &crate::workspace::flow_history::FlowRunEntry,
     snap: &RightDockSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let report = run.dir.join(daruda_flow::record::RUN_REPORT_FILE);
-    let openable = report.is_file();
     let workspace = snap.workspace.clone();
 
     let row_hover_bg = t.skill_row_hover_bg;
@@ -129,7 +125,7 @@ fn past_row(
                 .text_color(status_color(run.status))
                 .child(strings::flow_run_status(run.status)),
         )
-        .when(openable, |row| {
+        .when_some(run.report.clone(), |row, report| {
             row.cursor_pointer()
                 .hover(move |s| s.bg(row_hover_bg))
                 .on_click(move |_, window, cx| {

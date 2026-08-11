@@ -192,6 +192,7 @@ actions!(
         SwitchRightPanelSkills,
         SwitchRightPanelTools,
         SwitchRightPanelTasks,
+        SwitchRightPanelFlows,
         NewSkill,
         FocusSkillSearch,
         InvokeSkillPalette,
@@ -1954,6 +1955,9 @@ impl Workspace {
                 }
                 "switch_right_panel_tasks" => {
                     self.on_switch_right_panel_tasks(&SwitchRightPanelTasks, window, cx);
+                }
+                "switch_right_panel_flows" => {
+                    self.on_switch_right_panel_flows(&SwitchRightPanelFlows, window, cx);
                 }
                 "new_skill" => {
                     self.on_new_skill(&NewSkill, window, cx);

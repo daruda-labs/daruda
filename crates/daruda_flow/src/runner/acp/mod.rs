@@ -168,11 +168,14 @@ impl AcpRunner {
                 // nothing.
                 if let Some(id) = park.take_outstanding() {
                     session.respond_permission(id, PermissionDecision::Cancelled);
+                    // Recorded, or `run.md` shows the wait with nothing said
+                    // and reads like a question that was answered normally.
+                    park.answered(&PermissionDecision::Cancelled);
                 }
                 session.cancel();
                 // The turn's own verdict is discarded: it is a cancel's, and
                 // the node reports why it was stopped instead.
-                let winding_down = drain(events, session, ctx, &rec);
+                let winding_down = drain(events, session, ctx, &rec, Answering::WindingDown);
                 smol::future::or(async { _ = winding_down.await }, sleep(self.grace)).await;
                 Err(interrupt.into_failure())
             }
@@ -210,7 +213,14 @@ impl AcpRunner {
         self.apply(events, session, connected.options, agent, rec.usage)
             .await?;
         session.send_prompt(prompt.to_string());
-        drain(events, session, ctx, rec).await
+        drain(
+            events,
+            session,
+            ctx,
+            rec,
+            Answering::Policy(&ctx.permission),
+        )
+        .await
     }
 
     /// Apply each axis the node pinned, in order, and confirm each before
@@ -486,6 +496,12 @@ impl Park {
         self.outstanding.set(None);
     }
 
+    /// Whether a wait is in progress — which is to say, whether the node
+    /// clock is stopped right now.
+    fn waiting_now(&self) -> bool {
+        self.since.get().is_some()
+    }
+
     fn take_outstanding(&self) -> Option<u64> {
         self.outstanding.take()
     }
@@ -507,6 +523,11 @@ impl Park {
     }
 }
 
+/// How often the deadline is re-read while a wait is in progress. Only
+/// decides how promptly a timeout fires *after* the wait ends, so it is
+/// coarse on purpose — see [`interrupted`].
+const WAITING_POLL: Duration = Duration::from_millis(100);
+
 /// The node's clock, which stops while a person is being waited on.
 ///
 /// A loop rather than one `sleep`: the deadline moves as the wait grows,
@@ -518,6 +539,15 @@ async fn interrupted(ctx: &RunContext<'_>, started: Instant, park: &Park) -> Int
     smol::future::or(
         async move {
             loop {
+                // A wait in progress grows `paused` exactly as fast as
+                // `elapsed`, so what is left cannot change until it ends —
+                // sleeping that figure would re-derive the same one at its
+                // own cadence, and a wait beginning on the deadline makes
+                // that cadence zero. Poll instead.
+                if park.waiting_now() {
+                    sleep(WAITING_POLL).await;
+                    continue;
+                }
                 let paused = park.total(Instant::now());
                 let elapsed = started.elapsed();
                 match (timeout + paused).checked_sub(elapsed) {
@@ -541,6 +571,18 @@ async fn interrupted(ctx: &RunContext<'_>, started: Instant, park: &Park) -> Int
     .await
 }
 
+/// What [`drain`] does with a permission request.
+///
+/// Not a third `Permission`: during a turn this is the node's policy, but
+/// once the turn is being wound down there is no run left to answer for.
+/// A question raised then must be released at once — routing it to a
+/// person shows them a dialog for a run they just stopped, and their wait
+/// would spend the grace the adapter needs to stop mid-write.
+enum Answering<'a> {
+    Policy(&'a Permission<'a>),
+    WindingDown,
+}
+
 /// Read events until the turn settles. Every other event describes a
 /// conversation, which is the UI's business and not the engine's — except
 /// usage, the only cumulative cost the run's budget can see, and permission,
@@ -550,8 +592,8 @@ async fn drain(
     session: &AcpSessionHandle,
     ctx: &RunContext<'_>,
     rec: &Recording<'_>,
+    answering: Answering<'_>,
 ) -> Result<(), NodeFailure> {
-    let permission = &ctx.permission;
     loop {
         let Some(event) = events.next().await else {
             return Err(NodeFailure::SessionError(ENDED_EARLY.to_string()));
@@ -565,8 +607,13 @@ async fn drain(
                     .title
                     .clone()
                     .unwrap_or_else(|| request.tool_call.tool_call_id.0.to_string());
-                match permission {
-                    Permission::Ask(channel) => {
+                match answering {
+                    // The turn is over; let the adapter go.
+                    Answering::WindingDown => {
+                        session.respond_permission(id, PermissionDecision::Cancelled);
+                        rec.park.answered(&PermissionDecision::Cancelled);
+                    }
+                    Answering::Policy(Permission::Ask(channel)) => {
                         // Converted here, through `daruda_acp`'s own seam, so
                         // the protocol request never leaves this arm.
                         let (options, detail) = match daruda_acp::permission_item(id, &request, &[])
@@ -588,7 +635,7 @@ async fn drain(
                     }
                     // Answered before anything else, so a policy that lets
                     // the turn continue never leaves the agent parked.
-                    settled => {
+                    Answering::Policy(settled) => {
                         session.respond_permission(id, decide(settled, &request.options));
                         // Under `Deny` the request arriving at all means the
                         // mode this node was launched in was wrong. Refusing

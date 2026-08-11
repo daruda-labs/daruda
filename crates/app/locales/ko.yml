@@ -961,7 +961,7 @@ flow:
   picker_prompt_validate: "어느 플로우를 검사할까요?"
   picker_empty: "아직 플로우가 없습니다 — .daruda/flows/ 아래에 만들어 주세요"
   panel_empty: "이 worktree에서 실행 중인 플로우가 없습니다"
-  panel_running: "실행 중"
+  ask_modal_stop: "플로우 중단"
   panel_stop: "중단하기"
   ask_modal_title: "플로우가 권한을 묻고 있습니다"
   panel_live_heading: "실행 중"

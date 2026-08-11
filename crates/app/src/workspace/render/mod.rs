@@ -1398,6 +1398,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_switch_right_panel_skills))
             .on_action(cx.listener(Self::on_switch_right_panel_tools))
             .on_action(cx.listener(Self::on_switch_right_panel_tasks))
+            .on_action(cx.listener(Self::on_switch_right_panel_flows))
             .on_action(cx.listener(Self::on_new_skill))
             .on_action(cx.listener(Self::on_new_task))
             .on_action(cx.listener(Self::on_open_agent_chat))

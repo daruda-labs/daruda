@@ -224,7 +224,6 @@ impl Run<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::NodeFailure;
     use std::time::Instant;
 
     fn call(parked: Duration) -> RunResult {
@@ -319,6 +318,5 @@ mod tests {
             spent.exhausted(&counted),
             Some(BudgetLimit::NodeRuns)
         ));
-        let _ = NodeFailure::Refused;
     }
 }

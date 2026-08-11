@@ -319,3 +319,70 @@ fn a_run_that_ends_over_its_cost_limit_says_so() {
         report.warnings()
     );
 }
+
+/// A node's own budget is clipped against the run's deadline — and that
+/// deadline is the one already pushed out by earlier waiting. Clip against
+/// the raw one and the node after a long approval is handed *zero* time and
+/// dies instantly, for a wait somebody else did.
+///
+/// The two readings are 30s apart, so this separates them without depending
+/// on any wall clock passing.
+#[test]
+fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
+    struct Timekeeper(FakeRunner, std::cell::RefCell<Vec<Duration>>);
+
+    impl NodeRunner for Timekeeper {
+        fn run_agent<'a>(
+            &'a self,
+            ctx: &'a RunContext<'a>,
+            agent: &'a crate::model::AgentSpec,
+            prompt: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = RunResult> + 'a>> {
+            self.1.borrow_mut().push(ctx.timeout);
+            self.0.run_agent(ctx, agent, prompt)
+        }
+
+        fn run_command<'a>(
+            &'a self,
+            ctx: &'a RunContext<'a>,
+            run: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = RunResult> + 'a>> {
+            self.1.borrow_mut().push(ctx.timeout);
+            self.0.run_command(ctx, run)
+        }
+    }
+
+    let keeper = Timekeeper(
+        FakeRunner::new().parked_per_call(Duration::from_secs(30)),
+        std::cell::RefCell::new(Vec::new()),
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let loaded = load(CHAIN).expect("valid flow");
+    let budget = Budget {
+        deadline: Some(std::time::Instant::now() + Duration::from_secs(1)),
+        ..Budget::unlimited()
+    };
+    let _ = smol::block_on(run_flow(
+        RunInputs {
+            loaded: &loaded,
+            flow_dir: dir.path(),
+            cwd: dir.path(),
+            run_dir: &dir.path().join("run"),
+            cancel: &CancelToken::default(),
+            budget: &budget,
+            git_status: None,
+            events: None,
+            ask: None,
+        },
+        &keeper,
+    ));
+
+    let given = keeper.1.into_inner();
+    assert!(given.len() > 1, "only one node ran: {given:?}");
+    for budget in &given[1..] {
+        assert!(
+            *budget > Duration::from_secs(2),
+            "a node was clipped against the un-adjusted deadline: {given:?}"
+        );
+    }
+}

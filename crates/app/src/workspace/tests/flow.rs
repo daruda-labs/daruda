@@ -417,10 +417,12 @@ async fn an_answer_only_lands_on_the_question_it_names(cx: &mut TestAppContext) 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let here = ws.active;
-            ws.seed_flow_run_for_test(here, lane.path().join("run"));
+            let run_dir = lane.path().join("run");
+            ws.seed_flow_run_for_test(here, run_dir.clone());
             let (reply_tx, reply_rx) = smol::channel::bounded(1);
             ws.park_flow_ask_for_test(
                 here,
+                &run_dir,
                 daruda_flow::runner::PendingAsk {
                     node: "design".to_string(),
                     attempt: 1,
@@ -542,9 +544,8 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
 /// would silently throw the question away and the run would park forever
 /// with nothing on screen.
 ///
-/// Whether the dialog itself is up cannot be asserted here — upstream
-/// keeps `Root::active_dialogs` `pub(crate)` — so the modal's own
-/// rendering is checked with `--screenshot-scenario flow-asking`.
+/// What the dialog *looks* like is checked with
+/// `--screenshot-scenario flow-asking`; that it is up is asserted here.
 #[gpui::test]
 async fn closing_the_modal_leaves_the_question_standing(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
@@ -552,10 +553,12 @@ async fn closing_the_modal_leaves_the_question_standing(cx: &mut TestAppContext)
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let here = ws.active;
-            ws.seed_flow_run_for_test(here, lane.path().join("run"));
+            let run_dir = lane.path().join("run");
+            ws.seed_flow_run_for_test(here, run_dir.clone());
             let (reply_tx, reply_rx) = smol::channel::bounded(1);
             ws.park_flow_ask_for_test(
                 here,
+                &run_dir,
                 daruda_flow::runner::PendingAsk {
                     node: "design".to_string(),
                     attempt: 1,
@@ -569,6 +572,11 @@ async fn closing_the_modal_leaves_the_question_standing(cx: &mut TestAppContext)
                 },
                 window,
                 cx,
+            );
+
+            assert!(
+                crate::ui::WindowExt::has_active_dialog(window, cx),
+                "a question in the lane in view did not reach the front"
             );
 
             // What Escape does: closes the dialog and nothing else.
@@ -625,4 +633,195 @@ nodes:
     );
     // Stage 1 costs nothing and changes nothing.
     assert!(!crate::workspace::flow_paths::runs_dir(lane.path()).exists());
+}
+
+/// A run in another lane must not take the window away from what someone
+/// is doing. The question still parks — the chip and the panel are how it
+/// is reachable — but nothing is raised over the top of the lane in view.
+#[gpui::test]
+async fn a_question_from_a_lane_out_of_view_does_not_take_the_window(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let elsewhere = daruda_store::project::LaneRef {
+                project: ws.active.project,
+                lane: ws.active.lane + 1,
+            };
+            assert_ne!(elsewhere, ws.active, "the fixture lane is the one in view");
+            let run_dir = lane.path().join("run");
+            ws.seed_flow_run_for_test(elsewhere, run_dir.clone());
+            let (reply_tx, _reply_rx) = smol::channel::bounded(1);
+            ws.park_flow_ask_for_test(
+                elsewhere,
+                &run_dir,
+                daruda_flow::runner::PendingAsk {
+                    node: "design".to_string(),
+                    attempt: 1,
+                    ask_id: 4,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: None,
+                        options: Vec::new(),
+                    },
+                    reply: reply_tx,
+                },
+                window,
+                cx,
+            );
+
+            assert!(
+                !crate::ui::WindowExt::has_active_dialog(window, cx),
+                "a run in another lane took the window"
+            );
+            // And it is still a question somebody can answer: the chip is
+            // workspace-wide, so it carries the lanes out of view.
+            assert!(
+                ws.flow_status_rows()
+                    .iter()
+                    .any(|row| row.asking.as_ref().is_some_and(|a| a.ask_id == 4)),
+                "the parked question is not reachable anywhere"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// The panel has a tab, so it needs the rest of the G3 chain: an action,
+/// a handler wired to it, and a palette entry that reaches it. Driven
+/// through the palette because that is the point furthest from the code
+/// under test — a broken link anywhere along the four leaves the entry
+/// visible and inert, which is exactly how a user meets it.
+#[gpui::test]
+async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
+    let (_lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+            ws.command_palette.open();
+            for ch in "Right Panel: Flows".chars() {
+                ws.command_palette.append(ch);
+            }
+            assert_eq!(
+                ws.command_palette.filtered_entries().len(),
+                1,
+                "the palette does not offer the Flows panel"
+            );
+            ws.execute_palette_action(window, cx);
+            assert_eq!(
+                ws.right_dock_view,
+                daruda_store::project::RightDockView::Flows,
+                "the palette entry did not reach the panel"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// A channel drains before it closes, so the last question a stopping run
+/// queued can arrive after the next run in that lane has taken the slot.
+/// `ask_id` restarts at 1 per run, so without the run it came from being
+/// checked it lands on the newcomer looking exactly like its own — and
+/// the person answers a question nothing is waiting for.
+#[gpui::test]
+async fn a_question_left_over_from_the_previous_run_is_not_shown_as_this_one_s(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let here = ws.active;
+            let previous = lane.path().join("runs/1");
+            let current = lane.path().join("runs/2");
+            ws.seed_flow_run_for_test(here, current);
+
+            let (reply_tx, _reply_rx) = smol::channel::bounded(1);
+            ws.park_flow_ask_for_test(
+                here,
+                &previous,
+                daruda_flow::runner::PendingAsk {
+                    node: "design".to_string(),
+                    attempt: 1,
+                    ask_id: 1,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: None,
+                        options: Vec::new(),
+                    },
+                    reply: reply_tx,
+                },
+                window,
+                cx,
+            );
+
+            let row = ws
+                .flow_rows_for_active_lane()
+                .into_iter()
+                .next()
+                .expect("the run is still there");
+            assert!(
+                row.asking.is_none(),
+                "a question from the run before landed on this one"
+            );
+            assert!(
+                !crate::ui::WindowExt::has_active_dialog(window, cx),
+                "a question from the run before took the window"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// Stop is the other way out of a question, and the modal's backdrop is
+/// why it has to be reachable from there: with a dialog up, the panel's
+/// Stop cannot be clicked at all. Stopping settles the question on its way
+/// out — a stopped run has no question anyone should still be answering,
+/// and leaving the buttons up is how "the button does nothing" was met the
+/// first time.
+#[gpui::test]
+async fn stopping_a_run_takes_its_question_down_with_it(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let here = ws.active;
+            let run_dir = lane.path().join("run");
+            ws.seed_flow_run_for_test(here, run_dir.clone());
+            let (reply_tx, _reply_rx) = smol::channel::bounded(1);
+            ws.park_flow_ask_for_test(
+                here,
+                &run_dir,
+                daruda_flow::runner::PendingAsk {
+                    node: "design".to_string(),
+                    attempt: 2,
+                    ask_id: 9,
+                    request: daruda_flow::runner::AskRequest {
+                        tool: "Bash".to_string(),
+                        detail: None,
+                        options: Vec::new(),
+                    },
+                    reply: reply_tx,
+                },
+                window,
+                cx,
+            );
+
+            ws.stop_flow_run_in(here, cx);
+
+            let row = ws
+                .flow_rows_for_active_lane()
+                .into_iter()
+                .next()
+                .expect("the run is still listed until it ends");
+            assert!(
+                row.asking.is_none(),
+                "a stopped run still offers its question to answer"
+            );
+            // And it says what it was doing, not a blank stage.
+            assert!(row.doing.contains("design"), "{}", row.doing);
+        });
+    })
+    .expect("the test window is live");
 }

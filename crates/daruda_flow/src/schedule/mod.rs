@@ -267,8 +267,6 @@ impl<'a> Run<'a> {
                 let artifacts = result.artifacts.clone();
                 // Captured before `judge` consumes the result, like
                 // `artifacts` — every `record` below is for this attempt.
-                // Captured before `judge` consumes the result, like `artifacts`
-                // — every `record` below is for this attempt.
                 let waited = result.waiting.clone();
 
                 let failure = match judge(node, &ctx, result) {
@@ -700,20 +698,23 @@ impl Run<'_> {
     /// unreachable in practice because `validate_request` refuses such a
     /// run before the lock, and safe rather than silent if it ever were.
     fn permission_for(&self, node: &Node) -> crate::runner::Permission<'_> {
-        match permission_of(node) {
-            crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
-            crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
-            crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {
-                Some(channel) => crate::runner::Permission::Ask(channel),
-                None => crate::runner::Permission::Deny,
-            },
-        }
+        self.permission_for_policy(permission_of(node))
     }
 
     /// The repair's `fix` runs as `flow.default_agent` and inherits its
     /// policy, so a flow whose defaults say `ask` asks during repair too.
     fn permission_for_fix(&self, agent: &AgentSpec) -> crate::runner::Permission<'_> {
-        match agent.permission {
+        self.permission_for_policy(agent.permission)
+    }
+
+    /// A policy becomes a capability: `ask` is only one if this run has
+    /// somewhere to ask. Validation refuses that combination up front, so
+    /// reaching `Deny` here means a host built a request by hand.
+    fn permission_for_policy(
+        &self,
+        policy: crate::model::PermissionPolicy,
+    ) -> crate::runner::Permission<'_> {
+        match policy {
             crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
             crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
             crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {

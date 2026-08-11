@@ -31,8 +31,7 @@ use crate::surface::strings as s;
 pub(in crate::workspace) struct FlowRunRow {
     pub lane: daruda_store::project::LaneRef,
     /// `<project>/<lane>` — a run in another lane is the case the chip
-    /// exists for, so the row has to say which lane it is. The panel is
-    /// already scoped to one lane and leaves it unrendered.
+    /// exists for, so the row has to say which lane it is.
     pub lane_label: gpui::SharedString,
     /// What that run is doing, already worded (see `RunStage`).
     pub doing: gpui::SharedString,
@@ -289,6 +288,7 @@ impl Workspace {
         } = submission;
         let cancel = CancelToken::default();
         let run_dir = request.run_dir.clone();
+        let run_dir_for_asks = run_dir.clone();
         // Captured now: the run belongs to the lane it was submitted from,
         // not to whichever one is active when it ends.
         let lane_ref = self.active;
@@ -323,7 +323,7 @@ impl Workspace {
             },
         );
         self.watch_flow_events(lane_ref, events, cx);
-        self.watch_flow_asks(lane_ref, asks, cx);
+        self.watch_flow_asks(lane_ref, run_dir_for_asks, asks, cx);
         cx.notify();
     }
 
@@ -342,8 +342,20 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         cx: &mut Context<Self>,
     ) {
-        if let Some(handle) = self.flow_runs.get(&lane) {
+        if let Some(handle) = self.flow_runs.get_mut(&lane) {
             handle.cancel.cancel();
+            // A stopped run has no question anyone should answer. Settled
+            // here rather than when the run's `RunEnded` arrives, for the
+            // same reason answering settles immediately: until then the
+            // question and its buttons are still on screen with nothing to
+            // say the Stop landed. The engine releases its own side — the
+            // interrupt arm answers the adapter `Cancelled`.
+            if let RunStage::Asking { question } = &handle.doing {
+                handle.doing = RunStage::Node {
+                    id: question.node.clone(),
+                    attempt: question.attempt,
+                };
+            }
         }
         cx.notify();
     }
@@ -533,17 +545,19 @@ impl Workspace {
     fn watch_flow_asks(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
+        run_dir: PathBuf,
         asks: smol::channel::Receiver<daruda_flow::runner::PendingAsk>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
             while let Ok(pending) = asks.recv().await {
+                let run_dir = run_dir.clone();
                 // `update_in` rather than `update`: parking also raises the
                 // question as a modal when its lane is the one in view, and
                 // opening a dialog needs the window.
                 if this
                     .update_in(cx, |workspace, window, cx| {
-                        workspace.park_flow_ask(lane_ref, pending, window, cx);
+                        workspace.park_flow_ask(lane_ref, &run_dir, pending, window, cx);
                     })
                     .is_err()
                 {
@@ -555,9 +569,17 @@ impl Workspace {
     }
 
     /// Hold a question until somebody answers it.
+    ///
+    /// `run_dir` names the run the question came from. A channel drains
+    /// before it closes, so a question the engine queued as its run was
+    /// stopping can still arrive after the next run in that lane has taken
+    /// the slot — and `ask_id` restarts at 1 per run, so it would land on
+    /// the newcomer looking exactly like its own. Dropping it releases the
+    /// old run's engine, which is the only thing still waiting on it.
     fn park_flow_ask(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
+        run_dir: &Path,
         pending: daruda_flow::runner::PendingAsk,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -565,6 +587,9 @@ impl Workspace {
         let Some(handle) = self.flow_runs.get_mut(&lane_ref) else {
             return;
         };
+        if handle.run_dir != run_dir {
+            return;
+        }
         handle.doing = RunStage::Asking {
             question: std::sync::Arc::new(ParkedAsk {
                 ask_id: pending.ask_id,
@@ -578,10 +603,11 @@ impl Workspace {
         };
         cx.notify();
 
-        // Brought to the front only for the lane in view — the modal owns
-        // that rule. Everywhere else the chip is what says a run is waiting.
+        // Rows for *this* lane, not the active one: whether it may take the
+        // window is the modal's rule, and pre-filtering here would enforce
+        // it twice — the copy that never runs is the one nothing tests.
         if let Some(row) = self
-            .flow_rows_for_active_lane()
+            .flow_rows_matching(|lane| lane == lane_ref)
             .into_iter()
             .find(|row| row.lane == lane_ref)
             .and_then(|row| row.asking)
@@ -749,11 +775,12 @@ impl Workspace {
     ) {
         use daruda_acp::{PermissionChoice, PermissionKindView};
         let lane = self.active;
+        let run_dir = self.active_lane_root().unwrap_or_default();
         self.flow_runs.insert(
             lane,
             RunHandle {
                 cancel: CancelToken::default(),
-                run_dir: self.active_lane_root().unwrap_or_default(),
+                run_dir: run_dir.clone(),
                 doing: RunStage::Node {
                     id: "verdict".to_string(),
                     attempt: 2,
@@ -768,6 +795,7 @@ impl Workspace {
             let (reply, _rx) = smol::channel::bounded(1);
             self.park_flow_ask(
                 lane,
+                &run_dir,
                 daruda_flow::runner::PendingAsk {
                     node: "implement".to_string(),
                     attempt: 1,
@@ -821,11 +849,12 @@ impl Workspace {
     pub(in crate::workspace) fn park_flow_ask_for_test(
         &mut self,
         lane: daruda_store::project::LaneRef,
+        run_dir: &Path,
         pending: daruda_flow::runner::PendingAsk,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.park_flow_ask(lane, pending, window, cx);
+        self.park_flow_ask(lane, run_dir, pending, window, cx);
     }
 
     #[cfg(test)]
