@@ -4125,6 +4125,23 @@ pub fn flow_picker_prompt_validate() -> String {
 /// Marks a flow that is the person's own rather than the repository's.
 /// Only the global ones are tagged — tagging both would be noise on every
 /// row in the ordinary case.
+/// The row action on a run that was killed. "Continue", not "run again":
+/// what already passed is not run a second time.
+pub fn flow_resume_action() -> String {
+    rust_i18n::t!("flow.resume_action").into_owned()
+}
+/// Asked before continuing, because the node the crash interrupted starts
+/// over — whatever it had already done to the working tree or the machine,
+/// it does again.
+pub fn flow_resume_confirm_title() -> String {
+    rust_i18n::t!("flow.resume_confirm_title").into_owned()
+}
+pub fn flow_resume_confirm_body() -> String {
+    rust_i18n::t!("flow.resume_confirm_body").into_owned()
+}
+pub fn flow_resume_refused() -> String {
+    rust_i18n::t!("flow.resume_refused").into_owned()
+}
 pub fn flow_picker_global() -> String {
     rust_i18n::t!("flow.picker_global").into_owned()
 }

@@ -43,6 +43,9 @@ pub(in crate::workspace) enum FlowSubmitError {
     /// The rules that need the request's own context — a node naming an
     /// agent the catalog lacks, a `prompt_file` that is not there.
     Invalid(Vec<daruda_flow::error::ValidationIssue>),
+    /// The run directory cannot be picked up — it ended on purpose, it is
+    /// still going, or what it left behind is not enough to continue from.
+    Resume(daruda_flow::resume::ResumeError),
 }
 
 /// A request and the stream that narrates it. The receiver is handed back
@@ -173,6 +176,63 @@ impl Workspace {
         let submission =
             self.assemble_flow_request(flow_path, profile, FlowPurpose::Validate, cx)?;
         Ok(daruda_flow::request::validate_request(&submission.request))
+    }
+
+    /// Assemble a request that **continues** the run in `run_dir`, rather
+    /// than starting a new one.
+    ///
+    /// The predicate that decides whether the earlier process is gone is
+    /// made **once, here**, and handed to both the question and the lock
+    /// that question implies. Two of them can disagree, and then the panel
+    /// offers a resume that the lock immediately refuses as held.
+    pub(in crate::workspace) fn build_resume_request(
+        &mut self,
+        run_dir: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<FlowSubmission, FlowSubmitError> {
+        let Some(cwd) = self.active_lane_root() else {
+            return Err(FlowSubmitError::NoLane);
+        };
+        let is_alive: fn(u32) -> bool = process_is_alive;
+        let resumed =
+            daruda_flow::resume::prepare(run_dir, &is_alive).map_err(FlowSubmitError::Resume)?;
+
+        let agents = self.flow_agent_catalog(
+            &cwd,
+            FlowPurpose::Run,
+            &referenced_agents(&resumed.loaded),
+            cx,
+        )?;
+        let node_install_dir = daruda_store::persistence::node_install_dir();
+        let (tx, rx) = smol::channel::unbounded();
+        let (ask_tx, ask_rx) = smol::channel::unbounded();
+
+        let request = RunRequest {
+            loaded: resumed.loaded,
+            run_dir: run_dir.to_path_buf(),
+            // The run's own directory: `run.yaml` inlined every file-backed
+            // prompt and hint when it was written, so a resumed run resolves
+            // nothing against the flow file's directory — which may not even
+            // hold that flow any more.
+            flow_dir: run_dir.to_path_buf(),
+            cwd: cwd.clone(),
+            agents,
+            node_install_dir: node_install_dir.clone(),
+            // A fresh ceiling, measured from now. What the earlier half
+            // spent is carried by the journal, not by this.
+            budget: budget_from(&self.config_flow()),
+            is_alive: Box::new(is_alive),
+            git_status: Some(Box::new(move || git_status(&cwd))),
+            events: Some(tx),
+            ask: Some(ask_tx),
+            resume: Some(resumed.replay),
+        };
+        Ok(FlowSubmission {
+            request,
+            node_install_dir,
+            events: rx,
+            asks: ask_rx,
+        })
     }
 
     fn assemble_flow_request(

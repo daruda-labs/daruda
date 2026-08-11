@@ -125,6 +125,7 @@ fn past_row(
                 .text_color(status_color(run.status))
                 .child(strings::flow_run_status(run.status)),
         )
+        .children(resume_button(run, snap))
         .when_some(run.report.clone(), |row, report| {
             row.cursor_pointer()
                 .hover(move |s| s.bg(row_hover_bg))
@@ -146,6 +147,63 @@ fn past_row(
                     }
                 })
         })
+}
+
+/// The way back into a run that was killed.
+///
+/// Only for those: `is_resumable` is the engine's own answer, asked here
+/// rather than restated, so the button and the refusal cannot disagree
+/// about what may be continued.
+fn resume_button(
+    run: &crate::workspace::flow_history::FlowRunEntry,
+    snap: &RightDockSnapshot,
+) -> Option<impl IntoElement + use<>> {
+    if !daruda_flow::resume::is_resumable(run.status) {
+        return None;
+    }
+    let workspace = snap.workspace.clone();
+    let run_dir = run.dir.clone();
+    Some(
+        div().flex_none().child(
+            crate::ui::button(
+                SharedString::from(format!("flow-resume-{}", run.dir.display())),
+                strings::flow_resume_action(),
+            )
+            .on_click(move |_, window, cx| {
+                // Asked first: the interrupted node starts over, so whatever
+                // it had already done it does again. Nobody should meet that
+                // by having clicked a row.
+                let workspace = workspace.clone();
+                let run_dir = run_dir.clone();
+                crate::workspace::dialog_helpers::open_confirm_dialog(
+                    strings::flow_resume_confirm_title(),
+                    strings::flow_resume_confirm_body(),
+                    strings::flow_resume_action(),
+                    crate::ui::ButtonVariant::Primary,
+                    move |_, _window, cx| {
+                        let run_dir = run_dir.clone();
+                        match workspace.update(cx, |ws, cx| ws.resume_flow_run(&run_dir, cx)) {
+                            Ok(()) => {}
+                            Err(e) => daruda_store::observability::log_writer::LogWriter::log(
+                                daruda_store::observability::error_report::ErrorReport::new(
+                                    "Flows panel: workspace gone while continuing a run",
+                                )
+                                .severity(
+                                    daruda_store::observability::error_report::ErrorSeverity::Warning,
+                                )
+                                .at(file!(), line!())
+                                .with_context("error", format!("{e}"))
+                                .dedup("right_dock.flow.resume")
+                                .build(),
+                            ),
+                        }
+                    },
+                    window,
+                    cx,
+                );
+            }),
+        ),
+    )
 }
 
 /// No run in this lane. Deliberately not "no runs anywhere" — a run in

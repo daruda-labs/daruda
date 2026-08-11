@@ -959,6 +959,10 @@ session_host:
 flow:
   picker_prompt_run: "Run which flow?"
   picker_prompt_validate: "Check which flow?"
+  resume_action: "Continue"
+  resume_confirm_title: "Continue this run?"
+  resume_confirm_body: "Nodes that already passed will not run again. The node the crash interrupted starts over, so anything it had already done — commands it ran, files it edited — it does again."
+  resume_refused: "This run cannot be continued"
   picker_global: "global"
   picker_profile_defaults: "defaults"
   picker_prompt_profile: "Run %{flow} as…"

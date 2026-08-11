@@ -959,6 +959,10 @@ session_host:
 flow:
   picker_prompt_run: "어느 플로우를 실행할까요?"
   picker_prompt_validate: "어느 플로우를 검사할까요?"
+  resume_action: "이어서"
+  resume_confirm_title: "이 실행을 이어서 할까요?"
+  resume_confirm_body: "이미 통과한 노드는 다시 실행되지 않습니다. 다만 중단된 노드는 처음부터 다시 도므로, 그 노드가 이미 했던 일 — 실행한 명령, 수정한 파일 — 을 한 번 더 합니다."
+  resume_refused: "이 실행은 이어서 할 수 없습니다"
   picker_global: "전역"
   picker_profile_defaults: "기본값"
   picker_prompt_profile: "%{flow} 실행 프로필"

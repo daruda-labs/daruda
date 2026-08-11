@@ -1024,3 +1024,127 @@ async fn the_picker_offers_the_person_s_own_flows_beside_the_lane_s(cx: &mut Tes
     });
     assert_eq!(rows, vec!["ship.yaml".to_string(), "tidy.yaml".to_string()]);
 }
+
+/// A run directory that a killed process left: a journal, a spec, and no
+/// marker, with a lock naming a pid that is gone.
+fn killed_run_in(lane: &std::path::Path) -> std::path::PathBuf {
+    let runs = crate::workspace::flow_paths::runs_dir(lane);
+    let run_dir = runs.join("0000000000000001-00000001-0001");
+    std::fs::create_dir_all(&run_dir).expect("mkdir");
+    std::fs::write(
+        run_dir.join(daruda_flow::resume::RUN_SPEC_FILE),
+        ONE_AGENT_RESOLVED,
+    )
+    .expect("spec");
+    std::fs::write(
+        run_dir.join(daruda_flow::journal::JOURNAL_FILE),
+        "{\"kind\":\"started\",\"v\":1,\"profile\":null}\n",
+    )
+    .expect("journal");
+    // pid 0 is never a live process, which is what makes this a crash
+    // rather than a run still going.
+    std::fs::write(
+        runs.join(".lock"),
+        "pid: 0\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
+    )
+    .expect("lock");
+    run_dir
+}
+
+/// What `run.yaml` holds: every node stating what it resolved to.
+const ONE_AGENT_RESOLVED: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+nodes:
+  - id: design
+    timeout: 10m
+    kind: agent
+    agent:
+      id: claude
+      mode: bypassPermissions
+      permission: deny
+    prompt: write a line
+    output: design.md
+    on_fail: halt
+";
+
+/// A killed run is picked up from its own directory: the same run id, the
+/// spec it recorded, and the journal saying what it had finished. Never the
+/// flow file on disk today — editing that between the crash and the resume
+/// must not change what the run is, halfway through.
+#[gpui::test]
+async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let run_dir = killed_run_in(lane.path());
+    // The flow file says something else entirely by now.
+    std::fs::write(&flow_path, "version: 1\nnodes: []\n").expect("rewrite");
+
+    let request = ws.update(cx, |ws, cx| {
+        ws.build_resume_request(&run_dir, cx)
+            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
+            .request
+    });
+
+    assert_eq!(request.run_dir, run_dir, "a resume took a new directory");
+    assert!(
+        request.resume.is_some(),
+        "the request is not a continuation"
+    );
+    assert_eq!(
+        request.loaded.flow().nodes.len(),
+        1,
+        "the resume read today's flow file instead of the run's own spec"
+    );
+}
+
+/// Only a killed run. A finished one ended the way its policy said to, and
+/// continuing it is a different verb — the engine decides that, and the app
+/// asks rather than deciding again.
+#[gpui::test]
+async fn a_run_that_ended_on_purpose_is_not_continued(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let run_dir = killed_run_in(lane.path());
+    std::fs::write(run_dir.join("DONE"), "").expect("marker");
+
+    let refused = ws.update(cx, |ws, cx| ws.build_resume_request(&run_dir, cx).err());
+    assert!(
+        matches!(
+            refused,
+            Some(crate::workspace::flow_request::FlowSubmitError::Resume(
+                daruda_flow::resume::ResumeError::NotResumable(_)
+            ))
+        ),
+        "{refused:?}"
+    );
+}
+
+/// One predicate answers both halves of the same question.
+///
+/// Whether the earlier process is gone decides *both* that the run may be
+/// continued and that its stale lock may be reclaimed. Two predicates can
+/// drift, and then the panel offers a Continue the lock refuses as held —
+/// which is exactly what happened the first time this was wired.
+#[gpui::test]
+async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let run_dir = killed_run_in(lane.path());
+
+    let request = ws.update(cx, |ws, cx| {
+        ws.build_resume_request(&run_dir, cx)
+            .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
+            .request
+    });
+
+    let holder = daruda_flow::lock::read_holder(run_dir.parent().expect("runs dir"))
+        .expect("the killed run left its lock");
+    assert!(
+        !(request.is_alive)(holder.pid),
+        "the request would find the lock held by a process the resume just called gone"
+    );
+}

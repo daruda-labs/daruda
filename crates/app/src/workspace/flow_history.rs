@@ -68,6 +68,30 @@ impl FlowHistory {
         self.lane != lane
     }
 
+    /// A history for `--screenshot`. A run that was killed only exists as a
+    /// particular arrangement of files, and a capture cannot make one
+    /// without writing into whichever repository happens to be open.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn for_shot(lane: LaneRef, dir: PathBuf) -> Self {
+        Self {
+            lane,
+            runs: vec![
+                FlowRunEntry {
+                    dir: dir.join("0000019fee7d80b8-00005ad5-0003"),
+                    started: "08-11 14:36".into(),
+                    status: RunStatus::Crashed,
+                    report: None,
+                },
+                FlowRunEntry {
+                    dir: dir.join("0000019fee7ccf03-00005ad5-0002"),
+                    started: "08-11 10:49".into(),
+                    status: RunStatus::Done,
+                    report: None,
+                },
+            ],
+        }
+    }
+
     pub(in crate::workspace) fn runs(&self) -> &[FlowRunEntry] {
         &self.runs
     }

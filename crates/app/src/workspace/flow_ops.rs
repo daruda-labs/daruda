@@ -298,13 +298,26 @@ impl Workspace {
     // ---- Stage 2: the run ----
 
     fn submit_flow_run(&mut self, path: &Path, profile: Option<&str>, cx: &mut Context<Self>) {
-        let submission = match self.build_flow_request(path, profile, cx) {
-            Ok(submission) => submission,
-            Err(e) => {
-                self.report_flow_refusal(e, cx);
-                return;
-            }
-        };
+        match self.build_flow_request(path, profile, cx) {
+            Ok(submission) => self.start_flow_thread(submission, cx),
+            Err(e) => self.report_flow_refusal(e, cx),
+        }
+    }
+
+    /// Continue the run in `run_dir` instead of starting a new one.
+    ///
+    /// The same funnel a fresh submission goes through, on purpose: a
+    /// resumed run is watched, stopped and listed exactly like any other,
+    /// and a second launch path would be a second set of those to keep
+    /// working.
+    pub(in crate::workspace) fn resume_flow_run(&mut self, run_dir: &Path, cx: &mut Context<Self>) {
+        match self.build_resume_request(run_dir, cx) {
+            Ok(submission) => self.start_flow_thread(submission, cx),
+            Err(e) => self.report_flow_refusal(e, cx),
+        }
+    }
+
+    fn start_flow_thread(&mut self, submission: FlowSubmission, cx: &mut Context<Self>) {
         let FlowSubmission {
             request,
             node_install_dir,
@@ -785,6 +798,23 @@ impl Workspace {
         run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
     }
 
+    /// Put a killed run in the panel's history, for `--screenshot`. The
+    /// one row with a way back into it — and the only state here that no
+    /// scenario can reach without writing into a real repository.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_crashed_run_for_shot(&mut self, cx: &mut Context<Self>) {
+        // The dock too, not only the tab: it restores closed as often as
+        // open, and a capture of the panel behind a collapsed dock shows
+        // nothing at all.
+        self.right_dock.update(cx, |dock, _| dock.open());
+        self.main_area.pending_resize = true;
+        self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        let lane = self.active;
+        let dir = super::flow_paths::runs_dir(&self.active_lane_root().unwrap_or_default());
+        self.flow_history = Some(super::flow_history::FlowHistory::for_shot(lane, dir));
+        cx.notify();
+    }
+
     /// Put the picker on its second question, for `--screenshot`.
     ///
     /// Reaches the state directly instead of picking a flow: picking one
@@ -941,6 +971,10 @@ impl Workspace {
                 s::flow_invalid_title("", issues.len()),
                 issue_report(&issues),
             ),
+            // The engine's own words: it is the one that decides what can be
+            // continued, and a second wording here would be a second answer
+            // to the same question.
+            FlowSubmitError::Resume(e) => (s::flow_resume_refused(), e.to_string()),
         };
         self.report_error(
             ErrorReport::new(message)
