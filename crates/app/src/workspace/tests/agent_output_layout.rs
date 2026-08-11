@@ -791,3 +791,37 @@ fn fold_in_window<R>(
     })
     .expect("the window is open")
 }
+
+/// A descendant that stops mouse-up propagation must not strand the transcript
+/// container's drag lifetime: its mouse-down starts the selection-autoscroll
+/// poll, so if the matching mouse-up never reaches it the poll keeps ticking.
+#[gpui::test]
+async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestAppContext) {
+    let (window_handle, view) = render_shell_output_card(cx, 3, true);
+    push_filler_cards(cx, window_handle, &view, 30);
+    cx.update_window(window_handle, |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+    vcx.run_until_parked();
+
+    let button = vcx
+        .debug_bounds("agent-chat-scroll-bottom")
+        .expect("scrolled up off the bottom, so the jump-to-bottom button paints");
+    vcx.simulate_mouse_move(button.center(), None, Default::default());
+    vcx.run_until_parked();
+    vcx.simulate_mouse_down(button.center(), gpui::MouseButton::Left, Default::default());
+    vcx.run_until_parked();
+    assert!(
+        view.read_with(&vcx, |v, _| v.selection_drag_active),
+        "the container's mouse-down starts the drag, so the fixture is vacuous \
+         if it never does"
+    );
+
+    vcx.simulate_mouse_up(button.center(), gpui::MouseButton::Left, Default::default());
+    vcx.run_until_parked();
+    assert!(
+        !view.read_with(&vcx, |v, _| v.selection_drag_active),
+        "the drag outlived its mouse-up, so the autoscroll poll is still running"
+    );
+}

@@ -226,11 +226,16 @@ pub(in crate::workspace) fn render(
             )
             // Left mouse-up ends the drag on the always-painted container, so
             // the poll stops on release even if the selected child block is no
-            // longer painted.
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _ev, _window, _cx| this.end_selection_drag()),
-            )
+            // longer painted. Capture phase, not bubble: a floating descendant
+            // (the jump-to-bottom button, a diagram card's action row) stops
+            // propagation on its own click so it doesn't double-fire the row
+            // beneath, and a bubble listener here would never see that release
+            // — leaving the poll ticking until the next mouse move.
+            .capture_any_mouse_up(cx.listener(|this, ev: &gpui::MouseUpEvent, _window, _cx| {
+                if ev.button == MouseButton::Left {
+                    this.end_selection_drag();
+                }
+            }))
             // Mouse-move catches an off-window release on re-entry (the button is
             // no longer held); mirrors the terminal's implicit mouse-up.
             .on_mouse_move(cx.listener(|this, ev, _window, cx| this.on_selection_drag_move(ev, cx)))
@@ -536,13 +541,22 @@ fn scroll_to_bottom_button(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     div()
+        .debug_selector(|| "agent-chat-scroll-bottom".into())
         .absolute()
         .bottom(px(theme::AGENT_CHAT_SCROLL_BTN_INSET))
         .right(px(theme::AGENT_CHAT_SCROLL_BTN_INSET))
         .child(
             button_bare(("agent-chat-scroll-bottom", pane_id as usize))
                 .icon(IconName::ArrowDown)
-                .on_click(cx.listener(move |this, _ev, _window, cx| this.scroll_to_bottom(cx))),
+                .on_click(cx.listener(move |this, _ev, _window, cx| {
+                    // This button floats over the transcript, and gpui
+                    // hit-tests every hitbox under the pointer — without this
+                    // the click also lands on whatever row happens to sit
+                    // beneath it (a fold header toggles, a diagram card opens
+                    // its lightbox).
+                    cx.stop_propagation();
+                    this.scroll_to_bottom(cx);
+                })),
         )
 }
 
