@@ -133,3 +133,33 @@ fn the_working_tree_note_is_taken_where_the_node_ran() {
         "the second node's tree was reported as the run's: {notes:?}"
     );
 }
+
+/// Readiness is asked, not assumed.
+///
+/// While one node runs at a time the answer is always yes — the worklist
+/// walks a topological order, so a node's dependencies are behind it. The
+/// check exists for the moment two can run at once, and until then nothing
+/// else would notice it always returning true.
+#[test]
+fn a_node_waits_for_what_it_depends_on() {
+    use crate::schedule::deps_are_done;
+
+    let loaded = load(CHAIN, None).expect("valid flow");
+    let flow = loaded.flow();
+    let ids: Vec<NodeId> = flow.nodes.iter().map(|node| node.id.clone()).collect();
+    let mut done: HashSet<NodeId> = HashSet::new();
+
+    // The first depends on nothing, so it is ready from the start; each of
+    // the rest is not, until the one before it is done.
+    assert!(deps_are_done(flow, &ids[0], &done));
+    for pair in ids.windows(2) {
+        assert!(
+            !deps_are_done(flow, &pair[1], &done),
+            "`{}` was ready before `{}` finished",
+            pair[1],
+            pair[0]
+        );
+        done.insert(pair[0].clone());
+        assert!(deps_are_done(flow, &pair[1], &done));
+    }
+}

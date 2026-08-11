@@ -218,6 +218,13 @@ impl Accounting {
 
 impl Run<'_> {
     pub(super) fn finish(self, outcome: RunOutcome) -> RunReport {
+        // The account is **not** reordered, and that is deliberate.
+        //
+        // It grows as nodes settle, so it reads in the order things
+        // happened. Sorting it by the file would misreport a run where two
+        // nodes really did overlap, and would move the repair session — a
+        // synthetic id that is in no graph — away from the gate whose
+        // failure explains it.
         self.spent.finish(
             outcome,
             self.run_dir.to_path_buf(),

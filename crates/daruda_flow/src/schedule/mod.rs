@@ -179,17 +179,39 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
     };
 
     let mut outcome = RunOutcome::Done;
-    for id in graph.topological_order() {
-        // The only place a resume skips anything. Not inside `drive`: a
-        // gate's repair re-runs nodes *because* they already ran, and a
-        // blanket skip there would turn every repair into a no-op.
-        if run.already_passed.contains(&id) {
-            continue;
-        }
+
+    // A worklist over the topological order rather than a walk down it.
+    //
+    // The two are the same thing while one node runs at a time: the order
+    // is Kahn's with a declaration-ordered ready set, so taking the first
+    // *ready* node out of it yields exactly that order back. What the
+    // worklist adds is the question "which nodes could start now" as
+    // something the loop asks rather than something it assumes — which is
+    // what running two at once will need.
+    //
+    // Nodes an earlier process finished start out done. Not skipped inside
+    // `drive`: a gate's repair re-runs nodes *because* they already ran,
+    // and a blanket skip there would turn every repair into a no-op.
+    let mut done: HashSet<NodeId> = run.already_passed.iter().cloned().collect();
+    let mut waiting: Vec<NodeId> = graph
+        .topological_order()
+        .into_iter()
+        .filter(|id| !done.contains(id))
+        .collect();
+
+    while !waiting.is_empty() {
+        let Some(next) = waiting.iter().position(|id| deps_are_done(flow, id, &done)) else {
+            // Nothing ready and nothing in flight. Only a cycle can produce
+            // that, and `FlowGraph::build` refuses those — so this is a
+            // graph nobody could have handed us.
+            break;
+        };
+        let id = waiting.remove(next);
         if let Err(stopped) = run.drive(&id).await {
             outcome = stopped;
             break;
         }
+        done.insert(id);
     }
     run.finish(outcome)
 }
@@ -793,6 +815,19 @@ impl Run<'_> {
             },
         }
     }
+}
+
+/// Whether everything this node waits on has finished.
+///
+/// A question about the flow, not about the run: `deps` is what the file
+/// says, and asking the graph would be asking the same thing one
+/// indirection away. Free-standing for the same reason — it needs no run
+/// state, and a method would have implied it did.
+pub(crate) fn deps_are_done(flow: &Flow, id: &NodeId, done: &HashSet<NodeId>) -> bool {
+    flow.nodes
+        .iter()
+        .find(|n| &n.id == id)
+        .is_none_or(|node| node.deps.iter().all(|dep| done.contains(dep)))
 }
 
 /// A runner reporting success is necessary but not sufficient for an agent
