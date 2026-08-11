@@ -1110,6 +1110,7 @@ nodes:
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         }
     }
 

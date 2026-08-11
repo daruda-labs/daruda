@@ -88,6 +88,7 @@ nodes:
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         },
         &runner,
     ));
@@ -141,6 +142,7 @@ nodes:
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         },
         &runner,
     ));

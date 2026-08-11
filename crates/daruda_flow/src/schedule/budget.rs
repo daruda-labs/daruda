@@ -47,8 +47,43 @@ pub(super) struct Accounting {
 }
 
 impl Accounting {
+    /// Start from what an earlier process had already spent.
+    ///
+    /// Cost and runner calls carry: they are money and work that really
+    /// happened, and a resume that forgot them would let a `max_node_runs`
+    /// of 50 run 50 more. **`parked` does not carry.** It exists only to
+    /// push out a wall-clock deadline that was set before the waiting
+    /// happened, and a resumed run is given a fresh deadline measured from
+    /// now — adding the old waiting to it would hand the run extra time for
+    /// a wait that is already behind it.
+    pub(super) fn resumed(spent: crate::journal::Spent, records: Vec<NodeRecord>) -> Self {
+        Self {
+            node_runs: Cell::new(spent.node_runs),
+            parked: Cell::new(Duration::ZERO),
+            cost: RefCell::new(spent.cost),
+            cost_mixed: Cell::new(false),
+            warnings: RefCell::new(spent.warnings),
+            // Carried so the finished run's account covers both halves. A
+            // resume that started its record afresh would leave `run.md`
+            // beginning in the middle of the run it describes.
+            records: RefCell::new(records),
+        }
+    }
+
     pub(super) fn warn(&self, message: String) {
         self.warnings.borrow_mut().push(message);
+    }
+
+    /// What the run has spent so far, for the journal. A copy, not a
+    /// handle: the cells stay private, which is the whole reason the
+    /// counters live here.
+    pub(super) fn spent(&self) -> crate::journal::Spent {
+        crate::journal::Spent {
+            node_runs: self.node_runs.get(),
+            parked: self.parked.get(),
+            cost: self.cost.borrow().clone(),
+            warnings: self.warnings.borrow().clone(),
+        }
     }
 
     pub(super) fn record(&self, record: impl FnOnce(&mut Vec<NodeRecord>)) {
@@ -186,7 +221,7 @@ impl Run<'_> {
             outcome,
             self.run_dir.to_path_buf(),
             self.budget,
-            self.flow.profile.clone(),
+            self.profile.clone(),
         )
     }
 

@@ -17,13 +17,13 @@ pub type GitStatus<'a> = Option<&'a dyn Fn() -> Option<String>>;
 
 /// One node's history this run. A node can appear once (it passed) or many
 /// times over several generations (a gate's repair re-derived it).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeRecord {
     pub id: NodeId,
     pub attempts: Vec<AttemptRecord>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AttemptRecord {
     /// The node's own counter, which resets each generation — so this is not
     /// unique within a run. `evidence_seq` is.
@@ -57,7 +57,7 @@ pub struct AttemptRecord {
 /// The blast radius of one failed attempt. The two travel together because
 /// they are computed together — the nodes are the invalidation set and the
 /// paths are where that same set's evidence went.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Invalidation {
     /// The set the failure invalidated, gate included. Design §10 calls this
     /// the rerun set and asks `run.md` to name it.
@@ -68,11 +68,18 @@ pub struct Invalidation {
 /// How one attempt ended. Three states, not `Option<NodeFailure>`: a cancel
 /// is neither a pass nor a failure, and collapsing it into either makes the
 /// record lie about why the run stopped.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AttemptOutcome {
     Passed,
     Failed(NodeFailure),
     Canceled,
+    /// An attempt an earlier process made, read back from the journal on
+    /// resume. Only the rendered reason survives, and that is enough: a
+    /// resumed run reports a settled attempt, it never re-decides its
+    /// policy. A variant here rather than one on [`NodeFailure`] because
+    /// that enum is the scheduler's control flow, and a value that can only
+    /// come from a file has no business in it.
+    Reported(String),
 }
 
 /// Append `attempt` to `id`'s history, starting one if this is the node's
@@ -273,6 +280,7 @@ fn ended_as(outcome: &AttemptOutcome) -> String {
         AttemptOutcome::Passed => "passed".to_string(),
         AttemptOutcome::Failed(failure) => format!("failed: {failure}"),
         AttemptOutcome::Canceled => "canceled".to_string(),
+        AttemptOutcome::Reported(reason) => reason.clone(),
     }
 }
 

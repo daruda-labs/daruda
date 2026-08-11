@@ -8,11 +8,13 @@
 // reports, and what it leaves on disk.
 pub mod error;
 pub mod event;
+pub mod journal;
 pub mod load;
 pub mod lock;
 pub mod marker;
 pub mod record;
 pub mod request;
+pub mod resume;
 pub mod runner;
 pub mod schedule;
 

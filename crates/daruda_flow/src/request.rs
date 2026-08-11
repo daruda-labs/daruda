@@ -50,6 +50,14 @@ pub struct RunRequest {
     /// `events` channel and only prints what arrives, so keying on that
     /// would let an `ask` flow start there and park forever.
     pub ask: Option<smol::channel::Sender<crate::runner::PendingAsk>>,
+    /// What an earlier process had already finished, when this is a run
+    /// being picked up rather than started.
+    ///
+    /// Comes from [`crate::resume::prepare`], which produces it together
+    /// with the `loaded` above — they are two halves of one run directory
+    /// and pairing a replay with a different flow would skip nodes by name
+    /// in a graph that never had them.
+    pub resume: Option<crate::journal::Replay>,
 }
 
 /// A cost ceiling is only meaningful in a currency, and two currencies do
@@ -341,6 +349,7 @@ mod tests {
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         }
     }
 

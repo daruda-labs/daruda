@@ -113,12 +113,44 @@ fn execute_with(
     // finishes is still hidden from git and still counted for retention.
     let mut setup_warnings = prepare_runs_dir(request.run_dir.parent());
 
-    // After the lock and before the first node: earlier would write into a
-    // directory another run owns, later would leave a crashed run — the one
-    // whose settings someone needs — with no spec at all.
-    let spec_warning = write_run_yaml(&request.run_dir, request.loaded.flow(), &request.flow_dir)
-        .err()
-        .map(|e| e.to_string());
+    let resume = request.resume.clone();
+
+    // A continuation writes neither setup file again: the spec already in
+    // the directory is the authority it reads back, and the journal it is
+    // about to append to already has its opening line. Rewriting either
+    // would replace the record of what the run *is* with this process's
+    // idea of it.
+    let (spec_warning, journal_warning) = match &resume {
+        Some(replay) => {
+            // Whatever the interrupted node had half-written is evidence,
+            // not a result — `judge` cannot tell the two apart, and left
+            // live it would be accepted as that node's output.
+            setup_warnings.extend(crate::resume::archive_unclaimed_outputs(
+                &request.run_dir,
+                &request.run_dir.join(crate::schedule::LOG_DIR_NAME),
+                &crate::schedule::node_outputs(request.loaded.flow(), &request.run_dir),
+                &replay.passed,
+            ));
+            (None, None)
+        }
+        None => (
+            // After the lock and before the first node: earlier would write
+            // into a directory another run owns, later would leave a
+            // crashed run — the one whose settings someone needs — with no
+            // spec at all.
+            write_run_yaml(&request.run_dir, request.loaded.flow(), &request.flow_dir)
+                .err()
+                .map(|e| e.to_string()),
+            // Beside `run.yaml` and for the same reason, plus one of its
+            // own: its presence is what tells a later resume that the crash
+            // was not in setup.
+            crate::journal::start(&request.run_dir, request.loaded.flow().profile.as_deref())
+                .err()
+                .map(|e| {
+                    format!("this run's progress cannot be written, so it cannot be resumed: {e}")
+                }),
+        ),
+    };
 
     // Last of the setup steps, so a run that cannot be provisioned still
     // leaves the spec that says what it was going to do — and so a download
@@ -138,6 +170,7 @@ fn execute_with(
                     .map(|ask| &**ask as &dyn Fn() -> Option<String>),
                 events: request.events.as_ref(),
                 ask: request.ask.as_ref(),
+                resume,
             },
             runner,
         )),
@@ -148,6 +181,7 @@ fn execute_with(
     // ran before the first node. None of them touches `RunOutcome`: a run
     // directory that could not be tidied or audited still ran.
     setup_warnings.extend(spec_warning);
+    setup_warnings.extend(journal_warning);
     report.warn_from_setup(setup_warnings);
     // Before the marker, and after the warning above so the record carries
     // it: the marker is the "it is all over" signal, and a reader that acts

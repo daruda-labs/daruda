@@ -56,6 +56,10 @@ struct Run<'a> {
     budget: &'a Budget,
     /// Asked once per attempt, wherever that attempt's fate is sealed.
     git_status: GitStatus<'a>,
+    /// Nodes an earlier process finished, empty for a run that is starting.
+    already_passed: Vec<NodeId>,
+    /// The profile this run went by, for its record.
+    profile: Option<String>,
     /// Where the run narrates itself, or `None` when nobody is watching.
     events: Option<&'a smol::channel::Sender<FlowEvent>>,
     /// Where a `permission: ask` node puts its question. `None` is a host
@@ -110,6 +114,8 @@ pub(crate) struct RunInputs<'a> {
     /// Where a person is asked for permission. `None` is a host with no
     /// answering surface.
     pub(crate) ask: Option<&'a smol::channel::Sender<crate::runner::PendingAsk>>,
+    /// What an earlier process finished, when this is a continuation.
+    pub(crate) resume: Option<crate::journal::Replay>,
 }
 
 /// Run every node in topological order, judging each before the next.
@@ -124,8 +130,30 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         git_status,
         events,
         ask,
+        resume,
     } = inputs;
     let (flow, graph) = (loaded.flow(), loaded.graph());
+    // Destructured before the run is built: every one of these is a field
+    // the run starts from rather than something it can ask for later.
+    let (passed, next_seq, spent, profile) = match resume {
+        Some(replay) => (
+            replay.passed,
+            // Continued, never restarted: an attempt that re-used a
+            // number would write its evidence over the log that is the
+            // only account of the attempt before the crash.
+            replay.next_seq.max(1),
+            budget::Accounting::resumed(replay.spent, replay.records),
+            // The journal's, not the spec's: `run.yaml` records the
+            // settings a profile produced and never the name.
+            replay.profile,
+        ),
+        None => (
+            Vec::new(),
+            1,
+            budget::Accounting::default(),
+            flow.profile.clone(),
+        ),
+    };
     let run = Run {
         flow,
         graph,
@@ -133,25 +161,31 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         cwd,
         run_dir,
         log_dir: run_dir.join(LOG_DIR_NAME),
-        node_outputs: flow
-            .nodes
-            .iter()
-            .filter_map(|n| node_output(n, run_dir).map(|p| (n.id.clone(), p)))
-            .collect(),
+        node_outputs: node_outputs(flow, run_dir).into_iter().collect(),
         runner,
         cancel,
         budget,
         git_status,
         events,
         ask: ask.cloned().map(crate::runner::AskChannel::new),
-        spent: budget::Accounting::default(),
-        executed: RefCell::new(Vec::new()),
-        next_seq: Cell::new(1),
+        spent,
+        profile,
+        // Seeded: a repair's `∩ executed` filter asks which nodes have run,
+        // and the ones from before the crash did.
+        executed: RefCell::new(passed.clone()),
+        already_passed: passed,
+        next_seq: Cell::new(next_seq),
         driving: RefCell::new(HashSet::new()),
     };
 
     let mut outcome = RunOutcome::Done;
     for id in graph.topological_order() {
+        // The only place a resume skips anything. Not inside `drive`: a
+        // gate's repair re-runs nodes *because* they already ran, and a
+        // blanket skip there would turn every repair into a no-op.
+        if run.already_passed.contains(&id) {
+            continue;
+        }
         if let Err(stopped) = run.drive(&id).await {
             outcome = stopped;
             break;
@@ -403,6 +437,20 @@ impl<'a> Run<'a> {
             git_status: self.git_status.and_then(|ask| ask()),
             waited,
         };
+        // On disk before the next node starts, through the same funnel the
+        // in-memory record goes through — a second write site is a second
+        // chance for the two to disagree about what happened.
+        //
+        // Best-effort: a journal that cannot be written costs a resume, and
+        // failing the run over it would cost the run. The warning is how
+        // someone finds out the run stopped being resumable.
+        if let Err(e) =
+            crate::journal::append_attempt(self.run_dir, ctx.node_id, &attempt, &self.spent.spent())
+        {
+            self.spent.warn(format!(
+                "this run's progress could not be written, so it cannot be resumed: {e}"
+            ));
+        }
         self.spent
             .record(|records| crate::record::push_attempt(records, ctx.node_id, attempt));
     }
@@ -675,6 +723,16 @@ fn node_io(
 }
 
 /// The absolute path an agent node owes, resolved against `run_dir`.
+/// Every node that writes, and where. One derivation, because a resume
+/// sweeps the same paths the run is about to write to — two would be two
+/// chances to disagree about which file belongs to which node.
+pub(crate) fn node_outputs(flow: &Flow, run_dir: &Path) -> Vec<(NodeId, PathBuf)> {
+    flow.nodes
+        .iter()
+        .filter_map(|n| node_output(n, run_dir).map(|p| (n.id.clone(), p)))
+        .collect()
+}
+
 fn node_output(node: &Node, run_dir: &Path) -> Option<PathBuf> {
     match &node.kind {
         NodeKind::Agent { output, .. } => Some(run_dir.join(output)),

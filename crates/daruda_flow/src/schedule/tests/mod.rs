@@ -76,6 +76,7 @@ fn run_with(
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         },
         runner,
     ));
@@ -138,6 +139,7 @@ pub(super) fn request_for_profile(
         git_status: None,
         events: None,
         ask: None,
+        resume: None,
     }
 }
 
@@ -218,3 +220,4 @@ mod lifecycle;
 mod ordering;
 mod records;
 mod repair;
+mod resuming;

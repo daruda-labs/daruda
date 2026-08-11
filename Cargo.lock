@@ -1726,6 +1726,7 @@ dependencies = [
  "libc",
  "petgraph",
  "serde",
+ "serde_json",
  "shlex",
  "smol",
  "tempfile",

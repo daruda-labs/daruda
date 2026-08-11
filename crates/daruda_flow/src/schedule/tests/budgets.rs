@@ -279,6 +279,7 @@ fn a_node_never_gets_longer_than_the_run_has_left() {
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         },
         &keeper,
     ));
@@ -373,6 +374,7 @@ fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
             git_status: None,
             events: None,
             ask: None,
+            resume: None,
         },
         &keeper,
     ));

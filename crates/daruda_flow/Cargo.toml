@@ -15,6 +15,9 @@ daruda_acp = { path = "../daruda_acp" }
 humantime-serde = "1.1"
 petgraph = "0.8"
 serde = { workspace = true }
+# The progress journal is append-only NDJSON: the writer can be killed
+# mid-line, and only a per-line format lets the reader drop the tear.
+serde_json = { workspace = true }
 shlex = "1.3"
 # A retry's `wait` is a timer the scheduler itself awaits, so this is a
 # runtime dependency, not just a test harness.

@@ -211,6 +211,9 @@ impl Workspace {
             git_status: Some(Box::new(move || git_status(&cwd))),
             events: Some(tx),
             ask: Some(ask_tx),
+            // This assembles a run that is starting. Picking one up reads
+            // the directory it left instead, and builds its own request.
+            resume: None,
         };
         Ok(FlowSubmission {
             request,

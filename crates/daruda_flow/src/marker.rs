@@ -159,6 +159,10 @@ pub fn sweep_old_runs(runs_dir: &Path, keep: usize) -> std::io::Result<Vec<PathB
 
 /// Whether the run got to say how it ended. The one question retention asks
 /// — and the only one it can answer without a lock.
+///
+/// This is also what keeps a killed run around long enough to be resumed:
+/// it never wrote a marker, so the sweep never reaches it. See
+/// [`crate::resume`].
 fn has_marker(run_dir: &Path) -> bool {
     [DONE, FAILED, CANCELED]
         .iter()

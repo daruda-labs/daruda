@@ -770,3 +770,80 @@ fn a_run_without_a_profile_leaves_the_line_out() {
     assert_eq!(report.profile, None);
     assert!(!crate::record::render_run_md(&report).contains("**Profile**"));
 }
+
+/// A run writes down what it finished **as it goes**. Checked through a
+/// real `execute` rather than against the journal module, because the
+/// question is whether the scheduler reaches it at all — a journal nothing
+/// calls is a resume that always starts over.
+#[test]
+fn a_run_leaves_a_journal_of_what_it_finished() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = execute(
+        &request_for_profile(PROFILED, Some("cheap"), dir.path()),
+        &FakeRunner::new(),
+        &CancelToken::default(),
+    );
+
+    let replay = crate::journal::read(&report.run_dir);
+    assert_eq!(replay.passed, vec!["design".to_string()]);
+    assert_eq!(replay.profile.as_deref(), Some("cheap"));
+    assert_eq!(replay.spent.node_runs, report.node_runs);
+    assert!(!replay.torn);
+}
+
+/// One node that fails its first attempt and passes its second, so the
+/// journal has a settled failure to carry as well as a pass.
+const RETRYING: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write it
+    on_fail:
+      retry:
+        hint: try again after {{failure}}
+        max_attempts: 2
+";
+
+/// Every attempt, not just the passing ones — a resumed run's `run.md` has
+/// to show the failures the earlier process saw, or the account of the run
+/// starts at the resume.
+#[test]
+fn the_journal_keeps_the_attempts_that_failed_too() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![
+            Step::fail(NodeFailure::TurnFailed("the adapter gave up".to_string())),
+            Step::Ok {
+                writes: Some("done\n".to_string()),
+            },
+        ],
+    );
+    let report = execute(
+        &request_for(RETRYING, dir.path()),
+        &runner,
+        &CancelToken::default(),
+    );
+
+    let replay = crate::journal::read(&report.run_dir);
+    let design = replay
+        .records
+        .iter()
+        .find(|r| r.id == "design")
+        .expect("the node has a history");
+    assert_eq!(design.attempts.len(), 2, "{:?}", design.attempts);
+    assert!(
+        matches!(
+            design.attempts[0].outcome,
+            crate::record::AttemptOutcome::Reported(_)
+        ),
+        "the first attempt's failure did not survive: {:?}",
+        design.attempts[0].outcome
+    );
+}
