@@ -200,7 +200,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         .collect();
 
     while !waiting.is_empty() {
-        let batch = take_ready_batch(flow, &mut waiting, &done, flow.parallel);
+        let batch = take_ready_batch(flow, cwd, &mut waiting, &done, flow.parallel);
         if batch.is_empty() {
             // Nothing ready and nothing in flight. Only a cycle can produce
             // that, and `FlowGraph::build` refuses those — so this is a
@@ -505,6 +505,11 @@ impl<'a> Run<'a> {
     }
 
     /// Where a node runs: its own directory, or the run's.
+    ///
+    /// The spelling the file used, not the resolved form — a runner shows
+    /// this to a person and reports it in the record, and a canonical path
+    /// with every symlink expanded is not what they wrote. Overlap safety
+    /// asks the resolved question separately, in `working_tree_of`.
     fn node_cwd(&self, node: &Node) -> PathBuf {
         match &node.cwd {
             Some(relative) => self.cwd.join(relative),
@@ -854,21 +859,21 @@ impl Run<'_> {
 /// all eight work in the same place.
 fn take_ready_batch(
     flow: &Flow,
+    cwd: &Path,
     waiting: &mut Vec<NodeId>,
     done: &HashSet<NodeId>,
     parallel: usize,
 ) -> Vec<NodeId> {
     let mut batch: Vec<NodeId> = Vec::new();
-    let mut taken_dirs: Vec<Option<&Path>> = Vec::new();
+    let mut taken_dirs: Vec<PathBuf> = Vec::new();
     waiting.retain(|id| {
         if batch.len() >= parallel || !deps_are_done(flow, id, done) {
             return true;
         }
-        let dir = flow
-            .nodes
-            .iter()
-            .find(|n| &n.id == id)
-            .and_then(|n| n.cwd.as_deref());
+        let Some(node) = flow.nodes.iter().find(|n| &n.id == id) else {
+            return true;
+        };
+        let dir = working_tree_of(cwd, node);
         if taken_dirs.contains(&dir) {
             return true;
         }
@@ -877,6 +882,30 @@ fn take_ready_batch(
         false
     });
     batch
+}
+
+/// Which directory a node actually works in, as something two nodes can be
+/// compared on.
+///
+/// **Resolved, not compared as written.** `a` and `./a` are one directory
+/// spelled two ways, and a string comparison puts both in the same wave —
+/// bypassing the one rule this whole feature rests on with a `./`. The
+/// same goes for `A` and `a` on the case-insensitive filesystem macOS
+/// ships by default, and for a symlink pointing at a directory already
+/// taken.
+///
+/// `canonicalize` answers all three, because it asks the filesystem rather
+/// than the spelling. It needs the directory to exist, which
+/// `validate_request` has already established; if it fails anyway — the
+/// directory went away mid-run — the lexical form is the fallback, and
+/// erring toward *different* there only costs some overlap, never safety,
+/// because a directory that is gone is not one two nodes can corrupt.
+fn working_tree_of(cwd: &Path, node: &Node) -> PathBuf {
+    let joined = match &node.cwd {
+        Some(relative) => cwd.join(relative),
+        None => cwd.to_path_buf(),
+    };
+    std::fs::canonicalize(&joined).unwrap_or(joined)
 }
 
 /// Every future to completion, in one place.

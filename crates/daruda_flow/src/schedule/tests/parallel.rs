@@ -44,6 +44,22 @@ nodes:
     run: \"true\"
 ";
 
+/// One directory, spelled two ways. Both nodes work in `<run>/a`.
+const FORK_SHARING_ONE_TREE_SPELLED_TWO_WAYS: &str = "\
+version: 1
+defaults:
+  parallel: 2
+nodes:
+  - id: left
+    kind: command
+    cwd: a
+    run: \"true\"
+  - id: right
+    kind: command
+    cwd: ./a
+    run: \"true\"
+";
+
 /// Records the order of starts and finishes, and yields once inside every
 /// call so a concurrent sibling has somewhere to interleave.
 struct Interleaving {
@@ -260,5 +276,65 @@ fn a_halt_stops_the_branches_that_had_nothing_to_do_with_it() {
         matches!(report.outcome, RunOutcome::Failed { ref node, .. } if node == "left"),
         "{:?}",
         report.outcome
+    );
+}
+
+/// The safety rule has to hold on the *directory*, not on how it was
+/// typed. `a` and `./a` are one tree, and two agents editing it at once
+/// ruin each other exactly as much as if both had said `a`.
+///
+/// This is the hole a string comparison leaves: the two spellings differ,
+/// so both went into the same wave and the one rule the whole feature
+/// rests on was bypassed by a `./`.
+#[test]
+fn one_directory_spelled_two_ways_is_still_one_directory() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let trace = trace_of(FORK_SHARING_ONE_TREE_SPELLED_TWO_WAYS, dir.path());
+    assert_eq!(
+        trace,
+        vec!["start left", "end left", "start right", "end right"],
+        "`a` and `./a` were treated as two directories: {trace:?}"
+    );
+}
+
+/// A symlink is the same directory under another name, and the filesystem
+/// is the only thing that knows it. Two nodes reaching one tree through
+/// two names corrupt it exactly as much as two saying the same word.
+///
+/// This is why the comparison resolves rather than normalizes: no amount
+/// of tidying the *strings* `a` and `link` makes them equal.
+#[test]
+fn two_names_for_one_directory_through_a_symlink_are_still_one() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("a")).expect("mkdir");
+    std::os::unix::fs::symlink(dir.path().join("a"), dir.path().join("link")).expect("symlink");
+
+    let flow = "\
+version: 1
+defaults:
+  parallel: 2
+nodes:
+  - id: left
+    kind: command
+    cwd: a
+    run: \"true\"
+  - id: right
+    kind: command
+    cwd: link
+    run: \"true\"
+";
+    let runner = Interleaving::new();
+    let log = runner.log.clone();
+    execute(
+        &request_for(flow, dir.path()),
+        &runner,
+        &CancelToken::default(),
+    );
+
+    let trace = log.borrow().clone();
+    assert_eq!(
+        trace,
+        vec!["start left", "end left", "start right", "end right"],
+        "a symlink let two nodes into one directory at once: {trace:?}"
     );
 }
