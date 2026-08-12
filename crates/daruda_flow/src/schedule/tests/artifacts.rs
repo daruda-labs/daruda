@@ -749,7 +749,7 @@ fn the_record_says_which_profile_the_run_used() {
         &FakeRunner::new(),
         &CancelToken::default(),
     );
-    assert_eq!(report.profile.as_deref(), Some("cheap"));
+    assert_eq!(report.provenance.profile.as_deref(), Some("cheap"));
     let rendered = crate::record::render_run_md(&report);
     assert!(
         rendered.contains("**Profile** — `cheap`"),
@@ -767,7 +767,7 @@ fn a_run_without_a_profile_leaves_the_line_out() {
         &FakeRunner::new(),
         &CancelToken::default(),
     );
-    assert_eq!(report.profile, None);
+    assert_eq!(report.provenance.profile, None);
     assert!(!crate::record::render_run_md(&report).contains("**Profile**"));
 }
 

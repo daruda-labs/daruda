@@ -54,6 +54,10 @@ enum Entry {
         /// name that produced them, so a resume has nowhere else to read it.
         profile: Option<String>,
     },
+    /// Written where a later process picked the run up. Nothing reads it
+    /// back — its whole job is to be in the file, so that anyone looking at
+    /// a run directory afterwards can see it was continued and where.
+    Resumed { v: u32, carried: usize },
     /// One attempt at one node, plus what the run had spent once it
     /// settled. The spend is a *snapshot*, not a delta: a torn tail then
     /// costs the reader the last attempt, never a wrong total.
@@ -223,6 +227,17 @@ pub(crate) fn append_attempt(
     )
 }
 
+/// Mark where a later process took the run over.
+pub(crate) fn resumed(run_dir: &Path, carried: usize) -> std::io::Result<()> {
+    append(
+        run_dir,
+        &Entry::Resumed {
+            v: JOURNAL_VERSION,
+            carried,
+        },
+    )
+}
+
 /// Open the journal for this run. Written past the lock and before the
 /// first node, so a directory with no journal at all is one whose crash
 /// came during setup — there is nothing to resume there.
@@ -296,6 +311,10 @@ fn absorb(replay: &mut Replay, entry: Entry) {
     match entry {
         Entry::Started { v, profile } if v <= JOURNAL_VERSION => replay.profile = profile,
         Entry::Started { .. } => {}
+        // Read past: the boundary is for a person reading the file. What
+        // the run needs from a resume — what passed, what it spent — comes
+        // from the attempt lines either side of it.
+        Entry::Resumed { .. } => {}
         Entry::Attempt(line) if line.v > JOURNAL_VERSION => {}
         Entry::Attempt(line) => {
             let AttemptLine {

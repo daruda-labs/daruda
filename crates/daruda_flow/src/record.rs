@@ -116,8 +116,14 @@ pub const RUN_REPORT_FILE: &str = "run.md";
 pub fn render_run_md(report: &RunReport) -> String {
     let mut out = String::from("# Run\n\n");
     out.push_str(&format!("- **Result** — {}\n", result_of(&report.outcome)));
-    if let Some(profile) = &report.profile {
+    if let Some(profile) = &report.provenance.profile {
         out.push_str(&format!("- **Profile** — `{profile}`\n"));
+    }
+    if report.provenance.carried_over > 0 {
+        out.push_str(&format!(
+            "- **Continued** — picked up with {} node(s) already done\n",
+            report.provenance.carried_over
+        ));
     }
     out.push_str(&format!(
         "- **Cost limit** — {}\n",

@@ -1312,3 +1312,78 @@ async fn answering_brings_the_next_question_forward(cx: &mut TestAppContext) {
     );
     assert_eq!(row.also_waiting, 0);
 }
+
+/// A question that arrives after the last one was answered raises the
+/// modal, same as the first did.
+///
+/// Written to settle an observation from a real run: five questions, one
+/// modal. Either the person answered the rest in the panel before the
+/// modal reached them, or later questions do not raise one at all — and
+/// those two look identical from the outside.
+#[gpui::test]
+async fn a_question_arriving_after_the_last_was_answered_still_raises_the_modal(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.update(&mut cx, |ws, _| ws.active);
+    let run_dir = lane.path().join("run");
+    ws.update(&mut cx, |ws, _| {
+        ws.seed_flow_run_for_test(here, run_dir.clone())
+    });
+
+    let _first = park_question(&ws, &mut cx, here, &run_dir, 1);
+    cx.update(|window, cx| {
+        assert!(
+            crate::ui::WindowExt::has_active_dialog(window, cx),
+            "the first question did not reach the front"
+        );
+        ws.update(cx, |ws, cx| {
+            ws.answer_flow_ask(
+                here,
+                1,
+                daruda_acp::PermissionDecision::Allow {
+                    option_id: "once".to_string(),
+                },
+                cx,
+            );
+        });
+        crate::ui::WindowExt::close_dialog(window, cx);
+    });
+
+    let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
+    cx.update(|window, cx| {
+        assert!(
+            crate::ui::WindowExt::has_active_dialog(window, cx),
+            "the next question never reached the front"
+        );
+    });
+}
+
+/// A question that arrives *while* one is up must not raise a second
+/// modal. It is behind the first, and a dialog stacked over the one being
+/// answered would show the same question twice — the front one — with the
+/// person's click landing on whichever copy is on top.
+#[gpui::test]
+async fn a_queued_question_does_not_stack_a_second_modal(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut cx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let here = ws.update(&mut cx, |ws, _| ws.active);
+    let run_dir = lane.path().join("run");
+    ws.update(&mut cx, |ws, _| {
+        ws.seed_flow_run_for_test(here, run_dir.clone())
+    });
+
+    let _first = park_question(&ws, &mut cx, here, &run_dir, 1);
+    let _second = park_question(&ws, &mut cx, here, &run_dir, 2);
+
+    // One close is enough to clear the front dialog. A second one behind
+    // it would still be up.
+    cx.update(crate::ui::WindowExt::close_dialog);
+    cx.update(|window, cx| {
+        assert!(
+            !crate::ui::WindowExt::has_active_dialog(window, cx),
+            "a queued question stacked a modal of its own"
+        );
+    });
+}

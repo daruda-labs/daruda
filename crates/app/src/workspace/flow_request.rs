@@ -421,9 +421,15 @@ pub(in crate::workspace) fn process_is_alive(pid: u32) -> bool {
     system.process(pid).is_some()
 }
 
+/// The working tree at `cwd`, as `git status --porcelain` sees it.
+///
+/// Scoped to that directory with `-- .`, which is what makes the note mean
+/// anything once nodes run in directories of their own: `git status` is
+/// otherwise repository-wide, and every node in one repo would report the
+/// same list however different their directories.
 fn git_status(cwd: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
+        .args(["status", "--porcelain", "--", "."])
         .current_dir(cwd)
         .output()
         .ok()?;

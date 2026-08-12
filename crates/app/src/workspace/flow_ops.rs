@@ -664,16 +664,28 @@ impl Workspace {
         // ask independently, and a second question that replaced the first
         // would leave that first node parked on a reply nobody can send —
         // the run would wait forever on a question no longer on screen.
-        match &mut handle.doing {
-            RunStage::Asking { queued, .. } => queued.push_back(arrived),
+        let now_showing = match &mut handle.doing {
+            RunStage::Asking { queued, .. } => {
+                queued.push_back(arrived);
+                false
+            }
             doing => {
                 *doing = RunStage::Asking {
                     question: arrived,
                     queued: std::collections::VecDeque::new(),
-                }
+                };
+                true
             }
-        }
+        };
         cx.notify();
+
+        // Only for the question that is now on screen. A queued arrival
+        // would otherwise raise a modal for the *front* question — the one
+        // already being answered — stacking a second copy of it, with the
+        // click landing on whichever is on top.
+        if !now_showing {
+            return;
+        }
 
         // Rows for *this* lane, not the active one: whether it may take the
         // window is the modal's rule, and pre-filtering here would enforce

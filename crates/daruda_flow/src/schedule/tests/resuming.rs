@@ -285,3 +285,49 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
         report.outcome
     );
 }
+
+/// A resumed run says it was resumed.
+///
+/// Written after a real `kill -9` test where the artifacts could not answer
+/// the one question the test existed to ask: the run directory looked the
+/// same whether it had been picked up or had simply run through. A feature
+/// whose whole point is continuing a run has to leave that on the record.
+#[test]
+fn a_continued_run_says_so_on_its_record() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let run_dir = killed_after(dir.path(), CHAIN_OF_THREE, "two", FakeRunner::new());
+
+    let report = resume_run(&run_dir, CHAIN_OF_THREE, &FakeRunner::new());
+
+    assert_eq!(
+        report.provenance.carried_over, 1,
+        "`one` was not counted as carried"
+    );
+    let rendered = crate::record::render_run_md(&report);
+    assert!(
+        rendered.contains("**Continued** — picked up with 1 node(s) already done"),
+        "the report knows, the record does not say: {rendered}"
+    );
+    // And the journal keeps the boundary, for whoever reads the directory
+    // rather than the report.
+    let journal =
+        std::fs::read_to_string(run_dir.join(crate::journal::JOURNAL_FILE)).expect("journal");
+    assert!(
+        journal.contains("\"kind\":\"resumed\""),
+        "the journal does not show where it was taken over: {journal}"
+    );
+}
+
+/// A run that started at its first node says nothing about being
+/// continued — the line is a fact about this run, not decoration.
+#[test]
+fn a_run_that_started_normally_claims_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = execute(
+        &request_for(CHAIN_OF_THREE, dir.path()),
+        &FakeRunner::new(),
+        &CancelToken::default(),
+    );
+    assert_eq!(report.provenance.carried_over, 0);
+    assert!(!crate::record::render_run_md(&report).contains("**Continued**"));
+}

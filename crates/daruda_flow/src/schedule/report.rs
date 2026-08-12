@@ -82,10 +82,25 @@ pub struct RunReport {
     /// Every attempt the run made, in the order the nodes first ran. The
     /// attempt counts here sum to `node_runs`.
     pub nodes: Vec<NodeRecord>,
-    /// The profile the run was submitted under. `run.yaml` records the
-    /// settings it produced, but two runs of one flow under two profiles
-    /// are otherwise indistinguishable to someone reading `run.md`.
+    /// How this run came to be. Neither half is something the run did —
+    /// both are facts about how it was started, which is why they travel
+    /// together rather than as two more fields among what it spent.
+    pub provenance: Provenance,
+}
+
+/// How a run came to be.
+///
+/// `run.yaml` records the settings a profile produced and never its name,
+/// and a picked-up run is otherwise indistinguishable from one that ran
+/// straight through — so both of these exist to be written down, and
+/// neither is read back by the engine.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Provenance {
+    /// The profile the run was submitted under.
     pub profile: Option<String>,
+    /// How many nodes it started with already done, because it was picked
+    /// up rather than started. Zero for a run that began at its first node.
+    pub carried_over: usize,
 }
 
 impl RunReport {
@@ -106,7 +121,7 @@ impl RunReport {
             cost: None,
             warnings: Vec::new(),
             nodes: Vec::new(),
-            profile: None,
+            provenance: Provenance::default(),
         }
     }
 
@@ -121,7 +136,7 @@ impl RunReport {
         cost: Option<CostLimit>,
         warnings: Vec<String>,
         nodes: Vec<NodeRecord>,
-        profile: Option<String>,
+        provenance: Provenance,
     ) -> Self {
         Self {
             outcome,
@@ -130,7 +145,7 @@ impl RunReport {
             cost,
             warnings,
             nodes,
-            profile,
+            provenance,
         }
     }
 

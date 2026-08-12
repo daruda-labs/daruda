@@ -125,6 +125,11 @@ fn execute_with(
             // Whatever the interrupted node had half-written is evidence,
             // not a result — `judge` cannot tell the two apart, and left
             // live it would be accepted as that node's output.
+            setup_warnings.extend(
+                crate::journal::resumed(&request.run_dir, replay.passed.len())
+                    .err()
+                    .map(|e| format!("this run's progress could not be marked as continued: {e}")),
+            );
             setup_warnings.extend(crate::resume::archive_unclaimed_outputs(
                 &request.run_dir,
                 &request.run_dir.join(crate::schedule::LOG_DIR_NAME),
