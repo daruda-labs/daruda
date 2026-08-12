@@ -292,7 +292,13 @@ pub struct RunContext<'a> {
     /// 1-based policy attempt for this node. Not globally unique: nested
     /// repair generations can reset a child policy owner's counter.
     pub attempt: u32,
-    /// The working directory every node shares.
+    /// When this attempt began, for the record's sake. Wall clock rather
+    /// than `Instant` because what it becomes is a timestamp somebody lines
+    /// up against other logs; a clock that jumps backwards costs the
+    /// duration on one line and nothing else.
+    pub started_at: std::time::SystemTime,
+    /// Where this node runs — its own directory when it names one, and the
+    /// run's otherwise.
     pub cwd: &'a Path,
     /// `<cwd>/.daruda/flow-runs/<run-id>/` — outputs land here.
     pub run_dir: &'a Path,

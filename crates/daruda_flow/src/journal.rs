@@ -81,6 +81,12 @@ struct AttemptLine {
     archived: Vec<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     git_status: Option<String>,
+    /// Epoch milliseconds. A number rather than a formatted time: the file
+    /// is machine-read, and how it reads belongs to whoever renders it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    at_ms: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    took_ms: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     waited_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -100,6 +106,13 @@ fn is_zero(ms: &u64) -> bool {
 /// supported". Because both duration fields are skipped when zero, that
 /// only bites a run that actually waited: the journal of every other run
 /// reads back fine, which is exactly how it would reach a user.
+/// Milliseconds since the epoch, or zero for a clock set before it.
+fn epoch_millis(at: std::time::SystemTime) -> u64 {
+    at.duration_since(std::time::UNIX_EPOCH)
+        .map(millis)
+        .unwrap_or_default()
+}
+
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -204,6 +217,8 @@ pub(crate) fn append_attempt(
             invalidated: attempt.invalidated.nodes.clone(),
             archived: attempt.invalidated.archived.clone(),
             git_status: attempt.git_status.clone(),
+            at_ms: epoch_millis(attempt.at),
+            took_ms: millis(attempt.took),
             waited_ms: millis(attempt.waited.total),
             answers: attempt
                 .waited
@@ -325,6 +340,8 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 invalidated,
                 archived,
                 git_status,
+                at_ms,
+                took_ms,
                 waited_ms,
                 answers,
                 spent,
@@ -367,6 +384,8 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                         archived,
                     },
                     git_status,
+                    at: std::time::UNIX_EPOCH + Duration::from_millis(at_ms),
+                    took: Duration::from_millis(took_ms),
                     waited: Waiting {
                         total: Duration::from_millis(waited_ms),
                         answers: answers
@@ -388,10 +407,17 @@ fn absorb(replay: &mut Replay, entry: Entry) {
 mod tests {
     use super::*;
 
+    /// A settled instant, so a record rendered in a test reads the same on
+    /// every machine and at every hour. `Instant::now()` in a fixture is a
+    /// test that passes because nobody looked at the line it produced.
+    const FIXED_INSTANT: std::time::SystemTime = std::time::SystemTime::UNIX_EPOCH;
+
     fn attempt(n: u32, seq: u32, outcome: AttemptOutcome) -> AttemptRecord {
         AttemptRecord {
             attempt: n,
             evidence_seq: seq,
+            at: FIXED_INSTANT,
+            took: Duration::from_secs(0),
             outcome,
             invalidated: Invalidation::default(),
             git_status: None,

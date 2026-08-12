@@ -8,6 +8,7 @@ use crate::request::CostLimit;
 use crate::runner::NodeFailure;
 use crate::schedule::{BudgetLimit, RunOutcome, RunReport};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// The working tree's state right now, as `git status --porcelain` prints
 /// it. `None` when the host has nothing to say — not a git repo, or the
@@ -46,6 +47,19 @@ pub struct AttemptRecord {
     /// answers. Best-effort: the design records the tree's state because the
     /// engine deliberately does not manage it.
     pub git_status: Option<String>,
+    /// When this attempt settled, and how long it had been going.
+    ///
+    /// Wall clock, so it can be lined up against anything else that was
+    /// happening — the app's log, another run, a person's memory of when
+    /// they walked away. Without it the record says what happened in what
+    /// order and leaves *when* to be guessed from file timestamps, which
+    /// is what a reader ends up doing.
+    pub at: std::time::SystemTime,
+    /// Wall time from the attempt starting to it settling, waiting
+    /// included. Two nodes running together have overlapping spans, so
+    /// this cannot be derived by subtracting one attempt's `at` from the
+    /// next one's.
+    pub took: Duration,
     /// What this attempt spent waiting for a person, and what they said.
     ///
     /// The duration is recorded because the clocks *stop* for it — without
@@ -230,6 +244,24 @@ fn money(amount: f64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// `2026-08-12T01:18:05Z`. UTC on purpose: this file is read wherever it
+/// is copied to, and a local time with no offset is a time nobody can
+/// place. The panel renders the same instants in local time, where the
+/// reader's clock is known.
+pub(crate) fn stamp(at: std::time::SystemTime) -> String {
+    humantime::format_rfc3339_seconds(at).to_string()
+}
+
+/// ` (took 3s)`, or nothing at all under a second — most command nodes
+/// settle in milliseconds and a parenthesis saying so on every line is
+/// noise over the attempts where duration is the whole story.
+fn took(duration: Duration) -> String {
+    if duration.as_secs() == 0 {
+        return String::new();
+    }
+    format!(" (took {}s)", duration.as_secs())
+}
+
 /// One attempt and everything it left behind. `attempt` repeats across repair
 /// generations, so `evidence_seq` travels with it — that pair is what tells
 /// two runs of the same node apart.
@@ -238,10 +270,12 @@ fn money(amount: f64) -> String {
 /// lives: an absolute path here is one long prefix repeated on every line.
 fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path) {
     out.push_str(&format!(
-        "- attempt {} (evidence {}) — {}\n",
+        "- attempt {} (evidence {}) — {} at {}{}\n",
         attempt.attempt,
         attempt.evidence_seq,
-        ended_as(&attempt.outcome)
+        ended_as(&attempt.outcome),
+        stamp(attempt.at),
+        took(attempt.took),
     ));
     // Said before the evidence, because it changes how every duration on
     // this attempt reads: the clocks stop while a person is being waited
@@ -295,6 +329,11 @@ fn ended_as(outcome: &AttemptOutcome) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A settled instant, so a record rendered in a test reads the same on
+    /// every machine and at every hour. `Instant::now()` in a fixture is a
+    /// test that passes because nobody looked at the line it produced.
+    const FIXED_INSTANT: std::time::SystemTime = std::time::SystemTime::UNIX_EPOCH;
+
     use crate::runner::{AskAnswer, Waiting};
     use std::time::Duration;
 
@@ -318,6 +357,8 @@ mod tests {
             &AttemptRecord {
                 attempt: 1,
                 evidence_seq: 1,
+                at: FIXED_INSTANT,
+                took: Duration::from_secs(0),
                 outcome: AttemptOutcome::Failed(NodeFailure::NoOutput {
                     expected: PathBuf::from("/run/touched.md"),
                 }),
@@ -341,6 +382,8 @@ mod tests {
             &AttemptRecord {
                 attempt: 1,
                 evidence_seq: 1,
+                at: FIXED_INSTANT,
+                took: Duration::from_secs(0),
                 outcome: AttemptOutcome::Passed,
                 invalidated: Invalidation::default(),
                 git_status: None,
@@ -361,6 +404,8 @@ mod tests {
             &AttemptRecord {
                 attempt: 1,
                 evidence_seq: 1,
+                at: FIXED_INSTANT,
+                took: Duration::from_secs(0),
                 outcome: AttemptOutcome::Passed,
                 invalidated: Invalidation::default(),
                 git_status: None,
@@ -377,6 +422,8 @@ mod tests {
         AttemptRecord {
             attempt: n,
             evidence_seq: n,
+            at: FIXED_INSTANT,
+            took: Duration::from_secs(0),
             outcome: AttemptOutcome::Passed,
             invalidated: Invalidation {
                 nodes: Vec::new(),
@@ -463,6 +510,8 @@ mod tests {
                 AttemptRecord {
                     attempt: 1,
                     evidence_seq: 3,
+                    at: FIXED_INSTANT,
+                    took: Duration::from_secs(0),
                     outcome: AttemptOutcome::Failed(NodeFailure::Exit { code: Some(1) }),
                     invalidated: Invalidation {
                         nodes: Vec::new(),
@@ -474,6 +523,8 @@ mod tests {
                 AttemptRecord {
                     attempt: 2,
                     evidence_seq: 6,
+                    at: FIXED_INSTANT,
+                    took: Duration::from_secs(0),
                     outcome: AttemptOutcome::Passed,
                     invalidated: Invalidation {
                         nodes: Vec::new(),
@@ -512,6 +563,8 @@ mod tests {
                 AttemptRecord {
                     attempt: 1,
                     evidence_seq: 1,
+                    at: FIXED_INSTANT,
+                    took: Duration::from_secs(0),
                     outcome: AttemptOutcome::Passed,
                     invalidated: Invalidation {
                         nodes: Vec::new(),
@@ -525,6 +578,8 @@ mod tests {
                 AttemptRecord {
                     attempt: 1,
                     evidence_seq: 2,
+                    at: FIXED_INSTANT,
+                    took: Duration::from_secs(0),
                     outcome: AttemptOutcome::Passed,
                     invalidated: Invalidation {
                         nodes: Vec::new(),

@@ -293,6 +293,7 @@ impl<'a> Run<'a> {
                 let ctx = RunContext {
                     node_id: id,
                     attempt,
+                    started_at: std::time::SystemTime::now(),
                     cwd: &cwd,
                     run_dir: self.run_dir,
                     log_dir: &self.log_dir,
@@ -476,6 +477,10 @@ impl<'a> Run<'a> {
         let attempt = AttemptRecord {
             attempt: ctx.attempt,
             evidence_seq: ctx.evidence_seq,
+            at: std::time::SystemTime::now(),
+            // `Err` is a clock that moved backwards under us; the duration
+            // is then simply not shown, which beats a wrong one.
+            took: ctx.started_at.elapsed().unwrap_or_default(),
             outcome,
             invalidated,
             git_status: self.git_status.and_then(|ask| ask(ctx.cwd)),
@@ -689,6 +694,10 @@ impl<'a> Run<'a> {
         let fix_ctx = RunContext {
             node_id: &fix_id,
             attempt: ctx.attempt,
+            // Its own: the fix is a session of its own, and dating it from
+            // the gate's start would report it as having taken the gate's
+            // whole life.
+            started_at: std::time::SystemTime::now(),
             cwd: self.cwd,
             run_dir: self.run_dir,
             log_dir: &self.log_dir,

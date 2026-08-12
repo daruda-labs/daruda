@@ -186,6 +186,7 @@ impl Fixture {
         RunContext {
             node_id: &self.node,
             attempt: 1,
+            started_at: std::time::SystemTime::now(),
             cwd: &self.cwd,
             run_dir: &self.run_dir,
             log_dir: &self.log_dir,

@@ -331,3 +331,39 @@ fn a_run_that_started_normally_claims_nothing() {
     assert_eq!(report.provenance.carried_over, 0);
     assert!(!crate::record::render_run_md(&report).contains("**Continued**"));
 }
+
+/// Every attempt says when it settled, and the resume gap is visible as a
+/// gap between two of them.
+///
+/// Written because reading a real killed-and-continued run meant opening
+/// the *file timestamps* to answer "when did the second half start" — the
+/// record itself only gave an order.
+#[test]
+fn the_record_dates_every_attempt() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let run_dir = killed_after(dir.path(), CHAIN_OF_THREE, "two", FakeRunner::new());
+    let report = resume_run(&run_dir, CHAIN_OF_THREE, &FakeRunner::new());
+
+    let rendered = crate::record::render_run_md(&report);
+    let dated = rendered.matches(" at 20").count();
+    assert_eq!(
+        dated,
+        report.nodes.iter().map(|n| n.attempts.len()).sum::<usize>(),
+        "an attempt went undated: {rendered}"
+    );
+
+    // And the two halves are hours apart in principle — here only
+    // milliseconds, but the first half's stamps must not be *later* than
+    // the second's.
+    let mut stamps: Vec<std::time::SystemTime> = report
+        .nodes
+        .iter()
+        .flat_map(|n| n.attempts.iter().map(|a| a.at))
+        .collect();
+    let ordered = stamps.clone();
+    stamps.sort();
+    assert_eq!(
+        ordered, stamps,
+        "the record's attempts are not in the order they settled"
+    );
+}

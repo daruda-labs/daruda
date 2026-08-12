@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 daruda_acp = { path = "../daruda_acp" }
+# The record says when each attempt settled. Already in the tree through
+# `humantime-serde`; taken directly for `format_rfc3339_seconds`.
+humantime = "2"
 humantime-serde = "1.1"
 petgraph = "0.8"
 serde = { workspace = true }
