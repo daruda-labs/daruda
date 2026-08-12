@@ -12,6 +12,7 @@ pub mod colors;
 pub mod cursor;
 pub mod editor;
 pub mod file_viewer;
+pub mod flow;
 pub mod font;
 pub mod general;
 pub mod keybindings;
@@ -128,6 +129,7 @@ pub struct Config {
     pub left_dock: LeftDockConfig,
     pub file_viewer: FileViewerConfig,
     pub editor: EditorConfig,
+    pub flow: flow::FlowConfig,
     pub claude_status: ClaudeStatusConfig,
     pub notifications: NotificationsConfig,
     pub clipboard: ClipboardConfig,
@@ -187,6 +189,7 @@ impl Default for Config {
             left_dock: Default::default(),
             file_viewer: Default::default(),
             editor: Default::default(),
+            flow: Default::default(),
             claude_status: Default::default(),
             notifications: Default::default(),
             clipboard: Default::default(),
@@ -238,6 +241,7 @@ impl Config {
         self.panels.clamp();
         self.render.clamp();
         self.agent.clamp();
+        self.status_bar.clamp();
         // A missing `[[agents]]` is handled by the serde field default, and the
         // manual `Config::default()` (used on load errors) seeds the Claude
         // default directly (since a232e44). This guard exists for the remaining
@@ -421,16 +425,20 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
     patch_section(&mut doc, "status_bar", |t| {
         let mut arr = toml_edit::Array::new();
-        for item in &config.status_bar.visible_items {
+        for item in &config.status_bar.hidden_items {
             let slug = match item {
                 StatusBarItem::ProjectBranch => "project_branch",
                 StatusBarItem::AccountSlot => "account_slot",
                 StatusBarItem::Ports => "ports",
                 StatusBarItem::ClaudeUsage => "claude_usage",
+                StatusBarItem::Flow => "flow",
             };
             arr.push(slug);
         }
-        t["visible_items"] = toml_edit::value(arr);
+        t["hidden_items"] = toml_edit::value(arr);
+        // The opt-in list is gone; leaving it behind would be read back on
+        // the next launch and undo the migration that just ran.
+        t.remove("visible_items");
     });
 
     patch_section(&mut doc, "ports", |t| {

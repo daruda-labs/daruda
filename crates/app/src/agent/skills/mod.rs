@@ -351,5 +351,5 @@ pub fn extra_keys(fm: &SkillFrontmatter) -> Vec<String> {
 
 #[allow(dead_code)]
 fn _ensure_btreemap_in_use() {
-    let _: BTreeMap<String, serde_yaml::Value> = BTreeMap::new();
+    let _: BTreeMap<String, yaml_serde::Value> = BTreeMap::new();
 }

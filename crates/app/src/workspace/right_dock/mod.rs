@@ -7,6 +7,7 @@ use gpui::{AnyElement, App, Context, IntoElement, ScrollHandle, div, prelude::*,
 use super::layout::Dock;
 use super::layout::RightDockSnapshot;
 
+pub(in crate::workspace) mod flows;
 pub(in crate::workspace) mod mcp_ops;
 pub(in crate::workspace) mod skill_ops;
 pub(in crate::workspace) mod skills;
@@ -44,6 +45,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         RightDockView::Skills => skills::render(snap, cx),
         RightDockView::Tasks => tasks::render(snap, cx),
         RightDockView::Tools => tools::render(snap, cx),
+        RightDockView::Flows => flows::render(snap, cx),
     };
     let handle = snap.right_panel_scroll_handle.clone();
     div()

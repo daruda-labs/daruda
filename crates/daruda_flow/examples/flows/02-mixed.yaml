@@ -1,0 +1,24 @@
+# 2 — an agent node and a command gate in one flow.
+#
+# Until `Runners` existed each runner refused half the grammar, so this is
+# the shape that only ever worked in tests. The gate reads the agent's
+# output through a template, which is also the quoting path: `run_dir` holds
+# the repo path, and an unquoted substitution splits on a space.
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: verdict
+    kind: agent
+    output: verdict.md
+    prompt: |
+      Write exactly one line to {{output}}: `VERDICT: PASS`
+  - id: gate
+    kind: command
+    deps: [verdict]
+    run: "grep -q '^VERDICT: PASS' {{node.verdict.output}}"

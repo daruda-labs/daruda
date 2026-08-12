@@ -1,0 +1,35 @@
+# 3 — the design's flagship path: a gate fails, a fix session runs, and the
+# rerun set is re-derived.
+#
+# `verdict` is told to fail the first time and to read the archived evidence
+# the second, which is the only way to make a repair happen on demand. What
+# is being checked is the engine's sequence, not the agent's judgement:
+#   verdict → gate(fail) → __fix__ → verdict → gate(pass)
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: verdict
+    kind: agent
+    output: verdict.md
+    prompt: |
+      If the file {{run_dir}}/fixed.txt exists, write `VERDICT: PASS` to
+      {{output}}. Otherwise write `VERDICT: FAIL` to {{output}}.
+      Write nothing else, and create no other file.
+  - id: gate
+    kind: command
+    deps: [verdict]
+    run: "grep -q '^VERDICT: PASS' {{node.verdict.output}}"
+    on_fail:
+      repair:
+        fix: |
+          The gate failed: {{failure}}. The evidence is at {{attempts}}.
+          Read it, then create the file {{run_dir}}/fixed.txt containing the
+          word `done`. Change nothing else.
+        rerun: [verdict]
+        max_attempts: 2

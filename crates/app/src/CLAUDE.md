@@ -9,7 +9,7 @@ config/keybinding wiring.
 ```
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions, welcome
-├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers)
+├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
 ├── project/              # Runtime Project model — `Vec<Lane>` + group/color/tab_order (GPUI-free)
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
@@ -47,6 +47,8 @@ App-shell glue — process entry, native menu bar + Open Recent, window lifecycl
 ## `agent/`
 
 Agent-side data models for the right dock — MCP servers, skills, tasks. Each submodule splits responsibility into a GPUI-free state core (state struct, snapshot, disk scan, persistence writers, parsers) and a sibling GPUI Global wrapper. Personal/plugin layers are user-global; project layers are keyed per-lane. Tasks wraps `daruda_store::TasksState` as a newtype to satisfy the orphan rule.
+
+Not every submodule is a right-dock model with a Global wrapper: `account.rs` (`PreparedAccount`) and `launch_resolve.rs` (`resolve_launch` and its pure helpers) are a GPUI-free pair resolving what an ACP launch needs to spawn — command line, working directory, env, and session-host write-back — shared by the agent-chat connect pump and the shell-pane spawn funnel.
 
 ## `surface/`
 
@@ -232,12 +234,13 @@ main.rs → menus.rs, windows.rs → workspace/, welcome.rs
   → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
 
 project/ → lane/
+agent/ → lane/
 ```
 
 - `surface/` imports nothing from siblings (except `action_map.rs` → workspace action types).
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
-- `agent/` imports nothing from `workspace/`.
+- `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
 
 When a function references a lane across module boundaries, pass
 the full `daruda_store::project::LaneRef { project, lane }` —

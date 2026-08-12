@@ -15,6 +15,7 @@ use daruda_store::project::{
 use gpui::{App, Context, Window};
 
 use super::Workspace;
+use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
@@ -653,7 +654,7 @@ impl Workspace {
                     let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
                     let pane_recipe = self
                         .agent_launch_for(&agent_id)
-                        .and_then(|l| l.account_recipe(is_remote));
+                        .and_then(|l| account_recipe_for_connect(&l, is_remote));
                     let mut restored = self.create_agent_chat_pane(
                         ac.cwd.clone(),
                         if keep_session {

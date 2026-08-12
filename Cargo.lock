@@ -1615,6 +1615,7 @@ dependencies = [
  "daruda_agent",
  "daruda_config",
  "daruda_core",
+ "daruda_flow",
  "daruda_store",
  "daruda_terminal",
  "daruda_update",
@@ -1645,8 +1646,8 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "similar",
+ "smol",
  "sys-locale",
  "sysinfo 0.32.1",
  "tempfile",
@@ -1658,6 +1659,7 @@ dependencies = [
  "uuid",
  "which",
  "x11rb",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -1714,6 +1716,24 @@ dependencies = [
 [[package]]
 name = "daruda_core"
 version = "0.2.11"
+
+[[package]]
+name = "daruda_flow"
+version = "0.2.11"
+dependencies = [
+ "daruda_acp",
+ "humantime",
+ "humantime-serde",
+ "libc",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "shlex",
+ "smol",
+ "tempfile",
+ "thiserror 2.0.18",
+ "yaml_serde",
+]
 
 [[package]]
 name = "daruda_store"
@@ -3436,6 +3456,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "humantime"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4080,6 +4116,12 @@ dependencies = [
  "plain",
  "redox_syscall 0.7.3",
 ]
+
+[[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
 
 [[package]]
 name = "linebender_resource_handle"
@@ -5169,6 +5211,7 @@ dependencies = [
  "fixedbitset",
  "hashbrown 0.15.5",
  "indexmap 2.13.1",
+ "serde",
 ]
 
 [[package]]
@@ -9456,6 +9499,19 @@ name = "y4m"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08c7c1b1a6a7c8a6b2741a6c21a4f8918e51899b111cfa08d1288202656e3975"
+dependencies = [
+ "indexmap 2.13.1",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
+]
 
 [[package]]
 name = "yazi"

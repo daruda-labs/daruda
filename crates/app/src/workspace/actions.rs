@@ -26,9 +26,9 @@ use super::{
     InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill, NewTab, NewTask,
     NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
     PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes,
-    SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
-    SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane,
-    UninstallAgentHooks, ZoomWindow,
+    SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks,
+    SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen,
+    ToggleZoomPane, UninstallAgentHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -208,6 +208,15 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+    }
+
+    pub(in crate::workspace) fn on_switch_right_panel_flows(
+        &mut self,
+        _: &SwitchRightPanelFlows,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
     }
 
     pub(in crate::workspace) fn on_new_skill(

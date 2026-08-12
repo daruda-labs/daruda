@@ -5,7 +5,7 @@
 //! body, and the parsed frontmatter is `Default`.
 //!
 //! The parser is **lossless**: any key not in [`super::KNOWN_KEYS`] is
-//! kept in [`SkillFrontmatter::extra`] as a `serde_yaml::Value` so a
+//! kept in [`SkillFrontmatter::extra`] as a `yaml_serde::Value` so a
 //! later [`serialize_frontmatter`] reproduces the same KV set.
 //! Unknown keys can carry nested objects (e.g. `hooks:`) which daruda
 //! does not interpret but must round-trip when the user edits other
@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 use super::{DEFAULT_USER_INVOCABLE, KNOWN_KEYS};
 
@@ -101,11 +101,11 @@ pub fn split_frontmatter(source: &str) -> (Option<&str>, &str) {
 /// Parse the YAML chunk produced by [`split_frontmatter`]. An empty
 /// chunk yields [`SkillFrontmatter::empty`]; malformed YAML returns an
 /// `Err` carrying the parser message.
-pub fn parse_frontmatter(yaml_src: &str) -> Result<SkillFrontmatter, serde_yaml::Error> {
+pub fn parse_frontmatter(yaml_src: &str) -> Result<SkillFrontmatter, yaml_serde::Error> {
     if yaml_src.trim().is_empty() {
         return Ok(SkillFrontmatter::empty());
     }
-    let value: Value = serde_yaml::from_str(yaml_src)?;
+    let value: Value = yaml_serde::from_str(yaml_src)?;
     let mapping = match value {
         Value::Mapping(m) => m,
         Value::Null => return Ok(SkillFrontmatter::empty()),
@@ -125,7 +125,7 @@ pub fn parse_frontmatter(yaml_src: &str) -> Result<SkillFrontmatter, serde_yaml:
     for (k, v) in mapping {
         let key = match &k {
             Value::String(s) => s.clone(),
-            other => match serde_yaml::to_string(other) {
+            other => match yaml_serde::to_string(other) {
                 Ok(rendered) => rendered.trim().to_string(),
                 Err(_) => continue,
             },
@@ -225,12 +225,12 @@ pub fn serialize_frontmatter(fm: &SkillFrontmatter) -> String {
         push_bool(&mut out, "user-invocable", fm.user_invocable);
     }
 
-    // `extra` round-trip — let serde_yaml render the values; trim
+    // `extra` round-trip — let yaml_serde render the values; trim
     // trailing newline so we control exactly one between entries.
     for (key, val) in &fm.extra {
-        let mut single = serde_yaml::Mapping::new();
+        let mut single = yaml_serde::Mapping::new();
         single.insert(Value::String(key.clone()), val.clone());
-        match serde_yaml::to_string(&Value::Mapping(single)) {
+        match yaml_serde::to_string(&Value::Mapping(single)) {
             Ok(rendered) => {
                 let trimmed = rendered.trim_end_matches('\n');
                 out.push_str(trimmed);

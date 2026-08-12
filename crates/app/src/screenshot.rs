@@ -499,7 +499,12 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::ErrorModal
         | ScreenshotScenario::Toast
         | ScreenshotScenario::PaneContextMenu
-        | ScreenshotScenario::MermaidLightbox => None,
+        | ScreenshotScenario::MermaidLightbox
+        | ScreenshotScenario::FlowPicker
+        | ScreenshotScenario::FlowProfilePicker
+        | ScreenshotScenario::FlowResumable
+        | ScreenshotScenario::FlowRunning
+        | ScreenshotScenario::FlowAsking => None,
     }
 }
 

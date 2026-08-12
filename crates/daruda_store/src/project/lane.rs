@@ -37,6 +37,7 @@ pub enum RightDockView {
     Skills,
     Tools,
     Tasks,
+    Flows,
 }
 
 /// Distinguishes git worktrees from the fallback used when daruda
@@ -252,6 +253,34 @@ impl SerializedLane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A config written before `Flows` existed names one of the older four,
+    /// and must still restore to it — adding a variant to a single-choice
+    /// enum is only safe while that stays true.
+    #[test]
+    fn a_right_dock_view_written_before_flows_existed_still_restores() {
+        for (stored, expected) in [
+            ("\"usage\"", RightDockView::Usage),
+            ("\"skills\"", RightDockView::Skills),
+            ("\"tools\"", RightDockView::Tools),
+            ("\"tasks\"", RightDockView::Tasks),
+            ("\"flows\"", RightDockView::Flows),
+        ] {
+            let parsed: RightDockView = serde_json::from_str(stored).expect(stored);
+            assert_eq!(parsed, expected, "{stored}");
+            assert_eq!(
+                serde_json::to_string(&parsed).expect("serialise"),
+                stored,
+                "round trip"
+            );
+        }
+    }
+
+    /// The new tab must not become what an unconfigured workspace opens on.
+    #[test]
+    fn flows_is_not_the_default_tab() {
+        assert_eq!(RightDockView::default(), RightDockView::Usage);
+    }
 
     #[test]
     fn lane_session_host_round_trips_every_variant_with_registry_id() {

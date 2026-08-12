@@ -286,6 +286,73 @@ pub fn right_panel_tab_tools() -> String {
 pub fn right_panel_tab_tasks() -> String {
     rust_i18n::t!("dock.right_tab_tasks").into_owned()
 }
+pub fn right_panel_tab_flows() -> String {
+    rust_i18n::t!("dock.right_tab_flows").into_owned()
+}
+
+/// Shown when the active lane has no flow running. Says "this lane"
+/// deliberately: a run in another lane is still going, and the status bar
+/// chip is what says so.
+pub fn right_panel_flow_empty() -> String {
+    rust_i18n::t!("flow.panel_empty").into_owned()
+}
+pub fn right_panel_flow_stop() -> String {
+    rust_i18n::t!("flow.panel_stop").into_owned()
+}
+/// Said under a question when more are behind it. Without it a person
+/// answers, sees a different question appear, and cannot tell whether they
+/// answered the wrong one.
+pub fn flow_more_questions_waiting(n: usize) -> String {
+    rust_i18n::t!("flow.more_questions_waiting", n = n).into_owned()
+}
+/// The modal's way out that is not an answer. Names the object because
+/// "Stop" alone, beside three answer buttons, reads as stopping the tool
+/// call rather than the run.
+pub fn flow_ask_modal_stop() -> String {
+    rust_i18n::t!("flow.ask_modal_stop").into_owned()
+}
+/// Title of the modal that brings a parked question to the front.
+pub fn flow_ask_modal_title() -> String {
+    rust_i18n::t!("flow.ask_modal_title").into_owned()
+}
+pub fn right_panel_flow_live_heading() -> String {
+    rust_i18n::t!("flow.panel_live_heading").into_owned()
+}
+pub fn right_panel_flow_past_heading() -> String {
+    rust_i18n::t!("flow.panel_past_heading").into_owned()
+}
+pub fn right_panel_flow_past_empty() -> String {
+    rust_i18n::t!("flow.panel_past_empty").into_owned()
+}
+/// How many finished runs survive a sweep. Said once under the list so a
+/// run vanishing from it reads as retention rather than as a loss.
+pub fn right_panel_flow_retention(keep: usize) -> String {
+    rust_i18n::t!("flow.panel_retention", keep = keep).into_owned()
+}
+
+/// A past run's start time, decoded from its id. Local time, since the
+/// question it answers is "was that the one I ran before lunch".
+pub fn flow_run_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format("%m-%d %H:%M")
+        .to_string()
+}
+
+/// How a finished run ended. `Running` and `Crashed` are not markers the
+/// engine writes — they are read from the lock, which is why a run that
+/// died with the app can be told from one that is still going.
+pub fn flow_run_status(status: daruda_flow::marker::RunStatus) -> String {
+    use daruda_flow::marker::RunStatus;
+    match status {
+        RunStatus::Done => rust_i18n::t!("flow.status_done"),
+        RunStatus::Failed => rust_i18n::t!("flow.status_failed"),
+        RunStatus::Canceled => rust_i18n::t!("flow.status_canceled"),
+        RunStatus::Running => rust_i18n::t!("flow.status_running"),
+        RunStatus::Crashed => rust_i18n::t!("flow.status_crashed"),
+        RunStatus::Unknown => rust_i18n::t!("flow.status_unknown"),
+    }
+    .into_owned()
+}
 
 // ============================================================================
 // Dock (left dock) tab labels
@@ -2239,6 +2306,9 @@ pub fn status_bar_toggle_project_branch() -> String {
 pub fn status_bar_toggle_account_slot() -> String {
     rust_i18n::t!("settings.status_bar_toggle_account_slot").into_owned()
 }
+pub fn status_bar_toggle_flow() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_flow").into_owned()
+}
 pub fn status_bar_toggle_ports() -> String {
     rust_i18n::t!("settings.status_bar_toggle_ports").into_owned()
 }
@@ -4088,6 +4158,210 @@ pub fn session_host_saving() -> String {
     rust_i18n::t!("session_host.saving_label").into_owned()
 }
 
+// ============================================================================
+// Flow engine
+// ============================================================================
+
+pub fn status_bar_flow_chip_one(doing: &str) -> String {
+    rust_i18n::t!("flow.chip_one", doing => doing).into_owned()
+}
+pub fn status_bar_flow_chip_many(n: usize) -> String {
+    rust_i18n::t!("flow.chip_many", n = n).into_owned()
+}
+pub fn status_bar_flow_summary(n: usize) -> String {
+    rust_i18n::t!("flow.chip_summary", n = n).into_owned()
+}
+pub fn status_bar_flow_stop() -> String {
+    rust_i18n::t!("flow.stop_action").into_owned()
+}
+/// What a run is doing, in the terms `RunStage` keeps.
+pub fn status_bar_flow_stage_starting() -> String {
+    rust_i18n::t!("flow.stage_starting").into_owned()
+}
+pub fn status_bar_flow_stage_node(node: &str) -> String {
+    rust_i18n::t!("flow.stage_node", node => node).into_owned()
+}
+pub fn status_bar_flow_stage_node_retry(node: &str, attempt: u32) -> String {
+    rust_i18n::t!("flow.stage_node_retry", node => node, attempt = attempt).into_owned()
+}
+pub fn status_bar_flow_stage_rederiving(gate: &str) -> String {
+    rust_i18n::t!("flow.stage_rederiving", gate => gate).into_owned()
+}
+/// The chip while a run is waiting on a person. A count rather than a name:
+/// the row underneath says which, and this has to fit a status bar.
+pub fn status_bar_flow_chip_asking(waiting: usize) -> String {
+    rust_i18n::t!("flow.chip_asking", waiting => waiting).into_owned()
+}
+/// Waiting on a person. Names the tool because "waiting for approval" with
+/// no object is not something a user can act on from the row alone.
+pub fn status_bar_flow_stage_asking(node: &str, tool: &str) -> String {
+    rust_i18n::t!("flow.stage_asking", node => node, tool => tool).into_owned()
+}
+pub fn status_bar_flow_stage_fixing(gate: &str) -> String {
+    rust_i18n::t!("flow.stage_fixing", gate => gate).into_owned()
+}
+pub fn flow_picker_prompt_run() -> String {
+    rust_i18n::t!("flow.picker_prompt_run").into_owned()
+}
+pub fn flow_picker_prompt_validate() -> String {
+    rust_i18n::t!("flow.picker_prompt_validate").into_owned()
+}
+/// Marks a flow that is the person's own rather than the repository's.
+/// Only the global ones are tagged — tagging both would be noise on every
+/// row in the ordinary case.
+/// The row action on a run that was killed. "Continue", not "run again":
+/// what already passed is not run a second time.
+pub fn flow_resume_action() -> String {
+    rust_i18n::t!("flow.resume_action").into_owned()
+}
+/// Asked before continuing, because the node the crash interrupted starts
+/// over — whatever it had already done to the working tree or the machine,
+/// it does again.
+pub fn flow_resume_confirm_title() -> String {
+    rust_i18n::t!("flow.resume_confirm_title").into_owned()
+}
+pub fn flow_resume_confirm_body() -> String {
+    rust_i18n::t!("flow.resume_confirm_body").into_owned()
+}
+pub fn flow_resume_refused() -> String {
+    rust_i18n::t!("flow.resume_refused").into_owned()
+}
+pub fn flow_picker_global() -> String {
+    rust_i18n::t!("flow.picker_global").into_owned()
+}
+/// The first row of the profile list: the flow as its file is written.
+/// Declaring a profile must not take the base run away.
+pub fn flow_picker_profile_defaults() -> String {
+    rust_i18n::t!("flow.picker_profile_defaults").into_owned()
+}
+/// The prompt over the profile list.
+pub fn flow_picker_prompt_profile(flow: &str) -> String {
+    rust_i18n::t!("flow.picker_prompt_profile", flow => flow).into_owned()
+}
+pub fn flow_picker_empty() -> String {
+    rust_i18n::t!("flow.picker_empty").into_owned()
+}
+pub fn flow_stop_prompt() -> String {
+    rust_i18n::t!("flow.stop_prompt").into_owned()
+}
+pub fn flow_stop_action() -> String {
+    rust_i18n::t!("flow.stop_action").into_owned()
+}
+pub fn flow_close() -> String {
+    rust_i18n::t!("common.btn_close").into_owned()
+}
+pub fn flow_no_lane() -> String {
+    rust_i18n::t!("flow.no_lane").into_owned()
+}
+pub fn flow_remote_lane(agent: &str) -> String {
+    rust_i18n::t!("flow.remote_lane", agent => agent).into_owned()
+}
+pub fn flow_lock_held(pid: u32) -> String {
+    rust_i18n::t!("flow.lock_held", pid => pid).into_owned()
+}
+pub fn flow_unprovisioned(agent: &str, message: &str) -> String {
+    rust_i18n::t!("flow.unprovisioned", agent => agent, message => message).into_owned()
+}
+/// Which ceiling stopped the run. A `Debug` rendering of the limit would
+/// put a Rust identifier in front of a user.
+pub fn flow_budget_exhausted(limit: daruda_flow::schedule::BudgetLimit) -> String {
+    use daruda_flow::schedule::BudgetLimit as L;
+    match limit {
+        L::WallClock => rust_i18n::t!("flow.budget_wall_clock"),
+        L::NodeRuns => rust_i18n::t!("flow.budget_node_runs"),
+        L::Cost => rust_i18n::t!("flow.budget_cost"),
+    }
+    .into_owned()
+}
+pub fn flow_read_failed_title() -> String {
+    rust_i18n::t!("flow.read_failed_title").into_owned()
+}
+pub fn flow_parse_failed_title() -> String {
+    rust_i18n::t!("flow.parse_failed_title").into_owned()
+}
+pub fn flow_valid_title() -> String {
+    rust_i18n::t!("flow.valid_title").into_owned()
+}
+pub fn flow_valid_body(name: &str) -> String {
+    rust_i18n::t!("flow.valid_body", name => name).into_owned()
+}
+pub fn flow_invalid_title(name: &str, count: usize) -> String {
+    rust_i18n::t!("flow.invalid_title", name => name, count => count).into_owned()
+}
+
+/// One line of a validation report. A node-level problem names the node;
+/// a whole-graph one (a cycle) has no node to name.
+pub fn flow_issue_line(node: Option<&str>, text: &str) -> String {
+    match node {
+        Some(node) => rust_i18n::t!("flow.issue_line_at_node", node => node, text => text),
+        None => rust_i18n::t!("flow.issue_line", text => text),
+    }
+    .into_owned()
+}
+
+/// User-facing wording for one validation problem.
+///
+/// The match lives here rather than at the call site because the whole
+/// point of the split is that `ValidationIssue.message` is developer
+/// detail and never reaches a user — putting the branch anywhere else
+/// invites someone to reach for `.message` instead. Exhaustive on
+/// purpose: a new `ValidationKind` stops compiling until it has wording.
+pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
+    use daruda_flow::error::ValidationKind as K;
+    match kind {
+        K::MissingAgent => rust_i18n::t!("flow.issue_missing_agent"),
+        K::AgentIdWithoutMode => rust_i18n::t!("flow.issue_agent_id_without_mode"),
+        K::AskWithoutMode => rust_i18n::t!("flow.issue_ask_without_mode"),
+        K::UnknownProfile { name } => rust_i18n::t!("flow.issue_unknown_profile", name => name),
+        K::ReservedProfileName => rust_i18n::t!("flow.issue_reserved_profile_name"),
+        K::CwdEscapesRunCwd => rust_i18n::t!("flow.issue_cwd_escapes"),
+        K::CwdMissing { path } => rust_i18n::t!("flow.issue_cwd_missing", path => path),
+        K::UnknownVersion(version) => {
+            rust_i18n::t!("flow.issue_unknown_version", version => version)
+        }
+        K::UnreachableOutputRef { referenced } => {
+            rust_i18n::t!("flow.issue_unreachable_output_ref", referenced => referenced)
+        }
+        K::UnknownField { field } => rust_i18n::t!("flow.issue_unknown_field", field => field),
+        K::ConflictingField { field, wins } => {
+            rust_i18n::t!("flow.issue_conflicting_field", field => field, wins => wins)
+        }
+        K::DuplicateOutput => rust_i18n::t!("flow.issue_duplicate_output"),
+        K::OutputEscapesRunDir => rust_i18n::t!("flow.issue_output_escapes_run_dir"),
+        K::RerunNotAnAncestor { root } => {
+            rust_i18n::t!("flow.issue_rerun_not_an_ancestor", root => root)
+        }
+        K::RepairWithoutFailureContext => {
+            rust_i18n::t!("flow.issue_repair_without_failure_context")
+        }
+        K::RepairWithoutAgent => rust_i18n::t!("flow.issue_repair_without_agent"),
+        K::ReservedNodeId => rust_i18n::t!("flow.issue_reserved_node_id"),
+        K::InvalidNodeId => rust_i18n::t!("flow.issue_invalid_node_id"),
+        K::OutputInReservedDir { reserved } => {
+            rust_i18n::t!("flow.issue_output_in_reserved_dir", reserved => reserved)
+        }
+        K::DuplicateId => rust_i18n::t!("flow.issue_duplicate_id"),
+        K::UnknownDep { dep } => rust_i18n::t!("flow.issue_unknown_dep", dep => dep),
+        K::Cycle => rust_i18n::t!("flow.issue_cycle"),
+        K::UnknownAgent { id } => rust_i18n::t!("flow.issue_unknown_agent", id => id),
+        K::NobodyToAsk => rust_i18n::t!("flow.issue_nobody_to_ask"),
+        K::MissingPromptFile { field, path } => rust_i18n::t!(
+            "flow.issue_missing_prompt_file",
+            field => field,
+            path => path.display()
+        ),
+        K::RelativeRequestPath { field } => {
+            rust_i18n::t!("flow.issue_relative_request_path", field => field)
+        }
+        K::PromptFileOutsideFlowDir { field, path } => rust_i18n::t!(
+            "flow.issue_prompt_file_outside_flow_dir",
+            field => field,
+            path => path.display()
+        ),
+    }
+    .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4096,11 +4370,11 @@ mod tests {
     /// Recursively collect dotted key paths for every scalar leaf in a
     /// YAML mapping tree (e.g. `common.btn_cancel`).
     fn collect_locale_keys(
-        value: &serde_yaml::Value,
+        value: &yaml_serde::Value,
         prefix: &str,
         out: &mut std::collections::BTreeSet<String>,
     ) {
-        if let serde_yaml::Value::Mapping(map) = value {
+        if let yaml_serde::Value::Mapping(map) = value {
             for (k, v) in map {
                 let key = k.as_str().unwrap_or("<non-string-key>");
                 let path = if prefix.is_empty() {
@@ -4120,10 +4394,10 @@ mod tests {
     /// key string at runtime, so key drift must fail the build.
     #[test]
     fn locale_en_ko_key_parity() {
-        let en: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../../locales/en.yml")).unwrap();
-        let ko: serde_yaml::Value =
-            serde_yaml::from_str(include_str!("../../locales/ko.yml")).unwrap();
+        let en: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/en.yml")).unwrap();
+        let ko: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/ko.yml")).unwrap();
 
         let mut en_keys = std::collections::BTreeSet::new();
         let mut ko_keys = std::collections::BTreeSet::new();

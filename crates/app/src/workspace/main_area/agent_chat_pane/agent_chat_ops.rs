@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use super::telegram_ops::DeferKind;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
+use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
@@ -85,7 +86,7 @@ enum PaneCwdOutcome {
 
 /// Pure core of [`Workspace::resolve_new_pane_cwd`]: decide `Local` vs.
 /// `Remote` cwd for a fresh pane, mirroring what its first connect will
-/// resolve (`resolve_session_command` in `agent_chat_connect_ops.rs`) so a
+/// resolve (`resolve_session_command` in `crate::agent::launch_resolve`) so a
 /// freshly opened pane's `PaneCwd` — the value the rest of the app reads via
 /// `PaneCwd::as_local`/`into_local` — already agrees with where the session
 /// actually attaches.
@@ -434,7 +435,7 @@ impl Workspace {
         let is_remote = matches!(cwd, Some(PaneCwd::Remote(_)));
         let account = self.default_account_selection_for_new_pane(
             self.agent_launch_for(&agent_id)
-                .and_then(|l| l.account_recipe(is_remote)),
+                .and_then(|l| account_recipe_for_connect(&l, is_remote)),
         );
         // `title` seeds the view's `session_title` below (restored dormant
         // panes show their persisted label before the session loads);

@@ -58,7 +58,7 @@ pub struct EditSkillModal {
     /// Carry-over of every YAML key daruda doesn't interpret. Saved
     /// back on submit so external tooling that adds a field (e.g.
     /// `hooks:` blocks) survives the round-trip.
-    extra: std::collections::BTreeMap<String, serde_yaml::Value>,
+    extra: std::collections::BTreeMap<String, yaml_serde::Value>,
     /// Unparsed `name` / `arguments` fields preserved through the
     /// frontmatter serializer.
     frontmatter_name: Option<String>,

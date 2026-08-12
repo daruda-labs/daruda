@@ -683,6 +683,13 @@ pub const PALETTE_ENTRY_PAD_Y: f32 = PAD_SM;
 pub const PALETTE_ENTRY_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Command palette shortcut font size (px).
 pub const PALETTE_SHORTCUT_FONT_SIZE: f32 = FONT_SIZE_SM;
+/// Accent rule down the left of the row Enter will act on.
+///
+/// DESIGN §Colors calls the 2px accent left border the primary "selected"
+/// signal, and forbids accent as a panel fill. The focused row's tint alone
+/// is `SURFACE_2`(L 8.2%) against `SURFACE_3`(L 9.8%) — 1.6 points apart on
+/// a near-black panel, which is not a signal a person can navigate by.
+pub const PALETTE_FOCUS_BORDER_W: f32 = LANE_ACTIVE_BORDER_W;
 /// Command palette "no results" padding Y (px).
 pub const PALETTE_EMPTY_PAD_Y: f32 = 16.0;
 /// Settings window initial origin X from screen top-left (px).
@@ -838,8 +845,11 @@ pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 pub const DOCK_LEFT_MIN_W: f32 = 220.0;
 /// Left dock maximum width (px).
 pub const DOCK_LEFT_MAX_W: f32 = 400.0;
-/// Right dock default width (px).
-pub const DOCK_RIGHT_DEFAULT_W: f32 = 250.0;
+/// Right dock default width (px). Sized so the five-tab view switcher
+/// shows every label plus its overflow chevron in the widest locale —
+/// measured at 250 the English "Flows" was already clipped. Narrower is
+/// still allowed; the chevron is what keeps the hidden tabs reachable.
+pub const DOCK_RIGHT_DEFAULT_W: f32 = 290.0;
 /// Right dock minimum width (px).
 pub const DOCK_RIGHT_MIN_W: f32 = 220.0;
 /// Right dock maximum width (px).

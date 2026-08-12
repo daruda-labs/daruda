@@ -32,6 +32,10 @@ fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
             RightDockView::Tasks,
             strings::right_panel_tab_tasks().into(),
         ),
+        (
+            RightDockView::Flows,
+            strings::right_panel_tab_flows().into(),
+        ),
     ]
 }
 
@@ -59,6 +63,13 @@ pub(in crate::workspace) fn render(
     tab_bar("right-dock-view-switcher")
         .w_full()
         .gap(px(0.))
+        // Five labels do not fit this dock at its narrower widths — in
+        // English "Flows" is already clipped at the default 250px and gone
+        // entirely at the 220px minimum, with only its underline left. The
+        // strip has no other overflow behaviour: it just cuts, so the active
+        // tab can be the unreadable one. The menu keeps every tab reachable
+        // whatever the width, and keeps doing so if a sixth is ever added.
+        .menu(true)
         .selected_index(active_ix)
         .children(all.into_iter().map(|(_, label)| tab(label)))
         .on_click(move |ix, _window, cx| {

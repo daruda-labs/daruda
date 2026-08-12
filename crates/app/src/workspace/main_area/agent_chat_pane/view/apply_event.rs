@@ -314,6 +314,13 @@ impl AgentChatView {
             AcpEvent::Notice(_) => {
                 // Logged above; no status change.
             }
+            AcpEvent::ConfigOptionRejected { .. } => {
+                // Nothing to do here: the same refusal arrives as a
+                // `Notice`, which is logged above and is the wording a
+                // user reads. This variant exists for a consumer that
+                // *required* the change — a flow node pinned to that model
+                // has to fail, where a chip the user flipped just stays put.
+            }
             AcpEvent::TurnFailed(message) => {
                 // A single `session/prompt` failed (e.g. the adapter hit a usage
                 // / session limit → `-32603`), but the ACP connection is alive —

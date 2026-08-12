@@ -59,6 +59,7 @@ impl Workspace {
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
         self.agents = config.resolved_agents();
+        self.flow_config = config.flow.clone();
         self.session_hosts = config.session_hosts.clone();
         self.session_host_tombstones = config.session_host_tombstones.clone();
         let agent_names = self

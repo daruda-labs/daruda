@@ -54,6 +54,12 @@ const MERMAID_LIGHTBOX_SAMPLE: &str = concat!(
     "    end\n",
 );
 
+const NAME_FLOW_PICKER: &str = "flow-picker";
+const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
+const NAME_FLOW_RESUMABLE: &str = "flow-resumable";
+const NAME_FLOW_RUNNING: &str = "flow-running";
+const NAME_FLOW_ASKING: &str = "flow-asking";
+
 /// Where the pane menu is deployed for the capture, in window coordinates.
 /// Near the top-left of the content area so the menu opens downward at its
 /// natural length — the shot is meant to show every entry, not the edge flip.
@@ -80,6 +86,21 @@ pub(crate) enum ScreenshotScenario {
     /// the only way to eyeball the clamp/scroll behavior a unit test can
     /// only assert numerically.
     MermaidLightbox,
+    /// Open the flow picker, listing the active lane's `.daruda/flows/`.
+    /// The only way to see the row highlight, the empty state and the
+    /// prompt line — none of which the state tests can look at.
+    FlowPicker,
+    /// The second question, for a flow that declares profiles.
+    FlowProfilePicker,
+    /// A killed run in the panel, with the way back into it.
+    FlowResumable,
+    /// A flow mid-run, so the status bar chip and its dropdown can be seen.
+    /// Nothing else puts a run on screen without one actually running.
+    FlowRunning,
+    /// A flow parked on a permission question, with the Flows panel showing.
+    /// The buttons a person has to read and hit — the one part of `ask` no
+    /// state test can look at, and the surface Task 1 proved needs eyes.
+    FlowAsking,
 }
 
 impl ScreenshotScenario {
@@ -94,6 +115,11 @@ impl ScreenshotScenario {
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
+            NAME_FLOW_PICKER => Some(Self::FlowPicker),
+            NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
+            NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
+            NAME_FLOW_RUNNING => Some(Self::FlowRunning),
+            NAME_FLOW_ASKING => Some(Self::FlowAsking),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -114,6 +140,32 @@ pub(crate) fn drive(
         ScreenshotScenario::CommandPalette => {
             workspace.update(cx, |ws, cx| {
                 ws.on_toggle_command_palette(&ToggleCommandPalette, window, cx);
+            });
+        }
+        ScreenshotScenario::FlowPicker => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_flow_picker(
+                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    cx,
+                );
+            });
+        }
+        ScreenshotScenario::FlowResumable => {
+            workspace.update(cx, |ws, cx| ws.seed_crashed_run_for_shot(cx));
+        }
+        ScreenshotScenario::FlowProfilePicker => {
+            workspace.update(cx, |ws, cx| ws.ask_flow_profile_for_shot(cx));
+        }
+        ScreenshotScenario::FlowRunning => {
+            workspace.update(cx, |ws, cx| ws.seed_flow_run_for_shot(false, window, cx));
+        }
+        ScreenshotScenario::FlowAsking => {
+            workspace.update(cx, |ws, cx| {
+                // The tab too: the panel is where the question is answered,
+                // and a capture would otherwise show whichever tab was last
+                // persisted.
+                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+                ws.seed_flow_run_for_shot(true, window, cx);
             });
         }
         ScreenshotScenario::ErrorModal => {

@@ -36,6 +36,7 @@ fn toggle_label(item: StatusBarItem) -> SharedString {
         StatusBarItem::ProjectBranch => crate::surface::strings::status_bar_toggle_project_branch(),
         StatusBarItem::AccountSlot => crate::surface::strings::status_bar_toggle_account_slot(),
         StatusBarItem::Ports => crate::surface::strings::status_bar_toggle_ports(),
+        StatusBarItem::Flow => crate::surface::strings::status_bar_toggle_flow(),
         StatusBarItem::ClaudeUsage => crate::surface::strings::status_bar_toggle_claude_usage(),
     })
 }

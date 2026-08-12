@@ -9,6 +9,7 @@ use gpui::{
     App, IntoElement, MouseButton, MouseDownEvent, RenderOnce, SharedString, Window, div,
     prelude::*, px,
 };
+use std::rc::Rc;
 
 /// A single entry in the command palette.
 #[derive(Clone)]
@@ -32,6 +33,16 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         id: "toggle_lane_switcher",
         label: "Switch Lane…",
         shortcut: "Cmd+P",
+    },
+    PaletteEntry {
+        id: "run_flow",
+        label: "Run Flow…",
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "validate_flow",
+        label: "Check Flow…",
+        shortcut: "",
     },
     PaletteEntry {
         id: "open_settings",
@@ -344,6 +355,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "switch_right_panel_flows",
+        label: "Right Panel: Flows",
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "new_skill",
         label: "Skills: New skill",
         shortcut: "",
@@ -426,6 +442,13 @@ impl CommandPaletteState {
         self.focused_index = 0;
     }
 
+    /// Move the focus to a row the mouse named. Clicking is the same
+    /// gesture as arrowing there and pressing Enter, so it goes through the
+    /// same field rather than a second path to the same decision.
+    pub fn focus(&mut self, index: usize) {
+        self.focused_index = index;
+    }
+
     pub fn move_up(&mut self) {
         if self.focused_index > 0 {
             self.focused_index -= 1;
@@ -476,16 +499,22 @@ pub(in crate::workspace) struct CommandPaletteOverlay {
     #[allow(clippy::type_complexity)]
     pub(in crate::workspace) on_close:
         Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    /// Activate the row at this visible index. `Rc` because every row needs
+    /// its own handle to it.
+    #[allow(clippy::type_complexity)]
+    pub(in crate::workspace) on_pick: Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>,
 }
 
 impl CommandPaletteOverlay {
     pub(in crate::workspace) fn new(
         state: CommandPaletteState,
         on_close: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        on_pick: impl Fn(&usize, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             state,
             on_close: Box::new(on_close),
+            on_pick: Rc::new(on_pick),
         }
     }
 }
@@ -550,7 +579,17 @@ impl RenderOnce for CommandPaletteOverlay {
                         let entry = &PALETTE_ENTRIES[entry_idx];
                         let is_focused = vis_idx == state.focused_index;
 
+                        let on_pick = self.on_pick.clone();
                         div()
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                move |_: &MouseDownEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    on_pick(&vis_idx, window, cx);
+                                },
+                            )
+                            .hover(|d| d.bg(focused_bg))
                             .flex()
                             .flex_row()
                             .items_center()
@@ -559,7 +598,17 @@ impl RenderOnce for CommandPaletteOverlay {
                             .px(px(theme::PALETTE_ENTRY_PAD_X))
                             .py(px(theme::PALETTE_ENTRY_PAD_Y))
                             .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
-                            .when(is_focused, |d| d.bg(focused_bg).text_color(focused_text))
+                            // Reserve the same-width transparent border on
+                            // unfocused rows so the label does not shift when
+                            // the accent rule appears — same idiom as the lane
+                            // rows in the left dock.
+                            .border_l(px(theme::PALETTE_FOCUS_BORDER_W))
+                            .border_color(theme::TRANSPARENT)
+                            .when(is_focused, |d| {
+                                d.bg(focused_bg)
+                                    .text_color(focused_text)
+                                    .border_color(theme::PRIMARY)
+                            })
                             .when(!is_focused, |d| d.text_color(entry_text))
                             .child(div().child(entry.label))
                             .when(!entry.shortcut.is_empty(), |d| {

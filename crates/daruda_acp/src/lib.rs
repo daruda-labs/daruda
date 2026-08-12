@@ -21,6 +21,14 @@ pub mod session;
 pub(crate) mod wire_log;
 
 pub use agent_client_protocol::schema::v1::SessionId;
+// `AcpEvent::PermissionRequested` already hands a protocol
+// `RequestPermissionRequest` to its consumer; these are what reading its
+// `options` faithfully takes. The kind is re-exported rather than mapped to
+// `PermissionKindView` because that mapping renders an unrecognized kind as a
+// reject, which is right for a UI and wrong for anything selecting on it.
+pub use agent_client_protocol::schema::v1::{
+    ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate,
+};
 pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run_one_shot};
 pub use mapping::{
     SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
