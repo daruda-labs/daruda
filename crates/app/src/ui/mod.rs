@@ -26,6 +26,7 @@ pub mod code_editor;
 pub mod dialog;
 pub mod disclosure;
 pub mod divider;
+pub mod flow_canvas;
 pub mod form_helpers;
 pub mod group_box;
 pub mod highlighter;

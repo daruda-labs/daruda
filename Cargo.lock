@@ -1620,6 +1620,7 @@ dependencies = [
  "daruda_terminal",
  "daruda_update",
  "dirs",
+ "ferrum_flow",
  "fs4",
  "futures",
  "ghostty_vt",
@@ -2263,6 +2264,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "ferrum_flow"
+version = "0.3.1"
+dependencies = [
+ "anyhow",
+ "futures",
+ "gpui",
+ "image",
+ "log",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "uuid",
 ]
 
 [[package]]

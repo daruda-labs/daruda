@@ -53,6 +53,7 @@ SKIP_DIRS=(
     "crates/gpui_component"
     "crates/gpui_component_assets"
     "crates/gpui_component_macros"
+    "crates/ferrum_flow"
     "crates/ghostty_vt"
     "crates/ghostty_vt_sys"
     "vendor"

@@ -23,6 +23,7 @@ screenshot = ["gpui/test-support", "gpui_macos/test-support"]
 
 [dependencies]
 daruda_core = { path = "../daruda_core" }
+ferrum_flow = { path = "../ferrum_flow" }
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

@@ -100,3 +100,53 @@ Three groups of changes captured in a single diff:
    `window_border` imports along with the unused
    `set_rem_size` / `font_family` / `bg` / `text_color` /
    `window_border()` calls.
+
+---
+
+## `crates/ferrum_flow/` — vendored, **no source patch**
+
+Not a patch: a record of provenance for a vendored crate that carries
+zero source delta, so re-vendoring stays a plain file copy.
+
+| | |
+|---|---|
+| Upstream | [tu6ge/ferrum-flow](https://github.com/tu6ge/ferrum-flow) — Apache-2.0 |
+| Pinned at | `43b762ced6f61313bbc2b388871bdc93f64893d0` on `master` (2026-06-05) |
+| Version string | `0.3.1` — the last tag, 127 commits behind this pin. Upstream has been silent since 2026-06-07, so `master` is effectively its final state; the tag would have forgone level-of-detail node rendering and lazy paint-order traversal, both of which matter as a flow grows. |
+| Copied | `crates/core/src/` → `crates/ferrum_flow/src/`, plus `crates/core/README.md` and the repository-root `LICENSE` |
+| Not copied | `crates/core/examples/` — they call `Application::new()`, which no longer exists at daruda's pinned GPUI rev. Also the sibling `crates/sync_plugin` (Yrs CRDT collaboration), which daruda does not use. |
+
+**The only daruda-authored file is `Cargo.toml`.** It differs from
+upstream's in four ways, none of which touch source:
+
+1. `gpui = { workspace = true }` — the reason this crate is vendored at
+   all. Upstream takes `gpui` from crates.io, which resolves to a
+   *different* crate instance than daruda's pinned zed git rev, so the
+   types would not unify.
+2. `image` / `futures` / `uuid` declared locally at the versions already
+   in `Cargo.lock`, since they are not in `workspace.dependencies`. Same
+   shape as `gpui_component`'s own local `uuid`.
+3. `[lints]` — every clippy and rustc group set to `allow` with
+   `priority = -1`, matching the "vendored upstream, do not lint" stance
+   used for `gpui_component`. The `priority` is load-bearing: without it
+   the one lint deliberately left armed (below) is buried by the groups.
+4. `rust-version = "1.95"` plus `incompatible_msrv = "deny"` — unlike
+   `gpui_component`, this crate declares the floor. The manifest is
+   daruda's own file, so declaring it costs nothing when re-vendoring,
+   and it lets `cargo clippy -p ferrum_flow` catch a std API newer than
+   CI's pinned toolchain without installing that toolchain locally.
+   Note the check only sees std API stabilization, not language
+   features; CI's 1.95 pin remains the final gate.
+
+### Re-vendor procedure
+
+```bash
+git clone https://github.com/tu6ge/ferrum-flow /tmp/ff && cd /tmp/ff
+git checkout <new-commit>
+rm -rf <daruda>/crates/ferrum_flow/src
+cp -R crates/core/src <daruda>/crates/ferrum_flow/src
+cp crates/core/README.md LICENSE <daruda>/crates/ferrum_flow/
+# Cargo.toml is daruda's — reconcile it against upstream's dependency
+# list by hand, then:
+cargo build -p ferrum_flow && cargo clippy -p ferrum_flow && cargo test -p ferrum_flow
+```
