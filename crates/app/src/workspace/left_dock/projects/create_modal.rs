@@ -112,13 +112,13 @@ impl CreateWorktreeModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let branch_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("branch name (required)")
+            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_branch_name())
         });
         let base_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("base ref — blank = current HEAD")
+            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_base_ref())
         });
         let description_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("description (optional)")
+            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_description())
         });
         let host_select = cx.new(|cx_state| {
             select::state_with_options(
@@ -406,21 +406,21 @@ impl Render for CreateWorktreeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child("Branch name for the new lane. A sibling directory will be created."),
+                    .child(s::create_lane_body_branch_name()),
             )
             .child(input(&self.branch_input, cx, 0))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child("Base ref (optional) — branch from `main`, `origin/main`, etc."),
+                    .child(s::create_lane_body_base_ref()),
             )
             .child(input(&self.base_input, cx, 1))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child("Description (optional) — shown in the left dock."),
+                    .child(s::create_lane_body_description()),
             )
             .child(input(&self.description_input, cx, 2))
             .child(field_label(s::session_host_field_host(), &t))
@@ -443,9 +443,9 @@ impl Render for CreateWorktreeModal {
 
         let create_disabled = self.submitting || self.branch_input.read(cx).value().is_empty();
         let submit_label = if self.submitting {
-            "Creating…"
+            s::create_lane_creating()
         } else {
-            "Create"
+            s::create_lane_submit()
         };
         let footer = div()
             .flex()
@@ -453,11 +453,13 @@ impl Render for CreateWorktreeModal {
             .justify_end()
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(button("create-wt-cancel", "Cancel").on_click(cx.listener(
-                |this, _: &ClickEvent, window, cx| {
-                    this.dismiss(window, cx);
-                },
-            )))
+            .child(
+                button("create-wt-cancel", s::common_button_cancel()).on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
+                        this.dismiss(window, cx);
+                    },
+                )),
+            )
             .child(
                 button_primary("create-wt-submit", submit_label)
                     .disabled(create_disabled)

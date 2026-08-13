@@ -118,7 +118,7 @@ impl Workspace {
             return;
         }
         let Some(repo_root) = self.git_repo_root() else {
-            let report = ErrorReport::new("Tasks require a git repo")
+            let report = ErrorReport::new(crate::surface::strings::error_tasks_require_git_repo())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("tasks.no_git_repo")
@@ -127,7 +127,7 @@ impl Workspace {
             return;
         };
         if !self.acquire_repo_lock(&repo_root) {
-            let report = ErrorReport::new("Another lane is already being created")
+            let report = ErrorReport::new(crate::surface::strings::error_lane_create_busy())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("lane.create.busy")
@@ -204,12 +204,14 @@ impl Workspace {
                         // same repo isn't blocked by a half-created entry.
                         match result {
                             Err(msg) => {
-                                let report = ErrorReport::new("Lane create failed")
-                                    .severity(ErrorSeverity::Error)
-                                    .at(file!(), line!())
-                                    .with_context("detail", msg)
-                                    .dedup("lane.create")
-                                    .build();
+                                let report = ErrorReport::new(
+                                    crate::surface::strings::error_lane_create_failed(),
+                                )
+                                .severity(ErrorSeverity::Error)
+                                .at(file!(), line!())
+                                .with_context("detail", msg)
+                                .dedup("lane.create")
+                                .build();
                                 ws.report_error(report, cx);
                             }
                             Ok(()) => {
@@ -221,12 +223,14 @@ impl Workspace {
                                     cx,
                                 ) {
                                     Err(msg) => {
-                                        let report = ErrorReport::new("Lane finalize failed")
-                                            .severity(ErrorSeverity::Error)
-                                            .at(file!(), line!())
-                                            .with_context("detail", msg)
-                                            .dedup("lane.create")
-                                            .build();
+                                        let report = ErrorReport::new(
+                                            crate::surface::strings::error_lane_finalize_failed(),
+                                        )
+                                        .severity(ErrorSeverity::Error)
+                                        .at(file!(), line!())
+                                        .with_context("detail", msg)
+                                        .dedup("lane.create")
+                                        .build();
                                         ws.report_error(report, cx);
                                     }
                                     Ok(pane_id) => {
@@ -768,7 +772,8 @@ impl Workspace {
             // observable. The session counter has already been
             // cleared by the caller, so we don't escalate again
             // when the next failure arrives.
-            let report = ErrorReport::new("Tool-use-failure escalation has no matching task")
+            let report =
+                ErrorReport::new(crate::surface::strings::error_task_escalation_orphan())
                 .severity(ErrorSeverity::Warning)
                 .message(format!(
                     "session {session_id} hit the escalation threshold but no Running task owns it ({message})"

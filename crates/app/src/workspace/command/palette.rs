@@ -4,7 +4,7 @@
 //! filters the action list; Enter executes the focused action; Escape
 //! closes. Matches are scored by substring position (earlier = better).
 
-use crate::ui::theme;
+use crate::{surface::strings as s, ui::theme};
 use gpui::{
     App, IntoElement, MouseButton, MouseDownEvent, RenderOnce, SharedString, Window, div,
     prelude::*, px,
@@ -17,7 +17,7 @@ pub(in crate::workspace) struct PaletteEntry {
     /// Action identifier (snake_case, matches action_map).
     pub id: &'static str,
     /// Human-readable label shown in the palette.
-    pub label: &'static str,
+    pub label: fn() -> String,
     /// Keyboard shortcut hint (displayed right-aligned).
     pub shortcut: &'static str,
 }
@@ -31,382 +31,382 @@ pub(in crate::workspace) struct PaletteEntry {
 pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "toggle_lane_switcher",
-        label: "Switch Lane…",
+        label: s::command_switch_lane,
         shortcut: "Cmd+P",
     },
     PaletteEntry {
         id: "run_flow",
-        label: "Run Flow…",
+        label: s::command_run_flow,
         shortcut: "",
     },
     PaletteEntry {
         id: "validate_flow",
-        label: "Check Flow…",
+        label: s::command_check_flow,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings",
-        label: "Settings…",
+        label: s::command_settings,
         shortcut: "Cmd+,",
     },
     PaletteEntry {
         id: "open_settings.general",
-        label: "Settings: General",
+        label: s::command_settings_general,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.font",
-        label: "Settings: Font",
+        label: s::command_settings_font,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.cursor",
-        label: "Settings: Cursor",
+        label: s::command_settings_cursor,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.shell",
-        label: "Settings: Shell",
+        label: s::command_settings_shell,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.window",
-        label: "Settings: Window",
+        label: s::command_settings_window,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.terminal",
-        label: "Settings: Terminal",
+        label: s::command_settings_terminal,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.dock",
-        label: "Settings: Dock",
+        label: s::command_settings_dock,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.clipboard",
-        label: "Settings: Clipboard",
+        label: s::command_settings_clipboard,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.external_editor",
-        label: "Settings: External Editor",
+        label: s::command_settings_external_editor,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.notifications",
-        label: "Settings: Notifications",
+        label: s::command_settings_notifications,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_settings.keymap",
-        label: "Settings: Keymap",
+        label: s::command_settings_keymap,
         shortcut: "",
     },
     PaletteEntry {
         id: "new_tab",
-        label: "New Tab",
+        label: s::command_new_tab,
         shortcut: "Cmd+T",
     },
     PaletteEntry {
         id: "new_task",
-        label: "New Task",
+        label: s::command_new_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "new_agent_chat",
-        label: "New Agent Chat",
+        label: s::command_new_agent_chat,
         shortcut: "",
     },
     PaletteEntry {
         id: "edit_task",
-        label: "Edit Task…",
+        label: s::command_edit_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "start_task",
-        label: "Start Task…",
+        label: s::command_start_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "cancel_task",
-        label: "Cancel Task…",
+        label: s::command_cancel_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "reopen_task",
-        label: "Reopen Task…",
+        label: s::command_reopen_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "retry_task",
-        label: "Retry Task…",
+        label: s::command_retry_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "delete_task",
-        label: "Delete Task…",
+        label: s::command_delete_task,
         shortcut: "",
     },
     PaletteEntry {
         id: "close_pane",
-        label: "Close Pane",
+        label: s::command_close_pane,
         shortcut: "Cmd+W",
     },
     PaletteEntry {
         id: "close_tab",
-        label: "Close Tab",
+        label: s::command_close_tab,
         shortcut: "",
     },
     PaletteEntry {
         id: "split_right",
-        label: "Split Right",
+        label: s::command_split_right,
         shortcut: "Cmd+D",
     },
     PaletteEntry {
         id: "split_down",
-        label: "Split Down",
+        label: s::command_split_down,
         shortcut: "Cmd+Shift+D",
     },
     PaletteEntry {
         id: "next_tab",
-        label: "Next Tab",
+        label: s::command_next_tab,
         shortcut: "Ctrl+Tab",
     },
     PaletteEntry {
         id: "prev_tab",
-        label: "Previous Tab",
+        label: s::command_previous_tab,
         shortcut: "Ctrl+Shift+Tab",
     },
     PaletteEntry {
         id: "toggle_left_dock",
-        label: "Toggle Left Dock",
+        label: s::command_toggle_left_dock,
         shortcut: "Cmd+B",
     },
     PaletteEntry {
         id: "toggle_bottom_dock",
-        label: "Toggle Bottom Panel",
+        label: s::command_toggle_bottom_panel,
         shortcut: "Cmd+J",
     },
     PaletteEntry {
         id: "toggle_right_dock",
-        label: "Toggle Right Dock",
+        label: s::command_toggle_right_dock,
         shortcut: "Cmd+Shift+B",
     },
     PaletteEntry {
         id: "focus_next_pane",
-        label: "Focus Next Pane",
+        label: s::command_focus_next_pane,
         shortcut: "Cmd+]",
     },
     PaletteEntry {
         id: "focus_prev_pane",
-        label: "Focus Previous Pane",
+        label: s::command_focus_previous_pane,
         shortcut: "Cmd+[",
     },
     PaletteEntry {
         id: "focus_pane_left",
-        label: "Focus Pane Left",
+        label: s::command_focus_pane_left,
         shortcut: "Cmd+Alt+Left",
     },
     PaletteEntry {
         id: "focus_pane_right",
-        label: "Focus Pane Right",
+        label: s::command_focus_pane_right,
         shortcut: "Cmd+Alt+Right",
     },
     PaletteEntry {
         id: "focus_pane_up",
-        label: "Focus Pane Up",
+        label: s::command_focus_pane_up,
         shortcut: "Cmd+Alt+Up",
     },
     PaletteEntry {
         id: "focus_pane_down",
-        label: "Focus Pane Down",
+        label: s::command_focus_pane_down,
         shortcut: "Cmd+Alt+Down",
     },
     PaletteEntry {
         id: "move_tab_left",
-        label: "Move Tab Left",
+        label: s::command_move_tab_left,
         shortcut: "",
     },
     PaletteEntry {
         id: "move_tab_right",
-        label: "Move Tab Right",
+        label: s::command_move_tab_right,
         shortcut: "",
     },
     PaletteEntry {
         id: "copy",
-        label: "Copy",
+        label: s::command_copy,
         shortcut: "Cmd+C",
     },
     PaletteEntry {
         id: "paste",
-        label: "Paste",
+        label: s::command_paste,
         shortcut: "Cmd+V",
     },
     PaletteEntry {
         id: "select_all",
-        label: "Select All",
+        label: s::command_select_all,
         shortcut: "Cmd+A",
     },
     PaletteEntry {
         id: "activate_lane_1",
-        label: "Activate Lane 1",
+        label: s::command_activate_lane_1,
         shortcut: "Cmd+Ctrl+1",
     },
     PaletteEntry {
         id: "activate_lane_2",
-        label: "Activate Lane 2",
+        label: s::command_activate_lane_2,
         shortcut: "Cmd+Ctrl+2",
     },
     PaletteEntry {
         id: "activate_lane_3",
-        label: "Activate Lane 3",
+        label: s::command_activate_lane_3,
         shortcut: "Cmd+Ctrl+3",
     },
     PaletteEntry {
         id: "activate_lane_4",
-        label: "Activate Lane 4",
+        label: s::command_activate_lane_4,
         shortcut: "Cmd+Ctrl+4",
     },
     PaletteEntry {
         id: "activate_lane_5",
-        label: "Activate Lane 5",
+        label: s::command_activate_lane_5,
         shortcut: "Cmd+Ctrl+5",
     },
     PaletteEntry {
         id: "activate_lane_6",
-        label: "Activate Lane 6",
+        label: s::command_activate_lane_6,
         shortcut: "Cmd+Ctrl+6",
     },
     PaletteEntry {
         id: "activate_lane_7",
-        label: "Activate Lane 7",
+        label: s::command_activate_lane_7,
         shortcut: "Cmd+Ctrl+7",
     },
     PaletteEntry {
         id: "activate_lane_8",
-        label: "Activate Lane 8",
+        label: s::command_activate_lane_8,
         shortcut: "Cmd+Ctrl+8",
     },
     PaletteEntry {
         id: "activate_lane_9",
-        label: "Activate Lane 9",
+        label: s::command_activate_lane_9,
         shortcut: "Cmd+Ctrl+9",
     },
     PaletteEntry {
         id: "open_folder",
-        label: "Open Project\u{2026}",
+        label: s::command_open_project,
         shortcut: "Cmd+O",
     },
     PaletteEntry {
         id: "new_group",
-        label: "New Group",
+        label: s::command_new_group,
         shortcut: "Cmd+Shift+N",
     },
     PaletteEntry {
         id: "rename_project",
-        label: "Rename Project\u{2026}",
+        label: s::command_rename_project,
         shortcut: "Cmd+Shift+R",
     },
     PaletteEntry {
         id: "move_project_to_group",
-        label: "Move Project to Group\u{2026}",
+        label: s::command_move_project_to_group,
         shortcut: "Cmd+Shift+M",
     },
     PaletteEntry {
         id: "close_project",
-        label: "Close Project",
+        label: s::command_close_project,
         shortcut: "Cmd+Shift+W",
     },
     PaletteEntry {
         id: "show_left_dock_lanes",
-        label: "Show Lanes",
+        label: s::command_show_lanes,
         shortcut: "",
     },
     PaletteEntry {
         id: "show_left_dock_git",
-        label: "Show Git Changes",
+        label: s::command_show_git_changes,
         shortcut: "",
     },
     PaletteEntry {
         id: "show_left_dock_files",
-        label: "Show Files",
+        label: s::command_show_files,
         shortcut: "",
     },
     PaletteEntry {
         id: "switch_right_panel_usage",
-        label: "Right Panel: Usage",
+        label: s::command_right_panel_usage,
         shortcut: "",
     },
     PaletteEntry {
         id: "switch_right_panel_skills",
-        label: "Right Panel: Skills",
+        label: s::command_right_panel_skills,
         shortcut: "",
     },
     PaletteEntry {
         id: "switch_right_panel_tools",
-        label: "Right Panel: Tools",
+        label: s::command_right_panel_tools,
         shortcut: "",
     },
     PaletteEntry {
         id: "switch_right_panel_tasks",
-        label: "Right Panel: Tasks",
+        label: s::command_right_panel_tasks,
         shortcut: "",
     },
     PaletteEntry {
         id: "switch_right_panel_flows",
-        label: "Right Panel: Flows",
+        label: s::command_right_panel_flows,
         shortcut: "",
     },
     PaletteEntry {
         id: "new_skill",
-        label: "Skills: New skill",
+        label: s::command_skills_new_skill,
         shortcut: "",
     },
     PaletteEntry {
         id: "refresh_git_status",
-        label: "Refresh Git Status",
+        label: s::command_refresh_git_status,
         shortcut: "",
     },
     PaletteEntry {
         id: "files_toggle_hidden",
-        label: "Files: Toggle Hidden Files",
+        label: s::command_files_toggle_hidden,
         shortcut: "Cmd+Shift+.",
     },
     PaletteEntry {
         id: "files_refresh",
-        label: "Files: Refresh",
+        label: s::command_files_refresh,
         shortcut: "",
     },
     PaletteEntry {
         id: "commit_changes",
-        label: "Commit Changes",
+        label: s::command_commit_changes,
         shortcut: "",
     },
     PaletteEntry {
         id: "push_changes",
-        label: "Push Changes",
+        label: s::command_push_changes,
         shortcut: "",
     },
     PaletteEntry {
         id: "install_claude_hooks",
-        label: "Claude: Install Hook Integration",
+        label: s::command_claude_install_hooks,
         shortcut: "",
     },
     PaletteEntry {
         id: "uninstall_claude_hooks",
-        label: "Claude: Uninstall Hook Integration",
+        label: s::command_claude_uninstall_hooks,
         shortcut: "",
     },
     PaletteEntry {
         id: "open_command_history",
-        label: "Open Command History",
+        label: s::command_open_command_history,
         shortcut: "Cmd+Shift+H",
     },
     PaletteEntry {
         id: "quit",
-        label: "Quit",
+        label: s::command_quit,
         shortcut: "Cmd+Q",
     },
 ];
@@ -474,7 +474,7 @@ impl CommandPaletteState {
             .iter()
             .enumerate()
             .filter_map(|(i, entry)| {
-                let label_lower = entry.label.to_ascii_lowercase();
+                let label_lower = (entry.label)().to_ascii_lowercase();
                 label_lower.find(&query_lower).map(|pos| (i, pos))
             })
             .collect();
@@ -559,7 +559,7 @@ impl RenderOnce for CommandPaletteOverlay {
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
                     .text_color(query_text)
                     .child(if state.query.is_empty() {
-                        SharedString::from("Type a command...")
+                        SharedString::from(s::command_type_command_placeholder())
                     } else {
                         SharedString::from(state.query.clone())
                     }),
@@ -578,6 +578,7 @@ impl RenderOnce for CommandPaletteOverlay {
                     .map(|(vis_idx, &entry_idx)| {
                         let entry = &PALETTE_ENTRIES[entry_idx];
                         let is_focused = vis_idx == state.focused_index;
+                        let label = (entry.label)();
 
                         let on_pick = self.on_pick.clone();
                         div()
@@ -610,7 +611,7 @@ impl RenderOnce for CommandPaletteOverlay {
                                     .border_color(theme::PRIMARY)
                             })
                             .when(!is_focused, |d| d.text_color(entry_text))
-                            .child(div().child(entry.label))
+                            .child(div().child(label))
                             .when(!entry.shortcut.is_empty(), |d| {
                                 d.child(
                                     div()
@@ -629,7 +630,7 @@ impl RenderOnce for CommandPaletteOverlay {
                     .py(px(theme::PALETTE_EMPTY_PAD_Y))
                     .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
                     .text_color(empty_text)
-                    .child("No matching commands"),
+                    .child(s::command_no_matching_commands()),
             )
         } else {
             None
@@ -712,12 +713,11 @@ mod tests {
         );
         for &idx in &filtered {
             assert!(
-                PALETTE_ENTRIES[idx]
-                    .label
+                (PALETTE_ENTRIES[idx].label)()
                     .to_ascii_lowercase()
                     .contains("split"),
                 "entry {:?} should contain 'split'",
-                PALETTE_ENTRIES[idx].label
+                (PALETTE_ENTRIES[idx].label)()
             );
         }
 

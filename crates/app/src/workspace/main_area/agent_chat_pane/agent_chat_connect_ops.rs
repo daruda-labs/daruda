@@ -721,12 +721,14 @@ impl Workspace {
                                 v.set_connecting(cx);
                             });
                         }
-                        let report = ErrorReport::new("ACP session resume failed; retrying fresh")
-                            .severity(ErrorSeverity::Warning)
-                            .with_context("detail", message)
-                            .at(file!(), line!())
-                            .dedup("agent_chat.resume_fallback")
-                            .build();
+                        let report = ErrorReport::new(
+                            crate::surface::strings::error_acp_resume_failed_retrying(),
+                        )
+                        .severity(ErrorSeverity::Warning)
+                        .with_context("detail", message)
+                        .at(file!(), line!())
+                        .dedup("agent_chat.resume_fallback")
+                        .build();
                         daruda_store::observability::log_writer::LogWriter::log(report);
                         // Re-enter with no resume → `session/new`. This spawns a
                         // fresh pump on the view; the current task then returns,
@@ -762,12 +764,13 @@ impl Workspace {
                                 );
                             }
                         }
-                        let report = ErrorReport::new("ACP session connect failed")
-                            .severity(ErrorSeverity::Error)
-                            .with_context("detail", message)
-                            .at(file!(), line!())
-                            .dedup("agent_chat.connect")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_acp_connect_failed())
+                                .severity(ErrorSeverity::Error)
+                                .with_context("detail", message)
+                                .at(file!(), line!())
+                                .dedup("agent_chat.connect")
+                                .build();
                         ws.report_error(report, cx);
                     });
                 }

@@ -66,14 +66,14 @@ impl TerminalView {
         } = &self.state.search.mode
         {
             (
-                ux_strings::SEARCH_REGEX_ERROR.to_string(),
+                ux_strings::search_regex_error(),
                 ux_theme::SEARCH_LABEL_ERROR,
             )
         } else if query.is_empty() {
             (String::new(), ux_theme::SEARCH_LABEL_IDLE)
         } else if total == 0 {
             (
-                ux_strings::SEARCH_NO_MATCHES.to_string(),
+                ux_strings::search_no_matches(),
                 ux_theme::SEARCH_LABEL_EMPTY,
             )
         } else {

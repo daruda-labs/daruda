@@ -893,13 +893,15 @@ impl Workspace {
             },
             |ws, (full_path, result), cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new("Failed to open file externally")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(&full_path))
-                        .dedup("files.open_external")
-                        .build();
+                    let report = ErrorReport::new(
+                        crate::surface::strings::error_open_file_external_failed(),
+                    )
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(&full_path))
+                    .dedup("files.open_external")
+                    .build();
                     ws.report_error(report, cx);
                 }
             },

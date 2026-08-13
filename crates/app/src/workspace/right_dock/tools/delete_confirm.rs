@@ -43,13 +43,14 @@ pub fn open_delete_mcp_server_confirm(
                 let name = name.clone();
                 ws.update(app_cx, |ws, cx| {
                     if let Err(e) = ws.delete_mcp_server_internal(scope, &name, cx) {
-                        let report = ErrorReport::new("MCP delete failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("server", name.clone())
-                            .dedup("mcp.delete")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_mcp_delete_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("server", name.clone())
+                                .dedup("mcp.delete")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 });

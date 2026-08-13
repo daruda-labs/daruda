@@ -58,7 +58,7 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
             .title(title.clone())
             .child(input(&state_for_body, cx, 0))
             .confirm()
-            .button_props(DialogButtonProps::default().ok_text("OK"))
+            .button_props(DialogButtonProps::default().ok_text(s::common_button_ok()))
             .on_ok(move |_, window, app_cx| {
                 let text = state_for_ok.read(app_cx).value().to_string();
                 let trimmed = text.trim();

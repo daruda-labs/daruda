@@ -260,6 +260,214 @@ pub const URL_REPORT_ISSUE: &str = "https://github.com/daruda-ai/daruda/issues/n
 pub const URL_HELP: &str = "https://github.com/daruda-ai/daruda#readme";
 
 // ============================================================================
+// Common controls
+// ============================================================================
+
+pub fn common_button_cancel() -> String {
+    rust_i18n::t!("common.btn_cancel").into_owned()
+}
+pub fn common_button_close() -> String {
+    rust_i18n::t!("common.btn_close").into_owned()
+}
+pub fn common_button_create() -> String {
+    rust_i18n::t!("common.btn_create").into_owned()
+}
+pub fn common_button_delete() -> String {
+    rust_i18n::t!("common.btn_delete").into_owned()
+}
+pub fn common_button_move() -> String {
+    rust_i18n::t!("common.btn_move").into_owned()
+}
+pub fn common_button_ok() -> String {
+    rust_i18n::t!("common.btn_ok").into_owned()
+}
+pub fn common_button_open() -> String {
+    rust_i18n::t!("common.btn_open").into_owned()
+}
+pub fn common_button_save() -> String {
+    rust_i18n::t!("common.btn_save").into_owned()
+}
+
+// ============================================================================
+// Command palette and quick switchers
+// ============================================================================
+
+macro_rules! command_string {
+    ($name:ident, $key:literal) => {
+        pub fn $name() -> String {
+            rust_i18n::t!($key).into_owned()
+        }
+    };
+}
+
+command_string!(command_activate_lane_1, "command.activate_lane_1");
+command_string!(command_activate_lane_2, "command.activate_lane_2");
+command_string!(command_activate_lane_3, "command.activate_lane_3");
+command_string!(command_activate_lane_4, "command.activate_lane_4");
+command_string!(command_activate_lane_5, "command.activate_lane_5");
+command_string!(command_activate_lane_6, "command.activate_lane_6");
+command_string!(command_activate_lane_7, "command.activate_lane_7");
+command_string!(command_activate_lane_8, "command.activate_lane_8");
+command_string!(command_activate_lane_9, "command.activate_lane_9");
+command_string!(command_cancel_task, "command.cancel_task");
+command_string!(command_check_flow, "command.check_flow");
+command_string!(command_claude_install_hooks, "command.claude_install_hooks");
+command_string!(
+    command_claude_uninstall_hooks,
+    "command.claude_uninstall_hooks"
+);
+command_string!(command_close_pane, "command.close_pane");
+command_string!(command_close_project, "command.close_project");
+command_string!(command_close_tab, "command.close_tab");
+command_string!(command_commit_changes, "command.commit_changes");
+command_string!(command_copy, "command.copy");
+command_string!(command_delete_task, "command.delete_task");
+command_string!(command_edit_task, "command.edit_task");
+command_string!(command_files_refresh, "command.files_refresh");
+command_string!(command_files_toggle_hidden, "command.files_toggle_hidden");
+command_string!(command_focus_next_pane, "command.focus_next_pane");
+command_string!(command_focus_pane_down, "command.focus_pane_down");
+command_string!(command_focus_pane_left, "command.focus_pane_left");
+command_string!(command_focus_pane_right, "command.focus_pane_right");
+command_string!(command_focus_pane_up, "command.focus_pane_up");
+command_string!(command_focus_previous_pane, "command.focus_previous_pane");
+command_string!(
+    command_move_project_to_group,
+    "command.move_project_to_group"
+);
+command_string!(command_move_tab_left, "command.move_tab_left");
+command_string!(command_move_tab_right, "command.move_tab_right");
+command_string!(command_new_agent_chat, "command.new_agent_chat");
+command_string!(command_new_group, "command.new_group");
+command_string!(command_new_tab, "command.new_tab");
+command_string!(command_new_task, "command.new_task");
+command_string!(command_next_tab, "command.next_tab");
+command_string!(command_no_matching_commands, "command.no_matching_commands");
+command_string!(command_no_matching_lanes, "command.no_matching_lanes");
+command_string!(command_open_command_history, "command.open_command_history");
+command_string!(command_open_project, "command.open_project");
+command_string!(command_paste, "command.paste");
+command_string!(command_previous_tab, "command.previous_tab");
+command_string!(command_push_changes, "command.push_changes");
+command_string!(command_quit, "command.quit");
+command_string!(command_refresh_git_status, "command.refresh_git_status");
+command_string!(command_rename_project, "command.rename_project");
+command_string!(command_reopen_task, "command.reopen_task");
+command_string!(command_retry_task, "command.retry_task");
+command_string!(command_right_panel_flows, "command.right_panel_flows");
+command_string!(command_right_panel_skills, "command.right_panel_skills");
+command_string!(command_right_panel_tasks, "command.right_panel_tasks");
+command_string!(command_right_panel_tools, "command.right_panel_tools");
+command_string!(command_right_panel_usage, "command.right_panel_usage");
+command_string!(command_run_flow, "command.run_flow");
+command_string!(command_select_all, "command.select_all");
+command_string!(command_settings, "command.settings");
+command_string!(command_show_files, "command.show_files");
+command_string!(command_show_flow_graph, "command.show_flow_graph");
+command_string!(command_show_git_changes, "command.show_git_changes");
+command_string!(command_show_lanes, "command.show_lanes");
+command_string!(command_skills_new_skill, "command.skills_new_skill");
+command_string!(command_split_down, "command.split_down");
+command_string!(command_split_right, "command.split_right");
+command_string!(command_start_task, "command.start_task");
+command_string!(command_switch_lane, "command.switch_lane");
+command_string!(
+    command_switch_lane_placeholder,
+    "command.switch_lane_placeholder"
+);
+command_string!(command_toggle_bottom_panel, "command.toggle_bottom_panel");
+command_string!(command_toggle_left_dock, "command.toggle_left_dock");
+command_string!(command_toggle_right_dock, "command.toggle_right_dock");
+command_string!(
+    command_type_command_placeholder,
+    "command.type_command_placeholder"
+);
+
+pub fn command_settings_section(section: &str) -> String {
+    rust_i18n::t!("command.settings_section", section = section).into_owned()
+}
+pub fn command_settings_general() -> String {
+    command_settings_section(&settings_nav_general())
+}
+pub fn command_settings_font() -> String {
+    command_settings_section(&settings_nav_font())
+}
+pub fn command_settings_cursor() -> String {
+    command_settings_section(&settings_nav_cursor())
+}
+pub fn command_settings_shell() -> String {
+    command_settings_section(&settings_nav_shell())
+}
+pub fn command_settings_window() -> String {
+    command_settings_section(&settings_nav_window())
+}
+pub fn command_settings_terminal() -> String {
+    command_settings_section(&settings_nav_terminal())
+}
+pub fn command_settings_dock() -> String {
+    command_settings_section(&settings_nav_dock())
+}
+pub fn command_settings_clipboard() -> String {
+    command_settings_section(&settings_nav_clipboard())
+}
+pub fn command_settings_external_editor() -> String {
+    command_settings_section(&settings_nav_external_editor())
+}
+pub fn command_settings_notifications() -> String {
+    command_settings_section(&settings_nav_notifications())
+}
+pub fn command_settings_keymap() -> String {
+    command_settings_section(&settings_nav_keymap())
+}
+
+// ============================================================================
+// Project and confirmation modals
+// ============================================================================
+
+pub fn close_project_modal_body(name: &str) -> String {
+    rust_i18n::t!("modal.close_project_body", name = name).into_owned()
+}
+pub fn close_project_modal_title() -> String {
+    rust_i18n::t!("modal.close_project_title").into_owned()
+}
+pub fn delete_project_keep_choice() -> String {
+    rust_i18n::t!("modal.delete_project_keep_choice").into_owned()
+}
+pub fn delete_project_delete_choice() -> String {
+    rust_i18n::t!("modal.delete_project_delete_choice").into_owned()
+}
+pub fn open_project_modal_body(name: &str) -> String {
+    rust_i18n::t!("modal.open_project_body", name = name).into_owned()
+}
+pub fn open_project_add_here() -> String {
+    rust_i18n::t!("modal.open_project_add_here").into_owned()
+}
+pub fn open_project_new_window() -> String {
+    rust_i18n::t!("modal.open_project_new_window").into_owned()
+}
+pub fn open_project_dont_ask() -> String {
+    rust_i18n::t!("modal.open_project_dont_ask").into_owned()
+}
+pub fn open_project_modal_title() -> String {
+    rust_i18n::t!("modal.open_project_title").into_owned()
+}
+pub fn new_group_modal_title() -> String {
+    rust_i18n::t!("modal.new_group_title").into_owned()
+}
+pub fn new_group_placeholder() -> String {
+    rust_i18n::t!("modal.new_group_placeholder").into_owned()
+}
+pub fn rename_project_modal_title() -> String {
+    rust_i18n::t!("modal.rename_project_title").into_owned()
+}
+pub fn rename_project_placeholder() -> String {
+    rust_i18n::t!("modal.rename_project_placeholder").into_owned()
+}
+pub fn move_project_group_modal_title() -> String {
+    rust_i18n::t!("modal.move_project_group_title").into_owned()
+}
+
+// ============================================================================
 // Dock panel labels — kept as &'static str because panel_name() -> &'static str
 // ============================================================================
 
@@ -384,6 +592,37 @@ pub fn task_filter_running() -> String {
 }
 pub fn task_filter_done() -> String {
     rust_i18n::t!("task.filter_done").into_owned()
+}
+
+pub fn right_panel_task_backlog() -> String {
+    rust_i18n::t!("terminal.task_backlog").into_owned()
+}
+pub fn right_panel_task_running() -> String {
+    rust_i18n::t!("terminal.task_running").into_owned()
+}
+pub fn right_panel_task_cancelled() -> String {
+    rust_i18n::t!("terminal.task_cancelled").into_owned()
+}
+pub fn right_panel_task_done_prefix() -> String {
+    rust_i18n::t!("terminal.task_done_prefix").into_owned()
+}
+pub fn right_panel_task_error_prefix() -> String {
+    rust_i18n::t!("terminal.task_error_prefix").into_owned()
+}
+pub fn right_panel_task_empty_all() -> String {
+    rust_i18n::t!("terminal.task_empty_all").into_owned()
+}
+pub fn right_panel_task_empty_backlog() -> String {
+    rust_i18n::t!("terminal.task_empty_backlog").into_owned()
+}
+pub fn right_panel_task_empty_running() -> String {
+    rust_i18n::t!("terminal.task_empty_running").into_owned()
+}
+pub fn right_panel_task_empty_done() -> String {
+    rust_i18n::t!("terminal.task_empty_done").into_owned()
+}
+pub fn right_panel_task_failures_prefix() -> String {
+    rust_i18n::t!("terminal.task_failures_prefix").into_owned()
 }
 
 /// `[+ New]` button label.
@@ -555,6 +794,18 @@ pub fn task_edit_surface_terminal() -> String {
 /// Option label — run the task on an in-app Agent chat (ACP) session.
 pub fn task_edit_surface_agent_chat() -> String {
     rust_i18n::t!("task.edit_surface_agent_chat").into_owned()
+}
+pub fn task_edit_title_placeholder() -> String {
+    rust_i18n::t!("task.edit_title_placeholder").into_owned()
+}
+pub fn task_edit_branch_placeholder() -> String {
+    rust_i18n::t!("task.edit_branch_placeholder").into_owned()
+}
+pub fn task_edit_prompt_placeholder() -> String {
+    rust_i18n::t!("task.edit_prompt_placeholder").into_owned()
+}
+pub fn task_edit_notes_placeholder() -> String {
+    rust_i18n::t!("task.edit_notes_placeholder").into_owned()
 }
 
 /// Glyph appended to the status pill label as the dropdown chevron.
@@ -816,9 +1067,9 @@ pub fn usage_weekday_label(idx: u8) -> String {
 /// single string and don't have to reason about pluralization.
 pub fn format_reset_countdown(remaining: std::time::Duration) -> String {
     if remaining.as_secs() == 0 {
-        return "Resets now".to_string();
+        return rust_i18n::t!("usage.reset_now").into_owned();
     }
-    format!("Resets in {}", format_reset_short(remaining))
+    rust_i18n::t!("usage.reset_in", time = format_reset_short(remaining)).into_owned()
 }
 
 /// The same buckets as [`format_reset_countdown`] without the "Resets"
@@ -828,19 +1079,29 @@ pub fn format_reset_countdown(remaining: std::time::Duration) -> String {
 pub fn format_reset_short(remaining: std::time::Duration) -> String {
     let secs = remaining.as_secs();
     if secs == 0 {
-        return "now".to_string();
+        return rust_i18n::t!("usage.reset_short_now").into_owned();
     }
     let mins_total = secs / 60;
     let hours_total = mins_total / 60;
     let days_total = hours_total / 24;
     if days_total >= 1 {
-        format!("{}d {}h", days_total, hours_total % 24)
+        rust_i18n::t!(
+            "usage.reset_short_days",
+            days = days_total,
+            hours = hours_total % 24
+        )
+        .into_owned()
     } else if hours_total >= 1 {
-        format!("{}h {}m", hours_total, mins_total % 60)
+        rust_i18n::t!(
+            "usage.reset_short_hours",
+            hours = hours_total,
+            minutes = mins_total % 60
+        )
+        .into_owned()
     } else if mins_total >= 1 {
-        format!("{}m", mins_total)
+        rust_i18n::t!("usage.reset_short_minutes", minutes = mins_total).into_owned()
     } else {
-        "<1m".to_string()
+        rust_i18n::t!("usage.reset_short_under_minute").into_owned()
     }
 }
 
@@ -1000,7 +1261,7 @@ pub fn file_viewer_copy_rel_path() -> String {
 }
 
 pub fn file_viewer_more_lines(count: usize) -> String {
-    format!("… ({count} more lines)")
+    rust_i18n::t!("file_viewer.more_lines", count = count).into_owned()
 }
 
 pub fn file_viewer_byte_truncated(shown: usize, max_bytes: usize, total_count: usize) -> String {
@@ -1010,9 +1271,20 @@ pub fn file_viewer_byte_truncated(shown: usize, max_bytes: usize, total_count: u
         format!("{} KB", max_bytes / 1024)
     };
     if total_count > shown {
-        format!("File exceeds {size} — showing first {shown} of {total_count}+ lines")
+        rust_i18n::t!(
+            "file_viewer.byte_truncated_full",
+            size = size,
+            shown = shown,
+            total_count = total_count
+        )
+        .into_owned()
     } else {
-        format!("File exceeds {size} — showing first {shown} lines")
+        rust_i18n::t!(
+            "file_viewer.byte_truncated_short",
+            size = size,
+            shown = shown
+        )
+        .into_owned()
     }
 }
 
@@ -1657,6 +1929,53 @@ pub fn merge_modal_abort_merge() -> String {
 pub fn merge_modal_remove_after() -> String {
     rust_i18n::t!("modal.merge_remove_after").into_owned()
 }
+pub fn merge_modal_cleanup_failed_title() -> String {
+    rust_i18n::t!("modal.merge_cleanup_failed_title").into_owned()
+}
+pub fn merge_modal_confirm() -> String {
+    rust_i18n::t!("modal.merge_confirm").into_owned()
+}
+pub fn merge_modal_goto_target(branch: &str) -> String {
+    rust_i18n::t!("modal.merge_goto_target", branch = branch).into_owned()
+}
+pub fn merge_modal_title(branch: &str) -> String {
+    rust_i18n::t!("modal.merge_title", branch = branch).into_owned()
+}
+pub fn remove_lane_modal_body(name: &str) -> String {
+    rust_i18n::t!("modal.remove_lane_body", name = name).into_owned()
+}
+pub fn remove_lane_branch_delete_failed(branch: &str, error: &str) -> String {
+    rust_i18n::t!(
+        "modal.remove_lane_branch_delete_failed",
+        branch = branch,
+        error = error
+    )
+    .into_owned()
+}
+pub fn remove_lane_also_delete_branch(branch: &str) -> String {
+    rust_i18n::t!("modal.remove_lane_also_delete_branch", branch = branch).into_owned()
+}
+pub fn remove_lane_force_hint() -> String {
+    rust_i18n::t!("modal.remove_lane_force_hint").into_owned()
+}
+pub fn remove_lane_err_cannot_remove() -> String {
+    rust_i18n::t!("modal.remove_lane_err_cannot_remove").into_owned()
+}
+pub fn remove_lane_err_not_found() -> String {
+    rust_i18n::t!("modal.remove_lane_err_not_found").into_owned()
+}
+pub fn remove_lane_err_not_git() -> String {
+    rust_i18n::t!("modal.remove_lane_err_not_git").into_owned()
+}
+pub fn remove_lane_removing() -> String {
+    rust_i18n::t!("modal.remove_lane_removing").into_owned()
+}
+pub fn remove_lane_force() -> String {
+    rust_i18n::t!("modal.remove_lane_force").into_owned()
+}
+pub fn remove_lane_confirm() -> String {
+    rust_i18n::t!("modal.remove_lane_confirm").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Bottom dock panels — tab modals + context menu
@@ -1697,6 +2016,79 @@ pub fn delete_macro_modal_title() -> String {
 }
 pub fn delete_macro_confirm_label() -> String {
     rust_i18n::t!("common.btn_delete").into_owned()
+}
+pub fn delete_macro_modal_body(label: &str) -> String {
+    rust_i18n::t!("modal.delete_macro_body", label = label).into_owned()
+}
+pub fn delete_panel_tab_modal_body(name: &str, widget_count: usize) -> String {
+    match widget_count {
+        0 => rust_i18n::t!("modal.delete_panel_tab_body_empty", name = name).into_owned(),
+        1 => rust_i18n::t!("modal.delete_panel_tab_body_one", name = name).into_owned(),
+        count => rust_i18n::t!(
+            "modal.delete_panel_tab_body_many",
+            name = name,
+            count = count
+        )
+        .into_owned(),
+    }
+}
+
+pub fn bottom_dock_no_tabs() -> String {
+    rust_i18n::t!("terminal.panels_no_tabs").into_owned()
+}
+pub fn bottom_dock_no_active_tab() -> String {
+    rust_i18n::t!("terminal.panels_no_active_tab").into_owned()
+}
+pub fn macro_new_title() -> String {
+    rust_i18n::t!("bottom_dock.macro_new_title").into_owned()
+}
+pub fn macro_edit_title() -> String {
+    rust_i18n::t!("bottom_dock.macro_edit_title").into_owned()
+}
+pub fn macro_placeholder_label() -> String {
+    rust_i18n::t!("bottom_dock.macro_placeholder_label").into_owned()
+}
+pub fn macro_placeholder_send() -> String {
+    rust_i18n::t!("bottom_dock.macro_placeholder_send").into_owned()
+}
+pub fn macro_placeholder_icon() -> String {
+    rust_i18n::t!("bottom_dock.macro_placeholder_icon").into_owned()
+}
+pub fn macro_placeholder_shortcut() -> String {
+    rust_i18n::t!("bottom_dock.macro_placeholder_shortcut").into_owned()
+}
+pub fn macro_err_label_required() -> String {
+    rust_i18n::t!("bottom_dock.macro_err_label_required").into_owned()
+}
+pub fn macro_err_send_required() -> String {
+    rust_i18n::t!("bottom_dock.macro_err_send_required").into_owned()
+}
+pub fn macro_err_icon_required() -> String {
+    rust_i18n::t!("bottom_dock.macro_err_icon_required").into_owned()
+}
+pub fn macro_field_label() -> String {
+    rust_i18n::t!("bottom_dock.macro_field_label").into_owned()
+}
+pub fn macro_field_send() -> String {
+    rust_i18n::t!("bottom_dock.macro_field_send").into_owned()
+}
+pub fn macro_field_icon() -> String {
+    rust_i18n::t!("bottom_dock.macro_field_icon").into_owned()
+}
+pub fn macro_field_shortcut() -> String {
+    rust_i18n::t!("bottom_dock.macro_field_shortcut").into_owned()
+}
+pub fn macro_auto_enter() -> String {
+    rust_i18n::t!("bottom_dock.macro_auto_enter").into_owned()
+}
+pub fn macro_display_as_icon() -> String {
+    rust_i18n::t!("bottom_dock.macro_display_as_icon").into_owned()
+}
+pub fn macro_record_idle() -> String {
+    rust_i18n::t!("bottom_dock.macro_record_idle").into_owned()
+}
+pub fn macro_record_recording() -> String {
+    rust_i18n::t!("bottom_dock.macro_record_recording").into_owned()
 }
 
 // Bottom dock — row-preset selector (suffix in the tab strip).
@@ -1896,6 +2288,12 @@ pub fn group_rename_dialog_title() -> String {
 pub fn group_rename_dialog_placeholder() -> String {
     rust_i18n::t!("modal.group_rename_placeholder").into_owned()
 }
+pub fn group_ungrouped() -> String {
+    rust_i18n::t!("group.ungrouped").into_owned()
+}
+pub fn group_current_suffix() -> String {
+    rust_i18n::t!("group.current_suffix").into_owned()
+}
 
 /// Confirm-dialog copy shown before opening a new pane for a busy
 /// pane's account switch (`Workspace::confirm_open_pane_with_account`,
@@ -1993,6 +2391,9 @@ pub fn agent_sessions_label_suffix() -> String {
 pub fn git_commit_placeholder() -> String {
     rust_i18n::t!("git.commit_placeholder").into_owned()
 }
+pub fn git_changes_header(branch: &str) -> String {
+    rust_i18n::t!("git.changes_header", branch = branch).into_owned()
+}
 /// Button label for the commit action in the git commit footer.
 pub fn git_commit_btn() -> String {
     rust_i18n::t!("git.commit_btn").into_owned()
@@ -2029,6 +2430,13 @@ pub fn git_confirm_discard_title() -> String {
 pub fn git_confirm_discard_ok() -> String {
     rust_i18n::t!("git.confirm_discard_ok").into_owned()
 }
+pub fn git_confirm_discard_body(filename: &str, is_untracked: bool) -> String {
+    if is_untracked {
+        rust_i18n::t!("git.confirm_discard_untracked_body", filename = filename).into_owned()
+    } else {
+        rust_i18n::t!("git.confirm_discard_tracked_body", filename = filename).into_owned()
+    }
+}
 
 /// Single-conflict banner shown at the top of the Git Changes view when
 /// `git status` reports one merge conflict. Multi-conflict variants are
@@ -2063,6 +2471,9 @@ pub fn git_confirm_commit_title() -> String {
 /// OK button label for the commit confirmation dialog.
 pub fn git_confirm_commit_ok() -> String {
     rust_i18n::t!("git.confirm_commit_ok").into_owned()
+}
+pub fn git_confirm_commit_body(count: usize, message: &str) -> String {
+    rust_i18n::t!("git.confirm_commit_body", count = count, message = message).into_owned()
 }
 
 /// Title for the amend confirmation dialog.
@@ -2923,6 +3334,9 @@ pub fn settings_agent_field_id() -> String {
 pub fn settings_agent_field_name() -> String {
     rust_i18n::t!("settings.agent_field_name").into_owned()
 }
+pub fn settings_agent_name_placeholder() -> String {
+    rust_i18n::t!("settings.agent_name_placeholder").into_owned()
+}
 pub fn settings_agent_field_command() -> String {
     rust_i18n::t!("settings.agent_field_command").into_owned()
 }
@@ -3762,6 +4176,16 @@ pub fn mcp_user() -> String {
 pub fn mcp_local() -> String {
     rust_i18n::t!("common.section_local").into_owned()
 }
+pub fn mcp_scope_display(scope: crate::agent::mcp::McpScope) -> String {
+    match scope {
+        crate::agent::mcp::McpScope::User => mcp_user(),
+        crate::agent::mcp::McpScope::Project => mcp_project(),
+        crate::agent::mcp::McpScope::Local => mcp_local(),
+    }
+}
+pub fn mcp_user_local_scope_display() -> String {
+    format!("{}/{}", mcp_user(), mcp_local())
+}
 /// Header button — opens AddMcpServerModal.
 pub fn mcp_new_button() -> String {
     rust_i18n::t!("mcp.new_button").into_owned()
@@ -3951,6 +4375,146 @@ pub const TOAST_BUTTON_DISMISS: &str = "×";
 pub fn toast_button_copied() -> String {
     rust_i18n::t!("common.btn_copied").into_owned()
 }
+
+macro_rules! error_string {
+    ($name:ident, $key:literal) => {
+        pub fn $name() -> String {
+            rust_i18n::t!($key).into_owned()
+        }
+    };
+}
+
+error_string!(error_acp_connect_failed, "error.acp_connect_failed");
+error_string!(
+    error_acp_resume_failed_retrying,
+    "error.acp_resume_failed_retrying"
+);
+error_string!(error_cannot_read_directory, "error.cannot_read_directory");
+pub fn error_cannot_read_directory_detail(error: &str) -> String {
+    rust_i18n::t!("error.cannot_read_directory_detail", error = error).into_owned()
+}
+error_string!(
+    error_claude_hooks_install_failed,
+    "error.claude_hooks_install_failed"
+);
+error_string!(
+    error_claude_hooks_uninstall_failed,
+    "error.claude_hooks_uninstall_failed"
+);
+error_string!(
+    error_claude_status_file_read_failed,
+    "error.claude_status_file_read_failed"
+);
+error_string!(error_commit_message_empty, "error.commit_message_empty");
+error_string!(
+    error_create_config_dir_failed,
+    "error.create_config_dir_failed"
+);
+error_string!(error_file_watcher_error, "error.file_watcher_error");
+error_string!(
+    error_file_watcher_init_failed,
+    "error.file_watcher_init_failed"
+);
+error_string!(error_git_add_all_failed, "error.git_add_all_failed");
+error_string!(error_git_add_failed, "error.git_add_failed");
+error_string!(error_git_add_paths_failed, "error.git_add_paths_failed");
+error_string!(
+    error_git_commit_amend_failed,
+    "error.git_commit_amend_failed"
+);
+error_string!(error_git_commit_failed, "error.git_commit_failed");
+error_string!(error_git_fetch_failed, "error.git_fetch_failed");
+error_string!(error_git_init_failed, "error.git_init_failed");
+error_string!(error_git_init_probe_failed, "error.git_init_probe_failed");
+error_string!(error_git_pull_failed, "error.git_pull_failed");
+error_string!(error_git_push_failed, "error.git_push_failed");
+error_string!(
+    error_git_restore_staged_all_failed,
+    "error.git_restore_staged_all_failed"
+);
+error_string!(
+    error_git_restore_staged_failed,
+    "error.git_restore_staged_failed"
+);
+error_string!(
+    error_git_restore_staged_paths_failed,
+    "error.git_restore_staged_paths_failed"
+);
+error_string!(error_git_status_failed, "error.git_status_failed");
+error_string!(error_lane_path_not_found, "error.lane_path_not_found");
+error_string!(error_lane_create_busy, "error.lane_create_busy");
+error_string!(error_lane_create_failed, "error.lane_create_failed");
+error_string!(
+    error_lane_disk_cleanup_failed,
+    "error.lane_disk_cleanup_failed"
+);
+error_string!(error_lane_finalize_failed, "error.lane_finalize_failed");
+error_string!(error_lane_remove_failed, "error.lane_remove_failed");
+error_string!(error_mcp_delete_failed, "error.mcp_delete_failed");
+error_string!(error_open_finder_failed, "error.open_finder_failed");
+error_string!(
+    error_open_file_external_failed,
+    "error.open_file_external_failed"
+);
+error_string!(error_panels_save_failed, "error.panels_save_failed");
+error_string!(pane_context_new_tab, "error.pane_context_new_tab");
+error_string!(pane_context_restore, "error.pane_context_restore");
+error_string!(pane_context_split, "error.pane_context_split");
+error_string!(
+    pane_context_switch_account,
+    "error.pane_context_switch_account"
+);
+error_string!(error_prompt_file_not_found, "error.prompt_file_not_found");
+error_string!(
+    error_prompt_file_outside_lanes,
+    "error.prompt_file_outside_lanes"
+);
+error_string!(
+    error_prompt_watcher_read_failed,
+    "error.prompt_watcher_read_failed"
+);
+error_string!(
+    error_project_config_create_dir_failed,
+    "error.project_config_create_dir_failed"
+);
+error_string!(
+    error_project_config_create_file_failed,
+    "error.project_config_create_file_failed"
+);
+error_string!(
+    error_project_config_open_failed,
+    "error.project_config_open_failed"
+);
+error_string!(error_reveal_finder_failed, "error.reveal_finder_failed");
+error_string!(error_skill_delete_failed, "error.skill_delete_failed");
+error_string!(
+    error_skill_invocation_failed,
+    "error.skill_invocation_failed"
+);
+error_string!(error_skill_rename_failed, "error.skill_rename_failed");
+error_string!(error_status_bar_save_failed, "error.status_bar_save_failed");
+error_string!(error_tasks_require_git_repo, "error.tasks_require_git_repo");
+error_string!(error_tasks_save_failed, "error.tasks_save_failed");
+error_string!(error_task_escalation_orphan, "error.task_escalation_orphan");
+
+pub fn error_mcp_reload_failed(source: &str) -> String {
+    rust_i18n::t!("error.mcp_reload_failed", source = source).into_owned()
+}
+pub fn error_mcp_toggle_failed(scope: &str) -> String {
+    rust_i18n::t!("error.mcp_toggle_failed", scope = scope).into_owned()
+}
+pub fn error_pane_spawn_failed(context: &str) -> String {
+    rust_i18n::t!("error.pane_spawn_failed", context = context).into_owned()
+}
+pub fn error_pane_spawn_status(context: &str, error: &str) -> String {
+    rust_i18n::t!("error.pane_spawn_status", context = context, error = error).into_owned()
+}
+pub fn error_pane_vt_init_failed(error: &str) -> String {
+    rust_i18n::t!("error.pane_vt_init_failed", error = error).into_owned()
+}
+pub fn error_save_file_failed(path: &str) -> String {
+    rust_i18n::t!("error.save_file_failed", path = path).into_owned()
+}
 /// `×N` repeat counter prefix.
 pub const TOAST_REPEAT_PREFIX: &str = "×";
 
@@ -4080,6 +4644,40 @@ pub fn create_lane_err_branch_invalid() -> String {
 
 pub fn create_lane_err_no_active_project() -> String {
     rust_i18n::t!("create_lane.err_no_active_project").into_owned()
+}
+
+pub fn create_lane_body_base_ref() -> String {
+    rust_i18n::t!("create_lane.body_base_ref").into_owned()
+}
+pub fn create_lane_body_branch_name() -> String {
+    rust_i18n::t!("create_lane.body_branch_name").into_owned()
+}
+pub fn create_lane_body_description() -> String {
+    rust_i18n::t!("create_lane.body_description").into_owned()
+}
+pub fn create_lane_button_title() -> String {
+    rust_i18n::t!("create_lane.button_title").into_owned()
+}
+pub fn create_lane_creating() -> String {
+    rust_i18n::t!("create_lane.creating").into_owned()
+}
+pub fn create_lane_placeholder_base_ref() -> String {
+    rust_i18n::t!("create_lane.placeholder_base_ref").into_owned()
+}
+pub fn create_lane_placeholder_branch_name() -> String {
+    rust_i18n::t!("create_lane.placeholder_branch_name").into_owned()
+}
+pub fn create_lane_placeholder_description() -> String {
+    rust_i18n::t!("create_lane.placeholder_description").into_owned()
+}
+pub fn create_lane_submit() -> String {
+    rust_i18n::t!("create_lane.submit").into_owned()
+}
+pub fn lane_git_init_label() -> String {
+    rust_i18n::t!("terminal.lane_git_init_label").into_owned()
+}
+pub fn lane_non_git_hint() -> String {
+    rust_i18n::t!("terminal.lane_non_git_hint").into_owned()
 }
 
 /// Shown under the create-lane form's host dropdown when the workspace's

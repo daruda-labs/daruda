@@ -67,9 +67,12 @@ impl Workspace {
     ) {
         let lane = self.active_lane_root();
         let project_dirs = self.mcp_project_dirs.clone();
-        let label = match event {
-            McpEvent::ClaudeJsonReloaded => "user/local",
-            McpEvent::ProjectReloaded => "project",
+        let (label, display_label) = match event {
+            McpEvent::ClaudeJsonReloaded => (
+                "user/local",
+                crate::surface::strings::mcp_user_local_scope_display(),
+            ),
+            McpEvent::ProjectReloaded => ("project", crate::surface::strings::mcp_project()),
         };
         let result = cx.update_global::<McpState, _>(|state, _| match event {
             McpEvent::ClaudeJsonReloaded => state.reload_claude_json(lane.as_deref()),
@@ -88,13 +91,15 @@ impl Workspace {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(e) => {
-                let report = ErrorReport::new(format!("MCP reload failed ({label})"))
-                    .severity(ErrorSeverity::Warning)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .with_context("source", label)
-                    .dedup(format!("mcp.reload.{label}"))
-                    .build();
+                let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
+                    &display_label,
+                ))
+                .severity(ErrorSeverity::Warning)
+                .from_error(&e)
+                .at(file!(), line!())
+                .with_context("source", label)
+                .dedup(format!("mcp.reload.{label}"))
+                .build();
                 self.report_error(report, cx);
             }
         }
@@ -202,13 +207,15 @@ impl Workspace {
             state.reload_claude_json(lane_root.as_deref())
         });
         if let Err(e) = claude_json_result {
-            let report = ErrorReport::new("MCP reload failed (user/local)")
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("source", "user/local")
-                .dedup("mcp.reload.user_local")
-                .build();
+            let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
+                &crate::surface::strings::mcp_user_local_scope_display(),
+            ))
+            .severity(ErrorSeverity::Warning)
+            .from_error(&e)
+            .at(file!(), line!())
+            .with_context("source", "user/local")
+            .dedup("mcp.reload.user_local")
+            .build();
             self.report_error(report, cx);
         }
         let dirs_for_reload = project_dirs.clone();
@@ -223,13 +230,15 @@ impl Workspace {
             last
         });
         if let Err(e) = project_result {
-            let report = ErrorReport::new("MCP reload failed (project)")
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("source", "project")
-                .dedup("mcp.reload.project")
-                .build();
+            let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
+                &crate::surface::strings::mcp_project(),
+            ))
+            .severity(ErrorSeverity::Warning)
+            .from_error(&e)
+            .at(file!(), line!())
+            .with_context("source", "project")
+            .dedup("mcp.reload.project")
+            .build();
             self.report_error(report, cx);
         }
         cx.notify();

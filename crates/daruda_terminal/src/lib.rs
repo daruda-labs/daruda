@@ -1,3 +1,10 @@
+rust_i18n::i18n!("locales", fallback = "en");
+
+/// Keep terminal-owned UI text aligned with the host application's locale.
+pub fn set_locale(locale: &str) {
+    rust_i18n::set_locale(locale);
+}
+
 pub mod ansi;
 mod config;
 pub mod coords;

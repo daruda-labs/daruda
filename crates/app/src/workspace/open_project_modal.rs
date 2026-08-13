@@ -13,10 +13,10 @@ use gpui::{
     ClickEvent, Context, FocusHandle, Focusable, IntoElement, Render, Window, div, prelude::*, px,
 };
 
-use crate::ui::theme;
 use crate::ui::{ActiveTheme, WindowExt as _, button, button_primary, checkbox, radio};
 use crate::workspace::ModalView;
 use crate::workspace::dialog_helpers::open_form_modal;
+use crate::{surface::strings as s, ui::theme};
 
 /// User's pick on the Open Project chooser. Mirrors the runtime
 /// [`WindowOpenPolicy`] variants that the modal can produce — `Ask`
@@ -124,7 +124,7 @@ impl Render for OpenProjectModal {
             .to_string();
         let theme_ref = cx.theme();
         let body_color = theme_ref.muted_foreground;
-        let prompt_text = format!("How should \"{folder_name}\" open?");
+        let prompt_text = s::open_project_modal_body(&folder_name);
 
         let here_checked = self.choice == OpenProjectChoice::AddHere;
         let new_checked = self.choice == OpenProjectChoice::NewWindow;
@@ -135,7 +135,7 @@ impl Render for OpenProjectModal {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP / 2.0))
             .child(
-                radio("open-project-add-here", "Add to this window", 0_isize)
+                radio("open-project-add-here", s::open_project_add_here(), 0_isize)
                     .checked(here_checked)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.choice = OpenProjectChoice::AddHere;
@@ -143,15 +143,19 @@ impl Render for OpenProjectModal {
                     })),
             )
             .child(
-                radio("open-project-new-window", "Open in new window", 1_isize)
-                    .checked(new_checked)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.choice = OpenProjectChoice::NewWindow;
-                        cx.notify();
-                    })),
+                radio(
+                    "open-project-new-window",
+                    s::open_project_new_window(),
+                    1_isize,
+                )
+                .checked(new_checked)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.choice = OpenProjectChoice::NewWindow;
+                    cx.notify();
+                })),
             );
 
-        let dont_ask = checkbox("open-project-dont-ask", "Don't ask again", 2_isize)
+        let dont_ask = checkbox("open-project-dont-ask", s::open_project_dont_ask(), 2_isize)
             .checked(dont_ask_checked)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.dont_ask = !this.dont_ask;
@@ -165,14 +169,14 @@ impl Render for OpenProjectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("open-project-cancel", "Cancel").on_click(cx.listener(
+                button("open-project-cancel", s::common_button_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
                 )),
             )
             .child(
-                button_primary("open-project-open", "Open").on_click(cx.listener(
+                button_primary("open-project-open", s::common_button_open()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     },
@@ -212,7 +216,7 @@ pub(crate) fn open_choose_window_modal<F>(
 {
     let on_submit: OpenProjectSubmit = Rc::new(on_submit);
     open_form_modal(
-        "Open Project",
+        s::open_project_modal_title(),
         None,
         move |_window, modal_cx| OpenProjectModal::new(path, initial, on_submit, modal_cx),
         window,

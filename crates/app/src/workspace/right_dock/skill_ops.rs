@@ -132,7 +132,7 @@ impl Workspace {
     /// process-launch concerns (G2 / `render.rs` responsibility fence).
     pub fn open_skill_dir_in_finder(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
         if let Err(e) = open::that_detached(dir) {
-            let report = ErrorReport::new("Open in Finder failed")
+            let report = ErrorReport::new(crate::surface::strings::error_open_finder_failed())
                 .severity(ErrorSeverity::Warning)
                 .from_error(&e)
                 .at(file!(), line!())

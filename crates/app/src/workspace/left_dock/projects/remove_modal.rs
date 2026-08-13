@@ -13,6 +13,7 @@ use gpui::{
     SharedString, WeakEntity, Window, div, prelude::*, px,
 };
 
+use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{button, button_danger, checkbox};
@@ -141,7 +142,7 @@ impl RemoveWorktreeModal {
                         // detached, so we don't roll back.
                         if let Some(b) = &branch_to_delete {
                             crate::lane::git::delete_branch(&repo_root, b).map_err(|e| {
-                                format!("Lane removed, but `git branch -D {b}` failed: {e}")
+                                s::remove_lane_branch_delete_failed(b, &e.to_string())
                             })?;
                         }
                         Ok(())
@@ -215,10 +216,7 @@ impl Render for RemoveWorktreeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(SharedString::from(format!(
-                        "Remove \"{}\" — this runs `git worktree remove`. The branch is kept; only the checkout directory is deleted.",
-                        self.target_label
-                    ))),
+                    .child(s::remove_lane_modal_body(&self.target_label)),
             )
             .child(
                 div()
@@ -231,7 +229,7 @@ impl Render for RemoveWorktreeModal {
         // Only shown when the lane actually has a branch
         // (Default kind / detached HEAD have nothing to delete).
         if let Some(branch) = self.branch.clone() {
-            let label = SharedString::from(format!("Also delete branch \"{branch}\""));
+            let label = SharedString::from(s::remove_lane_also_delete_branch(&branch));
             body = body.child(
                 checkbox("remove-wt-also-delete-branch", label, 0)
                     .checked(self.delete_branch_too)
@@ -254,20 +252,18 @@ impl Render for RemoveWorktreeModal {
                     div()
                         .text_size(px(theme::LANE_SUB_FONT_SIZE))
                         .text_color(faint_text)
-                        .child(
-                            "The lane has uncommitted changes. Clicking Remove again will pass --force.",
-                        ),
+                        .child(s::remove_lane_force_hint()),
                 );
             }
             stack
         });
 
         let confirm_label = if self.submitting {
-            "Removing…"
+            s::remove_lane_removing()
         } else if self.allow_force {
-            "Force Remove"
+            s::remove_lane_force()
         } else {
-            "Remove"
+            s::remove_lane_confirm()
         };
 
         let footer = div()
@@ -276,11 +272,13 @@ impl Render for RemoveWorktreeModal {
             .justify_end()
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(button("remove-wt-cancel", "Cancel").on_click(cx.listener(
-                |this, _: &ClickEvent, window, cx| {
-                    this.dismiss(window, cx);
-                },
-            )))
+            .child(
+                button("remove-wt-cancel", s::common_button_cancel()).on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
+                        this.dismiss(window, cx);
+                    },
+                )),
+            )
             .child(
                 button_danger("remove-wt-confirm", confirm_label)
                     .disabled(self.submitting)

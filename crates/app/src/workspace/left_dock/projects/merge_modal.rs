@@ -330,13 +330,14 @@ impl MergeModal {
                                         }
                                     }
                                     Err(e) => {
-                                        let report =
-                                            ErrorReport::new("Merge succeeded, but cleanup failed")
-                                                .severity(ErrorSeverity::Error)
-                                                .at(file!(), line!())
-                                                .with_context("detail", e.clone())
-                                                .dedup("lane.merge.cleanup")
-                                                .build();
+                                        let report = ErrorReport::new(
+                                            surface_strings::merge_modal_cleanup_failed_title(),
+                                        )
+                                        .severity(ErrorSeverity::Error)
+                                        .at(file!(), line!())
+                                        .with_context("detail", e.clone())
+                                        .dedup("lane.merge.cleanup")
+                                        .build();
                                         ws.report_error(report, cx);
                                     }
                                 }
@@ -604,7 +605,7 @@ impl Render for MergeModal {
                 .child(
                     button_primary(
                         "merge-goto",
-                        SharedString::from(format!("Go to \"{sel_branch}\" \u{2192}")),
+                        surface_strings::merge_modal_goto_target(&sel_branch),
                     )
                     .on_click(cx.listener(
                         move |this, _: &ClickEvent, window, cx| {
@@ -615,14 +616,14 @@ impl Render for MergeModal {
         } else {
             footer = footer
                 .child(
-                    button("merge-cancel", "Cancel")
+                    button("merge-cancel", surface_strings::common_button_cancel())
                         .disabled(is_merging)
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.dismiss(window, cx);
                         })),
                 )
                 .child(
-                    button_primary("merge-confirm", "Merge")
+                    button_primary("merge-confirm", surface_strings::merge_modal_confirm())
                         .disabled(is_merging)
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.submit(window, cx);

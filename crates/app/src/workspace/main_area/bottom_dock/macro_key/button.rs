@@ -113,7 +113,7 @@ fn edit_item(
             let btn = btn.clone();
             let workspace_for_modal = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_form_modal(
-                "Edit Macro",
+                surface_strings::macro_edit_title(),
                 None,
                 move |window, cx| {
                     MacroEditModal::new(
@@ -142,7 +142,7 @@ fn delete_item(
         surface_strings::ctx_macro_delete(),
         false,
         move |_ws, window, cx| {
-            let body = format!("Delete macro \u{201c}{label}\u{201d}?");
+            let body = surface_strings::delete_macro_modal_body(&label);
             let workspace_for_modal = cx.entity().downgrade();
             let tab_id = tab_id.clone();
             let widget_id = widget_id.clone();

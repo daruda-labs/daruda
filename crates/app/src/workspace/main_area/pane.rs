@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{TaskAgentSurface, TaskId};
-use daruda_terminal::ux::strings as term_strings;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
 use futures::StreamExt as _;
@@ -39,8 +38,10 @@ pub(in crate::workspace) enum PaneSpawnError {
 impl std::fmt::Display for PaneSpawnError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PaneSpawnError::Pty(e) => write!(f, "PTY: {e}"),
-            PaneSpawnError::Vt(e) => write!(f, "VT init: {e}"),
+            PaneSpawnError::Pty(e) => e.fmt(f),
+            PaneSpawnError::Vt(e) => f.write_str(
+                &crate::surface::strings::error_pane_vt_init_failed(&e.to_string()),
+            ),
         }
     }
 }
@@ -380,6 +381,26 @@ impl Pane {
                     crate::surface::strings::new_agent_chat_named(&v.agent_name).into()
                 })
             }
+        }
+    }
+
+    /// Refresh pane-title caches whose fallback text follows the active
+    /// locale. Content-derived titles are left untouched.
+    pub(in crate::workspace) fn refresh_locale_dependent_title(&mut self, cx: &App) {
+        match &mut self.content {
+            PaneContent::Terminal(t) => {
+                let title = t.view.read(cx).terminal_title().into_owned();
+                if t.cached_title.as_ref() != title {
+                    t.cached_title = title.into();
+                }
+            }
+            PaneContent::TaskEditPane(te) if te.title_input.read(cx).value().is_empty() => {
+                let title = crate::surface::strings::command_new_task();
+                if te.cached_title.as_ref() != title {
+                    te.cached_title = title.into();
+                }
+            }
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {}
         }
     }
 
@@ -1302,7 +1323,7 @@ impl Workspace {
             content: PaneContent::Terminal(TerminalContent {
                 view,
                 master,
-                cached_title: term_strings::FALLBACK_TITLE.into(),
+                cached_title: daruda_terminal::ux::strings::fallback_title().into(),
                 cached_cwd: None,
                 _stdout_task: stdout_task,
                 _view_event_subscription: view_event_sub,

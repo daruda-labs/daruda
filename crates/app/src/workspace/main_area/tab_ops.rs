@@ -220,7 +220,7 @@ impl Workspace {
         let pane = match self.create_pane(window, cx) {
             Ok(p) => p,
             Err(e) => {
-                self.report_pane_error("new tab", e, cx);
+                self.report_pane_error(&crate::surface::strings::pane_context_new_tab(), e, cx);
                 return;
             }
         };
@@ -713,7 +713,7 @@ impl Workspace {
             NewPaneKind::Terminal => match self.create_pane(window, cx) {
                 Ok(p) => p,
                 Err(e) => {
-                    self.report_pane_error("split", e, cx);
+                    self.report_pane_error(&crate::surface::strings::pane_context_split(), e, cx);
                     return;
                 }
             },

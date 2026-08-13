@@ -75,13 +75,14 @@ impl Workspace {
                         // A status failure staleness-freezes the whole Git
                         // Changes panel, meeting the CLAUDE.md "core function
                         // broke" bar for Error severity.
-                        let report = ErrorReport::new("git status failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.status")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_git_status_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(&path_for_report))
+                                .dedup("git.status")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }

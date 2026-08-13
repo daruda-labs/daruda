@@ -28,7 +28,6 @@ use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use daruda_terminal::ux::strings as ux_strings;
 
 /// Which action runs after the user picks a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -205,21 +204,13 @@ impl TaskPickerModal {
 /// "Error") — the picker intentionally drops the suffix the right
 /// panel appends (e.g. "Done (Stop)"), so the `_PREFIX` name refers to
 /// the panel's usage, not this one.
-fn state_label(state: &daruda_store::tasks::TaskState) -> &'static str {
+fn state_label(state: &daruda_store::tasks::TaskState) -> String {
     match state {
-        daruda_store::tasks::TaskState::Backlog => ux_strings::RIGHT_PANEL_TASK_BACKLOG_LABEL,
-        daruda_store::tasks::TaskState::Running { .. } => {
-            ux_strings::RIGHT_PANEL_TASK_RUNNING_LABEL
-        }
-        daruda_store::tasks::TaskState::Done { .. } => {
-            ux_strings::RIGHT_PANEL_TASK_DONE_LABEL_PREFIX
-        }
-        daruda_store::tasks::TaskState::Error { .. } => {
-            ux_strings::RIGHT_PANEL_TASK_ERROR_LABEL_PREFIX
-        }
-        daruda_store::tasks::TaskState::Cancelled { .. } => {
-            ux_strings::RIGHT_PANEL_TASK_CANCELLED_LABEL
-        }
+        daruda_store::tasks::TaskState::Backlog => strings::right_panel_task_backlog(),
+        daruda_store::tasks::TaskState::Running { .. } => strings::right_panel_task_running(),
+        daruda_store::tasks::TaskState::Done { .. } => strings::right_panel_task_done_prefix(),
+        daruda_store::tasks::TaskState::Error { .. } => strings::right_panel_task_error_prefix(),
+        daruda_store::tasks::TaskState::Cancelled { .. } => strings::right_panel_task_cancelled(),
     }
 }
 

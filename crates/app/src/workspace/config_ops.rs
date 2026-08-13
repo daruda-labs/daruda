@@ -298,6 +298,22 @@ impl Workspace {
         let git_commit_input = self.git_commit_input.clone();
         let skill_search_input = self.skill_search_input.clone();
         let task_search_input = self.task_search_input.clone();
+        let task_edit_inputs = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .filter_map(|pane| {
+                pane.task_edit_content().map(|task_edit| {
+                    (
+                        task_edit.title_input.clone(),
+                        task_edit.branch_input.clone(),
+                        task_edit.prompt_state.clone(),
+                        task_edit.notes_state.clone(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
         let handle = self.window_handle;
         // Keep the amend-mode labels if a language switch lands mid-amend.
         let amend_mode = self.is_amend_mode();
@@ -330,8 +346,36 @@ impl Workspace {
                 task_search_input.update(cx, |input, cx| {
                     input.set_placeholder(s::task_search_placeholder(), window, cx);
                 });
+
+                // Every open Task Edit pane, including panes parked in
+                // inactive lanes, owns four locale-dependent placeholders.
+                for (title, branch, prompt, notes) in task_edit_inputs {
+                    title.update(cx, |input, cx| {
+                        input.set_placeholder(s::task_edit_title_placeholder(), window, cx);
+                    });
+                    branch.update(cx, |input, cx| {
+                        input.set_placeholder(s::task_edit_branch_placeholder(), window, cx);
+                    });
+                    prompt.update(cx, |input, cx| {
+                        input.set_placeholder(s::task_edit_prompt_placeholder(), window, cx);
+                    });
+                    notes.update(cx, |input, cx| {
+                        input.set_placeholder(s::task_edit_notes_placeholder(), window, cx);
+                    });
+                }
             },
         );
+
+        // Terminal fallback titles and untitled Task Edit tabs are cached by
+        // the workspace, so refresh them separately from the widget strings.
+        for pane in self
+            .main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|runtime| runtime.panes.iter_mut())
+        {
+            pane.refresh_locale_dependent_title(cx);
+        }
 
         // Re-sync the bottom input placeholder: a language switch or
         // `use_modifier_to_send` toggle may change its copy.

@@ -1,0 +1,9 @@
+terminal:
+  fallback_title: "셸"
+  pty_io_failed: "PTY 입출력 실패: %{error}"
+  pty_open_failed: "PTY 열기 실패: %{error}"
+  pty_reader_thread_died: "PTY 읽기 스레드가 종료되었습니다"
+  pty_spawn_shell_failed: "셸 실행 실패: %{error}"
+  pty_writer_thread_died: "PTY 쓰기 스레드가 종료되었습니다"
+  search_no_matches: "일치 항목 없음"
+  search_regex_error: "정규식 오류"

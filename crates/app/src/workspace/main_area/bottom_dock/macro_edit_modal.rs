@@ -6,12 +6,12 @@
 
 use crate::ui::theme;
 use daruda_store::panels::{ButtonDisplay, ButtonWidget, TabId, WidgetId, new_widget_id};
-use daruda_terminal::ux::strings as s;
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
     MouseDownEvent, Render, SharedString, Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
+use crate::surface::strings as s;
 use crate::ui::WindowExt as _;
 use crate::ui::checkbox;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
@@ -54,16 +54,16 @@ impl MacroEditModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let label_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("Macro label (required)")
+            InputState::new(window, cx_state).placeholder(s::macro_placeholder_label())
         });
         let send_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("Text to send (e.g. claude, cargo build)")
+            InputState::new(window, cx_state).placeholder(s::macro_placeholder_send())
         });
         let icon_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("Icon character (required for icon mode)")
+            InputState::new(window, cx_state).placeholder(s::macro_placeholder_icon())
         });
         let shortcut_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("Shortcut (optional, e.g. cmd-shift-1)")
+            InputState::new(window, cx_state).placeholder(s::macro_placeholder_shortcut())
         });
 
         let (auto_enter, display_as_icon, widget_id, is_builtin) = if let Some(btn) = initial {
@@ -192,11 +192,11 @@ impl MacroEditModal {
         let label = self.label_input.read(cx).value().to_string();
         let label = label.trim().to_string();
         if label.is_empty() {
-            return Err("Label is required.".to_string());
+            return Err(s::macro_err_label_required());
         }
         let send = self.send_input.read(cx).value().to_string();
         if send.trim().is_empty() {
-            return Err("Send text is required.".to_string());
+            return Err(s::macro_err_send_required());
         }
 
         let display = if self.display_as_icon {
@@ -212,7 +212,7 @@ impl MacroEditModal {
             Some(icon_raw)
         };
         if matches!(display, ButtonDisplay::Icon) && icon.is_none() {
-            return Err("Icon character is required when 'Display as icon' is on.".to_string());
+            return Err(s::macro_err_icon_required());
         }
 
         let shortcut_raw = self.shortcut_input.read(cx).value().to_string();
@@ -278,9 +278,9 @@ impl MacroEditModal {
     fn record_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let recording = self.recording_shortcut;
         let label = if recording {
-            s::MACRO_RECORD_BUTTON_RECORDING
+            s::macro_record_recording()
         } else {
-            s::MACRO_RECORD_BUTTON_IDLE
+            s::macro_record_idle()
         };
         let t = theme::current(cx);
         let widget_bg = t.button_widget_bg;
@@ -343,9 +343,9 @@ impl ModalView for MacroEditModal {}
 impl Render for MacroEditModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let submit_label = if self.widget_id.is_some() {
-            "Save"
+            s::common_button_save()
         } else {
-            "Create"
+            s::common_button_create()
         };
 
         let error_text_color = theme::ERROR;
@@ -353,53 +353,50 @@ impl Render for MacroEditModal {
         // Dialog provides outer chrome (panel bg / border / radius /
         // padding / title / backdrop). The modal body is just the
         // form fields + footer.
-        let mut body = div()
-            .key_context("MacroEditModal")
-            .tab_group()
-            // Safety net: when shortcut recording is active, route the
-            // captured keystroke through `handle_record_keydown` even
-            // if focus has wandered off the record button itself.
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                if this.recording_shortcut {
-                    this.handle_record_keydown(ev, window, cx);
-                }
-            }))
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(field_label("Label", cx))
-            .child(input(&self.label_input, cx, 0))
-            .child(field_label("Send", cx))
-            .child(input(&self.send_input, cx, 1))
-            .child(
-                checkbox("macro-edit-auto-enter", "Press Enter after sending", 2)
-                    .checked(self.auto_enter)
-                    .on_click(
-                        cx.listener(|this, _checked: &bool, _w, cx| this.toggle_auto_enter(cx)),
-                    ),
-            )
-            .child(
-                checkbox(
-                    "macro-edit-display-icon",
-                    "Display as icon (square tile)",
-                    3,
+        let mut body =
+            div()
+                .key_context("MacroEditModal")
+                .tab_group()
+                // Safety net: when shortcut recording is active, route the
+                // captured keystroke through `handle_record_keydown` even
+                // if focus has wandered off the record button itself.
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    if this.recording_shortcut {
+                        this.handle_record_keydown(ev, window, cx);
+                    }
+                }))
+                .flex()
+                .flex_col()
+                .gap(px(theme::MODAL_PANEL_GAP))
+                .child(field_label(s::macro_field_label(), cx))
+                .child(input(&self.label_input, cx, 0))
+                .child(field_label(s::macro_field_send(), cx))
+                .child(input(&self.send_input, cx, 1))
+                .child(
+                    checkbox("macro-edit-auto-enter", s::macro_auto_enter(), 2)
+                        .checked(self.auto_enter)
+                        .on_click(
+                            cx.listener(|this, _checked: &bool, _w, cx| this.toggle_auto_enter(cx)),
+                        ),
                 )
-                .checked(self.display_as_icon)
-                .on_click(
-                    cx.listener(|this, _checked: &bool, _w, cx| this.toggle_display_as_icon(cx)),
-                ),
-            )
-            .child(field_label("Icon", cx))
-            .child(input(&self.icon_input, cx, 4))
-            .child(field_label("Shortcut", cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(theme::MODAL_FOOTER_GAP))
-                    .child(div().flex_1().child(input(&self.shortcut_input, cx, 5)))
-                    .child(self.record_button(cx)),
-            );
+                .child(
+                    checkbox("macro-edit-display-icon", s::macro_display_as_icon(), 3)
+                        .checked(self.display_as_icon)
+                        .on_click(cx.listener(|this, _checked: &bool, _w, cx| {
+                            this.toggle_display_as_icon(cx)
+                        })),
+                )
+                .child(field_label(s::macro_field_icon(), cx))
+                .child(input(&self.icon_input, cx, 4))
+                .child(field_label(s::macro_field_shortcut(), cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(theme::MODAL_FOOTER_GAP))
+                        .child(div().flex_1().child(input(&self.shortcut_input, cx, 5)))
+                        .child(self.record_button(cx)),
+                );
 
         if let Some(err) = self.error.as_ref() {
             body = body.child(
@@ -416,11 +413,13 @@ impl Render for MacroEditModal {
             .justify_end()
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(button("macro-edit-cancel", "Cancel").on_click(cx.listener(
-                |this, _: &ClickEvent, window, cx| {
-                    this.dismiss(window, cx);
-                },
-            )))
+            .child(
+                button("macro-edit-cancel", s::common_button_cancel()).on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
+                        this.dismiss(window, cx);
+                    },
+                )),
+            )
             .child(
                 button_primary("macro-edit-submit", submit_label).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
@@ -461,7 +460,8 @@ fn has_any_modifier(ks: &Keystroke) -> bool {
     ks.modifiers.platform || ks.modifiers.control || ks.modifiers.alt || ks.modifiers.shift
 }
 
-fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn field_label(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement {
+    let text = text.into();
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(theme::current(cx).text_muted)

@@ -127,7 +127,8 @@ impl Workspace {
 
         let title_for_default = title.clone();
         let title_input = cx.new(|cx_state| {
-            let mut s = InputState::new(window, cx_state).placeholder("Task title");
+            let mut s = InputState::new(window, cx_state)
+                .placeholder(crate::surface::strings::task_edit_title_placeholder());
             if !title_for_default.is_empty() {
                 s = s.default_value(title_for_default);
             }
@@ -136,7 +137,8 @@ impl Workspace {
 
         let branch_for_default = branch_name.clone();
         let branch_input = cx.new(|cx_state| {
-            let mut s = InputState::new(window, cx_state).placeholder("branch-name");
+            let mut s = InputState::new(window, cx_state)
+                .placeholder(crate::surface::strings::task_edit_branch_placeholder());
             if !branch_for_default.is_empty() {
                 s = s.default_value(branch_for_default);
             }
@@ -148,8 +150,20 @@ impl Workspace {
         // like a plain textarea. Use `make_markdown_state` instead
         // for code-style buffers (gpui_component default keeps line
         // numbers on).
-        let prompt_state = make_markdown_prose_state(&prompt, "Describe the task…", 20, window, cx);
-        let notes_state = make_markdown_prose_state(&notes, "Notes (markdown)", 4, window, cx);
+        let prompt_state = make_markdown_prose_state(
+            &prompt,
+            crate::surface::strings::task_edit_prompt_placeholder(),
+            20,
+            window,
+            cx,
+        );
+        let notes_state = make_markdown_prose_state(
+            &notes,
+            crate::surface::strings::task_edit_notes_placeholder(),
+            4,
+            window,
+            cx,
+        );
 
         let title_sub = cx.subscribe_in(
             &title_input,
@@ -230,7 +244,7 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
 
         let cached_title: SharedString = if title.is_empty() {
-            "New task".into()
+            crate::surface::strings::command_new_task().into()
         } else {
             SharedString::from(title.clone())
         };
@@ -330,7 +344,7 @@ impl Workspace {
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.branch_validation = validate_branch(&derived);
             te.cached_title = if title.is_empty() {
-                "New task".into()
+                crate::surface::strings::command_new_task().into()
             } else {
                 SharedString::from(title)
             };
@@ -825,7 +839,7 @@ impl Workspace {
             Ok(s) => s,
             Err(e) => {
                 LogWriter::log(
-                    ErrorReport::new("Prompt watcher read failed")
+                    ErrorReport::new(crate::surface::strings::error_prompt_watcher_read_failed())
                         .severity(ErrorSeverity::Info)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -967,7 +981,7 @@ impl Workspace {
             return;
         };
         if !path.exists() {
-            let report = ErrorReport::new("Prompt file not found")
+            let report = ErrorReport::new(crate::surface::strings::error_prompt_file_not_found())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .with_context("path", redact_home(&path))
@@ -982,12 +996,13 @@ impl Workspace {
             .find(|w| path.starts_with(&w.path))
             .map(|w| w.id)
         else {
-            let report = ErrorReport::new("Prompt file is outside all known lanes")
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .with_context("path", redact_home(&path))
-                .dedup("tasks.open_prompt_file.no_lane")
-                .build();
+            let report =
+                ErrorReport::new(crate::surface::strings::error_prompt_file_outside_lanes())
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(&path))
+                    .dedup("tasks.open_prompt_file.no_lane")
+                    .build();
             self.report_error(report, cx);
             return;
         };

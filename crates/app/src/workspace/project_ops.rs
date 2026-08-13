@@ -438,7 +438,7 @@ impl Workspace {
                     let close_window = ws.update(cx_w, |ws, cx| {
                         for (path, message) in &errors {
                             let report = daruda_store::observability::error_report::ErrorReport::new(
-                                "Lane disk cleanup failed",
+                                crate::surface::strings::error_lane_disk_cleanup_failed(),
                             )
                             .severity(
                                 daruda_store::observability::error_report::ErrorSeverity::Warning,

@@ -1,0 +1,9 @@
+terminal:
+  fallback_title: "shell"
+  pty_io_failed: "PTY I/O failed: %{error}"
+  pty_open_failed: "Failed to open PTY: %{error}"
+  pty_reader_thread_died: "PTY reader thread died"
+  pty_spawn_shell_failed: "Failed to spawn shell: %{error}"
+  pty_writer_thread_died: "PTY writer thread died"
+  search_no_matches: "no matches"
+  search_regex_error: "regex error"

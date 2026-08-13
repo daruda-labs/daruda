@@ -191,11 +191,6 @@ pub(crate) struct TerminalViewState {
     /// see `None`.
     pub(crate) last_bounds: Option<gpui::Bounds<gpui::Pixels>>,
 
-    /// Window title cached from the last OSC 0/2. Read by
-    /// `terminal_title()` (workspace tab strip) and by IME callbacks
-    /// that surface the title to the OS.
-    pub(crate) last_window_title: Option<String>,
-
     // ---- Pending PTY output ----
     /// Bytes received from the PTY but not yet fed into the VT
     /// parser. The 16 ms render tick batches them so a verbose
@@ -321,7 +316,6 @@ impl TerminalViewState {
             viewport_total_len: 0,
             viewport_style_runs: Vec::new(),
             last_bounds: None,
-            last_window_title: None,
             pending_output: Vec::new(),
             pending_refresh: PendingRefresh::No,
             marked_text: None,

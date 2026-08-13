@@ -4,7 +4,7 @@
 //! `PopupMenuItem` closures are `'static` and free of borrows on the
 //! row or snapshot they were built from.
 
-use gpui::{App, ClickEvent, SharedString};
+use gpui::{App, ClickEvent};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
@@ -86,13 +86,14 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
                         })
                         .await;
                     if let Err(e) = result {
-                        let report = ErrorReport::new("Reveal in Finder failed")
-                            .severity(ErrorSeverity::Warning)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path))
-                            .dedup("files.reveal")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_reveal_finder_failed())
+                                .severity(ErrorSeverity::Warning)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(&path))
+                                .dedup("files.reveal")
+                                .build();
                         // SILENT-OK: workspace may drop before the reveal returns
                         let _ = workspace.update(cx, |ws, cx| ws.report_error(report, cx));
                     }
@@ -283,7 +284,7 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
                     }
 
                     crate::workspace::dialog_helpers::open_form_modal(
-                        SharedString::from(format!("Merge \"{branch}\" into")),
+                        surface_strings::merge_modal_title(&branch),
                         None,
                         move |window, cx| {
                             super::merge_modal::MergeModal::new(

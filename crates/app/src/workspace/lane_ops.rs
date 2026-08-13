@@ -147,13 +147,13 @@ impl Workspace {
     ) -> Result<RemoveWorktreePlan, String> {
         let wt = self
             .lane_for(target)
-            .ok_or_else(|| "Lane not found.".to_string())?;
+            .ok_or_else(crate::surface::strings::remove_lane_err_not_found)?;
         if !Self::lane_removable(wt) {
-            return Err("This lane cannot be removed.".to_string());
+            return Err(crate::surface::strings::remove_lane_err_cannot_remove());
         }
         let repo_root = match &wt.kind {
             daruda_store::project::LaneKind::Git { repo_root, .. } => repo_root.clone(),
-            _ => return Err("Not a git worktree.".to_string()),
+            _ => return Err(crate::surface::strings::remove_lane_err_not_git()),
         };
         Ok(RemoveWorktreePlan {
             path: wt.path.clone(),
@@ -789,7 +789,7 @@ impl Workspace {
             Ok(p) => p,
             Err(msg) => {
                 let report = daruda_store::observability::error_report::ErrorReport::new(
-                    "Cannot remove worktree",
+                    crate::surface::strings::error_lane_remove_failed(),
                 )
                 .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
                 .message(msg)
