@@ -25,6 +25,7 @@ pub mod project;
 pub mod render;
 pub mod scrollback;
 pub mod session_host;
+mod settings_patch;
 pub mod settings_section;
 pub mod shell;
 pub mod status_bar;
@@ -39,7 +40,7 @@ pub mod window;
 mod tests;
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{io::Write as _, path::PathBuf};
 
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
@@ -72,6 +73,7 @@ pub use project::{
 pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use session_host::{SessionHostEntry, SessionHostKind, SessionHostTombstone};
+pub use settings_patch::{SettingsFieldId, SettingsPatch};
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
 pub use status_bar::{StatusBarConfig, StatusBarItem};
@@ -324,6 +326,98 @@ pub fn patch_config_file(config: &Config) -> Result<(), String> {
     patch_config_file_to(config, &config_path())
 }
 
+/// Apply one Settings UI change against the latest on-disk document.
+///
+/// Only the addressed TOML key (or structural catalog) is rewritten, so an
+/// open Settings window cannot overwrite unrelated changes made after it was
+/// opened. The returned config is parsed from the exact document written and
+/// is suitable for replacing an in-memory settings cache.
+pub fn apply_settings_patch(patch: &SettingsPatch) -> Result<Config, String> {
+    apply_settings_patch_to(patch, &config_path())
+}
+
+/// Path-aware form of [`apply_settings_patch`] for tests and alternate stores.
+pub fn apply_settings_patch_to(
+    patch: &SettingsPatch,
+    path: &std::path::Path,
+) -> Result<Config, String> {
+    apply_settings_patch_to_inner(patch, path, None).map_err(|error| error.to_string())
+}
+
+/// A Settings patch failed because the addressed field changed or persistence
+/// itself failed. Callers use the conflict variant to offer an explicit choice
+/// instead of treating a concurrent edit as an I/O error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsPatchApplyError {
+    Conflict(SettingsFieldId),
+    Persistence(String),
+}
+
+impl std::fmt::Display for SettingsPatchApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict(field) => write!(f, "{} changed before it could be saved", field.path()),
+            Self::Persistence(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for SettingsPatchApplyError {}
+
+/// Apply `patch` only when its field still matches `expected` in the latest
+/// on-disk document. Unrelated changes are retained and retried if the file
+/// changes again while the replacement is being prepared.
+pub fn apply_settings_patch_to_if_unchanged(
+    patch: &SettingsPatch,
+    expected: &Config,
+    path: &std::path::Path,
+) -> Result<Config, SettingsPatchApplyError> {
+    apply_settings_patch_to_inner(patch, path, Some(expected))
+}
+
+fn apply_settings_patch_to_inner(
+    patch: &SettingsPatch,
+    path: &std::path::Path,
+    expected: Option<&Config>,
+) -> Result<Config, SettingsPatchApplyError> {
+    const MAX_WRITE_ATTEMPTS: usize = 8;
+
+    for _ in 0..MAX_WRITE_ATTEMPTS {
+        let existing = read_config_text(path).map_err(SettingsPatchApplyError::Persistence)?;
+        let mut doc: toml_edit::DocumentMut =
+            existing.parse().map_err(|e: toml_edit::TomlError| {
+                SettingsPatchApplyError::Persistence(format!(
+                    "existing config has a parse error: {e}"
+                ))
+            })?;
+        let mut config = parse_config_text(&existing)?;
+        if expected.is_some_and(|baseline| patch.field_changed_between(baseline, &config)) {
+            return Err(SettingsPatchApplyError::Conflict(patch.field()));
+        }
+
+        patch.apply_to(&mut config);
+        config.clamp();
+        patch_settings_document(&mut doc, &config, patch);
+
+        let text = doc.to_string();
+        let mut written: Config = toml::from_str(&text).map_err(|e| {
+            SettingsPatchApplyError::Persistence(format!(
+                "written config could not be reloaded: {e}"
+            ))
+        })?;
+        written.clamp();
+        if write_config_text_atomic(path, &text, Some(&existing))
+            .map_err(SettingsPatchApplyError::Persistence)?
+        {
+            return Ok(written);
+        }
+    }
+
+    Err(SettingsPatchApplyError::Persistence(
+        "config changed repeatedly while settings were being saved".to_string(),
+    ))
+}
+
 /// Like [`patch_config_file`] but writes to an explicit path.  Used by tests
 /// so they can operate on a temp directory instead of the user's real config.
 pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(), String> {
@@ -334,28 +428,16 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     clamped.clamp();
     let config = &clamped;
 
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = read_config_text(path)?;
     let mut doc: toml_edit::DocumentMut = existing
         .parse()
         .map_err(|e: toml_edit::TomlError| format!("existing config has a parse error: {e}"))?;
 
-    // Patch one section at a time.  Creates the table if absent so saving
-    // from a fresh install produces a minimal file.
-    fn patch_section(
-        doc: &mut toml_edit::DocumentMut,
-        key: &str,
-        f: impl FnOnce(&mut toml_edit::Table),
-    ) {
-        if !doc.contains_key(key) {
-            doc.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
-        }
-        if let Some(t) = doc.get_mut(key).and_then(|i| i.as_table_mut()) {
-            f(t);
-        }
-    }
-
     patch_section(&mut doc, "general", |t| {
-        t["language"] = toml_edit::value(config.general.language.clone());
+        t.insert(
+            "language",
+            toml_edit::value(config.general.language.clone()),
+        );
     });
 
     patch_section(&mut doc, "theme", |t| {
@@ -363,19 +445,37 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         // up with only `terminal_preset` (cell palette) / `ui_preset`
         // (chrome palette).
         t.remove("preset");
-        t["terminal_preset"] = toml_edit::value(config.theme.terminal_preset.clone());
-        t["ui_preset"] = toml_edit::value(config.theme.ui_preset.clone());
+        t.insert(
+            "terminal_preset",
+            toml_edit::value(config.theme.terminal_preset.clone()),
+        );
+        t.insert(
+            "ui_preset",
+            toml_edit::value(config.theme.ui_preset.clone()),
+        );
     });
 
     patch_section(&mut doc, "font", |t| {
-        t["family"] = toml_edit::value(config.font.family.clone());
-        t["size"] = toml_edit::value(f64::from(config.font.size));
-        t["editor_size"] = toml_edit::value(f64::from(config.font.editor_size));
-        t["agent_chat_size"] = toml_edit::value(f64::from(config.font.agent_chat_size));
-        t["vertical_spacing"] = toml_edit::value(f64::from(config.font.vertical_spacing));
-        t["horizontal_spacing"] = toml_edit::value(f64::from(config.font.horizontal_spacing));
-        t["inset_x"] = toml_edit::value(f64::from(config.font.inset_x));
-        t["inset_y"] = toml_edit::value(f64::from(config.font.inset_y));
+        t.insert("family", toml_edit::value(config.font.family.clone()));
+        t.insert("size", toml_edit::value(f64::from(config.font.size)));
+        t.insert(
+            "editor_size",
+            toml_edit::value(f64::from(config.font.editor_size)),
+        );
+        t.insert(
+            "agent_chat_size",
+            toml_edit::value(f64::from(config.font.agent_chat_size)),
+        );
+        t.insert(
+            "vertical_spacing",
+            toml_edit::value(f64::from(config.font.vertical_spacing)),
+        );
+        t.insert(
+            "horizontal_spacing",
+            toml_edit::value(f64::from(config.font.horizontal_spacing)),
+        );
+        t.insert("inset_x", toml_edit::value(f64::from(config.font.inset_x)));
+        t.insert("inset_y", toml_edit::value(f64::from(config.font.inset_y)));
     });
 
     patch_section(&mut doc, "cursor", |t| {
@@ -384,43 +484,80 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             CursorStyle::Underline => "underline",
             CursorStyle::Bar => "bar",
         };
-        t["style"] = toml_edit::value(style_str);
-        t["blinking"] = toml_edit::value(config.cursor.blinking);
+        t.insert("style", toml_edit::value(style_str));
+        t.insert("blinking", toml_edit::value(config.cursor.blinking));
     });
 
     patch_section(&mut doc, "shell", |t| {
-        t["close_pane_on_exit"] = toml_edit::value(config.shell.close_pane_on_exit);
+        t.insert(
+            "close_pane_on_exit",
+            toml_edit::value(config.shell.close_pane_on_exit),
+        );
     });
 
     patch_section(&mut doc, "window", |t| {
-        t["opacity"] = toml_edit::value(f64::from(config.window.opacity));
-        t["blur"] = toml_edit::value(config.window.blur);
+        t.insert(
+            "opacity",
+            toml_edit::value(f64::from(config.window.opacity)),
+        );
+        t.insert("blur", toml_edit::value(config.window.blur));
     });
 
     patch_section(&mut doc, "scrollback", |t| {
-        t["max_rows"] = toml_edit::value(config.scrollback.max_rows as i64);
+        t.insert(
+            "max_rows",
+            toml_edit::value(config.scrollback.max_rows as i64),
+        );
     });
 
     patch_section(&mut doc, "left_dock", |t| {
-        t["files_show_hidden"] = toml_edit::value(config.left_dock.files_show_hidden);
-        t["files_use_gitignore"] = toml_edit::value(config.left_dock.files_use_gitignore);
+        t.insert(
+            "files_show_hidden",
+            toml_edit::value(config.left_dock.files_show_hidden),
+        );
+        t.insert(
+            "files_use_gitignore",
+            toml_edit::value(config.left_dock.files_use_gitignore),
+        );
     });
 
     patch_section(&mut doc, "file_viewer", |t| {
-        t["syntax_theme"] = toml_edit::value(config.file_viewer.syntax_theme.clone());
-        t["preview_tab"] = toml_edit::value(config.file_viewer.preview_tab);
+        t.insert(
+            "syntax_theme",
+            toml_edit::value(config.file_viewer.syntax_theme.clone()),
+        );
+        t.insert(
+            "preview_tab",
+            toml_edit::value(config.file_viewer.preview_tab),
+        );
     });
 
     patch_section(&mut doc, "editor", |t| {
-        t["preferred"] = toml_edit::value(config.editor.preferred.clone());
+        t.insert(
+            "preferred",
+            toml_edit::value(config.editor.preferred.clone()),
+        );
     });
 
     patch_section(&mut doc, "clipboard", |t| {
-        t["streaming_max_bytes"] = toml_edit::value(config.clipboard.streaming_max_bytes as i64);
+        t.insert(
+            "streaming_max_bytes",
+            toml_edit::value(config.clipboard.streaming_max_bytes as i64),
+        );
     });
 
     patch_section(&mut doc, "panels", |t| {
-        t["grid_columns"] = toml_edit::value(i64::from(config.panels.grid_columns));
+        t.insert(
+            "grid_columns",
+            toml_edit::value(i64::from(config.panels.grid_columns)),
+        );
+    });
+
+    patch_section(&mut doc, "render", |t| {
+        t.insert(
+            "max_fps",
+            toml_edit::value(i64::from(config.render.max_fps)),
+        );
     });
 
     patch_section(&mut doc, "status_bar", |t| {
@@ -435,33 +572,49 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             };
             arr.push(slug);
         }
-        t["hidden_items"] = toml_edit::value(arr);
+        t.insert("hidden_items", toml_edit::value(arr));
         // The opt-in list is gone; leaving it behind would be read back on
         // the next launch and undo the migration that just ran.
         t.remove("visible_items");
     });
 
     patch_section(&mut doc, "ports", |t| {
-        t["poll_secs"] = toml_edit::value(config.ports.poll_secs as i64);
+        t.insert("poll_secs", toml_edit::value(config.ports.poll_secs as i64));
     });
 
     patch_section(&mut doc, "claude_status", |t| {
-        t["enable"] = toml_edit::value(config.claude_status.enable);
+        t.insert("enable", toml_edit::value(config.claude_status.enable));
     });
 
     patch_section(&mut doc, "agent", |t| {
-        t["default_permission_mode"] =
-            toml_edit::value(config.agent.default_permission_mode.mode_id());
-        t["use_modifier_to_send"] = toml_edit::value(config.agent.use_modifier_to_send);
-        t["input_max_rows"] = toml_edit::value(i64::from(config.agent.input_max_rows));
+        t.insert(
+            "default_permission_mode",
+            toml_edit::value(config.agent.default_permission_mode.mode_id()),
+        );
+        t.insert(
+            "use_modifier_to_send",
+            toml_edit::value(config.agent.use_modifier_to_send),
+        );
+        t.insert(
+            "input_max_rows",
+            toml_edit::value(i64::from(config.agent.input_max_rows)),
+        );
     });
 
     patch_section(&mut doc, "telegram", |t| {
-        t["enabled"] = toml_edit::value(config.telegram.enabled);
-        t["defer_while_active"] = toml_edit::value(config.telegram.defer_while_active);
-        t["active_idle_secs"] = toml_edit::value(config.telegram.active_idle_secs as i64);
+        t.insert("enabled", toml_edit::value(config.telegram.enabled));
+        t.insert(
+            "defer_while_active",
+            toml_edit::value(config.telegram.defer_while_active),
+        );
+        t.insert(
+            "active_idle_secs",
+            toml_edit::value(config.telegram.active_idle_secs as i64),
+        );
         match config.telegram.authorized_chat_id {
-            Some(id) => t["authorized_chat_id"] = toml_edit::value(id),
+            Some(id) => {
+                t.insert("authorized_chat_id", toml_edit::value(id));
+            }
             None => {
                 t.remove("authorized_chat_id");
             }
@@ -469,17 +622,362 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     });
 
     if doc.contains_key("agents") || config.agents != agent::default_agents() {
-        let mut agents = toml_edit::ArrayOfTables::new();
-        for entry in &config.agents {
-            agents.push(agent_entry_table(entry));
-        }
-        doc.insert("agents", toml_edit::Item::ArrayOfTables(agents));
+        replace_agents(&mut doc, &config.agents);
     }
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    replace_session_hosts(
+        &mut doc,
+        &config.session_hosts,
+        &config.session_host_tombstones,
+    );
+
+    write_config_text_atomic(path, &doc.to_string(), None).map(|_| ())
+}
+
+/// Patch one section at a time. Creates the table if absent so saving from a
+/// fresh install produces a minimal document.
+fn patch_section(
+    doc: &mut toml_edit::DocumentMut,
+    key: &str,
+    f: impl FnOnce(&mut dyn toml_edit::TableLike),
+) {
+    if !doc.contains_key(key) {
+        doc.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
     }
-    std::fs::write(path, doc.to_string()).map_err(|e| e.to_string())
+    if let Some(table) = doc
+        .get_mut(key)
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        f(table);
+    }
+}
+
+fn read_config_text(path: &std::path::Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(format!("failed to read config: {error}")),
+    }
+}
+
+fn parse_config_text(text: &str) -> Result<Config, SettingsPatchApplyError> {
+    let mut config = if text.trim().is_empty() {
+        Config::default()
+    } else {
+        toml::from_str::<Config>(text).map_err(|e| {
+            SettingsPatchApplyError::Persistence(format!(
+                "existing config has invalid settings: {e}"
+            ))
+        })?
+    };
+    config.clamp();
+    Ok(config)
+}
+
+fn config_write_path(path: &std::path::Path) -> Result<PathBuf, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::canonicalize(path)
+            .map_err(|e| format!("failed to resolve config symlink: {e}")),
+        Ok(_) => Ok(path.to_path_buf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(error) => Err(format!("failed to inspect config path: {error}")),
+    }
+}
+
+/// Write a prepared document atomically. When `expected` is present, return
+/// `Ok(false)` if the logical config path changed while the temporary file was
+/// being prepared so the caller can rebuild its patch from the new contents.
+fn write_config_text_atomic(
+    path: &std::path::Path,
+    text: &str,
+    expected: Option<&str>,
+) -> Result<bool, String> {
+    let write_path = config_write_path(path)?;
+    let parent = write_path
+        .parent()
+        .ok_or_else(|| "config path has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("failed to create config dir: {e}"))?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("failed to create temporary config: {e}"))?;
+    temp.write_all(text.as_bytes())
+        .map_err(|e| format!("failed to write temporary config: {e}"))?;
+    temp.flush()
+        .map_err(|e| format!("failed to flush temporary config: {e}"))?;
+    if let Ok(metadata) = std::fs::metadata(&write_path) {
+        temp.as_file()
+            .set_permissions(metadata.permissions())
+            .map_err(|e| format!("failed to preserve config permissions: {e}"))?;
+    }
+    temp.as_file()
+        .sync_all()
+        .map_err(|e| format!("failed to sync temporary config: {e}"))?;
+    if let Some(expected) = expected
+        && read_config_text(path)? != expected
+    {
+        return Ok(false);
+    }
+    temp.persist(&write_path)
+        .map_err(|e| format!("failed to replace config: {}", e.error))?;
+    Ok(true)
+}
+
+fn patch_settings_document(
+    doc: &mut toml_edit::DocumentMut,
+    config: &Config,
+    patch: &SettingsPatch,
+) {
+    match patch {
+        SettingsPatch::GeneralLanguage(_) => patch_section(doc, "general", |t| {
+            t.insert(
+                "language",
+                toml_edit::value(config.general.language.clone()),
+            );
+        }),
+        SettingsPatch::TerminalPreset(_) => patch_section(doc, "theme", |t| {
+            t.remove("preset");
+            t.insert(
+                "terminal_preset",
+                toml_edit::value(config.theme.terminal_preset.clone()),
+            );
+        }),
+        SettingsPatch::UiPreset(_) => patch_section(doc, "theme", |t| {
+            t.insert(
+                "ui_preset",
+                toml_edit::value(config.theme.ui_preset.clone()),
+            );
+        }),
+        SettingsPatch::FontFamily(_) => patch_section(doc, "font", |t| {
+            t.insert("family", toml_edit::value(config.font.family.clone()));
+        }),
+        SettingsPatch::FontSize(_) => patch_section(doc, "font", |t| {
+            t.insert("size", toml_edit::value(f64::from(config.font.size)));
+        }),
+        SettingsPatch::EditorFontSize(_) => patch_section(doc, "font", |t| {
+            t.insert(
+                "editor_size",
+                toml_edit::value(f64::from(config.font.editor_size)),
+            );
+        }),
+        SettingsPatch::AgentChatFontSize(_) => patch_section(doc, "font", |t| {
+            t.insert(
+                "agent_chat_size",
+                toml_edit::value(f64::from(config.font.agent_chat_size)),
+            );
+        }),
+        SettingsPatch::VerticalSpacing(_) => patch_section(doc, "font", |t| {
+            t.insert(
+                "vertical_spacing",
+                toml_edit::value(f64::from(config.font.vertical_spacing)),
+            );
+        }),
+        SettingsPatch::HorizontalSpacing(_) => patch_section(doc, "font", |t| {
+            t.insert(
+                "horizontal_spacing",
+                toml_edit::value(f64::from(config.font.horizontal_spacing)),
+            );
+        }),
+        SettingsPatch::CursorStyle(_) => patch_section(doc, "cursor", |t| {
+            let value = match config.cursor.style {
+                CursorStyle::Block => "block",
+                CursorStyle::Underline => "underline",
+                CursorStyle::Bar => "bar",
+            };
+            t.insert("style", toml_edit::value(value));
+        }),
+        SettingsPatch::CursorBlinking(_) => patch_section(doc, "cursor", |t| {
+            t.insert("blinking", toml_edit::value(config.cursor.blinking));
+        }),
+        SettingsPatch::AgentPermissionMode(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "default_permission_mode",
+                toml_edit::value(config.agent.default_permission_mode.mode_id()),
+            );
+        }),
+        SettingsPatch::AgentUseModifierToSend(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "use_modifier_to_send",
+                toml_edit::value(config.agent.use_modifier_to_send),
+            );
+        }),
+        SettingsPatch::AgentCatalog(_) => replace_agents(doc, &config.agents),
+        SettingsPatch::SessionHosts { .. } => {
+            replace_session_hosts(doc, &config.session_hosts, &config.session_host_tombstones)
+        }
+        SettingsPatch::RenderMaxFps(_) => patch_section(doc, "render", |t| {
+            t.insert(
+                "max_fps",
+                toml_edit::value(i64::from(config.render.max_fps)),
+            );
+        }),
+        SettingsPatch::ShellClosePaneOnExit(_) => patch_section(doc, "shell", |t| {
+            t.insert(
+                "close_pane_on_exit",
+                toml_edit::value(config.shell.close_pane_on_exit),
+            );
+        }),
+        SettingsPatch::WindowOpacity(_) => patch_section(doc, "window", |t| {
+            t.insert(
+                "opacity",
+                toml_edit::value(f64::from(config.window.opacity)),
+            );
+        }),
+        SettingsPatch::WindowBlur(_) => patch_section(doc, "window", |t| {
+            t.insert("blur", toml_edit::value(config.window.blur));
+        }),
+        SettingsPatch::ScrollbackMaxRows(_) => patch_section(doc, "scrollback", |t| {
+            t.insert(
+                "max_rows",
+                toml_edit::value(config.scrollback.max_rows as i64),
+            );
+        }),
+        SettingsPatch::TerminalInsetX(_) => patch_section(doc, "font", |t| {
+            t.insert("inset_x", toml_edit::value(f64::from(config.font.inset_x)));
+        }),
+        SettingsPatch::TerminalInsetY(_) => patch_section(doc, "font", |t| {
+            t.insert("inset_y", toml_edit::value(f64::from(config.font.inset_y)));
+        }),
+        SettingsPatch::FilesShowHidden(_) => patch_section(doc, "left_dock", |t| {
+            t.insert(
+                "files_show_hidden",
+                toml_edit::value(config.left_dock.files_show_hidden),
+            );
+        }),
+        SettingsPatch::FilesUseGitignore(_) => patch_section(doc, "left_dock", |t| {
+            t.insert(
+                "files_use_gitignore",
+                toml_edit::value(config.left_dock.files_use_gitignore),
+            );
+        }),
+        SettingsPatch::SyntaxTheme(_) => patch_section(doc, "file_viewer", |t| {
+            t.insert(
+                "syntax_theme",
+                toml_edit::value(config.file_viewer.syntax_theme.clone()),
+            );
+        }),
+        SettingsPatch::ClipboardStreamingMaxBytes(_) => patch_section(doc, "clipboard", |t| {
+            t.insert(
+                "streaming_max_bytes",
+                toml_edit::value(config.clipboard.streaming_max_bytes as i64),
+            );
+        }),
+        SettingsPatch::PreferredEditor(_) => patch_section(doc, "editor", |t| {
+            t.insert(
+                "preferred",
+                toml_edit::value(config.editor.preferred.clone()),
+            );
+        }),
+        SettingsPatch::PanelsGridColumns(_) => patch_section(doc, "panels", |t| {
+            t.insert(
+                "grid_columns",
+                toml_edit::value(i64::from(config.panels.grid_columns)),
+            );
+        }),
+        SettingsPatch::ToggleStatusBarItem(_) => patch_section(doc, "status_bar", |t| {
+            let mut items = toml_edit::Array::new();
+            for item in &config.status_bar.hidden_items {
+                items.push(status_bar_item_slug(*item));
+            }
+            t.insert("hidden_items", toml_edit::value(items));
+            t.remove("visible_items");
+        }),
+        SettingsPatch::ClaudeStatusEnabled(_) => patch_section(doc, "claude_status", |t| {
+            t.insert("enable", toml_edit::value(config.claude_status.enable));
+        }),
+        SettingsPatch::TelegramEnabled(_) => patch_section(doc, "telegram", |t| {
+            t.insert("enabled", toml_edit::value(config.telegram.enabled));
+        }),
+        SettingsPatch::TelegramAuthorizedChatId(_) => patch_section(doc, "telegram", |t| {
+            if let Some(id) = config.telegram.authorized_chat_id {
+                t.insert("authorized_chat_id", toml_edit::value(id));
+            } else {
+                t.remove("authorized_chat_id");
+            }
+        }),
+    }
+}
+
+fn replace_agents(doc: &mut toml_edit::DocumentMut, entries: &[AgentEntry]) {
+    let mut tables = toml_edit::ArrayOfTables::new();
+    for entry in entries {
+        tables.push(agent_entry_table(entry));
+    }
+    doc.insert("agents", toml_edit::Item::ArrayOfTables(tables));
+}
+
+fn replace_session_hosts(
+    doc: &mut toml_edit::DocumentMut,
+    entries: &[SessionHostEntry],
+    tombstones: &[SessionHostTombstone],
+) {
+    replace_array_of_tables(doc, "session_hosts", entries, session_host_entry_table);
+    replace_array_of_tables(
+        doc,
+        "session_host_tombstones",
+        tombstones,
+        session_host_tombstone_table,
+    );
+}
+
+fn replace_array_of_tables<T>(
+    doc: &mut toml_edit::DocumentMut,
+    key: &str,
+    values: &[T],
+    table: impl Fn(&T) -> toml_edit::Table,
+) {
+    if values.is_empty() {
+        doc.remove(key);
+        return;
+    }
+    let mut tables = toml_edit::ArrayOfTables::new();
+    for value in values {
+        tables.push(table(value));
+    }
+    doc.insert(key, toml_edit::Item::ArrayOfTables(tables));
+}
+
+fn session_host_entry_table(entry: &SessionHostEntry) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    table["id"] = toml_edit::value(entry.id.as_inner().to_string());
+    table["label"] = toml_edit::value(entry.label.clone());
+    table["kind"] = toml_edit::Item::Table(session_host_kind_table(&entry.kind));
+    table
+}
+
+fn session_host_tombstone_table(entry: &SessionHostTombstone) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    table["old_id"] = toml_edit::value(entry.old_id.as_inner().to_string());
+    table["value"] = toml_edit::value(entry.value.clone());
+    table["removed_at"] = toml_edit::value(entry.removed_at as i64);
+    if let Some(id) = entry.redirected_to {
+        table["redirected_to"] = toml_edit::value(id.as_inner().to_string());
+    }
+    table["kind"] = toml_edit::Item::Table(session_host_kind_table(&entry.kind));
+    table
+}
+
+fn session_host_kind_table(kind: &SessionHostKind) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    match kind {
+        SessionHostKind::Ssh { target } => {
+            table["type"] = toml_edit::value("ssh");
+            table["target"] = toml_edit::value(target.clone());
+        }
+        SessionHostKind::Docker { container } => {
+            table["type"] = toml_edit::value("docker");
+            table["container"] = toml_edit::value(container.clone());
+        }
+    }
+    table
+}
+
+fn status_bar_item_slug(item: StatusBarItem) -> &'static str {
+    match item {
+        StatusBarItem::ProjectBranch => "project_branch",
+        StatusBarItem::AccountSlot => "account_slot",
+        StatusBarItem::Ports => "ports",
+        StatusBarItem::ClaudeUsage => "claude_usage",
+        StatusBarItem::Flow => "flow",
+    }
 }
 
 /// One `[[agents]]` table as [`patch_config_file_to`] writes it. Hand-built

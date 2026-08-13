@@ -1,18 +1,19 @@
 //! Session Hosts page: the `[[session_hosts]]` registry editor.
 //!
-//! Model closely mirrors [`super::agent`]'s catalog editor (row
-//! add/edit/delete over a `Vec`, staged in memory until Save), minus the
-//! preset concept agents have — every row here is a plain user-entered
-//! `{label, kind, target|container}`. See `SettingsWindow::validate` for
-//! the label-uniqueness check and the tombstone/redirect bookkeeping this
-//! page's Save triggers.
+//! Model closely mirrors [`super::agent`]'s catalog editor, minus the preset
+//! concept agents have. Every row is a plain user-entered
+//! `{label, kind, target|container}`; each valid row commit persists the whole
+//! catalog atomically with its tombstone/redirect bookkeeping.
 
 use crate::surface::strings as s;
+use crate::ui::field_row;
 use crate::ui::theme;
-use crate::ui::{button, button_danger, field_row};
 use gpui::{AnyElement, ClickEvent, IntoElement, div, prelude::*, px};
 
-use super::super::{SessionHostRow, SettingsWindow};
+use super::super::{
+    SessionHostRow, SettingsWindow, settings_button as button,
+    settings_button_danger as button_danger,
+};
 
 impl SettingsWindow {
     pub(in crate::settings_window) fn render_session_hosts(
@@ -95,11 +96,11 @@ impl SettingsWindow {
             )
             .child(field_row(
                 s::settings_session_host_field_label(),
-                crate::ui::input(&row.label_input, cx, ()),
+                crate::ui::input(&row.label_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_session_host_field_kind(),
-                crate::ui::select::select(&row.kind_select, cx, ()),
+                crate::ui::select::select(&row.kind_select, cx, 0),
             ));
 
         // Only one of target/container is meaningful per kind — show just
@@ -107,12 +108,12 @@ impl SettingsWindow {
         if is_docker {
             body = body.child(field_row(
                 s::settings_session_host_field_container(),
-                crate::ui::input(&row.container_input, cx, ()),
+                crate::ui::input(&row.container_input, cx, 0),
             ));
         } else {
             body = body.child(field_row(
                 s::settings_session_host_field_target(),
-                crate::ui::input(&row.target_input, cx, ()),
+                crate::ui::input(&row.target_input, cx, 0),
             ));
         }
 

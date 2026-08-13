@@ -13,18 +13,20 @@
 mod about;
 mod accounts;
 mod agent;
-mod plugin;
+pub(super) mod plugin;
 mod session_hosts;
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{button, button_danger, checkbox, checkbox_row, field_row};
+use crate::ui::{checkbox, checkbox_row, field_row};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, IntoElement, div, prelude::*, px};
 
-use super::SettingsWindow;
+use super::{
+    BoolSetting, SettingsWindow, settings_button as button, settings_button_danger as button_danger,
+};
 
 /// How long the pairing-command "Copied!" label stays before reverting
 /// to "Copy" — mirrors `ErrorReportModal::COPIED_LABEL_DURATION`
@@ -112,7 +114,7 @@ impl SettingsWindow {
         // Disabled (not hidden) if only one UI preset is available, so the
         // row's layout stays stable across that edge case.
         let ui_preset_disabled = daruda_config::UI_THEME_PRESETS.len() <= 1;
-        let ui_preset_widget = crate::ui::select::select(&self.ui_preset_select, cx, ())
+        let ui_preset_widget = crate::ui::select::select(&self.ui_preset_select, cx, 0)
             .when(ui_preset_disabled, |w| w.disabled(true));
 
         div()
@@ -122,16 +124,16 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_general(), cx))
             .child(field_row(
                 s::settings_label_language(),
-                crate::ui::select::select(&self.language_select, cx, ()),
+                crate::ui::select::select(&self.language_select, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_terminal_theme(),
-                crate::ui::select::select(&self.terminal_preset_select, cx, ()),
+                crate::ui::select::select(&self.terminal_preset_select, cx, 0),
             ))
             .child(field_row(s::settings_label_ui_theme(), ui_preset_widget))
             .child(field_row(
                 s::settings_label_syntax_theme(),
-                crate::ui::select::select(&self.syntax_theme_select, cx, ()),
+                crate::ui::select::select(&self.syntax_theme_select, cx, 0),
             ))
             .into_any_element()
     }
@@ -144,27 +146,27 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_font(), cx))
             .child(field_row(
                 s::settings_label_font_family(),
-                crate::ui::select::select(&self.font_family_select, cx, ()),
+                crate::ui::select::select(&self.font_family_select, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_font_size(),
-                crate::ui::input(&self.font_size_input, cx, ()),
+                crate::ui::input(&self.font_size_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_editor_font_size(),
-                crate::ui::input(&self.editor_font_size_input, cx, ()),
+                crate::ui::input(&self.editor_font_size_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_agent_chat_font_size(),
-                crate::ui::input(&self.agent_chat_font_size_input, cx, ()),
+                crate::ui::input(&self.agent_chat_font_size_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_vertical_spacing(),
-                crate::ui::input(&self.vertical_spacing_input, cx, ()),
+                crate::ui::input(&self.vertical_spacing_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_horizontal_spacing(),
-                crate::ui::input(&self.horizontal_spacing_input, cx, ()),
+                crate::ui::input(&self.horizontal_spacing_input, cx, 0),
             ))
             .into_any_element()
     }
@@ -178,18 +180,20 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_cursor(), cx))
             .child(field_row(
                 s::settings_label_cursor_style(),
-                crate::ui::select::select(&self.cursor_style_select, cx, ()),
+                crate::ui::select::select(&self.cursor_style_select, cx, 0),
             ))
             .child(checkbox_row(
                 checkbox(
                     "settings-cursor-blinking",
                     s::settings_label_cursor_blinking(),
-                    (),
+                    0,
                 )
                 .checked(cursor_blinking)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.cursor_blinking = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::CursorBlinking, *checked, cx) {
+                        this.cursor_blinking = *checked;
+                        cx.notify();
+                    }
                 })),
             ))
             .into_any_element()
@@ -206,12 +210,14 @@ impl SettingsWindow {
                 checkbox(
                     "settings-close-on-exit",
                     s::settings_label_close_on_exit(),
-                    (),
+                    0,
                 )
                 .checked(close_on_exit)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.close_pane_on_exit = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::ShellClosePaneOnExit, *checked, cx) {
+                        this.close_pane_on_exit = *checked;
+                        cx.notify();
+                    }
                 })),
             ))
             .into_any_element()
@@ -226,14 +232,16 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_window(), cx))
             .child(field_row(
                 s::settings_label_window_opacity(),
-                crate::ui::input(&self.opacity_input, cx, ()),
+                crate::ui::input(&self.opacity_input, cx, 0),
             ))
             .child(checkbox_row(
-                checkbox("settings-window-blur", s::settings_label_window_blur(), ())
+                checkbox("settings-window-blur", s::settings_label_window_blur(), 0)
                     .checked(window_blur)
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.window_blur = *checked;
-                        cx.notify();
+                        if this.persist_bool_setting(BoolSetting::WindowBlur, *checked, cx) {
+                            this.window_blur = *checked;
+                            cx.notify();
+                        }
                     })),
             ))
             .into_any_element()
@@ -247,19 +255,19 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_terminal(), cx))
             .child(field_row(
                 s::settings_label_scrollback(),
-                crate::ui::input(&self.scrollback_input, cx, ()),
+                crate::ui::input(&self.scrollback_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_max_fps(),
-                crate::ui::select::select(&self.max_fps_select, cx, ()),
+                crate::ui::select::select(&self.max_fps_select, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_inset_x(),
-                crate::ui::input(&self.inset_x_input, cx, ()),
+                crate::ui::input(&self.inset_x_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_inset_y(),
-                crate::ui::input(&self.inset_y_input, cx, ()),
+                crate::ui::input(&self.inset_y_input, cx, 0),
             ))
             .into_any_element()
     }
@@ -277,29 +285,33 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_dock(), cx))
             .child(Self::section_label(s::settings_section_sidebar(), cx))
             .child(checkbox_row(
-                checkbox("settings-show-hidden", s::settings_label_show_hidden(), ())
+                checkbox("settings-show-hidden", s::settings_label_show_hidden(), 0)
                     .checked(files_show_hidden)
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.files_show_hidden = *checked;
-                        cx.notify();
+                        if this.persist_bool_setting(BoolSetting::FilesShowHidden, *checked, cx) {
+                            this.files_show_hidden = *checked;
+                            cx.notify();
+                        }
                     })),
             ))
             .child(checkbox_row(
                 checkbox(
                     "settings-use-gitignore",
                     s::settings_label_use_gitignore(),
-                    (),
+                    0,
                 )
                 .checked(files_use_gitignore)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.files_use_gitignore = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::FilesUseGitignore, *checked, cx) {
+                        this.files_use_gitignore = *checked;
+                        cx.notify();
+                    }
                 })),
             ))
             .child(Self::section_label(s::settings_section_panels(), cx))
             .child(field_row(
                 s::settings_label_grid_columns(),
-                crate::ui::input(&self.panels_grid_columns_input, cx, ()),
+                crate::ui::input(&self.panels_grid_columns_input, cx, 0),
             ))
             .into_any_element()
     }
@@ -312,7 +324,7 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_clipboard(), cx))
             .child(field_row(
                 s::settings_label_clipboard_streaming(),
-                crate::ui::input(&self.clipboard_streaming_input, cx, ()),
+                crate::ui::input(&self.clipboard_streaming_input, cx, 0),
             ))
             .into_any_element()
     }
@@ -328,7 +340,7 @@ impl SettingsWindow {
             ))
             .child(field_row(
                 s::settings_label_preferred_editor(),
-                crate::ui::select::select(&self.editor_select, cx, ()),
+                crate::ui::select::select(&self.editor_select, cx, 0),
             ))
             .into_any_element()
     }
@@ -358,17 +370,19 @@ impl SettingsWindow {
                 checkbox(
                     "settings-telegram-enabled",
                     s::settings_telegram_enabled_label(),
-                    (),
+                    0,
                 )
                 .checked(telegram_enabled)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.telegram_enabled = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::TelegramEnabled, *checked, cx) {
+                        this.telegram_enabled = *checked;
+                        cx.notify();
+                    }
                 })),
             ))
             .child(field_row(
                 s::settings_telegram_token_label(),
-                crate::ui::input(&self.telegram_token_input, cx, ()),
+                crate::ui::input(&self.telegram_token_input, cx, 0),
             ))
             .child(
                 div()
@@ -537,9 +551,11 @@ impl SettingsWindow {
                                     let result = cx
                                         .update_global::<crate::settings_store::SettingsStore, _>(
                                             |store, _| {
-                                                store.patch_user(|cfg| {
-                                                    cfg.telegram.authorized_chat_id = None
-                                                })
+                                                store.apply_patch(
+                                                    daruda_config::SettingsPatch::TelegramAuthorizedChatId(
+                                                        None,
+                                                    ),
+                                                )
                                             },
                                         );
                                     if let Err(e) = result {

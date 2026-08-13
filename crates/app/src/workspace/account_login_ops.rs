@@ -181,7 +181,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !can_start_login(&self.pending_login) {
+        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
@@ -247,6 +247,20 @@ impl Workspace {
         let env =
             daruda_config::account_env(recipe.config_dir_env(), &config_dir, recipe.strip_env());
         let mode = finish.mode();
+
+        if !accounts_global::begin_login(cx, account_id) {
+            if cleanup_dir_on_cancel(mode) {
+                cleanup_account_dir(recipe_id, &config_dir);
+            }
+            self.report_error(
+                ErrorReport::new(s::settings_accounts_login_busy())
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("account.login.global_busy")
+                    .build(),
+                cx,
+            );
+            return;
+        }
 
         // Stash `Preparing` before the async node-resolve gap even starts —
         // it blocks a second concurrent login (`can_start_login`) and gives
@@ -331,6 +345,11 @@ impl Workspace {
                                 })
                                 .is_err()
                             {
+                                cx.update_global::<accounts_global::AccountsGlobal, _>(
+                                    |global, _| {
+                                        accounts_global::clear_login_marker(global, account_id);
+                                    },
+                                );
                                 // Workspace window closed mid-login: the
                                 // finish path's own cleanup never ran. Run
                                 // it here only for the add flow — a reauth's
@@ -348,6 +367,7 @@ impl Workspace {
                             cleanup_account_dir(recipe_id, &config_dir);
                         }
                         ws.pending_login = PendingLogin::None;
+                        accounts_global::finish_login(cx, account_id);
                         ws.report_error(
                             ErrorReport::new(finish.spawn_error_title())
                                 .message(e.to_string())
@@ -361,6 +381,11 @@ impl Workspace {
                 }
             });
 
+            if updated.is_err() {
+                cx.update_global::<accounts_global::AccountsGlobal, _>(|global, _| {
+                    accounts_global::clear_login_marker(global, account_id);
+                });
+            }
             if updated.is_err() && cleanup_dir_on_cancel(mode) {
                 // Workspace window closed during the node resolve, before
                 // `spawn_login` ever ran: nothing was spawned to leak a
@@ -399,6 +424,7 @@ impl Workspace {
             return;
         }
         self.pending_login = PendingLogin::None;
+        accounts_global::finish_login(cx, account_id);
 
         match outcome {
             LoginOutcome::Success => {
@@ -580,6 +606,7 @@ impl Workspace {
         if cleanup_dir_on_cancel(mode) {
             cleanup_account_dir(recipe, &account_config_dir(&self.data_dir, account_id));
         }
+        accounts_global::finish_login(cx, account_id);
         cx.notify();
     }
 
@@ -609,7 +636,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !can_start_login(&self.pending_login) {
+        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
@@ -686,6 +713,7 @@ impl Workspace {
             return;
         }
         self.pending_login = PendingLogin::None;
+        accounts_global::finish_login(cx, account_id);
 
         match outcome {
             LoginOutcome::Success => self.finish_reauth_success(account_id, config_dir, recipe, cx),

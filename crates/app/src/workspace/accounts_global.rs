@@ -22,11 +22,14 @@
 
 use gpui::{App, BorrowAppContext, Global};
 
-use daruda_store::accounts::AccountsState;
+use daruda_store::accounts::{AccountId, AccountsState};
 
-/// Process-wide managed-accounts snapshot. Newtype so it can be a GPUI
-/// `Global` (orphan rule) and so the mutation surface is just [`replace`].
-pub(crate) struct AccountsGlobal(pub(crate) AccountsState);
+/// Process-wide managed-accounts snapshot and authentication operation marker.
+/// State replacement and login-slot ownership stay behind this module's API.
+pub(crate) struct AccountsGlobal {
+    state: AccountsState,
+    login_account: Option<AccountId>,
+}
 
 impl Global for AccountsGlobal {}
 
@@ -38,7 +41,10 @@ impl Global for AccountsGlobal {}
 /// `initial` load is the same content.
 pub(crate) fn install_if_absent(cx: &mut App, initial: AccountsState) {
     if !cx.has_global::<AccountsGlobal>() {
-        cx.set_global(AccountsGlobal(initial));
+        cx.set_global(AccountsGlobal {
+            state: initial,
+            login_account: None,
+        });
     }
 }
 
@@ -49,14 +55,70 @@ pub(crate) fn install_if_absent(cx: &mut App, initial: AccountsState) {
 /// disk. Falls back to `set_global` if somehow not yet installed.
 pub(crate) fn replace(cx: &mut App, state: AccountsState) {
     if cx.has_global::<AccountsGlobal>() {
-        cx.update_global::<AccountsGlobal, _>(|g, _| g.0 = state);
+        cx.update_global::<AccountsGlobal, _>(|g, _| g.state = state);
     } else {
-        cx.set_global(AccountsGlobal(state));
+        cx.set_global(AccountsGlobal {
+            state,
+            login_account: None,
+        });
     }
 }
 
 /// Clone of the current shared state — the value each window copies into
 /// its `accounts` read-cache (on install and from `observe_global`).
 pub(crate) fn snapshot(cx: &App) -> AccountsState {
-    cx.global::<AccountsGlobal>().0.clone()
+    cx.global::<AccountsGlobal>().state.clone()
+}
+
+/// Reserve the single process-wide account authentication slot. The
+/// Workspace still owns the process handle, while this shared marker keeps
+/// Settings and other Workspace windows from starting a competing flow.
+pub(in crate::workspace) fn begin_login(cx: &mut App, account_id: AccountId) -> bool {
+    cx.update_global::<AccountsGlobal, bool>(|global, _| {
+        if global.login_account.is_some() {
+            return false;
+        }
+        global.login_account = Some(account_id);
+        true
+    })
+}
+
+/// Clear the authentication slot only when it still belongs to `account_id`.
+/// A stale async completion must not clear a newer login.
+pub(in crate::workspace) fn finish_login(cx: &mut App, account_id: AccountId) {
+    cx.update_global::<AccountsGlobal, _>(|global, _| {
+        clear_login_marker(global, account_id);
+    });
+}
+
+pub(in crate::workspace) fn clear_login_marker(global: &mut AccountsGlobal, account_id: AccountId) {
+    if global.login_account == Some(account_id) {
+        global.login_account = None;
+    }
+}
+
+pub(crate) fn login_busy(cx: &App) -> bool {
+    cx.global::<AccountsGlobal>().login_account.is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn login_slot_rejects_competitors_and_ignores_stale_completion(cx: &mut TestAppContext) {
+        let owner = AccountId::new();
+        let competitor = AccountId::new();
+
+        cx.update(|cx| {
+            install_if_absent(cx, AccountsState::default());
+            assert!(begin_login(cx, owner));
+            assert!(!begin_login(cx, competitor));
+            finish_login(cx, competitor);
+            assert!(login_busy(cx));
+            finish_login(cx, owner);
+            assert!(!login_busy(cx));
+        });
+    }
 }

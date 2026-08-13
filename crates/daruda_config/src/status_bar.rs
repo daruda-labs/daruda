@@ -79,7 +79,7 @@ impl StatusBarConfig {
 
     /// Flip `item`'s membership in `visible_items`. Pure mutation so
     /// the toggle logic is unit-testable independent of the I/O-touching
-    /// `SettingsStore::patch_user` call chain that persists it
+    /// `SettingsStore::apply_patch` call chain that persists it
     /// (`Workspace::toggle_status_bar_item`).
     pub fn toggle(&mut self, item: StatusBarItem) {
         if self.is_visible(item) {

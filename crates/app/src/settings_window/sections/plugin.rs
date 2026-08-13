@@ -6,10 +6,11 @@
 //! `settings_window::render` dispatcher can call them, but no code
 //! outside `settings_window` can.
 
-use crate::ui::button;
 use crate::ui::theme;
 
-use super::super::{PluginSkillBodyState, PluginSkillView, SettingsWindow};
+use super::super::{
+    PluginSkillBodyState, PluginSkillView, SettingsWindow, settings_button as button,
+};
 use crate::agent::skills::plugins::{PluginAvailability, PluginInstall};
 use crate::agent::skills::{Skill, SkillInvocation};
 use crate::surface::strings as s;
@@ -145,7 +146,8 @@ fn invocation_status_label(inv: SkillInvocation) -> String {
 /// detail pane. Errors collapse to an empty map — the detail pane
 /// then surfaces `—` for the missing fields, matching the policy of
 /// the upstream loader.
-fn read_plugin_installs_indexed() -> BTreeMap<String, PluginInstall> {
+pub(in crate::settings_window) fn read_plugin_installs_indexed() -> BTreeMap<String, PluginInstall>
+{
     let path = crate::agent::skills::plugins::installed_plugins_manifest();
     let installs = crate::agent::skills::plugins::read_installed_plugins(&path);
     let mut out = BTreeMap::new();
@@ -170,7 +172,6 @@ impl SettingsWindow {
             .plugin
             .clone();
         let groups = group_plugins_for_settings(&plugin_skills);
-        let installs = read_plugin_installs_indexed();
         let in_flight = self.plugin_ops_in_flight.clone();
 
         let mut header_col = div()
@@ -188,7 +189,13 @@ impl SettingsWindow {
         }
 
         let master = self.plugin_master_pane(&groups, cx);
-        let detail = self.plugin_detail_pane(&groups, &plugin_skills, &installs, &in_flight, cx);
+        let detail = self.plugin_detail_pane(
+            &groups,
+            &plugin_skills,
+            &self.plugin_installs,
+            &in_flight,
+            cx,
+        );
 
         let split = div()
             .flex()

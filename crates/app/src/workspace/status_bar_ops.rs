@@ -10,14 +10,13 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     /// Flip `item`'s membership in `StatusBarConfig::visible_items` and
-    /// persist it through `SettingsStore::patch_user` — the same
-    /// immediate-write chain the Settings window's live dropdowns use
-    /// (`persist_theme_field`), so the choice survives restart. The
+    /// persist it through `SettingsStore::apply_patch`, so the choice survives
+    /// restart. The
     /// Global's `observe_global` fan-out re-applies the resolved config
     /// to every open workspace (including this one), refreshing
     /// `self.mirrors.status_bar` without a separate `cx.notify()` here.
     ///
-    /// Do not call this from a test: `patch_user` writes the real
+    /// Do not call this from a test: `apply_patch` writes the real
     /// on-disk `config_path()` with no test-mode redirect (see
     /// `settings_window/tests.rs::validate_does_not_revert_background_pairing`).
     /// `StatusBarConfig::toggle` carries the actual membership-flip logic
@@ -28,7 +27,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
-            store.patch_user(|cfg| cfg.status_bar.toggle(item))
+            store.apply_patch(daruda_config::SettingsPatch::ToggleStatusBarItem(item))
         });
         if let Err(msg) = result {
             self.report_error(

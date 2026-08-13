@@ -2476,6 +2476,13 @@ pub fn settings_accounts_reauth_no_credentials_detail() -> String {
 pub fn settings_accounts_login_in_progress() -> String {
     rust_i18n::t!("settings.accounts_login_in_progress").into_owned()
 }
+/// Settings label while either add-account or reauthentication is running.
+pub fn settings_accounts_authentication_in_progress() -> String {
+    rust_i18n::t!("settings.accounts_authentication_in_progress").into_owned()
+}
+pub fn settings_accounts_workspace_required() -> String {
+    rust_i18n::t!("settings.accounts_workspace_required").into_owned()
+}
 /// Status-bar dropdown's Cancel row next to the in-progress indicator —
 /// dispatches `Workspace::cancel_pending_login`. Reuses the shared
 /// `common.btn_cancel` copy (no domain-specific wording needed).
@@ -2585,6 +2592,39 @@ pub fn settings_cancel() -> String {
 }
 pub fn settings_save() -> String {
     rust_i18n::t!("common.btn_save").into_owned()
+}
+pub fn settings_external_change(path: &str) -> String {
+    rust_i18n::t!("settings.external_change", path => path).into_owned()
+}
+pub fn settings_use_external_value() -> String {
+    rust_i18n::t!("settings.use_external_value").into_owned()
+}
+pub fn settings_overwrite_external_value() -> String {
+    rust_i18n::t!("settings.overwrite_external_value").into_owned()
+}
+pub fn settings_search_placeholder() -> String {
+    rust_i18n::t!("settings.search_placeholder").into_owned()
+}
+pub fn settings_group_general() -> String {
+    rust_i18n::t!("settings.group_general").into_owned()
+}
+pub fn settings_group_appearance() -> String {
+    rust_i18n::t!("settings.group_appearance").into_owned()
+}
+pub fn settings_group_terminal() -> String {
+    rust_i18n::t!("settings.group_terminal").into_owned()
+}
+pub fn settings_group_workspace() -> String {
+    rust_i18n::t!("settings.group_workspace").into_owned()
+}
+pub fn settings_group_agents() -> String {
+    rust_i18n::t!("settings.group_agents").into_owned()
+}
+pub fn settings_group_integrations() -> String {
+    rust_i18n::t!("settings.group_integrations").into_owned()
+}
+pub fn settings_group_system() -> String {
+    rust_i18n::t!("settings.group_system").into_owned()
 }
 pub fn settings_err_font_size() -> String {
     rust_i18n::t!("settings.err_font_size").into_owned()

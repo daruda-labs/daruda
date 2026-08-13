@@ -11,12 +11,12 @@
 //! sibling `render_plugin` pattern.
 
 use crate::surface::strings as s;
+use crate::ui::Disableable as _;
 use crate::ui::theme;
-use crate::ui::{Disableable as _, button};
 use crate::update::AutoUpdateStatus;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
-use super::super::SettingsWindow;
+use super::super::{SettingsWindow, settings_button as button};
 
 /// Two-column meta row: muted label on the left, primary value on the
 /// right. Used for the current-version line.

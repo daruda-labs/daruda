@@ -26,12 +26,29 @@ use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
 use crate::window_registry::WindowRegistry;
 
+fn settings_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+) -> crate::ui::Button {
+    crate::ui::button(id, label).tab_stop(true)
+}
+
+fn settings_button_danger(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+) -> crate::ui::Button {
+    crate::ui::button_danger(id, label).tab_stop(true)
+}
+
 pub struct SettingsWindow {
     panel_focus_handle: FocusHandle,
-    /// Open-time snapshot; saves overlay form fields so hidden config survives.
+    /// Last config this window observed after opening or successfully writing.
+    /// Used only to detect a same-field external edit before applying a draft.
     base_config: daruda_config::Config,
     /// Section currently rendered by the body.
     active_section: BuiltinSection,
+    sidebar_search_input: Entity<InputState>,
+    sidebar_focus_handles: HashMap<BuiltinSection, FocusHandle>,
     /// Per-section input focus handles, in tab-cycle order. `focus_section`
     /// jumps to the first handle when entering a section from outside the
     /// window (sidebar click, external open); `focus_next_input` cycles the
@@ -78,10 +95,10 @@ pub struct SettingsWindow {
     // Accounts (Task 9). Snapshot loaded from `accounts.json` at
     // construction; every write goes through the section's own
     // `set_default_account`/`remove_account` handlers, which persist
-    // immediately (no Save-button batching, unlike the config-backed
-    // fields above) and broadcast the new state to every open
+    // immediately and broadcast the new state to every open
     // `Workspace` window. See `sections/accounts.rs`'s module doc.
     accounts: daruda_store::accounts::AccountsState,
+    account_login_busy: bool,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -127,6 +144,7 @@ pub struct SettingsWindow {
     scroll_handle: gpui::ScrollHandle,
     _input_subscriptions: Vec<Subscription>,
     error: Option<SharedString>,
+    conflict: Option<daruda_config::SettingsPatch>,
     /// Plugin ids (`<plugin>@<marketplace>`) with an `install` /
     /// `uninstall` CLI invocation currently spawned on the
     /// `background_executor`. Used by the Plugin section to show a
@@ -136,6 +154,10 @@ pub struct SettingsWindow {
     /// Last plugin-op error message — surfaced inline above the plugin
     /// list. `None` clears the banner.
     pub(super) plugin_last_error: Option<SharedString>,
+    /// Installed-plugin manifest snapshot. Refreshed when `SkillsState`
+    /// changes so rendering the Plugin section never performs file I/O.
+    pub(super) plugin_installs:
+        std::collections::BTreeMap<String, crate::agent::skills::plugins::PluginInstall>,
     /// `<plugin>@<marketplace>` of the plugin whose detail pane is on
     /// the right side of the master-detail layout. `None` shows the
     /// "select a plugin" placeholder.
@@ -148,6 +170,10 @@ pub struct SettingsWindow {
     /// install / uninstall completions (and external `claude plugin`
     /// CLI runs) without polling.
     _skills_global_subscription: Subscription,
+    /// Window-aware observer for file-watcher and cross-window settings
+    /// changes. Clean forms reload immediately; a local draft is preserved
+    /// for the same-field conflict flow.
+    _settings_global_subscription: Subscription,
     /// Subscription that refreshes the `accounts` mirror + repaints whenever
     /// the app-wide `AccountsGlobal` changes — so an add/reauth/default/
     /// delete in any Workspace window shows here without a restart.
@@ -189,9 +215,50 @@ pub(super) enum PluginSkillBodyState {
 /// edit and is carried verbatim, so both kinds live in a single ordered list —
 /// position survives a save, and no operation can see one kind without the
 /// other being in reach.
+#[derive(Clone)]
 pub(super) enum AgentCatalogItem {
     Editable(AgentCatalogRow),
     Unresolved(daruda_config::AgentEntry),
+}
+
+#[derive(Clone, Copy)]
+enum TextSetting {
+    FontSize,
+    EditorFontSize,
+    AgentChatFontSize,
+    VerticalSpacing,
+    HorizontalSpacing,
+    WindowOpacity,
+    ScrollbackMaxRows,
+    TerminalInsetX,
+    TerminalInsetY,
+    ClipboardStreamingMaxBytes,
+    PanelsGridColumns,
+}
+
+#[derive(Clone, Copy)]
+enum SelectSetting {
+    Language,
+    TerminalPreset,
+    UiPreset,
+    FontFamily,
+    CursorStyle,
+    AgentPermissionMode,
+    RenderMaxFps,
+    SyntaxTheme,
+    PreferredEditor,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum BoolSetting {
+    CursorBlinking,
+    AgentUseModifierToSend,
+    ShellClosePaneOnExit,
+    WindowBlur,
+    FilesShowHidden,
+    FilesUseGitignore,
+    ClaudeStatusEnabled,
+    TelegramEnabled,
 }
 
 #[derive(Clone)]
@@ -237,11 +304,10 @@ pub(super) struct AgentCatalogRow {
 /// `id` is minted once, at construction, and never changes for the row's
 /// lifetime: an existing row keeps the [`daruda_config::SessionHostId`] it
 /// loaded from config, and a freshly added row mints its own right away
-/// (rather than waiting for Save) so [`SettingsWindow::validate`] can tell
-/// "this row existed before this Save" from "this row is new" by id
-/// membership alone — the distinction the tombstone/redirect bookkeeping
-/// needs. The id a Save *writes* can still differ: a row whose Type changed
-/// retires it (see [`session_host_entry_id`]).
+/// so [`SettingsWindow::validate`] can distinguish a persisted row from a
+/// newly-added draft by id membership alone. The id persisted on commit can
+/// still differ: a row whose Type changed retires it (see
+/// [`session_host_entry_id`]).
 #[derive(Clone)]
 pub(super) struct SessionHostRow {
     pub(super) id: daruda_store::project::SessionHostId,
@@ -267,16 +333,6 @@ impl SessionHostRow {
             .selected_value()
             .is_some_and(|value| value.as_ref() == "docker")
     }
-
-    /// The value field the row's current Type renders. The other one is
-    /// invisible, so nothing may focus or read it.
-    fn value_input(&self, cx: &gpui::App) -> &Entity<InputState> {
-        if self.is_docker(cx) {
-            &self.container_input
-        } else {
-            &self.target_input
-        }
-    }
 }
 
 impl SettingsWindow {
@@ -284,7 +340,7 @@ impl SettingsWindow {
         Self::new_with_section(BuiltinSection::default(), window, cx)
     }
 
-    fn subscribe_input_state(
+    fn subscribe_draft_input(
         state: &Entity<InputState>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -292,15 +348,113 @@ impl SettingsWindow {
         cx.subscribe_in(
             state,
             window,
-            |this, _, ev: &InputEvent, window, cx| match ev {
-                InputEvent::PressEnter { .. } => this.submit(window, cx),
+            |this, _, ev: &InputEvent, _window, cx| match ev {
                 InputEvent::Change => {
                     if this.error.is_some() {
                         this.error = None;
                         cx.notify();
                     }
                 }
-                InputEvent::Focus | InputEvent::Blur => {}
+                InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+            },
+        )
+    }
+
+    fn subscribe_sidebar_search(
+        state: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(state, window, |_this, _, ev: &InputEvent, _window, cx| {
+            if matches!(ev, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+    }
+
+    fn subscribe_text_setting(
+        state: &Entity<InputState>,
+        setting: TextSetting,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            move |this, state, ev: &InputEvent, _window, cx| match ev {
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    this.persist_text_setting(state, setting, cx);
+                }
+                InputEvent::Change => {
+                    if this.error.is_some() {
+                        this.error = None;
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus => {}
+            },
+        )
+    }
+
+    fn subscribe_select_setting(
+        state: &Entity<SelectState>,
+        setting: SelectSetting,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            move |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    this.persist_select_setting(state, setting, cx);
+                }
+            },
+        )
+    }
+
+    fn subscribe_agent_input(
+        state: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            |this, _, ev: &InputEvent, _window, cx| match ev {
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    this.persist_agent_catalog(cx);
+                }
+                InputEvent::Change => {
+                    if this.error.is_some() {
+                        this.error = None;
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus => {}
+            },
+        )
+    }
+
+    fn subscribe_session_host_input(
+        state: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            |this, _, ev: &InputEvent, _window, cx| match ev {
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    this.persist_session_hosts(cx);
+                }
+                InputEvent::Change => {
+                    if this.error.is_some() {
+                        this.error = None;
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus => {}
             },
         )
     }
@@ -312,6 +466,7 @@ impl SettingsWindow {
     fn new_text_field(
         placeholder: &str,
         default_value: String,
+        setting: TextSetting,
         window: &mut Window,
         cx: &mut Context<Self>,
         subs: &mut Vec<Subscription>,
@@ -321,7 +476,7 @@ impl SettingsWindow {
                 .placeholder(placeholder)
                 .default_value(default_value)
         });
-        subs.push(Self::subscribe_input_state(&state, window, cx));
+        subs.push(Self::subscribe_text_setting(&state, setting, window, cx));
         let fh = state.read(cx).focus_handle(cx);
         (state, fh)
     }
@@ -412,16 +567,16 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
         subs: &mut Vec<Subscription>,
     ) {
-        subs.push(Self::subscribe_input_state(&row.id_input, window, cx));
-        subs.push(Self::subscribe_input_state(&row.name_input, window, cx));
-        subs.push(Self::subscribe_input_state(&row.command_input, window, cx));
-        subs.push(Self::subscribe_input_state(&row.host_input, window, cx));
-        subs.push(Self::subscribe_input_state(
+        subs.push(Self::subscribe_agent_input(&row.id_input, window, cx));
+        subs.push(Self::subscribe_agent_input(&row.name_input, window, cx));
+        subs.push(Self::subscribe_agent_input(&row.command_input, window, cx));
+        subs.push(Self::subscribe_agent_input(&row.host_input, window, cx));
+        subs.push(Self::subscribe_agent_input(
             &row.container_input,
             window,
             cx,
         ));
-        subs.push(Self::subscribe_input_state(
+        subs.push(Self::subscribe_agent_input(
             &row.default_mode_input,
             window,
             cx,
@@ -436,9 +591,9 @@ impl SettingsWindow {
         subs.push(cx.subscribe_in(
             &row.transport_select,
             window,
-            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+            |this, _state, ev: &select::ConfirmEvent, _window, cx| {
                 if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    cx.notify();
+                    this.persist_agent_catalog(cx);
                 }
             },
         ));
@@ -460,7 +615,7 @@ impl SettingsWindow {
     }
 
     /// Whether the catalog holds no entries **of either kind**. The single
-    /// definition the Save check and the section's placeholder both read, so a
+    /// definition validation and the section's placeholder both read, so a
     /// catalog of only non-editable entries can never be called empty by one
     /// and non-empty by the other.
     pub(super) fn agent_catalog_is_empty(&self) -> bool {
@@ -545,6 +700,9 @@ impl SettingsWindow {
         Self::subscribe_agent_row(&row, window, cx, &mut self._input_subscriptions);
         self.agent_catalog.push(AgentCatalogItem::Editable(row));
         self.error = None;
+        if self.collect_agent_catalog(cx).is_ok() {
+            self.persist_agent_catalog(cx);
+        }
         cx.notify();
     }
 
@@ -553,8 +711,11 @@ impl SettingsWindow {
     /// only alternative is hand-editing `config.toml`.
     pub(super) fn remove_agent_catalog_item(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.agent_catalog.len() {
-            self.agent_catalog.remove(index);
+            let removed = self.agent_catalog.remove(index);
             self.error = None;
+            if !self.persist_agent_catalog(cx) {
+                self.agent_catalog.insert(index, removed);
+            }
             cx.notify();
         }
     }
@@ -635,9 +796,17 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
         subs: &mut Vec<Subscription>,
     ) {
-        subs.push(Self::subscribe_input_state(&row.label_input, window, cx));
-        subs.push(Self::subscribe_input_state(&row.target_input, window, cx));
-        subs.push(Self::subscribe_input_state(
+        subs.push(Self::subscribe_session_host_input(
+            &row.label_input,
+            window,
+            cx,
+        ));
+        subs.push(Self::subscribe_session_host_input(
+            &row.target_input,
+            window,
+            cx,
+        ));
+        subs.push(Self::subscribe_session_host_input(
             &row.container_input,
             window,
             cx,
@@ -648,9 +817,9 @@ impl SettingsWindow {
         subs.push(cx.subscribe_in(
             &row.kind_select,
             window,
-            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+            |this, _state, ev: &select::ConfirmEvent, _window, cx| {
                 if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    cx.notify();
+                    this.persist_session_hosts(cx);
                 }
             },
         ));
@@ -672,8 +841,8 @@ impl SettingsWindow {
     }
 
     /// Append a blank row the user fills in by hand. A fresh
-    /// [`daruda_store::project::SessionHostId`] is minted right away (not
-    /// deferred to Save) — see [`SessionHostRow::id`]'s doc for why.
+    /// [`daruda_store::project::SessionHostId`] is minted right away — see
+    /// [`SessionHostRow::id`]'s doc for why.
     pub(super) fn add_session_host_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let row = Self::session_host_row_new(
             daruda_store::project::SessionHostId::new(),
@@ -690,15 +859,16 @@ impl SettingsWindow {
         cx.notify();
     }
 
-    /// Drop the row at `index`. Nothing is written to `config.toml` (and so
-    /// no tombstone is recorded) until Save — [`Self::validate`] diffs the
-    /// saved rows against `self.base_config.session_hosts` to build the
-    /// tombstone the missing row implies. Mirrors
-    /// [`Self::remove_agent_catalog_item`].
+    /// Drop the row at `index` and commit the complete valid catalog. The
+    /// missing persisted id becomes a tombstone in the same atomic patch.
+    /// Mirrors [`Self::remove_agent_catalog_item`].
     pub(super) fn remove_session_host_row(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.session_host_rows.len() {
-            self.session_host_rows.remove(index);
+            let removed = self.session_host_rows.remove(index);
             self.error = None;
+            if !self.persist_session_hosts(cx) {
+                self.session_host_rows.insert(index, removed);
+            }
             cx.notify();
         }
     }
@@ -714,6 +884,15 @@ impl SettingsWindow {
         let config = crate::settings_store::SettingsStore::global(cx)
             .user()
             .clone();
+
+        let sidebar_search_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(s::settings_search_placeholder())
+        });
+        let sidebar_focus_handles = BuiltinSection::ALL
+            .iter()
+            .copied()
+            .map(|section| (section, cx.focus_handle().tab_stop(true)))
+            .collect();
 
         // Language select — options driven by the canonical locale list so
         // adding a new locale only requires updating SUPPORTED_LOCALES.
@@ -770,11 +949,17 @@ impl SettingsWindow {
         // is the single source for both `focus_section` (first handle) and
         // `focus_next_input` (full per-section cycle order).
         let mut input_subscriptions: Vec<Subscription> = Vec::new();
+        input_subscriptions.push(Self::subscribe_sidebar_search(
+            &sidebar_search_input,
+            window,
+            cx,
+        ));
         let mut section_focus_targets: HashMap<BuiltinSection, Vec<FocusHandle>> = HashMap::new();
 
         let (font_size_input, font_size_fh) = Self::new_text_field(
             "e.g. 13",
             format!("{}", config.font.size),
+            TextSetting::FontSize,
             window,
             cx,
             &mut input_subscriptions,
@@ -789,6 +974,7 @@ impl SettingsWindow {
         let (editor_font_size_input, _) = Self::new_text_field(
             "e.g. 13",
             format!("{}", config.font.editor_size),
+            TextSetting::EditorFontSize,
             window,
             cx,
             &mut input_subscriptions,
@@ -796,6 +982,7 @@ impl SettingsWindow {
         let (agent_chat_font_size_input, _) = Self::new_text_field(
             "e.g. 13",
             format!("{}", config.font.agent_chat_size),
+            TextSetting::AgentChatFontSize,
             window,
             cx,
             &mut input_subscriptions,
@@ -803,6 +990,7 @@ impl SettingsWindow {
         let (vertical_spacing_input, vertical_spacing_fh) = Self::new_text_field(
             "e.g. 1.0",
             format!("{}", config.font.vertical_spacing),
+            TextSetting::VerticalSpacing,
             window,
             cx,
             &mut input_subscriptions,
@@ -814,6 +1002,7 @@ impl SettingsWindow {
         let (horizontal_spacing_input, horizontal_spacing_fh) = Self::new_text_field(
             "e.g. 1.0",
             format!("{}", config.font.horizontal_spacing),
+            TextSetting::HorizontalSpacing,
             window,
             cx,
             &mut input_subscriptions,
@@ -825,6 +1014,7 @@ impl SettingsWindow {
         let (opacity_input, opacity_fh) = Self::new_text_field(
             "0.1 – 1.0",
             format!("{}", config.window.opacity),
+            TextSetting::WindowOpacity,
             window,
             cx,
             &mut input_subscriptions,
@@ -836,6 +1026,7 @@ impl SettingsWindow {
         let (scrollback_input, scrollback_fh) = Self::new_text_field(
             "e.g. 10000",
             format!("{}", config.scrollback.max_rows),
+            TextSetting::ScrollbackMaxRows,
             window,
             cx,
             &mut input_subscriptions,
@@ -847,6 +1038,7 @@ impl SettingsWindow {
         let (inset_x_input, inset_x_fh) = Self::new_text_field(
             "e.g. 4",
             format!("{}", config.font.inset_x),
+            TextSetting::TerminalInsetX,
             window,
             cx,
             &mut input_subscriptions,
@@ -858,6 +1050,7 @@ impl SettingsWindow {
         let (inset_y_input, inset_y_fh) = Self::new_text_field(
             "e.g. 2",
             format!("{}", config.font.inset_y),
+            TextSetting::TerminalInsetY,
             window,
             cx,
             &mut input_subscriptions,
@@ -869,6 +1062,7 @@ impl SettingsWindow {
         let (clipboard_streaming_input, clipboard_streaming_fh) = Self::new_text_field(
             "e.g. 10485760",
             format!("{}", config.clipboard.streaming_max_bytes),
+            TextSetting::ClipboardStreamingMaxBytes,
             window,
             cx,
             &mut input_subscriptions,
@@ -896,6 +1090,7 @@ impl SettingsWindow {
         let (panels_grid_columns_input, panels_grid_columns_fh) = Self::new_text_field(
             "1 – 16",
             format!("{}", config.panels.grid_columns),
+            TextSetting::PanelsGridColumns,
             window,
             cx,
             &mut input_subscriptions,
@@ -917,7 +1112,7 @@ impl SettingsWindow {
                 .placeholder(s::settings_telegram_token_placeholder())
                 .masked(true)
         });
-        input_subscriptions.push(Self::subscribe_input_state(
+        input_subscriptions.push(Self::subscribe_draft_input(
             &telegram_token_input,
             window,
             cx,
@@ -1036,48 +1231,22 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&syntax_theme), window, cx)
         });
 
-        // Theme dropdowns apply live on pick (no Save needed): the commit
-        // persists just that one field, and the existing config fan-out
-        // repaints every open editor / diff view / pane.
-        input_subscriptions.push(cx.subscribe_in(
-            &syntax_theme_select,
-            window,
-            |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    this.persist_theme_field(state, |c, v| c.file_viewer.syntax_theme = v, cx);
-                }
-            },
-        ));
-        input_subscriptions.push(cx.subscribe_in(
-            &terminal_preset_select,
-            window,
-            |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    this.persist_theme_field(state, |c, v| c.theme.terminal_preset = v, cx);
-                }
-            },
-        ));
-        input_subscriptions.push(cx.subscribe_in(
-            &ui_preset_select,
-            window,
-            |this, state, ev: &select::ConfirmEvent, _window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    this.persist_theme_field(state, |c, v| c.theme.ui_preset = v, cx);
-                }
-            },
-        ));
-        // The permission-mode dropdown is persisted on Save (not live), but
-        // the explanatory text below it tracks the selection — repaint the
-        // window on each pick so `render_agent` shows the matching blurb.
-        input_subscriptions.push(cx.subscribe_in(
-            &default_permission_mode_select,
-            window,
-            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) {
-                    cx.notify();
-                }
-            },
-        ));
+        for (state, setting) in [
+            (&language_select, SelectSetting::Language),
+            (&terminal_preset_select, SelectSetting::TerminalPreset),
+            (&ui_preset_select, SelectSetting::UiPreset),
+            (&font_family_select, SelectSetting::FontFamily),
+            (&cursor_style_select, SelectSetting::CursorStyle),
+            (
+                &default_permission_mode_select,
+                SelectSetting::AgentPermissionMode,
+            ),
+            (&max_fps_select, SelectSetting::RenderMaxFps),
+            (&syntax_theme_select, SelectSetting::SyntaxTheme),
+            (&editor_select, SelectSetting::PreferredEditor),
+        ] {
+            input_subscriptions.push(Self::subscribe_select_setting(state, setting, window, cx));
+        }
         // Picking a preset swaps the Add button for install instructions when
         // that preset ships binaries only — repaint so the swap is immediate.
         input_subscriptions.push(cx.subscribe_in(
@@ -1136,9 +1305,11 @@ impl SettingsWindow {
             daruda_store::accounts::load_accounts().unwrap_or_default(),
         );
         let accounts = crate::workspace::accounts_global::snapshot(cx);
+        let account_login_busy = crate::workspace::accounts_global::login_busy(cx);
         let _accounts_global_subscription = cx
             .observe_global::<crate::workspace::accounts_global::AccountsGlobal>(|this, cx| {
                 this.accounts = crate::workspace::accounts_global::snapshot(cx);
+                this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
                 cx.notify();
             });
 
@@ -1146,6 +1317,8 @@ impl SettingsWindow {
             panel_focus_handle: cx.focus_handle(),
             base_config: config.clone(),
             active_section: active,
+            sidebar_search_input,
+            sidebar_focus_handles,
             section_focus_targets,
             language_select,
             terminal_preset_select,
@@ -1164,6 +1337,7 @@ impl SettingsWindow {
             agent_catalog,
             session_host_rows,
             accounts,
+            account_login_busy,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -1187,12 +1361,25 @@ impl SettingsWindow {
             scroll_handle: gpui::ScrollHandle::new(),
             _input_subscriptions: input_subscriptions,
             error: None,
+            conflict: None,
             plugin_ops_in_flight: std::collections::HashSet::new(),
             plugin_last_error: None,
+            plugin_installs: sections::plugin::read_plugin_installs_indexed(),
             plugin_selected: None,
             plugin_view_skill: None,
-            _skills_global_subscription: cx
-                .observe_global::<crate::agent::skills::SkillsState>(|_, cx| cx.notify()),
+            _skills_global_subscription: cx.observe_global::<crate::agent::skills::SkillsState>(
+                |this, cx| {
+                    this.plugin_installs = sections::plugin::read_plugin_installs_indexed();
+                    cx.notify();
+                },
+            ),
+            _settings_global_subscription: cx
+                .observe_global_in::<crate::settings_store::SettingsStore>(
+                    window,
+                    |this, window, cx| {
+                        this.sync_external_settings(window, cx);
+                    },
+                ),
             _accounts_global_subscription,
             _updater_subscription,
         };
@@ -1277,6 +1464,746 @@ impl SettingsWindow {
             .ok()
             .filter(|v| range.contains(v))
             .ok_or_else(err)
+    }
+
+    fn apply_settings_patch(
+        &mut self,
+        patch: daruda_config::SettingsPatch,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        use gpui::BorrowAppContext as _;
+
+        let baseline = self.base_config.clone();
+        let committed_patch = patch.clone();
+        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.apply_patch_if_unchanged(patch, &baseline)
+        });
+        match result {
+            Ok(()) => {
+                self.advance_base_field_from_live(&committed_patch, cx);
+                self.error = None;
+                self.conflict = None;
+                cx.notify();
+                true
+            }
+            Err(daruda_config::SettingsPatchApplyError::Conflict(_)) => {
+                self.error = None;
+                self.conflict = Some(committed_patch);
+                cx.notify();
+                false
+            }
+            Err(daruda_config::SettingsPatchApplyError::Persistence(message)) => {
+                self.error = Some(SharedString::from(message));
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn apply_settings_patch_force(
+        &mut self,
+        patch: daruda_config::SettingsPatch,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        use gpui::BorrowAppContext as _;
+        let committed_patch = patch.clone();
+        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.apply_patch(patch)
+        });
+        match result {
+            Ok(()) => {
+                self.advance_base_field_from_live(&committed_patch, cx);
+                self.error = None;
+                self.conflict = None;
+                cx.notify();
+                true
+            }
+            Err(message) => {
+                self.error = Some(SharedString::from(message));
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn advance_base_field_from_live(
+        &mut self,
+        patch: &daruda_config::SettingsPatch,
+        cx: &gpui::App,
+    ) {
+        let live = crate::settings_store::SettingsStore::global(cx).user();
+        if let Some(live_patch) = Self::settings_ui_patches(live)
+            .into_iter()
+            .find(|candidate| candidate.field() == patch.field())
+        {
+            live_patch.apply_to(&mut self.base_config);
+        }
+    }
+
+    fn overwrite_conflict(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(patch) = self.conflict.clone()
+            && self.apply_settings_patch_force(patch.clone(), cx)
+        {
+            let live = crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .clone();
+            self.load_settings_patch(&patch, &live, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn reload_conflict(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(patch) = self.conflict.take() else {
+            return;
+        };
+        let live = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .clone();
+        self.load_settings_patch(&patch, &live, window, cx);
+        if let Some(live_patch) = Self::settings_ui_patches(&live)
+            .into_iter()
+            .find(|candidate| candidate.field() == patch.field())
+        {
+            live_patch.apply_to(&mut self.base_config);
+        }
+        self.error = None;
+        self.sync_external_settings(window, cx);
+        cx.notify();
+    }
+
+    fn load_settings_patch(
+        &mut self,
+        patch: &daruda_config::SettingsPatch,
+        live: &daruda_config::Config,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match patch {
+            daruda_config::SettingsPatch::GeneralLanguage(_) => Self::set_select_value(
+                &self.language_select,
+                live.general.language.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::TerminalPreset(_) => Self::set_select_value(
+                &self.terminal_preset_select,
+                live.theme.terminal_preset.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::UiPreset(_) => Self::set_select_value(
+                &self.ui_preset_select,
+                live.theme.ui_preset.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::FontFamily(_) => Self::set_select_value(
+                &self.font_family_select,
+                live.font.family.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::FontSize(_) => {
+                Self::set_input_value(&self.font_size_input, live.font.size, window, cx)
+            }
+            daruda_config::SettingsPatch::EditorFontSize(_) => Self::set_input_value(
+                &self.editor_font_size_input,
+                live.font.editor_size,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::AgentChatFontSize(_) => Self::set_input_value(
+                &self.agent_chat_font_size_input,
+                live.font.agent_chat_size,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::VerticalSpacing(_) => Self::set_input_value(
+                &self.vertical_spacing_input,
+                live.font.vertical_spacing,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::HorizontalSpacing(_) => Self::set_input_value(
+                &self.horizontal_spacing_input,
+                live.font.horizontal_spacing,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::CursorStyle(_) => {
+                let value = match live.cursor.style {
+                    daruda_config::CursorStyle::Block => "block",
+                    daruda_config::CursorStyle::Underline => "underline",
+                    daruda_config::CursorStyle::Bar => "bar",
+                };
+                Self::set_select_value(&self.cursor_style_select, value, window, cx);
+            }
+            daruda_config::SettingsPatch::CursorBlinking(_) => {
+                self.cursor_blinking = live.cursor.blinking;
+            }
+            daruda_config::SettingsPatch::AgentPermissionMode(_) => Self::set_select_value(
+                &self.default_permission_mode_select,
+                live.agent.default_permission_mode.mode_id(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::AgentUseModifierToSend(_) => {
+                self.agent_use_modifier_to_send = live.agent.use_modifier_to_send;
+            }
+            daruda_config::SettingsPatch::AgentCatalog(_) => {
+                let catalog = live
+                    .agents
+                    .iter()
+                    .map(|entry| match entry.resolve() {
+                        Some(definition) => {
+                            AgentCatalogItem::Editable(Self::agent_row_from_definition(
+                                &definition,
+                                entry.preset_id().map(str::to_string),
+                                window,
+                                cx,
+                            ))
+                        }
+                        None => AgentCatalogItem::Unresolved(entry.clone()),
+                    })
+                    .collect::<Vec<_>>();
+                for item in &catalog {
+                    if let AgentCatalogItem::Editable(row) = item {
+                        Self::subscribe_agent_row(row, window, cx, &mut self._input_subscriptions);
+                    }
+                }
+                self.agent_catalog = catalog;
+                self.section_focus_targets.remove(&BuiltinSection::Agent);
+                if let Some(row) = self.agent_catalog.iter().find_map(|item| match item {
+                    AgentCatalogItem::Editable(row) => Some(row),
+                    AgentCatalogItem::Unresolved(_) => None,
+                }) {
+                    self.section_focus_targets
+                        .entry(BuiltinSection::Agent)
+                        .or_default()
+                        .push(row.id_input.read(cx).focus_handle(cx));
+                }
+            }
+            daruda_config::SettingsPatch::SessionHosts { .. } => {
+                let rows = live
+                    .session_hosts
+                    .iter()
+                    .map(|entry| Self::session_host_row_from_entry(entry, window, cx))
+                    .collect::<Vec<_>>();
+                for row in &rows {
+                    Self::subscribe_session_host_row(
+                        row,
+                        window,
+                        cx,
+                        &mut self._input_subscriptions,
+                    );
+                }
+                self.session_host_rows = rows;
+                self.section_focus_targets
+                    .remove(&BuiltinSection::SessionHosts);
+                if let Some(row) = self.session_host_rows.first() {
+                    self.section_focus_targets
+                        .entry(BuiltinSection::SessionHosts)
+                        .or_default()
+                        .push(row.label_input.read(cx).focus_handle(cx));
+                }
+            }
+            daruda_config::SettingsPatch::RenderMaxFps(_) => Self::set_select_value(
+                &self.max_fps_select,
+                live.render.max_fps.to_string(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::ShellClosePaneOnExit(_) => {
+                self.close_pane_on_exit = live.shell.close_pane_on_exit;
+            }
+            daruda_config::SettingsPatch::WindowOpacity(_) => {
+                Self::set_input_value(&self.opacity_input, live.window.opacity, window, cx)
+            }
+            daruda_config::SettingsPatch::WindowBlur(_) => {
+                self.window_blur = live.window.blur;
+            }
+            daruda_config::SettingsPatch::ScrollbackMaxRows(_) => {
+                Self::set_input_value(&self.scrollback_input, live.scrollback.max_rows, window, cx)
+            }
+            daruda_config::SettingsPatch::TerminalInsetX(_) => {
+                Self::set_input_value(&self.inset_x_input, live.font.inset_x, window, cx)
+            }
+            daruda_config::SettingsPatch::TerminalInsetY(_) => {
+                Self::set_input_value(&self.inset_y_input, live.font.inset_y, window, cx)
+            }
+            daruda_config::SettingsPatch::FilesShowHidden(_) => {
+                self.files_show_hidden = live.left_dock.files_show_hidden;
+            }
+            daruda_config::SettingsPatch::FilesUseGitignore(_) => {
+                self.files_use_gitignore = live.left_dock.files_use_gitignore;
+            }
+            daruda_config::SettingsPatch::SyntaxTheme(_) => Self::set_select_value(
+                &self.syntax_theme_select,
+                live.file_viewer.syntax_theme.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::ClipboardStreamingMaxBytes(_) => {
+                Self::set_input_value(
+                    &self.clipboard_streaming_input,
+                    live.clipboard.streaming_max_bytes,
+                    window,
+                    cx,
+                );
+            }
+            daruda_config::SettingsPatch::PreferredEditor(_) => Self::set_select_value(
+                &self.editor_select,
+                live.editor.preferred.clone(),
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::PanelsGridColumns(_) => Self::set_input_value(
+                &self.panels_grid_columns_input,
+                live.panels.grid_columns,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::ClaudeStatusEnabled(_) => {
+                self.claude_status_enable = live.claude_status.enable;
+            }
+            daruda_config::SettingsPatch::TelegramEnabled(_) => {
+                self.telegram_enabled = live.telegram.enabled;
+            }
+            daruda_config::SettingsPatch::ToggleStatusBarItem(_)
+            | daruda_config::SettingsPatch::TelegramAuthorizedChatId(_) => {}
+        }
+    }
+
+    fn set_select_value(
+        select: &Entity<SelectState>,
+        value: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = value.into();
+        select.update(cx, |select, cx| {
+            select.set_selected_value(&value, window, cx);
+        });
+    }
+
+    fn set_input_value(
+        input: &Entity<InputState>,
+        value: impl ToString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = value.to_string();
+        input.update(cx, |input, cx| input.set_value(value, window, cx));
+    }
+
+    fn settings_ui_patches(config: &daruda_config::Config) -> Vec<daruda_config::SettingsPatch> {
+        vec![
+            daruda_config::SettingsPatch::GeneralLanguage(config.general.language.clone()),
+            daruda_config::SettingsPatch::TerminalPreset(config.theme.terminal_preset.clone()),
+            daruda_config::SettingsPatch::UiPreset(config.theme.ui_preset.clone()),
+            daruda_config::SettingsPatch::FontFamily(config.font.family.clone()),
+            daruda_config::SettingsPatch::FontSize(config.font.size),
+            daruda_config::SettingsPatch::EditorFontSize(config.font.editor_size),
+            daruda_config::SettingsPatch::AgentChatFontSize(config.font.agent_chat_size),
+            daruda_config::SettingsPatch::VerticalSpacing(config.font.vertical_spacing),
+            daruda_config::SettingsPatch::HorizontalSpacing(config.font.horizontal_spacing),
+            daruda_config::SettingsPatch::CursorStyle(config.cursor.style),
+            daruda_config::SettingsPatch::CursorBlinking(config.cursor.blinking),
+            daruda_config::SettingsPatch::AgentPermissionMode(config.agent.default_permission_mode),
+            daruda_config::SettingsPatch::AgentUseModifierToSend(config.agent.use_modifier_to_send),
+            daruda_config::SettingsPatch::AgentCatalog(config.agents.clone()),
+            daruda_config::SettingsPatch::SessionHosts {
+                entries: config.session_hosts.clone(),
+                tombstones: config.session_host_tombstones.clone(),
+            },
+            daruda_config::SettingsPatch::RenderMaxFps(config.render.max_fps),
+            daruda_config::SettingsPatch::ShellClosePaneOnExit(config.shell.close_pane_on_exit),
+            daruda_config::SettingsPatch::WindowOpacity(config.window.opacity),
+            daruda_config::SettingsPatch::WindowBlur(config.window.blur),
+            daruda_config::SettingsPatch::ScrollbackMaxRows(config.scrollback.max_rows),
+            daruda_config::SettingsPatch::TerminalInsetX(config.font.inset_x),
+            daruda_config::SettingsPatch::TerminalInsetY(config.font.inset_y),
+            daruda_config::SettingsPatch::FilesShowHidden(config.left_dock.files_show_hidden),
+            daruda_config::SettingsPatch::FilesUseGitignore(config.left_dock.files_use_gitignore),
+            daruda_config::SettingsPatch::SyntaxTheme(config.file_viewer.syntax_theme.clone()),
+            daruda_config::SettingsPatch::ClipboardStreamingMaxBytes(
+                config.clipboard.streaming_max_bytes,
+            ),
+            daruda_config::SettingsPatch::PreferredEditor(config.editor.preferred.clone()),
+            daruda_config::SettingsPatch::PanelsGridColumns(config.panels.grid_columns),
+            daruda_config::SettingsPatch::ClaudeStatusEnabled(config.claude_status.enable),
+            daruda_config::SettingsPatch::TelegramEnabled(config.telegram.enabled),
+        ]
+    }
+
+    fn sync_external_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let live = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .clone();
+        let changed_patches = Self::settings_ui_patches(&live)
+            .iter()
+            .filter(|patch| patch.field_changed_between(&self.base_config, &live))
+            .cloned()
+            .collect::<Vec<_>>();
+        if changed_patches.is_empty() {
+            return;
+        }
+
+        let Ok(draft) = self.validate(cx) else {
+            cx.notify();
+            return;
+        };
+        let has_local_draft = Self::settings_ui_patches(&self.base_config)
+            .iter()
+            .any(|patch| patch.field_changed_between(&self.base_config, &draft));
+        if has_local_draft || self.conflict.is_some() {
+            cx.notify();
+            return;
+        }
+
+        // Reuse the per-field loader so structural editors rebuild their
+        // subscriptions and focus handles through the same path as the
+        // explicit "Use external value" action.
+        for patch in changed_patches {
+            self.load_settings_patch(&patch, &live, window, cx);
+        }
+        self.base_config = live;
+        self.error = None;
+        self.conflict = None;
+        cx.notify();
+    }
+
+    fn persist_select_setting(
+        &mut self,
+        select: &Entity<SelectState>,
+        setting: SelectSetting,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(value) = select
+            .read(cx)
+            .selected_value()
+            .map(|value| value.to_string())
+        else {
+            return;
+        };
+        let patch = match setting {
+            SelectSetting::Language => daruda_config::SettingsPatch::GeneralLanguage(value),
+            SelectSetting::TerminalPreset => daruda_config::SettingsPatch::TerminalPreset(value),
+            SelectSetting::UiPreset => daruda_config::SettingsPatch::UiPreset(value),
+            SelectSetting::FontFamily => daruda_config::SettingsPatch::FontFamily(value),
+            SelectSetting::CursorStyle => {
+                let style = match value.as_str() {
+                    "underline" => daruda_config::CursorStyle::Underline,
+                    "bar" => daruda_config::CursorStyle::Bar,
+                    _ => daruda_config::CursorStyle::Block,
+                };
+                daruda_config::SettingsPatch::CursorStyle(style)
+            }
+            SelectSetting::AgentPermissionMode => {
+                let Some(mode) = daruda_config::DefaultPermissionMode::from_mode_id(&value) else {
+                    return;
+                };
+                daruda_config::SettingsPatch::AgentPermissionMode(mode)
+            }
+            SelectSetting::RenderMaxFps => {
+                let Some(fps) = value.parse::<u32>().ok() else {
+                    return;
+                };
+                daruda_config::SettingsPatch::RenderMaxFps(fps)
+            }
+            SelectSetting::SyntaxTheme => daruda_config::SettingsPatch::SyntaxTheme(value),
+            SelectSetting::PreferredEditor => daruda_config::SettingsPatch::PreferredEditor(value),
+        };
+        self.apply_settings_patch(patch, cx);
+    }
+
+    pub(super) fn persist_bool_setting(
+        &mut self,
+        setting: BoolSetting,
+        value: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let patch = match setting {
+            BoolSetting::CursorBlinking => daruda_config::SettingsPatch::CursorBlinking(value),
+            BoolSetting::AgentUseModifierToSend => {
+                daruda_config::SettingsPatch::AgentUseModifierToSend(value)
+            }
+            BoolSetting::ShellClosePaneOnExit => {
+                daruda_config::SettingsPatch::ShellClosePaneOnExit(value)
+            }
+            BoolSetting::WindowBlur => daruda_config::SettingsPatch::WindowBlur(value),
+            BoolSetting::FilesShowHidden => daruda_config::SettingsPatch::FilesShowHidden(value),
+            BoolSetting::FilesUseGitignore => {
+                daruda_config::SettingsPatch::FilesUseGitignore(value)
+            }
+            BoolSetting::ClaudeStatusEnabled => {
+                daruda_config::SettingsPatch::ClaudeStatusEnabled(value)
+            }
+            BoolSetting::TelegramEnabled => daruda_config::SettingsPatch::TelegramEnabled(value),
+        };
+        self.apply_settings_patch(patch, cx)
+    }
+
+    fn persist_text_setting(
+        &mut self,
+        input: &Entity<InputState>,
+        setting: TextSetting,
+        cx: &mut Context<Self>,
+    ) {
+        let patch = match setting {
+            TextSetting::FontSize => Self::parse_bounded_field(
+                input,
+                6.0..=72.0,
+                || SharedString::from(s::settings_err_font_size()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::FontSize),
+            TextSetting::EditorFontSize => Self::parse_bounded_field(
+                input,
+                6.0..=72.0,
+                || SharedString::from(s::settings_err_editor_font_size()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::EditorFontSize),
+            TextSetting::AgentChatFontSize => Self::parse_bounded_field(
+                input,
+                6.0..=72.0,
+                || SharedString::from(s::settings_err_agent_chat_font_size()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::AgentChatFontSize),
+            TextSetting::VerticalSpacing => Self::parse_bounded_field(
+                input,
+                0.5..=2.0,
+                || SharedString::from(s::settings_err_spacing()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::VerticalSpacing),
+            TextSetting::HorizontalSpacing => Self::parse_bounded_field(
+                input,
+                0.5..=2.0,
+                || SharedString::from(s::settings_err_spacing()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::HorizontalSpacing),
+            TextSetting::WindowOpacity => Self::parse_bounded_field(
+                input,
+                0.1..=1.0,
+                || SharedString::from(s::settings_err_opacity()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::WindowOpacity),
+            TextSetting::ScrollbackMaxRows => Self::parse_bounded_field(
+                input,
+                1_000..=500_000,
+                || SharedString::from(s::settings_err_scrollback()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::ScrollbackMaxRows),
+            TextSetting::TerminalInsetX => Self::parse_bounded_field(
+                input,
+                0.0..=32.0,
+                || SharedString::from(s::settings_err_inset()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::TerminalInsetX),
+            TextSetting::TerminalInsetY => Self::parse_bounded_field(
+                input,
+                0.0..=32.0,
+                || SharedString::from(s::settings_err_inset()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::TerminalInsetY),
+            TextSetting::ClipboardStreamingMaxBytes => Self::parse_bounded_field(
+                input,
+                4_096..=67_108_864,
+                || SharedString::from(s::settings_err_clipboard()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::ClipboardStreamingMaxBytes),
+            TextSetting::PanelsGridColumns => Self::parse_bounded_field(
+                input,
+                1..=16,
+                || SharedString::from(s::settings_err_grid_columns()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::PanelsGridColumns),
+        };
+
+        match patch {
+            Ok(patch) => {
+                self.apply_settings_patch(patch, cx);
+            }
+            Err(message) => {
+                self.error = Some(message);
+                cx.notify();
+            }
+        }
+    }
+
+    fn collect_agent_catalog(
+        &self,
+        cx: &gpui::App,
+    ) -> Result<Vec<daruda_config::AgentEntry>, SharedString> {
+        let mut agents = Vec::with_capacity(self.agent_catalog.len());
+        let mut seen_agent_ids = HashSet::new();
+        let mut ordinal = 0usize;
+        for item in &self.agent_catalog {
+            let row = match item {
+                AgentCatalogItem::Unresolved(entry) => {
+                    agents.push(entry.clone());
+                    continue;
+                }
+                AgentCatalogItem::Editable(row) => row,
+            };
+            ordinal += 1;
+            let id = row.id_input.read(cx).value().trim().to_string();
+            let name = row.name_input.read(cx).value().trim().to_string();
+            let command = row.command_input.read(cx).value().trim().to_string();
+            if id.is_empty() || name.is_empty() || command.is_empty() {
+                return Err(SharedString::from(s::settings_err_agent_catalog_field(
+                    ordinal,
+                )));
+            }
+            if !is_valid_agent_id(&id) {
+                return Err(SharedString::from(s::settings_err_agent_catalog_id(&id)));
+            }
+            if !seen_agent_ids.insert(id.clone()) {
+                return Err(SharedString::from(s::settings_err_agent_catalog_duplicate(
+                    &id,
+                )));
+            }
+            let kind = row
+                .transport_select
+                .read(cx)
+                .selected_value()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "raw".to_string());
+            let host = row.host_input.read(cx).value().trim().to_string();
+            let container = row.container_input.read(cx).value().trim().to_string();
+            if !agent_row_is_valid(&kind, &host, &container) {
+                let message = if kind == "ssh" {
+                    s::settings_err_agent_catalog_host(ordinal)
+                } else {
+                    s::settings_err_agent_catalog_container(ordinal)
+                };
+                return Err(SharedString::from(message));
+            }
+            let launch = match kind.as_str() {
+                "ssh" => daruda_config::AgentLaunch::Ssh {
+                    adapter_command: command,
+                    host,
+                },
+                "docker" => daruda_config::AgentLaunch::Docker {
+                    adapter_command: command,
+                    container,
+                },
+                _ => daruda_config::AgentLaunch::Raw(command),
+            };
+            let default_mode = row.default_mode_input.read(cx).value().trim().to_string();
+            agents.push(daruda_config::AgentEntry::for_definition(
+                daruda_config::AgentDefinition {
+                    id,
+                    name,
+                    launch,
+                    default_mode: (!default_mode.is_empty()).then_some(default_mode),
+                },
+                row.preset.as_deref(),
+            ));
+        }
+        if agents.is_empty() {
+            return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
+        }
+        Ok(agents)
+    }
+
+    fn persist_agent_catalog(&mut self, cx: &mut Context<Self>) -> bool {
+        match self.collect_agent_catalog(cx) {
+            Ok(agents) => {
+                self.apply_settings_patch(daruda_config::SettingsPatch::AgentCatalog(agents), cx)
+            }
+            Err(message) => {
+                self.error = Some(message);
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn collect_session_hosts(
+        &self,
+        cx: &gpui::App,
+    ) -> Result<Vec<daruda_config::SessionHostEntry>, SharedString> {
+        let previous = &crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .session_hosts;
+        let mut entries = Vec::with_capacity(self.session_host_rows.len());
+        let mut seen_labels = HashSet::new();
+        for (index, row) in self.session_host_rows.iter().enumerate() {
+            let label = row.label_input.read(cx).value().trim().to_string();
+            let is_new = !previous.iter().any(|entry| entry.id == row.id);
+            let target = row.target_input.read(cx).value().trim().to_string();
+            let container = row.container_input.read(cx).value().trim().to_string();
+            if is_new && label.is_empty() && target.is_empty() && container.is_empty() {
+                continue;
+            }
+            if label.is_empty() {
+                return Err(SharedString::from(
+                    s::settings_err_session_host_label_empty(index + 1),
+                ));
+            }
+            if !seen_labels.insert(label.to_ascii_lowercase()) {
+                return Err(SharedString::from(
+                    s::settings_err_session_host_label_duplicate(&label),
+                ));
+            }
+            let kind = if row.is_docker(cx) {
+                let container = session_host::checked_bare_word(
+                    &container,
+                    session_host::SessionHostField::Container,
+                )
+                .map_err(|error| session_host_validation_message(index, error))?;
+                daruda_config::SessionHostKind::Docker { container }
+            } else {
+                let target = session_host::checked_bare_word(
+                    &target,
+                    session_host::SessionHostField::Target,
+                )
+                .map_err(|error| session_host_validation_message(index, error))?;
+                daruda_config::SessionHostKind::Ssh { target }
+            };
+            entries.push(daruda_config::SessionHostEntry {
+                id: session_host_entry_id(previous, row.id, &kind),
+                label,
+                kind,
+            });
+        }
+        Ok(entries)
+    }
+
+    fn persist_session_hosts(&mut self, cx: &mut Context<Self>) -> bool {
+        let entries = match self.collect_session_hosts(cx) {
+            Ok(entries) => entries,
+            Err(message) => {
+                self.error = Some(message);
+                cx.notify();
+                return false;
+            }
+        };
+        let live = crate::settings_store::SettingsStore::global(cx).user();
+        let tombstones = reconcile_session_host_tombstones(
+            &live.session_hosts,
+            &live.session_host_tombstones,
+            &entries,
+            now_unix(),
+        );
+        self.apply_settings_patch(
+            daruda_config::SettingsPatch::SessionHosts {
+                entries,
+                tombstones,
+            },
+            cx,
+        )
     }
 
     fn validate(&self, cx: &gpui::App) -> Result<daruda_config::Config, SharedString> {
@@ -1444,8 +2371,8 @@ impl SettingsWindow {
         // Non-editable entries are part of this count: they carry no fields but
         // they are still catalog entries, and `resolved_agents` already falls
         // back to the built-in default when none of them resolve. Counting only
-        // the editable rows would block every Save — including unrelated
-        // settings — for a config whose entries all name manual-install or
+        // the editable rows would reject a valid catalog whose entries all
+        // name manual-install or
         // retired presets.
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
@@ -1574,12 +2501,9 @@ impl SettingsWindow {
 
         config.claude_status.enable = self.claude_status_enable;
 
-        // `authorized_chat_id` is managed outside this form's staged-Save flow
-        // (set asynchronously by the Telegram bridge's poll loop on a successful
-        // pairing, or cleared immediately by the "Unpair" button) — re-read the
-        // live value here instead of trusting `self.base_config`'s window-open
-        // snapshot, so clicking Save can never revert a pairing that completed
-        // while Settings was open.
+        // `authorized_chat_id` is managed asynchronously by pairing/unpairing.
+        // Re-read it here so draft detection never treats a completed pairing
+        // as a local form edit.
         config.telegram.authorized_chat_id = crate::settings_store::SettingsStore::global(cx)
             .user_arc()
             .telegram
@@ -1589,112 +2513,13 @@ impl SettingsWindow {
         Ok(config)
     }
 
-    /// Persist a picked theme dropdown value immediately (no Save
-    /// required). Writes only the one field `set` touches; `patch_user`'s
-    /// fan-out then re-bridges themes and repaints open views, so the
-    /// change is visible the moment the dropdown commits. `set` is a
-    /// non-capturing fn so it coerces to a plain `fn` pointer.
-    fn persist_theme_field(
-        &mut self,
-        select: &Entity<SelectState>,
-        set: fn(&mut daruda_config::Config, String),
-        cx: &mut Context<Self>,
-    ) {
-        let Some(value) = select.read(cx).selected_value().map(|s| s.to_string()) else {
-            return;
-        };
-        use gpui::BorrowAppContext as _;
-        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
-            store.patch_user(|cfg| set(cfg, value.clone()))
-        });
-        if let Err(msg) = result {
-            self.error = Some(SharedString::from(msg));
-            cx.notify();
-        }
-    }
-
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let config = match self.validate(cx) {
-            Ok(c) => c,
-            Err(msg) => {
-                self.error = Some(msg);
-                cx.notify();
-                return;
-            }
-        };
-
-        // `patch_user` persists the file, updates the Global, and
-        // fires every `observe_global` subscriber on return — the
-        // app-level theme/keybinding observer and each workspace's
-        // own subscription fan the change out, keeping the in-memory
-        // store in sync with disk in a single update cycle.
-        use gpui::BorrowAppContext as _;
-        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
-            store.patch_user(|cfg| *cfg = config.clone())
-        });
-        if let Err(msg) = result {
-            self.error = Some(SharedString::from(msg));
-            cx.notify();
-            return;
-        }
-
-        self.dismiss(window);
-    }
-
+    #[cfg(test)]
     fn focus_next_input(&self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // Cycle only through inputs that belong to the *active* section
-        // — Tab on the Font page must not jump into the Window page's
-        // opacity input while it is hidden.
-        let handles: Vec<FocusHandle> = match self.active_section {
-            // Dynamic sections: rows are added/removed at runtime, so neither
-            // can be precomputed into `section_focus_targets` like the fixed
-            // sections below (which keep only a first-field jump target).
-            BuiltinSection::Agent => self
-                .agent_editable_rows()
-                .flat_map(|(_, row)| {
-                    [
-                        row.id_input.read(cx).focus_handle(cx),
-                        row.name_input.read(cx).focus_handle(cx),
-                        row.command_input.read(cx).focus_handle(cx),
-                    ]
-                })
-                .collect(),
-            // Label then whichever value field the row's Type renders — the
-            // hidden one would be an invisible stop. The Type dropdown itself
-            // stays out, as the agent catalog's transport select does.
-            BuiltinSection::SessionHosts => self
-                .session_host_rows
-                .iter()
-                .flat_map(|row| {
-                    [
-                        row.label_input.read(cx).focus_handle(cx),
-                        row.value_input(cx).read(cx).focus_handle(cx),
-                    ]
-                })
-                .collect(),
-            // Sections with no text input (Cursor / Shell / placeholders /
-            // …) have no entry in the map, so this falls through to the
-            // `n == 0` early-return below.
-            _ => self
-                .section_focus_targets
-                .get(&self.active_section)
-                .cloned()
-                .unwrap_or_default(),
-        };
-        let n = handles.len();
-        if n == 0 {
-            return;
-        }
-        let current = handles.iter().position(|h| h.is_focused(window));
-        let next = if forward {
-            current.map_or(0, |i| (i + 1) % n)
+        if forward {
+            window.focus_next(cx);
         } else {
-            match current {
-                Some(0) | None => n - 1,
-                Some(i) => i - 1,
-            }
-        };
-        handles[next].focus(window, cx);
+            window.focus_prev(cx);
+        }
     }
 
     pub(super) fn section_label(
@@ -1872,10 +2697,10 @@ const MAX_SESSION_HOST_TOMBSTONES: usize = 20;
 
 /// Diff `previous_entries`/`current_entries` (matched by
 /// [`daruda_store::project::SessionHostId`]) against `previous_tombstones` to
-/// produce the tombstone list a Save persists:
+/// produce the tombstone list committed with the catalog:
 ///
 /// 1. Every entry present in `previous_entries` but missing from
-///    `current_entries` was removed this Save — append a fresh tombstone for
+///    `current_entries` was removed by this edit — append a fresh tombstone for
 ///    it (`redirected_to: None`, `removed_at`).
 /// 2. Trim to the most recently removed [`MAX_SESSION_HOST_TOMBSTONES`]
 ///    (oldest evicted first).

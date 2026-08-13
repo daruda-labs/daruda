@@ -222,9 +222,9 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
             // in-memory `authorized_chat_id` — this persists it so pairing
             // survives a restart.
             cx.update(|cx| {
-                let result = cx
-                    .global_mut::<SettingsStore>()
-                    .patch_user(|c| c.telegram.authorized_chat_id = Some(chat_id));
+                let result = cx.global_mut::<SettingsStore>().apply_patch(
+                    daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
+                );
                 if let Err(e) = result {
                     LogWriter::log(
                         ErrorReport::new("Telegram pairing failed to persist")

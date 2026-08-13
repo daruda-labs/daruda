@@ -12,11 +12,14 @@
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{button, button_danger, checkbox, checkbox_row, field_row};
+use crate::ui::{checkbox, checkbox_row, field_row};
 use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
-use super::super::{AgentCatalogRow, SettingsWindow};
+use super::super::{
+    AgentCatalogRow, BoolSetting, SettingsWindow, settings_button as button,
+    settings_button_danger as button_danger,
+};
 
 /// The `transport_select` value that means "run the command locally" — the only
 /// transport a preset reference can carry (see [`daruda_config::AgentEntry`]).
@@ -54,7 +57,7 @@ impl SettingsWindow {
             .child(Self::section_label(s::settings_section_agent(), cx))
             .child(field_row(
                 s::settings_label_agent_mode(),
-                crate::ui::select::select(&self.default_permission_mode_select, cx, ()),
+                crate::ui::select::select(&self.default_permission_mode_select, cx, 0),
             ))
             .child(
                 div()
@@ -72,12 +75,15 @@ impl SettingsWindow {
                 checkbox(
                     "settings-agent-use-modifier-to-send",
                     s::settings_label_agent_use_modifier_to_send(),
-                    (),
+                    0,
                 )
                 .checked(use_modifier_to_send)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.agent_use_modifier_to_send = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::AgentUseModifierToSend, *checked, cx)
+                    {
+                        this.agent_use_modifier_to_send = *checked;
+                        cx.notify();
+                    }
                 })),
             ))
             .child(
@@ -96,12 +102,14 @@ impl SettingsWindow {
                 checkbox(
                     "settings-claude-status-enable",
                     s::settings_label_claude_status_enable(),
-                    (),
+                    0,
                 )
                 .checked(claude_status_enable)
                 .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    this.claude_status_enable = *checked;
-                    cx.notify();
+                    if this.persist_bool_setting(BoolSetting::ClaudeStatusEnabled, *checked, cx) {
+                        this.claude_status_enable = *checked;
+                        cx.notify();
+                    }
                 })),
             ));
 
@@ -135,7 +143,7 @@ impl SettingsWindow {
                     .child(div().flex_1().child(crate::ui::select::select(
                         &self.agent_preset_select,
                         cx,
-                        (),
+                        0,
                     )))
                     .child(match needs_install {
                         Some((_, install_url)) => button(
@@ -167,8 +175,8 @@ impl SettingsWindow {
             ));
         }
 
-        // Same predicate the Save check uses, so the placeholder cannot claim an
-        // empty catalog while a Save of the same catalog succeeds.
+        // Same predicate catalog validation uses, so the placeholder cannot
+        // claim an empty catalog while the same catalog is valid.
         if self.agent_catalog_is_empty() {
             body = body.child(
                 div()
@@ -331,18 +339,18 @@ impl SettingsWindow {
             .child(header)
             .child(field_row(
                 s::settings_agent_field_id(),
-                crate::ui::input(&row.id_input, cx, ()),
+                crate::ui::input(&row.id_input, cx, 0),
             ))
             .child(field_row(
                 s::settings_agent_field_name(),
-                crate::ui::input(&row.name_input, cx, ()),
+                crate::ui::input(&row.name_input, cx, 0),
             ))
             .when_some(provenance.name_base.clone(), |body, base| {
                 body.child(Self::preset_base_value(base, cx))
             })
             .child(field_row(
                 s::settings_agent_field_command(),
-                crate::ui::input(&row.command_input, cx, ()),
+                crate::ui::input(&row.command_input, cx, 0),
             ))
             .when_some(provenance.command_base.clone(), |body, base| {
                 body.child(Self::preset_base_value(base, cx))
@@ -361,7 +369,7 @@ impl SettingsWindow {
             })
             .child(field_row(
                 s::settings_agent_field_transport(),
-                crate::ui::select::select(&row.transport_select, cx, ()),
+                crate::ui::select::select(&row.transport_select, cx, 0),
             ))
             .when(
                 transport_kind == "ssh" || transport_kind == "docker",
@@ -376,14 +384,14 @@ impl SettingsWindow {
             )
             .child(field_row(
                 s::settings_agent_field_default_mode(),
-                crate::ui::input(&row.default_mode_input, cx, ()),
+                crate::ui::input(&row.default_mode_input, cx, 0),
             ))
             .when_some(provenance.default_mode_base.clone(), |body, base| {
                 body.child(Self::preset_base_value(base, cx))
             });
 
         // A preset reference is `Raw`-only, so picking a remote transport
-        // detaches the row into a custom copy on save — say so before Save
+        // detaches the row into a custom copy on commit — say so before commit
         // silently drops the preset link.
         if provenance.follows_preset() && transport_kind != TRANSPORT_RAW {
             body = body.child(
@@ -403,7 +411,7 @@ impl SettingsWindow {
             body = body
                 .child(field_row(
                     s::settings_agent_field_host(),
-                    crate::ui::input(&row.host_input, cx, ()),
+                    crate::ui::input(&row.host_input, cx, 0),
                 ))
                 .child(
                     div()
@@ -415,7 +423,7 @@ impl SettingsWindow {
             body = body
                 .child(field_row(
                     s::settings_agent_field_container(),
-                    crate::ui::input(&row.container_input, cx, ()),
+                    crate::ui::input(&row.container_input, cx, 0),
                 ))
                 .child(
                     div()

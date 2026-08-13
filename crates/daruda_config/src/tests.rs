@@ -481,6 +481,174 @@ fn patch_config_file_preserves_unmanaged_sections() {
 }
 
 #[test]
+fn settings_patch_only_rewrites_the_addressed_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "# keep this comment\n[font]\nsize = 14.0\neditor_size = 17.0 # external value\n",
+    )
+    .unwrap();
+
+    let written = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
+        .expect("field patch");
+
+    assert_eq!(written.font.size, 16.0);
+    assert_eq!(written.font.editor_size, 17.0);
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains("# keep this comment"), "{text}");
+    assert!(
+        text.contains("editor_size = 17.0 # external value"),
+        "{text}"
+    );
+}
+
+#[test]
+fn settings_patch_updates_an_inline_table_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "font = { size = 14.0, editor_size = 17.0 } # keep inline\n",
+    )
+    .unwrap();
+
+    let written = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
+        .expect("inline field patch");
+
+    assert_eq!(written.font.size, 16.0);
+    assert_eq!(written.font.editor_size, 17.0);
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains("font = {"), "{text}");
+    assert!(text.contains("# keep inline"), "{text}");
+}
+
+#[test]
+fn checked_settings_patch_rejects_a_same_field_disk_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[font]\nsize = 14.0\n").unwrap();
+    let expected = Config::load_from(&path);
+    std::fs::write(&path, "[font]\nsize = 20.0\n").unwrap();
+
+    let error = crate::apply_settings_patch_to_if_unchanged(
+        &crate::SettingsPatch::FontSize(16.0),
+        &expected,
+        &path,
+    )
+    .expect_err("same-field external edit must conflict");
+
+    assert_eq!(
+        error,
+        crate::SettingsPatchApplyError::Conflict(crate::SettingsFieldId::FontSize)
+    );
+    assert_eq!(Config::load_from(&path).font.size, 20.0);
+}
+
+#[test]
+fn checked_settings_patch_keeps_an_unrelated_disk_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[font]\nsize = 14.0\neditor_size = 13.0\n").unwrap();
+    let expected = Config::load_from(&path);
+    std::fs::write(&path, "[font]\nsize = 14.0\neditor_size = 17.0\n").unwrap();
+
+    let written = crate::apply_settings_patch_to_if_unchanged(
+        &crate::SettingsPatch::FontSize(16.0),
+        &expected,
+        &path,
+    )
+    .expect("unrelated external edit");
+
+    assert_eq!(written.font.size, 16.0);
+    assert_eq!(written.font.editor_size, 17.0);
+}
+
+#[cfg(unix)]
+#[test]
+fn settings_patch_preserves_a_config_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("managed-config.toml");
+    let path = dir.path().join("config.toml");
+    std::fs::write(&target, "[font]\nsize = 14.0\n").unwrap();
+    symlink(&target, &path).unwrap();
+
+    crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
+        .expect("symlinked config patch");
+
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(Config::load_from(&target).font.size, 16.0);
+}
+
+#[test]
+fn settings_patch_refuses_to_replace_a_corrupt_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let corrupt = "[font\nsize = 14";
+    std::fs::write(&path, corrupt).unwrap();
+
+    let error = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
+        .expect_err("corrupt config must block the write");
+
+    assert!(error.contains("parse error"), "{error}");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), corrupt);
+}
+
+#[test]
+fn settings_patch_round_trips_structural_session_hosts() {
+    use daruda_store::project::SessionHostId;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let host = SessionHostEntry {
+        id: SessionHostId::new(),
+        label: "Build box".to_string(),
+        kind: SessionHostKind::Ssh {
+            target: "vm-work".to_string(),
+        },
+    };
+    let tombstone = SessionHostTombstone {
+        old_id: SessionHostId::new(),
+        kind: SessionHostKind::Docker {
+            container: "old-dev".to_string(),
+        },
+        value: "old-dev".to_string(),
+        removed_at: 1_700_000_000,
+        redirected_to: Some(host.id),
+    };
+
+    let written = crate::apply_settings_patch_to(
+        &crate::SettingsPatch::SessionHosts {
+            entries: vec![host.clone()],
+            tombstones: vec![tombstone.clone()],
+        },
+        &path,
+    )
+    .expect("catalog patch");
+
+    assert_eq!(written.session_hosts, vec![host]);
+    assert_eq!(written.session_host_tombstones, vec![tombstone]);
+}
+
+#[test]
+fn settings_patch_writes_render_max_fps() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    crate::apply_settings_patch_to(&crate::SettingsPatch::RenderMaxFps(60), &path)
+        .expect("render patch");
+
+    assert_eq!(Config::load_from(&path).render.max_fps, 60);
+}
+
+#[test]
 fn patch_config_file_creates_missing_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

@@ -16,9 +16,9 @@
 //!
 //! The add-account buttons are the one case needing a `Workspace` (the login
 //! command comes from that window's agent catalog), so `start_add_account`
-//! runs the login in `WindowRegistry::first_workspace`. It deliberately does
-//! not mirror `Workspace.pending_login` here — the spinner + Cancel lives in
-//! the status-bar dropdown of the window running the login.
+//! runs the login in `WindowRegistry::first_workspace`. The process-wide
+//! login marker in `AccountsGlobal` disables competing Settings actions while
+//! the target Workspace retains ownership of the process handle and Cancel.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,10 +27,12 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
-use super::super::SettingsWindow;
+use super::super::{
+    SettingsWindow, settings_button as button, settings_button_danger as button_danger,
+};
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariant, Disableable as _, button, button_danger};
+use crate::ui::{ButtonVariant, Disableable as _};
 use crate::window_registry::WindowRegistry;
 use crate::workspace::accounts_global;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
@@ -274,8 +276,13 @@ impl SettingsWindow {
             .child(
                 button(
                     SharedString::from(format!("settings-accounts-reauth-{row_key}")),
-                    s::settings_accounts_reauthenticate(),
+                    if self.account_login_busy {
+                        s::settings_accounts_authentication_in_progress()
+                    } else {
+                        s::settings_accounts_reauthenticate()
+                    },
                 )
+                .disabled(self.account_login_busy)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
                     this.start_reauthenticate_account(account_id, cx);
                 })),
@@ -296,11 +303,9 @@ impl SettingsWindow {
             .into_any_element()
     }
 
-    /// Starts a headless add-account login for `recipe` on click — see
-    /// [`Self::start_add_account`] for why there's no live spinner here
-    /// (that lives in the status-bar dropdown, which reads
-    /// `Workspace.pending_login` natively; this window has no `Workspace`
-    /// of its own to observe it on).
+    /// Starts a headless add-account login for `recipe` on click. The shared
+    /// login marker disables this button as soon as the target Workspace
+    /// begins preparing authentication.
     fn render_add_account_row(
         &self,
         recipe: AccountRecipeId,
@@ -309,8 +314,13 @@ impl SettingsWindow {
         div().flex().flex_row().child(
             button(
                 SharedString::from(format!("settings-accounts-add-{}", recipe_slug(recipe))),
-                s::settings_accounts_add(&s::account_recipe_label(recipe)),
+                if self.account_login_busy {
+                    s::settings_accounts_authentication_in_progress()
+                } else {
+                    s::settings_accounts_add(&s::account_recipe_label(recipe))
+                },
             )
+            .disabled(self.account_login_busy)
             .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
                 this.start_add_account(recipe, cx);
             })),
@@ -324,20 +334,10 @@ impl SettingsWindow {
     /// resolve to the Settings window itself, not a workspace). The domain
     /// is the button the user pressed, not that window's active agent —
     /// `add_managed_account` resolves a login command for it.
-    ///
-    /// This window has no progress/spinner affordance of its own:
-    /// `Workspace.pending_login` is `pub(in crate::workspace)` and
-    /// observing it live from here would mean either polling every open
-    /// Workspace window on every Settings repaint (no precedent for
-    /// cross-window reads during `render()` in this codebase — see the
-    /// project CLAUDE.md's "No GPUI re-entry in render()" convention) or
-    /// a dedicated broadcast mirror, neither of which this task's scope
-    /// covers. The login itself still runs for real; its spinner + Cancel
-    /// affordance is the status-bar dropdown (`status_bar::build_account_menu`),
-    /// which reads the state natively in the Workspace window it belongs
-    /// to. A toast in that target window reports success/failure.
-    fn start_add_account(&self, recipe: AccountRecipeId, cx: &mut gpui::Context<Self>) {
+    fn start_add_account(&mut self, recipe: AccountRecipeId, cx: &mut gpui::Context<Self>) {
         let Some((handle, weak)) = WindowRegistry::first_workspace(cx) else {
+            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
+            cx.notify();
             LogWriter::log(
                 ErrorReport::new("Add-account login has no open Workspace window to run against")
                     .severity(ErrorSeverity::Warning)
@@ -347,13 +347,21 @@ impl SettingsWindow {
             );
             return;
         };
+        self.error = None;
         let result = cx.update_window(handle, |_root, window, cx_w| {
             if let Some(ws) = weak.upgrade() {
                 ws.update(cx_w, |ws, cx| {
                     ws.add_managed_account(recipe, window, cx);
                 });
+                true
+            } else {
+                false
             }
         });
+        if !matches!(&result, Ok(true)) {
+            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
+            cx.notify();
+        }
         if let Err(e) = result {
             LogWriter::log(
                 ErrorReport::new(
@@ -379,12 +387,14 @@ impl SettingsWindow {
     /// (`Workspace::on_reauthenticate_account`), so dispatching it here
     /// reaches the same handler without this Settings-window module
     /// needing `pub(crate)` access into `crate::workspace`'s internals.
-    ///
-    /// Same "no spinner here" rationale as `start_add_account`: the
-    /// in-flight indicator lives in the status-bar dropdown of the
-    /// window the login actually runs in.
-    fn start_reauthenticate_account(&self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
+    fn start_reauthenticate_account(
+        &mut self,
+        account_id: AccountId,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let Some((handle, _weak)) = WindowRegistry::first_workspace(cx) else {
+            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
+            cx.notify();
             LogWriter::log(
                 ErrorReport::new(
                     "Reauthenticate-account login has no open Workspace window to run against",
@@ -396,6 +406,7 @@ impl SettingsWindow {
             );
             return;
         };
+        self.error = None;
         let result = cx.update_window(handle, |_root, window, cx_w| {
             window.dispatch_action(
                 Box::new(crate::workspace::ReauthenticateAccount(account_id)),
@@ -403,6 +414,8 @@ impl SettingsWindow {
             );
         });
         if let Err(e) = result {
+            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
+            cx.notify();
             LogWriter::log(
                 ErrorReport::new(
                     "Failed to start reauthenticate-account login: target Workspace window is gone",

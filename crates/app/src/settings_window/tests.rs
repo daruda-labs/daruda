@@ -42,6 +42,297 @@ fn validate_accepts_defaults(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+fn boolean_setting_applies_immediately(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |window, cx| {
+        let next = !window.cursor_blinking;
+        assert!(window.persist_bool_setting(BoolSetting::CursorBlinking, next, cx));
+        window.cursor_blinking = next;
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .cursor
+                .blinking,
+            window.cursor_blinking
+        );
+    });
+}
+
+#[gpui::test]
+fn valid_text_draft_applies_on_commit(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+    let input = win.read_with(cx, |window, _| window.font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::FontSize, cx);
+    });
+
+    win.read_with(cx, |_window, cx| {
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .font
+                .size,
+            16.0
+        );
+    });
+}
+
+#[gpui::test]
+fn same_field_external_edit_requires_an_explicit_choice(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::FontSize(20.0))
+                .expect("external edit");
+        });
+    });
+    let input = win.read_with(cx, |window, _| window.font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::FontSize, cx);
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_some());
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .font
+                .size,
+            20.0
+        );
+    });
+
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .font
+                .size,
+            16.0
+        );
+    });
+}
+
+#[gpui::test]
+fn conflict_can_reload_the_external_value(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::FontSize(20.0))
+                .expect("external edit");
+        });
+    });
+    let input = win.read_with(cx, |window, _| window.font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::FontSize, cx);
+    });
+    let win_for_reload = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_reload.update(cx, |settings, cx| {
+            settings.reload_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(window.font_size_input.read(cx).value().as_ref(), "20");
+    });
+}
+
+#[gpui::test]
+fn boolean_conflict_overwrite_updates_store_and_visible_value(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let desired = win.read_with(cx, |window, _| !window.cursor_blinking);
+    win.update(cx, |window, cx| {
+        window.cursor_blinking = desired;
+        cx.notify();
+    });
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::CursorBlinking(desired))
+                .expect("external edit");
+        });
+    });
+
+    win.update(cx, |window, cx| {
+        assert!(!window.persist_bool_setting(BoolSetting::CursorBlinking, desired, cx));
+        assert!(window.conflict.is_some());
+    });
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(window.cursor_blinking, desired);
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .cursor
+                .blinking,
+            desired
+        );
+    });
+}
+
+#[gpui::test]
+fn clean_form_reloads_an_external_setting_immediately(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::FontSize(20.0))
+                .expect("external edit");
+        });
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(window.font_size_input.read(cx).value().as_ref(), "20");
+        assert_eq!(window.base_config.font.size, 20.0);
+        assert!(window.conflict.is_none());
+    });
+}
+
+#[gpui::test]
+fn committing_one_draft_does_not_swallow_an_unrelated_external_edit(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::GeneralLanguage(
+                    "en".to_string(),
+                ))
+                .expect("external edit");
+        });
+    });
+
+    let input = win.read_with(cx, |window, _| window.font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::FontSize, cx);
+    });
+    cx.run_until_parked();
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            window
+                .language_select
+                .read(cx)
+                .selected_value()
+                .map(|value| value.as_ref()),
+            Some("en")
+        );
+        assert_eq!(window.base_config.general.language, "en");
+    });
+}
+
+#[gpui::test]
+fn resolving_one_conflict_preserves_another_drafts_baseline(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+    set_input(&wh, &win, cx, |window| window.opacity_input.clone(), "0.8");
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::FontSize(20.0))
+                .expect("external font edit");
+            store
+                .apply_patch(daruda_config::SettingsPatch::WindowOpacity(0.7))
+                .expect("external opacity edit");
+        });
+    });
+
+    let font = win.read_with(cx, |window, _| window.font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&font, TextSetting::FontSize, cx);
+        assert!(window.conflict.is_some());
+    });
+    let win_for_reload = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_reload.update(cx, |settings, cx| {
+            settings.reload_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    let opacity = win.read_with(cx, |window, _| window.opacity_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&opacity, TextSetting::WindowOpacity, cx);
+        assert!(window.conflict.is_some());
+    });
+}
+
+#[gpui::test]
+fn structural_overwrite_reloads_the_persisted_catalog(cx: &mut TestAppContext) {
+    let config = one_ssh_row_config();
+    let (wh, win) = build_window_with_config(cx, config.clone());
+    set_input(&wh, &win, cx, |window| window.font_size_input.clone(), "16");
+
+    let mut external_entries = config.session_hosts.clone();
+    external_entries[0].label = "External label".to_string();
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::SessionHosts {
+                    entries: external_entries,
+                    tombstones: Vec::new(),
+                })
+                .expect("external host edit");
+        });
+    });
+
+    win.update(cx, |window, cx| {
+        window.remove_session_host_row(0, cx);
+        assert!(window.conflict.is_some());
+        assert_eq!(
+            window.session_host_rows().count(),
+            1,
+            "failed edit rolls back"
+        );
+    });
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(window.session_host_rows().count(), 0);
+        assert!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .session_hosts
+                .is_empty()
+        );
+    });
+}
+
 /// Test-only — write `value` into one of the settings_window's inputs
 /// through the real `InputState::set_value` pipeline. Tests don't hold
 /// a live `&mut Window`, so re-enter via the window handle.
@@ -661,8 +952,9 @@ fn validate_rejects_agent_catalog_errors(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.update(cx, |w, cx| w.remove_agent_catalog_item(0, cx));
     win.read_with(cx, |w, cx| {
-        let err = w.validate(cx).unwrap_err();
-        assert!(err.contains("agent") || err.contains("에이전트"));
+        assert_eq!(w.agent_editable_rows().count(), 1);
+        assert!(w.validate(cx).is_ok(), "the last valid agent is restored");
+        assert!(w.error.is_some(), "the rejected removal is explained");
     });
 
     let config = daruda_config::Config {
@@ -1250,6 +1542,35 @@ fn session_host_input_is_focused(
     .expect("settings window should still be open during the test")
 }
 
+fn focus_session_host_input(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+) {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).focus(window, cx);
+    })
+    .expect("settings window should still be open during the test");
+}
+
+fn session_host_kind_is_focused(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+) -> bool {
+    let state = win.read_with(cx, |w, _| {
+        w.session_host_row(index).unwrap().kind_select.clone()
+    });
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).is_focused(window)
+    })
+    .expect("settings window should still be open during the test")
+}
+
 /// A one-row SSH catalog config — the seed for the tab-cycle tests.
 fn one_ssh_row_config() -> daruda_config::Config {
     daruda_config::Config {
@@ -1278,10 +1599,17 @@ fn tab_cycle_covers_session_host_rows(cx: &mut TestAppContext) {
 
     press_tab(&wh, &win, cx, true);
     assert!(
+        session_host_kind_is_focused(&wh, &win, cx, 0),
+        "Tab from the label must reach the row's kind select"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
-        "Tab from the label must reach the row's target field"
+        "Tab from the kind select must reach the row's target field"
     );
 
+    press_tab(&wh, &win, cx, false);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
     press_tab(&wh, &win, cx, false);
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
@@ -1292,15 +1620,22 @@ fn tab_cycle_covers_session_host_rows(cx: &mut TestAppContext) {
     select_session_host_kind(&wh, &win, cx, 1, "docker");
 
     press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
+    press_tab(&wh, &win, cx, true);
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
         "the first row's value field comes after its label"
     );
     press_tab(&wh, &win, cx, true);
+    // The second row's Remove button is a real tab stop and precedes its
+    // fields in render order.
+    press_tab(&wh, &win, cx, true);
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 1, |r| r.label_input.clone()),
         "the cycle carries on into the second row"
     );
+    press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 1));
     press_tab(&wh, &win, cx, true);
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 1, |r| r.container_input.clone()),
@@ -1310,21 +1645,17 @@ fn tab_cycle_covers_session_host_rows(cx: &mut TestAppContext) {
         !session_host_input_is_focused(&wh, &win, cx, 1, |r| r.target_input.clone()),
         "the hidden target field must never take focus"
     );
-    press_tab(&wh, &win, cx, true);
-    assert!(
-        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
-        "the cycle wraps back to the first row"
-    );
-
     let (wh, win) = build_window(cx);
     open_session_hosts_section(&wh, &win, cx);
     add_session_host(&wh, &win, cx);
 
-    press_tab(&wh, &win, cx, true);
+    focus_session_host_input(&wh, &win, cx, 0, |r| r.label_input.clone());
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
-        "Tab must land on the first field of the only row"
+        "the first field of a newly added row can enter the native tab order"
     );
+    press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
     press_tab(&wh, &win, cx, true);
     assert!(
         session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
