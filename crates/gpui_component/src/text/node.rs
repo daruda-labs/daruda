@@ -964,8 +964,8 @@ impl Node {
 enum ListItemChildLayout {
     /// Leading paragraph — carries the bullet / number prefix.
     LeadParagraph,
-    /// A follow-on paragraph directly after another paragraph — merged into the
-    /// previous line's container so continuation text stacks.
+    /// A follow-on paragraph directly after another paragraph — built into that
+    /// paragraph's content column so continuation prose stacks under it.
     MergedParagraph,
     /// A follow-on paragraph after a non-paragraph block — its own continuation
     /// line with no prefix, so it neither merges into that block's container
@@ -1026,30 +1026,59 @@ impl Node {
                     let mut items: Vec<Div> = Vec::with_capacity(children.len());
 
                     let layouts = classify_list_item_children(children);
-                    for (child, layout) in children.iter().zip(layouts) {
-                        let block = child.render_block(
-                            NodeRenderOptions {
-                                depth: options.depth + 1,
-                                todo: checked.is_some(),
-                                is_last: true,
-                                ..options
-                            },
-                            node_cx,
-                            link_click_handler,
-                            window,
-                            cx,
-                        );
-
-                        match layout {
-                            // Merge continuation prose into the previous line's
-                            // container so tight-list paragraphs stack.
-                            ListItemChildLayout::MergedParagraph => {
-                                if let Some(item_item) = items.last_mut() {
-                                    item_item.extend(vec![
-                                        div().overflow_hidden().child(block).into_any_element(),
-                                    ]);
+                    let child_options = NodeRenderOptions {
+                        depth: options.depth + 1,
+                        todo: checked.is_some(),
+                        is_last: true,
+                        ..options
+                    };
+                    let mut start = 0;
+                    while start < children.len() {
+                        // A paragraph absorbs the run of `MergedParagraph`s
+                        // that follows it, so they are built into its content
+                        // column in one pass. Appending them afterwards is not
+                        // an option: the lead's container is an `h_flex`, so
+                        // every extra child landed *beside* the paragraph
+                        // instead of under it — sharing the item's width and
+                        // adding no height at all.
+                        let mut end = start + 1;
+                        while end < children.len()
+                            && layouts[end] == ListItemChildLayout::MergedParagraph
+                        {
+                            end += 1;
+                        }
+                        let blocks = children[start..end]
+                            .iter()
+                            .enumerate()
+                            .map(|(offset, child)| {
+                                let block = child.render_block(
+                                    child_options,
+                                    node_cx,
+                                    link_click_handler,
+                                    window,
+                                    cx,
+                                );
+                                // `render_block` zeroes a paragraph's bottom
+                                // margin inside a list, so absorbed prose would
+                                // sit flush against the paragraph above it and
+                                // read as one block. Space it like the
+                                // paragraphs of a loose list item are meant to
+                                // be — the same gap top-level prose uses.
+                                if offset == 0 {
+                                    block
+                                } else {
+                                    div()
+                                        .pt(node_cx.style.paragraph_gap)
+                                        .child(block)
+                                        .into_any_element()
                                 }
-                            }
+                            })
+                            .collect::<Vec<_>>();
+
+                        match layouts[start] {
+                            // Absorbed by the paragraph above it, so a run
+                            // never starts here.
+                            ListItemChildLayout::MergedParagraph => {}
                             ListItemChildLayout::LeadParagraph => {
                                 items.push(
                                     h_flex()
@@ -1087,8 +1116,14 @@ impl Node {
                                                     }),
                                             )
                                         })
+                                        // A column, so the lead paragraph and
+                                        // the prose merged into it stack.
                                         .child(
-                                            div().flex_1().min_w_0().overflow_hidden().child(block),
+                                            v_flex()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .children(blocks),
                                         ),
                                 );
                             }
@@ -1108,9 +1143,10 @@ impl Node {
                             ListItemChildLayout::NestedList
                             | ListItemChildLayout::ContinuationParagraph
                             | ListItemChildLayout::Block => {
-                                items.push(div().ml(rems(1.)).min_w_0().child(block));
+                                items.push(v_flex().ml(rems(1.)).min_w_0().children(blocks));
                             }
                         }
+                        start = end;
                     }
                     items
                 })
@@ -1521,9 +1557,9 @@ mod tests {
 
     #[test]
     fn list_item_merges_consecutive_paragraphs_and_indents_nested_list() {
-        // Locks the pre-existing behaviour the fix must preserve: consecutive
-        // paragraphs merge; a nested list indents; a paragraph after a nested
-        // list keeps its prefixed leading-line treatment.
+        // Consecutive paragraphs merge into the first one's content column; a
+        // nested list indents; a paragraph after a nested list keeps its
+        // prefixed leading-line treatment.
         let children = vec![p(), p(), ul(), p()];
         assert_eq!(
             classify_list_item_children(&children),
