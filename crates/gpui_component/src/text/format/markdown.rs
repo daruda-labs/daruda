@@ -52,6 +52,16 @@ fn parse_table_cell(row: &mut node::TableRow, node: &mdast::TableCell, cx: &mut 
     row.children.push(table_cell);
 }
 
+/// Apply `mark` over every run of an already-parsed paragraph, keeping the
+/// marks those runs carry. Emphasis (`**`/`*`/`~~`) nests around other inline
+/// nodes, so flattening its children into one run would drop their inline
+/// code / link / nested-emphasis formatting.
+fn mark_children(paragraph: &mut Paragraph, mark: TextMark) {
+    for child in paragraph.children.iter_mut() {
+        child.marks.push((0..child.text.len(), mark.clone()));
+    }
+}
+
 fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeContext) -> String {
     let span = node.position().map(|pos| Span {
         start: pos.start.offset,
@@ -78,34 +88,38 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
             for child in val.children.iter() {
                 text.push_str(&parse_paragraph(&mut child_paragraph, &child, cx));
             }
-            paragraph.push(
-                InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().italic())]),
-            );
+            mark_children(&mut child_paragraph, TextMark::default().italic());
+            paragraph.merge(child_paragraph);
         }
         Node::Strong(val) => {
             let mut child_paragraph = Paragraph::default();
             for child in val.children.iter() {
                 text.push_str(&parse_paragraph(&mut child_paragraph, &child, cx));
             }
-            paragraph.push(
-                InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().bold())]),
-            );
+            mark_children(&mut child_paragraph, TextMark::default().bold());
+            paragraph.merge(child_paragraph);
         }
         Node::Delete(val) => {
             let mut child_paragraph = Paragraph::default();
             for child in val.children.iter() {
                 text.push_str(&parse_paragraph(&mut child_paragraph, &child, cx));
             }
-            paragraph.push(
-                InlineNode::new(&text)
-                    .marks(vec![(0..text.len(), TextMark::default().strikethrough())]),
-            );
+            mark_children(&mut child_paragraph, TextMark::default().strikethrough());
+            paragraph.merge(child_paragraph);
         }
         Node::InlineCode(val) => {
             text = val.value.clone();
             paragraph.push(
                 InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().code())]),
             );
+        }
+        // A hard line break — two trailing spaces or a trailing backslash.
+        // `mdast` reports it as an inline child of the paragraph, so without
+        // this arm it fell to the catch-all below and the runs on either side
+        // rendered glued together with no separator at all.
+        Node::Break(_) => {
+            text = "\n".to_owned();
+            paragraph.push(InlineNode::new(&text));
         }
         Node::Link(val) => {
             let link_mark = Some(LinkMark {
@@ -391,5 +405,93 @@ fn ast_to_node(
             }
             node::Node::Unknown
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::highlighter::HighlightTheme;
+    use crate::text::TextViewStyle;
+    use crate::text::node::{Node, NodeContext, Paragraph};
+
+    fn parse_md(raw: &str) -> Node {
+        let style = TextViewStyle::default();
+        let mut cx = NodeContext::default();
+        let theme = HighlightTheme::default_dark();
+        super::parse(raw, &style, &mut cx, &theme).expect("parses")
+    }
+
+    /// The first paragraph of a single-paragraph document.
+    fn first_paragraph(raw: &str) -> Paragraph {
+        match parse_md(raw) {
+            Node::Root { children } => match children.into_iter().next() {
+                Some(Node::Paragraph(p)) => p,
+                other => panic!("expected a leading paragraph, got {other:?}"),
+            },
+            other => panic!("expected a root, got {other:?}"),
+        }
+    }
+
+    fn joined_text(p: &Paragraph) -> String {
+        p.children.iter().map(|c| c.text.to_string()).collect()
+    }
+
+    /// Two trailing spaces are a hard line break; `mdast` reports it as an
+    /// inline `Break` child of the paragraph. Dropping it glued the runs on
+    /// either side together with no separator at all.
+    #[test]
+    fn a_hard_line_break_becomes_a_newline_run() {
+        let p = first_paragraph("AAAA  \nBBBB");
+        assert_eq!(joined_text(&p), "AAAA\nBBBB");
+    }
+
+    /// A backslash at end of line is the other hard-break spelling.
+    #[test]
+    fn a_backslash_line_break_becomes_a_newline_run() {
+        let p = first_paragraph("AAAA\\\nBBBB");
+        assert_eq!(joined_text(&p), "AAAA\nBBBB");
+    }
+
+    /// Emphasis wrapped its children's text into one flat run carrying only
+    /// its own mark, so any inline code / link / nested emphasis inside it
+    /// lost its formatting. The marks must compose instead.
+    #[test]
+    fn bold_keeps_the_marks_of_its_children() {
+        let p = first_paragraph("**bold `code` here**");
+        assert_eq!(joined_text(&p), "bold code here");
+
+        let code = p
+            .children
+            .iter()
+            .find(|c| c.text == "code")
+            .expect("the inline-code run survives as its own node");
+        assert!(
+            code.marks.iter().any(|(_, m)| m.code),
+            "inline code inside bold lost its code mark: {:?}",
+            code.marks
+        );
+        assert!(
+            p.children
+                .iter()
+                .all(|c| c.marks.iter().any(|(_, m)| m.bold)),
+            "not every run inside the emphasis is bold: {:?}",
+            p.children
+        );
+    }
+
+    /// A link inside emphasis must stay a link.
+    #[test]
+    fn bold_keeps_a_nested_link() {
+        let p = first_paragraph("**see [docs](https://example.com) now**");
+        let link = p
+            .children
+            .iter()
+            .find(|c| c.text == "docs")
+            .expect("the link text survives as its own node");
+        assert!(
+            link.marks.iter().any(|(_, m)| m.link.is_some()),
+            "link inside bold lost its link mark: {:?}",
+            link.marks
+        );
     }
 }

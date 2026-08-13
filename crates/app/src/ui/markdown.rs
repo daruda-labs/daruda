@@ -165,32 +165,37 @@ mod tests {
 
     use crate::test_support::init_gpui_component;
 
-    struct HeadingProbe {
+    struct MarkdownProbe {
         text: SharedString,
     }
 
-    impl Render for HeadingProbe {
+    impl Render for MarkdownProbe {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
-                .id("heading-probe")
-                .debug_selector(|| "heading-probe".into())
+                .id("markdown-probe")
+                .debug_selector(|| "markdown-probe".into())
                 .w_full()
-                .child(super::markdown("probe-heading", self.text.clone()))
+                .child(super::markdown("probe", self.text.clone()))
         }
     }
 
     /// Opens a real window pinned to `width` (tall enough that height never
-    /// clips) with a single heading, lets it settle, then reads the painted
-    /// height of the `heading-probe` div back via `debug_bounds` — the
-    /// wrap-driven line count made visible.
-    fn heading_probe_height(cx: &mut TestAppContext, text: SharedString, width: Pixels) -> Pixels {
+    /// clips) with one markdown body, lets it settle, then reads the painted
+    /// height of the `markdown-probe` div back via `debug_bounds` — the
+    /// wrap- and stack-driven line count made visible.
+    fn markdown_probe_height(
+        cx: &mut TestAppContext,
+        text: impl Into<SharedString>,
+        width: Pixels,
+    ) -> Pixels {
         let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
         let opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         };
+        let text = text.into();
         let window = cx
-            .update(|cx| cx.open_window(opts, |_window, cx| cx.new(|_cx| HeadingProbe { text })))
+            .update(|cx| cx.open_window(opts, |_window, cx| cx.new(|_cx| MarkdownProbe { text })))
             .expect("window opens");
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
@@ -201,8 +206,8 @@ mod tests {
         // frame-1-vs-frame-2 check in `workspace/tests/agent_diff_layout.rs`).
         vcx.update(|window, _| window.refresh());
         vcx.run_until_parked();
-        vcx.debug_bounds("heading-probe")
-            .expect("heading probe painted")
+        vcx.debug_bounds("markdown-probe")
+            .expect("markdown probe painted")
             .size
             .height
     }
@@ -222,12 +227,69 @@ mod tests {
             "# This heading has enough words that it must wrap across more than one line once the pane narrows"
                 .into();
 
-        let narrow = heading_probe_height(cx, text.clone(), px(220.));
-        let wide = heading_probe_height(cx, text, px(1400.));
+        let narrow = markdown_probe_height(cx, text.clone(), px(220.));
+        let wide = markdown_probe_height(cx, text, px(1400.));
 
         assert!(
             narrow > wide,
             "heading did not reflow at a narrower width: narrow={narrow:?} wide={wide:?}"
+        );
+    }
+
+    /// A hard line break (two trailing spaces) must start a new line. The
+    /// parser dropped `mdast::Node::Break` on its catch-all arm, which glued
+    /// the runs on either side into one — an agent reply that puts a citation
+    /// link on the line under its claim rendered as `…제거합니다.lib.rs`.
+    #[gpui::test]
+    fn a_hard_line_break_starts_a_new_line(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+
+        let broken = markdown_probe_height(cx, "AAAA  \nBBBB", px(600.));
+        let glued = markdown_probe_height(cx, "AAAABBBB", px(600.));
+
+        assert!(
+            broken > glued,
+            "hard break did not start a new line: with_break={broken:?} glued={glued:?}"
+        );
+    }
+
+    /// A list item's second and later paragraphs must stack under the first,
+    /// not sit beside it. They were appended to the lead paragraph's `h_flex`
+    /// (a flex **row**), so they added no height at all and shared the item's
+    /// width — every numbered finding in an agent's review reply collapsed
+    /// into side-by-side columns.
+    #[gpui::test]
+    fn a_list_item_stacks_its_continuation_paragraphs(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+
+        let three = markdown_probe_height(cx, "1. AAAA\n\n   BBBB\n\n   CCCC", px(600.));
+        let one = markdown_probe_height(cx, "1. AAAA", px(600.));
+
+        assert!(
+            three > one,
+            "continuation paragraphs added no height: three={three:?} one={one:?}"
+        );
+    }
+
+    /// The same defect seen through width rather than height. Sharing a row
+    /// makes the continuation's width — and so its wrap — depend on how long
+    /// the lead line is; stacked, the lead's length is irrelevant. Both leads
+    /// fit on one line at this width, so the two must measure identically.
+    #[gpui::test]
+    fn a_list_item_continuation_keeps_the_full_width(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+        let long = "This continuation paragraph is long enough that it must wrap several times when it is laid out inside a column narrower than the pane it belongs to.";
+
+        let short_lead = markdown_probe_height(cx, format!("1. Lead\n\n   {long}"), px(600.));
+        let long_lead = markdown_probe_height(
+            cx,
+            format!("1. A considerably longer lead line that fills the row\n\n   {long}"),
+            px(600.),
+        );
+
+        assert_eq!(
+            short_lead, long_lead,
+            "the continuation's wrap depends on the lead line's length — they share a row"
         );
     }
 }
