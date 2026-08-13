@@ -27,9 +27,9 @@ pub enum PtyError {
 impl std::fmt::Display for PtyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PtyError::OpenPty(e) => write!(f, "openpty failed: {e}"),
-            PtyError::SpawnShell(e) => write!(f, "spawn shell failed: {e}"),
-            PtyError::Io(e) => write!(f, "pty I/O error: {e}"),
+            PtyError::OpenPty(e) => f.write_str(&crate::ux::strings::pty_open_failed(e)),
+            PtyError::SpawnShell(e) => f.write_str(&crate::ux::strings::pty_spawn_shell_failed(e)),
+            PtyError::Io(e) => f.write_str(&crate::ux::strings::pty_io_failed(e)),
         }
     }
 }
@@ -243,7 +243,7 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
                 // tracer rebuild. Best-effort send — if the receiver is
                 // gone the pane has already torn down.
                 let _ = writer_error_tx.send(
-                    ErrorReport::new("PTY writer thread died")
+                    ErrorReport::new(crate::ux::strings::pty_writer_thread_died())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -269,7 +269,7 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
                 Ok(n) => n,
                 Err(e) => {
                     let _ = reader_error_tx.send(
-                        ErrorReport::new("PTY reader thread died")
+                        ErrorReport::new(crate::ux::strings::pty_reader_thread_died())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -423,13 +423,13 @@ mod tests {
     #[test]
     fn test_pty_error_display() {
         let err = PtyError::OpenPty("test".into());
-        assert_eq!(err.to_string(), "openpty failed: test");
+        assert_eq!(err.to_string(), "Failed to open PTY: test");
 
         let err = PtyError::SpawnShell("not found".into());
-        assert_eq!(err.to_string(), "spawn shell failed: not found");
+        assert_eq!(err.to_string(), "Failed to spawn shell: not found");
 
         let err = PtyError::Io("broken pipe".into());
-        assert_eq!(err.to_string(), "pty I/O error: broken pipe");
+        assert_eq!(err.to_string(), "PTY I/O failed: broken pipe");
     }
 
     /// Probe portable-pty's behavior for a nonexistent shell path.

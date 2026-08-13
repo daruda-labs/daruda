@@ -16,9 +16,8 @@ pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
 pub(in crate::workspace) mod terminal_input;
 
-use crate::ui::theme;
+use crate::{surface::strings as s, ui::theme};
 use daruda_store::panels::{MacroKey, TabId};
-use daruda_terminal::ux::strings as s;
 use gpui::{AnyElement, ClickEvent, Context, Div, IntoElement, div, prelude::*, px};
 
 use self::macro_edit_modal::MacroEditModal;
@@ -82,9 +81,9 @@ pub(in crate::workspace) fn render_body(
 
     let Some(active_tab_id) = active_tab_id else {
         let message = if !has_tabs {
-            s::PANELS_NO_TABS
+            s::bottom_dock_no_tabs()
         } else {
-            s::PANELS_NO_ACTIVE_TAB
+            s::bottom_dock_no_active_tab()
         };
         return placeholder(message, cx).into_any_element();
     };
@@ -144,7 +143,7 @@ fn add_widget_button(
                 let ws_for_modal = workspace.clone();
                 ws.update(cx, |_, cx| {
                     crate::workspace::dialog_helpers::open_form_modal(
-                        "New Macro",
+                        s::macro_new_title(),
                         None,
                         move |window, cx| {
                             MacroEditModal::new(
@@ -164,7 +163,7 @@ fn add_widget_button(
     ))
 }
 
-fn placeholder(message: &'static str, cx: &mut Context<Dock>) -> impl IntoElement {
+fn placeholder(message: impl Into<gpui::SharedString>, cx: &mut Context<Dock>) -> impl IntoElement {
     let text_color = theme::current(cx).text_subtle;
     div()
         .flex_1()

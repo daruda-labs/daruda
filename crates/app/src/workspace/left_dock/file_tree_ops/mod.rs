@@ -244,13 +244,14 @@ impl Workspace {
         let watcher = match FileTreeWatcher::new(root.clone()) {
             Ok(w) => w,
             Err(e) => {
-                let report = ErrorReport::new("File watcher init failed")
-                    .severity(ErrorSeverity::Warning)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .with_context("path", redact_home(&root))
-                    .dedup("files.watcher_init")
-                    .build();
+                let report =
+                    ErrorReport::new(crate::surface::strings::error_file_watcher_init_failed())
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&root))
+                        .dedup("files.watcher_init")
+                        .build();
                 self.report_error(report, cx);
                 return;
             }
@@ -394,7 +395,7 @@ impl Workspace {
             }
             DebouncedEvent::Changed { .. } => {}
             DebouncedEvent::Error(msg) => {
-                let report = ErrorReport::new("File watcher reported error")
+                let report = ErrorReport::new(crate::surface::strings::error_file_watcher_error())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .with_context("detail", msg)
@@ -638,7 +639,9 @@ impl Workspace {
                         // root — keep the lane and report like any
                         // dir-read error.
                         Some((
-                            format!("Cannot read directory: {e}"),
+                            crate::surface::strings::error_cannot_read_directory_detail(
+                                &e.to_string(),
+                            ),
                             ErrorSeverity::Error,
                             "files.dir_read.root",
                         ))
@@ -692,7 +695,7 @@ impl Workspace {
                     None
                 } else {
                     Some((
-                        format!("Cannot read directory: {e}"),
+                        crate::surface::strings::error_cannot_read_directory_detail(&e.to_string()),
                         ErrorSeverity::Warning,
                         "files.dir_read",
                     ))
@@ -700,7 +703,7 @@ impl Workspace {
             }
         };
         if let Some((msg, severity, dedup_key)) = error_msg {
-            let report = ErrorReport::new("Cannot read directory")
+            let report = ErrorReport::new(crate::surface::strings::error_cannot_read_directory())
                 .severity(severity)
                 .at(file!(), line!())
                 .with_context("detail", msg)

@@ -124,13 +124,14 @@ impl Workspace {
                         .await;
                     if let Err(e) = result {
                         use daruda_store::observability::system_info::redact_home;
-                        let report = ErrorReport::new("Tasks save failed")
-                            .severity(ErrorSeverity::Warning)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("dir", redact_home(&dir))
-                            .dedup("tasks.save")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_tasks_save_failed())
+                                .severity(ErrorSeverity::Warning)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("dir", redact_home(&dir))
+                                .dedup("tasks.save")
+                                .build();
                         // `report_error` routes to toast + history + NDJSON;
                         // fall back to a log-only write when the workspace
                         // entity is already gone (window closing).

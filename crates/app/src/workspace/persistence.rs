@@ -435,12 +435,13 @@ impl Workspace {
                     .map(|l| l.availability != LaneAvailability::Present)
                     .unwrap_or(false);
                 if unavailable {
-                    let report = ErrorReport::new("Lane path not found")
-                        .severity(ErrorSeverity::Warning)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(&swt.path))
-                        .dedup("lane.restore.missing_path")
-                        .build();
+                    let report =
+                        ErrorReport::new(crate::surface::strings::error_lane_path_not_found())
+                            .severity(ErrorSeverity::Warning)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&swt.path))
+                            .dedup("lane.restore.missing_path")
+                            .build();
                     self.report_error(report, cx);
                     continue;
                 }
@@ -482,7 +483,11 @@ impl Workspace {
                         Err(e) => {
                             // Drop the whole lane's partial panes (scratch
                             // goes out of scope) — restore aborts here.
-                            self.report_pane_error("restore", e, cx);
+                            self.report_pane_error(
+                                &crate::surface::strings::pane_context_restore(),
+                                e,
+                                cx,
+                            );
                             failed = true;
                             break;
                         }

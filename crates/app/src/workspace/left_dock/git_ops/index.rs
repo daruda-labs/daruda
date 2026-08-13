@@ -53,7 +53,7 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git add failed")
+                        let report = ErrorReport::new(app_strings::error_git_add_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -107,14 +107,15 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git restore --staged failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("lane", redact_home(&wt_for_report))
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.unstage")
-                            .build();
+                        let report =
+                            ErrorReport::new(app_strings::error_git_restore_staged_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("lane", redact_home(&wt_for_report))
+                                .with_context("path", redact_home(&path_for_report))
+                                .dedup("git.unstage")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }
@@ -159,7 +160,7 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git add (paths) failed")
+                        let report = ErrorReport::new(app_strings::error_git_add_paths_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -211,14 +212,15 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git restore --staged (paths) failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("lane", redact_home(&wt_for_report))
-                            .with_context("count", paths_count.to_string())
-                            .dedup("git.unstage_paths")
-                            .build();
+                        let report =
+                            ErrorReport::new(app_strings::error_git_restore_staged_paths_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("lane", redact_home(&wt_for_report))
+                                .with_context("count", paths_count.to_string())
+                                .dedup("git.unstage_paths")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }
@@ -256,7 +258,7 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git add --all failed")
+                        let report = ErrorReport::new(app_strings::error_git_add_all_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -300,13 +302,14 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git restore --staged . failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.unstage_all")
-                            .build();
+                        let report =
+                            ErrorReport::new(app_strings::error_git_restore_staged_all_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(&path_for_report))
+                                .dedup("git.unstage_all")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }
@@ -340,15 +343,7 @@ impl Workspace {
             return;
         }
         let filename = path.file_name_lossy();
-        let body = if is_untracked {
-            format!(
-                "Delete untracked file \"{filename}\"? This file is not in git and cannot be recovered."
-            )
-        } else {
-            format!(
-                "Discard working-tree changes to \"{filename}\"? The committed version will replace your edits."
-            )
-        };
+        let body = app_strings::git_confirm_discard_body(&filename, is_untracked);
 
         let weak = cx.weak_entity();
         open_confirm_dialog(

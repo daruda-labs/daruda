@@ -18,10 +18,10 @@ use gpui::{
     ClickEvent, Context, FocusHandle, Focusable, IntoElement, Render, Window, div, prelude::*, px,
 };
 
-use crate::ui::theme;
 use crate::ui::{ActiveTheme, WindowExt as _, button, button_danger, radio};
 use crate::workspace::ModalView;
 use crate::workspace::dialog_helpers::open_form_modal;
+use crate::{surface::strings as s, ui::theme};
 
 /// User's pick on the delete-project chooser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,12 +86,12 @@ impl ModalView for DeleteProjectModal {}
 impl Render for DeleteProjectModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body_color = cx.theme().muted_foreground;
-        let prompt = format!("Close project \"{}\"?", self.project_name);
+        let prompt = s::close_project_modal_body(&self.project_name);
         let keep_checked = self.choice == DeleteProjectChoice::KeepOnDisk;
         let delete_checked = self.choice == DeleteProjectChoice::DeleteOnDisk;
         let delete_label = match self.choice {
-            DeleteProjectChoice::KeepOnDisk => "Close",
-            DeleteProjectChoice::DeleteOnDisk => "Delete",
+            DeleteProjectChoice::KeepOnDisk => s::common_button_close(),
+            DeleteProjectChoice::DeleteOnDisk => s::common_button_delete(),
         };
 
         let radio_group = div()
@@ -101,7 +101,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-keep",
-                    "Remove from Daruda only (keep lanes on disk)",
+                    s::delete_project_keep_choice(),
                     0_isize,
                 )
                 .checked(keep_checked)
@@ -113,7 +113,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-disk",
-                    "Remove lanes and delete on disk",
+                    s::delete_project_delete_choice(),
                     1_isize,
                 )
                 .checked(delete_checked)
@@ -137,7 +137,7 @@ impl Render for DeleteProjectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("delete-project-cancel", "Cancel").on_click(cx.listener(
+                button("delete-project-cancel", s::common_button_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
@@ -179,7 +179,7 @@ pub(crate) fn open_delete_project_modal<F>(
 {
     let on_submit: DeleteProjectSubmit = Rc::new(on_submit);
     open_form_modal(
-        "Close Project",
+        s::close_project_modal_title(),
         None,
         move |_window, modal_cx| DeleteProjectModal::new(project_name, on_submit, modal_cx),
         window,

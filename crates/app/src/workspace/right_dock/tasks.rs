@@ -190,10 +190,10 @@ fn search_empty_hint(query: String, t: &crate::ui::theme::DarudaTheme) -> impl I
 
 fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
     let msg = match filter {
-        TaskFilter::All => ux_strings::RIGHT_PANEL_TASK_EMPTY_ALL,
-        TaskFilter::Backlog => ux_strings::RIGHT_PANEL_TASK_EMPTY_BACKLOG,
-        TaskFilter::Running => ux_strings::RIGHT_PANEL_TASK_EMPTY_RUNNING,
-        TaskFilter::Done => ux_strings::RIGHT_PANEL_TASK_EMPTY_DONE,
+        TaskFilter::All => strings::right_panel_task_empty_all(),
+        TaskFilter::Backlog => strings::right_panel_task_empty_backlog(),
+        TaskFilter::Running => strings::right_panel_task_empty_running(),
+        TaskFilter::Done => strings::right_panel_task_empty_done(),
     };
     crate::ui::placeholder_text(msg)
         .py(px(theme::RIGHT_PANEL_PAD_Y))
@@ -353,11 +353,11 @@ fn state_indicator(state: &TaskState, cx: &gpui::App) -> (&'static str, Hsla) {
 
 fn state_label(state: &TaskState) -> SharedString {
     match state {
-        TaskState::Backlog => SharedString::from(ux_strings::RIGHT_PANEL_TASK_BACKLOG_LABEL),
-        TaskState::Running { .. } => SharedString::from(ux_strings::RIGHT_PANEL_TASK_RUNNING_LABEL),
+        TaskState::Backlog => SharedString::from(strings::right_panel_task_backlog()),
+        TaskState::Running { .. } => SharedString::from(strings::right_panel_task_running()),
         TaskState::Done { end_reason, .. } => SharedString::from(format!(
             "{} ({})",
-            ux_strings::RIGHT_PANEL_TASK_DONE_LABEL_PREFIX,
+            strings::right_panel_task_done_prefix(),
             done_flavour_label(*end_reason),
         )),
         TaskState::Error { message, .. } => {
@@ -373,13 +373,11 @@ fn state_label(state: &TaskState) -> SharedString {
             };
             SharedString::from(format!(
                 "{}: {}",
-                ux_strings::RIGHT_PANEL_TASK_ERROR_LABEL_PREFIX,
+                strings::right_panel_task_error_prefix(),
                 truncated,
             ))
         }
-        TaskState::Cancelled { .. } => {
-            SharedString::from(ux_strings::RIGHT_PANEL_TASK_CANCELLED_LABEL)
-        }
+        TaskState::Cancelled { .. } => SharedString::from(strings::right_panel_task_cancelled()),
     }
 }
 
@@ -523,7 +521,7 @@ fn failure_indicator(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement
     }
     let text = format!(
         "{}{}/{}",
-        ux_strings::RIGHT_PANEL_TASK_FAILURES_LABEL,
+        strings::right_panel_task_failures_prefix(),
         count,
         TASK_TOOL_USE_FAILURE_THRESHOLD,
     );

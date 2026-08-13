@@ -73,22 +73,25 @@ impl Workspace {
                         // Repo is on disk and usable — only the follow-up
                         // probe that flips `Default → Git` failed, and a
                         // re-open will pick it up. Warning, not Error.
-                        let report = ErrorReport::new("git init succeeded but probe failed")
-                            .severity(ErrorSeverity::Warning)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.init.probe")
-                            .build();
+                        let report = ErrorReport::new(
+                            crate::surface::strings::error_git_init_probe_failed(),
+                        )
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&path_for_report))
+                        .dedup("git.init.probe")
+                        .build();
                         ws.report_error(report, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git init failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.init")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_git_init_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(&path_for_report))
+                                .dedup("git.init")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }

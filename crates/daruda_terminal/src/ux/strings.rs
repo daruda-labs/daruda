@@ -20,9 +20,17 @@ pub const TERM_PROGRAM_VALUE: &str = "daruda";
 /// compile as a regex.
 pub const SEARCH_REGEX_ERROR: &str = "regex error";
 
+pub fn search_regex_error() -> String {
+    rust_i18n::t!("terminal.search_regex_error").into_owned()
+}
+
 /// Right-aligned status label when the current query compiles cleanly
 /// but finds no hits in scrollback.
 pub const SEARCH_NO_MATCHES: &str = "no matches";
+
+pub fn search_no_matches() -> String {
+    rust_i18n::t!("terminal.search_no_matches").into_owned()
+}
 
 // ============================================================================
 // Fallback / placeholder text
@@ -31,6 +39,30 @@ pub const SEARCH_NO_MATCHES: &str = "no matches";
 /// Title returned when a session hasn't yet received an OSC 0 / 2
 /// title. Shown in tab bars and window chrome.
 pub const FALLBACK_TITLE: &str = "shell";
+
+pub fn fallback_title() -> String {
+    rust_i18n::t!("terminal.fallback_title").into_owned()
+}
+
+pub fn pty_reader_thread_died() -> String {
+    rust_i18n::t!("terminal.pty_reader_thread_died").into_owned()
+}
+
+pub fn pty_writer_thread_died() -> String {
+    rust_i18n::t!("terminal.pty_writer_thread_died").into_owned()
+}
+
+pub fn pty_open_failed(error: &str) -> String {
+    rust_i18n::t!("terminal.pty_open_failed", error = error).into_owned()
+}
+
+pub fn pty_spawn_shell_failed(error: &str) -> String {
+    rust_i18n::t!("terminal.pty_spawn_shell_failed", error = error).into_owned()
+}
+
+pub fn pty_io_failed(error: &str) -> String {
+    rust_i18n::t!("terminal.pty_io_failed", error = error).into_owned()
+}
 
 // ============================================================================
 // Key contexts (for `KeyContext::new`)

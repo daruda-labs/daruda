@@ -406,11 +406,7 @@ fn delete_item(
 /// Build "Delete tab 'X'? N widgets will be removed." style body.
 /// Singular when widget_count == 1, omits the count clause when 0.
 fn format_delete_body(name: &str, widget_count: usize) -> String {
-    match widget_count {
-        0 => format!("Delete tab \u{201c}{name}\u{201d}?"),
-        1 => format!("Delete tab \u{201c}{name}\u{201d}? 1 widget will be removed."),
-        n => format!("Delete tab \u{201c}{name}\u{201d}? {n} widgets will be removed."),
-    }
+    surface_strings::delete_panel_tab_modal_body(name, widget_count)
 }
 
 #[cfg(test)]

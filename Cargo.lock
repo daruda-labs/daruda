@@ -1763,6 +1763,7 @@ dependencies = [
  "gpui",
  "portable-pty",
  "regex",
+ "rust-i18n",
  "serde",
  "serde_json",
  "smallvec",

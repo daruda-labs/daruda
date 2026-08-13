@@ -36,7 +36,7 @@ impl Workspace {
             panel.text(cx).to_string()
         };
         if message.trim().is_empty() {
-            let report = ErrorReport::new("Commit message cannot be empty")
+            let report = ErrorReport::new(app_strings::error_commit_message_empty())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .dedup("git.commit.empty_message")
@@ -51,7 +51,7 @@ impl Workspace {
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let first_line = message.lines().next().unwrap_or("").to_string();
-        let body = format!("{staged_count} file(s) staged — {first_line}");
+        let body = app_strings::git_confirm_commit_body(staged_count, &first_line);
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
@@ -115,7 +115,7 @@ impl Workspace {
                         ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git commit failed")
+                        let report = ErrorReport::new(app_strings::error_git_commit_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -357,7 +357,7 @@ impl Workspace {
                         ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git commit --amend failed")
+                        let report = ErrorReport::new(app_strings::error_git_commit_amend_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -433,7 +433,7 @@ impl Workspace {
                 ws.sync_commit_buttons(cx);
                 cx.notify();
                 if let Err(e) = result {
-                    let report = ErrorReport::new("git push failed")
+                    let report = ErrorReport::new(app_strings::error_git_push_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -466,7 +466,7 @@ impl Workspace {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
                 if let Err(e) = result {
-                    let report = ErrorReport::new("git fetch failed")
+                    let report = ErrorReport::new(app_strings::error_git_fetch_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -505,7 +505,7 @@ impl Workspace {
                         ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new("git pull failed")
+                        let report = ErrorReport::new(app_strings::error_git_pull_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())

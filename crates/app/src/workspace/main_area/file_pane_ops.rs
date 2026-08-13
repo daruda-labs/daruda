@@ -217,10 +217,12 @@ impl Workspace {
                 cx.notify();
             }
             Err(e) => {
-                let report = ErrorReport::new(format!("Failed to save: {}", path.display()))
-                    .severity(ErrorSeverity::Error)
-                    .from_error(&e)
-                    .build();
+                let report = ErrorReport::new(crate::surface::strings::error_save_file_failed(
+                    &path.display().to_string(),
+                ))
+                .severity(ErrorSeverity::Error)
+                .from_error(&e)
+                .build();
                 self.report_error(report, cx);
             }
         }
@@ -288,9 +290,9 @@ impl Workspace {
         err: PaneSpawnError,
         cx: &mut Context<Self>,
     ) {
-        let msg = format!("{context} failed — {err}");
+        let msg = crate::surface::strings::error_pane_spawn_status(context, &err.to_string());
         self.last_error = Some(msg.clone().into());
-        let report = ErrorReport::new(format!("Pane spawn failed: {context}"))
+        let report = ErrorReport::new(crate::surface::strings::error_pane_spawn_failed(context))
             .severity(ErrorSeverity::Error)
             .from_error(&err)
             .at(file!(), line!())

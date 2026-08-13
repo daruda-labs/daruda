@@ -9,13 +9,13 @@
 //! this entry. To mint a new group on purpose, use the `New Group` action
 //! (`Cmd+Shift+N`).
 
-use crate::ui::theme;
 use crate::ui::{
     WindowExt as _, button, button_primary,
     select::{self, SelectOption, SelectState},
 };
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use crate::{surface::strings as s, ui::theme};
 use daruda_store::project::{GroupId, ProjectId};
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
@@ -53,17 +53,19 @@ impl GroupSelectModal {
             .and_then(|p| p.group_id);
 
         let mut opts = Vec::with_capacity(workspace.groups.len() + 1);
+        let ungrouped = s::group_ungrouped();
+        let current_suffix = s::group_current_suffix();
         let ungrouped_label = if current.is_none() {
-            "Ungrouped (current)"
+            format!("{ungrouped}{current_suffix}")
         } else {
-            "Ungrouped"
+            ungrouped
         };
         opts.push(SelectOption::new(UNGROUPED_VALUE, ungrouped_label));
 
         for g in &workspace.groups {
             let value = SharedString::from(g.id.to_string());
             let label = if current == Some(g.id) {
-                SharedString::from(format!("{} (current)", g.name))
+                SharedString::from(format!("{}{current_suffix}", g.name))
             } else {
                 SharedString::from(g.name.clone())
             };
@@ -150,14 +152,14 @@ impl Render for GroupSelectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("group-select-cancel", "Cancel").on_click(cx.listener(
+                button("group-select-cancel", s::common_button_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
                 )),
             )
             .child(
-                button_primary("group-select-move", "Move").on_click(cx.listener(
+                button_primary("group-select-move", s::common_button_move()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     },

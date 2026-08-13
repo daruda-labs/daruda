@@ -129,14 +129,16 @@ impl Workspace {
             // mutators (add / update / delete) — earlier revisions only
             // poked `self.last_error`, which is now reserved for inline
             // form-validation banners.
-            let report = ErrorReport::new(format!("MCP toggle failed ({})", scope.slug()))
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("scope", scope.slug())
-                .with_context("server", name)
-                .dedup(format!("mcp.toggle.{}", scope.slug()))
-                .build();
+            let report = ErrorReport::new(crate::surface::strings::error_mcp_toggle_failed(
+                &crate::surface::strings::mcp_scope_display(scope),
+            ))
+            .severity(ErrorSeverity::Warning)
+            .from_error(&e)
+            .at(file!(), line!())
+            .with_context("scope", scope.slug())
+            .with_context("server", name)
+            .dedup(format!("mcp.toggle.{}", scope.slug()))
+            .build();
             self.report_error(report, cx);
         }
         cx.notify();

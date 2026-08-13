@@ -321,7 +321,7 @@ impl Workspace {
         }
         self.open_skill_picker_modal(
             &skills,
-            gpui::SharedString::from("Invoke skill"),
+            crate::surface::strings::skills_invoke_title().into(),
             window,
             cx,
         );
@@ -569,26 +569,29 @@ impl Workspace {
         if let Some(parent) = path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
-            let report = ErrorReport::new("Failed to create project config directory")
-                .severity(ErrorSeverity::Error)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("path", redact_home(parent))
-                .dedup("config.mkdir")
-                .build();
+            let report =
+                ErrorReport::new(crate::surface::strings::error_project_config_create_dir_failed())
+                    .severity(ErrorSeverity::Error)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(parent))
+                    .dedup("config.mkdir")
+                    .build();
             self.report_error(report, cx);
             return;
         }
         if !path.exists()
             && let Err(e) = std::fs::write(&path, s::PROJECT_CONFIG_TEMPLATE)
         {
-            let report = ErrorReport::new("Failed to create project config file")
-                .severity(ErrorSeverity::Error)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("path", redact_home(&path))
-                .dedup("config.create")
-                .build();
+            let report = ErrorReport::new(
+                crate::surface::strings::error_project_config_create_file_failed(),
+            )
+            .severity(ErrorSeverity::Error)
+            .from_error(&e)
+            .at(file!(), line!())
+            .with_context("path", redact_home(&path))
+            .dedup("config.create")
+            .build();
             self.report_error(report, cx);
             return;
         }
@@ -597,13 +600,14 @@ impl Workspace {
         // `open` crate launches the system default handler and detaches
         // without waiting for it to exit.
         if let Err(e) = open::that_detached(&path) {
-            let report = ErrorReport::new("Failed to open project config")
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("path", redact_home(&path))
-                .dedup("config.open")
-                .build();
+            let report =
+                ErrorReport::new(crate::surface::strings::error_project_config_open_failed())
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(&path))
+                    .dedup("config.open")
+                    .build();
             self.report_error(report, cx);
         }
     }
@@ -628,12 +632,13 @@ impl Workspace {
                 self.refresh_jsonl_watcher(cx);
             }
             Err(e) => {
-                let report = ErrorReport::new("Claude hooks install failed")
-                    .severity(ErrorSeverity::Error)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .dedup("hooks.install")
-                    .build();
+                let report =
+                    ErrorReport::new(crate::surface::strings::error_claude_hooks_install_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .dedup("hooks.install")
+                        .build();
                 self.report_error(report, cx);
             }
         }
@@ -658,12 +663,14 @@ impl Workspace {
                 self.refresh_jsonl_watcher(cx);
             }
             Err(e) => {
-                let report = ErrorReport::new("Claude hooks uninstall failed")
-                    .severity(ErrorSeverity::Error)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .dedup("hooks.uninstall")
-                    .build();
+                let report = ErrorReport::new(
+                    crate::surface::strings::error_claude_hooks_uninstall_failed(),
+                )
+                .severity(ErrorSeverity::Error)
+                .from_error(&e)
+                .at(file!(), line!())
+                .dedup("hooks.uninstall")
+                .build();
                 self.report_error(report, cx);
             }
         }

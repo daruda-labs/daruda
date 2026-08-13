@@ -122,17 +122,6 @@ impl Render for TerminalView {
         }
         self.state.pending_refresh = PendingRefresh::No;
 
-        if self.session.window_title_updates_enabled() {
-            let title = self
-                .session
-                .title()
-                .unwrap_or(crate::ux::strings::FALLBACK_TITLE);
-
-            if self.state.last_window_title.as_deref() != Some(title) {
-                self.state.last_window_title = Some(title.to_string());
-            }
-        }
-
         // Bell detection — drain the pending flag even when disabled so it
         // doesn't accumulate.
         if self.session.take_bell() && self.session.visual_bell_enabled() {

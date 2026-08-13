@@ -132,5 +132,6 @@ fn apply_locale_str(lang: &str) {
         "en".to_string()
     };
     rust_i18n::set_locale(&resolved);
+    daruda_terminal::set_locale(&resolved);
     gpui_component::set_locale(&resolved);
 }

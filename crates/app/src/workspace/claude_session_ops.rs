@@ -290,13 +290,15 @@ impl Workspace {
                     // Mid-write or malformed; skip silently.
                 }
                 Err(e) => {
-                    let report = ErrorReport::new("Claude status file read failed")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(&path))
-                        .dedup("claude.status.read")
-                        .build();
+                    let report = ErrorReport::new(
+                        crate::surface::strings::error_claude_status_file_read_failed(),
+                    )
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(&path))
+                    .dedup("claude.status.read")
+                    .build();
                     self.report_error(report, cx);
                 }
             },

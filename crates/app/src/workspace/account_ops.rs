@@ -271,7 +271,11 @@ impl Workspace {
                 match self.create_pane_with_cwd(cwd, selection, prepared.as_ref(), window, cx) {
                     Ok(p) => p,
                     Err(e) => {
-                        self.report_pane_error("switch account", e, cx);
+                        self.report_pane_error(
+                            &crate::surface::strings::pane_context_switch_account(),
+                            e,
+                            cx,
+                        );
                         return;
                     }
                 }

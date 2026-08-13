@@ -630,13 +630,15 @@ impl SettingsWindow {
                         && let Err(e) = std::fs::create_dir_all(parent)
                     {
                         LogWriter::log(
-                            ErrorReport::new("Failed to create config directory")
-                                .severity(ErrorSeverity::Warning)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("path", redact_home(parent))
-                                .dedup("config.mkdir")
-                                .build(),
+                            ErrorReport::new(
+                                crate::surface::strings::error_create_config_dir_failed(),
+                            )
+                            .severity(ErrorSeverity::Warning)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(parent))
+                            .dedup("config.mkdir")
+                            .build(),
                         );
                     }
                     cx.open_url(&path_to_file_url(&path));

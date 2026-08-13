@@ -210,12 +210,13 @@ impl TerminalView {
 
     /// Title reported by the terminal (OSC-2 window title), used by both
     /// the workspace tab bar and per-pane headers in split mode. Falls back
-    /// to "shell" before any title sequence is seen.
-    pub fn terminal_title(&self) -> &str {
-        self.state
-            .last_window_title
-            .as_deref()
-            .unwrap_or(crate::ux::strings::FALLBACK_TITLE)
+    /// to the localized shell label before any title sequence is seen.
+    pub fn terminal_title(&self) -> std::borrow::Cow<'_, str> {
+        self.session
+            .title()
+            .filter(|_| self.session.window_title_updates_enabled())
+            .map(std::borrow::Cow::Borrowed)
+            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::ux::strings::fallback_title()))
     }
 
     /// Current working directory as reported by the shell (OSC 7).

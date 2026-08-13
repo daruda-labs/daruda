@@ -3,7 +3,6 @@
 //! derivation, and the non-git placeholder hint.
 
 use crate::ui::theme;
-use daruda_terminal::ux::strings;
 use gpui::{ClickEvent, Context, IntoElement, Rgba, SharedString, div, prelude::*, px};
 
 use daruda_store::project::{LaneId, ProjectId};
@@ -542,7 +541,7 @@ pub(in crate::workspace) fn project_header_row(
                                 };
                                 let catalog = ws.session_hosts.clone();
                                 crate::workspace::dialog_helpers::open_form_modal(
-                                    "Create Lane",
+                                    surface_strings::create_lane_button_title(),
                                     None,
                                     move |window, cx| {
                                         super::create_modal::CreateWorktreeModal::new(
@@ -992,12 +991,12 @@ pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElem
         .p(px(theme::LANE_PLACEHOLDER_PAD))
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(hint_color)
-        .child(strings::LANE_NON_GIT_HINT)
+        .child(surface_strings::lane_non_git_hint())
         .child(
             div()
                 .mt(px(theme::LANE_PLACEHOLDER_GIT_INIT_MT))
                 .text_color(init_color)
-                .child(strings::LANE_GIT_INIT_LABEL),
+                .child(surface_strings::lane_git_init_label()),
         )
 }
 

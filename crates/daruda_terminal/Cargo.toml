@@ -19,6 +19,7 @@ ghostty_vt = { path = "../ghostty_vt" }
 gpui = { workspace = true }
 portable-pty = "0.9"
 regex = "1.10"
+rust-i18n = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 smallvec = { workspace = true }

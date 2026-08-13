@@ -31,7 +31,7 @@ impl Workspace {
         });
         if let Err(msg) = result {
             self.report_error(
-                ErrorReport::new("Failed to save status bar toggle")
+                ErrorReport::new(crate::surface::strings::error_status_bar_save_failed())
                     .severity(ErrorSeverity::Warning)
                     .message(msg)
                     .at(file!(), line!())

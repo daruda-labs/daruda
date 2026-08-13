@@ -46,13 +46,14 @@ pub fn open_delete_skill_confirm(
                 let dir = dir.clone();
                 ws.update(app_cx, |ws, cx| {
                     if let Err(e) = persist::delete_skill(&dir) {
-                        let report = ErrorReport::new("Skill delete failed")
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&dir))
-                            .dedup("skills.delete")
-                            .build();
+                        let report =
+                            ErrorReport::new(crate::surface::strings::error_skill_delete_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(&dir))
+                                .dedup("skills.delete")
+                                .build();
                         ws.report_error(report, cx);
                         return;
                     }

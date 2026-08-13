@@ -13,6 +13,7 @@
 use gpui::{Context, Window};
 
 use super::{MoveActiveProjectToGroup, NewGroup, RenameActiveProject, Workspace};
+use crate::surface::strings as s;
 use crate::workspace::dialog_helpers::{open_form_modal, open_single_field_dialog};
 use crate::workspace::group_select_modal::GroupSelectModal;
 
@@ -26,8 +27,8 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         open_single_field_dialog(
             weak,
-            "New Group",
-            "Group name",
+            s::new_group_modal_title(),
+            s::new_group_placeholder(),
             None,
             |ws, value, _window, cx| {
                 let Some(name) = value else {
@@ -52,8 +53,8 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         open_single_field_dialog(
             weak,
-            "Rename Project",
-            "Project name",
+            s::rename_project_modal_title(),
+            s::rename_project_placeholder(),
             Some(&initial),
             |ws, value, _window, cx| {
                 let Some(name) = value else {
@@ -82,7 +83,7 @@ impl Workspace {
         let (options, initial) = GroupSelectModal::build_options(self, project_id);
         let weak = cx.entity().downgrade();
         open_form_modal(
-            "Move Project to Group",
+            s::move_project_group_modal_title(),
             None,
             move |window, cx| GroupSelectModal::new(weak, project_id, options, initial, window, cx),
             window,

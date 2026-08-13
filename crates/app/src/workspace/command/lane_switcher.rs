@@ -14,8 +14,7 @@ use gpui::{
     prelude::*, px,
 };
 
-use crate::fuzzy::fuzzy_match;
-use crate::ui::theme;
+use crate::{fuzzy::fuzzy_match, surface::strings as s, ui::theme};
 use std::rc::Rc;
 
 /// One selectable lane, captured when the switcher opens so the overlay
@@ -167,7 +166,7 @@ impl RenderOnce for LaneSwitcherOverlay {
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
                     .text_color(query_text)
                     .child(if state.query.is_empty() {
-                        SharedString::from("Switch to lane...")
+                        SharedString::from(s::command_switch_lane_placeholder())
                     } else {
                         SharedString::from(state.query.clone())
                     }),
@@ -227,7 +226,7 @@ impl RenderOnce for LaneSwitcherOverlay {
                     .py(px(theme::PALETTE_EMPTY_PAD_Y))
                     .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
                     .text_color(empty_text)
-                    .child("No matching lanes"),
+                    .child(s::command_no_matching_lanes()),
             )
         } else {
             None

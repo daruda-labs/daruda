@@ -519,7 +519,7 @@ impl SettingsWindow {
             }),
             name_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("Display name")
+                    .placeholder(s::settings_agent_name_placeholder())
                     .default_value(name)
             }),
             command_input: cx.new(|cx_state| {

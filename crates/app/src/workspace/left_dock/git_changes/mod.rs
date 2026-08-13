@@ -190,7 +190,7 @@ fn view_header(
 ) -> impl IntoElement {
     use crate::ui::Disableable as _;
 
-    let label = format!("Git Changes — {branch}");
+    let label = app_strings::git_changes_header(branch);
     let workspace_refresh = snap.workspace.clone();
     let workspace_fetch = snap.workspace.clone();
     let workspace_push = snap.workspace.clone();

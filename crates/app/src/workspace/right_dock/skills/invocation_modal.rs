@@ -159,13 +159,14 @@ impl SkillInvocationModal {
 
         if !delivered {
             ws.update(cx, |ws, cx| {
-                let report = ErrorReport::new("Skill invocation failed")
-                    .severity(ErrorSeverity::Warning)
-                    .message(strings::skills_invoke_no_input_target())
-                    .at(file!(), line!())
-                    .with_context("skill", &display_name)
-                    .dedup("skills.invoke.no_input_target")
-                    .build();
+                let report =
+                    ErrorReport::new(crate::surface::strings::error_skill_invocation_failed())
+                        .severity(ErrorSeverity::Warning)
+                        .message(strings::skills_invoke_no_input_target())
+                        .at(file!(), line!())
+                        .with_context("skill", &display_name)
+                        .dedup("skills.invoke.no_input_target")
+                        .build();
                 ws.report_error(report, cx);
             });
             self.submitting = false;
