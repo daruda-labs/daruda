@@ -362,6 +362,17 @@ impl FlowCanvas {
         self.graph.clone()
     }
 
+    /// Read-only view of the pan / zoom / measured-drawable state.
+    ///
+    /// The graph is reachable ([`Self::graph`]) but *where it ended up on
+    /// screen* was not, and that is decided here — by the plugins the host
+    /// composed and by a drawable size only layout knows. A host that picks
+    /// its own plugin set has no other way to confirm the result (e.g. that
+    /// the initial fit-all actually brought every node into view).
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+
     fn process_event_queue(&mut self, cx: &mut Context<Self>) {
         while let Some(event) = self.event_queue.pop() {
             if let Some(sync_plugin) = &mut self.sync_plugin {

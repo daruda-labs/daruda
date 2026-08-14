@@ -158,7 +158,10 @@ impl Workspace {
             .find(|p| p.id == pane_id)?;
         match &pane.content {
             PaneContent::Terminal(t) => Some(t.view.clone()),
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => None,
+            PaneContent::File(_)
+            | PaneContent::TaskEditPane(_)
+            | PaneContent::AgentChat(_)
+            | PaneContent::FlowGraph(_) => None,
         }
     }
 

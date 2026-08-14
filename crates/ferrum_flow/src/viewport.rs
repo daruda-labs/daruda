@@ -147,9 +147,16 @@ impl Viewport {
     }
 
     /// Whether **world-space** `bounds` intersects the drawable window area.
+    ///
+    /// An unmeasured drawable fails **open**. [`Self::window_bounds`] is first
+    /// set from GPUI layout (`on_children_prepainted`), which runs after that
+    /// frame's render has already asked what is visible — and a `notify` raised
+    /// inside a draw phase does not schedule another frame, so culling on an
+    /// unknown drawable blanks the canvas until something unrelated dirties it.
+    /// Overdrawing one frame is the cheaper failure.
     pub fn is_world_bounds_visible(&self, bounds: &Bounds<Pixels>) -> bool {
         let Some(window_bounds) = self.window_bounds else {
-            return false;
+            return true;
         };
 
         let screen = self.world_to_screen(bounds.origin);
@@ -191,5 +198,51 @@ impl Viewport {
                 window_h: 0.0,
             },
         }
+    }
+}
+
+/// daruda-authored guard for the one patched behaviour in this vendored crate
+/// (see `patches/README.md`): culling against an unmeasured drawable.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card() -> Bounds<Pixels> {
+        Bounds {
+            origin: Point::new(px(0.0), px(0.0)),
+            size: gpui::Size {
+                width: px(250.0),
+                height: px(112.0),
+            },
+        }
+    }
+
+    /// The first frame asks what is visible *before* layout has measured the
+    /// drawable, and a `notify` from inside that draw cannot schedule another
+    /// frame — so culling here paints an empty canvas that never recovers.
+    #[test]
+    fn an_unmeasured_drawable_culls_nothing() {
+        let viewport = Viewport::new();
+        assert_eq!(viewport.window_bounds(), None);
+        assert!(viewport.is_world_bounds_visible(&card()));
+    }
+
+    /// Failing open must not turn culling off once the size is known.
+    #[test]
+    fn a_measured_drawable_still_culls_what_sits_outside_it() {
+        let mut viewport = Viewport::new();
+        viewport.set_window_bounds(Some(Bounds {
+            origin: Point::new(px(220.0), px(56.0)),
+            size: gpui::Size {
+                width: px(827.0),
+                height: px(583.0),
+            },
+        }));
+
+        assert!(viewport.is_world_bounds_visible(&card()));
+
+        let mut far = card();
+        far.origin = Point::new(px(9_000.0), px(0.0));
+        assert!(!viewport.is_world_bounds_visible(&far));
     }
 }

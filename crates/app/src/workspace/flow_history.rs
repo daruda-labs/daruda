@@ -61,13 +61,6 @@ impl FlowHistory {
         Self { lane, runs }
     }
 
-    /// Whether this cache answers for `lane`. The panel is lane-scoped, so
-    /// a cache built for another one is not stale data — it is data about
-    /// something else.
-    pub(in crate::workspace) fn is_stale_for(&self, lane: LaneRef) -> bool {
-        self.lane != lane
-    }
-
     /// A history for `--screenshot`. A run that was killed only exists as a
     /// particular arrangement of files, and a capture cannot make one
     /// without writing into whichever repository happens to be open.
@@ -226,20 +219,6 @@ mod tests {
         let read = FlowHistory::read(lane(), runs);
         let reports: Vec<bool> = read.runs().iter().map(|r| r.report.is_some()).collect();
         assert_eq!(reports, vec![true, false]);
-    }
-
-    /// The cache is only an answer about the lane it was built for.
-    /// Without this the panel would show one lane's runs under another's
-    /// name after a switch.
-    #[test]
-    fn a_cache_built_for_one_lane_is_stale_for_another() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let read = FlowHistory::read(lane(), tmp.path());
-        assert!(!read.is_stale_for(lane()));
-        assert!(read.is_stale_for(LaneRef {
-            project: 0,
-            lane: 1
-        }));
     }
 
     /// A directory this host did not name gets no time rather than a

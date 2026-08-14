@@ -167,30 +167,78 @@ pub struct SerializedTab {
     pub user_label: Option<String>,
 }
 
+/// `large_enum_variant` is allowed for the same reason as its runtime
+/// counterpart `PaneContent`: one leaf per pane, built only on save and read
+/// only on restore. Boxing a variant's payload would buy stack bytes nobody
+/// spends and cost an allocation per leaf on both paths.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(from = "RawLayout", into = "RawLayout")]
 pub enum SerializedLayout {
     Leaf {
         pane_id: u64,
-        /// Terminal cwd (last value reported via OSC 7). Ignored when
-        /// `file` is `Some` — a File pane derives its cwd from
-        /// `path.parent()` at runtime.
+        content: SerializedPaneContent,
+    },
+    Split {
+        direction: SplitDirectionSerde,
+        children: Vec<SerializedLayout>,
+        ratios: Vec<f32>,
+    },
+}
+
+/// What a leaf restores as — one variant per [`PaneContent`] kind that
+/// persists.
+///
+/// An enum rather than a field per kind: the file format spells them as four
+/// optional keys, and "at most one is set" is not something optional keys can
+/// say. Three of them had accumulated, each documented as mutually exclusive
+/// with the others, which is a rule a reader has to keep rather than one the
+/// type keeps for them.
+///
+/// TaskEdit panes are absent on purpose: they hold an unsaved form, and
+/// restoring one would put a half-typed task back on screen as if it had been
+/// kept.
+///
+/// Deliberately not `Serialize`/`Deserialize`: the file's shape is
+/// [`RawLayout`]'s, and deriving them here would let this type reach a state
+/// file the moment somebody dropped the conversion. Without them, that is a
+/// compile error rather than a format change nobody notices.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq)]
+pub enum SerializedPaneContent {
+    /// A shell. `cwd` is the last value reported via OSC 7; `account_id` is
+    /// the managed account it runs under, `None` being the system default.
+    Terminal {
         cwd: Option<PathBuf>,
-        /// File-viewer state for File panes. `None` (the default and
-        /// the format used pre-Plan-B) means the leaf is a Terminal
-        /// pane; `Some` means the leaf restores as a `PaneContent::File`.
+        account_id: Option<crate::accounts::AccountId>,
+    },
+    /// A file viewer. Its cwd is `path.parent()` at runtime, so none is kept.
+    File(SerializedFileContent),
+    /// An agent chat. Carries its own cwd and account.
+    AgentChat(SerializedAgentChatContent),
+    /// A flow graph, which is the file's path and nothing else.
+    FlowGraph(SerializedFlowGraphContent),
+}
+
+/// The file's own shape: a leaf is a `pane_id` plus four optional keys, at
+/// most one of the last three set.
+///
+/// Kept exactly as it was written so no state file needs migrating, and so a
+/// build without [`SerializedPaneContent`] still reads what this one writes.
+/// The conversion below is the only place the two shapes meet.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum RawLayout {
+    Leaf {
+        pane_id: u64,
+        cwd: Option<PathBuf>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<SerializedFileContent>,
-        /// Agent-chat state for `PaneContent::AgentChat` leaves. `None`
-        /// (the default and the format used before AgentChat panes
-        /// existed) means the leaf restores as a Terminal / File pane;
-        /// `Some` means the leaf restores as a `PaneContent::AgentChat`.
-        /// Mutually exclusive with `file`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_chat: Option<SerializedAgentChatContent>,
-        /// Managed account this leaf's terminal shell runs under; `None` =
-        /// the system default. Ignored for `file`/`agent_chat` leaves, which
-        /// carry their own `account_id` (`SerializedAgentChatContent`'s).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        flow_graph: Option<SerializedFlowGraphContent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account_id: Option<crate::accounts::AccountId>,
     },
@@ -199,6 +247,85 @@ pub enum SerializedLayout {
         children: Vec<SerializedLayout>,
         ratios: Vec<f32>,
     },
+}
+
+impl From<RawLayout> for SerializedLayout {
+    fn from(raw: RawLayout) -> Self {
+        match raw {
+            RawLayout::Leaf {
+                pane_id,
+                cwd,
+                file,
+                agent_chat,
+                flow_graph,
+                account_id,
+            } => {
+                // First one wins, and the order is the one restore already
+                // read them in. A file holding two is not something this app
+                // writes; picking silently beats refusing to open a window.
+                let content = if let Some(file) = file {
+                    SerializedPaneContent::File(file)
+                } else if let Some(chat) = agent_chat {
+                    SerializedPaneContent::AgentChat(chat)
+                } else if let Some(graph) = flow_graph {
+                    SerializedPaneContent::FlowGraph(graph)
+                } else {
+                    SerializedPaneContent::Terminal { cwd, account_id }
+                };
+                SerializedLayout::Leaf { pane_id, content }
+            }
+            RawLayout::Split {
+                direction,
+                children,
+                ratios,
+            } => SerializedLayout::Split {
+                direction,
+                children,
+                ratios,
+            },
+        }
+    }
+}
+
+impl From<SerializedLayout> for RawLayout {
+    fn from(layout: SerializedLayout) -> Self {
+        match layout {
+            SerializedLayout::Leaf { pane_id, content } => {
+                let (cwd, account_id) = match &content {
+                    SerializedPaneContent::Terminal { cwd, account_id } => {
+                        (cwd.clone(), *account_id)
+                    }
+                    _ => (None, None),
+                };
+                RawLayout::Leaf {
+                    pane_id,
+                    cwd,
+                    account_id,
+                    file: match &content {
+                        SerializedPaneContent::File(fc) => Some(fc.clone()),
+                        _ => None,
+                    },
+                    agent_chat: match &content {
+                        SerializedPaneContent::AgentChat(ac) => Some(ac.clone()),
+                        _ => None,
+                    },
+                    flow_graph: match content {
+                        SerializedPaneContent::FlowGraph(fg) => Some(fg),
+                        _ => None,
+                    },
+                }
+            }
+            SerializedLayout::Split {
+                direction,
+                children,
+                ratios,
+            } => RawLayout::Split {
+                direction,
+                children,
+                ratios,
+            },
+        }
+    }
 }
 
 /// Persisted state for a `PaneContent::File` leaf — enough to
@@ -213,6 +340,15 @@ pub struct SerializedFileContent {
     #[serde(default)]
     pub staged: bool,
     pub view_mode: SerializedFileViewMode,
+}
+
+/// Persisted state for a `PaneContent::FlowGraph` leaf. The flow file's path
+/// is the whole of it: the graph — nodes, edges, placement — is derived from
+/// that file on every open, so persisting any of it would let a layout
+/// outlive the YAML it was read from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SerializedFlowGraphContent {
+    pub path: PathBuf,
 }
 
 /// Private wire representation for [`PaneCwd`]. **Not** the internally

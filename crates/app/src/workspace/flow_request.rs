@@ -48,12 +48,31 @@ pub(in crate::workspace) enum FlowSubmitError {
     Resume(daruda_flow::resume::ResumeError),
 }
 
+/// Where a run came from, kept because `RunRequest` cannot say.
+///
+/// A graph pane is keyed by the flow file's path, so colouring one from a
+/// run means knowing which file the run was submitted for. A resumed run
+/// cannot answer that: `prepare` reads `run.yaml` and sets `flow_dir` to the
+/// run directory, so the original `.daruda/flows/x.yaml` is not recoverable
+/// from anything the request carries. That gap is deliberate here — closing
+/// it means writing the origin into the run directory at start, which is a
+/// host/engine contract change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum FlowSource {
+    /// A fresh submission, which knows the file it was asked for.
+    File(PathBuf),
+    /// Picked up from a run directory; the originating file is unknown.
+    Resumed { run_dir: PathBuf },
+}
+
 /// A request and the stream that narrates it. The receiver is handed back
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
 pub(in crate::workspace) struct FlowSubmission {
     pub lane: daruda_store::project::LaneRef,
     pub request: RunRequest,
+    /// Which flow file this run is of, when that is knowable ([`FlowSource`]).
+    pub source: FlowSource,
     pub node_install_dir: PathBuf,
     pub events: smol::channel::Receiver<FlowEvent>,
     /// Where the run's permission questions arrive. A second pump rather
@@ -233,6 +252,9 @@ impl Workspace {
         Ok(FlowSubmission {
             lane: lane_ref,
             request,
+            source: FlowSource::Resumed {
+                run_dir: run_dir.to_path_buf(),
+            },
             node_install_dir,
             events: rx,
             asks: ask_rx,
@@ -284,6 +306,7 @@ impl Workspace {
         Ok(FlowSubmission {
             lane: lane_ref,
             request,
+            source: FlowSource::File(flow_path.to_path_buf()),
             node_install_dir,
             events: rx,
             asks: ask_rx,
@@ -380,14 +403,14 @@ impl Workspace {
     }
 
     fn next_run_id(&mut self) -> String {
-        self.flow_run_counter = self.flow_run_counter.wrapping_add(1);
+        let counter = self.runs.next_run_id();
         run_id(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
                 .unwrap_or_default(),
             std::process::id(),
-            self.flow_run_counter,
+            counter,
         )
     }
 }

@@ -524,7 +524,7 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
 async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppContext) {
     use daruda_store::accounts::AccountRecipeId;
     use daruda_store::project::{
-        SerializedAgentChatContent, SerializedLayout, SplitDirectionSerde,
+        SerializedAgentChatContent, SerializedLayout, SerializedPaneContent, SplitDirectionSerde,
     };
 
     let legacy_agent = legacy_ssh_claude_agent();
@@ -546,9 +546,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
 
     let agent_leaf = |pane_id: u64, agent_id: String| SerializedLayout::Leaf {
         pane_id,
-        cwd: None,
-        file: None,
-        agent_chat: Some(SerializedAgentChatContent {
+        content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
             cwd: Some(PaneCwd::Local(std::env::temp_dir())),
             session_id: None,
             title: None,
@@ -557,7 +555,6 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             mode_id: None,
             content_width: daruda_store::project::SerializedChatContentWidth::Full,
         }),
-        account_id: None,
     };
     let layout = SerializedLayout::Split {
         direction: SplitDirectionSerde::Horizontal,
@@ -567,10 +564,10 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             agent_leaf(3, legacy_id),
             SerializedLayout::Leaf {
                 pane_id: 4,
-                cwd: Some(std::env::temp_dir()),
-                file: None,
-                agent_chat: None,
-                account_id: Some(claude_account),
+                content: SerializedPaneContent::Terminal {
+                    cwd: Some(std::env::temp_dir()),
+                    account_id: Some(claude_account),
+                },
             },
         ],
         ratios: vec![0.25; 4],

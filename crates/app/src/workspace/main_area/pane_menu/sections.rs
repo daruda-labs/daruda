@@ -15,6 +15,7 @@ trait PaneMenuSource {
 
 struct TerminalMenu;
 struct AgentChatMenu;
+struct FlowGraphMenu;
 struct DefaultMenu;
 
 impl PaneMenuSource for TerminalMenu {
@@ -96,7 +97,9 @@ impl PaneMenuSource for TerminalMenu {
                     ));
                 }
             }
-            PaneMenuKind::AgentChat { .. } | PaneMenuKind::Other => {}
+            PaneMenuKind::AgentChat { .. }
+            | PaneMenuKind::FlowGraph { .. }
+            | PaneMenuKind::Other => {}
         }
         if let Some(mark_id) = ctx.click.as_ref().and_then(|click| click.annotation) {
             let pane_id = ctx.pane_id;
@@ -158,6 +161,44 @@ impl PaneMenuSource for AgentChatMenu {
     }
 }
 
+impl PaneMenuSource for FlowGraphMenu {
+    fn head(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
+        // Reload keyed to the pane that was clicked, not to the focused one: a
+        // right-click in a split does not move focus, and reloading the other
+        // graph would be silent and wrong.
+        let pane_id = ctx.pane_id;
+        let mut entries = vec![item(
+            s::flow_add_node(),
+            ItemState::Enabled,
+            Activate::Op(Box::new(move |ws, window, cx| {
+                ws.add_node_to_pane(pane_id, window, cx);
+            })),
+        )];
+        // Deleting needs a node, and the menu is reachable with nothing
+        // selected — disabled rather than absent, so the row does not appear
+        // and disappear under the pointer.
+        entries.push(match &ctx.kind {
+            PaneMenuKind::FlowGraph { selected: true } => item(
+                s::flow_delete_node(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, window, cx| {
+                    ws.delete_node_in_pane(pane_id, window, cx);
+                })),
+            ),
+            _ => disabled_item(s::flow_delete_node(), None),
+        });
+        entries.push(MenuEntry::Separator);
+        entries.push(item(
+            s::ctx_reload_flow_graph(),
+            ItemState::Enabled,
+            Activate::Op(Box::new(move |ws, window, cx| {
+                ws.reload_flow_graph_pane(pane_id, window, cx);
+            })),
+        ));
+        entries
+    }
+}
+
 impl PaneMenuSource for DefaultMenu {
     fn head(_ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         Vec::new()
@@ -168,6 +209,7 @@ pub(super) fn compose(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     let mut entries = match &ctx.kind {
         PaneMenuKind::Terminal { .. } => TerminalMenu::head(ctx),
         PaneMenuKind::AgentChat { .. } => AgentChatMenu::head(ctx),
+        PaneMenuKind::FlowGraph { .. } => FlowGraphMenu::head(ctx),
         PaneMenuKind::Other => DefaultMenu::head(ctx),
     };
     if !entries.is_empty() {
@@ -451,6 +493,27 @@ mod tests {
             !find(&entries, &s::ctx_close_tab())
                 .expect("close entry present")
                 .is_disabled()
+        );
+    }
+
+    /// The graph pane's own entry, and only its own: a graph has no selection
+    /// to copy and nothing to stop.
+    #[test]
+    fn a_graph_pane_is_offered_the_reload_and_nothing_of_the_others() {
+        let graph = labels(&compose(&base(PaneMenuKind::FlowGraph { selected: true })));
+        assert!(
+            graph.contains(&s::ctx_reload_flow_graph()),
+            "reload is offered: {graph:?}"
+        );
+        for forbidden in [s::menu_copy(), s::ctx_stop(), s::menu_scroll_to_bottom()] {
+            assert!(
+                !graph.contains(&forbidden),
+                "{forbidden} belongs to another kind of pane"
+            );
+        }
+        assert!(
+            !labels(&compose(&base(PaneMenuKind::Other))).contains(&s::ctx_reload_flow_graph()),
+            "and a pane that is not a graph is not offered it"
         );
     }
 

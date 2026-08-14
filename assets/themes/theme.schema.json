@@ -78,6 +78,31 @@
       "$ref": "#/$defs/Rgba",
       "default": "#5e6ad2ff"
     },
+    "flow_canvas_bg": {
+      "description": "Maps to `palette::CANVAS`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#070809ff"
+    },
+    "flow_grid_dot": {
+      "description": "Maps to `palette::SURFACE_2`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141516ff"
+    },
+    "flow_edge": {
+      "description": "Maps to `palette::FLOW_GRAPH_EDGE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#515761ff"
+    },
+    "flow_card_bg": {
+      "description": "Maps to `palette::SURFACE_1`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#0f1011ff"
+    },
+    "flow_chip_bg": {
+      "description": "Maps to `palette::SURFACE_2`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141516ff"
+    },
     "status_bar_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",

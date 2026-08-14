@@ -128,7 +128,9 @@ impl Workspace {
                     true
                 }
             }
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::FlowGraph(_) => {
+                false
+            }
         }
     }
 

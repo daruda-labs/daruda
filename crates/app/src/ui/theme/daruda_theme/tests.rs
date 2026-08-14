@@ -399,9 +399,8 @@ fn bundled_theme_schema_json_matches_generated() {
     // `bundled_daruda_dark_json_matches_default`, but for the
     // companion JSON Schema. Editors that point `$schema` at the
     // bundled file would otherwise show stale autocomplete after
-    // a slot rename / addition. Regenerate via
-    //   cargo run --example dump_theme_schema  # or the build script
-    // (see `assets/themes/README.md`).
+    // a slot rename / addition. Regenerate with the companion below:
+    //   cargo test -p daruda --bin daruda dump_theme_schema -- --ignored
     let bundled = include_str!("../../../../../../assets/themes/theme.schema.json");
     let bundled_value: serde_json::Value =
         serde_json::from_str(bundled).expect("bundled theme.schema.json must be valid JSON");
@@ -424,4 +423,22 @@ fn is_dark_reflects_base_background_lightness() {
         ..Default::default()
     };
     assert!(!light.is_dark());
+}
+
+/// Writes `assets/themes/theme.schema.json` from the live type — the companion
+/// to the drift check above, and the command its comment names. Ignored by
+/// default because it writes into the repository.
+#[test]
+#[ignore = "regenerator — writes assets/themes/theme.schema.json"]
+fn dump_theme_schema() {
+    let generated =
+        serde_json::to_string_pretty(&DarudaTheme::json_schema()).expect("the schema serialises");
+    std::fs::write(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/themes/theme.schema.json"
+        ),
+        format!("{generated}\n"),
+    )
+    .expect("write the bundled schema");
 }

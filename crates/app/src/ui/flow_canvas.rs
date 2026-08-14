@@ -14,10 +14,27 @@
 /// `NestedNodeDragPlugin` (nodes are auto-placed, so dragging one carries
 /// no information) and `HistoryPlugin` (the YAML buffer is the single undo
 /// stack — a second one would make ⌘Z ambiguous).
+///
+/// Framing the graph into the pane is daruda's own plugin rather than the
+/// vendored `FitAllGraphPlugin`: upstream's fit magnifies up to 3× and stops
+/// zooming out at 0.7, and both of those are decisions about what a card
+/// still says at that size — which daruda's cards answer differently.
 pub use ferrum_flow::{BackgroundPlugin, GraphPlugin, SelectionPlugin, ViewportPlugin};
 pub use ferrum_flow::{
     FlowCanvas, FlowTheme, Graph, Node, NodeId, NodeRenderer, Plugin, Port, RenderContext,
-    RenderLayer,
+    RenderLayer, Viewport,
+};
+
+/// The canvas exposes its graph immutably and takes edits as commands, so a
+/// host that changes anything — re-stamping a card from a run, framing the
+/// graph into the pane — implements this rather than reaching for the graph.
+/// `PluginContext` has no public viewport setter; `CommandContext` does.
+pub use ferrum_flow::{Command, CommandContext};
+
+/// What a daruda-side plugin needs to answer an event: the two it handles are
+/// "the pane has been measured" and ⌘0.
+pub use ferrum_flow::{
+    EventResult, FlowEvent, InputEvent, PluginContext, primary_platform_modifier,
 };
 
 pub mod layout {

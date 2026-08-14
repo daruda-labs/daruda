@@ -68,7 +68,7 @@ pub use code_editor::{
 };
 pub use disclosure::{Disclosure, disclosure};
 pub use divider::Divider;
-pub use form_helpers::{checkbox_row, field_row};
+pub use form_helpers::{checkbox_row, field_column, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputGrowMode, InputState, Rope, RopeExt,

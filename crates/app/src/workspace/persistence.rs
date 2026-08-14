@@ -617,88 +617,102 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<PaneLayout, PaneSpawnError> {
         match slayout {
-            daruda_store::project::SerializedLayout::Leaf {
-                pane_id,
-                cwd,
-                file,
-                agent_chat,
-                account_id,
-            } => {
-                let pane = if let Some(fc) = file {
-                    // File pane — `file_status` is not persisted; the git
-                    // badge re-derives on the next `refresh_git_status`, via
-                    // `sync_file_pane_statuses`. Content stays `Loading`
-                    // until the owning lane becomes active and
-                    // `load_pending_file_panes` fires.
-                    self.create_file_pane(
-                        fc.lane_id,
-                        fc.path.clone(),
-                        fc.staged,
-                        None,
-                        deserialize_view_mode(fc.view_mode),
-                        window,
-                        cx,
-                    )
-                } else if let Some(ac) = agent_chat {
-                    // AgentChat pane — re-opens dormant (`Idle`) at the saved
-                    // cwd, seeded with the persisted session id + title. The
-                    // live session is not started here; `focus_pane` connects
-                    // it lazily on first focus, resuming via `session/load`
-                    // when a session id is present.
-                    //
-                    // Resolve which agent the pane relaunches under: its own
-                    // owning agent when still in the catalog (session id kept),
-                    // else the default agent (session id dropped — it belongs
-                    // to a now-absent agent and could not resume).
-                    let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
-                    let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
-                    let pane_recipe = self
-                        .agent_launch_for(&agent_id)
-                        .and_then(|l| account_recipe_for_connect(&l, is_remote));
-                    let mut restored = self.create_agent_chat_pane(
-                        ac.cwd.clone(),
-                        if keep_session {
-                            ac.session_id.clone()
-                        } else {
-                            None
-                        },
-                        agent_id,
-                        ac.title.clone(),
-                        window,
-                        cx,
-                    );
-                    // The constructor seeds the domain default — patch in
-                    // the persisted selection now that the pane exists.
-                    let account =
-                        restored_agent_account(ac.account_id, pane_recipe, &self.accounts);
-                    if let Some(content) = restored.agent_chat_content_mut() {
-                        content.account = account;
-                        // Seed the last-known mode so the lazy connect can
-                        // reapply it on resume (`connect_agent_chat`'s
-                        // `restore_mode`) — a no-op when this agent's session
-                        // id was dropped above (fresh session applies
-                        // `initial_modes` instead).
-                        let mode_id = ac.mode_id.clone();
-                        let content_width = deserialize_chat_content_width(ac.content_width);
-                        content.view.update(cx, |v, _| {
-                            v.last_known_mode_id = mode_id;
-                            v.content_width = content_width;
-                        });
+            daruda_store::project::SerializedLayout::Leaf { pane_id, content } => {
+                use daruda_store::project::SerializedPaneContent as Content;
+                let pane = match content {
+                    Content::File(fc) => {
+                        // File pane — `file_status` is not persisted; the git
+                        // badge re-derives on the next `refresh_git_status`, via
+                        // `sync_file_pane_statuses`. Content stays `Loading`
+                        // until the owning lane becomes active and
+                        // `load_pending_file_panes` fires.
+                        self.create_file_pane(
+                            fc.lane_id,
+                            fc.path.clone(),
+                            fc.staged,
+                            None,
+                            deserialize_view_mode(fc.view_mode),
+                            window,
+                            cx,
+                        )
                     }
-                    restored
-                } else {
-                    let effective = effective_cwd(cwd.clone(), fallback_cwd);
-                    let account =
-                        daruda_store::accounts::AccountSelection::from_persisted(*account_id);
-                    // Terminal pane: no agent, so no required auth domain —
-                    // the account's own recipe decides the env.
-                    let prepared = pane::resolve_pane_account(
-                        &self.accounts,
-                        &self.data_dir,
-                        account,
-                        pane::AccountDomain::Any,
-                    );
-                    self.create_pane_with_cwd(effective, account, prepared.as_ref(), window, cx)?
+                    Content::AgentChat(ac) => {
+                        // AgentChat pane — re-opens dormant (`Idle`) at the saved
+                        // cwd, seeded with the persisted session id + title. The
+                        // live session is not started here; `focus_pane` connects
+                        // it lazily on first focus, resuming via `session/load`
+                        // when a session id is present.
+                        //
+                        // Resolve which agent the pane relaunches under: its own
+                        // owning agent when still in the catalog (session id kept),
+                        // else the default agent (session id dropped — it belongs
+                        // to a now-absent agent and could not resume).
+                        let (agent_id, keep_session) =
+                            self.resolve_restored_agent(ac.agent_id.clone());
+                        let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
+                        let pane_recipe = self
+                            .agent_launch_for(&agent_id)
+                            .and_then(|l| account_recipe_for_connect(&l, is_remote));
+                        let mut restored = self.create_agent_chat_pane(
+                            ac.cwd.clone(),
+                            if keep_session {
+                                ac.session_id.clone()
+                            } else {
+                                None
+                            },
+                            agent_id,
+                            ac.title.clone(),
+                            window,
+                            cx,
+                        );
+                        // The constructor seeds the domain default — patch in
+                        // the persisted selection now that the pane exists.
+                        let account =
+                            restored_agent_account(ac.account_id, pane_recipe, &self.accounts);
+                        if let Some(content) = restored.agent_chat_content_mut() {
+                            content.account = account;
+                            // Seed the last-known mode so the lazy connect can
+                            // reapply it on resume (`connect_agent_chat`'s
+                            // `restore_mode`) — a no-op when this agent's session
+                            // id was dropped above (fresh session applies
+                            // `initial_modes` instead).
+                            let mode_id = ac.mode_id.clone();
+                            let content_width = deserialize_chat_content_width(ac.content_width);
+                            content.view.update(cx, |v, _| {
+                                v.last_known_mode_id = mode_id;
+                                v.content_width = content_width;
+                            });
+                        }
+                        restored
+                    }
+                    Content::FlowGraph(fg) => {
+                        // FlowGraph pane — re-reads the flow file and lays the
+                        // graph out again. A file that has since been deleted or
+                        // broken restores as the pane's own "why not" state, which
+                        // is the honest thing to show for a path that was saved
+                        // when it still loaded.
+                        self.create_flow_graph_pane(&fg.path, window, cx)
+                    }
+                    Content::Terminal { cwd, account_id } => {
+                        let effective = effective_cwd(cwd.clone(), fallback_cwd);
+                        let account =
+                            daruda_store::accounts::AccountSelection::from_persisted(*account_id);
+                        // Terminal pane: no agent, so no required auth domain —
+                        // the account's own recipe decides the env.
+                        let prepared = pane::resolve_pane_account(
+                            &self.accounts,
+                            &self.data_dir,
+                            account,
+                            pane::AccountDomain::Any,
+                        );
+                        self.create_pane_with_cwd(
+                            effective,
+                            account,
+                            prepared.as_ref(),
+                            window,
+                            cx,
+                        )?
+                    }
                 };
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
@@ -910,6 +924,44 @@ fn anchor_lane_paths_to_project_root(
     }
 }
 
+/// What this pane restores as. The kinds are exclusive, and this is where
+/// that is decided — a leaf can no longer be handed two of them.
+fn serialize_pane_content(
+    pane: &pane::Pane,
+    cx: &App,
+) -> daruda_store::project::SerializedPaneContent {
+    use daruda_store::project::SerializedPaneContent as Content;
+    if let Some(fv) = pane.file_view() {
+        return Content::File(daruda_store::project::SerializedFileContent {
+            lane_id: fv.lane_id,
+            path: fv.path.clone(),
+            staged: fv.staged,
+            view_mode: serialize_view_mode(fv.view_mode),
+        });
+    }
+    if let Some(ac) = pane.agent_chat_content() {
+        let v = ac.view.read(cx);
+        return Content::AgentChat(daruda_store::project::SerializedAgentChatContent {
+            cwd: ac.cwd.clone(),
+            session_id: v.session_id.clone(),
+            title: v.session_title.clone(),
+            agent_id: Some(v.agent_id.clone()),
+            account_id: ac.account.to_persisted(),
+            mode_id: v.last_known_mode_id.clone(),
+            content_width: serialize_chat_content_width(v.content_width),
+        });
+    }
+    if let Some(fg) = pane.flow_graph_content() {
+        return Content::FlowGraph(daruda_store::project::SerializedFlowGraphContent {
+            path: fg.path.clone(),
+        });
+    }
+    Content::Terminal {
+        cwd: pane.cwd().map(std::path::Path::to_path_buf),
+        account_id: pane.terminal_account_id(),
+    }
+}
+
 fn serialize_layout(
     layout: &pane_tree::PaneLayout,
     panes: &[pane::Pane],
@@ -918,51 +970,22 @@ fn serialize_layout(
     match layout {
         pane_tree::PaneLayout::Pane(id) => {
             let pane = panes.iter().find(|p| p.id == *id);
-            // File panes serialize their viewer state; Terminal panes
-            // serialize their cwd. The two are mutually exclusive —
-            // a File leaf carries `cwd: None` because it derives its
-            // cwd from `path.parent()` at runtime.
-            let file = pane.and_then(|p| p.file_view()).map(|fv| {
-                daruda_store::project::SerializedFileContent {
-                    lane_id: fv.lane_id,
-                    path: fv.path.clone(),
-                    staged: fv.staged,
-                    view_mode: serialize_view_mode(fv.view_mode),
-                }
-            });
-            // AgentChat panes serialize their anchored lane cwd plus the live
-            // ACP session id + title (read from the view), so a later launch
-            // resumes the prior conversation via `session/load`. The
-            // conversation itself is not stored — the adapter replays it.
-            // Mutually exclusive with `file`.
-            let agent_chat = pane.and_then(|p| p.agent_chat_content()).map(|ac| {
-                let v = ac.view.read(cx);
-                daruda_store::project::SerializedAgentChatContent {
-                    cwd: ac.cwd.clone(),
-                    session_id: v.session_id.clone(),
-                    title: v.session_title.clone(),
-                    agent_id: Some(v.agent_id.clone()),
-                    account_id: ac.account.to_persisted(),
-                    mode_id: v.last_known_mode_id.clone(),
-                    content_width: serialize_chat_content_width(v.content_width),
-                }
-            });
-            let cwd = if file.is_some() || agent_chat.is_some() {
-                None
-            } else {
-                pane.and_then(|p| p.cwd().map(std::path::Path::to_path_buf))
-            };
-            // Terminal leaves persist their own `account_id`; File/AgentChat
-            // leaves carry it on their own sub-content (`agent_chat.account_id`)
-            // instead, so this stays `None` for those (mutually exclusive with
-            // `agent_chat`/`file` the same way `cwd` is).
-            let account_id = pane.and_then(|p| p.terminal_account_id());
+            // One kind, chosen once. What each kind keeps is its own: a File
+            // pane's viewer state (its cwd is `path.parent()` at runtime), an
+            // AgentChat's cwd plus the ACP session id and title so a later
+            // launch resumes the conversation via `session/load`, a FlowGraph's
+            // file path and nothing else — the graph is re-derived from that
+            // file on every open — and a Terminal's cwd and account.
+            let content = pane.map_or(
+                daruda_store::project::SerializedPaneContent::Terminal {
+                    cwd: None,
+                    account_id: None,
+                },
+                |p| serialize_pane_content(p, cx),
+            );
             daruda_store::project::SerializedLayout::Leaf {
                 pane_id: *id,
-                cwd,
-                file,
-                agent_chat,
-                account_id,
+                content,
             }
         }
         pane_tree::PaneLayout::Split {

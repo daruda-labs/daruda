@@ -789,10 +789,10 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             tabs: vec![daruda_store::project::SerializedTab {
                 layout: daruda_store::project::SerializedLayout::Leaf {
                     pane_id: 1,
-                    cwd: Some(missing_root.clone()),
-                    file: None,
-                    agent_chat: None,
-                    account_id: None,
+                    content: daruda_store::project::SerializedPaneContent::Terminal {
+                        cwd: Some(missing_root.clone()),
+                        account_id: None,
+                    },
                 },
                 last_focused_pane: 1,
                 user_label: None,

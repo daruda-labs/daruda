@@ -37,6 +37,10 @@ pub(in crate::workspace) enum FlowPurpose {
     /// Static checks only — no session, no lock, no run directory.
     Validate,
     Run,
+    /// Draw the flow. Reads the file and nothing else — no session, no
+    /// lock, and no profile question: a graph is the file's shape, and
+    /// which profile a *run* merged under is a question the run answers.
+    Graph,
 }
 
 /// One flow file, captured when the picker opens.
@@ -69,7 +73,11 @@ impl FlowCandidate {
     /// person typing the name of a repo flow.
     fn tag(&self) -> Option<SharedString> {
         match self.origin {
-            crate::workspace::flow_paths::FlowOrigin::Repo => None,
+            // The ordinary case is now two: a flow committed with the repo and
+            // one this machine keeps for it. Neither needs a tag — what the tag
+            // is for is the one that belongs to no project.
+            crate::workspace::flow_paths::FlowOrigin::Repo
+            | crate::workspace::flow_paths::FlowOrigin::Project => None,
             crate::workspace::flow_paths::FlowOrigin::Global => {
                 Some(SharedString::from(strings::flow_picker_global()))
             }
@@ -286,6 +294,7 @@ impl FlowPicker {
             ),
             (Stage::Flows { .. }, FlowPurpose::Validate) => strings::flow_picker_prompt_validate(),
             (Stage::Flows { .. }, FlowPurpose::Run) => strings::flow_picker_prompt_run(),
+            (Stage::Flows { .. }, FlowPurpose::Graph) => strings::flow_picker_prompt_graph(),
         }
     }
 
