@@ -80,6 +80,8 @@ pub(in crate::workspace) enum FlowGraphEvent {
     /// A reload replaced what the inspector held, and the person had typed
     /// something into it that was not saved.
     TypingDropped,
+    /// Add a node, chained after the selected one when there is one.
+    AddNode,
 }
 
 pub(in crate::workspace) struct FlowGraphView {
@@ -763,6 +765,39 @@ fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, HashMap<String, NodeId>
     (graph, ids)
 }
 
+/// Buttons over the graph for the two things a person does to it.
+///
+/// The menu (`pane_menu::FlowGraphMenu`) has the same two and calls the same
+/// ops — this is a second way in, not a second implementation. It exists because
+/// the menu is a right-click nobody is told about, and adding the first node to
+/// a new flow is the moment that matters most.
+fn toolbar(has_selection: bool, cx: &mut Context<FlowGraphView>) -> impl IntoElement {
+    use crate::ui::{Disableable as _, button_bare};
+
+    div()
+        .absolute()
+        .top(px(palette::FLOW_TOOLBAR_INSET))
+        .right(px(palette::FLOW_TOOLBAR_INSET))
+        .flex()
+        .flex_row()
+        .gap(px(palette::FLOW_TOOLBAR_GAP))
+        .child(
+            button_bare("flow-toolbar-add")
+                .icon(crate::ui::IconName::Plus)
+                .tooltip(s::flow_add_node())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::AddNode))),
+        )
+        .child(
+            // Disabled rather than absent: a button that comes and goes under
+            // the pointer is worse than one that says it is not available.
+            button_bare("flow-toolbar-delete")
+                .icon(crate::ui::IconName::Minus)
+                .tooltip(s::flow_delete_node())
+                .disabled(!has_selection)
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
+        )
+}
+
 impl Render for FlowGraphView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = div().size_full().track_focus(&self.focus_handle);
@@ -789,12 +824,22 @@ impl Render for FlowGraphView {
                     }
                     Selection::None => form::render_empty(cx).into_any_element(),
                 };
+                // The toolbar goes inside the canvas half, not the pane: over the
+                // pane it would sit on the inspector column instead of the graph.
+                let has_selection = matches!(self.selection(cx), Selection::One(_));
                 body.child(
                     div()
                         .size_full()
                         .flex()
                         .flex_row()
-                        .child(div().flex_1().h_full().child(canvas.clone()))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .h_full()
+                                .child(canvas.clone())
+                                .child(toolbar(has_selection, cx)),
+                        )
                         .child(inspector),
                 )
             }

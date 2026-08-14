@@ -146,6 +146,7 @@ impl Workspace {
                 }
                 // A toast rather than something in the pane: what would have
                 // carried it — the node's form — is the thing that was replaced.
+                FlowGraphEvent::AddNode => workspace.add_node(&for_path, view.clone(), window, cx),
                 FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
                     s::flow_edit_dropped_typing(),
                     "flow.edit_dropped_typing",

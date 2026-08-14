@@ -2268,6 +2268,14 @@ pub const FLOW_INSPECTOR_PAD: f32 = PAD_LG;
 /// scrolls for the rest.
 pub const FLOW_INSPECTOR_PROMPT_ROWS: usize = 5;
 
+// The buttons floating over the graph. Inset from the canvas corner rather than
+// the pane's, so they clear the inspector's border.
+
+/// Distance from the canvas's top-right corner.
+pub const FLOW_TOOLBAR_INSET: f32 = PAD_LG;
+/// Space between the toolbar's buttons.
+pub const FLOW_TOOLBAR_GAP: f32 = PAD_SM;
+
 /// Canvas behind the graph — the app canvas, so the pane reads as a
 /// surface rather than a floating panel.
 pub const FLOW_GRAPH_BACKGROUND: Hsla = CANVAS;

@@ -1140,3 +1140,47 @@ async fn right_clicking_a_graph_opens_the_pane_menu(cx: &mut TestAppContext) {
         "a right-click on the graph has to reach the menu"
     );
 }
+
+/// The toolbar's Add is a second way into the same op, so what has to be tested
+/// is the wiring: the view emits, the workspace writes the file.
+///
+/// Without it the button would be a button that does nothing — the menu path
+/// would still pass every test it has.
+#[gpui::test]
+async fn the_toolbar_add_reaches_the_file(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before = view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len());
+
+    view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::AddNode));
+    vcx.run_until_parked();
+
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len()),
+        before + 1,
+        "the graph has the new node"
+    );
+    let text = std::fs::read_to_string(&flow_path).expect("on disk");
+    assert!(
+        daruda_flow::parse::parse_flow_file(&text)
+            .expect("still a flow")
+            .nodes
+            .len()
+            == before + 1,
+        "and so does the file:\n{text}"
+    );
+}
