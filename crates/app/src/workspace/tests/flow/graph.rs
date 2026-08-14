@@ -1097,3 +1097,46 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
         "the id came back on a different node, and the run never ran that one"
     );
 }
+
+/// The menu that holds Add Node has to be reachable from the graph itself.
+///
+/// It was attached to the pane *header*, which is drawn only when the tab is
+/// split — so a graph opened on its own had no way to reach it at all, and Add
+/// Node was unreachable. Right-clicking the pane body is that way.
+#[gpui::test]
+async fn right_clicking_a_graph_opens_the_pane_menu(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let pane_id = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find(|p| p.flow_graph_content().is_some())
+                .map(|p| p.id)
+        })
+        .expect("the graph pane opened");
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws.main_area.popup_menu_deploy.is_none()),
+        "nothing deployed yet"
+    );
+
+    // The click itself, not the handler it should reach: calling the opener
+    // directly would pass with the wiring absent, which is what was wrong.
+    let _ = pane_id;
+    vcx.simulate_mouse_down(
+        gpui::point(gpui::px(300.), gpui::px(300.)),
+        gpui::MouseButton::Right,
+        gpui::Modifiers::default(),
+    );
+    vcx.run_until_parked();
+
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws.main_area.popup_menu_deploy.is_some()),
+        "a right-click on the graph has to reach the menu"
+    );
+}
