@@ -1712,6 +1712,12 @@ pub fn agent_chat_awaiting_permission() -> String {
 }
 
 /// Heading for an inline permission card.
+/// Toast title for a non-fatal session advisory (`AcpEvent::Notice`): the
+/// session is live, but something the user or their config asked for did not
+/// happen. The body is the adapter's own diagnostic and stays untranslated.
+pub fn agent_chat_session_notice() -> String {
+    rust_i18n::t!("agent_chat.session_notice").into_owned()
+}
 pub fn agent_chat_permission_title() -> String {
     rust_i18n::t!("agent_chat.permission_title").into_owned()
 }
@@ -2919,6 +2925,36 @@ pub fn settings_accounts_reauth_failed() -> String {
 /// `settings_accounts_reauth_failed()`'s report `.message()`.
 pub fn account_reauth_missing() -> String {
     rust_i18n::t!("settings.accounts_reauth_missing").into_owned()
+}
+/// Toast title when a failed pane's re-login cannot be run by daruda: the
+/// agent signs in wherever it runs, which for a remote agent is not this
+/// machine.
+pub fn account_reauth_elsewhere() -> String {
+    rust_i18n::t!("settings.accounts_reauth_elsewhere").into_owned()
+}
+/// Body for [`account_reauth_elsewhere`] — what to do instead.
+pub fn account_reauth_elsewhere_detail() -> String {
+    rust_i18n::t!("settings.accounts_reauth_elsewhere_detail").into_owned()
+}
+/// Authored toast-body detail for `Workspace::reauthenticate_system` when the
+/// domain cannot name its ambient home — no home directory and no config-dir
+/// override, so there is nothing to sign into. Folded into
+/// `settings_accounts_reauth_failed()`'s report `.message()`.
+pub fn account_system_home_unknown() -> String {
+    rust_i18n::t!("settings.accounts_system_home_unknown").into_owned()
+}
+/// Label for the Settings System row's re-login button, and for the
+/// re-login button a failed pane shows when it runs on the ambient
+/// credentials rather than a managed account.
+pub fn settings_accounts_system_reauthenticate() -> String {
+    rust_i18n::t!("settings.accounts_system_reauthenticate").into_owned()
+}
+/// Label for the button an agent-chat pane offers when its failure is one a
+/// fresh sign-in actually fixes (`daruda_acp::Remedy::Reauthenticate`).
+/// Deliberately distinct from the Settings row's label: here the user is
+/// recovering a session, not administering accounts.
+pub fn agent_chat_sign_in_again() -> String {
+    rust_i18n::t!("agent_chat.sign_in_again").into_owned()
 }
 /// Warning toast when a terminal pane's account config dir could not be
 /// prepared. A warning rather than a blocker: the account's env still gets

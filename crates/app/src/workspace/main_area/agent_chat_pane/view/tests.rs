@@ -1023,6 +1023,7 @@ fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppCon
                     modes: None,
                     config_options: Vec::new(),
                     capabilities: Default::default(),
+                    login_methods: Vec::new(),
                 },
                 "",
                 false,
@@ -1042,7 +1043,12 @@ fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppCon
 
             // A terminal Error mid-restore also clears the gate.
             view.restoring = true;
-            view.apply_event(AcpEvent::Error("load rejected".into()), "", false, cx);
+            view.apply_event(
+                AcpEvent::Error(daruda_acp::AcpFailure::unclassified("load rejected")),
+                "",
+                false,
+                cx,
+            );
             assert!(!view.restoring, "Error releases the restore gate");
 
             // The end-of-stream guard releases a gate stuck with no terminal
@@ -1074,7 +1080,9 @@ fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut gpui::TestAppCon
             view.set_turn_in_flight();
 
             view.apply_event(
-                AcpEvent::TurnFailed("session limit reached".into()),
+                AcpEvent::TurnFailed(daruda_acp::AcpFailure::unclassified(
+                    "session limit reached",
+                )),
                 "",
                 false,
                 cx,
@@ -1088,7 +1096,9 @@ fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut gpui::TestAppCon
             assert!(view.turn_is_idle(), "the failed turn must settle to idle");
             assert_eq!(
                 view.items.last(),
-                Some(&ChatItem::Error("session limit reached".to_string())),
+                Some(&ChatItem::Failure(daruda_acp::AcpFailure::unclassified(
+                    "session limit reached"
+                ))),
                 "the failure is surfaced as an inline Error item"
             );
             assert_eq!(

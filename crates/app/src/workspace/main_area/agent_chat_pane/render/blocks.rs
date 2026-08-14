@@ -11,6 +11,7 @@ use super::links::AgentChatMarkdownLinks;
 use super::mermaid::mermaid_code_block_render;
 use crate::surface::strings as s;
 use crate::ui::theme;
+use crate::ui::{ButtonVariants as _, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -214,6 +215,58 @@ pub(super) fn thinking_block(
 }
 
 /// Surfaced error item — error-tinted block.
+/// A turn failure, with the one action its classification implies.
+///
+/// This is the *main* path an expired login surfaces on, not the connect
+/// banner: the agent creates the session without checking credentials and only
+/// refuses at the first real request, so the session stays alive and the
+/// failure lands here. Without an affordance the conversation just stops with
+/// a red line and no way forward inside the app.
+///
+/// Only `Reauthenticate` gets a button. `Retry` on a turn means re-sending the
+/// prompt rather than reconnecting (the events differ, so the action does),
+/// and the rest are either the user's to fix elsewhere or have no action at
+/// all — for those the message alone is the honest answer.
+pub(super) fn failure_block(
+    failure: &daruda_acp::AcpFailure,
+    pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    window_handle: gpui::AnyWindowHandle,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let sign_in = matches!(failure.remedy(), daruda_acp::Remedy::Reauthenticate).then(|| {
+        crate::ui::button(
+            ("agent-chat-failure-reauth", pane_id as usize),
+            s::agent_chat_sign_in_again(),
+        )
+        .ghost()
+        .xsmall()
+        .on_click(cx.listener(move |_this, _ev, _window, cx| {
+            // The login op reaches this same view through `Workspace`, which
+            // would double-lease-panic inline (CLAUDE.md Pitfall #5).
+            cx.defer(move |cx| {
+                if let Some(workspace) =
+                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+                {
+                    // SILENT-OK: the workspace window may already be closed by the time this deferred callback runs — nothing left to sign in for
+                    let _ = workspace.update(cx, |ws, cx| {
+                        ws.reauthenticate_pane_account(pane_id, cx);
+                    });
+                }
+            });
+        }))
+    });
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(error_block(failure.message(), t, cx))
+        .when_some(sign_in, |el, btn| {
+            el.child(div().flex().flex_row().child(btn))
+        })
+}
+
 pub(super) fn error_block(
     message: &str,
     t: &theme::DarudaTheme,

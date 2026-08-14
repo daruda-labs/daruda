@@ -11,7 +11,9 @@
 
 pub mod adapter;
 pub mod connection;
+pub mod failure;
 pub mod launch_env;
+pub mod login_method;
 pub mod mapping;
 pub(crate) mod mode_tracker;
 pub mod model;
@@ -30,6 +32,8 @@ pub use agent_client_protocol::schema::v1::{
     ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate,
 };
 pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run_one_shot};
+pub use failure::{AcpFailure, FailureKind, Remedy, RuntimeKind};
+pub use login_method::{LoginMethod, LoginMethodKind, TerminalCommand, parse_login_methods};
 pub use mapping::{
     SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
     finalize_streaming, permission_item, subagent_activity, touched_tool_id,

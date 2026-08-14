@@ -129,6 +129,18 @@ pub struct AddManagedAccount(pub daruda_store::accounts::AccountRecipeId);
 #[action(namespace = workspace, no_json)]
 pub struct ReauthenticateAccount(pub daruda_store::accounts::AccountId);
 
+/// Re-run the headless login for an auth domain's **ambient** home — the
+/// credentials a pane with no managed account runs under (see
+/// `account_login_ops::reauthenticate_system`). Carries the
+/// [`daruda_store::accounts::AccountRecipeId`] rather than an account id
+/// because there is no `accounts.json` row to name: the domain identifies
+/// the home by itself. `no_json`: dispatched from the Settings window's
+/// System row and from a failed pane's re-login button, never from
+/// keymap.json.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = workspace, no_json)]
+pub struct ReauthenticateSystem(pub daruda_store::accounts::AccountRecipeId);
+
 /// Active lane's branch state, derived once per render and shared
 /// by the status bar (text label + inline detached chip) and the
 /// macOS window title (text only — chip cannot ride along).
@@ -277,22 +289,23 @@ pub(in crate::workspace) enum CommitMode {
 /// UI (a disabled "+ Add account" affordance while a login is running),
 /// not by this enum itself.
 ///
-/// `InProgress` carries the cancel [`LoginProcessHandle`], the `account_id`
-/// the pending login will file under, and the `recipe` it signed into — but
-/// not the config dir, which is a pure function of data already on
-/// `Workspace` (`daruda_agent::accounts::account_config_dir(&self.data_dir,
-/// account_id)`). `recipe` is carried because a cancel has to clean that dir
-/// up through the right auth domain, and only the spawning flow knows which
-/// one it launched.
+/// `InProgress` carries the cancel [`LoginProcessHandle`] and the
+/// [`account_login_ops::LoginTarget`] the login writes into — but not the
+/// config dir, which is a pure function of data already on `Workspace`
+/// (`daruda_agent::accounts::account_config_dir(&self.data_dir, id)` for a
+/// managed target; the domain's own `system_home_dir()` for a system one).
+/// The target carries the auth domain because a cancel has to clean that dir
+/// up through the right one, and only the spawning flow knows which it
+/// launched.
 ///
-/// `mode` distinguishes an add-account login (whose `account_id` names a
+/// `finish` distinguishes an add-account login (whose account id names a
 /// throwaway config dir that only becomes real on success) from a
-/// reauthenticate login (whose `account_id` names an *existing*
+/// reauthenticate login (whose id names an *existing*
 /// [`daruda_agent::accounts::ManagedAccount`]'s real, permanent config dir
-/// and Keychain item). `Workspace::cancel_pending_login` reads it to decide
-/// whether cancelling is allowed to delete that directory — for `Reauth`
-/// it must not, or cancelling a reauth would delete a good account's
-/// credentials.
+/// and Keychain item) and from a system login (which writes into the user's
+/// own home). `Workspace::cancel_pending_login` reads it to decide whether
+/// cancelling may delete that directory — for the latter two it must not, or
+/// cancelling would destroy credentials this app did not create.
 ///
 /// `Preparing` covers the window before a login process even exists: the
 /// managed-node resolve (`account_login_ops::resolve_node_path_env`) is blocking
@@ -307,17 +320,15 @@ pub(in crate::workspace) enum CommitMode {
 pub(in crate::workspace) enum PendingLogin {
     None,
     Preparing {
-        account_id: daruda_store::accounts::AccountId,
-        recipe: daruda_store::accounts::AccountRecipeId,
-        mode: account_login_ops::LoginMode,
+        target: account_login_ops::LoginTarget,
+        finish: account_login_ops::LoginFinish,
     },
     InProgress {
-        account_id: daruda_store::accounts::AccountId,
-        recipe: daruda_store::accounts::AccountRecipeId,
+        target: account_login_ops::LoginTarget,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
         handle: daruda_agent::accounts::LoginProcessHandle,
-        mode: account_login_ops::LoginMode,
+        finish: account_login_ops::LoginFinish,
     },
 }
 

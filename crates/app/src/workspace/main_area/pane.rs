@@ -1127,8 +1127,20 @@ impl Workspace {
     /// needs the resulting [`AccountDomain`], so the derivation lives here
     /// rather than being rebuilt per surface.
     pub(in crate::workspace) fn focused_account_pane(&self, cx: &gpui::App) -> AccountPane {
-        let focused_pane_id = self.active_runtime().focused_pane_id;
-        match self.agent_chat_view(focused_pane_id) {
+        self.account_pane_for(self.active_runtime().focused_pane_id, cx)
+    }
+
+    /// How the account layer sees one pane by id — the cross-lane form of
+    /// [`Self::focused_account_pane`], for a decision made about a specific
+    /// pane rather than about whatever currently has focus (a failed pane's
+    /// re-login button acts on the pane that failed, which need not be the
+    /// focused one by the time it is clicked).
+    pub(in crate::workspace) fn account_pane_for(
+        &self,
+        pane_id: crate::workspace::main_area::PaneId,
+        cx: &gpui::App,
+    ) -> AccountPane {
+        match self.agent_chat_view(pane_id) {
             Some(view) => {
                 let v = view.read(cx);
                 let is_remote = matches!(v.cwd, Some(PaneCwd::Remote(_)));

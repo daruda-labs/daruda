@@ -300,6 +300,8 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  session_notice: "The session continued, but not as configured"
+  sign_in_again: "Sign in again"
   diagram_zoom: "Enlarge diagram"
   diagram_copy: "Copy diagram source"
   diagram_copied: "Copied"
@@ -915,6 +917,10 @@ settings:
   accounts_reauth_added: "Account reauthenticated."
   accounts_reauth_failed: "Could not reauthenticate account."
   accounts_reauth_missing: "The account being reauthenticated no longer exists."
+  accounts_reauth_elsewhere: "This agent signs in where it runs"
+  accounts_reauth_elsewhere_detail: "It is not running on this machine, so daruda cannot sign in for it. Open a terminal on its host, run the agent's CLI, and use its /login command."
+  accounts_system_home_unknown: "No home directory was found for this agent, so there is nowhere to sign in to."
+  accounts_system_reauthenticate: "Sign in"
   accounts_prepare_dir_failed: "Could not fully set up this account's configuration directory. The pane still runs under the account, but shared resources may be missing."
 
 # Skills tab

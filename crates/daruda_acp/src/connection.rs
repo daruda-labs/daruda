@@ -86,13 +86,34 @@ pub enum AcpClientError {
     /// The adapter command string could not be parsed into a transport.
     #[error("invalid adapter command: {0}")]
     Command(String),
-    /// The protocol exchange failed (handshake, session, or prompt).
+    /// The protocol exchange failed (handshake, session, or prompt), already
+    /// classified so the host can act on it rather than re-parse a string.
     #[error("protocol error: {0}")]
-    Protocol(String),
+    Protocol(crate::failure::AcpFailure),
     /// Provisioning the Node.js runtime the adapter needs failed. `Display`
     /// forwards the (user-facing) [`crate::node::NodeError`] message verbatim.
     #[error("{0}")]
     Runtime(#[from] crate::node::NodeError),
+}
+
+impl AcpClientError {
+    /// Collapse into the classified shape the host consumes.
+    ///
+    /// This is the one place every connect-time failure — a bad command, a
+    /// protocol error, a runtime that would not provision — becomes a single
+    /// type carrying a remedy, so the host has no residual `String` arm to
+    /// reason about. The `Protocol` arm unwraps rather than re-wraps: its
+    /// `Display` prefix exists for logs, not for the user-facing message.
+    #[must_use]
+    pub fn into_failure(self) -> crate::failure::AcpFailure {
+        match self {
+            Self::Protocol(failure) => failure,
+            Self::Runtime(error) => crate::failure::AcpFailure::from_node_error(&error),
+            // Rendered through `Display` so the "invalid adapter command:"
+            // prefix survives — the bare string has no other context.
+            other @ Self::Command(_) => crate::failure::AcpFailure::unclassified(other.to_string()),
+        }
+    }
 }
 
 /// Events emitted by [`run_one_shot`] as the exchange progresses. Production
@@ -204,7 +225,7 @@ pub async fn run_one_shot(
             Ok(())
         })
         .await
-        .map_err(|e| AcpClientError::Protocol(format!("{e:?}")))?;
+        .map_err(|e| AcpClientError::Protocol(crate::failure::AcpFailure::classify(&e)))?;
 
     Ok(())
 }

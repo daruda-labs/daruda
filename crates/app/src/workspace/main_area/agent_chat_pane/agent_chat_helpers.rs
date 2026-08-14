@@ -128,7 +128,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             }
             daruda_acp::ChatItem::UserText(_)
             | daruda_acp::ChatItem::Permission(_)
-            | daruda_acp::ChatItem::Error(_) => {}
+            | daruda_acp::ChatItem::Failure(_) => {}
         }
     }
     keys
@@ -302,7 +302,7 @@ impl Rollup {
                     }
                     running |= *streaming;
                 }
-                ChatItem::Error(_) => any_failed = true,
+                ChatItem::Failure(_) => any_failed = true,
                 // A user message never belongs to a run; a permission card is
                 // neither an outcome nor progress.
                 ChatItem::UserText(_) | ChatItem::Permission(_) => {}
@@ -445,7 +445,7 @@ pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem)
             })
             .chain(tc.subagent_prompt())
             .collect(),
-        daruda_acp::ChatItem::Permission(_) | daruda_acp::ChatItem::Error(_) => Vec::new(),
+        daruda_acp::ChatItem::Permission(_) | daruda_acp::ChatItem::Failure(_) => Vec::new(),
     }
 }
 
@@ -661,21 +661,21 @@ pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
             *streaming
         }
         ChatItem::ToolCall(tc) => tc.status.is_live(),
-        ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Error(_) => false,
+        ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => false,
     }
 }
 
 /// True when `items` holds conversation content that a session teardown would
-/// destroy. [`ChatItem::Error`](daruda_acp::ChatItem::Error) does not count: it
-/// is a session-failure notice, not the user's transcript, so a pane whose only
-/// content is "session limit reached" — the usual reason to reach for another
-/// account — still counts as empty and can reconnect in place.
+/// destroy. [`ChatItem::Failure`](daruda_acp::ChatItem::Failure) does not count:
+/// it is a session-failure notice, not the user's transcript, so a pane whose
+/// only content is "session limit reached" — the usual reason to reach for
+/// another account — still counts as empty and can reconnect in place.
 ///
 /// Read by [`switch_kind`](crate::workspace::account_ops::switch_kind) to
 /// decide whether an account switch may reuse the pane.
 pub(in crate::workspace) fn has_conversation(items: &[daruda_acp::ChatItem]) -> bool {
     use daruda_acp::ChatItem;
-    items.iter().any(|it| !matches!(it, ChatItem::Error(_)))
+    items.iter().any(|it| !matches!(it, ChatItem::Failure(_)))
 }
 
 /// The `active` input [`FoldState::is_expanded`](super::fold::FoldState::is_expanded)

@@ -12,7 +12,12 @@ workspace = true
 
 [dependencies]
 daruda_core = { path = "../daruda_core" }
-agent-client-protocol = "2.0"
+# `unstable_auth_methods` is what makes the agent advertise its terminal login
+# methods at `initialize`; without it `authMethods` comes back empty and the
+# host has to hardcode the login command instead of reading it. Marked UNSTABLE
+# upstream (may change with the schema), so the reader treats a missing/renamed
+# field as "no methods advertised" rather than an error.
+agent-client-protocol = { version = "2.0", features = ["unstable_auth_methods"] }
 anyhow = { workspace = true }
 futures = "0.3"
 semver = "1"

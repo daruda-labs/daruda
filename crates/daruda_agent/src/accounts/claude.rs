@@ -4,7 +4,7 @@
 //! seam over existing behavior, not new logic.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use daruda_store::accounts::AccountRecipeId;
 
@@ -28,8 +28,38 @@ const AUTH_ENV_STRIP: &[&str] = &[
 /// subscription-login flow (see `daruda_config::AgentLaunch::login_command`).
 const LOGIN_ARGS: &str = "--cli auth login --claudeai";
 
-/// The user's own Claude home, shown as the "System" choice's hint.
-const SYSTEM_HOME_HINT: &str = "~/.claude";
+/// System Claude home, relative to `$HOME`. Declared as a macro so the
+/// display hint below is concatenated from the same single source.
+macro_rules! system_home_dir {
+    () => {
+        ".claude"
+    };
+}
+
+const SYSTEM_HOME_DIR: &str = system_home_dir!();
+
+/// [`SYSTEM_HOME_DIR`] as a tilde path, for the Settings "System" choice.
+const SYSTEM_HOME_HINT: &str = concat!("~/", system_home_dir!());
+
+/// The ambient Claude home every unmanaged pane reads: `$CLAUDE_CONFIG_DIR`
+/// when the user set it, else `~/.claude`. Mirrors
+/// [`super::codex::system_codex_home`].
+fn system_claude_home() -> Option<PathBuf> {
+    system_claude_home_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
+}
+
+/// Pure core of [`system_claude_home`], split out so the override and the
+/// default can be unit-tested without mutating the real process environment
+/// (parallel `cargo test` runs share one).
+fn system_claude_home_from(
+    override_dir: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(dir) = override_dir {
+        return Some(PathBuf::from(dir));
+    }
+    Some(home?.join(SYSTEM_HOME_DIR))
+}
 
 pub struct ClaudeRecipe;
 
@@ -58,6 +88,10 @@ impl AccountRecipe for ClaudeRecipe {
 
     fn system_home_hint(&self) -> &'static str {
         SYSTEM_HOME_HINT
+    }
+
+    fn system_home_dir(&self) -> Option<PathBuf> {
+        system_claude_home()
     }
 
     fn prepare_dir(&self, dir: &Path) -> io::Result<()> {
@@ -112,6 +146,32 @@ mod tests {
     fn has_credentials_is_false_for_a_dir_with_no_keychain_item() {
         let dir = std::env::temp_dir().join(format!("daruda-recipe-creds-{}", std::process::id()));
         assert!(!ClaudeRecipe.has_credentials(&dir));
+    }
+
+    #[test]
+    fn the_system_home_follows_the_config_dir_override() {
+        assert_eq!(
+            system_claude_home_from(
+                Some(std::ffi::OsString::from("/elsewhere/claude")),
+                Some(PathBuf::from("/home/u"))
+            ),
+            Some(PathBuf::from("/elsewhere/claude"))
+        );
+    }
+
+    #[test]
+    fn the_system_home_defaults_under_the_home_directory() {
+        assert_eq!(
+            system_claude_home_from(None, Some(PathBuf::from("/home/u"))),
+            Some(PathBuf::from("/home/u/.claude"))
+        );
+    }
+
+    /// No home and no override means there is nothing to read — the caller
+    /// has to refuse the login rather than invent a path.
+    #[test]
+    fn the_system_home_is_unknown_without_a_home_directory() {
+        assert_eq!(system_claude_home_from(None, None), None);
     }
 
     #[test]

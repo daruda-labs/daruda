@@ -65,6 +65,10 @@ impl AccountRecipe for CodexRecipe {
         home::SYSTEM_HOME_HINT
     }
 
+    fn system_home_dir(&self) -> Option<std::path::PathBuf> {
+        home::system_codex_home()
+    }
+
     fn prepare_dir(&self, dir: &Path) -> io::Result<()> {
         home::prepare_codex_home(dir)
     }

@@ -421,10 +421,22 @@ impl Workspace {
         // error prefix, so carry the bare reason here.
         let (cwd, status) = match outcome {
             PaneCwdOutcome::Ready(Some(cwd)) => (Some(cwd), AgentSessionStatus::Idle),
-            PaneCwdOutcome::Ready(None) => {
-                (None, AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()))
-            }
-            PaneCwdOutcome::Blocked(reason) => (None, AgentSessionStatus::Error(reason)),
+            // Neither of these has an in-app fix: the lane has no working
+            // directory, or the remote path is blocked by configuration.
+            PaneCwdOutcome::Ready(None) => (
+                None,
+                AgentSessionStatus::Error {
+                    message: s::agent_chat_no_lane_cwd(),
+                    remedy: daruda_acp::Remedy::NoneAvailable,
+                },
+            ),
+            PaneCwdOutcome::Blocked(reason) => (
+                None,
+                AgentSessionStatus::Error {
+                    message: reason,
+                    remedy: daruda_acp::Remedy::NoneAvailable,
+                },
+            ),
         };
         let pane_id = self.alloc_id();
         let window_handle = window.window_handle();

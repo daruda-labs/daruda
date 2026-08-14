@@ -7,6 +7,8 @@
 
 use std::path::PathBuf;
 
+use crate::failure::AcpFailure;
+
 /// One renderable item in the agent conversation, in arrival order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatItem {
@@ -37,8 +39,10 @@ pub enum ChatItem {
     ToolCall(ToolCallItem),
     /// A pending or resolved tool-permission request.
     Permission(PermissionItem),
-    /// A surfaced error (connection or protocol failure).
-    Error(String),
+    /// A surfaced failure (connection, protocol, or runtime), carrying its
+    /// classification so the renderer can offer the matching remedy rather
+    /// than only printing text. See [`crate::failure`].
+    Failure(AcpFailure),
 }
 
 /// A tool call, updated in place as `ToolCallUpdate`s arrive.

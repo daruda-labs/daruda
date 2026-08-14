@@ -38,26 +38,15 @@ impl AgentChatView {
         // toast. A toast here is pure noise: it duplicates the banner, and on
         // cold restore the auto-connect of any errored session would pop one
         // per pane on startup.
-        if let AcpEvent::Error(message) = &event {
+        if let AcpEvent::Error(failure) = &event {
             let report = ErrorReport::new("ACP session error")
                 .severity(ErrorSeverity::Error)
-                .with_context("detail", message.clone())
+                .with_context("detail", failure.message().to_owned())
                 .at(file!(), line!())
                 .dedup("agent_chat.session_error")
                 .build();
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
-        // Non-fatal advisory: log at Warning severity; session stays live.
-        if let AcpEvent::Notice(message) = &event {
-            let report = ErrorReport::new("ACP session notice")
-                .severity(ErrorSeverity::Warning)
-                .with_context("detail", message.clone())
-                .at(file!(), line!())
-                .dedup(format!("agent_chat.notice.{}", self.pane_id))
-                .build();
-            daruda_store::observability::log_writer::LogWriter::log(report);
-        }
-
         // What this event changed, to gate the expensive full-conversation
         // reconciles below. Only an `Update` carrying tool/text content sets
         // these; every other event leaves both false.
@@ -103,6 +92,13 @@ impl AgentChatView {
                 modes,
                 config_options,
                 capabilities,
+                // Dropped: a re-login runs the command its *account domain*
+                // defines, so nothing here reads what the agent advertised.
+                // These matter once the host offers the agent's own resolved
+                // command, or the metered Console sign-in as a second choice —
+                // and the agent re-advertises them on every connect, so the
+                // pane loses nothing by picking them up only then.
+                login_methods: _,
             } => {
                 self.status = AgentSessionStatus::Connected;
                 if let Some(state) = &modes {
@@ -312,16 +308,18 @@ impl AgentChatView {
                 apply_info_field(&mut self.session_updated_at, updated_at);
             }
             AcpEvent::Notice(_) => {
-                // Logged above; no status change.
+                // Advisory only: the session stays live, so nothing here
+                // changes. `Workspace::report_agent_notice` is what puts it
+                // in front of the user.
             }
             AcpEvent::ConfigOptionRejected { .. } => {
-                // Nothing to do here: the same refusal arrives as a
-                // `Notice`, which is logged above and is the wording a
-                // user reads. This variant exists for a consumer that
-                // *required* the change — a flow node pinned to that model
-                // has to fail, where a chip the user flipped just stays put.
+                // Nothing to do here: the same refusal also arrives as a
+                // `Notice`, which is the wording the user reads. This variant
+                // exists for a consumer that *required* the change — a flow
+                // node pinned to that model has to fail, where a chip the
+                // user flipped just stays put.
             }
-            AcpEvent::TurnFailed(message) => {
+            AcpEvent::TurnFailed(failure) => {
                 // A single `session/prompt` failed (e.g. the adapter hit a usage
                 // / session limit → `-32603`), but the ACP connection is alive —
                 // the error was a normal JSON-RPC response, not a transport
@@ -335,7 +333,7 @@ impl AgentChatView {
                 // block stays `streaming: true` and an `InProgress` tool stays
                 // live, so the rollup glyph blinks forever and the footer reads
                 // `Running` after the turn is already over.
-                self.items.push(ChatItem::Error(message));
+                self.items.push(ChatItem::Failure(failure));
                 // (A `TurnFailed` while `cancel_in_flight` is handled by the
                 // guarded arm above; here the turn was not being cancelled.)
                 self.settle_turn();
@@ -350,18 +348,21 @@ impl AgentChatView {
                 // when nothing is buffered (the common single-prompt case).
                 self.pump_pending_prompt(cx);
             }
-            AcpEvent::Error(message) => {
+            AcpEvent::Error(failure) => {
                 let error_message = match &self.cwd {
                     Some(PaneCwd::Remote(_)) => {
                         format!(
                             "{}\n\n{}",
-                            message,
+                            failure.message(),
                             s::agent_chat_remote_connect_error_hint()
                         )
                     }
-                    _ => message,
+                    _ => failure.message().to_owned(),
                 };
-                self.status = AgentSessionStatus::Error(error_message);
+                self.status = AgentSessionStatus::Error {
+                    message: error_message,
+                    remedy: failure.remedy(),
+                };
                 // A session-level error terminates every outstanding turn,
                 // including any cancel we were still awaiting an ack for — close
                 // the cancel window so a post-reconnect turn isn't misread.

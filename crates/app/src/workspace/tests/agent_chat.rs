@@ -69,7 +69,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                 let view = ac.view.read(cx);
                 // No resolvable lane cwd → the pane parks in `Error` rather
                 // than attempting a connection, keeping the suite offline.
-                let AgentSessionStatus::Error(message) = &view.status else {
+                let AgentSessionStatus::Error { message, .. } = &view.status else {
                     panic!(
                         "no lane cwd → error status, not a live connect, got {:?}",
                         view.status

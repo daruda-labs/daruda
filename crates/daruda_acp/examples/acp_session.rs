@@ -53,12 +53,24 @@ fn main() {
                     modes,
                     config_options,
                     capabilities,
+                    login_methods,
                 } => {
                     eprintln!("[session-id] {session_id}");
                     eprintln!(
                         "[connected] modes={modes:?} config_options={config_options:?} \
                          capabilities={capabilities:?} sending prompt 1"
                     );
+                    for method in &login_methods {
+                        eprintln!(
+                            "[login-method] {} ({:?}) {}",
+                            method.id,
+                            method.kind,
+                            method.command.as_ref().map_or_else(
+                                || "<no terminal-auth block>".to_string(),
+                                daruda_acp::TerminalCommand::to_shell_line
+                            )
+                        );
+                    }
                     handle.send_prompt(prompts[next_prompt].to_string());
                     next_prompt += 1;
                 }

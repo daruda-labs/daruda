@@ -43,6 +43,15 @@ pub trait AccountRecipe: Send + Sync {
     /// The ambient (unmanaged) home this domain reads when no account is
     /// pinned, as a tilde path for display next to the "System" choice.
     fn system_home_hint(&self) -> &'static str;
+    /// The same home as a real path, honouring the domain's own config-dir
+    /// override env var. A system login writes here instead of into a minted
+    /// config dir, so this is what [`Self::has_credentials`] gets probed
+    /// against for a domain whose login completes on credentials landing.
+    ///
+    /// `None` only when there is no home directory and no override — nothing
+    /// to read or write. [`Self::system_home_hint`] is display copy and cannot
+    /// stand in: it is a tilde string, not a path.
+    fn system_home_dir(&self) -> Option<std::path::PathBuf>;
     /// Best-effort prep run against `dir` before *any* process spawns under it
     /// — an agent session or a plain shell — e.g. mirroring shared config in.
     fn prepare_dir(&self, dir: &Path) -> std::io::Result<()>;
@@ -148,6 +157,46 @@ mod tests {
             std::fs::read(source.path().join("real.md")).expect("target survives"),
             b"user data"
         );
+    }
+
+    /// A system login runs against the user's own home rather than a minted
+    /// config dir, so every domain has to be able to name that home — a domain
+    /// that cannot has no way to probe whether its login landed.
+    #[test]
+    fn every_recipe_can_name_its_system_home() {
+        for id in AccountRecipeId::all() {
+            let recipe = recipe_for(id);
+            let home = recipe
+                .system_home_dir()
+                .expect("a machine running the tests has a home directory");
+            assert!(
+                home.is_absolute(),
+                "{id:?} yielded a relative home: {home:?}"
+            );
+        }
+    }
+
+    /// The hint is display copy and the dir is a real path, but they must name
+    /// the same place — a hint that says `~/.claude` next to a login writing
+    /// somewhere else is worse than no hint.
+    #[test]
+    fn the_system_home_hint_describes_the_system_home_dir() {
+        for id in AccountRecipeId::all() {
+            let recipe = recipe_for(id);
+            // Skip when the user's environment overrides the home — then the
+            // hint intentionally still shows the default location.
+            if std::env::var_os(recipe.config_dir_env()).is_some() {
+                continue;
+            }
+            let home = recipe.system_home_dir().expect("home directory");
+            let hint = recipe.system_home_hint();
+            let tail = hint.strip_prefix("~/").expect("hints are tilde paths");
+            assert_eq!(
+                home.file_name().and_then(std::ffi::OsStr::to_str),
+                Some(tail),
+                "{id:?}: hint {hint} does not name {home:?}"
+            );
+        }
     }
 
     #[test]

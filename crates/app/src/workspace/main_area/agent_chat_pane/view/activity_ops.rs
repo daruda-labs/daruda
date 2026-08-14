@@ -17,7 +17,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_agent::SessionStatus> {
         use daruda_agent::SessionStatus;
         match &self.status {
-            AgentSessionStatus::Idle | AgentSessionStatus::Error(_) => None,
+            AgentSessionStatus::Idle | AgentSessionStatus::Error { .. } => None,
             // Runtime prep and the handshake are both connecting sub-phases —
             // same pulsing badge.
             AgentSessionStatus::PreparingRuntime(_)

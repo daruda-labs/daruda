@@ -96,7 +96,7 @@ impl<'a> RenderAssets<'a> {
 }
 
 use blocks::{
-    MarkdownRender, assistant_block, assistant_markdown, conclusion_block, error_block,
+    MarkdownRender, assistant_block, assistant_markdown, conclusion_block, failure_block,
     thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
@@ -673,6 +673,8 @@ fn render_item(
             .into_any_element()
         }
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
-        ChatItem::Error(message) => error_block(message, t, cx).into_any_element(),
+        ChatItem::Failure(failure) => {
+            failure_block(failure, pane_id, window_handle, t, cx).into_any_element()
+        }
     }
 }
