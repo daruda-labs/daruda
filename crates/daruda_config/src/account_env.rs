@@ -14,6 +14,23 @@ pub struct AccountEnv {
     pub strip: Vec<&'static str>,
 }
 
+impl AccountEnv {
+    /// No override at all — the process inherits the user's own environment.
+    ///
+    /// This is what "no managed account" means concretely, and the reason it
+    /// is named rather than left to `Default`: a process spawned for the
+    /// ambient home must read the *same* credentials an unpinned pane does,
+    /// so injecting a config dir or stripping the user's auth vars here would
+    /// quietly point it somewhere else.
+    #[must_use]
+    pub fn ambient() -> Self {
+        Self {
+            inject: Vec::new(),
+            strip: Vec::new(),
+        }
+    }
+}
+
 /// Build the env override for one managed account's process: inject
 /// `env_name=config_dir` and strip `strip`'s auth-override vars.
 pub fn account_env(env_name: &str, config_dir: &Path, strip: &[&'static str]) -> AccountEnv {
@@ -30,6 +47,17 @@ pub fn account_env(env_name: &str, config_dir: &Path, strip: &[&'static str]) ->
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The ambient environment is the *absence* of both overrides, not an
+    /// empty injection: a pane with no managed account inherits the user's
+    /// own auth vars, and a login meant for that pane has to as well, or it
+    /// would sign into a place the pane never reads.
+    #[test]
+    fn the_ambient_environment_overrides_nothing() {
+        let e = AccountEnv::ambient();
+        assert!(e.inject.is_empty());
+        assert!(e.strip.is_empty());
+    }
 
     #[test]
     fn injects_config_dir_and_strips_auth_overrides() {

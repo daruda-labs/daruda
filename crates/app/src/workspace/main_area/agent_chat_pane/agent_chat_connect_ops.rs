@@ -68,7 +68,11 @@ fn fail_connect_account_prepare(
     match this.update(cx, |ws, cx| {
         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| {
-                v.set_error(s::agent_chat_account_prepare_failed(), cx)
+                v.set_error(
+                    s::agent_chat_account_prepare_failed(),
+                    daruda_acp::Remedy::Retry,
+                    cx,
+                )
             });
             // Connecting → Error clears the badge; dirty the cached docks so
             // it doesn't linger stale.
@@ -136,7 +140,7 @@ impl Workspace {
                 return;
             };
             let v = view.read(cx);
-            if !matches!(v.status, AgentSessionStatus::Error(_)) {
+            if !matches!(v.status, AgentSessionStatus::Error { .. }) {
                 return;
             }
             let Some(cwd) = v.cwd.clone() else {
@@ -151,6 +155,102 @@ impl Workspace {
             self.notify_status_docks(cx);
         }
         self.connect_agent_chat(pane_id, cwd, resume, cx);
+    }
+
+    /// Surface a session's non-fatal advisory through the app's error pipeline
+    /// (toast → details modal → log) instead of the log alone.
+    ///
+    /// Every advisory reports the same shape of thing: something the user or
+    /// their config asked for did not happen, and the session is fine anyway —
+    /// a resume that could not replay history, a configured mode the agent
+    /// refused, a config option it would not set. Each is the answer to an
+    /// action the user just took, so it is neither noise nor something they
+    /// can be expected to find in a log file.
+    ///
+    /// Reporting here rather than in the view keeps the one-way flow intact
+    /// (`Workspace` owns error reporting) and covers every advisory: the other
+    /// `apply_event` call site only ever feeds a synthetic terminal error.
+    pub(in crate::workspace) fn report_agent_notice(
+        &mut self,
+        pane_id: PaneId,
+        event: &daruda_acp::AcpEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let daruda_acp::AcpEvent::Notice(message) = event else {
+            return;
+        };
+        // The body is the adapter's own diagnostic, not authored copy — the
+        // same treatment a captured login failure gets.
+        self.report_error(
+            ErrorReport::new(s::agent_chat_session_notice())
+                .message(message.clone())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup(notice_dedup_key(pane_id, message))
+                .build(),
+            cx,
+        );
+    }
+
+    /// Reconnect every pane a successful login into `target` has actually
+    /// unblocked — the tail of both reauthenticate flows.
+    ///
+    /// Without this a user who signs in from a failure banner is left looking
+    /// at the same error, with a second button to press for the thing they
+    /// just asked for. Scoped by [`login_revives_pane`] rather than applied to
+    /// every failed pane: a login fixes only the panes that run on the
+    /// credentials it wrote.
+    ///
+    /// Only reaches panes whose *connection* failed, which is deliberately the
+    /// narrower half. An expired login usually surfaces as a **turn** failure
+    /// instead — the agent creates the session without checking credentials
+    /// and refuses at the first real request — and such a pane is still
+    /// `Connected`, so it is left alone here: whether a running adapter picks
+    /// up freshly written credentials without a reconnect is not something
+    /// this has established, and tearing down a live session to find out would
+    /// cost the user their conversation on a guess. That pane keeps its own
+    /// sign-in button and its next prompt shows whether the login took.
+    pub(in crate::workspace) fn reconnect_panes_after_login(
+        &mut self,
+        target: crate::workspace::account_login_ops::LoginTarget,
+        cx: &mut Context<Self>,
+    ) {
+        // Collected before any reconnect runs: `retry_agent_chat_connect`
+        // leases each view, and holding a read across that would re-enter the
+        // same entity (CLAUDE.md Pitfall #5).
+        let revived: Vec<PaneId> = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .map(|pane| (pane.id, pane.account_selection()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|&(pane_id, selection)| {
+                let pane_target = selection.and_then(|selection| {
+                    let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+                        &self.account_pane_for(pane_id, cx),
+                    );
+                    crate::workspace::account_login_ops::pane_login_target(
+                        selection,
+                        domain,
+                        &self.accounts,
+                    )
+                });
+                let remedy =
+                    self.agent_chat_view(pane_id)
+                        .and_then(|view| match &view.read(cx).status {
+                            AgentSessionStatus::Error { remedy, .. } => Some(*remedy),
+                            _ => None,
+                        });
+                login_revives_pane(target, pane_target, remedy)
+            })
+            .map(|(pane_id, _)| pane_id)
+            .collect();
+
+        for pane_id in revived {
+            self.retry_agent_chat_connect(pane_id, cx);
+        }
     }
 
     /// Resolve the launch spec for `pane_id`'s agent, reconciling the view when
@@ -351,7 +451,9 @@ impl Workspace {
                     }
                 };
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                    view.update(cx, |v, cx| v.set_error(message, cx));
+                    view.update(cx, |v, cx| {
+                        v.set_error(message, daruda_acp::Remedy::Configure, cx);
+                    });
                     // Connecting → Error clears the badge; dirty the cached
                     // docks so it doesn't linger stale (same pattern as every
                     // other Error transition in this function).
@@ -506,9 +608,9 @@ impl Workspace {
                         // session overwrites it via the `Connected` persist trigger.
                         if was_resume
                             && !connected_seen
-                            && let daruda_acp::AcpEvent::Error(detail) = &event
+                            && let daruda_acp::AcpEvent::Error(failure) = &event
                         {
-                            let detail = detail.clone();
+                            let detail = failure.message().to_owned();
                             // SILENT-OK: workspace/window dropped before the resume retry could start
                             let _ = this.update(cx, |ws, cx| {
                                 if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
@@ -581,6 +683,7 @@ impl Workspace {
                             // `apply_event` below. Turn *completion* fires later,
                             // at the activity-settle edge (see the reconcile below).
                             ws.maybe_notify_agent_event(pane_id, &event, cx);
+                            ws.report_agent_notice(pane_id, &event, cx);
                             let telegram_first_response = view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
@@ -675,7 +778,12 @@ impl Workspace {
                                 let telegram_first_response = view.update(cx, |v, cx| {
                                     v.apply_event(
                                         daruda_acp::AcpEvent::Error(
-                                            s::agent_chat_error_stream_ended(),
+                                            // Locally detected, not a protocol
+                                            // error — there is no code or
+                                            // `errorKind` behind it to classify.
+                                            daruda_acp::AcpFailure::unclassified(
+                                                s::agent_chat_error_stream_ended(),
+                                            ),
                                         ),
                                         &syntax_theme,
                                         is_light,
@@ -737,14 +845,19 @@ impl Workspace {
                     });
                 }
                 Err(err) => {
-                    let message = format!("{err}");
+                    // Connect-time failures classify like any other: a Node
+                    // runtime that would not provision is retryable, an
+                    // expired login is not.
+                    let failure = err.into_failure();
+                    let remedy = failure.remedy();
+                    let message = failure.message().to_owned();
                     // workspace gone before the connect resolved — nothing left
                     // to surface the failure on.
                     // SILENT-OK: workspace/window dropped before connect resolved
                     let _ = this.update(cx, |ws, cx| {
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
                             view.update(cx, |v, cx| {
-                                v.set_error(message.clone(), cx);
+                                v.set_error(message.clone(), remedy, cx);
                             });
                             // Connecting → Error clears the badge (maps to
                             // `None`); dirty the cached docks so the stale
@@ -807,10 +920,147 @@ impl Workspace {
     }
 }
 
+/// Dedup key for a session advisory's toast.
+///
+/// Keyed by pane *and* content. A pane-only key looks right and quietly loses
+/// information: dedup matches only against a toast still on screen, so a
+/// connect that reports both "this conversation could not be restored" and
+/// "the configured mode was refused" would show whichever landed first and
+/// drop the other — the one case where both facts matter.
+///
+/// The digest only has to be stable within a run, which is all a live toast
+/// queue spans; it keeps a multi-line adapter diagnostic out of the key that
+/// lands in the log.
+fn notice_dedup_key(pane_id: PaneId, message: &str) -> String {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    message.hash(&mut hasher);
+    format!("agent_chat.notice.{pane_id}.{:x}", hasher.finish())
+}
+
+/// Whether a successful login into `target` should reconnect a pane that
+/// resolves to `pane_target` and last failed with `remedy` (`None` when its
+/// connection did not fail).
+///
+/// Both conditions are load-bearing. Matching the target keeps the sweep off
+/// panes running on other credentials, which this login did nothing for. And
+/// only `Reauthenticate` is a failure a fresh sign-in actually clears — an
+/// organization-blocked account reconnects into the identical refusal, so
+/// retrying it automatically would spend the user's attention on a loop
+/// dressed up as progress.
+fn login_revives_pane(
+    target: crate::workspace::account_login_ops::LoginTarget,
+    pane_target: Option<crate::workspace::account_login_ops::LoginTarget>,
+    remedy: Option<daruda_acp::Remedy>,
+) -> bool {
+    pane_target == Some(target) && remedy == Some(daruda_acp::Remedy::Reauthenticate)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::agent_default_mode;
+    use super::{agent_default_mode, login_revives_pane, notice_dedup_key};
+    use crate::workspace::account_login_ops::LoginTarget;
+    use daruda_acp::Remedy;
     use daruda_config::{AgentDefinition, AgentLaunch};
+    use daruda_store::accounts::AccountRecipeId;
+
+    fn claude_system() -> LoginTarget {
+        LoginTarget::System {
+            recipe: AccountRecipeId::Claude,
+        }
+    }
+
+    /// A repeat of the same advisory should collapse onto the toast already on
+    /// screen rather than stacking.
+    #[test]
+    fn the_same_advisory_from_one_pane_shares_a_key() {
+        assert_eq!(
+            notice_dedup_key(7, "could not restore this conversation"),
+            notice_dedup_key(7, "could not restore this conversation")
+        );
+    }
+
+    /// The case a pane-only key would break: a connect can report that history
+    /// could not be restored *and* that the configured mode would not apply.
+    /// Both matter, and dedup only ever matches a toast still on screen — so a
+    /// shared key would silently swallow the second one.
+    #[test]
+    fn two_different_advisories_from_one_pane_do_not_collapse() {
+        assert_ne!(
+            notice_dedup_key(7, "could not restore this conversation"),
+            notice_dedup_key(7, "the configured mode was refused")
+        );
+    }
+
+    /// Two panes reporting the same thing are two separate facts about two
+    /// separate sessions.
+    #[test]
+    fn the_same_advisory_from_two_panes_does_not_collapse() {
+        assert_ne!(
+            notice_dedup_key(7, "the configured mode was refused"),
+            notice_dedup_key(8, "the configured mode was refused")
+        );
+    }
+
+    #[test]
+    fn a_pane_blocked_on_this_login_is_revived() {
+        assert!(login_revives_pane(
+            claude_system(),
+            Some(claude_system()),
+            Some(Remedy::Reauthenticate)
+        ));
+    }
+
+    /// The signed-in credentials are not this pane's, so reconnecting it would
+    /// re-run the same handshake with the same expired login.
+    #[test]
+    fn a_pane_on_other_credentials_is_left_alone() {
+        assert!(!login_revives_pane(
+            claude_system(),
+            Some(LoginTarget::System {
+                recipe: AccountRecipeId::Codex
+            }),
+            Some(Remedy::Reauthenticate)
+        ));
+    }
+
+    /// An organization-blocked account is the case that must not reconnect: the
+    /// login succeeds and changes nothing, so an automatic retry would fail
+    /// identically while looking like the app is making progress.
+    #[test]
+    fn a_failure_a_login_cannot_fix_is_not_retried() {
+        for remedy in [
+            Remedy::ExternalAction,
+            Remedy::Configure,
+            Remedy::Retry,
+            Remedy::NoneAvailable,
+        ] {
+            assert!(
+                !login_revives_pane(claude_system(), Some(claude_system()), Some(remedy)),
+                "{remedy:?} is not fixed by signing in"
+            );
+        }
+    }
+
+    /// A pane that never failed is mid-conversation. A login elsewhere in the
+    /// app must not tear its live session down.
+    #[test]
+    fn a_working_pane_is_never_reconnected() {
+        assert!(!login_revives_pane(
+            claude_system(),
+            Some(claude_system()),
+            None
+        ));
+    }
+
+    #[test]
+    fn a_pane_with_no_resolvable_login_is_left_alone() {
+        assert!(!login_revives_pane(
+            claude_system(),
+            None,
+            Some(Remedy::Reauthenticate)
+        ));
+    }
 
     #[test]
     fn agent_default_mode_reads_the_matching_catalog_entry() {

@@ -216,16 +216,37 @@ impl SettingsWindow {
     ) -> AnyElement {
         let slug = recipe_slug(recipe);
         let home = daruda_agent::accounts::recipe_for(recipe).system_home_hint();
-        let actions = div().flex().flex_row().child(
-            button(
-                SharedString::from(format!("settings-accounts-system-default-{slug}")),
-                s::settings_accounts_set_default(),
+        let actions = div()
+            .flex()
+            .flex_row()
+            .gap(px(theme::MODAL_FOOTER_GAP))
+            .child(
+                button(
+                    SharedString::from(format!("settings-accounts-system-default-{slug}")),
+                    s::settings_accounts_set_default(),
+                )
+                .disabled(is_default)
+                .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                    this.set_default_account(recipe, None, cx);
+                })),
             )
-            .disabled(is_default)
-            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                this.set_default_account(recipe, None, cx);
-            })),
-        );
+            // The ambient home can expire like any managed account, and it is
+            // the default selection — without this row it is the one credential
+            // set with no way back inside the app.
+            .child(
+                button(
+                    SharedString::from(format!("settings-accounts-system-reauth-{slug}")),
+                    if self.account_login_busy {
+                        s::settings_accounts_authentication_in_progress()
+                    } else {
+                        s::settings_accounts_system_reauthenticate()
+                    },
+                )
+                .disabled(self.account_login_busy)
+                .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                    this.start_reauthenticate_system(recipe, cx);
+                })),
+            );
 
         row_card(cx)
             .child(row_header(
@@ -392,41 +413,82 @@ impl SettingsWindow {
         account_id: AccountId,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.dispatch_login_action(
+            Box::new(crate::workspace::ReauthenticateAccount(account_id)),
+            "reauth",
+            cx,
+        );
+    }
+
+    /// Re-run the login for `recipe`'s ambient home — the credentials a pane
+    /// with no managed account uses. Same dispatch shape as
+    /// [`Self::start_reauthenticate_account`]; only the action differs,
+    /// because a system login has no account id to name.
+    fn start_reauthenticate_system(
+        &mut self,
+        recipe: AccountRecipeId,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.dispatch_login_action(
+            Box::new(crate::workspace::ReauthenticateSystem(recipe)),
+            "system_reauth",
+            cx,
+        );
+    }
+
+    /// Hand a login action to the first open `Workspace` window, which is
+    /// where the headless login machinery lives.
+    ///
+    /// Both failure modes surface the same user-facing message — there is no
+    /// Workspace window to run against — and differ only in the diagnostic
+    /// they log; `flow` names the caller in that log and its dedup key.
+    fn dispatch_login_action(
+        &mut self,
+        action: Box<dyn gpui::Action>,
+        flow: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let Some((handle, _weak)) = WindowRegistry::first_workspace(cx) else {
-            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
-            cx.notify();
-            LogWriter::log(
-                ErrorReport::new(
-                    "Reauthenticate-account login has no open Workspace window to run against",
-                )
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("settings.accounts.reauth_no_workspace")
-                .build(),
+            self.report_no_workspace(
+                format!("{flow} login has no open Workspace window to run against"),
+                format!("settings.accounts.{flow}_no_workspace"),
+                None,
+                cx,
             );
             return;
         };
         self.error = None;
         let result = cx.update_window(handle, |_root, window, cx_w| {
-            window.dispatch_action(
-                Box::new(crate::workspace::ReauthenticateAccount(account_id)),
-                cx_w,
-            );
+            window.dispatch_action(action, cx_w);
         });
         if let Err(e) = result {
-            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
-            cx.notify();
-            LogWriter::log(
-                ErrorReport::new(
-                    "Failed to start reauthenticate-account login: target Workspace window is gone",
-                )
-                .message(e.to_string())
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("settings.accounts.reauth_target_window_gone")
-                .build(),
+            self.report_no_workspace(
+                format!("Failed to start {flow} login: target Workspace window is gone"),
+                format!("settings.accounts.{flow}_target_window_gone"),
+                Some(e.to_string()),
+                cx,
             );
         }
+    }
+
+    /// Surface "no Workspace window" inline in Settings and log why.
+    fn report_no_workspace(
+        &mut self,
+        title: String,
+        dedup: String,
+        detail: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
+        cx.notify();
+        let mut report = ErrorReport::new(title)
+            .severity(ErrorSeverity::Warning)
+            .at(file!(), line!())
+            .dedup(dedup);
+        if let Some(detail) = detail {
+            report = report.message(detail);
+        }
+        LogWriter::log(report.build());
     }
 
     /// Immediate (no confirm) — sets which account new panes of `recipe`

@@ -15,19 +15,68 @@ fn has_conversation_distinguishes_empty_error_only_and_real_transcript() {
 
     // The pane that hit a usage limit holds nothing but the notice — the
     // switch that follows has no transcript to protect.
-    let items = [ChatItem::Error("session limit reached".to_owned())];
+    let items = [ChatItem::Failure(daruda_acp::AcpFailure::unclassified(
+        "session limit reached",
+    ))];
     assert!(!has_conversation(&items));
 
     for item in [
         ChatItem::UserText("hi".to_owned()),
         asst("hello"),
-        ChatItem::Error("boom".to_owned()),
+        ChatItem::Failure(daruda_acp::AcpFailure::unclassified("boom")),
     ]
     .windows(2)
     .map(|w| w.to_vec())
     {
         assert!(has_conversation(&item), "{item:?} holds a transcript");
     }
+}
+
+/// A *classified* failure must be excluded exactly like an unclassified one.
+/// The classes are what an auth failure now arrives as, and they are the whole
+/// reason a user reaches for another account — so a pane holding only these is
+/// still empty and must reconnect in place rather than stranding the user with
+/// a fresh pane every time a login expires.
+#[test]
+fn has_conversation_excludes_every_failure_class() {
+    let classes = [
+        daruda_acp::AcpFailure::classify(&agent_client_protocol::Error::new(
+            -32000,
+            "Authentication required",
+        )),
+        daruda_acp::AcpFailure::Categorized {
+            kind: daruda_acp::FailureKind::OauthOrgNotAllowed,
+            message: "org disabled".to_owned(),
+        },
+        daruda_acp::AcpFailure::Runtime {
+            kind: daruda_acp::RuntimeKind::Download,
+            message: "no network".to_owned(),
+        },
+        daruda_acp::AcpFailure::unclassified("stream ended"),
+    ];
+    for failure in classes {
+        let items = [ChatItem::Failure(failure.clone())];
+        assert!(
+            !has_conversation(&items),
+            "{failure:?} is a notice, not a transcript"
+        );
+    }
+}
+
+/// Ties the exclusion to the decision it actually drives: an account switch on
+/// a failure-only pane reuses the pane instead of opening a new one.
+#[test]
+fn a_failure_only_pane_switches_accounts_in_place() {
+    use crate::workspace::account_ops::{SwitchKind, switch_kind};
+
+    let items = [ChatItem::Failure(daruda_acp::AcpFailure::classify(
+        &agent_client_protocol::Error::new(-32000, "Authentication required"),
+    ))];
+    assert_eq!(
+        switch_kind(false, has_conversation(&items)),
+        SwitchKind::InPlace,
+        "an expired login leaves nothing to protect — reuse the pane"
+    );
 }
 
 #[test]
@@ -461,7 +510,9 @@ fn is_active_matches_streaming_and_in_progress() {
     assert!(!is_active(&ChatItem::ToolCall(tool_call("c1", Failed, 0))));
     // Non-foldable / inactive items.
     assert!(!is_active(&ChatItem::UserText("u".to_owned())));
-    assert!(!is_active(&ChatItem::Error("e".to_owned())));
+    assert!(!is_active(&ChatItem::Failure(
+        daruda_acp::AcpFailure::unclassified("e")
+    )));
 }
 
 /// `fold_active` — the single source both `rows::project` and
@@ -544,7 +595,12 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
     assert_eq!(texts.len(), 1);
     assert!(texts[0].contains("flowchart"));
 
-    assert!(chat_item_mermaid_texts(&daruda_acp::ChatItem::Error("boom".into())).is_empty());
+    assert!(
+        chat_item_mermaid_texts(&daruda_acp::ChatItem::Failure(
+            daruda_acp::AcpFailure::unclassified("boom")
+        ))
+        .is_empty()
+    );
     assert_eq!(
         chat_item_mermaid_texts(&daruda_acp::ChatItem::UserText("hi".into())),
         vec!["hi"]
@@ -647,7 +703,7 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
             message_id: None,
         },
         ChatItem::ToolCall(tool_call("c1", Completed, 2)),
-        ChatItem::Error("e".to_owned()),
+        ChatItem::Failure(daruda_acp::AcpFailure::unclassified("e")),
     ];
     let keys = collect_foldable_keys(&items);
     // Structural header keys (the response — non-trivial run) first, then
@@ -867,7 +923,7 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
 
     let items = [
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
-        ChatItem::Error("boom".to_owned()),
+        ChatItem::Failure(daruda_acp::AcpFailure::unclassified("boom")),
         // Empty prose is not output, so it cannot lift this to Partial.
         asst("   "),
     ];

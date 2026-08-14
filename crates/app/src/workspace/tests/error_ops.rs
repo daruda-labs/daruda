@@ -124,3 +124,91 @@ async fn report_pane_error_fills_status_bar_and_toast(cx: &mut TestAppContext) {
         assert_eq!(ws.error_history().len(), 1);
     });
 }
+
+/// A session advisory has to reach the user, not just the log file. Two call
+/// sites already assumed it did — the config-refusal arm of `apply_event`
+/// skips its own user-facing handling precisely because the advisory was
+/// supposed to be the wording a user reads — while it only ever reached the
+/// NDJSON log.
+#[gpui::test]
+async fn a_session_notice_surfaces_as_a_toast(cx: &mut TestAppContext) {
+    let (_window, workspace) = build_workspace(cx);
+
+    workspace.update(cx, |ws, cx| {
+        ws.report_agent_notice(
+            1,
+            &daruda_acp::AcpEvent::Notice(
+                "set_mode(bypassPermissions) on connect failed".to_string(),
+            ),
+            cx,
+        );
+    });
+
+    workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+        assert_eq!(toasts.len(), 1, "the advisory reaches the user");
+        assert!(
+            toasts[0].report.message.contains("bypassPermissions"),
+            "the adapter's own wording is what explains it: {:?}",
+            toasts[0].report.message
+        );
+    });
+}
+
+/// The pump hands every event through this, so anything that is not an
+/// advisory has to pass straight through — a toast per streamed chunk would
+/// bury the app.
+#[gpui::test]
+async fn other_events_raise_no_toast(cx: &mut TestAppContext) {
+    let (_window, workspace) = build_workspace(cx);
+
+    workspace.update(cx, |ws, cx| {
+        ws.report_agent_notice(
+            1,
+            &daruda_acp::AcpEvent::TurnEnded {
+                stop_reason: "EndTurn".to_string(),
+                completed_normally: true,
+            },
+            cx,
+        );
+    });
+
+    workspace.read_with(cx, |ws, cx| {
+        assert!(ws.error_toasts(cx).iter().next().is_none());
+    });
+}
+
+/// The failure banner decides whether signing in would *help* from the
+/// failure's classification, which it can. It cannot know whether daruda can
+/// run one — that depends on where the agent lives — so a pane whose sign-in
+/// resolves to nothing has to be answered with words. Clicking a button that
+/// silently does nothing is worse than the dead end it replaced.
+#[gpui::test]
+async fn a_pane_daruda_cannot_sign_in_for_says_so(cx: &mut TestAppContext) {
+    let (_window, workspace) = build_workspace(cx);
+
+    let pane_id = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .first()
+            .expect("the workspace opens with a pane")
+            .id
+    });
+
+    workspace.update(cx, |ws, cx| {
+        ws.reauthenticate_pane_account(pane_id, cx);
+    });
+
+    workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+        assert_eq!(
+            toasts.len(),
+            1,
+            "a sign-in that cannot run here must not fail silently"
+        );
+        assert!(
+            !toasts[0].report.message.is_empty(),
+            "the toast has to say what to do instead"
+        );
+    });
+}

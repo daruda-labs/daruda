@@ -1443,6 +1443,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_switch_pane_account))
             .on_action(cx.listener(Self::on_add_managed_account))
             .on_action(cx.listener(Self::on_reauthenticate_account))
+            .on_action(cx.listener(Self::on_reauthenticate_system))
             .on_action(cx.listener(Self::on_open_project_config))
             .on_action(cx.listener(Self::on_install_agent_hooks))
             .on_action(cx.listener(Self::on_uninstall_agent_hooks))

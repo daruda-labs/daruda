@@ -112,7 +112,16 @@ pub(in crate::workspace) enum AgentSessionStatus {
     Connected,
     /// The connection or protocol failed; the message is surfaced both here
     /// (status line) and through the error pipeline.
-    Error(String),
+    ///
+    /// `remedy` is what the banner may offer. It is decided here, in the
+    /// reducer, rather than in `render` — the view only picks an affordance
+    /// for a remedy it is handed. A locally-detected failure (no lane cwd, a
+    /// blocked remote path) has nothing to offer and carries
+    /// [`Remedy::NoneAvailable`].
+    Error {
+        message: String,
+        remedy: daruda_acp::Remedy,
+    },
 }
 
 /// Whether a `session/prompt` turn is currently in flight. `InFlight` carries
@@ -703,8 +712,17 @@ impl AgentChatView {
 
     /// Enter the `Error` status carrying `message` and repaint. Self-notifying
     /// so the event pump can't surface a failure without dirtying the pane.
-    pub(in crate::workspace) fn set_error(&mut self, message: String, cx: &mut Context<Self>) {
-        self.status = AgentSessionStatus::Error(message);
+    ///
+    /// Callers that hold a classified failure pass its
+    /// [`remedy`](daruda_acp::AcpFailure::remedy); a locally-raised error with
+    /// nothing to offer passes [`Remedy::NoneAvailable`].
+    pub(in crate::workspace) fn set_error(
+        &mut self,
+        message: String,
+        remedy: daruda_acp::Remedy,
+        cx: &mut Context<Self>,
+    ) {
+        self.status = AgentSessionStatus::Error { message, remedy };
         cx.notify();
     }
 

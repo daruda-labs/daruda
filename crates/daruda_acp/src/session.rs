@@ -50,7 +50,7 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
+    AuthCapabilities, BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
     ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
@@ -65,6 +65,8 @@ use futures::channel::oneshot;
 use futures::future::Either;
 
 use crate::connection::{AcpClientError, AdapterCommand, LaunchSpec};
+use crate::failure::AcpFailure;
+use crate::login_method::{LoginMethod, parse_login_methods};
 use crate::mode_tracker::ModeTracker;
 use crate::model::{ConfigOptionView, ConfigValueView, ModeStateView, SessionCapabilitiesView};
 
@@ -167,6 +169,14 @@ pub enum AcpEvent {
         /// (`session/load` / `list` / `resume` / `close`). The host gates the
         /// matching affordances on these flags.
         capabilities: SessionCapabilitiesView,
+        /// How the agent says a user can sign in, from `initialize`. Empty when
+        /// it advertises none — the host then derives the login command itself.
+        ///
+        /// Carried on connect rather than fetched when a login is needed: the
+        /// agent only offers this at `initialize`, and by the time a failure
+        /// asks for a re-login the session that could have answered is the one
+        /// that just failed.
+        login_methods: Vec<LoginMethod>,
     },
     /// The agent replaced its session config option state (the protocol carries
     /// the full option set), from either source: the reply to our
@@ -209,7 +219,10 @@ pub enum AcpEvent {
     /// stays alive. The host surfaces the message inline and keeps the session
     /// usable, so the user can re-prompt (e.g. once the limit resets) without
     /// reconnecting — distinct from the terminal [`AcpEvent::Error`].
-    TurnFailed(String),
+    ///
+    /// Carries the classified failure, not a message: an expired login and an
+    /// organization-blocked one both arrive here and need opposite remedies.
+    TurnFailed(AcpFailure),
     /// The session's mode state changed — the agent self-switched (via a
     /// `CurrentModeUpdate` notification), a `set_mode` was confirmed, or the
     /// agent re-advertised its mode list (it rebuilds one per model).
@@ -239,7 +252,11 @@ pub enum AcpEvent {
     Notice(String),
     /// A connection or protocol failure. Terminal: the connection task is
     /// ending (or has ended) when this is emitted.
-    Error(String),
+    ///
+    /// Carries the classified failure so the host can offer a remedy. Hosts
+    /// that synthesize this event for a locally-detected failure (no protocol
+    /// error behind it) build one with [`AcpFailure::unclassified`].
+    Error(AcpFailure),
 }
 
 /// A command the host enqueues for the connection task to execute. Internal:
@@ -393,7 +410,7 @@ pub fn connect_session(
         {
             // Terminal failure: surface it, then let the channel drop close the
             // stream. `unbounded_send` only fails if the host stopped reading.
-            let _ = task_event_tx.unbounded_send(AcpEvent::Error(format!("{err}")));
+            let _ = task_event_tx.unbounded_send(AcpEvent::Error(err.into_failure()));
         }
     })
     .detach();
@@ -461,11 +478,39 @@ pub fn connect_agent_session(
 ///
 /// The standard `.terminal(true)` capability is likewise NOT claimed: it promises
 /// the whole `terminal/*` method family, which this client does not implement.
+///
+/// `auth.terminal` IS claimed, and is a different promise: it only tells the
+/// agent it may *list* terminal-type login methods at `initialize`. There is no
+/// RPC behind it — the entries are a recipe the host runs in a terminal it
+/// already owns. Without it `authMethods` comes back empty and the host is left
+/// deriving the login command itself.
 fn client_capabilities() -> ClientCapabilities {
-    ClientCapabilities::new().session(ClientSessionCapabilities::new().config_options(
-        SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
-    ))
+    // Vendor-private companion to `auth.terminal`: with it the agent attaches
+    // `_meta["terminal-auth"]` to each login method, carrying the resolved
+    // interpreter path and full argv. Without it only `args` arrives and the
+    // host has to re-derive which binary to run them on — the exact derivation
+    // (system vs managed Node.js) this crate already does once at connect and
+    // would otherwise have to repeat.
+    // Top-level `_meta`, NOT `auth._meta`: the agent reads
+    // `clientCapabilities._meta["terminal-auth"]`. Nesting it under `auth`
+    // alongside the sibling flag looks right and is silently ignored.
+    let mut meta = agent_client_protocol::schema::v1::Meta::new();
+    meta.insert(
+        TERMINAL_AUTH_META_KEY.to_owned(),
+        serde_json::Value::Bool(true),
+    );
+    ClientCapabilities::new()
+        .meta(meta)
+        .auth(AuthCapabilities::new().terminal(true))
+        .session(ClientSessionCapabilities::new().config_options(
+            SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
+        ))
 }
+
+/// Vendor-private `_meta` flag that makes the agent attach an executable
+/// `command` + `args` pair to each advertised login method. Not in the ACP
+/// spec; read from adapter source and confirmed against a live capture.
+pub const TERMINAL_AUTH_META_KEY: &str = "terminal-auth";
 
 /// Wall-clock budget for `initialize` and — on a *fresh* session —
 /// `session/new` and the optional `set_mode`. Without this, a hung adapter
@@ -660,7 +705,7 @@ async fn run_connection(
             // `prompt_loop` below is deliberately outside every timeout here —
             // a live, quiet session is normal.
             let _ = event_tx.unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::Handshaking));
-            let (capabilities, resume, fresh) =
+            let (capabilities, login_methods, resume, fresh) =
                 with_connect_timeout("initialize", CONNECT_HANDSHAKE_TIMEOUT, async {
                     let init = connection
                         .send_request(
@@ -670,6 +715,7 @@ async fn run_connection(
                         .block_task()
                         .await?;
                     let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
+                    let login_methods = parse_login_methods(&init.auth_methods);
 
                     // Gate the requested resume on advertised `session/load` support:
                     // downgrade to a fresh session (with a Notice) when the agent can't
@@ -685,7 +731,7 @@ async fn run_connection(
                     // mode is applied only on a fresh session; a real load preserves the
                     // resumed session's own mode.
                     let fresh = resume.is_none();
-                    Ok((capabilities, resume, fresh))
+                    Ok((capabilities, login_methods, resume, fresh))
                 })
                 .await?;
 
@@ -832,6 +878,7 @@ async fn run_connection(
                 // `send_config_options_fold` does for every later set).
                 config_options: crate::mode_tracker::strip_mode_options(config_options),
                 capabilities,
+                login_methods,
             });
 
             prompt_loop(
@@ -845,7 +892,7 @@ async fn run_connection(
             Ok(())
         })
         .await
-        .map_err(|e| AcpClientError::Protocol(format!("{e:?}")))?;
+        .map_err(|e| AcpClientError::Protocol(AcpFailure::classify(&e)))?;
 
     Ok(())
 }
@@ -962,7 +1009,7 @@ async fn run_turn(
                     // emitting a terminal `Error` on top of this. Re-prompting a
                     // dead connection just yields another immediate `TurnFailed`
                     // — never a hang, since the request errors at once.
-                    let _ = event_tx.unbounded_send(AcpEvent::TurnFailed(format!("{e}")));
+                    let _ = event_tx.unbounded_send(AcpEvent::TurnFailed(AcpFailure::classify(&e)));
                     return Ok(handle_dropped);
                 }
             },
@@ -1299,6 +1346,44 @@ mod tests {
         );
     }
 
+    /// `auth.terminal` is claimed even though top-level `terminal` is not, and
+    /// the two must not be conflated: the first only lets the agent *list*
+    /// terminal login methods, the second promises the `terminal/*` RPCs.
+    ///
+    /// Asserted on the serialized shape because the agent gates on the literal
+    /// wire path `clientCapabilities.auth.terminal === true` — a builder call
+    /// that landed the flag anywhere else would read as "not advertised" and
+    /// silently return an empty `authMethods`, which is exactly the failure
+    /// this advertisement exists to end.
+    #[test]
+    fn client_capabilities_claim_terminal_auth_without_claiming_terminal_methods() {
+        let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+        assert_eq!(
+            json.get("auth").and_then(|a| a.get("terminal")),
+            Some(&serde_json::Value::Bool(true)),
+            "without this the agent advertises no login methods at all"
+        );
+        assert_ne!(
+            json.get("terminal"),
+            Some(&serde_json::Value::Bool(true)),
+            "auth.terminal must not drag in the terminal/* promise"
+        );
+        // The companion flag is read at the ROOT, not under `auth`. Nesting it
+        // beside `auth.terminal` reads as correct, serializes fine, and is
+        // silently ignored — a live capture caught exactly that.
+        assert_eq!(
+            json.get("_meta")
+                .and_then(|m| m.get(super::TERMINAL_AUTH_META_KEY)),
+            Some(&serde_json::Value::Bool(true)),
+            "terminal-auth belongs on clientCapabilities._meta, not auth._meta"
+        );
+        assert_eq!(
+            json.get("auth").and_then(|a| a.get("_meta")),
+            None,
+            "the agent never looks here"
+        );
+    }
+
     #[test]
     fn session_capabilities_reads_advertised_flags() {
         use agent_client_protocol::schema::v1::{
@@ -1604,6 +1689,113 @@ mod tests {
 
             // Closing the command channel ends `prompt_loop`, and with it the
             // whole connection task.
+            drop(handle);
+            connection.await.expect("connection task ends cleanly");
+        });
+    }
+
+    /// An agent that answers `initialize` with the exact payload captured from
+    /// `claude-agent-acp` once the client advertised `auth.terminal` — replayed
+    /// as wire JSON rather than rebuilt from typed constructors, so the test
+    /// exercises the same deserialization the live adapter goes through.
+    fn login_advertising_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse};
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    let response: InitializeResponse = serde_json::from_value(serde_json::json!({
+                        "protocolVersion": 1,
+                        "agentCapabilities": {},
+                        "authMethods": [
+                            {
+                                "id": "claude-ai-login",
+                                "name": "Claude Subscription",
+                                "description": "Use Claude subscription ",
+                                "type": "terminal",
+                                "args": ["--cli", "auth", "login", "--claudeai"],
+                                "_meta": {"terminal-auth": {
+                                    "command": "/opt/node/bin/node",
+                                    "args": ["/cache/claude-agent-acp", "--cli", "auth",
+                                             "login", "--claudeai"],
+                                    "label": "Claude Login"
+                                }}
+                            },
+                            {
+                                "id": "console-login",
+                                "name": "Anthropic Console",
+                                "description": "Use Anthropic Console (API usage billing)",
+                                "type": "terminal",
+                                "args": ["--cli", "auth", "login", "--console"]
+                            }
+                        ]
+                    }))
+                    .expect("the captured initialize payload parses");
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(NewSessionResponse::new("sess-login-methods"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// The advertised logins have to reach the host, and reach it classified:
+    /// a host comparing id strings at the call site eventually offers the
+    /// metered Console login as if it were the free one.
+    #[test]
+    fn connected_carries_the_agents_advertised_login_methods() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+        let handle = AcpSessionHandle {
+            commands: command_tx,
+            permission_parks: permission_parks.clone(),
+        };
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                login_advertising_agent(),
+                PathBuf::from("."),
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            let login_methods = loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { login_methods, .. }) => break login_methods,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            };
+
+            assert_eq!(
+                login_methods.len(),
+                2,
+                "both advertised logins reach the host"
+            );
+            assert_eq!(login_methods[0].kind, crate::LoginMethodKind::Subscription);
+            assert_eq!(login_methods[1].kind, crate::LoginMethodKind::MeteredApi);
+            // The agent resolved the interpreter for us; the host must not
+            // re-derive it.
+            assert_eq!(
+                login_methods[0]
+                    .command
+                    .as_ref()
+                    .expect("the subscription login carries a terminal-auth block")
+                    .program,
+                "/opt/node/bin/node"
+            );
+            // The second method omits `_meta` — normal, not an error.
+            assert_eq!(login_methods[1].command, None);
+
             drop(handle);
             connection.await.expect("connection task ends cleanly");
         });

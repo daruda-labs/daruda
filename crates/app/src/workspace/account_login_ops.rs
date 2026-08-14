@@ -24,7 +24,9 @@ use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedA
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::{AddManagedAccount, PendingLogin, ReauthenticateAccount, accounts_global};
+use super::{
+    AddManagedAccount, PendingLogin, ReauthenticateAccount, ReauthenticateSystem, accounts_global,
+};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
@@ -41,70 +43,97 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_a
 /// sweep grace period.
 pub(in crate::workspace) const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-/// Which of the two headless login flows a [`PendingLogin::InProgress`] is
-/// tracking. Carried alongside `account_id` so
-/// [`Workspace::cancel_pending_login`] can tell apart an add-account
-/// login's throwaway config dir (safe to delete on cancel) from a
-/// reauthenticate login's real, permanent one (must survive a cancel) —
-/// see [`cleanup_dir_on_cancel`].
+/// Whose credentials a headless login writes into — the key every part of
+/// the flow is tracked by: `Workspace::pending_login`, the process-wide slot
+/// in [`accounts_global`], and each finish path's staleness guard.
+///
+/// A system login has no [`AccountId`] at all (there is no `accounts.json`
+/// row for the ambient home), which is why this is an enum rather than an
+/// `AccountId` with a sentinel value: a fake id would make an unreal account
+/// representable everywhere a real one is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum LoginMode {
-    Add,
-    Reauth,
+pub(in crate::workspace) enum LoginTarget {
+    /// A managed account's own isolated config dir.
+    Managed {
+        id: AccountId,
+        recipe: AccountRecipeId,
+    },
+    /// The user's ambient home for this domain — what a pane runs under with
+    /// [`daruda_store::accounts::AccountSelection::SystemDefault`]. Keyed by
+    /// domain alone: there is exactly one such home per domain per machine,
+    /// and that is precisely why two windows must not sign into it at once.
+    System { recipe: AccountRecipeId },
 }
 
-/// Whether cancelling a pending login should remove its `account_id`'s
-/// config dir (+ scoped Keychain item): only for [`LoginMode::Add`], whose
-/// `account_id` names a throwaway dir that never became a kept
-/// [`ManagedAccount`]. For [`LoginMode::Reauth`] the same `account_id`
-/// names an existing account's real credentials — deleting them on cancel
-/// would be permanent data loss for a still-good account (see
-/// [`Workspace::reauthenticate_account`]'s doc for why
+impl LoginTarget {
+    /// The auth domain this login signs into. Always present, and never a
+    /// second field that could disagree with the variant.
+    pub(in crate::workspace) fn recipe(self) -> AccountRecipeId {
+        match self {
+            LoginTarget::Managed { recipe, .. } | LoginTarget::System { recipe } => recipe,
+        }
+    }
+}
+
+/// Whether cancelling a pending login should remove its target's directory
+/// (+ scoped credential-store entry): only for [`LoginFinish::Add`], whose
+/// account id names a throwaway dir that never became a kept
+/// [`ManagedAccount`].
+///
+/// [`LoginFinish::Reauth`] names an existing account's real credentials —
+/// deleting them on cancel would be permanent data loss for a still-good
+/// account (see [`Workspace::reauthenticate_account`]'s doc for why
 /// [`Workspace::finish_reauth_failed`] already avoids this on the
-/// login-failed path; cancel must match it).
-pub(in crate::workspace) fn cleanup_dir_on_cancel(mode: LoginMode) -> bool {
-    matches!(mode, LoginMode::Add)
+/// login-failed path; cancel must match it). [`LoginFinish::System`] is the
+/// same hazard one step worse: the directory is the user's own `~/.claude`,
+/// which this app never created and must never remove.
+pub(in crate::workspace) fn cleanup_dir_on_cancel(finish: LoginFinish) -> bool {
+    matches!(finish, LoginFinish::Add)
 }
 
-/// How [`Workspace::spawn_login_flow`] finishes a resolved login — the one
-/// axis on which the add and reauth flows differ once the shared
-/// spawn/poll machinery is done: which finish method the outcome dispatches
-/// into (add files a new [`ManagedAccount`]; reauth updates the existing row
-/// by id) and the title of the spawn-failure toast. The [`LoginMode`] (which
-/// drives cleanup-on-cancel / cleanup-on-spawn-failure) is *derived* from
-/// the variant ([`Self::mode`]) rather than passed alongside, so the two
-/// can't disagree. The auth domain is not carried here either — it comes
-/// from the agent actually running the login, threaded through
-/// [`Workspace::spawn_login_flow`].
-#[derive(Debug, Clone, Copy)]
+/// Which headless login flow is running — the one axis the flows differ on
+/// once the shared spawn/poll machinery is done: which finish method the
+/// outcome dispatches into (add files a new [`ManagedAccount`]; reauth
+/// updates the existing row by id; system has no row to touch), the title of
+/// the spawn-failure toast, and whether a cancel may delete the directory
+/// ([`cleanup_dir_on_cancel`]).
+///
+/// The auth domain is not carried here — it comes from the [`LoginTarget`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum LoginFinish {
     Add,
     Reauth,
+    System,
 }
 
 impl LoginFinish {
-    fn mode(self) -> LoginMode {
-        match self {
-            LoginFinish::Add => LoginMode::Add,
-            LoginFinish::Reauth => LoginMode::Reauth,
-        }
-    }
-
     /// Dispatch a resolved `outcome` into the flow-specific finish method.
-    /// `recipe` is the auth domain the login command signed into — the add
-    /// flow files the new account under it; reauth's row already has one.
+    /// `home_dir` is where the login wrote: a managed account's config dir,
+    /// or the ambient home for a system login.
     fn dispatch(
         self,
         ws: &mut Workspace,
-        account_id: AccountId,
-        config_dir: PathBuf,
-        recipe: AccountRecipeId,
+        target: LoginTarget,
+        home_dir: PathBuf,
         outcome: LoginOutcome,
         cx: &mut Context<Workspace>,
     ) {
-        match self {
-            LoginFinish::Add => ws.finish_login(account_id, config_dir, recipe, outcome, cx),
-            LoginFinish::Reauth => ws.finish_reauth(account_id, config_dir, recipe, outcome, cx),
+        let recipe = target.recipe();
+        match (self, target) {
+            (LoginFinish::Add, LoginTarget::Managed { id, .. }) => {
+                ws.finish_login(id, home_dir, recipe, outcome, cx)
+            }
+            (LoginFinish::Reauth, LoginTarget::Managed { id, .. }) => {
+                ws.finish_reauth(id, home_dir, recipe, outcome, cx)
+            }
+            (LoginFinish::System, _) => ws.finish_system_login(target, outcome, cx),
+            // An Add/Reauth flow is only ever started against a managed
+            // target (`add_managed_account` / `reauthenticate_account` both
+            // mint one), so this pairing is unreachable rather than merely
+            // unhandled.
+            (LoginFinish::Add | LoginFinish::Reauth, LoginTarget::System { .. }) => {
+                debug_assert!(false, "a managed login flow ran against a system target");
+            }
         }
     }
 
@@ -114,7 +143,7 @@ impl LoginFinish {
     fn spawn_error_title(self) -> String {
         match self {
             LoginFinish::Add => s::settings_accounts_login_failed(),
-            LoginFinish::Reauth => s::settings_accounts_reauth_failed(),
+            LoginFinish::Reauth | LoginFinish::System => s::settings_accounts_reauth_failed(),
         }
     }
 }
@@ -211,46 +240,54 @@ impl Workspace {
         }
 
         self.spawn_login_flow(
-            account_id,
+            LoginTarget::Managed {
+                id: account_id,
+                recipe,
+            },
             config_dir,
             command,
-            recipe,
             LoginFinish::Add,
             cx,
         );
     }
 
-    /// Shared spawn/poll/finish machinery behind both headless login flows
-    /// ([`Self::add_managed_account`] + [`Self::reauthenticate_account`]).
-    /// The caller has already run its own front-guards (busy /
-    /// command-available / account-exists) and provisioned `config_dir`;
-    /// this owns everything after: stash `Preparing`, resolve a managed-node
-    /// PATH off-thread, spawn the login child, track it as `InProgress`, and
-    /// await its `wait()` on the background executor — dispatching the
-    /// result through `finish`.
+    /// Shared spawn/poll/finish machinery behind every headless login flow
+    /// ([`Self::add_managed_account`], [`Self::reauthenticate_account`],
+    /// [`Self::reauthenticate_system`]). The caller has already run its own
+    /// front-guards (busy / command-available / account-exists) and resolved
+    /// `home_dir`; this owns everything after: stash `Preparing`, resolve a
+    /// managed-node PATH off-thread, spawn the login child, track it as
+    /// `InProgress`, and await its `wait()` on the background executor —
+    /// dispatching the result through `finish`.
     ///
-    /// `finish` ([`LoginFinish`]) is the single axis the two flows differ
-    /// on: it picks the finish method and spawn-failure toast, and its
-    /// derived [`LoginMode`] decides whether a spawn failure or closed-window
-    /// race removes `config_dir` (add's dir is throwaway → yes; reauth's is
-    /// the account's permanent dir → no, via [`cleanup_dir_on_cancel`]).
+    /// `home_dir` is where the login's credentials land, and plays two roles
+    /// that coincide for a managed account and diverge for a system login: it
+    /// is always the probe dir (`has_credentials`), but it is only *injected*
+    /// as the domain's config-dir env var for a managed target. A system
+    /// login deliberately injects and strips nothing — that is exactly what
+    /// `resolve_pane_account` returning `None` means for a `SystemDefault`
+    /// pane, so signing in has to run under the same environment the pane
+    /// will.
     fn spawn_login_flow(
         &mut self,
-        account_id: AccountId,
-        config_dir: PathBuf,
+        target: LoginTarget,
+        home_dir: PathBuf,
         command: String,
-        recipe_id: AccountRecipeId,
         finish: LoginFinish,
         cx: &mut Context<Self>,
     ) {
+        let recipe_id = target.recipe();
         let recipe = daruda_agent::accounts::recipe_for(recipe_id);
-        let env =
-            daruda_config::account_env(recipe.config_dir_env(), &config_dir, recipe.strip_env());
-        let mode = finish.mode();
+        let env = match target {
+            LoginTarget::Managed { .. } => {
+                daruda_config::account_env(recipe.config_dir_env(), &home_dir, recipe.strip_env())
+            }
+            LoginTarget::System { .. } => daruda_config::AccountEnv::ambient(),
+        };
 
-        if !accounts_global::begin_login(cx, account_id) {
-            if cleanup_dir_on_cancel(mode) {
-                cleanup_account_dir(recipe_id, &config_dir);
+        if !accounts_global::begin_login(cx, target) {
+            if cleanup_dir_on_cancel(finish) {
+                cleanup_account_dir(recipe_id, &home_dir);
             }
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
@@ -269,11 +306,7 @@ impl Workspace {
         // doc for why this state exists at all (`resolve_node_path_env` is
         // blocking and may download Node.js, so it can't run inline here on
         // the UI thread).
-        self.pending_login = PendingLogin::Preparing {
-            account_id,
-            recipe: recipe_id,
-            mode,
-        };
+        self.pending_login = PendingLogin::Preparing { target, finish };
         cx.notify();
 
         let resolve_command = command.clone();
@@ -283,7 +316,7 @@ impl Workspace {
                 .spawn(async move { resolve_node_path_env(&resolve_command) })
                 .await;
 
-            let closed_window_cleanup_path = config_dir.clone();
+            let closed_window_cleanup_path = home_dir.clone();
             let updated = this.update(cx, move |ws, cx| {
                 // The user may have cancelled during the resolve (or, in
                 // principle, a newer call superseded it) — bail without
@@ -291,8 +324,8 @@ impl Workspace {
                 // was staged above.
                 let is_current = matches!(
                     &ws.pending_login,
-                    PendingLogin::Preparing { account_id: current, .. }
-                        if *current == account_id
+                    PendingLogin::Preparing { target: current, .. }
+                        if *current == target
                 );
                 if !is_current {
                     return;
@@ -307,22 +340,21 @@ impl Workspace {
                     Ok(login_process) => {
                         let handle = login_process.handle();
                         ws.pending_login = PendingLogin::InProgress {
-                            account_id,
-                            recipe: recipe_id,
+                            target,
                             handle,
-                            mode,
+                            finish,
                         };
                         cx.notify();
 
-                        let wait_config_dir = config_dir.clone();
+                        let wait_home_dir = home_dir.clone();
                         cx.spawn(async move |this, cx| {
-                            let probe_dir = config_dir.clone();
+                            let probe_dir = home_dir.clone();
                             let outcome = cx
                                 .background_executor()
                                 .spawn(async move {
                                     // The domain decides what "finished"
                                     // means; the probe it may need is bound
-                                    // here, where the config dir is known.
+                                    // here, where the home dir is known.
                                     let landed =
                                         move || recipe_for(recipe_id).has_credentials(&probe_dir);
                                     let policy = recipe_for(recipe_id)
@@ -331,31 +363,25 @@ impl Workspace {
                                     login_process.wait(policy)
                                 })
                                 .await;
-                            let cleanup_path = wait_config_dir.clone();
+                            let cleanup_path = wait_home_dir.clone();
                             if this
                                 .update(cx, |ws, cx| {
-                                    finish.dispatch(
-                                        ws,
-                                        account_id,
-                                        wait_config_dir,
-                                        recipe_id,
-                                        outcome,
-                                        cx,
-                                    )
+                                    finish.dispatch(ws, target, wait_home_dir, outcome, cx)
                                 })
                                 .is_err()
                             {
                                 cx.update_global::<accounts_global::AccountsGlobal, _>(
                                     |global, _| {
-                                        accounts_global::clear_login_marker(global, account_id);
+                                        accounts_global::clear_login_marker(global, target);
                                     },
                                 );
                                 // Workspace window closed mid-login: the
                                 // finish path's own cleanup never ran. Run
                                 // it here only for the add flow — a reauth's
-                                // `config_dir` is the account's permanent
-                                // one and must survive (see `LoginFinish`).
-                                if cleanup_dir_on_cancel(mode) {
+                                // dir is the account's permanent one and a
+                                // system login's is the user's own home; both
+                                // must survive (see `LoginFinish`).
+                                if cleanup_dir_on_cancel(finish) {
                                     cleanup_account_dir(recipe_id, &cleanup_path);
                                 }
                             }
@@ -363,11 +389,11 @@ impl Workspace {
                         .detach();
                     }
                     Err(e) => {
-                        if cleanup_dir_on_cancel(mode) {
-                            cleanup_account_dir(recipe_id, &config_dir);
+                        if cleanup_dir_on_cancel(finish) {
+                            cleanup_account_dir(recipe_id, &home_dir);
                         }
                         ws.pending_login = PendingLogin::None;
-                        accounts_global::finish_login(cx, account_id);
+                        accounts_global::finish_login(cx, target);
                         ws.report_error(
                             ErrorReport::new(finish.spawn_error_title())
                                 .message(e.to_string())
@@ -383,15 +409,16 @@ impl Workspace {
 
             if updated.is_err() {
                 cx.update_global::<accounts_global::AccountsGlobal, _>(|global, _| {
-                    accounts_global::clear_login_marker(global, account_id);
+                    accounts_global::clear_login_marker(global, target);
                 });
             }
-            if updated.is_err() && cleanup_dir_on_cancel(mode) {
+            if updated.is_err() && cleanup_dir_on_cancel(finish) {
                 // Workspace window closed during the node resolve, before
                 // `spawn_login` ever ran: nothing was spawned to leak a
                 // process, but the add flow's throwaway config dir still
                 // needs the same cleanup the wait-path's closed-window
-                // fallback does (reauth's permanent dir must not — no-op).
+                // fallback does (a reauth's / system login's dir must not —
+                // no-op).
                 cleanup_account_dir(recipe_id, &closed_window_cleanup_path);
             }
         })
@@ -416,15 +443,13 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let is_current = matches!(
-            &self.pending_login,
-            PendingLogin::InProgress { account_id: current, .. } if *current == account_id
-        );
-        if !is_current {
+        let target = LoginTarget::Managed {
+            id: account_id,
+            recipe: recipe_id,
+        };
+        if !self.claim_finished_login(target, cx) {
             return;
         }
-        self.pending_login = PendingLogin::None;
-        accounts_global::finish_login(cx, account_id);
 
         match outcome {
             LoginOutcome::Success => {
@@ -585,29 +610,49 @@ impl Workspace {
     /// `finish_login` / `finish_reauth` re-entry a no-op via its staleness
     /// guard, so a cancelled login never double-cleans or toasts.
     pub(in crate::workspace) fn cancel_pending_login(&mut self, cx: &mut Context<Self>) {
-        let (account_id, recipe, handle, mode) =
+        let (target, handle, finish) =
             match std::mem::replace(&mut self.pending_login, PendingLogin::None) {
                 PendingLogin::None => return,
-                PendingLogin::Preparing {
-                    account_id,
-                    recipe,
-                    mode,
-                } => (account_id, recipe, None, mode),
+                PendingLogin::Preparing { target, finish } => (target, None, finish),
                 PendingLogin::InProgress {
-                    account_id,
-                    recipe,
+                    target,
                     handle,
-                    mode,
-                } => (account_id, recipe, Some(handle), mode),
+                    finish,
+                } => (target, Some(handle), finish),
             };
         if let Some(handle) = handle {
             handle.cancel();
         }
-        if cleanup_dir_on_cancel(mode) {
-            cleanup_account_dir(recipe, &account_config_dir(&self.data_dir, account_id));
+        // Only an add login owns a throwaway dir, and only a managed target
+        // has one this app minted — a system cancel has nothing to remove.
+        if cleanup_dir_on_cancel(finish)
+            && let LoginTarget::Managed { id, recipe } = target
+        {
+            cleanup_account_dir(recipe, &account_config_dir(&self.data_dir, id));
         }
-        accounts_global::finish_login(cx, account_id);
+        accounts_global::finish_login(cx, target);
         cx.notify();
+    }
+
+    /// Take ownership of a resolved login on this `Workspace`: `true` when
+    /// `target` is still the pending one, having cleared both the per-window
+    /// state and the process-wide slot; `false` when this callback is stale.
+    ///
+    /// A stale callback means the login was already handled — cancelled and
+    /// cleaned up, or superseded by a newer one — so running its finish path
+    /// anyway would either double-clean an already-removed dir or clobber an
+    /// `InProgress` it knows nothing about.
+    fn claim_finished_login(&mut self, target: LoginTarget, cx: &mut Context<Self>) -> bool {
+        let is_current = matches!(
+            &self.pending_login,
+            PendingLogin::InProgress { target: current, .. } if *current == target
+        );
+        if !is_current {
+            return false;
+        }
+        self.pending_login = PendingLogin::None;
+        accounts_global::finish_login(cx, target);
+        true
     }
 
     /// Action handler for [`ReauthenticateAccount`]. Thin shim, mirroring
@@ -615,10 +660,10 @@ impl Workspace {
     pub(in crate::workspace) fn on_reauthenticate_account(
         &mut self,
         action: &ReauthenticateAccount,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.reauthenticate_account(action.0, window, cx);
+        self.reauthenticate_account(action.0, cx);
     }
 
     /// Re-run a headless login for an **existing** managed account — the
@@ -633,7 +678,6 @@ impl Workspace {
     pub(in crate::workspace) fn reauthenticate_account(
         &mut self,
         account_id: AccountId,
-        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
@@ -684,13 +728,168 @@ impl Workspace {
         }
 
         self.spawn_login_flow(
-            account_id,
+            LoginTarget::Managed {
+                id: account_id,
+                recipe,
+            },
             config_dir,
             command,
-            recipe,
             LoginFinish::Reauth,
             cx,
         );
+    }
+
+    /// Action handler for [`ReauthenticateSystem`]. Thin shim, mirroring
+    /// [`Self::on_reauthenticate_account`].
+    pub(in crate::workspace) fn on_reauthenticate_system(
+        &mut self,
+        action: &ReauthenticateSystem,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reauthenticate_system(action.0, cx);
+    }
+
+    /// Sign in to the **ambient** home for `recipe` — the credentials a pane
+    /// with no managed account runs under
+    /// ([`daruda_store::accounts::AccountSelection::SystemDefault`], the
+    /// default). Until this existed the app had no in-app way to recover an
+    /// expired system login at all: the Settings reauthenticate button only
+    /// reached managed accounts, so the one selection most users are on was
+    /// the one with no path back.
+    ///
+    /// Runs the domain's ordinary login command with **no** env override —
+    /// see [`Self::spawn_login_flow`]'s `home_dir` doc for why injecting a
+    /// config dir here would sign into a place the pane never reads.
+    ///
+    /// INVARIANT: nothing on disk is created or removed by this flow. There
+    /// is no `accounts.json` row for the ambient home, and its directory is
+    /// the user's own — [`cleanup_dir_on_cancel`] refuses it.
+    pub(in crate::workspace) fn reauthenticate_system(
+        &mut self,
+        recipe: AccountRecipeId,
+        cx: &mut Context<Self>,
+    ) {
+        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
+            self.report_error(
+                ErrorReport::new(s::settings_accounts_login_busy())
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("account.system_reauth.login_busy")
+                    .build(),
+                cx,
+            );
+            return;
+        }
+
+        // The probe dir a credentials-landing domain needs, and the dir the
+        // login writes into. Absent only with no home directory and no
+        // override — there is nothing to sign into then, so refuse rather
+        // than run the command against an invented path.
+        let Some(home_dir) = recipe_for(recipe).system_home_dir() else {
+            self.report_error(
+                ErrorReport::new(s::settings_accounts_reauth_failed())
+                    .message(s::account_system_home_unknown())
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("account.system_reauth.no_home")
+                    .build(),
+                cx,
+            );
+            return;
+        };
+
+        let command = self.login_command_for_recipe(recipe);
+        self.spawn_login_flow(
+            LoginTarget::System { recipe },
+            home_dir,
+            command,
+            LoginFinish::System,
+            cx,
+        );
+    }
+
+    /// Sign in again for the pane that failed — the action behind an
+    /// agent-chat failure banner's re-login button
+    /// ([`daruda_acp::Remedy::Reauthenticate`]).
+    ///
+    /// Resolves which credentials that pane actually runs on
+    /// ([`pane_login_target`]) and routes to the matching flow, so the same
+    /// button recovers a managed account and the ambient home alike. A pane
+    /// whose agent has no local auth domain resolves to nothing; the banner
+    /// does not offer the button there, and this stays a no-op if it is ever
+    /// reached anyway.
+    pub(in crate::workspace) fn reauthenticate_pane_account(
+        &mut self,
+        pane_id: crate::workspace::main_area::pane_tree::PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(selection) = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .find(|p| p.id == pane_id)
+            .and_then(|p| p.account_selection())
+        else {
+            return;
+        };
+        let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+            &self.account_pane_for(pane_id, cx),
+        );
+        match pane_login_target(selection, domain, &self.accounts) {
+            Some(LoginTarget::Managed { id, .. }) => self.reauthenticate_account(id, cx),
+            Some(LoginTarget::System { recipe }) => self.reauthenticate_system(recipe, cx),
+            // The banner decides whether signing in would *help* from the
+            // failure's classification, which it can; it cannot know whether
+            // daruda can run one, which depends on where the agent lives. A
+            // remote agent signs in on its own host, so there is nothing to
+            // spawn here — and a button that silently does nothing is worse
+            // than the dead end it was meant to replace.
+            None => self.report_error(
+                ErrorReport::new(s::account_reauth_elsewhere())
+                    .message(s::account_reauth_elsewhere_detail())
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("account.reauth.not_runnable_here")
+                    .build(),
+                cx,
+            ),
+        }
+    }
+
+    /// Picks up a system login's result. Unlike the managed flows there is
+    /// no row to file or update and no directory to clean up either way —
+    /// the credentials landed in the user's own home (or the Keychain) and
+    /// that *is* the durable state. All that remains is telling the user,
+    /// and letting the panes that were failing on the old credentials try
+    /// again.
+    fn finish_system_login(
+        &mut self,
+        target: LoginTarget,
+        outcome: LoginOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.claim_finished_login(target, cx) {
+            return;
+        }
+
+        match outcome {
+            LoginOutcome::Success => {
+                self.report_error(
+                    ErrorReport::new(s::settings_accounts_reauth_added())
+                        .severity(ErrorSeverity::Info)
+                        .build(),
+                    cx,
+                );
+                self.reconnect_panes_after_login(target, cx);
+                cx.notify();
+            }
+            LoginOutcome::Denied => {
+                self.finish_reauth_failed(s::settings_accounts_login_denied_detail(), cx)
+            }
+            LoginOutcome::TimedOut => {
+                self.finish_reauth_failed(s::settings_accounts_login_timed_out_detail(), cx)
+            }
+            LoginOutcome::Failed(detail) => self.finish_reauth_failed(detail, cx),
+        }
     }
 
     /// Picks up a reauthenticate-account login's result on this
@@ -705,15 +904,13 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let is_current = matches!(
-            &self.pending_login,
-            PendingLogin::InProgress { account_id: current, .. } if *current == account_id
-        );
-        if !is_current {
+        let target = LoginTarget::Managed {
+            id: account_id,
+            recipe,
+        };
+        if !self.claim_finished_login(target, cx) {
             return;
         }
-        self.pending_login = PendingLogin::None;
-        accounts_global::finish_login(cx, account_id);
 
         match outcome {
             LoginOutcome::Success => self.finish_reauth_success(account_id, config_dir, recipe, cx),
@@ -806,6 +1003,15 @@ impl Workspace {
                 .build(),
             cx,
         );
+        // The panes that sent the user here are still sitting on the failure
+        // this login just cleared.
+        self.reconnect_panes_after_login(
+            LoginTarget::Managed {
+                id: account_id,
+                recipe: recipe_id,
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -873,6 +1079,35 @@ fn builtin_launch_for(recipe: AccountRecipeId) -> daruda_config::AgentLaunch {
     match recipe {
         AccountRecipeId::Claude => daruda_config::AgentDefinition::claude_default().launch,
         AccountRecipeId::Codex => daruda_config::AgentDefinition::codex_default().launch,
+    }
+}
+
+/// The login a pane's "sign in again" button runs, or `None` when the pane
+/// has none to offer.
+///
+/// Two inputs because neither alone is enough: a managed selection names an
+/// account but not its auth domain (the row does), and a `SystemDefault`
+/// selection names a domain-less choice whose ambient home is *per domain* —
+/// only the pane's own agent says which.
+pub(in crate::workspace) fn pane_login_target(
+    selection: daruda_store::accounts::AccountSelection,
+    domain: crate::workspace::main_area::pane::AccountDomain,
+    accounts: &AccountsState,
+) -> Option<LoginTarget> {
+    use crate::workspace::main_area::pane::AccountDomain;
+    use daruda_store::accounts::AccountSelection;
+    match selection {
+        // The account's own domain, not the pane's: signing in with the
+        // pane's domain would write another domain's credentials into this
+        // account's dir.
+        AccountSelection::Managed(id) => accounts.find(id).map(|account| LoginTarget::Managed {
+            id,
+            recipe: account.recipe,
+        }),
+        AccountSelection::SystemDefault => match domain {
+            AccountDomain::Exactly(recipe) => Some(LoginTarget::System { recipe }),
+            AccountDomain::Any | AccountDomain::Unsupported => None,
+        },
     }
 }
 
@@ -1004,22 +1239,92 @@ mod tests {
     #[test]
     fn can_start_login_preparing_is_not_startable() {
         let pending = PendingLogin::Preparing {
-            account_id: AccountId::new(),
-            recipe: AccountRecipeId::Claude,
-            mode: LoginMode::Add,
+            target: LoginTarget::Managed {
+                id: AccountId::new(),
+                recipe: AccountRecipeId::Claude,
+            },
+            finish: LoginFinish::Add,
         };
         assert!(!can_start_login(&pending));
     }
 
     #[test]
-    fn resolve_node_path_env_none_when_command_does_not_need_node() {
-        assert_eq!(resolve_node_path_env("/usr/local/bin/codex-acp"), None);
+    fn a_login_target_always_names_its_auth_domain() {
+        for recipe in AccountRecipeId::all() {
+            assert_eq!(
+                LoginTarget::Managed {
+                    id: AccountId::new(),
+                    recipe
+                }
+                .recipe(),
+                recipe
+            );
+            assert_eq!(LoginTarget::System { recipe }.recipe(), recipe);
+        }
+    }
+
+    /// A system login writes into the user's real home. Deleting it on cancel
+    /// would destroy credentials this app never created — the same reason a
+    /// reauth's permanent dir is spared, one step more severe.
+    #[test]
+    fn only_an_add_login_may_delete_its_directory_on_cancel() {
+        assert!(cleanup_dir_on_cancel(LoginFinish::Add));
+        assert!(!cleanup_dir_on_cancel(LoginFinish::Reauth));
+        assert!(!cleanup_dir_on_cancel(LoginFinish::System));
+    }
+
+    /// Two system logins into the *same* domain race over one `~/.claude`, so
+    /// the process-wide slot has to reject the second. This is what the slot
+    /// could not express while it was keyed on `AccountId`: a system login has
+    /// no account id to store.
+    #[gpui::test]
+    fn the_login_slot_rejects_a_second_system_login_in_the_same_domain(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            accounts_global::install_if_absent(cx, AccountsState::default());
+            let claude = LoginTarget::System {
+                recipe: AccountRecipeId::Claude,
+            };
+            assert!(accounts_global::begin_login(cx, claude));
+            assert!(
+                !accounts_global::begin_login(cx, claude),
+                "a second window must not sign into the same ambient home"
+            );
+            accounts_global::finish_login(cx, claude);
+            assert!(accounts_global::begin_login(cx, claude));
+            accounts_global::finish_login(cx, claude);
+        });
+    }
+
+    /// A stale completion from a finished login must not free the slot a newer
+    /// one owns — the same guard the managed path already had, now keyed on
+    /// the target rather than the account id.
+    #[gpui::test]
+    fn a_stale_system_completion_does_not_free_a_newer_login(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            accounts_global::install_if_absent(cx, AccountsState::default());
+            let system = LoginTarget::System {
+                recipe: AccountRecipeId::Claude,
+            };
+            let managed = LoginTarget::Managed {
+                id: AccountId::new(),
+                recipe: AccountRecipeId::Claude,
+            };
+            assert!(accounts_global::begin_login(cx, managed));
+            accounts_global::finish_login(cx, system);
+            assert!(
+                accounts_global::login_busy(cx),
+                "the managed login still owns the slot"
+            );
+            accounts_global::finish_login(cx, managed);
+            assert!(!accounts_global::login_busy(cx));
+        });
     }
 
     #[test]
-    fn cleanup_dir_on_cancel_add_yes_reauth_no() {
-        assert!(cleanup_dir_on_cancel(LoginMode::Add));
-        assert!(!cleanup_dir_on_cancel(LoginMode::Reauth));
+    fn resolve_node_path_env_none_when_command_does_not_need_node() {
+        assert_eq!(resolve_node_path_env("/usr/local/bin/codex-acp"), None);
     }
 
     #[test]
@@ -1030,10 +1335,12 @@ mod tests {
         let login = spawn_login("/usr/bin/true", &[], &[], Duration::from_secs(5))
             .expect("spawn a trivial process for the test handle");
         let pending = PendingLogin::InProgress {
-            account_id: AccountId::new(),
-            recipe: AccountRecipeId::Claude,
+            target: LoginTarget::Managed {
+                id: AccountId::new(),
+                recipe: AccountRecipeId::Claude,
+            },
             handle: login.handle(),
-            mode: LoginMode::Add,
+            finish: LoginFinish::Add,
         };
         assert!(!can_start_login(&pending));
         // Best-effort: the process has almost certainly already exited on
@@ -1132,6 +1439,191 @@ mod tests {
             panic!("the built-in Claude launch is Raw");
         };
         assert_eq!(command, format!("{raw} --cli auth login --claudeai"));
+    }
+
+    mod pane_login {
+        use super::*;
+        use crate::workspace::main_area::pane::AccountDomain;
+        use daruda_store::accounts::AccountSelection;
+
+        fn state_with(id: AccountId, recipe: AccountRecipeId) -> AccountsState {
+            let mut st = AccountsState::default();
+            st.accounts.push(ManagedAccount {
+                id,
+                recipe,
+                email: None,
+                organization: None,
+                config_dir: "/x".into(),
+                created_at: 0,
+                last_authenticated_at: 0,
+            });
+            st
+        }
+
+        /// A managed pane signs back into its own account, in that account's
+        /// own domain — read from the row rather than from the pane's agent,
+        /// so a pane pointed at another domain's account can't reauthenticate
+        /// the wrong credentials.
+        #[test]
+        fn a_managed_pane_signs_back_into_its_own_account() {
+            let id = AccountId::new();
+            let st = state_with(id, AccountRecipeId::Codex);
+            assert_eq!(
+                pane_login_target(
+                    AccountSelection::Managed(id),
+                    AccountDomain::Exactly(AccountRecipeId::Claude),
+                    &st
+                ),
+                Some(LoginTarget::Managed {
+                    id,
+                    recipe: AccountRecipeId::Codex
+                })
+            );
+        }
+
+        /// The ambient home is per-domain and the selection names no domain,
+        /// so the pane's own agent has to supply it.
+        #[test]
+        fn a_system_pane_signs_into_its_agents_domain() {
+            for recipe in AccountRecipeId::all() {
+                assert_eq!(
+                    pane_login_target(
+                        AccountSelection::SystemDefault,
+                        AccountDomain::Exactly(recipe),
+                        &AccountsState::default()
+                    ),
+                    Some(LoginTarget::System { recipe })
+                );
+            }
+        }
+
+        /// An agent with no local auth domain (remote, JSON stdio, or one this
+        /// build does not recognize) has no login to run — offering a button
+        /// would spawn a command for a domain that was never resolved.
+        #[test]
+        fn a_pane_with_no_auth_domain_offers_no_login() {
+            assert_eq!(
+                pane_login_target(
+                    AccountSelection::SystemDefault,
+                    AccountDomain::Unsupported,
+                    &AccountsState::default()
+                ),
+                None
+            );
+        }
+
+        /// `Any` is the terminal case: no agent, so no single ambient home to
+        /// sign into.
+        #[test]
+        fn an_unscoped_pane_offers_no_system_login() {
+            assert_eq!(
+                pane_login_target(
+                    AccountSelection::SystemDefault,
+                    AccountDomain::Any,
+                    &AccountsState::default()
+                ),
+                None
+            );
+        }
+
+        /// The row can be deleted from the Settings window while a pane still
+        /// points at it; there is nothing left to sign into.
+        #[test]
+        fn a_deleted_account_offers_no_login() {
+            assert_eq!(
+                pane_login_target(
+                    AccountSelection::Managed(AccountId::new()),
+                    AccountDomain::Exactly(AccountRecipeId::Claude),
+                    &AccountsState::default()
+                ),
+                None
+            );
+        }
+    }
+
+    mod billing {
+        use super::*;
+
+        /// The two ways the Claude agent advertises signing in, restated here
+        /// rather than shared with `daruda_acp`'s own fixture: this asserts a
+        /// contract *between* the crates, so it has to describe the agent
+        /// independently of the code that parses it.
+        ///
+        /// Only the fields the assertion reads are kept — the id that decides
+        /// the billing kind, and the runnable command whose trailing flags
+        /// select the flow.
+        fn advertised_claude_logins() -> Vec<daruda_acp::LoginMethod> {
+            let response: agent_client_protocol::schema::v1::InitializeResponse =
+                serde_json::from_value(serde_json::json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {},
+                    "authMethods": [
+                        {
+                            "id": "claude-ai-login",
+                            "name": "Claude Subscription",
+                            "type": "terminal",
+                            "_meta": {"terminal-auth": {
+                                "command": "/opt/node/bin/node",
+                                "args": ["/cache/claude-agent-acp", "--cli", "auth",
+                                         "login", "--claudeai"]
+                            }}
+                        },
+                        {
+                            "id": "console-login",
+                            "name": "Anthropic Console",
+                            "type": "terminal",
+                            "_meta": {"terminal-auth": {
+                                "command": "/opt/node/bin/node",
+                                "args": ["/cache/claude-agent-acp", "--cli", "auth",
+                                         "login", "--console"]
+                            }}
+                        }
+                    ]
+                }))
+                .expect("the advertised payload parses");
+            daruda_acp::parse_login_methods(&response.auth_methods)
+        }
+
+        /// The flags that pick a flow: everything after the adapter path the
+        /// agent resolved for us.
+        fn login_flags(method: &daruda_acp::LoginMethod) -> String {
+            method
+                .command
+                .as_ref()
+                .expect("the advertised method carries a runnable command")
+                .args[1..]
+                .join(" ")
+        }
+
+        /// daruda has to sign in on the flow that spends the plan the user
+        /// already pays for, and the guard that says which one that is comes
+        /// from the agent's own classification rather than a flag spelled out
+        /// here. Pointing the login command at the other one would move a user
+        /// onto per-token billing, and they would find out on an invoice.
+        #[test]
+        fn the_claude_login_runs_the_subscription_flow_not_the_metered_one() {
+            let methods = advertised_claude_logins();
+            let mut safe = methods.iter().filter(|m| m.kind.is_safe_default());
+            let subscription = safe.next().expect("one flow bills against the plan");
+            assert!(
+                safe.next().is_none(),
+                "more than one flow claims to be free — which one daruda runs is no longer decidable"
+            );
+            let metered = methods
+                .iter()
+                .find(|m| !m.kind.is_safe_default())
+                .expect("the agent also advertises a metered flow");
+
+            let command = resolve_login_command(&[], "", AccountRecipeId::Claude);
+            assert!(
+                command.ends_with(&login_flags(subscription)),
+                "the login command must run the subscription flow: {command}"
+            );
+            assert!(
+                !command.contains(&login_flags(metered)),
+                "the login command runs the per-token billed flow: {command}"
+            );
+        }
     }
 
     #[test]

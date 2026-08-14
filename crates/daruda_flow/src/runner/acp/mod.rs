@@ -427,7 +427,12 @@ async fn announced(
             {
                 return Err(NodeFailure::SettingRejected { config_id, reason });
             }
-            AcpEvent::Error(message) => return Err(NodeFailure::SessionError(message)),
+            // `NodeFailure` still carries a message; the classified failure is
+            // rendered through it. Threading the classification into the
+            // retry policy is a follow-up, not this change.
+            AcpEvent::Error(failure) => {
+                return Err(NodeFailure::SessionError(failure.to_string()));
+            }
             _ => {}
         }
     }
@@ -653,8 +658,12 @@ async fn drain(
                 return failure_for(&stop_reason).map_or(Ok(()), Err);
             }
             // The session survives this one, but the node's attempt does not.
-            AcpEvent::TurnFailed(message) => return Err(NodeFailure::TurnFailed(message)),
-            AcpEvent::Error(message) => return Err(NodeFailure::SessionError(message)),
+            AcpEvent::TurnFailed(failure) => {
+                return Err(NodeFailure::TurnFailed(failure.to_string()));
+            }
+            AcpEvent::Error(failure) => {
+                return Err(NodeFailure::SessionError(failure.to_string()));
+            }
             // What the agent actually said. Recorded here rather than in
             // the caller because this is the only place the stream is read.
             AcpEvent::Update(update) => rec.log.borrow_mut().update(&update),
