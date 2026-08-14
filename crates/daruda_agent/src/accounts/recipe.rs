@@ -40,6 +40,13 @@ pub trait AccountRecipe: Send + Sync {
     /// Suffix appended to an agent's launch command to run this domain's
     /// headless login flow.
     fn login_args(&self) -> &'static str;
+    /// Suffix that makes this domain's CLI report its current auth status as
+    /// JSON, for [`super::auth_status::read_auth_status`].
+    ///
+    /// `None` for a domain whose CLI has no such command *confirmed*. Guessing
+    /// one would spawn a process that prints an error, and the reading would
+    /// come back empty in a way indistinguishable from "signed out".
+    fn status_args(&self) -> Option<&'static str>;
     /// The ambient (unmanaged) home this domain reads when no account is
     /// pinned, as a tilde path for display next to the "System" choice.
     fn system_home_hint(&self) -> &'static str;
@@ -212,6 +219,18 @@ mod tests {
                 "{id:?}: hint {hint} does not name {home:?}"
             );
         }
+    }
+
+    /// Only a domain whose status command is confirmed may claim one — an
+    /// unconfirmed guess would print an error the reader cannot tell from
+    /// "signed out".
+    #[test]
+    fn only_a_confirmed_status_command_is_advertised() {
+        assert_eq!(
+            recipe_for(AccountRecipeId::Claude).status_args(),
+            Some("--cli auth status --json")
+        );
+        assert_eq!(recipe_for(AccountRecipeId::Codex).status_args(), None);
     }
 
     #[test]

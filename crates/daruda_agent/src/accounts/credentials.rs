@@ -15,6 +15,12 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use serde_json::Value;
 
+/// Keychain service holding the ambient Claude login — the entry the CLI
+/// writes when no per-account dir scopes it. Shared by every daruda profile
+/// and by the user's own terminal usage.
+#[cfg(target_os = "macos")]
+const SYSTEM_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+
 #[allow(unused_imports)] // used only on macOS (scoped Keychain service name)
 use super::layout::scoped_keychain_service;
 
@@ -48,12 +54,7 @@ pub struct PlanInfo {
 pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
     use std::process::Command;
     let out = Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-w",
-        ])
+        .args(["find-generic-password", "-s", SYSTEM_KEYCHAIN_SERVICE, "-w"])
         .output()
         .map_err(|_| FetchError::NoToken)?;
     if !out.status.success() {
@@ -114,8 +115,23 @@ fn parse_credentials(raw: &str) -> Result<(String, PlanInfo), FetchError> {
 }
 
 /// Read the OAuth token + plan for a specific account's config dir.
+///
+/// On macOS the Keychain is where the CLI normally puts them, but not the only
+/// place it ever has: a build that writes `.credentials.json` into the config
+/// dir instead would otherwise read as "no credentials" — and a *successful*
+/// login reported that way is not merely a wrong label, it makes the add flow
+/// discard the directory it just created. Trying the file after the Keychain
+/// costs one `stat` on the normal path.
 #[cfg(target_os = "macos")]
 pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
+    match read_scoped_keychain_credentials(config_dir) {
+        Ok(found) => Ok(found),
+        Err(keychain_error) => read_credentials_file(config_dir).map_err(|_| keychain_error),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_scoped_keychain_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
     use std::process::Command;
     let service = scoped_keychain_service(config_dir);
     let out = Command::new("security")
@@ -131,10 +147,55 @@ pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), 
 
 #[cfg(not(target_os = "macos"))]
 pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
-    let path = config_dir.join(".credentials.json");
-    let raw = std::fs::read_to_string(path)
+    read_credentials_file(config_dir)
+}
+
+/// The `.credentials.json` the CLI writes inside a config dir — the only store
+/// off macOS, and the fallback on it.
+fn read_credentials_file(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
+    let raw = std::fs::read_to_string(config_dir.join(".credentials.json"))
         .map_err(|_| AccountError::Credentials(FetchError::NoToken))?;
     Ok(parse_credentials(&raw)?)
+}
+
+/// A digest of the **ambient** credential store entry — the one a login the
+/// user ran themselves writes, shared by every profile.
+///
+/// A digest rather than the value: the caller only needs to know whether it
+/// changed, and a secret that is never held cannot be logged by accident.
+///
+/// This exists to bracket a *managed* login. The reference implementation
+/// daruda's account layer was ported from snapshots this entry before such a
+/// login and restores it afterwards, because the CLI has been observed to
+/// write it even when pointed at a config dir — which would silently replace
+/// the user's own sign-in with the managed account's. Whether the installed
+/// CLI still does that is unverified here, so daruda compares rather than
+/// writes: a clobber that happens becomes visible instead of silent, and a
+/// store daruda never writes to cannot be corrupted by this check.
+///
+/// `None` when there is no entry to read (including off macOS, where there is
+/// no ambient Keychain item at all).
+#[must_use]
+pub fn system_credentials_digest() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use sha2::{Digest, Sha256};
+        use std::process::Command;
+        let out = Command::new("security")
+            .args(["find-generic-password", "-s", SYSTEM_KEYCHAIN_SERVICE, "-w"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(&out.stdout);
+        Some(format!("{:x}", hasher.finalize()))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 /// Best-effort delete of the scoped macOS Keychain item a Claude Code
@@ -286,5 +347,46 @@ mod tests {
     #[test]
     fn credentials_path_is_none_without_config_dir_or_home() {
         assert_eq!(credentials_path_from(None, None), None);
+    }
+
+    /// A config dir whose credentials landed in the file rather than the
+    /// Keychain still has credentials. Reading only the Keychain reports a
+    /// successful login as a failed one — and the add flow deletes the
+    /// directory on that answer.
+    #[test]
+    fn a_config_dir_with_only_a_credentials_file_is_still_signed_in() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","subscriptionType":"pro"}}"#,
+        )
+        .expect("fixture");
+        let (token, plan) = read_scoped_credentials(dir.path()).expect("the file is read");
+        assert_eq!(token, "sk-ant-oat01-x");
+        assert_eq!(plan.tier.as_deref(), Some("pro"));
+    }
+
+    /// Neither store holding anything is still "signed out".
+    #[test]
+    fn an_empty_config_dir_has_no_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(read_scoped_credentials(dir.path()).is_err());
+    }
+
+    /// Reading it twice with nothing in between must agree — otherwise the
+    /// comparison this exists for would report a clobber on every login.
+    #[test]
+    fn the_ambient_digest_is_stable_across_reads() {
+        assert_eq!(system_credentials_digest(), system_credentials_digest());
+    }
+
+    /// And it must never be the secret itself.
+    #[test]
+    fn the_ambient_digest_is_a_digest() {
+        if let Some(d) = system_credentials_digest() {
+            assert_eq!(d.len(), 64, "sha256 hex");
+            assert!(d.chars().all(|c| c.is_ascii_hexdigit()));
+            assert!(!d.contains("sk-ant"));
+        }
     }
 }

@@ -303,6 +303,17 @@ impl Workspace {
         };
 
         let attempt = next_login_attempt();
+        // Snapshot the ambient entry before anything spawns. A managed login
+        // must not disturb the sign-in the user did themselves; the CLI has
+        // been seen to write that entry even when pointed at a config dir, so
+        // this is what makes such a replacement visible instead of silent.
+        // Only for a managed target — a system login writes it on purpose.
+        let ambient_before = match target {
+            LoginTarget::Managed { .. } => {
+                daruda_agent::accounts::credentials::system_credentials_digest()
+            }
+            LoginTarget::System { .. } => None,
+        };
         if !accounts_global::begin_login(cx, attempt) {
             if cleanup_dir_on_cancel(finish) {
                 cleanup_account_dir(recipe_id, &home_dir);
@@ -367,6 +378,7 @@ impl Workspace {
                         ws.pending_login = PendingLogin::InProgress {
                             target,
                             attempt,
+                            ambient_before,
                             handle,
                             finish,
                         };
@@ -470,9 +482,14 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
+        let ambient_before = match &self.pending_login {
+            PendingLogin::InProgress { ambient_before, .. } => ambient_before.clone(),
+            _ => None,
+        };
         if !self.claim_finished_login(attempt, cx) {
             return;
         }
+        self.report_ambient_clobber(ambient_before, cx);
 
         match outcome {
             LoginOutcome::Success => {
@@ -646,6 +663,7 @@ impl Workspace {
                     attempt,
                     handle,
                     finish,
+                    ..
                 } => (target, attempt, Some(handle), finish),
             };
         if let Some(handle) = handle {
@@ -686,6 +704,7 @@ impl Workspace {
                     attempt,
                     handle,
                     finish,
+                    ..
                 } => (target, attempt, Some(handle), finish),
             };
         if let Some(handle) = handle {
@@ -707,6 +726,32 @@ impl Workspace {
     /// cleaned up, or superseded by a newer one — so running its finish path
     /// anyway would either double-clean an already-removed dir or clobber an
     /// `InProgress` it knows nothing about.
+    /// Report a managed login that replaced the user's own ambient sign-in.
+    ///
+    /// Nothing is written back: the store is the user's, and a restore built on
+    /// an unverified premise could corrupt a working sign-in. Saying so is what
+    /// turns a silent replacement into one the user can act on — their
+    /// `SystemDefault` panes are now running as the managed account.
+    fn report_ambient_clobber(&mut self, before: Option<String>, cx: &mut Context<Self>) {
+        let Some(before) = before else {
+            return;
+        };
+        if daruda_agent::accounts::credentials::system_credentials_digest()
+            .is_none_or(|after| after == before)
+        {
+            return;
+        }
+        self.report_error(
+            ErrorReport::new(s::account_ambient_login_replaced())
+                .message(s::account_ambient_login_replaced_detail())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("account.login.ambient_clobbered")
+                .build(),
+            cx,
+        );
+    }
+
     fn claim_finished_login(&mut self, attempt: LoginAttempt, cx: &mut Context<Self>) -> bool {
         if !claims_pending(&self.pending_login, attempt) {
             return false;
@@ -979,9 +1024,14 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
+        let ambient_before = match &self.pending_login {
+            PendingLogin::InProgress { ambient_before, .. } => ambient_before.clone(),
+            _ => None,
+        };
         if !self.claim_finished_login(attempt, cx) {
             return;
         }
+        self.report_ambient_clobber(ambient_before, cx);
 
         match outcome {
             LoginOutcome::Success => self.finish_reauth_success(account_id, config_dir, recipe, cx),
@@ -1384,6 +1434,7 @@ mod tests {
             PendingLogin::InProgress {
                 target,
                 attempt,
+                ambient_before: None,
                 handle: login.handle(),
                 finish: LoginFinish::System,
             }
@@ -1569,6 +1620,7 @@ mod tests {
                 recipe: AccountRecipeId::Claude,
             },
             attempt: next_login_attempt(),
+            ambient_before: None,
             handle: login.handle(),
             finish: LoginFinish::Add,
         };

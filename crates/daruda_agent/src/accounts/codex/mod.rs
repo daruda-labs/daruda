@@ -61,6 +61,12 @@ impl AccountRecipe for CodexRecipe {
         LOGIN_ARGS
     }
 
+    /// Unconfirmed: the codex CLI's status command and its output shape have
+    /// not been captured, and a guess would read as "signed out".
+    fn status_args(&self) -> Option<&'static str> {
+        None
+    }
+
     fn system_home_hint(&self) -> &'static str {
         home::SYSTEM_HOME_HINT
     }

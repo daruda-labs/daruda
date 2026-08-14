@@ -336,6 +336,7 @@ fn finish_codex_login(
             recipe: daruda_store::accounts::AccountRecipeId::Codex,
         },
         attempt,
+        ambient_before: None,
         handle: login.handle(),
         finish: LoginFinish::Add,
     };

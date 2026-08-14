@@ -28,6 +28,13 @@ const AUTH_ENV_STRIP: &[&str] = &[
 /// subscription-login flow (see `daruda_config::AgentLaunch::login_command`).
 const LOGIN_ARGS: &str = "--cli auth login --claudeai";
 
+/// Suffix that makes the CLI print its auth status as JSON — how the user
+/// signed in, which no other source tells daruda (the ACP adapter does not
+/// forward it, and a login the user ran themselves left daruda no record).
+/// Honours `CLAUDE_CONFIG_DIR`, so it answers for a managed account and the
+/// ambient home alike.
+const STATUS_ARGS: &str = "--cli auth status --json";
+
 /// System Claude home, relative to `$HOME`. Declared as a macro so the
 /// display hint below is concatenated from the same single source.
 macro_rules! system_home_dir {
@@ -84,6 +91,10 @@ impl AccountRecipe for ClaudeRecipe {
 
     fn login_args(&self) -> &'static str {
         LOGIN_ARGS
+    }
+
+    fn status_args(&self) -> Option<&'static str> {
+        Some(STATUS_ARGS)
     }
 
     fn system_home_hint(&self) -> &'static str {

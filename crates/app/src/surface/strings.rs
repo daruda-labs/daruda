@@ -3252,6 +3252,15 @@ pub fn settings_accounts_reauth_failed() -> String {
 pub fn account_reauth_missing() -> String {
     rust_i18n::t!("settings.accounts_reauth_missing").into_owned()
 }
+/// Toast title when a managed login replaced the ambient sign-in the user had
+/// made themselves — every `SystemDefault` pane now runs as that account.
+pub fn account_ambient_login_replaced() -> String {
+    rust_i18n::t!("settings.accounts_ambient_login_replaced").into_owned()
+}
+/// Body for [`account_ambient_login_replaced`] — what it means and the way back.
+pub fn account_ambient_login_replaced_detail() -> String {
+    rust_i18n::t!("settings.accounts_ambient_login_replaced_detail").into_owned()
+}
 /// Toast title when a failed pane's re-login cannot be run by daruda: the
 /// agent signs in wherever it runs, which for a remote agent is not this
 /// machine.

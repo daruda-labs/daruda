@@ -919,6 +919,8 @@ settings:
   accounts_reauth_added: "Account reauthenticated."
   accounts_reauth_failed: "Could not reauthenticate account."
   accounts_reauth_missing: "The account being reauthenticated no longer exists."
+  accounts_ambient_login_replaced: "Your system sign-in was replaced"
+  accounts_ambient_login_replaced_detail: "Signing in to this account also replaced the sign-in you had made yourself, so panes on the System account now run as it. Sign in again from the System row to restore it."
   accounts_reauth_elsewhere: "This agent signs in where it runs"
   accounts_reauth_elsewhere_detail: "It is not running on this machine, so daruda cannot sign in for it. Open a terminal on its host, run the agent's CLI, and use its /login command."
   accounts_system_home_unknown: "No home directory was found for this agent, so there is nowhere to sign in to."

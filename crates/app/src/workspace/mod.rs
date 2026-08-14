@@ -337,6 +337,10 @@ pub(in crate::workspace) enum PendingLogin {
     InProgress {
         target: account_login_ops::LoginTarget,
         attempt: account_login_ops::LoginAttempt,
+        /// Digest of the ambient credential entry as it stood when this
+        /// attempt started, for the clobber check in
+        /// `account_login_ops`. `None` when there was nothing to read.
+        ambient_before: Option<String>,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
         handle: daruda_agent::accounts::LoginProcessHandle,

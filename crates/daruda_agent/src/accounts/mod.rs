@@ -13,6 +13,7 @@
 //! Re-exports every public item flat under `daruda_agent::accounts::*` so
 //! callers don't need to know which submodule each lives in.
 
+pub mod auth_status;
 pub mod claude;
 pub mod codex;
 pub mod credentials;
