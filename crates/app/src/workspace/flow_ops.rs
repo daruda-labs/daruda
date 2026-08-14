@@ -16,6 +16,7 @@ use gpui::{Context, Window};
 use super::Workspace;
 use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::flow_request::{FlowSubmission, FlowSubmitError, union_strip_env};
+use super::flow_runs::{Advanced, Parked, ParkedAsk, RunHandle, RunStage};
 use crate::surface::strings as s;
 
 /// One running flow, flattened for the render pass.
@@ -36,7 +37,7 @@ pub(in crate::workspace) struct FlowRunRow {
     /// What that run is doing, already worded (see `RunStage`).
     pub doing: gpui::SharedString,
     /// The question this run is waiting on, projected for display. The
-    /// reply channel stays behind in `flow_runs` — the snapshot is compared
+    /// reply channel stays behind in [`super::flow_runs`] — the snapshot is compared
     /// field by field (`RightDockSnapshot::content_differs`) and a channel
     /// has no equality, so it could not travel here even if it should.
     pub asking: Option<AskRowData>,
@@ -53,107 +54,6 @@ pub(in crate::workspace) struct AskRowData {
     pub tool: gpui::SharedString,
     pub detail: Option<gpui::SharedString>,
     pub options: Vec<daruda_acp::PermissionChoice>,
-}
-
-/// A run in flight. The token is the whole of the stop switch; the handle
-/// is kept so the workspace can tell a finished run from a wedged one
-/// without asking the engine.
-pub(in crate::workspace) struct RunHandle {
-    pub cancel: CancelToken,
-    pub run_dir: PathBuf,
-    /// What the run is doing right now, as its own stream reports it.
-    pub doing: RunStage,
-    _thread: std::thread::JoinHandle<()>,
-}
-
-/// Where a run is, in the only terms that stay true.
-///
-/// Deliberately not "node N of M": a repair sends nodes back to pending,
-/// so a count runs backwards — and repair is this engine's headline
-/// feature, not an edge case. What a person actually wants at a glance is
-/// which node is on, and whether it is on its second try.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum RunStage {
-    /// Submitted; the engine has not announced a node yet.
-    Starting,
-    Node {
-        id: String,
-        attempt: u32,
-    },
-    /// A gate's repair is running its fix session.
-    Fixing {
-        gate: String,
-    },
-    /// The fix is done and the gate is about to be re-derived. Not
-    /// `Node { attempt: 0 }`: a zeroth attempt does not exist, and the
-    /// number would have to be read as a sentinel at every use.
-    Rederiving {
-        gate: String,
-    },
-    /// Waiting for a person to answer a permission question. Both clocks
-    /// are stopped, so the only thing that ends this is an answer or a Stop.
-    ///
-    /// A variant rather than a flag beside an `Option`: a stage that is
-    /// "asking" and has no question is not a state worth representing.
-    ///
-    /// More than one at a time is now possible — nodes running together ask
-    /// independently — so the rest wait behind the one on screen. The queue
-    /// lives *in* the variant because a queue of questions in a run that is
-    /// not asking is not a state either.
-    Asking {
-        question: std::sync::Arc<ParkedAsk>,
-        /// Arrived while `question` was up. Answering promotes the front.
-        queued: std::collections::VecDeque<std::sync::Arc<ParkedAsk>>,
-    },
-}
-
-/// A question waiting for an answer, and the way to send one.
-///
-/// `PartialEq` by `ask_id` alone: the reply channel has no equality, and
-/// what the comparison is actually for is "is this the same question" —
-/// which the id answers. `RunStage` keeps its derive because of it.
-#[derive(Debug)]
-pub(in crate::workspace) struct ParkedAsk {
-    pub ask_id: u64,
-    pub node: String,
-    /// The attempt that asked — what the run goes back to being on once
-    /// the question is answered.
-    pub attempt: u32,
-    pub tool: String,
-    pub detail: Option<String>,
-    pub options: Vec<daruda_acp::PermissionChoice>,
-    reply: smol::channel::Sender<daruda_acp::PermissionDecision>,
-}
-
-impl PartialEq for ParkedAsk {
-    fn eq(&self, other: &Self) -> bool {
-        self.ask_id == other.ask_id
-    }
-}
-impl Eq for ParkedAsk {}
-
-impl RunStage {
-    /// What to show for this stage. `attempt` is only worth saying past the
-    /// first — every node has a first try, and "try 1" on every row is
-    /// noise that buries the row where it says "try 3".
-    pub(in crate::workspace) fn describe(&self) -> String {
-        match self {
-            RunStage::Starting => s::status_bar_flow_stage_starting(),
-            RunStage::Node { id, attempt } if *attempt > 1 => {
-                s::status_bar_flow_stage_node_retry(id, *attempt)
-            }
-            RunStage::Node { id, .. } => s::status_bar_flow_stage_node(id),
-            RunStage::Fixing { gate } => s::status_bar_flow_stage_fixing(gate),
-            RunStage::Rederiving { gate } => s::status_bar_flow_stage_rederiving(gate),
-            // Names the node like every other stage does: dropping it while
-            // asking would leave the one stage that does not say where the
-            // run is. For a repair's fix session the engine sends the gate's
-            // name, which is what makes that case renderable at all.
-            RunStage::Asking { question, .. } => {
-                s::status_bar_flow_stage_asking(&question.node, &question.tool)
-            }
-        }
-    }
 }
 
 impl Workspace {
@@ -200,7 +100,7 @@ impl Workspace {
             // The map is the authority, not the lock's pid: a token for
             // another lane belongs to this process too and would not stop
             // this one.
-            (FlowPurpose::Run, Some(_)) if self.flow_runs.contains_key(&self.active) => {
+            (FlowPurpose::Run, Some(_)) if self.runs.is_running(self.active) => {
                 self.flow_picker = FlowPicker::Stopping;
             }
             // Offering "stop it" for a run we cannot reach would be a
@@ -209,13 +109,15 @@ impl Workspace {
                 self.report_flow_refusal(FlowSubmitError::LockHeld { pid: holder.pid }, cx);
                 return;
             }
-            _ => self.flow_picker.open(
-                purpose,
-                super::flow_paths::list_flows(
-                    &cwd,
-                    &super::flow_paths::global_flows_dir(&self.data_dir),
-                ),
-            ),
+            _ => {
+                let listed = self
+                    .flow_sources()
+                    .map(|(cwd, project, global)| {
+                        super::flow_paths::list_flows(&cwd, &project, &global)
+                    })
+                    .unwrap_or_default();
+                self.flow_picker.open(purpose, listed)
+            }
         }
         cx.notify();
     }
@@ -244,7 +146,9 @@ impl Workspace {
 
         // A flow that declares profiles has one more question to answer,
         // so the picker stays up for it. Everything else is decided.
-        if let Some(FlowPick::Flow(purpose, path)) = &picked {
+        if let Some(FlowPick::Flow(purpose, path)) = &picked
+            && *purpose != FlowPurpose::Graph
+        {
             let profiles = flow_profiles(path);
             if !profiles.is_empty() {
                 self.flow_picker
@@ -267,8 +171,11 @@ impl Workspace {
         match purpose {
             FlowPurpose::Validate => self.validate_flow(&path, profile.as_deref(), window, cx),
             FlowPurpose::Run => self.submit_flow_run(&path, profile.as_deref(), cx),
+            FlowPurpose::Graph => self.open_flow_graph(&path, window, cx),
         }
     }
+
+    // ---- Authoring: the file, not its contents (S4 owns the contents) ----
 
     // ---- Stage 1: static checks, which cost nothing ----
 
@@ -336,6 +243,7 @@ impl Workspace {
         let FlowSubmission {
             lane,
             request,
+            source,
             node_install_dir,
             events,
             asks,
@@ -343,6 +251,14 @@ impl Workspace {
         let cancel = CancelToken::default();
         let run_dir = request.run_dir.clone();
         let run_dir_for_asks = run_dir.clone();
+        // Before the thread takes the request.
+        let nodes_at_start: Vec<String> = request
+            .loaded
+            .flow()
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect();
         // Captured by the request builder: the run belongs to the lane it
         // was submitted from, not to whichever one is active when it ends.
         let lane_ref = lane;
@@ -367,14 +283,9 @@ impl Workspace {
                 }
             })
         };
-        self.flow_runs.insert(
+        self.runs.insert(
             lane_ref,
-            RunHandle {
-                cancel,
-                run_dir,
-                doing: RunStage::Starting,
-                _thread: thread,
-            },
+            RunHandle::started(cancel, run_dir, source, nodes_at_start, thread),
         );
         self.watch_flow_events(lane_ref, events, cx);
         self.watch_flow_asks(lane_ref, run_dir_for_asks, asks, cx);
@@ -396,24 +307,9 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         cx: &mut Context<Self>,
     ) {
-        if let Some(handle) = self.flow_runs.get_mut(&lane) {
-            handle.cancel.cancel();
-            // A stopped run has no question anyone should answer. Settled
-            // here rather than when the run's `RunEnded` arrives, for the
-            // same reason answering settles immediately: until then the
-            // question and its buttons are still on screen with nothing to
-            // say the Stop landed. The engine releases its own side — the
-            // interrupt arm answers the adapter `Cancelled`.
-            // The queue goes with it. Every question behind this one
-            // belongs to the same stopped run, and the engine releases them
-            // the same way it releases the one on screen.
-            if let RunStage::Asking { question, .. } = &handle.doing {
-                handle.doing = RunStage::Node {
-                    id: question.node.clone(),
-                    attempt: question.attempt,
-                };
-            }
-        }
+        // The engine releases its own side — the interrupt arm answers the
+        // adapter `Cancelled`.
+        self.runs.cancel(lane);
         cx.notify();
     }
 
@@ -440,12 +336,12 @@ impl Workspace {
         keep: impl Fn(daruda_store::project::LaneRef) -> bool,
     ) -> Vec<FlowRunRow> {
         let mut rows: Vec<FlowRunRow> = self
-            .flow_runs
+            .runs
             .iter()
-            .filter(|(lane, _)| keep(**lane))
+            .filter(|(lane, _)| keep(*lane))
             .map(|(lane, handle)| FlowRunRow {
-                lane: *lane,
-                lane_label: self.lane_label_for(*lane).into(),
+                lane,
+                lane_label: self.lane_label_for(lane).into(),
                 doing: handle.doing.describe().into(),
                 asking: match &handle.doing {
                     RunStage::Asking { question, .. } => Some(AskRowData {
@@ -488,18 +384,13 @@ impl Workspace {
             return None;
         }
         let lane = self.active;
-        let fresh = self
-            .flow_history
-            .as_ref()
-            .is_some_and(|cached| !cached.is_stale_for(lane));
-        if !fresh {
+        if self.flow_history.get(lane).is_none() {
             let cwd = self.active_lane_root()?;
-            self.flow_history = Some(super::flow_history::FlowHistory::read(
-                lane,
-                &super::flow_paths::runs_dir(&cwd),
-            ));
+            let read =
+                super::flow_history::FlowHistory::read(lane, &super::flow_paths::runs_dir(&cwd));
+            self.flow_history.put(lane, read);
         }
-        self.flow_history.clone()
+        self.flow_history.get(lane).cloned()
     }
 
     /// Bring the run in `lane` into view: switch to its lane if needed,
@@ -550,13 +441,7 @@ impl Workspace {
     /// Scoped to the lane it happened in — another lane's run says nothing
     /// about this lane's directory.
     fn invalidate_flow_history(&mut self, lane: daruda_store::project::LaneRef) {
-        if self
-            .flow_history
-            .as_ref()
-            .is_some_and(|cached| !cached.is_stale_for(lane))
-        {
-            self.flow_history = None;
-        }
+        self.flow_history.invalidate_for(lane);
     }
 
     /// `<project> / <lane>`, the same shape the lane switcher shows.
@@ -644,45 +529,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = self.flow_runs.get_mut(&lane_ref) else {
-            return;
-        };
-        if handle.run_dir != run_dir {
-            return;
-        }
-        let arrived = std::sync::Arc::new(ParkedAsk {
-            ask_id: pending.ask_id,
-            node: pending.node,
-            attempt: pending.attempt,
-            tool: pending.request.tool,
-            detail: pending.request.detail,
-            options: pending.request.options,
-            reply: pending.reply,
-        });
-        // Behind the one already up, never over it. Nodes running together
-        // ask independently, and a second question that replaced the first
-        // would leave that first node parked on a reply nobody can send —
-        // the run would wait forever on a question no longer on screen.
-        let now_showing = match &mut handle.doing {
-            RunStage::Asking { queued, .. } => {
-                queued.push_back(arrived);
-                false
-            }
-            doing => {
-                *doing = RunStage::Asking {
-                    question: arrived,
-                    queued: std::collections::VecDeque::new(),
-                };
-                true
-            }
-        };
+        let parked = self
+            .runs
+            .park_ask(lane_ref, run_dir, ParkedAsk::new(pending));
         cx.notify();
 
-        // Only for the question that is now on screen. A queued arrival
-        // would otherwise raise a modal for the *front* question — the one
-        // already being answered — stacking a second copy of it, with the
-        // click landing on whichever is on top.
-        if !now_showing {
+        // Only for the question that is now on screen. A queued arrival would
+        // otherwise raise a modal for the *front* question — the one already
+        // being answered — stacking a second copy of it, with the click landing
+        // on whichever is on top.
+        if parked != Parked::Showing {
             return;
         }
 
@@ -718,37 +574,9 @@ impl Workspace {
         decision: daruda_acp::PermissionDecision,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = self.flow_runs.get_mut(&lane) else {
-            return;
-        };
-        let RunStage::Asking { question, queued } = &mut handle.doing else {
-            return;
-        };
-        if question.ask_id != ask_id {
-            return;
+        if self.runs.answer_ask(lane, ask_id, decision) {
+            cx.notify();
         }
-        // Bounded to one, so this cannot block and a second send cannot
-        // land.
-        let _ = question.reply.try_send(decision);
-        // Off this question now, not when the run's next event happens to
-        // arrive: the agent goes back to work for as long as it likes, and
-        // until then the question and its buttons would still be on screen
-        // with no sign the click did anything. Observed as "the button does
-        // nothing" — and answered again, and again.
-        //
-        // The next one takes its place if there is one. Answering must not
-        // hide a question that is still waiting for an answer.
-        handle.doing = match queued.pop_front() {
-            Some(next) => RunStage::Asking {
-                question: next,
-                queued: std::mem::take(queued),
-            },
-            None => RunStage::Node {
-                id: question.node.clone(),
-                attempt: question.attempt,
-            },
-        };
-        cx.notify();
     }
 
     fn apply_flow_event(
@@ -758,6 +586,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.colour_flow_graph(lane_ref, event, cx);
         let FlowEvent::RunEnded { end } = event else {
             self.advance_flow_stage(lane_ref, event, cx);
             return;
@@ -781,42 +610,24 @@ impl Workspace {
     /// Move the run's reported stage along. One `cx.notify()` per node
     /// boundary, which is as often as the engine has anything new to say —
     /// far too rarely to be a repaint concern.
-    fn advance_flow_stage(
+    pub(in crate::workspace) fn advance_flow_stage(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         event: &FlowEvent,
         cx: &mut Context<Self>,
     ) {
-        let stage = match event {
-            FlowEvent::NodeStarted { node, attempt } => RunStage::Node {
-                id: node.clone(),
-                attempt: *attempt,
-            },
-            FlowEvent::FixStarted { gate } => RunStage::Fixing { gate: gate.clone() },
-            // The fix is over but its gate has not re-run yet, and the
-            // members about to be re-derived have not started either.
-            FlowEvent::FixEnded { gate, .. } | FlowEvent::Rerunning { gate, .. } => {
-                RunStage::Rederiving { gate: gate.clone() }
+        // Leaving `Starting` is the first moment the run directory on disk is
+        // the swept one: retention runs during start-up, after the run announces
+        // itself and before its first node. Refreshing on the announcement
+        // instead would read the pre-sweep listing and leave deleted runs on
+        // screen for the length of the run.
+        match self.runs.advance_stage(lane_ref, event) {
+            Advanced::Nothing => return,
+            Advanced::Moved { left_setup } => {
+                if left_setup {
+                    self.invalidate_flow_history(lane_ref);
+                }
             }
-            // `RunStarted` leaves `Starting`; the passes and failures are
-            // already described by whichever node starts next.
-            _ => return,
-        };
-        let Some(handle) = self.flow_runs.get_mut(&lane_ref) else {
-            return;
-        };
-        if handle.doing == stage {
-            return;
-        }
-        // Leaving `Starting` is the first moment the run directory on disk
-        // is the swept one: retention runs during start-up, after the run
-        // announces itself and before its first node. Refreshing on the
-        // announcement instead would read the pre-sweep listing and leave
-        // deleted runs on screen for the length of the run.
-        let past_setup = handle.doing == RunStage::Starting;
-        handle.doing = stage;
-        if past_setup {
-            self.invalidate_flow_history(lane_ref);
         }
         cx.notify();
     }
@@ -830,10 +641,7 @@ impl Workspace {
         end: &RunEnd,
         cx: &mut Context<Self>,
     ) -> Option<PathBuf> {
-        let run_dir = self
-            .flow_runs
-            .remove(&lane_ref)
-            .map(|handle| handle.run_dir);
+        let run_dir = self.runs.retire(lane_ref);
         // The run just wrote its completion marker, so the list that reads
         // those markers is now wrong.
         self.invalidate_flow_history(lane_ref);
@@ -864,7 +672,8 @@ impl Workspace {
         self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
         let lane = self.active;
         let dir = super::flow_paths::runs_dir(&self.active_lane_root().unwrap_or_default());
-        self.flow_history = Some(super::flow_history::FlowHistory::for_shot(lane, dir));
+        let shot = super::flow_history::FlowHistory::for_shot(lane, dir);
+        self.flow_history.put(lane, shot);
         cx.notify();
     }
 
@@ -875,11 +684,10 @@ impl Workspace {
     /// real run leaves a run directory behind every time it is taken.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn ask_flow_profile_for_shot(&mut self, cx: &mut Context<Self>) {
-        let Some(cwd) = self.active_lane_root() else {
+        let Some((cwd, project, global)) = self.flow_sources() else {
             return;
         };
-        let global = super::flow_paths::global_flows_dir(&self.data_dir);
-        let Some((path, profiles)) = super::flow_paths::list_flows(&cwd, &global)
+        let Some((path, profiles)) = super::flow_paths::list_flows(&cwd, &project, &global)
             .into_iter()
             .find_map(|found| {
                 let names = flow_profiles(&found.path);
@@ -909,7 +717,7 @@ impl Workspace {
         use daruda_acp::{PermissionChoice, PermissionKindView};
         let lane = self.active;
         let run_dir = self.active_lane_root().unwrap_or_default();
-        self.flow_runs.insert(
+        self.runs.insert(
             lane,
             RunHandle {
                 cancel: CancelToken::default(),
@@ -918,6 +726,12 @@ impl Workspace {
                     id: "verdict".to_string(),
                     attempt: 2,
                 },
+                // This capture is of the panel and the chip, which read
+                // `doing`; no graph pane is open for it to colour.
+                source: FlowSource::Resumed {
+                    run_dir: run_dir.clone(),
+                },
+                nodes: NodeRunStates::new(),
                 _thread: std::thread::spawn(|| {}),
             },
         );
@@ -973,6 +787,10 @@ impl Workspace {
         event: &FlowEvent,
         cx: &mut Context<Self>,
     ) {
+        // Both halves the real path runs, in the same order. Only the
+        // `RunEnded` report — which opens a pane and so needs a window — is
+        // left to `apply_flow_event` itself.
+        self.colour_flow_graph(lane, event, cx);
         self.advance_flow_stage(lane, event, cx);
     }
 
@@ -996,15 +814,24 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
         run_dir: PathBuf,
     ) {
-        self.flow_runs.insert(
-            lane,
-            RunHandle {
-                cancel: CancelToken::default(),
-                run_dir,
-                doing: RunStage::Starting,
-                _thread: std::thread::spawn(|| {}),
-            },
-        );
+        let source = super::flow_request::FlowSource::Resumed {
+            run_dir: run_dir.clone(),
+        };
+        self.seed_flow_run_of_for_test(lane, run_dir, source);
+    }
+
+    /// Same, for a run whose origin matters — a graph pane is coloured only
+    /// when the run can name the file it is of. Also the seed the
+    /// `flow-graph-running` capture uses, which is the same need.
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(in crate::workspace) fn seed_flow_run_of_for_test(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        run_dir: PathBuf,
+        source: super::flow_request::FlowSource,
+    ) {
+        self.runs
+            .insert(lane, RunHandle::seeded(run_dir, source, RunStage::Starting));
     }
 
     fn report_flow_refusal(&mut self, error: FlowSubmitError, cx: &mut Context<Self>) {

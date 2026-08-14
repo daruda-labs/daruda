@@ -100,3 +100,95 @@ Three groups of changes captured in a single diff:
    `window_border` imports along with the unused
    `set_rem_size` / `font_family` / `bg` / `text_color` /
    `window_border()` calls.
+
+---
+
+## `crates/ferrum_flow/` — vendored, **two source patches**
+
+Provenance for a vendored crate, plus the source deltas it now carries.
+Re-vendoring stays a file copy followed by re-applying those.
+
+| | |
+|---|---|
+| Upstream | [tu6ge/ferrum-flow](https://github.com/tu6ge/ferrum-flow) — Apache-2.0 |
+| Pinned at | `43b762ced6f61313bbc2b388871bdc93f64893d0` on `master` (2026-06-05) |
+| Version string | `0.3.1` — the last tag, 127 commits behind this pin. Upstream has been silent since 2026-06-07, so `master` is effectively its final state; the tag would have forgone level-of-detail node rendering and lazy paint-order traversal, both of which matter as a flow grows. |
+| Copied | `crates/core/src/` → `crates/ferrum_flow/src/`, plus `crates/core/README.md` and the repository-root `LICENSE` |
+| Not copied | `crates/core/examples/` — they call `Application::new()`, which no longer exists at daruda's pinned GPUI rev. Also the sibling `crates/sync_plugin` (Yrs CRDT collaboration), which daruda does not use. |
+
+### Source patches
+
+| Patch | File | What |
+|-------|------|------|
+| `FlowCanvas::viewport` accessor | `src/canvas.rs` | read-only `pub fn viewport(&self) -> &Viewport`, mirroring the existing `graph()`. `Viewport` is already exported; only the getter was missing, so a host could see *what* the graph is but not *where the canvas put it* — which is decided by the host's own plugin choice plus a drawable size only layout knows. Same role as `gpui_component`'s `visible_rows` / `code_editor_language` accessors: it is what lets a test assert the result instead of the intent. Backs `opening_a_graph_brings_every_node_into_view` (`workspace/tests/flow.rs`), which fails if the pane stops framing the graph into the drawable. |
+| Unmeasured drawable fails open | `src/viewport.rs` (`is_world_bounds_visible` early return, plus a daruda-authored `mod tests` guarding it) | `Viewport::window_bounds` is `None` until GPUI layout measures the canvas in `on_children_prepainted`, and every node's and edge's visibility is decided against it. Returning `false` there culled the entire graph on the first frame — and nothing recovered it: gpui's `WindowInvalidator::invalidate_view` (`window.rs`) records the entity but **skips `dirty = true`** when `draw_phase != DrawPhase::None`, so the `cx.notify()` the canvas raises from that same prepaint cannot schedule a second frame. The canvas stayed blank until an unrelated event dirtied the window (a mouse move over it — which is why upstream's own examples look fine, and why `default_plugins()` gets away with omitting `FitAllGraphPlugin`, the only handler of `FlowEvent::DrawableBoundsReady`). Culling is an optimization, so an unknown drawable now fails open: one frame of overdraw instead of an empty canvas. Repro: `--screenshot-scenario flow-graph`; with the early return back at `false` the pane's card region collapses to the single app-canvas colour. |
+
+**The other daruda-authored file is `Cargo.toml`.** It differs from
+upstream's in four ways, none of which touch source:
+
+1. `gpui = { workspace = true }` — the reason this crate is vendored at
+   all. Upstream takes `gpui` from crates.io, which resolves to a
+   *different* crate instance than daruda's pinned zed git rev, so the
+   types would not unify.
+2. `image` / `futures` / `uuid` declared locally at the versions already
+   in `Cargo.lock`, since they are not in `workspace.dependencies`. Same
+   shape as `gpui_component`'s own local `uuid`.
+3. `[lints]` — every clippy and rustc group set to `allow` with
+   `priority = -1`, matching the "vendored upstream, do not lint" stance
+   used for `gpui_component`. The `priority` is load-bearing: without it
+   the one lint deliberately left armed (below) is buried by the groups.
+4. `rust-version = "1.95"` plus `incompatible_msrv = "deny"` — unlike
+   `gpui_component`, this crate declares the floor. The manifest is
+   daruda's own file, so declaring it costs nothing when re-vendoring,
+   and it lets `cargo clippy -p ferrum_flow` catch a std API newer than
+   CI's pinned toolchain without installing that toolchain locally.
+   Note the check only sees std API stabilization, not language
+   features; CI's 1.95 pin remains the final gate.
+
+### Re-vendor procedure
+
+```bash
+git clone https://github.com/tu6ge/ferrum-flow /tmp/ff && cd /tmp/ff
+git checkout <new-commit>
+rm -rf <daruda>/crates/ferrum_flow/src
+cp -R crates/core/src <daruda>/crates/ferrum_flow/src
+cp crates/core/README.md LICENSE <daruda>/crates/ferrum_flow/
+# Cargo.toml is daruda's — reconcile it against upstream's dependency
+# list by hand, re-apply the source patches above (the viewport one's
+# `mod tests` fails loudly if you forget), then:
+cargo build -p ferrum_flow && cargo clippy -p ferrum_flow && cargo test -p ferrum_flow
+```
+
+### Framing is daruda's, not the vendored fit's
+
+`FitAllGraphPlugin` is not registered. It was, briefly, and it needed a patch
+to stop it magnifying a small graph to 3× — which was the signal that the
+policy belonged on this side: how far out it is worth zooming is a question
+about what a card still says at that size, and daruda's cards drop rows as
+they shrink. `flow_graph_pane/frame.rs` holds the whole rule (fit to shrink,
+never magnify, floor at 0.2) for both entry points, opening and ⌘0, and
+reaches the vendor only through public API — a `Plugin` for the two events and
+a `Command` for the write, since `PluginContext` exposes no viewport setter.
+That patch is therefore gone rather than kept.
+
+### Unused modules are kept, on purpose
+
+The crate ships plugins daruda never registers — clipboard, context menu,
+minimap, zoom controls, snap guides, align, select-all, focus-selection,
+node interaction, and the ⌘Z history plugin. Deleting them was tried and
+reverted; the measurement is here so it does not get re-tried on the
+assumption that it helps.
+
+| | |
+|---|---|
+| Removed | 2,576 of 15,460 lines (17%) |
+| Crate rebuild | 0.60s → 0.58s. The whole crate compiles in under a second either way, so the "less to compile on a gpui bump" argument has nothing to buy |
+| Inline tests lost | 4 of 66 — and those tests are the cheapest signal that a gpui bump broke vendored code |
+| Re-vendor cost | copy, then re-delete 10 paths, then re-edit three *retained* files: `plugins/mod.rs`, `plugins/node/mod.rs`, and `canvas.rs` — whose `default_plugins()` would silently stop matching upstream's, which is a trap for whoever reads it next |
+
+The risk pruning was meant to buy down — a bump breaking code we do not
+use — is also weaker than it looks: the unused plugins reach for the same
+gpui surface (`div`, `Element`, mouse events) as the ones daruda does
+register, so a bump that breaks them very likely breaks the rest too. If a
+bump ever does break only an unused module, deleting it *then* is the same
+work, paid only if it is ever needed.

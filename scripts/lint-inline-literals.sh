@@ -61,6 +61,7 @@ is_whitelisted() {
     # and intentionally not routed through daruda's theme module.
     [[ "$file" == crates/gpui_component/* ]] && return 0
     [[ "$file" == crates/gpui_component_macros/* ]] && return 0
+    [[ "$file" == crates/ferrum_flow/* ]] && return 0
     return 1
 }
 

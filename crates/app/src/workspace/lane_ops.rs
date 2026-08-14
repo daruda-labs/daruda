@@ -269,6 +269,7 @@ impl Workspace {
         // Skill scope follows the active lane's root; restart the watcher.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
+        self.respawn_flow_watcher(cx);
         // Empty closure: see group_ops.rs:83. Only schedules persist.
         self.mutate_durable(cx, |_, _| {});
         // Force a render even when no fallback fired — the lane list
@@ -404,6 +405,7 @@ impl Workspace {
         // New lane root → new project-skills directory to watch.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
+        self.respawn_flow_watcher(cx);
         // Return the spawned pane's id so task-driven callers (start_task)
         // write into that PTY directly rather than relying on
         // `focused_pane_id`, which races with activate_lane's focus state.
@@ -546,6 +548,7 @@ impl Workspace {
         // re-spawn so the panel switches to the new repo's skills.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
+        self.respawn_flow_watcher(cx);
         // Commit button reflects the active lane's staged count —
         // recompute now that `active` has flipped.
         self.sync_commit_buttons(cx);
@@ -639,6 +642,7 @@ impl Workspace {
     ) {
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
+        self.respawn_flow_watcher(cx);
         self.sync_commit_buttons(cx);
     }
 

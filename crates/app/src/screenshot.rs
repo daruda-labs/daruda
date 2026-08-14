@@ -234,6 +234,10 @@ pub(crate) fn schedule_capture(
             // Let the theme swap / resize / scenario overlay paint before
             // capture (`render_to_image` reads the last painted frame).
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
+            // Then one more, so anything that only settles on the frame after
+            // it was measured is what the capture reads.
+            cx.update(|cx| force_repaint(target, cx));
+            cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
 
             let out = match theme {
                 Some(theme) if batch => derive_path(&path, theme.slug()),
@@ -448,10 +452,18 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
     .detach();
 }
 
+/// Resolve which window a capture step acts on: the scenario's own window when
+/// it opened one (Settings), else the first open window — the restored
+/// workspace or the welcome screen. Every step here has to agree on this, so
+/// the fallback lives in one place.
+fn capture_target(target: Option<AnyWindowHandle>, cx: &mut App) -> Option<AnyWindowHandle> {
+    target.or_else(|| cx.windows().into_iter().next())
+}
+
 /// Resize the capture target window (or the first window when `None`) and
 /// force a repaint so the new bounds are reflected in the captured frame.
 fn resize_target(target: Option<AnyWindowHandle>, win_size: Size<Pixels>, cx: &mut App) {
-    let Some(handle) = target.or_else(|| cx.windows().into_iter().next()) else {
+    let Some(handle) = capture_target(target, cx) else {
         return;
     };
     crate::windows::try_update_workspace_window(
@@ -462,6 +474,25 @@ fn resize_target(target: Option<AnyWindowHandle>, win_size: Size<Pixels>, cx: &m
             window.resize(win_size);
             window.refresh();
         },
+    );
+}
+
+/// Force one more frame on the capture target.
+///
+/// Some content only reaches its final shape on the frame *after* GPUI has
+/// measured it — the flow graph's initial fit-all reads the canvas's laid-out
+/// size, and gpui drops a `notify` raised inside a draw phase, so the state it
+/// derives lands one frame late. A live window gets that frame from the display
+/// link; an offscreen capture gets no ticks at all, so it has to ask.
+fn force_repaint(target: Option<AnyWindowHandle>, cx: &mut App) {
+    let Some(handle) = capture_target(target, cx) else {
+        return;
+    };
+    crate::windows::try_update_workspace_window(
+        handle,
+        cx,
+        "screenshot_force_repaint",
+        move |window, _| window.refresh(),
     );
 }
 
@@ -500,24 +531,22 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::Toast
         | ScreenshotScenario::PaneContextMenu
         | ScreenshotScenario::MermaidLightbox
+        | ScreenshotScenario::FlowGraph
+        | ScreenshotScenario::FlowGraphRunning
+        | ScreenshotScenario::FlowGraphForm
+        | ScreenshotScenario::FlowGraphFormRefused
         | ScreenshotScenario::FlowPicker
         | ScreenshotScenario::FlowProfilePicker
         | ScreenshotScenario::FlowResumable
         | ScreenshotScenario::FlowRunning
-        | ScreenshotScenario::FlowAsking => None,
+        | ScreenshotScenario::FlowAsking
+        | ScreenshotScenario::FlowDeleteConfirm => None,
     }
 }
 
 /// Render `target` (or the first open window when `None`) to `path` as a PNG.
 fn capture_window(target: Option<AnyWindowHandle>, path: &Path, cx: &mut App) -> Result<()> {
-    let window = match target {
-        Some(handle) => handle,
-        None => cx
-            .windows()
-            .into_iter()
-            .next()
-            .context("no open window to capture")?,
-    };
+    let window = capture_target(target, cx).context("no open window to capture")?;
     let image = cx
         .update_window(window, |_, window, _| window.render_to_image())
         .context("capture window is gone")??;

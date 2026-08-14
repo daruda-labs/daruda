@@ -1,0 +1,50 @@
+[package]
+name = "ferrum_flow"
+description = "Vendored copy of tu6ge/ferrum-flow (Apache-2.0) at 43b762ce. Routed through daruda's workspace gpui git rev."
+version = "0.3.1"
+license = "Apache-2.0"
+publish = false
+edition = "2024"
+# Declared, unlike gpui_component — the manifest is our own file (the only
+# delta), so a floor costs nothing in re-vendoring terms, and it is what
+# arms the MSRV check below.
+rust-version = "1.95"
+
+[lib]
+doctest = false
+
+# Vendored upstream — do not lint. `priority = -1` lowers the groups so the
+# one lint we do want survives; without it a later specific entry is buried.
+[lints.clippy]
+all = { level = "allow", priority = -1 }
+correctness = { level = "allow", priority = -1 }
+suspicious = { level = "allow", priority = -1 }
+style = { level = "allow", priority = -1 }
+complexity = { level = "allow", priority = -1 }
+perf = { level = "allow", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
+# The MSRV floor, checked on whatever toolchain is installed.
+incompatible_msrv = "deny"
+
+[lints.rust]
+unused = { level = "allow", priority = -1 }
+dead_code = { level = "allow", priority = -1 }
+
+# Upstream gates test helpers on this; declaring it keeps the `#[cfg]` clean.
+[features]
+default = []
+testing = []
+
+[dependencies]
+gpui = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+smallvec = { workspace = true }
+# Not in workspace.dependencies — declared locally at the versions already
+# resolved in Cargo.lock, the way gpui_component declares its own uuid.
+futures = { version = "0.3", features = ["std"] }
+image = { version = "0.25", default-features = false }
+uuid = { version = "1.10", features = ["v4"] }

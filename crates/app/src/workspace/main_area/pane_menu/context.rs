@@ -46,8 +46,17 @@ pub(super) struct SendTarget {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PaneMenuKind {
-    Terminal { annotation_range: Option<LineRange> },
-    AgentChat { busy: bool },
+    Terminal {
+        annotation_range: Option<LineRange>,
+    },
+    AgentChat {
+        busy: bool,
+    },
+    /// `selected` is whether the graph has exactly one node selected — deleting
+    /// needs one, and the menu opens with or without.
+    FlowGraph {
+        selected: bool,
+    },
     Other,
 }
 

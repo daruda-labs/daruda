@@ -122,6 +122,13 @@ impl Workspace {
                     kind: PaneMenuKind::AgentChat { busy },
                 })
             }
+            PaneContent::FlowGraph(content) => {
+                let selected = content.view.read(cx).selected_node(cx).is_some();
+                Some(PaneMenuSnapshot {
+                    selection: None,
+                    kind: PaneMenuKind::FlowGraph { selected },
+                })
+            }
             PaneContent::File(_) | PaneContent::TaskEditPane(_) => Some(PaneMenuSnapshot {
                 selection: None,
                 kind: PaneMenuKind::Other,
@@ -181,9 +188,10 @@ impl Workspace {
                 PaneContent::Terminal(content) => {
                     Some(content.view.read(cx).focus_handle().clone())
                 }
-                PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {
-                    None
-                }
+                PaneContent::File(_)
+                | PaneContent::TaskEditPane(_)
+                | PaneContent::AgentChat(_)
+                | PaneContent::FlowGraph(_) => None,
             })
     }
 
@@ -201,7 +209,9 @@ impl Workspace {
             .filter(|pane| match &pane.content {
                 PaneContent::AgentChat(_) => wants_agent,
                 PaneContent::Terminal(_) => wants_terminal,
-                PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
+                PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::FlowGraph(_) => {
+                    false
+                }
             })
             .filter_map(|pane| {
                 let tab_index = self.tab_index_for_pane(pane.id)?;
@@ -213,7 +223,10 @@ impl Workspace {
             .collect()
     }
 
-    fn tab_index_for_pane(&self, pane_id: PaneId) -> Option<usize> {
+    /// Which tab holds this pane, by containment. Also the flow-graph open
+    /// path's dedupe — a pane in a split is in its tab whether or not it was
+    /// the last one focused there.
+    pub(in crate::workspace) fn tab_index_for_pane(&self, pane_id: PaneId) -> Option<usize> {
         self.active_runtime()
             .tabs
             .iter()

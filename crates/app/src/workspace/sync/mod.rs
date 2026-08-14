@@ -1,3 +1,4 @@
+pub(in crate::workspace) mod flows;
 pub(in crate::workspace) mod jsonl;
 pub(in crate::workspace) mod limits;
 pub(in crate::workspace) mod mcp;

@@ -22,10 +22,15 @@ mod dnd_ops;
 mod durable;
 pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod flow_ask_modal;
+pub(in crate::workspace) mod flow_cache;
+mod flow_edit;
+mod flow_file_ops;
+mod flow_graph_ops;
 pub(in crate::workspace) mod flow_history;
 mod flow_ops;
 mod flow_paths;
 pub(in crate::workspace) mod flow_request;
+pub(in crate::workspace) mod flow_runs;
 mod group_ops;
 pub(in crate::workspace) mod group_select_modal;
 mod lane_ops;
@@ -176,6 +181,8 @@ actions!(
         ToggleLaneSwitcher,
         RunFlow,
         ValidateFlow,
+        ShowFlowGraph,
+        ReloadFlowGraph,
         ActivateLane1,
         ActivateLane2,
         ActivateLane3,
@@ -396,26 +403,19 @@ pub struct Workspace {
     pub(in crate::workspace) lane_switcher: command::lane_switcher::LaneSwitcherState,
     /// Flow picker state — the list opened by `Run Flow…` / `Check Flow…`.
     pub(in crate::workspace) flow_picker: command::flow_picker::FlowPicker,
-    /// The flow runs this app started, by the lane each one holds.
-    ///
-    /// Keyed rather than single because lanes run in parallel — that is the
-    /// whole point of the app — so a second flow in another lane must not
-    /// displace the first one's cancel token, and a run ending must find
-    /// *its own* handle rather than whichever lane happens to be active.
-    /// A run held by *another process* is not in here at all and is
-    /// recognised through the lock instead.
-    pub(in crate::workspace) flow_runs:
-        HashMap<daruda_store::project::LaneRef, flow_ops::RunHandle>,
+    /// The flow runs this app started. See [`flow_runs::FlowRuns`] for why the
+    /// rules about them live in a type rather than here.
+    pub(in crate::workspace) runs: flow_runs::FlowRuns,
     /// `[flow]` — the budget every run starts with. Cached from config
     /// like the other config mirrors, refreshed in `apply_config`.
     pub(in crate::workspace) flow_config: daruda_config::flow::FlowConfig,
-    /// Distinguishes two runs this process starts in the same millisecond.
-    pub(in crate::workspace) flow_run_counter: u32,
-    /// The active lane's past runs, read from disk. `None` means "not read
-    /// yet, or something made it wrong" — the snapshot rebuilds it when the
-    /// Flows tab needs it, so invalidating is a single assignment and there
-    /// is no second path that could refresh it into disagreement.
-    pub(in crate::workspace) flow_history: Option<flow_history::FlowHistory>,
+    /// The active lane's past runs, read from disk when the Flows tab needs
+    /// them. See [`flow_cache::LaneCache`] for the rule both caches share.
+    pub(in crate::workspace) flow_history: flow_cache::LaneCache<flow_history::FlowHistory>,
+    /// The active lane's flow *files*, listed from disk. Cached because the
+    /// snapshot that needs it is rebuilt every frame, and a directory listing
+    /// per frame is not what a panel costs.
+    pub(in crate::workspace) flow_list: flow_cache::LaneCache<Vec<flow_paths::FoundFlow>>,
     /// Cached git status per (project, lane). Refreshed when the
     /// Git Changes view is activated or after a commit. Only entries
     /// that have been fetched at least once are present; missing =
@@ -693,6 +693,10 @@ pub struct Workspace {
     /// `agent::mcp::global::init`).
     _mcp_watcher: Option<crate::hooks::mcp_watcher::McpWatcherHandle>,
     _mcp_event_pump: Option<gpui::Task<()>>,
+    /// Flow-definition watcher for the active lane's three flow directories.
+    /// Dropped on re-spawn, which is how the anchors follow a lane switch.
+    _flow_watcher: Option<crate::hooks::flow_watcher::FlowWatcherHandle>,
+    _flow_event_pump: Option<gpui::Task<()>>,
     /// Cached Project-scope `.mcp.json` directories (lane root + the
     /// focused cwd, each walked up to its git repo root). Recomputed
     /// only inside `respawn_mcp_watcher` — the render snapshot reads
@@ -1168,10 +1172,10 @@ impl Workspace {
             command_palette: command::palette::CommandPaletteState::default(),
             lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
             flow_picker: command::flow_picker::FlowPicker::default(),
-            flow_runs: HashMap::new(),
-            flow_history: None,
+            runs: flow_runs::FlowRuns::default(),
+            flow_history: flow_cache::LaneCache::default(),
+            flow_list: flow_cache::LaneCache::default(),
             flow_config: config.flow.clone(),
-            flow_run_counter: 0,
             git_status_cache: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
                 file_trees: HashMap::new(),
@@ -1276,6 +1280,8 @@ impl Workspace {
             ),
             _mcp_watcher: None,
             _mcp_event_pump: None,
+            _flow_watcher: None,
+            _flow_event_pump: None,
             mcp_project_dirs: Vec::new(),
             _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(
                 |_ws, cx| {
@@ -1345,6 +1351,9 @@ impl Workspace {
         // active lane's .mcp.json, re-loading the matching scope on
         // every external edit.
         ws.refresh_mcp_watcher(window, cx);
+        // Flow watcher: subscribes to the active lane's flow directories so a
+        // graph pane and the Flows panel follow an edit made outside the app.
+        ws.respawn_flow_watcher(cx);
         // Load the right-panel Tasks tab from this workspace's
         // `data_dir`. Production paths all share the default
         // `~/.config/daruda/`; tests inject a fresh per-test dir.
@@ -1932,6 +1941,8 @@ impl Workspace {
                 }
                 "run_flow" => self.on_run_flow(&RunFlow, window, cx),
                 "validate_flow" => self.on_validate_flow(&ValidateFlow, window, cx),
+                "show_flow_graph" => self.on_show_flow_graph(&ShowFlowGraph, window, cx),
+                "reload_flow_graph" => self.on_reload_flow_graph(&ReloadFlowGraph, window, cx),
                 "focus_next_pane" => self.on_focus_next_pane(&FocusNextPane, window, cx),
                 "focus_prev_pane" => self.on_focus_prev_pane(&FocusPrevPane, window, cx),
                 "focus_pane_left" => self.on_focus_pane_left(&FocusPaneLeft, window, cx),

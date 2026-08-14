@@ -27,6 +27,19 @@ const NAME_SETTINGS: &str = "settings";
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
 const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
+/// CLI token for the flow-graph pane scenario.
+const NAME_FLOW_GRAPH: &str = "flow-graph";
+/// CLI token for the flow-graph pane with a run colouring it.
+const NAME_FLOW_GRAPH_RUNNING: &str = "flow-graph-running";
+/// CLI token for the flow-graph pane with a node selected and its inspector up.
+const NAME_FLOW_GRAPH_FORM: &str = "flow-graph-form";
+/// CLI token for the inspector showing why a save was refused.
+const NAME_FLOW_GRAPH_FORM_REFUSED: &str = "flow-graph-form-refused";
+/// CLI token for the flow delete confirmation, on the repository's copy.
+const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
+/// The name the delete dialog is asked about. Nothing is deleted — a capture
+/// never presses the button — so it names no real file.
+const FLOW_DELETE_SAMPLE_NAME: &str = "deploy.yaml";
 
 /// A wide sample diagram (two side-by-side subgraphs) — the shape that
 /// exercises the lightbox's horizontal scroll/clamp path, not just the
@@ -86,6 +99,22 @@ pub(crate) enum ScreenshotScenario {
     /// the only way to eyeball the clamp/scroll behavior a unit test can
     /// only assert numerically.
     MermaidLightbox,
+    /// Draw the first flow the active lane has. The only way to eyeball the
+    /// card layout, the layered placement and the dashed `rerun` edge —
+    /// none of which a unit test can look at.
+    FlowGraph,
+    /// The same graph, coloured by a run. The only way to see the card states
+    /// side by side — a pass, a second attempt, a gate under repair, and the
+    /// nodes still waiting — which is a comparison no single assertion makes.
+    FlowGraphRunning,
+    /// The same graph with its first node selected, so the inspector is up. The
+    /// only way to look at the column's width against the graph it takes width
+    /// from, and at whether a prompt box that size is worth reading.
+    FlowGraphForm,
+    /// The inspector after a save the engine refused. The only way to look at
+    /// the banner — where it sits, and whether the engine's sentence reads as
+    /// something a person can act on.
+    FlowGraphFormRefused,
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -97,6 +126,10 @@ pub(crate) enum ScreenshotScenario {
     /// A flow mid-run, so the status bar chip and its dropdown can be seen.
     /// Nothing else puts a run on screen without one actually running.
     FlowRunning,
+    /// The delete confirmation for a repository-committed flow — the longest
+    /// of the three sentences, and the only way to see whether it still reads
+    /// as a sentence inside the dialog rather than as a wall.
+    FlowDeleteConfirm,
     /// A flow parked on a permission question, with the Flows panel showing.
     /// The buttons a person has to read and hit — the one part of `ask` no
     /// state test can look at, and the surface Task 1 proved needs eyes.
@@ -115,11 +148,16 @@ impl ScreenshotScenario {
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
+            NAME_FLOW_GRAPH => Some(Self::FlowGraph),
+            NAME_FLOW_GRAPH_RUNNING => Some(Self::FlowGraphRunning),
+            NAME_FLOW_GRAPH_FORM => Some(Self::FlowGraphForm),
+            NAME_FLOW_GRAPH_FORM_REFUSED => Some(Self::FlowGraphFormRefused),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
             NAME_FLOW_RUNNING => Some(Self::FlowRunning),
             NAME_FLOW_ASKING => Some(Self::FlowAsking),
+            NAME_FLOW_DELETE_CONFIRM => Some(Self::FlowDeleteConfirm),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -168,6 +206,19 @@ pub(crate) fn drive(
                 ws.seed_flow_run_for_shot(true, window, cx);
             });
         }
+        ScreenshotScenario::FlowDeleteConfirm => {
+            workspace.update(cx, |ws, cx| {
+                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+            });
+            crate::workspace::right_dock::flows::ask_before_deleting(
+                std::path::PathBuf::from(FLOW_DELETE_SAMPLE_NAME),
+                FLOW_DELETE_SAMPLE_NAME,
+                crate::workspace::flow_paths::FlowOrigin::Repo,
+                workspace.downgrade(),
+                window,
+                cx,
+            );
+        }
         ScreenshotScenario::ErrorModal => {
             dialog_helpers::open_error_report_dialog(sample_report(), window, cx);
         }
@@ -185,6 +236,31 @@ pub(crate) fn drive(
             });
         }
         ScreenshotScenario::MermaidLightbox => open_mermaid_lightbox_sample(window, cx),
+        ScreenshotScenario::FlowGraph => {
+            workspace.update(cx, |ws, cx| {
+                // The panel too, and the dock it lives in: the list is where a
+                // flow is opened from, and a capture that inherited a collapsed
+                // dock would show the graph with no way to have reached it.
+                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+                ws.right_dock.update(cx, |d, _| d.open());
+                ws.open_first_flow_graph_for_shot(window, cx);
+            });
+        }
+        ScreenshotScenario::FlowGraphRunning => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_first_flow_graph_running_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::FlowGraphForm => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_first_flow_graph_selected_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::FlowGraphFormRefused => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_first_flow_graph_refused_for_shot(window, cx)
+            });
+        }
     }
 }
 

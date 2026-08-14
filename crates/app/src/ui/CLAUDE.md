@@ -14,6 +14,12 @@ App code under `crates/app/src/` must always go through `crate::ui::*`;
 direct `use gpui_component::*` imports are forbidden (enforced by
 `scripts/lint-direct-gpui-component.sh`).
 
+The same rule covers the other vendored crate, `ferrum_flow` (the
+node-graph canvas), through `crate::ui::flow_canvas` — enforced by
+`scripts/lint-direct-ferrum-flow.sh`. That one also rejects a
+fully-qualified `ferrum_flow::…` path, not just a `use` line, since such
+a path needs no import and would otherwise walk past the boundary.
+
 This file documents the **wrapper authoring rules** only. For
 preserved-widget conventions (`Entity<T>` + `Render` for stateful, plus
 the IME / focus pitfalls), see root `CLAUDE.md` §3 + §4.

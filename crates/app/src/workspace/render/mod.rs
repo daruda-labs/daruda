@@ -243,8 +243,23 @@ fn dock_resize_handle(
 /// a transparent background stays equally transparent, just duller.
 pub(in crate::workspace) const INACTIVE_PANE_DIM_AMOUNT: f32 = 0.4;
 
+#[cfg(test)]
+thread_local! {
+    /// How many times the whole-window tree has been rebuilt. A repaint
+    /// counter for tests that need to say what a change cost the window,
+    /// which is not a claim any assertion on state can make.
+    ///
+    /// Thread-local, not a global: the harness runs tests in parallel and
+    /// every one of them renders a workspace, so a shared counter would
+    /// measure the suite rather than the test.
+    pub(in crate::workspace) static WORKSPACE_RENDERS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        WORKSPACE_RENDERS.with(|n| n.set(n.get() + 1));
         if self.main_area.pending_resize {
             self.resize_all_tabs(window, cx);
         }
@@ -343,7 +358,8 @@ impl Render for Workspace {
                     PaneContent::File(f) => Some((f.view.path.clone(), f.view.lane_id)),
                     PaneContent::Terminal(_)
                     | PaneContent::TaskEditPane(_)
-                    | PaneContent::AgentChat(_) => None,
+                    | PaneContent::AgentChat(_)
+                    | PaneContent::FlowGraph(_) => None,
                 }) {
                     Some((path, wt_id)) => {
                         let root = self
@@ -1390,6 +1406,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_lane_switcher))
             .on_action(cx.listener(Self::on_run_flow))
             .on_action(cx.listener(Self::on_validate_flow))
+            .on_action(cx.listener(Self::on_show_flow_graph))
+            .on_action(cx.listener(Self::on_reload_flow_graph))
             .on_action(cx.listener(Self::on_show_left_dock_worktrees))
             .on_action(cx.listener(Self::on_show_left_dock_git))
             .on_action(cx.listener(Self::on_show_left_dock_files))

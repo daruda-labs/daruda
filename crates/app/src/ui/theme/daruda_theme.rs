@@ -58,6 +58,14 @@ daruda_theme_fields! {
     link_color => LINK,
     scrollbar_thumb => SCROLLBAR_THUMB,
     flow_attention => ACCENT,
+    // The graph canvas. Its own fields rather than borrowed ones: the canvas is
+    // a surface of its own, and a light theme has to be able to say so — without
+    // these it kept the dark constants whatever theme was installed.
+    flow_canvas_bg => CANVAS,
+    flow_grid_dot => SURFACE_2,
+    flow_edge => FLOW_GRAPH_EDGE,
+    flow_card_bg => SURFACE_1,
+    flow_chip_bg => SURFACE_2,
     status_bar_bg => BG_BASE,
     status_bar_project_dot => STATUS_BAR_PROJECT_DOT,
     status_bar_detached_bg => STATUS_BAR_DETACHED_BG,

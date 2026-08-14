@@ -141,15 +141,17 @@ fn test_restore_state_rebuilds_horizontal_split(cx: &mut TestAppContext) {
             children: vec![
                 SerializedLayout::Leaf {
                     pane_id: 10,
-                    cwd: None,
-                    file: None,
-                    agent_chat: None,
+                    content: SerializedPaneContent::Terminal {
+                        cwd: None,
+                        account_id: None,
+                    },
                 },
                 SerializedLayout::Leaf {
                     pane_id: 11,
-                    cwd: None,
-                    file: None,
-                    agent_chat: None,
+                    content: SerializedPaneContent::Terminal {
+                        cwd: None,
+                        account_id: None,
+                    },
                 },
             ],
             ratios: vec![0.3, 0.7],
@@ -222,9 +224,10 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
         SerializedTab {
             layout: SerializedLayout::Leaf {
                 pane_id: 1,
-                cwd: None,
-                file: None,
-                agent_chat: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: None,
+                    account_id: None,
+                },
             },
             last_focused_pane: 1,
             user_label: None,
@@ -232,9 +235,10 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
         SerializedTab {
             layout: SerializedLayout::Leaf {
                 pane_id: 2,
-                cwd: None,
-                file: None,
-                agent_chat: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: None,
+                    account_id: None,
+                },
             },
             last_focused_pane: 2,
             user_label: None,
@@ -242,9 +246,10 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
         SerializedTab {
             layout: SerializedLayout::Leaf {
                 pane_id: 3,
-                cwd: None,
-                file: None,
-                agent_chat: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: None,
+                    account_id: None,
+                },
             },
             last_focused_pane: 3,
             user_label: None,
@@ -319,9 +324,10 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
         tabs: vec![SerializedTab {
             layout: SerializedLayout::Leaf {
                 pane_id: 1,
-                cwd: None,
-                file: None,
-                agent_chat: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: None,
+                    account_id: None,
+                },
             },
             last_focused_pane: 1,
             user_label: None,

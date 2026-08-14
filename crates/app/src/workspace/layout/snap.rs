@@ -410,6 +410,9 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// showing — the read is skipped rather than cached for a tab nobody
     /// is looking at.
     pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
+    /// The flow files this lane can run, for the panel's read-only list.
+    /// Empty when the Flows tab is not showing, same as the history above.
+    pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
 }
 
 /// One auth domain's block in the Usage tab: whose account it is, what the last
@@ -489,6 +492,7 @@ impl RightDockSnapshot {
             || self.mcp != prev.mcp
             || self.flows != prev.flows
             || self.flow_history != prev.flow_history
+            || self.flow_files != prev.flow_files
     }
 }
 

@@ -6,6 +6,7 @@
 //!   subcommand that Claude Code spawns for each hook event. Reads
 //!   stdin, runs the FSM, writes `~/.daruda/status/<session_id>.json`.
 //!
+pub mod flow_watcher;
 pub mod handler;
 pub mod installer;
 pub mod jsonl_watcher;

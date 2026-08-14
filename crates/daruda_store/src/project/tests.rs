@@ -26,17 +26,17 @@ fn split_layout_round_trip() {
         children: vec![
             SerializedLayout::Leaf {
                 pane_id: 1,
-                cwd: Some(PathBuf::from("/a")),
-                file: None,
-                agent_chat: None,
-                account_id: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: Some(PathBuf::from("/a")),
+                    account_id: None,
+                },
             },
             SerializedLayout::Leaf {
                 pane_id: 2,
-                cwd: Some(PathBuf::from("/b")),
-                file: None,
-                agent_chat: None,
-                account_id: None,
+                content: SerializedPaneContent::Terminal {
+                    cwd: Some(PathBuf::from("/b")),
+                    account_id: None,
+                },
             },
         ],
         ratios: vec![0.5, 0.5],
@@ -61,21 +61,21 @@ fn file_leaf_round_trip_preserves_viewer_state() {
     // restart restores the exact tab the user had open.
     let leaf = SerializedLayout::Leaf {
         pane_id: 7,
-        cwd: None,
-        file: Some(SerializedFileContent {
+        content: SerializedPaneContent::File(SerializedFileContent {
             lane_id: 1,
             path: PathBuf::from("src/main.rs"),
             staged: false,
             view_mode: SerializedFileViewMode::Raw,
         }),
-        agent_chat: None,
-        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
     let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
     match restored {
-        SerializedLayout::Leaf { file: Some(fc), .. } => {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::File(fc),
+            ..
+        } => {
             assert_eq!(fc.path, PathBuf::from("src/main.rs"));
             assert!(!fc.staged);
             assert_eq!(fc.view_mode, SerializedFileViewMode::Raw);
@@ -92,11 +92,11 @@ fn legacy_leaf_without_file_field_loads_as_terminal() {
     let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
     let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
     match restored {
-        SerializedLayout::Leaf { cwd, file, .. } => {
-            assert_eq!(cwd, Some(PathBuf::from("/some/dir")));
-            assert!(file.is_none(), "missing `file` field defaults to None");
-        }
-        _ => panic!("expected Leaf"),
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { cwd, .. },
+            ..
+        } => assert_eq!(cwd, Some(PathBuf::from("/some/dir"))),
+        other => panic!("a leaf naming no kind is a terminal, got {other:?}"),
     }
 }
 
@@ -106,10 +106,10 @@ fn file_leaf_skips_serialization_when_terminal() {
     // saved state stays small for the common case.
     let leaf = SerializedLayout::Leaf {
         pane_id: 1,
-        cwd: Some(PathBuf::from("/tmp")),
-        file: None,
-        agent_chat: None,
-        account_id: None,
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/tmp")),
+            account_id: None,
+        },
     };
     let json = serde_json::to_string(&leaf).unwrap();
     assert!(
@@ -127,24 +127,27 @@ fn terminal_leaf_round_trip_preserves_account_id() {
     let id = AccountId::new();
     let leaf = SerializedLayout::Leaf {
         pane_id: 3,
-        cwd: Some(PathBuf::from("/repo")),
-        file: None,
-        agent_chat: None,
-        account_id: Some(id),
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/repo")),
+            account_id: Some(id),
+        },
     };
     let json = serde_json::to_string(&leaf).unwrap();
     let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
     match restored {
-        SerializedLayout::Leaf { account_id, .. } => assert_eq!(account_id, Some(id)),
-        _ => panic!("expected Leaf with account_id"),
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { account_id, .. },
+            ..
+        } => assert_eq!(account_id, Some(id)),
+        other => panic!("expected a terminal leaf, got {other:?}"),
     }
 
     let unset = SerializedLayout::Leaf {
         pane_id: 4,
-        cwd: Some(PathBuf::from("/repo")),
-        file: None,
-        agent_chat: None,
-        account_id: None,
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/repo")),
+            account_id: None,
+        },
     };
     let json = serde_json::to_string(&unset).unwrap();
     assert!(
@@ -160,8 +163,11 @@ fn legacy_leaf_without_account_id_field_loads_as_none() {
     let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
     let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
     match restored {
-        SerializedLayout::Leaf { account_id, .. } => assert!(account_id.is_none()),
-        _ => panic!("expected Leaf"),
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { account_id, .. },
+            ..
+        } => assert!(account_id.is_none()),
+        other => panic!("expected a terminal leaf, got {other:?}"),
     }
 }
 
@@ -239,9 +245,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
     // resumes the prior session via `session/load` on attach.
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
-        cwd: None,
-        file: None,
-        agent_chat: Some(SerializedAgentChatContent {
+        content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
             cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
             session_id: Some("sess-abc123".to_string()),
             title: Some("Fix the parser".to_string()),
@@ -250,22 +254,19 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             mode_id: None,
             content_width: SerializedChatContentWidth::Full,
         }),
-        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
     let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
     match restored {
         SerializedLayout::Leaf {
-            agent_chat: Some(ac),
-            file,
+            content: SerializedPaneContent::AgentChat(ac),
             ..
         } => {
             assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
             assert_eq!(ac.session_id, Some("sess-abc123".to_string()));
             assert_eq!(ac.title, Some("Fix the parser".to_string()));
             assert_eq!(ac.agent_id, Some("claude".to_string()));
-            assert!(file.is_none(), "agent_chat and file are mutually exclusive");
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }
@@ -279,9 +280,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
     // reinterpreted as a local path on restore.
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
-        cwd: None,
-        file: None,
-        agent_chat: Some(SerializedAgentChatContent {
+        content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
             cwd: Some(PaneCwd::Remote("host:/repo/lane".to_string())),
             session_id: None,
             title: None,
@@ -290,7 +289,6 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             mode_id: None,
             content_width: SerializedChatContentWidth::Full,
         }),
-        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
@@ -304,7 +302,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
     let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
     match restored {
         SerializedLayout::Leaf {
-            agent_chat: Some(ac),
+            content: SerializedPaneContent::AgentChat(ac),
             ..
         } => {
             assert_eq!(ac.cwd, Some(PaneCwd::Remote("host:/repo/lane".to_string())));
@@ -323,7 +321,7 @@ fn agent_chat_leaf_without_session_fields_loads_as_none() {
     let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
     match restored {
         SerializedLayout::Leaf {
-            agent_chat: Some(ac),
+            content: SerializedPaneContent::AgentChat(ac),
             ..
         } => {
             assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
@@ -332,6 +330,57 @@ fn agent_chat_leaf_without_session_fields_loads_as_none() {
             assert_eq!(ac.agent_id, None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
+    }
+}
+
+#[test]
+fn flow_graph_leaf_round_trips_its_path_and_nothing_else() {
+    // The graph is re-derived from the file on open, so the path is the
+    // whole payload — and a graph leaf has no cwd of its own.
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 11,
+        content: SerializedPaneContent::FlowGraph(SerializedFlowGraphContent {
+            path: PathBuf::from("/repo/lane/.daruda/flows/ship.yaml"),
+        }),
+    };
+
+    let json = serde_json::to_string(&leaf).unwrap();
+    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::FlowGraph(fg),
+            ..
+        } => assert_eq!(fg.path, PathBuf::from("/repo/lane/.daruda/flows/ship.yaml")),
+        other => panic!("expected a flow-graph leaf, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_leaf_that_is_not_a_flow_graph_writes_no_flow_graph_key() {
+    // Forward-compat both ways: a leaf written before flow-graph panes
+    // existed omits the key and must load as `None`, and every other pane
+    // kind keeps writing state files without it.
+    let terminal = SerializedLayout::Leaf {
+        pane_id: 1,
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/tmp")),
+            account_id: None,
+        },
+    };
+    let json = serde_json::to_string(&terminal).unwrap();
+    assert!(
+        !json.contains("\"flow_graph\""),
+        "a non-graph leaf must not write a `flow_graph` key, got: {json}"
+    );
+
+    let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
+    let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { .. },
+            ..
+        } => {}
+        other => panic!("a leaf naming no kind is a terminal, got {other:?}"),
     }
 }
 
@@ -362,10 +411,10 @@ fn agent_chat_leaf_skips_serialization_when_absent() {
     // key so existing terminal/file state files stay byte-compatible.
     let leaf = SerializedLayout::Leaf {
         pane_id: 1,
-        cwd: Some(PathBuf::from("/tmp")),
-        file: None,
-        agent_chat: None,
-        account_id: None,
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/tmp")),
+            account_id: None,
+        },
     };
     let json = serde_json::to_string(&leaf).unwrap();
     assert!(
@@ -382,13 +431,11 @@ fn legacy_leaf_without_agent_chat_field_loads_as_none() {
     let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
     let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
     match restored {
-        SerializedLayout::Leaf { agent_chat, .. } => {
-            assert!(
-                agent_chat.is_none(),
-                "missing `agent_chat` defaults to None"
-            );
-        }
-        _ => panic!("expected Leaf"),
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { .. },
+            ..
+        } => {}
+        other => panic!("a leaf with no `agent_chat` key is a terminal, got {other:?}"),
     }
 }
 
@@ -606,10 +653,10 @@ fn serialized_tab_user_label_round_trip() {
     let tab = SerializedTab {
         layout: SerializedLayout::Leaf {
             pane_id: 7,
-            cwd: None,
-            file: None,
-            agent_chat: None,
-            account_id: None,
+            content: SerializedPaneContent::Terminal {
+                cwd: None,
+                account_id: None,
+            },
         },
         last_focused_pane: 7,
         user_label: Some("PR #123 review".into()),
@@ -639,10 +686,10 @@ fn serialized_tab_user_label_none_is_skipped_in_json() {
     let tab = SerializedTab {
         layout: SerializedLayout::Leaf {
             pane_id: 1,
-            cwd: None,
-            file: None,
-            agent_chat: None,
-            account_id: None,
+            content: SerializedPaneContent::Terminal {
+                cwd: None,
+                account_id: None,
+            },
         },
         last_focused_pane: 1,
         user_label: None,
@@ -979,4 +1026,56 @@ fn lane_ref_json_snapshot() {
         lane: 3,
     };
     insta::assert_snapshot!(serde_json::to_string_pretty(&r).unwrap());
+}
+
+/// The shape on disk did not change with the enum. Every key a leaf used to
+/// carry is still spelled the same way, and `content` — which is a Rust shape,
+/// not a file one — is nowhere in the JSON.
+///
+/// This is what makes the change need no migration: a state file written by
+/// any earlier build loads, and one written now is read by them.
+#[test]
+fn the_enum_writes_the_keys_the_file_always_had() {
+    let graph = SerializedLayout::Leaf {
+        pane_id: 2,
+        content: SerializedPaneContent::FlowGraph(SerializedFlowGraphContent {
+            path: PathBuf::from("/repo/.daruda/flows/ship.yaml"),
+        }),
+    };
+    let json = serde_json::to_string(&graph).unwrap();
+    assert!(json.contains(r#""flow_graph":{"path""#), "{json}");
+    assert!(
+        !json.contains("content"),
+        "`content` is how Rust holds it, not how the file spells it: {json}"
+    );
+
+    let terminal = SerializedLayout::Leaf {
+        pane_id: 1,
+        content: SerializedPaneContent::Terminal {
+            cwd: Some(PathBuf::from("/tmp")),
+            account_id: None,
+        },
+    };
+    assert_eq!(
+        serde_json::to_string(&terminal).unwrap(),
+        r#"{"type":"Leaf","pane_id":1,"cwd":"/tmp"}"#
+    );
+}
+
+/// A file naming two kinds cannot be written by this app, and is not worth
+/// refusing to open a window over. The first one wins, in the order restore
+/// already read them.
+#[test]
+fn a_leaf_naming_two_kinds_takes_the_first() {
+    let json = r#"{"type":"Leaf","pane_id":1,"cwd":"/tmp",
+        "file":{"worktree_id":1,"path":"a.rs","staged":false,"view_mode":"raw"},
+        "flow_graph":{"path":"ship.yaml"}}"#;
+    let restored: SerializedLayout = serde_json::from_str(json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::File(fc),
+            ..
+        } => assert_eq!(fc.path, PathBuf::from("a.rs")),
+        other => panic!("expected the file leaf, got {other:?}"),
+    }
 }

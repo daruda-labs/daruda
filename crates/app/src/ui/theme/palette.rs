@@ -2196,6 +2196,103 @@ pub const MCP_BADGE_RADIUS: f32 = RADIUS_XS;
 pub const MCP_MALFORMED_BADGE_BG: Hsla = hsla(14.0, 0.50, 0.40, 0.30);
 pub const MCP_MALFORMED_BADGE_TEXT: Hsla = with_lightness(MCP_INDICATOR_MALFORMED, 0.85);
 
+// ── Flow graph pane ────────────────────────────────────────────────────
+// The vendored canvas lays a node out at the size declared on the graph
+// node and clips whatever overflows, so the card size is fixed here rather
+// than derived from its content. The card spends its height on four rows:
+// kind chip + status badge, id, agent axes, prompt first line.
+
+/// Flow graph node card width (px).
+pub const FLOW_GRAPH_NODE_W: f32 = 250.0;
+/// Flow graph node card height (px).
+pub const FLOW_GRAPH_NODE_H: f32 = 112.0;
+/// Inner padding of a flow graph node card (px).
+pub const FLOW_GRAPH_CARD_PAD: f32 = PAD_LG;
+/// Flow graph node card corner radius (px).
+pub const FLOW_GRAPH_CARD_RADIUS: f32 = RADIUS_MD;
+/// Gap between a flow graph card's rows (px).
+pub const FLOW_GRAPH_CARD_ROW_GAP: f32 = PAD_XS;
+/// The node id, the one line read at a glance.
+pub const FLOW_GRAPH_ID_FONT_SIZE: f32 = FONT_SIZE_LG;
+/// Agent axes and prompt preview.
+pub const FLOW_GRAPH_META_FONT_SIZE: f32 = FONT_SIZE_SM;
+/// The `AGENT` / `GATE` chip.
+pub const FLOW_GRAPH_CHIP_FONT_SIZE: f32 = FONT_SIZE_XS;
+/// Chip padding X (px).
+pub const FLOW_GRAPH_CHIP_PAD_X: f32 = PAD_SM;
+/// Chip corner radius (px).
+pub const FLOW_GRAPH_CHIP_RADIUS: f32 = RADIUS_SM;
+
+// A card's *box* shrinks with zoom but its text does not — the canvas scales
+// `w`/`h` and leaves the content the size the renderer asked for. So a card
+// zoomed out does not become a small card, it becomes a card too small for
+// what is in it. These are the widths (screen px, after zoom) at which the
+// card drops a row rather than clipping one.
+
+/// At or above this screen width a card shows everything: chip + badge, id,
+/// agent axes, prompt.
+pub const FLOW_GRAPH_DENSITY_FULL_W: f32 = 200.0;
+/// At or above this, only the line that identifies the node: a kind dot, the
+/// id, and its status.
+pub const FLOW_GRAPH_DENSITY_COMPACT_W: f32 = 110.0;
+/// The id alone, at this size, once a card is narrower than
+/// [`FLOW_GRAPH_DENSITY_COMPACT_W`].
+pub const FLOW_GRAPH_MARKER_FONT_SIZE: f32 = FONT_SIZE_XS;
+/// The kind dot that replaces the chip once the chip's text would not fit.
+pub const FLOW_GRAPH_KIND_DOT: f32 = 6.0;
+
+// Framing a graph into the pane. daruda owns this rather than taking the
+// vendored fit's policy, because the floor below belongs with the card
+// densities above: how far out it is worth zooming is exactly the question of
+// what a card still says when it gets there.
+
+/// Fraction of the drawable left as margin on each side when framing.
+pub const FLOW_GRAPH_FRAME_MARGIN: f32 = 0.08;
+/// Furthest out framing will go. Below this a marker card is narrower than
+/// the id it carries, so the graph stops being readable and panning is the
+/// better answer.
+pub const FLOW_GRAPH_FRAME_MIN_ZOOM: f32 = 0.2;
+
+// The inspector beside the graph. Its width is what the canvas loses, so it is
+// the narrowest that still holds a prompt worth reading — and the graph re-fits
+// into what is left (see `flow_graph_pane::frame`).
+
+/// Width of the node inspector.
+pub const FLOW_INSPECTOR_W: f32 = 280.0;
+/// Space between the inspector's rows.
+pub const FLOW_INSPECTOR_GAP: f32 = PAD_LG;
+/// Inset around the inspector's content.
+pub const FLOW_INSPECTOR_PAD: f32 = PAD_LG;
+/// Rows the prompt box shows before it scrolls. Five, measured against a short
+/// pane: eight pushed the Save button past the bottom edge, and the column
+/// scrolls for the rest.
+pub const FLOW_INSPECTOR_PROMPT_ROWS: usize = 5;
+
+/// Canvas behind the graph — the app canvas, so the pane reads as a
+/// surface rather than a floating panel.
+pub const FLOW_GRAPH_BACKGROUND: Hsla = CANVAS;
+/// Dot grid on that canvas. Faint enough to give depth without competing
+/// with the edges.
+pub const FLOW_GRAPH_GRID_DOT: Hsla = SURFACE_2;
+/// A `deps` edge and the port discs it joins.
+pub const FLOW_GRAPH_EDGE: Hsla = hsla(218.0, 0.089, 0.35, 1.0);
+/// Node card fill.
+pub const FLOW_GRAPH_CARD_BG: Hsla = SURFACE_1;
+/// Kind chip fill.
+pub const FLOW_GRAPH_CHIP_BG: Hsla = SURFACE_2;
+
+/// A node that has not started. Its border is the card's own hairline —
+/// pending is the absence of a signal, not a signal of its own.
+pub const FLOW_GRAPH_STATUS_PENDING: Hsla = HAIRLINE;
+/// A node the run is on now.
+pub const FLOW_GRAPH_STATUS_RUNNING: Hsla = ACCENT;
+/// A node that passed.
+pub const FLOW_GRAPH_STATUS_PASSED: Hsla = SUCCESS;
+/// A node on a second or later attempt, or a gate running its repair.
+pub const FLOW_GRAPH_STATUS_RETRIED: Hsla = WARNING;
+/// A node that failed and stopped the run.
+pub const FLOW_GRAPH_STATUS_FAILED: Hsla = ERROR;
+
 #[cfg(test)]
 mod tests {
     use super::*;

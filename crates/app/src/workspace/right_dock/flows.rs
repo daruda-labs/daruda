@@ -13,6 +13,7 @@
 use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings;
+use crate::ui::ContextMenuExt as _;
 use crate::ui::theme;
 use crate::workspace::flow_ops::FlowRunRow;
 
@@ -26,6 +27,27 @@ pub(in crate::workspace) fn render(
     // own — every sibling here does, and the two spots that did not
     // rendered near-black against the dock.
     let mut body = super::right_panel_body().text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE));
+    // The files first, then what they are doing: a person comes here to
+    // open a flow at least as often as to watch one, and until now the only
+    // way in was knowing the command palette had an entry for it.
+    body = body.child(
+        crate::ui::SectionHeader::new(strings::right_panel_flows_heading())
+            .actions(new_flow_button(snap)),
+    );
+    if snap.flow_files.is_empty() {
+        body = body.child(
+            crate::ui::placeholder_text(strings::right_panel_flows_empty())
+                .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
+                .text_color(theme::current(cx).text_subtle),
+        );
+    } else {
+        body = body.children(
+            snap.flow_files
+                .iter()
+                .map(|found| flow_row(found, snap, cx)),
+        );
+    }
+    body = body.child(crate::ui::Divider::horizontal());
     body = body.child(crate::ui::SectionHeader::new(
         strings::right_panel_flow_live_heading(),
     ));
@@ -90,6 +112,236 @@ fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla {
 /// One past run: when it started, how it ended, and its report on click.
 /// A run with no report is not clickable; which those are was decided when
 /// the history was read.
+/// `[+]` in the section header. A flow made here lands in this project's own
+/// directory under the app home, not in the working tree — see
+/// `Workspace::create_flow`.
+fn new_flow_button(snap: &RightDockSnapshot) -> impl IntoElement {
+    let workspace = snap.workspace.clone();
+    crate::ui::button_bare("flow-new")
+        .icon(crate::ui::IconName::Plus)
+        .tooltip(strings::flow_new_tooltip())
+        .on_click(move |_, window, cx| {
+            let Some(ws) = workspace.upgrade() else {
+                return;
+            };
+            let weak = ws.downgrade();
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                weak,
+                strings::flow_new_title(),
+                strings::flow_new_placeholder(),
+                None,
+                move |ws, value, window, cx| {
+                    let Some(name) = value else {
+                        return;
+                    };
+                    ws.create_flow(&name, window, cx);
+                },
+                window,
+                cx,
+            );
+        })
+}
+
+/// What the origin word for a flow is, on a row and in a dialog about it.
+fn origin_label(origin: crate::workspace::flow_paths::FlowOrigin) -> String {
+    use crate::workspace::flow_paths::FlowOrigin;
+    match origin {
+        FlowOrigin::Repo => strings::right_panel_flow_origin_repo(),
+        FlowOrigin::Project => strings::right_panel_flow_origin_project(),
+        FlowOrigin::Global => strings::right_panel_flow_origin_global(),
+    }
+}
+
+/// What the delete dialog says about a flow.
+///
+/// It names the origin because three directories can hold the same file name —
+/// the row says which one it is, and a dialog that dropped that would ask about
+/// `deploy.yaml` when two of them exist.
+///
+/// The repository's gets its own sentence, and not the one a warning would use:
+/// a committed file is the *recoverable* case, and what the person actually
+/// needs told is that the deletion lands in the working tree for everyone.
+fn delete_confirm_body(name: &str, origin: crate::workspace::flow_paths::FlowOrigin) -> String {
+    match origin {
+        crate::workspace::flow_paths::FlowOrigin::Repo => {
+            strings::flow_delete_confirm_body_repo(name)
+        }
+        other => strings::flow_delete_confirm_body(name, &origin_label(other)),
+    }
+}
+
+/// Rename and delete, on the row they act on. Both are file operations — the
+/// contents are S4's business, and neither touches the run history, which
+/// records a resolved spec rather than the file it came from.
+///
+/// Origin does not gate either one. A flow under `.daruda/flows/` is committed
+/// *in order to* be authored there, so making it read-only would lock the one
+/// place a shared flow lives; what origin changes is what the dialog says, not
+/// what it is allowed to do.
+fn flow_row_menu(
+    path: std::path::PathBuf,
+    name: String,
+    origin: crate::workspace::flow_paths::FlowOrigin,
+    ws: gpui::WeakEntity<crate::workspace::Workspace>,
+) -> Vec<crate::ui::PopupMenuItem> {
+    use crate::workspace::render::ws_popup_menu_item;
+
+    let rename_path = path.clone();
+    let rename_from = name.clone();
+    let rename = ws_popup_menu_item(
+        ws.clone(),
+        strings::flow_row_menu_rename(),
+        false,
+        move |_, window, cx| {
+            let weak = cx.entity().downgrade();
+            let path = rename_path.clone();
+            let initial = rename_from.clone();
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                weak,
+                strings::flow_rename_title(),
+                strings::flow_new_placeholder(),
+                Some(&initial),
+                move |ws, value, _window, cx| {
+                    let Some(to) = value else {
+                        return;
+                    };
+                    ws.rename_flow(&path, &to, cx);
+                },
+                window,
+                cx,
+            );
+        },
+    );
+
+    let delete_path = path;
+    let delete_name = name;
+    let delete = ws_popup_menu_item(
+        ws,
+        strings::flow_row_menu_delete(),
+        false,
+        move |_, window, cx| {
+            let weak = cx.entity().downgrade();
+            ask_before_deleting(delete_path.clone(), &delete_name, origin, weak, window, cx);
+        },
+    );
+    vec![rename, delete]
+}
+
+/// Ask, then delete on yes. One funnel so the screenshot scenario opens the
+/// dialog a person actually gets rather than a second copy of it.
+pub(in crate::workspace) fn ask_before_deleting(
+    path: std::path::PathBuf,
+    name: &str,
+    origin: crate::workspace::flow_paths::FlowOrigin,
+    ws: gpui::WeakEntity<crate::workspace::Workspace>,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) {
+    crate::workspace::dialog_helpers::open_confirm_dialog(
+        strings::flow_delete_confirm_title(),
+        delete_confirm_body(name, origin),
+        strings::flow_delete_confirm_ok(),
+        crate::ui::dialog::ButtonVariant::Danger,
+        move |_, _window, app| {
+            let path = path.clone();
+            if let Some(ws) = ws.upgrade() {
+                ws.update(app, |ws, cx| ws.delete_flow(&path, cx));
+            }
+        },
+        window,
+        cx,
+    );
+}
+
+/// One flow file: its name, where it came from, and a click that draws it.
+///
+/// The origin is not decoration — the repository's `.daruda/flows/` and the
+/// person's own folder can hold the same name, and a row that did not say
+/// which would open the other one without a word.
+fn flow_row(
+    found: &crate::workspace::flow_paths::FoundFlow,
+    snap: &RightDockSnapshot,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let t = theme::current(cx);
+    let workspace = snap.workspace.clone();
+    let ws_for_menu = snap.workspace.clone();
+    let path = found.path.clone();
+    let menu_path = found.path.clone();
+    let name = found
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| found.path.display().to_string());
+    let menu_name = name.clone();
+    let menu_origin = found.origin;
+    let origin = origin_label(found.origin);
+    let row_hover_bg = t.skill_row_hover_bg;
+    div()
+        .id(SharedString::from(format!(
+            "flow-file-{}",
+            found.path.display()
+        )))
+        .flex()
+        .flex_row()
+        .items_center()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .px(px(theme::SKILL_ROW_PAD_X))
+        .py(px(theme::SKILL_ROW_PAD_Y))
+        .rounded(px(theme::SKILL_ROW_RADIUS))
+        .cursor_pointer()
+        .hover(move |s| s.bg(row_hover_bg))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(t.text_body)
+                .child(name),
+        )
+        .child(
+            div()
+                .flex_shrink()
+                .min_w_0()
+                .truncate()
+                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                .text_color(t.text_subtle)
+                .child(origin),
+        )
+        .on_click(move |_, window, cx| {
+            let path = path.clone();
+            match workspace.update(cx, |ws, cx| ws.open_flow_graph(&path, window, cx)) {
+                Ok(()) => {}
+                Err(e) => daruda_store::observability::log_writer::LogWriter::log(
+                    daruda_store::observability::error_report::ErrorReport::new(
+                        "Flows panel: workspace gone while opening a flow graph",
+                    )
+                    .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context("error", format!("{e}"))
+                    .dedup("right_dock.flow.graph")
+                    .build(),
+                ),
+            }
+        })
+        // `.context_menu()` returns a wrapper that only implements
+        // `ParentElement`/`Styled`, so it has to come after every
+        // `Stateful`/`InteractiveElement` call above.
+        .context_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
+            flow_row_menu(
+                menu_path.clone(),
+                menu_name.clone(),
+                menu_origin,
+                ws_for_menu.clone(),
+            )
+            .into_iter()
+            .fold(menu, |m, item| m.item(item))
+        }))
+}
+
 fn past_row(
     run: &crate::workspace::flow_history::FlowRunEntry,
     lane: daruda_store::project::LaneRef,
@@ -423,4 +675,43 @@ fn run_summary(run: &FlowRunRow, snap: &RightDockSnapshot, cx: &gpui::App) -> im
                 }),
             ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::flow_paths::FlowOrigin;
+
+    /// The trap the origin column exists for: two directories holding
+    /// `deploy.yaml`, and a dialog that says only the name.
+    #[test]
+    fn the_delete_dialog_says_which_of_the_same_name_goes() {
+        let project = delete_confirm_body("deploy.yaml", FlowOrigin::Project);
+        let global = delete_confirm_body("deploy.yaml", FlowOrigin::Global);
+        assert_ne!(project, global);
+        assert!(
+            project.contains(&origin_label(FlowOrigin::Project)),
+            "{project}"
+        );
+        assert!(
+            global.contains(&origin_label(FlowOrigin::Global)),
+            "{global}"
+        );
+    }
+
+    /// The repository's copy is not the dangerous one — git has it — so it is
+    /// told apart for what it does say: the deletion reaches the working tree.
+    #[test]
+    fn the_repository_copy_gets_its_own_sentence() {
+        let repo = delete_confirm_body("deploy.yaml", FlowOrigin::Repo);
+        assert!(repo.contains("deploy.yaml"), "{repo}");
+        // Against the shared sentence carrying the word `repo`, not against
+        // another origin's: an origin word alone makes those differ, so a test
+        // comparing them would pass with the repository arm gone.
+        assert_ne!(
+            repo,
+            strings::flow_delete_confirm_body("deploy.yaml", &origin_label(FlowOrigin::Repo)),
+            "the repository's copy fell back to the shared sentence"
+        );
+    }
 }

@@ -223,10 +223,12 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
     assert!(
         saved_tabs.iter().any(|t| matches!(
             &t.layout,
-            daruda_store::project::SerializedLayout::Leaf { file: Some(fc), .. }
-                if fc.path == std::path::Path::new("a.txt")
+            daruda_store::project::SerializedLayout::Leaf {
+                content: daruda_store::project::SerializedPaneContent::File(fc),
+                ..
+            } if fc.path == std::path::Path::new("a.txt")
         )),
-        "saved state must include a Leaf with file: Some(..) for a.txt",
+        "saved state must include a file leaf for a.txt",
     );
 
     // Build a fresh workspace at the same project root and apply

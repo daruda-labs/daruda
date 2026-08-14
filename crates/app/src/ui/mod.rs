@@ -26,6 +26,7 @@ pub mod code_editor;
 pub mod dialog;
 pub mod disclosure;
 pub mod divider;
+pub mod flow_canvas;
 pub mod form_helpers;
 pub mod group_box;
 pub mod highlighter;
@@ -67,7 +68,7 @@ pub use code_editor::{
 };
 pub use disclosure::{Disclosure, disclosure};
 pub use divider::Divider;
-pub use form_helpers::{checkbox_row, field_row};
+pub use form_helpers::{checkbox_row, field_column, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputGrowMode, InputState, Rope, RopeExt,

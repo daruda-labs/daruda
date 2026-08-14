@@ -126,5 +126,10 @@
   "text_subtle": "#7b818e",
   "link_color": "#0a3ccc",
   "scrollbar_thumb": "#00000040",
-  "text_primary": "#1a1d24"
+  "text_primary": "#1a1d24",
+  "flow_canvas_bg": "#eceef1",
+  "flow_grid_dot": "#c9ccd4",
+  "flow_edge": "#9aa1ae",
+  "flow_card_bg": "#f7f8fa",
+  "flow_chip_bg": "#e3e5ea"
 }

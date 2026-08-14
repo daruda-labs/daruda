@@ -45,6 +45,16 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "show_flow_graph",
+        label: s::command_show_flow_graph,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "reload_flow_graph",
+        label: s::command_reload_flow_graph,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "open_settings",
         label: s::command_settings,
         shortcut: "Cmd+,",

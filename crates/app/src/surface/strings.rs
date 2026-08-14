@@ -355,6 +355,7 @@ command_string!(command_rename_project, "command.rename_project");
 command_string!(command_reopen_task, "command.reopen_task");
 command_string!(command_retry_task, "command.retry_task");
 command_string!(command_right_panel_flows, "command.right_panel_flows");
+command_string!(command_reload_flow_graph, "command.reload_flow_graph");
 command_string!(command_right_panel_skills, "command.right_panel_skills");
 command_string!(command_right_panel_tasks, "command.right_panel_tasks");
 command_string!(command_right_panel_tools, "command.right_panel_tools");
@@ -522,6 +523,331 @@ pub fn flow_ask_modal_stop() -> String {
 /// Title of the modal that brings a parked question to the front.
 pub fn flow_ask_modal_title() -> String {
     rust_i18n::t!("flow.ask_modal_title").into_owned()
+}
+/// Prompt when the picker is choosing a flow to draw.
+pub fn flow_picker_prompt_graph() -> String {
+    rust_i18n::t!("flow.picker_prompt_graph").into_owned()
+}
+/// Chip on an agent node in the flow graph.
+pub fn flow_graph_kind_agent() -> String {
+    rust_i18n::t!("flow.graph_kind_agent").into_owned()
+}
+/// Chip on a command node — a gate whose exit code is the verdict.
+pub fn flow_graph_kind_gate() -> String {
+    rust_i18n::t!("flow.graph_kind_gate").into_owned()
+}
+pub fn flow_graph_status_running() -> String {
+    rust_i18n::t!("flow.graph_status_running").into_owned()
+}
+/// Second or later attempt. The first is not worth saying — every node has
+/// one, and saying it on every card buries the card that says "3".
+pub fn flow_graph_status_attempt(attempt: u32) -> String {
+    rust_i18n::t!("flow.graph_status_attempt", attempt = attempt).into_owned()
+}
+pub fn flow_graph_status_passed() -> String {
+    rust_i18n::t!("flow.graph_status_passed").into_owned()
+}
+pub fn flow_graph_status_failed() -> String {
+    rust_i18n::t!("flow.graph_status_failed").into_owned()
+}
+pub fn flow_graph_status_fixing() -> String {
+    rust_i18n::t!("flow.graph_status_fixing").into_owned()
+}
+/// A node that retries itself, shown when the run is not driving it.
+pub fn flow_graph_policy_retry(max_attempts: u32) -> String {
+    rust_i18n::t!("flow.graph_policy_retry", max = max_attempts).into_owned()
+}
+/// A gate that repairs. Said even when `rerun` is empty — an empty set
+/// re-runs the gate alone, and no edge would otherwise reveal the policy.
+pub fn flow_graph_policy_repair(max_attempts: u32) -> String {
+    rust_i18n::t!("flow.graph_policy_repair", max = max_attempts).into_owned()
+}
+/// Label on the dashed edge a gate's repair sends back.
+pub fn flow_graph_rerun_edge() -> String {
+    rust_i18n::t!("flow.graph_rerun_edge").into_owned()
+}
+/// Heading over the panel's list of flow files — the ones this lane can run,
+/// as opposed to the runs below it.
+pub fn right_panel_flows_heading() -> String {
+    rust_i18n::t!("flow.panel_flows_heading").into_owned()
+}
+pub fn right_panel_flows_empty() -> String {
+    rust_i18n::t!("flow.panel_flows_empty").into_owned()
+}
+/// What a graph pane says once its file has been deleted under it.
+pub fn flow_file_gone() -> String {
+    rust_i18n::t!("flow.file_gone").into_owned()
+}
+/// What each answer to a node's permission question is called. The values
+/// stay the serde spellings; only what a person reads is translated.
+pub fn flow_form_permission_deny() -> String {
+    rust_i18n::t!("flow.form_permission_deny").into_owned()
+}
+pub fn flow_form_permission_allow_once() -> String {
+    rust_i18n::t!("flow.form_permission_allow_once").into_owned()
+}
+pub fn flow_form_permission_ask() -> String {
+    rust_i18n::t!("flow.form_permission_ask").into_owned()
+}
+/// Title of the dialog that asks what to call a new flow.
+pub fn flow_new_title() -> String {
+    rust_i18n::t!("flow.new_title").into_owned()
+}
+pub fn flow_new_placeholder() -> String {
+    rust_i18n::t!("flow.new_placeholder").into_owned()
+}
+pub fn flow_new_tooltip() -> String {
+    rust_i18n::t!("flow.new_tooltip").into_owned()
+}
+pub fn flow_rename_title() -> String {
+    rust_i18n::t!("flow.rename_title").into_owned()
+}
+pub fn flow_row_menu_rename() -> String {
+    rust_i18n::t!("flow.row_menu_rename").into_owned()
+}
+pub fn flow_row_menu_delete() -> String {
+    rust_i18n::t!("flow.row_menu_delete").into_owned()
+}
+/// Confirmation before a flow file is removed. Names the file, because the
+/// menu was opened on a row and the dialog is what the person reads.
+pub fn flow_delete_confirm_title() -> String {
+    rust_i18n::t!("flow.delete_confirm_title").into_owned()
+}
+pub fn flow_delete_confirm_body(name: &str, origin: &str) -> String {
+    rust_i18n::t!("flow.delete_confirm_body", name = name, origin = origin).into_owned()
+}
+/// The repository's copy. Separate because the consequence is different: it is
+/// in the working tree, so the deletion is something the whole repo sees.
+pub fn flow_delete_confirm_body_repo(name: &str) -> String {
+    rust_i18n::t!("flow.delete_confirm_body_repo", name = name).into_owned()
+}
+/// The button that answers the question. Not the menu's label: an ellipsis on a
+/// menu item promises a question, and this *is* the question.
+pub fn flow_delete_confirm_ok() -> String {
+    rust_i18n::t!("flow.delete_confirm_ok").into_owned()
+}
+pub fn flow_name_refused_title() -> String {
+    rust_i18n::t!("flow.name_refused_title").into_owned()
+}
+pub fn flow_name_empty() -> String {
+    rust_i18n::t!("flow.name_empty").into_owned()
+}
+pub fn flow_name_has_separator() -> String {
+    rust_i18n::t!("flow.name_has_separator").into_owned()
+}
+pub fn flow_name_taken() -> String {
+    rust_i18n::t!("flow.name_taken").into_owned()
+}
+/// Why a new flow could not be written: there is no agent to name in it.
+pub fn flow_no_agent() -> String {
+    rust_i18n::t!("flow.no_agent").into_owned()
+}
+pub fn flow_create_failed_title() -> String {
+    rust_i18n::t!("flow.create_failed_title").into_owned()
+}
+pub fn flow_rename_failed_title() -> String {
+    rust_i18n::t!("flow.rename_failed_title").into_owned()
+}
+/// The node inspector's field labels and its two actions.
+pub fn flow_form_id_label() -> String {
+    rust_i18n::t!("flow.form_id_label").into_owned()
+}
+pub fn flow_form_deps_label() -> String {
+    rust_i18n::t!("flow.form_deps_label").into_owned()
+}
+pub fn flow_form_prompt_label() -> String {
+    rust_i18n::t!("flow.form_prompt_label").into_owned()
+}
+/// Shown instead of the prompt box when the node names a file for it.
+pub fn flow_form_prompt_file_label() -> String {
+    rust_i18n::t!("flow.form_prompt_file_label").into_owned()
+}
+pub fn flow_form_output_label() -> String {
+    rust_i18n::t!("flow.form_output_label").into_owned()
+}
+pub fn flow_form_run_label() -> String {
+    rust_i18n::t!("flow.form_run_label").into_owned()
+}
+pub fn flow_form_timeout_label() -> String {
+    rust_i18n::t!("flow.form_timeout_label").into_owned()
+}
+pub fn flow_form_id_required() -> String {
+    rust_i18n::t!("flow.form_id_required").into_owned()
+}
+pub fn flow_form_timeout_unreadable(text: &str) -> String {
+    rust_i18n::t!("flow.form_timeout_unreadable", text = text).into_owned()
+}
+pub fn flow_form_save() -> String {
+    rust_i18n::t!("flow.form_save").into_owned()
+}
+pub fn flow_form_revert() -> String {
+    rust_i18n::t!("flow.form_revert").into_owned()
+}
+/// What a node is: an agent turn, or a shell command that gates the flow.
+pub fn flow_form_kind_label() -> String {
+    rust_i18n::t!("flow.form_kind_label").into_owned()
+}
+pub fn flow_form_kind_agent() -> String {
+    rust_i18n::t!("flow.form_kind_agent").into_owned()
+}
+pub fn flow_form_kind_command() -> String {
+    rust_i18n::t!("flow.form_kind_command").into_owned()
+}
+pub fn flow_form_output_required() -> String {
+    rust_i18n::t!("flow.form_output_required").into_owned()
+}
+pub fn flow_form_run_required() -> String {
+    rust_i18n::t!("flow.form_run_required").into_owned()
+}
+
+/// The either-or select: prose typed here, or the file that holds it.
+pub fn flow_form_source_inline() -> String {
+    rust_i18n::t!("flow.form_source_inline").into_owned()
+}
+pub fn flow_form_source_file() -> String {
+    rust_i18n::t!("flow.form_source_file").into_owned()
+}
+
+/// The graph pane's node actions, and the one refusal deleting has of its own.
+pub fn flow_add_node() -> String {
+    rust_i18n::t!("flow.add_node").into_owned()
+}
+pub fn flow_delete_node() -> String {
+    rust_i18n::t!("flow.delete_node").into_owned()
+}
+pub fn flow_delete_node_last() -> String {
+    rust_i18n::t!("flow.delete_node_last").into_owned()
+}
+pub fn flow_delete_node_confirm_title() -> String {
+    rust_i18n::t!("flow.delete_node_confirm_title").into_owned()
+}
+pub fn flow_delete_node_confirm_body(node: &str, dependents: usize) -> String {
+    if dependents == 0 {
+        rust_i18n::t!("flow.delete_node_confirm_body", node = node).into_owned()
+    } else {
+        rust_i18n::t!(
+            "flow.delete_node_confirm_body_deps",
+            node = node,
+            n = dependents.to_string()
+        )
+        .into_owned()
+    }
+}
+
+/// The fail-policy select and the fields each policy shows.
+pub fn flow_form_fail_label() -> String {
+    rust_i18n::t!("flow.form_fail_label").into_owned()
+}
+pub fn flow_form_fail_halt() -> String {
+    rust_i18n::t!("flow.form_fail_halt").into_owned()
+}
+pub fn flow_form_fail_retry() -> String {
+    rust_i18n::t!("flow.form_fail_retry").into_owned()
+}
+pub fn flow_form_fail_repair() -> String {
+    rust_i18n::t!("flow.form_fail_repair").into_owned()
+}
+pub fn flow_form_hint_label() -> String {
+    rust_i18n::t!("flow.form_hint_label").into_owned()
+}
+pub fn flow_form_hint_file_label() -> String {
+    rust_i18n::t!("flow.form_hint_file_label").into_owned()
+}
+pub fn flow_form_fix_label() -> String {
+    rust_i18n::t!("flow.form_fix_label").into_owned()
+}
+pub fn flow_form_rerun_label() -> String {
+    rust_i18n::t!("flow.form_rerun_label").into_owned()
+}
+pub fn flow_form_attempts_label() -> String {
+    rust_i18n::t!("flow.form_attempts_label").into_owned()
+}
+pub fn flow_form_wait_label() -> String {
+    rust_i18n::t!("flow.form_wait_label").into_owned()
+}
+pub fn flow_form_attempts_unreadable(text: &str) -> String {
+    rust_i18n::t!("flow.form_attempts_unreadable", text = text).into_owned()
+}
+
+/// The select row for "this node names none" — the absent option.
+pub fn flow_form_absent() -> String {
+    rust_i18n::t!("flow.form_absent").into_owned()
+}
+pub fn flow_form_cwd_label() -> String {
+    rust_i18n::t!("flow.form_cwd_label").into_owned()
+}
+pub fn flow_form_agent_section() -> String {
+    rust_i18n::t!("flow.form_agent_section").into_owned()
+}
+pub fn flow_form_agent_id_label() -> String {
+    rust_i18n::t!("flow.form_agent_id_label").into_owned()
+}
+pub fn flow_form_agent_model_label() -> String {
+    rust_i18n::t!("flow.form_agent_model_label").into_owned()
+}
+pub fn flow_form_agent_effort_label() -> String {
+    rust_i18n::t!("flow.form_agent_effort_label").into_owned()
+}
+pub fn flow_form_agent_mode_label() -> String {
+    rust_i18n::t!("flow.form_agent_mode_label").into_owned()
+}
+pub fn flow_form_agent_permission_label() -> String {
+    rust_i18n::t!("flow.form_agent_permission_label").into_owned()
+}
+
+/// What the inspector says with nothing selected.
+pub fn flow_form_no_selection() -> String {
+    rust_i18n::t!("flow.form_no_selection").into_owned()
+}
+/// What it says for a flow that has no nodes yet.
+pub fn flow_form_no_nodes() -> String {
+    rust_i18n::t!("flow.form_no_nodes").into_owned()
+}
+/// What the inspector says when a marquee took several cards.
+pub fn flow_form_many_selected(n: usize) -> String {
+    rust_i18n::t!("flow.form_many_selected", n = n.to_string()).into_owned()
+}
+
+/// Why an edit was not written. The title is the same for all three refusals —
+/// the file is untouched either way, and the reason follows as the message.
+pub fn flow_edit_refused_title() -> String {
+    rust_i18n::t!("flow.edit_refused_title").into_owned()
+}
+/// The inspector had unsaved typing and the file changed elsewhere, so the
+/// node was read again and the typing went with it.
+pub fn flow_edit_dropped_typing() -> String {
+    rust_i18n::t!("flow.edit_dropped_typing").into_owned()
+}
+pub fn flow_edit_stale() -> String {
+    rust_i18n::t!("flow.edit_stale").into_owned()
+}
+pub fn flow_edit_would_not_load(detail: &str) -> String {
+    rust_i18n::t!("flow.edit_would_not_load", detail = detail).into_owned()
+}
+pub fn flow_edit_unsupported(detail: &str) -> String {
+    rust_i18n::t!("flow.edit_unsupported", detail = detail).into_owned()
+}
+pub fn flow_delete_failed_title() -> String {
+    rust_i18n::t!("flow.delete_failed_title").into_owned()
+}
+/// The one line of prose inside a new flow's template. The YAML around it is
+/// a Rust `const` in `flow_ops.rs`: a machine-parsed skeleton in a locale file
+/// is one re-indent away from a file that will not load, and only the sentence
+/// is worth translating.
+pub fn flow_starter_prompt() -> String {
+    rust_i18n::t!("flow.starter_prompt").into_owned()
+}
+/// Where a listed flow came from. Shown because the repository and the
+/// person's own folder can hold the same name, and opening the other one
+/// would be silent.
+pub fn right_panel_flow_origin_project() -> String {
+    rust_i18n::t!("flow.panel_flow_origin_project").into_owned()
+}
+pub fn right_panel_flow_origin_repo() -> String {
+    rust_i18n::t!("flow.panel_flow_origin_repo").into_owned()
+}
+pub fn right_panel_flow_origin_global() -> String {
+    rust_i18n::t!("flow.panel_flow_origin_global").into_owned()
 }
 pub fn right_panel_flow_live_heading() -> String {
     rust_i18n::t!("flow.panel_live_heading").into_owned()
@@ -3843,6 +4169,9 @@ pub fn ctx_send_selection_to_agent_chat() -> String {
 pub fn ctx_send_selection_to_terminal() -> String {
     rust_i18n::t!("ctx.send_selection_to_terminal").into_owned()
 }
+pub fn ctx_reload_flow_graph() -> String {
+    rust_i18n::t!("ctx.reload_flow_graph").into_owned()
+}
 pub fn ctx_stop() -> String {
     rust_i18n::t!("common.btn_stop").into_owned()
 }
@@ -4911,6 +5240,19 @@ pub fn flow_budget_exhausted(limit: daruda_flow::schedule::BudgetLimit) -> Strin
     }
     .into_owned()
 }
+/// The body a graph pane shows in place of the flow it cannot draw. The
+/// detail is the file system's or the parser's own words — not translatable,
+/// and the sentence around them is what makes them a sentence.
+pub fn flow_graph_read_failed(path: &str, detail: &str) -> String {
+    rust_i18n::t!("flow.graph_read_failed", path = path, detail = detail).into_owned()
+}
+pub fn flow_graph_parse_failed(detail: &str) -> String {
+    rust_i18n::t!("flow.graph_parse_failed", detail = detail).into_owned()
+}
+/// A file operation that failed. The detail is the file system's own words.
+pub fn flow_file_op_failed(path: &str, detail: &str) -> String {
+    rust_i18n::t!("flow.file_op_failed", path = path, detail = detail).into_owned()
+}
 pub fn flow_read_failed_title() -> String {
     rust_i18n::t!("flow.read_failed_title").into_owned()
 }
@@ -4929,6 +5271,19 @@ pub fn flow_invalid_title(name: &str, count: usize) -> String {
 
 /// One line of a validation report. A node-level problem names the node;
 /// a whole-graph one (a cycle) has no node to name.
+/// Every validation problem as its own line, node named where there is one.
+///
+/// `FlowError::Validate`'s own `Display` is a count — "1 validation problem(s)" —
+/// so anything that shows a person why a flow does not load has to walk the
+/// issues itself. One helper, so the graph pane and a refused edit say the same
+/// thing about the same file.
+pub fn flow_issue_lines(issues: &[daruda_flow::error::ValidationIssue]) -> Vec<String> {
+    issues
+        .iter()
+        .map(|issue| flow_issue_line(issue.node.as_deref(), &flow_issue(&issue.kind)))
+        .collect()
+}
+
 pub fn flow_issue_line(node: Option<&str>, text: &str) -> String {
     match node {
         Some(node) => rust_i18n::t!("flow.issue_line_at_node", node => node, text => text),

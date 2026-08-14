@@ -25,10 +25,13 @@ pub mod model;
 
 // The stages `load` runs, and what the scheduler uses to do its work. A
 // host never calls these; keeping them crate-private is what lets their
-// signatures change without it being an API break, and what stops the
-// pre-resolve wire types in `parse` from becoming a contract.
+// signatures change without it being an API break.
+//
+// `parse` is the exception, and deliberately so: a host that *authors* flow
+// files edits the file as written, not the resolved flow, so the pre-resolve
+// wire types are a contract to it. Changing one is an API break.
 pub(crate) mod archive;
-pub(crate) mod parse;
+pub mod parse;
 pub(crate) mod resolve;
 pub(crate) mod template;
 pub(crate) mod validate;
