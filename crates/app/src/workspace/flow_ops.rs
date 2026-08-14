@@ -719,21 +719,18 @@ impl Workspace {
         let run_dir = self.active_lane_root().unwrap_or_default();
         self.runs.insert(
             lane,
-            RunHandle {
-                cancel: CancelToken::default(),
-                run_dir: run_dir.clone(),
-                doing: RunStage::Node {
+            // This capture is of the panel and the chip, which read `doing`;
+            // no graph pane is open for it to colour.
+            RunHandle::seeded(
+                run_dir.clone(),
+                super::flow_request::FlowSource::Resumed {
+                    run_dir: run_dir.clone(),
+                },
+                RunStage::Node {
                     id: "verdict".to_string(),
                     attempt: 2,
                 },
-                // This capture is of the panel and the chip, which read
-                // `doing`; no graph pane is open for it to colour.
-                source: FlowSource::Resumed {
-                    run_dir: run_dir.clone(),
-                },
-                nodes: NodeRunStates::new(),
-                _thread: std::thread::spawn(|| {}),
-            },
+            ),
         );
         if asking {
             // Through the real parking path, not by writing the stage: the

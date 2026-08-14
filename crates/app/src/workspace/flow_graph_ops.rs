@@ -542,7 +542,11 @@ impl Workspace {
         self.open_flow_graph(&path, window, cx);
         let lane = self.active;
         let run_dir = self.active_lane_root().unwrap_or_default();
-        self.seed_flow_run_of_for_test(lane, run_dir, FlowSource::File(path.clone()));
+        self.seed_flow_run_of_for_test(
+            lane,
+            run_dir,
+            super::flow_request::FlowSource::File(path.clone()),
+        );
 
         let nodes: Vec<String> = self
             .main_area

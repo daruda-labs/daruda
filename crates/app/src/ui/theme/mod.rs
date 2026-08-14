@@ -507,6 +507,13 @@ impl PaneSurfaceTokens {
         Self::from_background_and_foreground(file_viewer_pane_bg(cx), agent_chat_fg(cx))
     }
 
+    /// The flow graph's canvas. Same source as the two above — a graph opened
+    /// from a transcript should not land on a surface unrelated to the pane it
+    /// came from.
+    pub fn flow_graph(cx: &App) -> Self {
+        Self::from_background_and_foreground(agent_chat_bg(cx), agent_chat_fg(cx))
+    }
+
     fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
         let overlay = neutral_overlay_for(background);
         Self {

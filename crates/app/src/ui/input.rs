@@ -47,6 +47,26 @@ impl InputTabSpec for () {
 /// (where the cross-axis stretch only fills vertically). Callers
 /// that need a narrower input can place this inside a sized
 /// container (`div().w(px(N))....child(input(...))`).
+/// [`input`], on a surface the caller names.
+///
+/// For a pane that follows the terminal colour theme rather than the workspace
+/// chrome: a box carrying `modal_input_bg` on such a surface is the one light
+/// rectangle in a dark pane. The same reason [`crate::ui::file_viewer_editor`]
+/// takes the file-viewer background.
+pub fn input_on<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    surface: gpui::Hsla,
+    cx: &App,
+    tab: T,
+) -> impl IntoElement {
+    let inner = Input::new(state)
+        .small()
+        .bordered(true)
+        .w_full()
+        .bg(surface);
+    tab.apply(state, cx, inner)
+}
+
 pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> impl IntoElement {
     // gpui draws its own chrome (bg + hairline + 1px accent focus
     // border); `.bg()` overrides the surface to `modal_input_bg`.

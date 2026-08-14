@@ -21,13 +21,14 @@ pub(in super::super) fn render(
     use crate::surface::strings as s;
     use crate::ui::select::select;
     use crate::ui::theme::{current, palette};
-    use crate::ui::{Disableable as _, button, button_danger, button_primary, field_column, input};
+    use crate::ui::{Disableable as _, button, button_danger, button_primary, field_column};
     use gpui::{ParentElement as _, Styled as _, div, px};
 
-    let (primary, error) = {
-        let theme = current(cx);
-        (theme.text_primary, theme.banner_error_text)
-    };
+    // Status hues stay the UI theme's — an error is an error on any surface.
+    let (primary, error) = (
+        crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground,
+        current(cx).banner_error_text,
+    );
     let dirty = form.is_dirty(cx);
     let refusal = form.refusal(cx);
 
@@ -39,14 +40,14 @@ pub(in super::super) fn render(
             form,
             super::notes::FormField::Id,
             s::flow_form_id_label(),
-            input(form.id_state(), cx, 0),
+            field(form.id_state(), cx, 0),
             cx,
         ))
         .child(field_with_note(
             form,
             super::notes::FormField::Deps,
             s::flow_form_deps_label(),
-            input(form.deps_state(), cx, 1),
+            field(form.deps_state(), cx, 1),
             cx,
         ));
 
@@ -71,14 +72,14 @@ pub(in super::super) fn render(
                 form,
                 super::notes::FormField::Output,
                 s::flow_form_output_label(),
-                input(body.output, cx, 5),
+                field(body.output, cx, 5),
                 cx,
             ))
             .child(fail_section(body.on_fail, FailShape::Retry, cx)),
         KindChoice::Command => rows
             .child(field_column(
                 s::flow_form_run_label(),
-                input(body.run, cx, 3),
+                field(body.run, cx, 3),
             ))
             .child(fail_section(body.on_fail, FailShape::Repair, cx)),
     };
@@ -86,13 +87,13 @@ pub(in super::super) fn render(
     rows = rows
         .child(field_column(
             s::flow_form_timeout_label(),
-            input(form.timeout_state(), cx, 4),
+            field(form.timeout_state(), cx, 4),
         ))
         .child(field_with_note(
             form,
             super::notes::FormField::Cwd,
             s::flow_form_cwd_label(),
-            input(form.cwd_state(), cx, 5),
+            field(form.cwd_state(), cx, 5),
             cx,
         ))
         .child(agent_section(form, cx));
@@ -207,7 +208,7 @@ fn source_row(
 ) -> impl IntoElement {
     use crate::ui::field_column;
     use crate::ui::select::select;
-    use crate::ui::{input, theme::palette};
+    use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, div, px};
 
     let from_file = super::is_file_source(states, cx);
@@ -220,9 +221,9 @@ fn source_row(
             select(&states.choice, cx, tab),
         ))
         .child(if from_file {
-            input(&states.file, cx, tab + 1).into_any_element()
+            field(&states.file, cx, tab + 1).into_any_element()
         } else {
-            input(&states.inline, cx, tab + 1).into_any_element()
+            field(&states.inline, cx, tab + 1).into_any_element()
         })
 }
 
@@ -241,9 +242,9 @@ fn fail_section(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
+    use crate::ui::field_column;
     use crate::ui::select::select;
     use crate::ui::theme::palette;
-    use crate::ui::{field_column, input};
     use gpui::{ParentElement as _, Styled as _, div, px};
 
     let acting = super::acting(states, cx);
@@ -269,21 +270,21 @@ fn fail_section(
         FailShape::Repair => section
             .child(field_column(
                 s::flow_form_fix_label(),
-                input(&states.fix, cx, 12),
+                field(&states.fix, cx, 12),
             ))
             .child(field_column(
                 s::flow_form_rerun_label(),
-                input(&states.rerun, cx, 13),
+                field(&states.rerun, cx, 13),
             )),
     };
     section
         .child(field_column(
             s::flow_form_attempts_label(),
-            input(&states.max_attempts, cx, 14),
+            field(&states.max_attempts, cx, 14),
         ))
         .child(field_column(
             s::flow_form_wait_label(),
-            input(&states.wait, cx, 15),
+            field(&states.wait, cx, 15),
         ))
 }
 
@@ -300,10 +301,10 @@ fn agent_section(
     use crate::surface::strings as s;
     use crate::ui::select::select;
     use crate::ui::theme::{current, palette};
-    use crate::ui::{disclosure, field_column, input};
+    use crate::ui::{disclosure, field_column};
     use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
 
-    let muted = current(cx).text_muted;
+    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
     let open = form.agent_open();
     let header = div()
         .flex()
@@ -340,19 +341,19 @@ fn agent_section(
         section = section
             .child(field_column(
                 s::flow_form_agent_id_label(),
-                input(&states.id, cx, 6),
+                field(&states.id, cx, 6),
             ))
             .child(field_column(
                 s::flow_form_agent_mode_label(),
-                input(&states.mode, cx, 7),
+                field(&states.mode, cx, 7),
             ))
             .child(field_column(
                 s::flow_form_agent_model_label(),
-                input(&states.model, cx, 8),
+                field(&states.model, cx, 8),
             ))
             .child(field_column(
                 s::flow_form_agent_effort_label(),
-                input(&states.effort, cx, 9),
+                field(&states.effort, cx, 9),
             ))
             .child(field_column(
                 s::flow_form_agent_permission_label(),
@@ -385,12 +386,29 @@ pub(in super::super) fn render_empty(
     note(crate::surface::strings::flow_form_no_selection(), cx)
 }
 
+/// A text box on the pane's own surface, not the modal one.
+///
+/// One place so the boxes cannot drift apart: [`crate::ui::input`]'s default
+/// background is a workspace-chrome tone, and this pane follows the terminal.
+fn field<T: crate::ui::input::InputTabSpec>(
+    state: &gpui::Entity<crate::ui::InputState>,
+    cx: &gpui::App,
+    tab: T,
+) -> impl gpui::IntoElement {
+    crate::ui::input_on(
+        state,
+        crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).tint,
+        cx,
+        tab,
+    )
+}
+
 /// The inspector column holding one line of muted prose.
 fn note(text: String, cx: &mut Context<super::super::FlowGraphView>) -> impl IntoElement {
-    use crate::ui::theme::{current, palette};
+    use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, px};
 
-    let muted = current(cx).text_muted;
+    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
     column(cx)
         .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
         .text_color(muted)
@@ -399,10 +417,10 @@ fn note(text: String, cx: &mut Context<super::super::FlowGraphView>) -> impl Int
 
 /// The column every inspector state shares: one width, one border, one inset.
 fn column(cx: &mut Context<super::super::FlowGraphView>) -> gpui::Stateful<gpui::Div> {
-    use crate::ui::theme::{current, palette};
+    use crate::ui::theme::palette;
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _, Styled as _, div, px};
 
-    let theme = current(cx);
+    let tokens = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx);
     div()
         .id("flow-inspector")
         .w(px(palette::FLOW_INSPECTOR_W))
@@ -414,6 +432,6 @@ fn column(cx: &mut Context<super::super::FlowGraphView>) -> gpui::Stateful<gpui:
         .overflow_y_scroll()
         .p(px(palette::FLOW_INSPECTOR_PAD))
         .border_l_1()
-        .border_color(theme.border)
-        .bg(theme.modal_panel_bg)
+        .border_color(tokens.border_tint)
+        .bg(tokens.background)
 }

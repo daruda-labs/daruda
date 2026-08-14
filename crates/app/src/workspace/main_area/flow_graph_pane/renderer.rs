@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::model::{FailPolicy, GraphNode, GraphNodeKind, NodeRunState, PromptSummary};
 use crate::surface::strings as s;
 use crate::ui::flow_canvas::{FlowTheme, Node, NodeRenderer, Port, RenderContext};
-use crate::ui::theme::palette;
+use crate::ui::theme::{PaneSurfaceTokens, palette};
 
 /// The node type every flow node registers under.
 ///
@@ -149,15 +149,19 @@ fn badge_for(node: &GraphNode, run: NodeRunState) -> (String, CardAccent) {
     }
 }
 
-/// The canvas chrome, in daruda's palette. `FlowTheme` is
+/// The canvas chrome, on the terminal colour theme. `FlowTheme` is
 /// `#[non_exhaustive]`, so it is built by mutating a default.
-pub(super) fn flow_theme(theme: &crate::ui::theme::DarudaTheme) -> FlowTheme {
+///
+/// [`PaneSurfaceTokens`] rather than the UI theme, for the reason agent chat and
+/// the file viewer already use it: a content pane sitting on workspace-chrome
+/// colours does not match the terminal beside it.
+pub(super) fn flow_theme(tokens: &PaneSurfaceTokens) -> FlowTheme {
     let mut t = FlowTheme::default();
-    t.background = rgb_u32(theme.flow_canvas_bg);
-    t.background_grid_dot = rgb_u32(theme.flow_grid_dot);
-    t.edge_stroke = rgb_u32(theme.flow_edge);
+    t.background = rgb_u32(tokens.background);
+    t.background_grid_dot = over(tokens.border_tint, tokens.background);
+    t.edge_stroke = rgb_u32(tokens.foreground_muted_over_background());
     t.edge_stroke_selected = rgb_u32(palette::FLOW_GRAPH_STATUS_RUNNING);
-    t.default_port_fill = rgb_u32(theme.flow_edge);
+    t.default_port_fill = rgb_u32(tokens.foreground_muted_over_background());
     t
 }
 
@@ -180,16 +184,63 @@ pub(super) struct CardPalette {
 }
 
 impl CardPalette {
-    pub(super) fn of(theme: &crate::ui::theme::DarudaTheme) -> Self {
+    pub(super) fn of(tokens: &PaneSurfaceTokens) -> Self {
         Self {
-            card_bg: rgb_u32(theme.flow_card_bg),
-            pending_border: rgb_u32(theme.border),
-            chip_bg: rgb_u32(theme.flow_chip_bg),
-            text_body: rgb_u32(theme.text_body),
-            text_mute: rgb_u32(theme.text_muted),
-            text_subtle: rgb_u32(theme.text_subtle),
+            card_bg: over(tokens.tint, tokens.background),
+            pending_border: over(tokens.border_tint, tokens.background),
+            chip_bg: over(tokens.active_tint, tokens.background),
+            text_body: rgb_u32(tokens.foreground),
+            text_mute: rgb_u32(tokens.foreground_muted_over_background()),
+            text_subtle: rgb_u32(tokens.foreground_subtle_over_background()),
         }
     }
+}
+
+/// Flatten `top` onto `bottom` and pack the result.
+///
+/// The canvas takes opaque `0x00RRGGBB` (see [`FlowTheme`]), while the pane
+/// tokens are overlays carrying alpha — a card tint is 6% of a neutral over the
+/// surface. Dropping the alpha would paint that neutral at full strength, so it
+/// is composited here instead.
+fn over(top: Hsla, bottom: Hsla) -> u32 {
+    let (top, bottom) = (gpui::Rgba::from(top), gpui::Rgba::from(bottom));
+    let a = top.a.clamp(0.0, 1.0);
+    let mix = |t: f32, b: f32| t * a + b * (1.0 - a);
+    let to_byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (to_byte(mix(top.r, bottom.r)) << 16)
+        | (to_byte(mix(top.g, bottom.g)) << 8)
+        | to_byte(mix(top.b, bottom.b))
+}
+
+/// The muted / subtle text ramp, already flattened onto the surface.
+///
+/// `PaneSurfaceTokens` dims by alpha, which a canvas cannot draw — so the same
+/// dimming is computed against the pane's own background here.
+trait FlattenedRamp {
+    fn foreground_muted_over_background(&self) -> Hsla;
+    fn foreground_subtle_over_background(&self) -> Hsla;
+}
+
+impl FlattenedRamp for PaneSurfaceTokens {
+    fn foreground_muted_over_background(&self) -> Hsla {
+        flatten(self.foreground_muted, self.background)
+    }
+
+    fn foreground_subtle_over_background(&self) -> Hsla {
+        flatten(self.foreground_subtle, self.background)
+    }
+}
+
+/// `over`, kept as an `Hsla` for the callers that pack it themselves.
+fn flatten(top: Hsla, bottom: Hsla) -> Hsla {
+    let packed = over(top, bottom);
+    gpui::Rgba {
+        r: ((packed >> 16) & 0xff) as f32 / 255.0,
+        g: ((packed >> 8) & 0xff) as f32 / 255.0,
+        b: (packed & 0xff) as f32 / 255.0,
+        a: 1.0,
+    }
+    .into()
 }
 
 /// `FlowTheme` takes packed `0x00RRGGBB`; daruda's palette is `Hsla`. The

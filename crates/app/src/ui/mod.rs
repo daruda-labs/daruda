@@ -72,7 +72,7 @@ pub use form_helpers::{checkbox_row, field_column, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputGrowMode, InputState, Rope, RopeExt,
-    ScrollWheelBehavior, input, input_with_action, input_with_action_grow,
+    ScrollWheelBehavior, input, input_on, input_with_action, input_with_action_grow,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,

@@ -680,9 +680,9 @@ fn build_graph_state(
     cx: &mut Context<FlowGraphView>,
 ) -> FlowGraphState {
     let (graph, ids) = build_canvas_graph(&model);
-    // Resolved here, where the theme is readable: neither the canvas's own theme
-    // nor a node renderer can reach `cx` once the canvas is built.
-    let theme = crate::ui::theme::current(cx).clone();
+    // Resolved here, where the colours are readable: neither the canvas's own
+    // theme nor a node renderer can reach `cx` once the canvas is built.
+    let tokens = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx);
     let rerun = RerunOverlay::new(ids.clone(), model.rerun.clone());
     let canvas = cx.new(|c| {
         // Deliberately not `default_plugins()`: no node drag (auto-placed
@@ -692,11 +692,11 @@ fn build_graph_state(
         // far out it is worth zooming depends on what our cards say when
         // they get there.
         FlowCanvas::builder(graph, c, window)
-            .theme(flow_theme(&theme))
+            .theme(flow_theme(&tokens))
             .node_renderer(
                 NODE_TYPE,
                 FlowNodeRenderer {
-                    palette: renderer::CardPalette::of(&theme),
+                    palette: renderer::CardPalette::of(&tokens),
                 },
             )
             .plugin(BackgroundPlugin::new())
