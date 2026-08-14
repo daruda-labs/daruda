@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 
 use daruda_agent::accounts::{LoginOutcome, account_config_dir, recipe_for, spawn_login};
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
@@ -114,6 +114,7 @@ impl LoginFinish {
         self,
         ws: &mut Workspace,
         target: LoginTarget,
+        attempt: LoginAttempt,
         home_dir: PathBuf,
         outcome: LoginOutcome,
         cx: &mut Context<Workspace>,
@@ -121,12 +122,12 @@ impl LoginFinish {
         let recipe = target.recipe();
         match (self, target) {
             (LoginFinish::Add, LoginTarget::Managed { id, .. }) => {
-                ws.finish_login(id, home_dir, recipe, outcome, cx)
+                ws.finish_login(id, attempt, home_dir, recipe, outcome, cx)
             }
             (LoginFinish::Reauth, LoginTarget::Managed { id, .. }) => {
-                ws.finish_reauth(id, home_dir, recipe, outcome, cx)
+                ws.finish_reauth(id, attempt, home_dir, recipe, outcome, cx)
             }
-            (LoginFinish::System, _) => ws.finish_system_login(target, outcome, cx),
+            (LoginFinish::System, _) => ws.finish_system_login(attempt, outcome, cx),
             // An Add/Reauth flow is only ever started against a managed
             // target (`add_managed_account` / `reauthenticate_account` both
             // mint one), so this pairing is unreachable rather than merely
@@ -180,11 +181,17 @@ impl Workspace {
         resolve_login_command(&self.agents, &active_id, requested)
     }
 
-    /// Whether a headless add-account login is currently in flight —
+    /// Whether a headless login is in flight **anywhere in the process** —
     /// drives the status-bar dropdown's spinner + Cancel row in place of
     /// "+ Add account" (see [`PendingLogin`]).
-    pub(in crate::workspace) fn is_login_pending(&self) -> bool {
-        !can_start_login(&self.pending_login)
+    ///
+    /// Deliberately not limited to this window. The login slot is
+    /// process-wide, so a window that does not own the attempt still refuses
+    /// to start one; showing it no way out would leave the user hunting for
+    /// the window that happens to hold it. The Cancel row cancels across
+    /// windows to match.
+    pub(in crate::workspace) fn is_login_pending(&self, cx: &App) -> bool {
+        !can_start_login(&self.pending_login) || accounts_global::login_busy(cx)
     }
 
     /// Start a headless add-account login (Plan B, A2 approach) for the
@@ -251,6 +258,16 @@ impl Workspace {
         );
     }
 
+    /// Clear a stale attempt for `target` so the caller's guard can let a fresh
+    /// one through — see [`reclick_restarts`] for when that is the right read
+    /// of a repeated click. A no-op for anything else, so the busy guard right
+    /// after it still refuses a genuinely concurrent login.
+    fn restart_stale_login(&mut self, target: LoginTarget, cx: &mut Context<Self>) {
+        if reclick_restarts(&self.pending_login, target) {
+            self.cancel_pending_login(cx);
+        }
+    }
+
     /// Shared spawn/poll/finish machinery behind every headless login flow
     /// ([`Self::add_managed_account`], [`Self::reauthenticate_account`],
     /// [`Self::reauthenticate_system`]). The caller has already run its own
@@ -285,7 +302,8 @@ impl Workspace {
             LoginTarget::System { .. } => daruda_config::AccountEnv::ambient(),
         };
 
-        if !accounts_global::begin_login(cx, target) {
+        let attempt = next_login_attempt();
+        if !accounts_global::begin_login(cx, attempt) {
             if cleanup_dir_on_cancel(finish) {
                 cleanup_account_dir(recipe_id, &home_dir);
             }
@@ -306,7 +324,11 @@ impl Workspace {
         // doc for why this state exists at all (`resolve_node_path_env` is
         // blocking and may download Node.js, so it can't run inline here on
         // the UI thread).
-        self.pending_login = PendingLogin::Preparing { target, finish };
+        self.pending_login = PendingLogin::Preparing {
+            target,
+            attempt,
+            finish,
+        };
         cx.notify();
 
         let resolve_command = command.clone();
@@ -322,10 +344,13 @@ impl Workspace {
                 // principle, a newer call superseded it) — bail without
                 // touching anything if this `Preparing` isn't the one that
                 // was staged above.
+                // Keyed on the attempt, not the target: a taken-over attempt
+                // reaches here after its replacement has already staged the
+                // same target, and would otherwise spawn a second process.
                 let is_current = matches!(
                     &ws.pending_login,
-                    PendingLogin::Preparing { target: current, .. }
-                        if *current == target
+                    PendingLogin::Preparing { attempt: current, .. }
+                        if *current == attempt
                 );
                 if !is_current {
                     return;
@@ -341,6 +366,7 @@ impl Workspace {
                         let handle = login_process.handle();
                         ws.pending_login = PendingLogin::InProgress {
                             target,
+                            attempt,
                             handle,
                             finish,
                         };
@@ -366,13 +392,13 @@ impl Workspace {
                             let cleanup_path = wait_home_dir.clone();
                             if this
                                 .update(cx, |ws, cx| {
-                                    finish.dispatch(ws, target, wait_home_dir, outcome, cx)
+                                    finish.dispatch(ws, target, attempt, wait_home_dir, outcome, cx)
                                 })
                                 .is_err()
                             {
                                 cx.update_global::<accounts_global::AccountsGlobal, _>(
                                     |global, _| {
-                                        accounts_global::clear_login_marker(global, target);
+                                        accounts_global::clear_login_marker(global, attempt);
                                     },
                                 );
                                 // Workspace window closed mid-login: the
@@ -393,7 +419,7 @@ impl Workspace {
                             cleanup_account_dir(recipe_id, &home_dir);
                         }
                         ws.pending_login = PendingLogin::None;
-                        accounts_global::finish_login(cx, target);
+                        accounts_global::finish_login(cx, attempt);
                         ws.report_error(
                             ErrorReport::new(finish.spawn_error_title())
                                 .message(e.to_string())
@@ -409,7 +435,7 @@ impl Workspace {
 
             if updated.is_err() {
                 cx.update_global::<accounts_global::AccountsGlobal, _>(|global, _| {
-                    accounts_global::clear_login_marker(global, target);
+                    accounts_global::clear_login_marker(global, attempt);
                 });
             }
             if updated.is_err() && cleanup_dir_on_cancel(finish) {
@@ -438,16 +464,13 @@ impl Workspace {
     pub(in crate::workspace) fn finish_login(
         &mut self,
         account_id: AccountId,
+        attempt: LoginAttempt,
         config_dir: PathBuf,
         recipe_id: AccountRecipeId,
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let target = LoginTarget::Managed {
-            id: account_id,
-            recipe: recipe_id,
-        };
-        if !self.claim_finished_login(target, cx) {
+        if !self.claim_finished_login(attempt, cx) {
             return;
         }
 
@@ -610,15 +633,20 @@ impl Workspace {
     /// `finish_login` / `finish_reauth` re-entry a no-op via its staleness
     /// guard, so a cancelled login never double-cleans or toasts.
     pub(in crate::workspace) fn cancel_pending_login(&mut self, cx: &mut Context<Self>) {
-        let (target, handle, finish) =
+        let (target, attempt, handle, finish) =
             match std::mem::replace(&mut self.pending_login, PendingLogin::None) {
                 PendingLogin::None => return,
-                PendingLogin::Preparing { target, finish } => (target, None, finish),
+                PendingLogin::Preparing {
+                    target,
+                    attempt,
+                    finish,
+                } => (target, attempt, None, finish),
                 PendingLogin::InProgress {
                     target,
+                    attempt,
                     handle,
                     finish,
-                } => (target, Some(handle), finish),
+                } => (target, attempt, Some(handle), finish),
             };
         if let Some(handle) = handle {
             handle.cancel();
@@ -630,8 +658,45 @@ impl Workspace {
         {
             cleanup_account_dir(recipe, &account_config_dir(&self.data_dir, id));
         }
-        accounts_global::finish_login(cx, target);
+        accounts_global::finish_login(cx, attempt);
         cx.notify();
+    }
+
+    /// Release a login this window owned as the window goes away.
+    ///
+    /// Its callbacks all re-enter this entity, so once it is dropped nothing
+    /// can finish the attempt — but the child process keeps running and the
+    /// process-wide slot stays taken until the login times out. Every other
+    /// window would refuse to start a login for minutes, with a Cancel row
+    /// that reaches a workspace no longer there.
+    ///
+    /// Same teardown as [`Self::cancel_pending_login`], minus the repaint: the
+    /// window being released has nothing left to paint.
+    pub(in crate::workspace) fn release_pending_login_on_close(&mut self, cx: &mut App) {
+        let (target, attempt, handle, finish) =
+            match std::mem::replace(&mut self.pending_login, PendingLogin::None) {
+                PendingLogin::None => return,
+                PendingLogin::Preparing {
+                    target,
+                    attempt,
+                    finish,
+                } => (target, attempt, None, finish),
+                PendingLogin::InProgress {
+                    target,
+                    attempt,
+                    handle,
+                    finish,
+                } => (target, attempt, Some(handle), finish),
+            };
+        if let Some(handle) = handle {
+            handle.cancel();
+        }
+        if cleanup_dir_on_cancel(finish)
+            && let LoginTarget::Managed { id, recipe } = target
+        {
+            cleanup_account_dir(recipe, &account_config_dir(&self.data_dir, id));
+        }
+        accounts_global::finish_login(cx, attempt);
     }
 
     /// Take ownership of a resolved login on this `Workspace`: `true` when
@@ -642,16 +707,12 @@ impl Workspace {
     /// cleaned up, or superseded by a newer one — so running its finish path
     /// anyway would either double-clean an already-removed dir or clobber an
     /// `InProgress` it knows nothing about.
-    fn claim_finished_login(&mut self, target: LoginTarget, cx: &mut Context<Self>) -> bool {
-        let is_current = matches!(
-            &self.pending_login,
-            PendingLogin::InProgress { target: current, .. } if *current == target
-        );
-        if !is_current {
+    fn claim_finished_login(&mut self, attempt: LoginAttempt, cx: &mut Context<Self>) -> bool {
+        if !claims_pending(&self.pending_login, attempt) {
             return false;
         }
         self.pending_login = PendingLogin::None;
-        accounts_global::finish_login(cx, target);
+        accounts_global::finish_login(cx, attempt);
         true
     }
 
@@ -680,17 +741,6 @@ impl Workspace {
         account_id: AccountId,
         cx: &mut Context<Self>,
     ) {
-        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
-            self.report_error(
-                ErrorReport::new(s::settings_accounts_login_busy())
-                    .severity(ErrorSeverity::Warning)
-                    .dedup("account.reauth.login_busy")
-                    .build(),
-                cx,
-            );
-            return;
-        }
-
         let Some(account) = self.accounts.find(account_id) else {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_reauth_failed())
@@ -704,6 +754,24 @@ impl Workspace {
         };
         let config_dir = account.config_dir.clone();
         let recipe = account.recipe;
+
+        self.restart_stale_login(
+            LoginTarget::Managed {
+                id: account_id,
+                recipe,
+            },
+            cx,
+        );
+        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
+            self.report_error(
+                ErrorReport::new(s::settings_accounts_login_busy())
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("account.reauth.login_busy")
+                    .build(),
+                cx,
+            );
+            return;
+        }
 
         // Scoped to the account's own domain: a login for another domain
         // run against this config dir would overwrite these credentials
@@ -770,6 +838,7 @@ impl Workspace {
         recipe: AccountRecipeId,
         cx: &mut Context<Self>,
     ) {
+        self.restart_stale_login(LoginTarget::System { recipe }, cx);
         if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
@@ -863,11 +932,16 @@ impl Workspace {
     /// again.
     fn finish_system_login(
         &mut self,
-        target: LoginTarget,
+        attempt: LoginAttempt,
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        if !self.claim_finished_login(target, cx) {
+        // Read before the claim clears it — the reconnect sweep below needs to
+        // know which credentials this login wrote.
+        let PendingLogin::InProgress { target, .. } = self.pending_login else {
+            return;
+        };
+        if !self.claim_finished_login(attempt, cx) {
             return;
         }
 
@@ -899,16 +973,13 @@ impl Workspace {
     fn finish_reauth(
         &mut self,
         account_id: AccountId,
+        attempt: LoginAttempt,
         config_dir: PathBuf,
         recipe: AccountRecipeId,
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let target = LoginTarget::Managed {
-            id: account_id,
-            recipe,
-        };
-        if !self.claim_finished_login(target, cx) {
+        if !self.claim_finished_login(attempt, cx) {
             return;
         }
 
@@ -1111,6 +1182,61 @@ pub(in crate::workspace) fn pane_login_target(
     }
 }
 
+/// One login attempt, distinct from every other — including a later attempt
+/// at the same [`LoginTarget`].
+///
+/// The target alone used to identify the pending login, which held only while
+/// a target could have one attempt at a time. Taking one over
+/// ([`reclick_restarts`]) breaks that: the replaced attempt's background wait
+/// is still running and resolves against whatever is pending *then*. Keyed on
+/// the target it would claim its own replacement's slot, report that login's
+/// failure, and leave the attempt the user is waiting on orphaned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) struct LoginAttempt(u64);
+
+/// Mint the next attempt id. Process-wide, because the login slot is: two
+/// windows must not mint the same id for different attempts.
+pub(in crate::workspace) fn next_login_attempt() -> LoginAttempt {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    LoginAttempt(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Whether `attempt`'s finish callback owns what is currently pending.
+///
+/// `Preparing` is deliberately not claimable: no process exists for it yet, so
+/// a finish callback cannot belong to one.
+pub(in crate::workspace) fn claims_pending(pending: &PendingLogin, attempt: LoginAttempt) -> bool {
+    matches!(
+        pending,
+        PendingLogin::InProgress { attempt: current, .. } if *current == attempt
+    )
+}
+
+/// Whether a click on sign-in for `target` should take over the attempt
+/// already in flight rather than be refused as a duplicate.
+///
+/// True only when the pending login is for the *same* target. Clicking sign-in
+/// again is the user saying the attempt they started is not going to finish —
+/// the browser opened and they closed it, or it never appeared. daruda cannot
+/// see that: the login process outlives the browser (its OAuth callback server
+/// waits on stdin), so the slot stays taken for the whole [`LOGIN_TIMEOUT`] and
+/// every later click reports "already signing in" with the only way out parked
+/// in the status bar's account menu, which is not where the user is looking.
+///
+/// A login for a *different* target is not the user's to discard — the slot is
+/// single and that attempt is somebody else's intent, so it is still refused.
+pub(in crate::workspace) fn reclick_restarts(pending: &PendingLogin, target: LoginTarget) -> bool {
+    match pending {
+        PendingLogin::None => false,
+        PendingLogin::Preparing {
+            target: current, ..
+        }
+        | PendingLogin::InProgress {
+            target: current, ..
+        } => *current == target,
+    }
+}
+
 /// Whether a new headless add-account login is safe to start: `true` iff
 /// nothing is already pending. Extracted as a pure predicate off
 /// [`Workspace::add_managed_account`]'s concurrent-add guard so it's
@@ -1243,9 +1369,120 @@ mod tests {
                 id: AccountId::new(),
                 recipe: AccountRecipeId::Claude,
             },
+            attempt: next_login_attempt(),
             finish: LoginFinish::Add,
         };
         assert!(!can_start_login(&pending));
+    }
+
+    mod attempt_identity {
+        use super::*;
+
+        fn in_progress(target: LoginTarget, attempt: LoginAttempt) -> PendingLogin {
+            let login = spawn_login("/usr/bin/true", &[], &[], Duration::from_secs(5))
+                .expect("spawn a trivial process for the test handle");
+            PendingLogin::InProgress {
+                target,
+                attempt,
+                handle: login.handle(),
+                finish: LoginFinish::System,
+            }
+        }
+
+        /// The race a restart opens. Taking over an attempt leaves its
+        /// background wait still running, and it resolves against whatever is
+        /// pending *then* — which is the replacement, for the same target. Keyed
+        /// on the target alone the stale wait claims the new attempt's slot,
+        /// clears it, and reports the failure of a login the user already
+        /// abandoned; the attempt they are waiting on is then orphaned and dies
+        /// silently.
+        #[test]
+        fn a_replaced_attempt_does_not_claim_its_replacement() {
+            let target = LoginTarget::System {
+                recipe: AccountRecipeId::Claude,
+            };
+            let stale = next_login_attempt();
+            let live = next_login_attempt();
+            assert_ne!(stale, live, "each attempt is its own");
+
+            let pending = in_progress(target, live);
+            assert!(!claims_pending(&pending, stale));
+            assert!(claims_pending(&pending, live));
+        }
+
+        /// Nothing pending is nothing to claim — the ordinary
+        /// already-cancelled case.
+        #[test]
+        fn nothing_pending_is_claimed_by_nobody() {
+            assert!(!claims_pending(&PendingLogin::None, next_login_attempt()));
+        }
+
+        /// A `Preparing` attempt has not produced a process yet, so a finish
+        /// callback cannot belong to it.
+        #[test]
+        fn a_preparing_attempt_is_not_a_finished_one() {
+            let attempt = next_login_attempt();
+            let pending = PendingLogin::Preparing {
+                target: LoginTarget::System {
+                    recipe: AccountRecipeId::Claude,
+                },
+                attempt,
+                finish: LoginFinish::System,
+            };
+            assert!(!claims_pending(&pending, attempt));
+        }
+    }
+
+    mod reclick {
+        use super::*;
+
+        fn system(recipe: AccountRecipeId) -> LoginTarget {
+            LoginTarget::System { recipe }
+        }
+
+        fn preparing(target: LoginTarget) -> PendingLogin {
+            PendingLogin::Preparing {
+                target,
+                attempt: next_login_attempt(),
+                finish: LoginFinish::System,
+            }
+        }
+
+        /// The report this exists for: sign in, a browser opens, the user
+        /// closes it without finishing. The login process outlives that — its
+        /// callback server waits on stdin — so the slot stays taken for the
+        /// whole login timeout. Clicking sign-in again is the user saying that
+        /// attempt is not going to finish, not asking for a second one.
+        #[test]
+        fn clicking_sign_in_again_takes_over_the_attempt_it_repeats() {
+            let target = system(AccountRecipeId::Claude);
+            assert!(reclick_restarts(&preparing(target), target));
+        }
+
+        /// A login for something else is not the user's to discard — the slot
+        /// is single, so this still has to be refused.
+        #[test]
+        fn a_login_for_another_target_is_not_taken_over() {
+            assert!(!reclick_restarts(
+                &preparing(system(AccountRecipeId::Codex)),
+                system(AccountRecipeId::Claude)
+            ));
+            assert!(!reclick_restarts(
+                &preparing(LoginTarget::Managed {
+                    id: AccountId::new(),
+                    recipe: AccountRecipeId::Claude
+                }),
+                system(AccountRecipeId::Claude)
+            ));
+        }
+
+        #[test]
+        fn nothing_in_flight_is_nothing_to_take_over() {
+            assert!(!reclick_restarts(
+                &PendingLogin::None,
+                system(AccountRecipeId::Claude)
+            ));
+        }
     }
 
     #[test]
@@ -1273,51 +1510,43 @@ mod tests {
         assert!(!cleanup_dir_on_cancel(LoginFinish::System));
     }
 
-    /// Two system logins into the *same* domain race over one `~/.claude`, so
-    /// the process-wide slot has to reject the second. This is what the slot
-    /// could not express while it was keyed on `AccountId`: a system login has
-    /// no account id to store.
+    /// The slot is single and process-wide, so a second attempt — whatever it
+    /// signs into — has to be refused while one is live. Before the login was
+    /// keyed at all there was nothing to store for an ambient sign-in, which is
+    /// exactly the case where two windows would have raced over one `~/.claude`.
     #[gpui::test]
-    fn the_login_slot_rejects_a_second_system_login_in_the_same_domain(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn the_login_slot_admits_one_attempt_at_a_time(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             accounts_global::install_if_absent(cx, AccountsState::default());
-            let claude = LoginTarget::System {
-                recipe: AccountRecipeId::Claude,
-            };
-            assert!(accounts_global::begin_login(cx, claude));
+            let first = next_login_attempt();
+            assert!(accounts_global::begin_login(cx, first));
             assert!(
-                !accounts_global::begin_login(cx, claude),
-                "a second window must not sign into the same ambient home"
+                !accounts_global::begin_login(cx, next_login_attempt()),
+                "a second window must not sign in while one attempt is live"
             );
-            accounts_global::finish_login(cx, claude);
-            assert!(accounts_global::begin_login(cx, claude));
-            accounts_global::finish_login(cx, claude);
+            accounts_global::finish_login(cx, first);
+            let second = next_login_attempt();
+            assert!(accounts_global::begin_login(cx, second));
+            accounts_global::finish_login(cx, second);
         });
     }
 
-    /// A stale completion from a finished login must not free the slot a newer
-    /// one owns — the same guard the managed path already had, now keyed on
-    /// the target rather than the account id.
+    /// A replaced or orphaned attempt resolves late and must not release the
+    /// slot its replacement now holds — the replacement signs into the same
+    /// place, so anything keyed on that would free it.
     #[gpui::test]
-    fn a_stale_system_completion_does_not_free_a_newer_login(cx: &mut gpui::TestAppContext) {
+    fn a_stale_attempt_does_not_free_a_newer_one(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             accounts_global::install_if_absent(cx, AccountsState::default());
-            let system = LoginTarget::System {
-                recipe: AccountRecipeId::Claude,
-            };
-            let managed = LoginTarget::Managed {
-                id: AccountId::new(),
-                recipe: AccountRecipeId::Claude,
-            };
-            assert!(accounts_global::begin_login(cx, managed));
-            accounts_global::finish_login(cx, system);
+            let stale = next_login_attempt();
+            let live = next_login_attempt();
+            assert!(accounts_global::begin_login(cx, live));
+            accounts_global::finish_login(cx, stale);
             assert!(
                 accounts_global::login_busy(cx),
-                "the managed login still owns the slot"
+                "the live attempt still owns the slot"
             );
-            accounts_global::finish_login(cx, managed);
+            accounts_global::finish_login(cx, live);
             assert!(!accounts_global::login_busy(cx));
         });
     }
@@ -1339,6 +1568,7 @@ mod tests {
                 id: AccountId::new(),
                 recipe: AccountRecipeId::Claude,
             },
+            attempt: next_login_attempt(),
             handle: login.handle(),
             finish: LoginFinish::Add,
         };

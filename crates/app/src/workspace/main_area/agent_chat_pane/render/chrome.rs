@@ -314,12 +314,11 @@ pub(super) fn status_banner(
         ),
     };
     let retry_button = retryable.then(|| {
-        crate::ui::button(
+        super::blocks::error_action_button(
             ("agent-chat-retry", pane_id as usize),
             s::agent_chat_retry(),
+            cx,
         )
-        .ghost()
-        .xsmall()
         .on_click(cx.listener(move |_this, _ev, _window, cx| {
             // `cx.listener` has this AgentChatView leased for the duration of
             // this callback; `retry_agent_chat_connect` reads/updates this
@@ -339,12 +338,11 @@ pub(super) fn status_banner(
         }))
     });
     let reauth_button = reauthable.then(|| {
-        crate::ui::button(
+        super::blocks::error_action_button(
             ("agent-chat-reauth", pane_id as usize),
             s::agent_chat_sign_in_again(),
+            cx,
         )
-        .ghost()
-        .xsmall()
         .on_click(cx.listener(move |_this, _ev, _window, cx| {
             // Same lease hazard as the retry button above: the login op
             // reaches this AgentChatView through `Workspace`, which would

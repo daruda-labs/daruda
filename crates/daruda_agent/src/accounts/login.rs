@@ -13,19 +13,16 @@
 //! in-memory output buffer scanned for a denial marker, and a poll-driven
 //! timeout that cancels the process.
 //!
-//! **Departure from orca**: orca cancels via the POSIX process *group*
-//! (`process.kill(-child.pid)`, `detached: true` on spawn) so a login
-//! command that forks (e.g. an `npx`-wrapped adapter) is torn down along
-//! with any child it spawned. This module cancels only the directly
-//! spawned child via `std::process::Child::kill()` — the same limitation
-//! `daruda_acp`'s agent-session process management already accepts for the
-//! identical `npx`-spawn shape (it has no group-kill either; see
-//! `daruda_acp::session`), and adding a `libc`/`nix` dependency for a
-//! group-wide `SIGTERM` here was intentionally out of scope for this task
-//! (see the account-switcher SDD Task 3 brief's escalation note). If an
-//! `npx`-wrapped login command ever orphans a grandchild process, the ACP
-//! session runner has the identical exposure — worth revisiting for both
-//! together, not this module in isolation.
+//! Cancellation kills the process **group**, matching orca: a login command
+//! that forks (an `npx`-wrapped adapter forking the CLI) leaves the forked
+//! process holding the OAuth callback port, and a cancel that spared it would
+//! block the very next attempt. `spawn_login` puts the child in its own group
+//! so the signal reaches the tree and nothing else.
+//!
+//! The ACP session runner (`daruda_acp::session`) still tears down only its
+//! direct child. The exposure is the same shape but not the same weight —
+//! there a spawn ends when the session does, while here cancel is the ordinary
+//! way a user abandons a sign-in, so a survivor is met on the next click.
 //!
 //! GPUI-free and blocking by design — the caller (the app's background
 //! executor) is responsible for running [`spawn_login`] +
@@ -254,6 +251,25 @@ impl LoginProcessHandle {
     /// child returns a harmless error that is discarded.
     pub fn cancel(&self) {
         if let Ok(mut child) = self.child.lock() {
+            // The whole login tree, not just the process that was spawned.
+            // A login command routed through `npx` forks the CLI that owns the
+            // OAuth callback server, and that server keeps its port bound; kill
+            // only the direct child and the next sign-in cannot complete, which
+            // is exactly the attempt a cancel exists to make room for.
+            // `spawn_login` already made the child a group leader, so its pid
+            // doubles as the group id.
+            #[cfg(unix)]
+            if matches!(child.try_wait(), Ok(None)) {
+                let pgid = child.id() as libc::pid_t;
+                // SAFETY: the child led its own group from `spawn_login`, so the
+                // negative form reaches that group and nothing else. It is not
+                // reaped — checked above, under the same lock that `wait` takes
+                // — so the pid is still this process's to name and cannot have
+                // been reused.
+                unsafe {
+                    libc::kill(-pgid, libc::SIGKILL);
+                }
+            }
             let _ = child.kill();
         }
     }
@@ -285,12 +301,11 @@ pub fn spawn_login(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    // Isolate the child into its own process group so signals delivered to
-    // *this* app's process group (e.g. a terminal Ctrl+C in a dev build)
-    // don't also reach the login process. This does not give `cancel` a
-    // group-wide kill (see the module doc's "Departure from orca" note) —
-    // it only changes what the child receives from outside, not what we
-    // send it.
+    // Isolate the child into its own process group, which buys two things:
+    // signals aimed at *this* app's group (a terminal Ctrl+C in a dev build)
+    // stop at the boundary, and the child's pid doubles as a group id that
+    // `LoginProcessHandle::cancel` can signal to reach the descendants an
+    // `npx`-wrapped login forks.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -660,6 +675,69 @@ mod tests {
     fn tokenize_falls_back_to_whitespace_on_unmatched_quote() {
         let toks = tokenize("claude --config 'unterminated");
         assert_eq!(toks, vec!["claude", "--config", "'unterminated"]);
+    }
+
+    /// Poll until `pid` is gone, or give up. `kill -0` asks only whether the
+    /// process exists, so an orphan reparented to init still answers.
+    #[cfg(unix)]
+    fn gone_within(pid: &str, budget: Duration) -> bool {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", pid])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !alive {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    /// A cancelled sign-in has to take the whole login tree with it.
+    ///
+    /// The login runs through `npx`, which forks the CLI that actually holds
+    /// the OAuth callback port; killing only the process daruda spawned leaves
+    /// that port bound, so the *next* attempt cannot complete — and cancel is
+    /// the ordinary recovery path when a user abandons a sign-in.
+    /// `spawn_login` already makes the child a process-group leader; this
+    /// covers the other half.
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_kills_a_grandchild_the_direct_child_forked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("grandchild.pid");
+        let command = format!(
+            "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {} ; wait'",
+            pid_file.display()
+        );
+        let login = spawn_login(&command, &[], &[], Duration::from_secs(20)).expect("spawn");
+        let handle = login.handle();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            if let Ok(raw) = std::fs::read_to_string(&pid_file) {
+                let trimmed = raw.trim().to_string();
+                if !trimmed.is_empty() {
+                    break trimmed;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the forked grandchild never reported its pid"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        };
+
+        handle.cancel();
+        assert!(
+            gone_within(&pid, Duration::from_secs(5)),
+            "grandchild {pid} survived the cancel — the login tree outlives it"
+        );
     }
 
     #[test]

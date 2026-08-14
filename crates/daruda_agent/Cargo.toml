@@ -23,3 +23,8 @@ shell-words = "1"
 tempfile = "3"
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[target.'cfg(unix)'.dependencies]
+# Group-wide signal for a cancelled login — `std` can put a child in its own
+# process group but cannot signal that group.
+libc = "0.2"

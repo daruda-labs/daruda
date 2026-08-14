@@ -570,6 +570,42 @@ impl Workspace {
     /// Open a fresh pane under the session's last-chosen agent (falling back
     /// to the catalog default). Thin wrapper over
     /// [`Self::open_agent_chat_pane_with_agent`].
+    /// Park an agent-chat pane on an expired-login failure — the
+    /// `--screenshot-scenario agent-chat-failure` entry point.
+    ///
+    /// Both affordances at once, because they are separately reachable and
+    /// separately breakable: the connect banner's pair, and the failure card
+    /// the conversation actually ends on. Pair it with a dark terminal preset
+    /// and `--screenshot-theme light` to reproduce the combination where the
+    /// pane background and the window theme disagree.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_failure_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.items.push(daruda_acp::ChatItem::UserText(
+                "why is the build failing?".to_string(),
+            ));
+            v.items.push(daruda_acp::ChatItem::Failure(
+                daruda_acp::AcpFailure::AuthRequired {
+                    message: "Authentication required".to_string(),
+                },
+            ));
+            v.set_error(
+                "Authentication required".to_string(),
+                daruda_acp::Remedy::Reauthenticate,
+                cx,
+            );
+        });
+    }
+
     pub(in crate::workspace) fn open_agent_chat_pane(
         &mut self,
         window: &mut Window,

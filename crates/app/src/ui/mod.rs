@@ -94,7 +94,9 @@ pub use spinner::{Spinner, spinner};
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use daruda_core::text::{CharType, char_cell_hit_x, logical_line_range, word_range};
-pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
+pub use gpui_component::button::{
+    ButtonCustomVariant, ButtonVariant, ButtonVariants, DropdownButton,
+};
 pub use gpui_component::scroll::ScrollableElement;
 pub use gpui_component::text::{
     SelectMode, TextSelectionHandle, active_text_selection, select_mode_for_click_count,

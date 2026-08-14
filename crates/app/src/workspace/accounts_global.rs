@@ -24,13 +24,13 @@ use gpui::{App, BorrowAppContext, Global};
 
 use daruda_store::accounts::AccountsState;
 
-use super::account_login_ops::LoginTarget;
+use super::account_login_ops::LoginAttempt;
 
 /// Process-wide managed-accounts snapshot and authentication operation marker.
 /// State replacement and login-slot ownership stay behind this module's API.
 pub(crate) struct AccountsGlobal {
     state: AccountsState,
-    login_target: Option<LoginTarget>,
+    login_attempt: Option<LoginAttempt>,
 }
 
 impl Global for AccountsGlobal {}
@@ -45,7 +45,7 @@ pub(crate) fn install_if_absent(cx: &mut App, initial: AccountsState) {
     if !cx.has_global::<AccountsGlobal>() {
         cx.set_global(AccountsGlobal {
             state: initial,
-            login_target: None,
+            login_attempt: None,
         });
     }
 }
@@ -61,7 +61,7 @@ pub(crate) fn replace(cx: &mut App, state: AccountsState) {
     } else {
         cx.set_global(AccountsGlobal {
             state,
-            login_target: None,
+            login_attempt: None,
         });
     }
 }
@@ -75,51 +75,49 @@ pub(crate) fn snapshot(cx: &App) -> AccountsState {
 /// Reserve the single process-wide account authentication slot. The
 /// Workspace still owns the process handle, while this shared marker keeps
 /// Settings and other Workspace windows from starting a competing flow.
-pub(in crate::workspace) fn begin_login(cx: &mut App, target: LoginTarget) -> bool {
+pub(in crate::workspace) fn begin_login(cx: &mut App, attempt: LoginAttempt) -> bool {
     cx.update_global::<AccountsGlobal, bool>(|global, _| {
-        if global.login_target.is_some() {
+        if global.login_attempt.is_some() {
             return false;
         }
-        global.login_target = Some(target);
+        global.login_attempt = Some(attempt);
         true
     })
 }
 
 /// Clear the authentication slot only when it still belongs to `account_id`.
 /// A stale async completion must not clear a newer login.
-pub(in crate::workspace) fn finish_login(cx: &mut App, target: LoginTarget) {
+pub(in crate::workspace) fn finish_login(cx: &mut App, attempt: LoginAttempt) {
     cx.update_global::<AccountsGlobal, _>(|global, _| {
-        clear_login_marker(global, target);
+        clear_login_marker(global, attempt);
     });
 }
 
-pub(in crate::workspace) fn clear_login_marker(global: &mut AccountsGlobal, target: LoginTarget) {
-    if global.login_target == Some(target) {
-        global.login_target = None;
+/// Release the slot only when it still belongs to `attempt`.
+///
+/// Keyed on the attempt rather than what it was signing into: a login that was
+/// taken over, or whose window closed, resolves late and would otherwise
+/// release the slot of the *replacement* — which signs into the same place.
+pub(in crate::workspace) fn clear_login_marker(global: &mut AccountsGlobal, attempt: LoginAttempt) {
+    if global.login_attempt == Some(attempt) {
+        global.login_attempt = None;
     }
 }
 
 pub(crate) fn login_busy(cx: &App) -> bool {
-    cx.global::<AccountsGlobal>().login_target.is_some()
+    cx.global::<AccountsGlobal>().login_attempt.is_some()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::account_login_ops::next_login_attempt;
     use super::*;
-    use daruda_store::accounts::{AccountId, AccountRecipeId};
     use gpui::TestAppContext;
-
-    fn managed() -> LoginTarget {
-        LoginTarget::Managed {
-            id: AccountId::new(),
-            recipe: AccountRecipeId::Claude,
-        }
-    }
 
     #[gpui::test]
     fn login_slot_rejects_competitors_and_ignores_stale_completion(cx: &mut TestAppContext) {
-        let owner = managed();
-        let competitor = managed();
+        let owner = next_login_attempt();
+        let competitor = next_login_attempt();
 
         cx.update(|cx| {
             install_if_absent(cx, AccountsState::default());

@@ -986,7 +986,7 @@ impl Render for Workspace {
         // showing a misleading "System".
         let focused_pane_id = self.active_runtime().focused_pane_id;
         let weak_workspace = cx.entity().downgrade();
-        let login_pending = self.is_login_pending();
+        let login_pending = self.is_login_pending(cx);
         let focused_selection = self
             .active_runtime()
             .panes

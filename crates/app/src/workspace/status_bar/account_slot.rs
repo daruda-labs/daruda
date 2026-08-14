@@ -327,7 +327,6 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     });
     let menu = menu.separator();
     let menu = if slot.login_pending {
-        let cancel_workspace = slot.workspace.clone();
         menu.item(
             PopupMenuItem::element(|_window, _cx| {
                 div()
@@ -347,9 +346,16 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 crate::surface::strings::settings_account_login_cancel(),
             ))
             .on_click(move |_, _window, app| {
-                if let Some(ws) = cancel_workspace.upgrade() {
-                    ws.update(app, |ws, cx| ws.cancel_pending_login(cx));
-                }
+                // Whichever window owns the attempt, not necessarily this one:
+                // the slot is process-wide, and a cancel that only reached the
+                // local window would leave the other windows' refusals with no
+                // remedy. A window holding nothing is a no-op. Safe to fan out
+                // from here — this handler runs on `App`, outside any
+                // Workspace lease.
+                crate::window_registry::WindowRegistry::for_each_workspace(
+                    app,
+                    |ws, _window, cx| ws.cancel_pending_login(cx),
+                );
             }),
         )
     } else {

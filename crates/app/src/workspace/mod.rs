@@ -328,10 +328,15 @@ pub(in crate::workspace) enum PendingLogin {
     None,
     Preparing {
         target: account_login_ops::LoginTarget,
+        /// Which attempt this is — see `account_login_ops::LoginAttempt`. The
+        /// target cannot stand in: a taken-over login is replaced by another
+        /// attempt at the same target.
+        attempt: account_login_ops::LoginAttempt,
         finish: account_login_ops::LoginFinish,
     },
     InProgress {
         target: account_login_ops::LoginTarget,
+        attempt: account_login_ops::LoginAttempt,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
         handle: daruda_agent::accounts::LoginProcessHandle,
@@ -1418,7 +1423,11 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         let window_handle = window.window_handle();
         crate::window_registry::WindowRegistry::register(window_handle, weak.clone(), cx);
-        cx.on_release(move |_: &mut Workspace, cx: &mut gpui::App| {
+        cx.on_release(move |ws: &mut Workspace, cx: &mut gpui::App| {
+            // Before deregistering: a login this window owned can no longer be
+            // finished by anyone, and the process-wide slot it holds would
+            // block every other window until the login timed out.
+            ws.release_pending_login_on_close(cx);
             crate::window_registry::WindowRegistry::deregister(&weak, cx);
         })
         .detach();

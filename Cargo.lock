@@ -1694,6 +1694,7 @@ dependencies = [
  "daruda_store",
  "dirs",
  "fs4",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

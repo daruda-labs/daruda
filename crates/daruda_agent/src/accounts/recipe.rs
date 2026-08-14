@@ -45,17 +45,32 @@ pub trait AccountRecipe: Send + Sync {
     fn system_home_hint(&self) -> &'static str;
     /// The same home as a real path, honouring the domain's own config-dir
     /// override env var. A system login writes here instead of into a minted
-    /// config dir, so this is what [`Self::has_credentials`] gets probed
-    /// against for a domain whose login completes on credentials landing.
+    /// config dir.
     ///
     /// `None` only when there is no home directory and no override — nothing
     /// to read or write. [`Self::system_home_hint`] is display copy and cannot
     /// stand in: it is a tilde string, not a path.
+    ///
+    /// NOT automatically a valid argument to [`Self::has_credentials`] — see
+    /// that method. A domain whose login completes on credentials landing can
+    /// probe this path only if its credentials actually live under it.
     fn system_home_dir(&self) -> Option<std::path::PathBuf>;
     /// Best-effort prep run against `dir` before *any* process spawns under it
     /// — an agent session or a plain shell — e.g. mirroring shared config in.
     fn prepare_dir(&self, dir: &Path) -> std::io::Result<()>;
     fn read_identity(&self, dir: &Path) -> AccountIdentity;
+    /// Whether a *managed* account's credentials are present under `dir`.
+    ///
+    /// Scoped to `dir`, which for Claude means a Keychain item whose service
+    /// name is derived from the path — so passing
+    /// [`Self::system_home_dir`] answers `false` even for a healthy ambient
+    /// login, whose item is the unscoped one the CLI writes. Codex has no such
+    /// split (its credentials are a file inside the home), which is why the
+    /// system flow can probe it and Claude's cannot.
+    ///
+    /// Claude only escapes this today because its login completes on process
+    /// exit and never probes. Verifying an ambient login needs a system-scoped
+    /// read, not this.
     fn has_credentials(&self, dir: &Path) -> bool;
     /// Remove `dir` and any OS-level credential store entry scoped to it.
     fn cleanup(&self, dir: &Path);

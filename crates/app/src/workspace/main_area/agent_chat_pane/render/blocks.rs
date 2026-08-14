@@ -215,6 +215,39 @@ pub(super) fn thinking_block(
 }
 
 /// Surfaced error item — error-tinted block.
+/// A button on one of this pane's error surfaces — the connect banner or a
+/// failure card.
+///
+/// Its colours come from the *pane*, not the window theme, which is what a
+/// `ghost` button gets wrong here twice over. Ghost paints no fill at all, so
+/// the affordance read as a run of plain text; and it takes its label from the
+/// window's `secondary_foreground`, which knows nothing about the agent-chat
+/// background — that background mirrors the terminal's, so a light window theme
+/// over a dark terminal put dark text on a dark surface and the button vanished.
+///
+/// The fill and hairline are the same background-derived overlay every card in
+/// this pane already uses (white over a dark pane, black over a light one), so
+/// the chrome tracks whatever the pane sits on. The label is the pane's own
+/// body colour, derived from that same background: an action is not part of
+/// the message it sits under, and colouring it like the error reads as more
+/// error text rather than as something to press.
+pub(super) fn error_action_button(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    cx: &mut Context<AgentChatView>,
+) -> crate::ui::Button {
+    crate::ui::button(id, label).xsmall().custom(
+        crate::ui::ButtonCustomVariant::new(cx)
+            .color(theme::agent_chat_tint(cx))
+            .foreground(theme::agent_chat_fg(cx))
+            .border(theme::agent_chat_border_tint(cx))
+            // One step up the same overlay, so hover is felt on any pane
+            // background rather than borrowed from the window theme.
+            .hover(theme::agent_chat_border_tint(cx))
+            .active(theme::agent_chat_border_tint(cx)),
+    )
+}
+
 /// A turn failure, with the one action its classification implies.
 ///
 /// This is the *main* path an expired login surfaces on, not the connect
@@ -235,12 +268,11 @@ pub(super) fn failure_block(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let sign_in = matches!(failure.remedy(), daruda_acp::Remedy::Reauthenticate).then(|| {
-        crate::ui::button(
+        error_action_button(
             ("agent-chat-failure-reauth", pane_id as usize),
             s::agent_chat_sign_in_again(),
+            cx,
         )
-        .ghost()
-        .xsmall()
         .on_click(cx.listener(move |_this, _ev, _window, cx| {
             // The login op reaches this same view through `Workspace`, which
             // would double-lease-panic inline (CLAUDE.md Pitfall #5).
