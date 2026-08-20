@@ -663,7 +663,7 @@ fn render_item(
         }
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Failure(failure) => {
-            failure_block(failure, pane_id, window_handle, t, cx).into_any_element()
+            failure_block(ix, failure, pane_id, window_handle, t, cx).into_any_element()
         }
     }
 }

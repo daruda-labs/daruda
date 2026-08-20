@@ -11,7 +11,7 @@ use super::links::AgentChatMarkdownLinks;
 use super::mermaid::mermaid_code_block_render;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Sizable as _};
+use crate::ui::ButtonVariants as _;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -234,7 +234,7 @@ pub(super) fn pane_action_button(
     label: String,
     cx: &mut Context<AgentChatView>,
 ) -> crate::ui::Button {
-    crate::ui::button(id, label).xsmall().custom(
+    crate::ui::button(id, label).custom(
         crate::ui::ButtonCustomVariant::new(cx)
             .color(theme::agent_chat_tint(cx))
             .foreground(theme::agent_chat_fg(cx))
@@ -262,7 +262,7 @@ pub(super) fn banner_action_button(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> crate::ui::Button {
-    crate::ui::button(id, label).xsmall().custom(
+    crate::ui::button(id, label).custom(
         crate::ui::ButtonCustomVariant::new(cx)
             .color(t.button_widget_bg)
             .foreground(t.text_primary)
@@ -285,6 +285,7 @@ pub(super) fn banner_action_button(
 /// and the rest are either the user's to fix elsewhere or have no action at
 /// all — for those the message alone is the honest answer.
 pub(super) fn failure_block(
+    ix: usize,
     failure: &daruda_acp::AcpFailure,
     pane_id: crate::workspace::main_area::pane_tree::PaneId,
     window_handle: gpui::AnyWindowHandle,
@@ -293,7 +294,11 @@ pub(super) fn failure_block(
 ) -> impl IntoElement + use<> {
     let sign_in = matches!(failure.remedy(), daruda_acp::Remedy::Reauthenticate).then(|| {
         pane_action_button(
-            ("agent-chat-failure-reauth", pane_id as usize),
+            // Keyed by the item, like every sibling block. Keyed by the pane,
+            // two failures in one conversation shared an element id — gpui
+            // then treats them as one element, so a click on either ran both
+            // of their handlers.
+            ("agent-chat-failure-reauth", ix),
             s::agent_chat_sign_in_again(),
             cx,
         )
@@ -316,10 +321,17 @@ pub(super) fn failure_block(
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        // Wider than the gap *within* a message (`AGENT_CHAT_MSG_GAP`), so the
+        // button reads as a separate thing to press rather than as the last
+        // line of the text above it.
+        .gap(px(theme::GAP_LG))
         .child(error_block(failure.message(), t, cx))
         .when_some(sign_in, |el, btn| {
-            el.child(div().flex().flex_row().child(btn))
+            // Centred under the message. The row stretches to the column's
+            // width (flex-column default), so `justify_center` has something to
+            // centre within; this container is `failure_block`'s alone, so
+            // neither the gap nor the alignment reaches any other block.
+            el.child(div().flex().flex_row().justify_center().child(btn))
         })
 }
 
