@@ -139,10 +139,8 @@ impl Workspace {
                     workspace.revert_node_form(&for_path, view.clone(), window, cx)
                 }
                 FlowGraphEvent::Delete => {
-                    let Some(node) = view.read(cx).selected_node(cx) else {
-                        return;
-                    };
-                    workspace.confirm_delete_node(&for_path, view.clone(), node, window, cx)
+                    let nodes = view.read(cx).selected_nodes(cx);
+                    workspace.confirm_delete_nodes(&for_path, view.clone(), nodes, window, cx)
                 }
                 // A toast rather than something in the pane: what would have
                 // carried it — the node's form — is the thing that was replaced.
@@ -247,10 +245,8 @@ impl Workspace {
         let Some((path, view)) = self.flow_graph_of_pane(pane_id) else {
             return;
         };
-        let Some(node) = view.read(cx).selected_node(cx) else {
-            return;
-        };
-        self.confirm_delete_node(&path, view, node, window, cx);
+        let nodes = view.read(cx).selected_nodes(cx);
+        self.confirm_delete_nodes(&path, view, nodes, window, cx);
     }
 
     fn flow_graph_of_pane(
@@ -313,26 +309,38 @@ impl Workspace {
     /// Refuses the last node: the differ takes the element's lines out and the
     /// file is left with `nodes:` and nothing under it, which does not parse —
     /// the engine would refuse it, in words about YAML rather than about flows.
-    pub(in crate::workspace) fn delete_node(
+    pub(in crate::workspace) fn delete_nodes(
         &mut self,
         path: &Path,
         view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        node: String,
+        nodes: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(base) = view.read_with(cx, |view, _| view.text().map(str::to_string)) else {
             return;
         };
-        if daruda_flow::parse::parse_flow_file(&base).is_ok_and(|file| file.nodes.len() <= 1) {
+        if nodes.is_empty() {
+            return;
+        }
+        // Refused against the *count being taken*, not against one: a marquee can
+        // catch every node there is, and the differ would leave `nodes:` with
+        // nothing under it — which does not parse.
+        if daruda_flow::parse::parse_flow_file(&base)
+            .is_ok_and(|file| file.nodes.len() <= nodes.len())
+        {
             self.report_own_flow_refusal(s::flow_delete_node_last(), "flow.delete_node_last", cx);
             return;
         }
-        let target = node.clone();
+        let targets = nodes.clone();
         let outcome = self.edit_flow(
             path,
             &base,
-            move |file| super::main_area::flow_graph_pane::form::apply::remove_node(file, &target),
+            move |file| {
+                for node in &targets {
+                    super::main_area::flow_graph_pane::form::apply::remove_node(file, node);
+                }
+            },
             window,
             cx,
         );
@@ -343,27 +351,40 @@ impl Workspace {
 
     /// Ask first, then delete. The body says what else changes — a node other
     /// nodes run after does not go quietly.
-    pub(in crate::workspace) fn confirm_delete_node(
+    pub(in crate::workspace) fn confirm_delete_nodes(
         &mut self,
         path: &Path,
         view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        node: String,
+        nodes: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let dependents = self.nodes_depending_on(&view, &node, cx);
+        let Some(first) = nodes.first().cloned() else {
+            return;
+        };
+        // Dependents *outside* the selection: a node going with the one that
+        // depends on it is not a change left behind.
+        let dependents = nodes
+            .iter()
+            .map(|node| self.nodes_depending_on(&view, node, cx))
+            .sum::<usize>()
+            .saturating_sub(nodes.len().saturating_sub(1));
+        let body = match nodes.len() {
+            1 => s::flow_delete_node_confirm_body(&first, dependents),
+            _ => s::flow_delete_nodes_confirm_body(&nodes, dependents),
+        };
         let weak = cx.weak_entity();
         let owned_path = path.to_path_buf();
         super::dialog_helpers::open_confirm_dialog(
             s::flow_delete_node_confirm_title(),
-            s::flow_delete_node_confirm_body(&node, dependents),
+            body,
             s::flow_delete_node(),
             gpui_component::button::ButtonVariant::Danger,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
-                    let (path, view, node) = (owned_path.clone(), view.clone(), node.clone());
+                    let (path, view, nodes) = (owned_path.clone(), view.clone(), nodes.clone());
                     ws.update(app_cx, |ws, cx| {
-                        ws.delete_node(&path, view, node, window, cx);
+                        ws.delete_nodes(&path, view, nodes, window, cx);
                     });
                 }
             },

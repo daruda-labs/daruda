@@ -204,7 +204,10 @@ fn diff_keyed_sequence(
 ) {
     for (old_ix, id) in old_ids.iter().enumerate() {
         if let Some(new_ix) = new_ids.iter().position(|new| new == id) {
-            path.push(Step::Index(old_ix));
+            path.push(Step::Index {
+                text: old_ix,
+                value: Some(new_ix),
+            });
             diff(&a[old_ix], &b[new_ix], path, out);
             path.pop();
         }
@@ -213,7 +216,11 @@ fn diff_keyed_sequence(
     // descending keeps the ranges from crossing.
     for (old_ix, id) in old_ids.iter().enumerate().rev() {
         if !new_ids.iter().any(|new| new == id) {
-            path.push(Step::Index(old_ix));
+            // Nowhere in the new tree: this is the element being removed.
+            path.push(Step::Index {
+                text: old_ix,
+                value: None,
+            });
             out.push(Change::Remove { path: path.clone() });
             path.pop();
         }
@@ -240,7 +247,7 @@ fn diff_positional_sequence(a: &[Value], b: &[Value], path: &mut Vec<Step>, out:
 
     if old_middle.len() == new_middle.len() {
         for (old_ix, new_ix) in old_middle.zip(new_middle) {
-            path.push(Step::Index(old_ix));
+            path.push(Step::index(old_ix));
             diff(&a[old_ix], &b[new_ix], path, out);
             path.pop();
         }
@@ -264,7 +271,7 @@ fn diff_positional_sequence(a: &[Value], b: &[Value], path: &mut Vec<Step>, out:
         // text, so the order only has to be one the caller can apply, and
         // descending keeps the ranges from crossing.
         for ix in old_middle.rev() {
-            path.push(Step::Index(ix));
+            path.push(Step::index(ix));
             out.push(Change::Remove { path: path.clone() });
             path.pop();
         }
@@ -499,7 +506,7 @@ fn value_at_path<'a>(value: &'a Value, path: &[Step]) -> Option<&'a Value> {
     for step in path {
         current = match step {
             Step::Key(key) => current.get(key.as_str())?,
-            Step::Index(ix) => current.as_sequence()?.get(*ix)?,
+            Step::Index { value, .. } => current.as_sequence()?.get((*value)?)?,
         };
     }
     Some(current)
@@ -513,7 +520,7 @@ fn element_column(
     path: &[Step],
 ) -> Result<usize, FlowEditError> {
     let mut probe = path.to_vec();
-    probe.push(Step::Index(0));
+    probe.push(Step::index(0));
     Ok(match locate::locate(tree, text, &probe)? {
         Site::Found(found) => found.column,
         Site::Vacant(vacancy) => vacancy.column,

@@ -721,6 +721,27 @@ pub fn flow_delete_node_last() -> String {
 pub fn flow_delete_node_confirm_title() -> String {
     rust_i18n::t!("flow.delete_node_confirm_title").into_owned()
 }
+/// The same question for a marquee selection. Names them rather than counting
+/// only: "3 nodes" does not tell you which three you caught in the drag.
+pub fn flow_delete_nodes_confirm_body(nodes: &[String], dependents: usize) -> String {
+    let list = nodes.join(", ");
+    if dependents == 0 {
+        rust_i18n::t!(
+            "flow.delete_nodes_confirm_body",
+            nodes = list,
+            n = nodes.len().to_string()
+        )
+        .into_owned()
+    } else {
+        rust_i18n::t!(
+            "flow.delete_nodes_confirm_body_deps",
+            nodes = list,
+            n = nodes.len().to_string(),
+            deps = dependents.to_string()
+        )
+        .into_owned()
+    }
+}
 pub fn flow_delete_node_confirm_body(node: &str, dependents: usize) -> String {
     if dependents == 0 {
         rust_i18n::t!("flow.delete_node_confirm_body", node = node).into_owned()
@@ -3251,6 +3272,12 @@ pub fn settings_accounts_reauth_failed() -> String {
 /// `settings_accounts_reauth_failed()`'s report `.message()`.
 pub fn account_reauth_missing() -> String {
     rust_i18n::t!("settings.accounts_reauth_missing").into_owned()
+}
+/// How an account signed in, for a Settings row — `method` is the agent's own
+/// value, shown verbatim because the set of values is the provider's to grow
+/// and a mapped one would report a metered login as unrecognized.
+pub fn settings_accounts_signed_in_with(method: &str) -> String {
+    rust_i18n::t!("settings.accounts_signed_in_with", method = method).into_owned()
 }
 /// Toast title when a managed login replaced the ambient sign-in the user had
 /// made themselves — every `SystemDefault` pane now runs as that account.

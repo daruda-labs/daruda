@@ -23,7 +23,32 @@ use super::FlowEditError;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Step {
     Key(String),
-    Index(usize),
+    /// A sequence element, in two coordinates: where the **text** holds it, and
+    /// where the **new tree** does.
+    ///
+    /// They differ the moment an earlier element is removed, and reading the new
+    /// tree at a text index is how a surviving node came to be written with a
+    /// different node's value.
+    ///
+    /// `value: None` is the element being removed — it has no place in the new
+    /// tree. Nothing reads it today (a removal's path stops before any value is
+    /// fetched), so it is what absence *means* here rather than a branch under
+    /// test.
+    Index {
+        text: usize,
+        value: Option<usize>,
+    },
+}
+
+impl Step {
+    /// An element that sits at the same index in both, which is every
+    /// positional diff: nothing before it moved.
+    pub(super) fn index(at: usize) -> Self {
+        Step::Index {
+            text: at,
+            value: Some(at),
+        }
+    }
 }
 
 /// What the text holds at a path that exists.
@@ -193,7 +218,7 @@ fn descend(container: Node, text: &str, path: &[Step]) -> Result<Site, FlowEditE
                 .ok_or_else(|| FlowEditError::Unaddressable(format!("`{key}` has no value")))?;
             step_into(pair, value, text, rest)
         }
-        ("block_sequence", Step::Index(index)) => {
+        ("block_sequence", Step::Index { text: index, .. }) => {
             let items: Vec<Node> = (0..container.child_count())
                 .filter_map(|i| container.child(i))
                 .filter(|c| c.kind() == "block_sequence_item")
@@ -467,7 +492,7 @@ nodes:
 
     #[test]
     fn a_sequence_element_resolves_by_index() {
-        let f = found(SAMPLE, &[key("nodes"), Step::Index(1), key("id")]);
+        let f = found(SAMPLE, &[key("nodes"), Step::index(1), key("id")]);
         assert_eq!(&SAMPLE[f.value], "build");
     }
 
@@ -475,7 +500,7 @@ nodes:
     /// is read off the body rather than inferred.
     #[test]
     fn a_block_scalar_is_one_value_with_its_own_column() {
-        let f = found(SAMPLE, &[key("nodes"), Step::Index(0), key("prompt")]);
+        let f = found(SAMPLE, &[key("nodes"), Step::index(0), key("prompt")]);
         assert_eq!(&SAMPLE[f.value], "|\n      write a line");
         assert_eq!(
             f.kind,
@@ -493,7 +518,7 @@ nodes:
         let err = locate(
             &tree,
             text,
-            &[key("nodes"), Step::Index(1), key("deps"), Step::Index(0)],
+            &[key("nodes"), Step::index(1), key("deps"), Step::index(0)],
         )
         .expect_err("refused");
         assert!(matches!(err, FlowEditError::FlowStyle(_)), "{err:?}");
@@ -505,7 +530,7 @@ nodes:
         let site = locate(
             &tree,
             SAMPLE,
-            &[key("nodes"), Step::Index(0), key("timeout")],
+            &[key("nodes"), Step::index(0), key("timeout")],
         )
         .unwrap();
         let Site::Vacant(v) = site else {
@@ -531,7 +556,7 @@ nodes:
         let err = locate(
             &tree,
             SAMPLE,
-            &[key("nodes"), Step::Index(0), key("agent"), key("id")],
+            &[key("nodes"), Step::index(0), key("agent"), key("id")],
         )
         .expect_err("refused");
         assert!(matches!(err, FlowEditError::Unaddressable(_)), "{err:?}");

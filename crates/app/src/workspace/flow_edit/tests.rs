@@ -656,3 +656,76 @@ nodes:
     });
     assert!(out.is_ok(), "{:?}", out.err());
 }
+
+/// Two removals at once, and the node that survives keeps *its own* values.
+///
+/// The trap: an edit's path indexes the **text**, and the value it writes came
+/// from the **new** tree read at that same index — which is a different element
+/// once anything before it is gone. Here it gave `n4` the deps of `n6`, and the
+/// flow only failed to load because that happened to make a cycle. A pair that
+/// did not would have been written silently.
+#[test]
+fn removing_two_nodes_leaves_the_survivors_own_values() {
+    let text = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: n1
+    kind: agent
+    output: n1.md
+    prompt: one
+  - id: n2
+    kind: agent
+    deps: [n1]
+    output: n2.md
+    prompt: two
+  - id: n3
+    kind: agent
+    deps: [n2]
+    output: n3.md
+    prompt: three
+  - id: n4
+    kind: agent
+    deps: [n3]
+    output: n4.md
+    prompt: four
+  - id: n5
+    kind: agent
+    deps: [n4]
+    output: n5.md
+    prompt: five
+  - id: n6
+    kind: agent
+    deps: [n5]
+    output: n6.md
+    prompt: six
+";
+    let after = edited(text, |file| {
+        for target in ["n2", "n3"] {
+            crate::workspace::main_area::flow_graph_pane::form::apply::remove_node(file, target);
+        }
+    });
+    let file = daruda_flow::parse::parse_flow_file(&after).expect("still a flow");
+    let deps: Vec<(&str, Vec<&str>)> = file
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.deps.iter().map(String::as_str).collect()))
+        .collect();
+    assert_eq!(
+        deps,
+        vec![
+            ("n1", vec![]),
+            ("n4", vec![]),
+            ("n5", vec!["n4"]),
+            ("n6", vec!["n5"]),
+        ],
+        "n4 lost the dep on a node that is gone, and nobody else moved:\n{after}"
+    );
+    assert!(
+        daruda_flow::load(&after, None).is_ok(),
+        "and it loads:\n{after}"
+    );
+}

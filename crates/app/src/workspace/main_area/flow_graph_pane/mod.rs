@@ -552,7 +552,10 @@ impl Command for SelectNode {
 pub(in crate::workspace) enum Selection {
     None,
     One(String),
-    Many(usize),
+    /// More than one, by flow node id. The count the inspector shows is
+    /// `len()` — an id list gives that *and* what a delete has to act on, which
+    /// a count cannot.
+    Many(Vec<String>),
 }
 
 impl FlowGraphView {
@@ -566,22 +569,27 @@ impl FlowGraphView {
             return Selection::None;
         };
         let selected = canvas.read(cx).graph().selected_node();
-        match selected.len() {
+        // Ours only, and in the file's order: a canvas node with no flow id is
+        // nothing this side can name, and a set has no order to show.
+        let mut flow_ids: Vec<String> = ids
+            .iter()
+            .filter(|(_, canvas_id)| selected.contains(canvas_id))
+            .map(|(flow_id, _)| flow_id.clone())
+            .collect();
+        flow_ids.sort();
+        match flow_ids.len() {
             0 => Selection::None,
-            1 => {
-                let node = selected.iter().next().copied();
-                match node.and_then(|node| {
-                    ids.iter()
-                        .find(|(_, canvas_id)| **canvas_id == node)
-                        .map(|(flow_id, _)| flow_id.clone())
-                }) {
-                    Some(flow_id) => Selection::One(flow_id),
-                    // Selected on the canvas but not one of ours — nothing this
-                    // side can show fields for.
-                    None => Selection::None,
-                }
-            }
-            many => Selection::Many(many),
+            1 => Selection::One(flow_ids.remove(0)),
+            _ => Selection::Many(flow_ids),
+        }
+    }
+
+    /// Every selected node, one or many. What a delete acts on.
+    pub(in crate::workspace) fn selected_nodes(&self, cx: &App) -> Vec<String> {
+        match self.selection(cx) {
+            Selection::None => Vec::new(),
+            Selection::One(node) => vec![node],
+            Selection::Many(nodes) => nodes,
         }
     }
 
@@ -776,6 +784,10 @@ fn toolbar(has_selection: bool, cx: &mut Context<FlowGraphView>) -> impl IntoEle
 
     div()
         .absolute()
+        // Or the press goes through to the canvas underneath and starts a
+        // marquee drag: the toolbar sits inside the canvas's own bounds, and
+        // without this both get the same mouse-down.
+        .occlude()
         .top(px(palette::FLOW_TOOLBAR_INSET))
         .right(px(palette::FLOW_TOOLBAR_INSET))
         .flex()
@@ -817,7 +829,7 @@ impl Render for FlowGraphView {
                         Some(form) => form::render(form, cx).into_any_element(),
                         None => form::render_empty(cx).into_any_element(),
                     },
-                    Selection::Many(n) => form::render_many(n, cx).into_any_element(),
+                    Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),
                     // Nothing to click is not the same as nothing clicked yet.
                     Selection::None if self.is_empty_graph() => {
                         form::render_no_nodes(cx).into_any_element()
@@ -826,7 +838,7 @@ impl Render for FlowGraphView {
                 };
                 // The toolbar goes inside the canvas half, not the pane: over the
                 // pane it would sit on the inspector column instead of the graph.
-                let has_selection = matches!(self.selection(cx), Selection::One(_));
+                let has_selection = !self.selected_nodes(cx).is_empty();
                 body.child(
                     div()
                         .size_full()

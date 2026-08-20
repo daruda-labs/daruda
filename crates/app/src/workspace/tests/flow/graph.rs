@@ -1184,3 +1184,54 @@ async fn the_toolbar_add_reaches_the_file(cx: &mut TestAppContext) {
         "and so does the file:\n{text}"
     );
 }
+
+/// A press on the toolbar must not reach the canvas underneath.
+///
+/// The toolbar sits inside the canvas's own bounds, so without `.occlude()`
+/// both get the same mouse-down and the canvas starts a marquee — the button
+/// then only worked if you dragged off it and back.
+#[gpui::test]
+async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test("design", window, cx)
+    });
+    vcx.run_until_parked();
+    let canvas = view
+        .read_with(&vcx, |v, _| v.canvas_for_test().cloned())
+        .expect("it drew");
+
+    // Just inside the canvas's top-right corner, where the toolbar is.
+    let on_toolbar = canvas.read_with(&vcx, |c, _| {
+        let b = c.viewport().window_bounds().expect("measured");
+        gpui::point(
+            b.origin.x + b.size.width - gpui::px(16.0),
+            b.origin.y + gpui::px(16.0),
+        )
+    });
+    vcx.simulate_mouse_down(
+        on_toolbar,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::default(),
+    );
+    vcx.run_until_parked();
+
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.selection(cx)),
+        crate::workspace::main_area::flow_graph_pane::Selection::One("design".to_string()),
+        "the canvas never saw the press, so the selection stands"
+    );
+}

@@ -206,8 +206,8 @@ async fn clicking_a_card_selects_it_and_does_not_move_it(cx: &mut TestAppContext
     vcx.run_until_parked();
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selection(cx)),
-        Selection::Many(2),
-        "shift-click adds the second card"
+        Selection::Many(vec!["build".to_string(), "design".to_string()]),
+        "shift-click adds the second card, and says which two"
     );
 }
 
@@ -966,7 +966,13 @@ async fn deleting_a_node_takes_the_dependencies_with_it(cx: &mut TestAppContext)
 
     // `build` depends on `design`; deleting `design` has to take that with it.
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.delete_node(&flow_path, view.clone(), "design".to_string(), window, cx)
+        ws.delete_nodes(
+            &flow_path,
+            view.clone(),
+            vec!["design".to_string()],
+            window,
+            cx,
+        )
     });
     vcx.run_until_parked();
     let after = std::fs::read_to_string(&flow_path).unwrap();
@@ -979,7 +985,13 @@ async fn deleting_a_node_takes_the_dependencies_with_it(cx: &mut TestAppContext)
     // The one node left cannot go: the file would stop being a flow file.
     let before = after;
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.delete_node(&flow_path, view.clone(), "build".to_string(), window, cx)
+        ws.delete_nodes(
+            &flow_path,
+            view.clone(),
+            vec!["build".to_string()],
+            window,
+            cx,
+        )
     });
     vcx.run_until_parked();
     assert_eq!(
@@ -1396,5 +1408,94 @@ async fn typing_lost_with_the_node_itself_is_reported(cx: &mut TestAppContext) {
     assert!(
         told_about_dropped_typing(&ws, &vcx),
         "and that is exactly when it has to be said"
+    );
+}
+
+/// A marquee catches several nodes, and one Delete takes all of them — with the
+/// references to them swept out of the nodes that stay.
+#[gpui::test]
+async fn deleting_a_multi_selection_takes_every_node_in_it(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.delete_nodes(
+            &flow_path,
+            view.clone(),
+            vec!["n2".to_string(), "n3".to_string()],
+            window,
+            cx,
+        )
+    });
+    vcx.run_until_parked();
+
+    let after = std::fs::read_to_string(&flow_path).expect("on disk");
+    let file = daruda_flow::parse::parse_flow_file(&after).expect("still a flow");
+    let ids: Vec<&str> = file.nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"n2") && !ids.contains(&"n3"),
+        "both went:\n{after}"
+    );
+    assert!(
+        !after.contains("deps: [n2]") && !after.contains("deps: [n3]"),
+        "and nothing still runs after them:\n{after}"
+    );
+}
+
+/// The last node cannot go, and neither can *every* node — a marquee over the
+/// whole graph is the way to ask for that. The differ would leave `nodes:` with
+/// nothing under it, which does not parse.
+#[gpui::test]
+async fn a_selection_of_every_node_is_refused(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before = std::fs::read_to_string(&flow_path).expect("on disk");
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.delete_nodes(
+            &flow_path,
+            view.clone(),
+            vec!["design".to_string(), "build".to_string()],
+            window,
+            cx,
+        )
+    });
+    vcx.run_until_parked();
+
+    assert_eq!(
+        std::fs::read_to_string(&flow_path).expect("on disk"),
+        before,
+        "the file is untouched"
+    );
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws
+            .error_history()
+            .iter()
+            .any(|r| r.dedup_key.as_deref() == Some("flow.delete_node_last"))),
+        "and it says why"
     );
 }
