@@ -115,7 +115,9 @@ fn spawn_status_pulse(cx: &mut App) {
                     // instead re-rendered and re-laid-out the entire window tree
                     // four times a second to advance one badge (Pitfall #10).
                     ws.notify_right_dock(cx);
-                    ws.notify_left_dock(cx);
+                    if ws.left_dock_paints_status_pulse(cx) {
+                        ws.notify_left_dock(cx);
+                    }
                 }
                 // AgentChat panes are separately cached; pulse them through
                 // settle so their final running frame cannot freeze.

@@ -1749,6 +1749,18 @@ impl Workspace {
     /// no change and would not refresh the dock).
     /// Lease-free (`App::notify`) — dock event listeners run inside a
     /// `Context<Dock>` lease, so leasing the dock here would double-lease.
+    /// Whether a status-pulse tick can change anything the left dock paints.
+    ///
+    /// The animated badge exists only in the Lanes view's rows
+    /// (`left_dock/projects/agent_badges.rs`). Pulsing the dock while it shows
+    /// Git Changes or Files repaints a view holding no badge — and Git Changes
+    /// builds one row element per changed file, so on a large branch that is a
+    /// full rebuild of the list four times a second to animate nothing.
+    pub(crate) fn left_dock_paints_status_pulse(&self, cx: &gpui::App) -> bool {
+        self.left_dock.read(cx).is_open
+            && self.left_dock_view == daruda_store::project::LeftDockView::Lanes
+    }
+
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
         let dock_id = self.left_dock.entity_id();
         gpui::App::notify(cx, dock_id);

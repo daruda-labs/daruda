@@ -14,6 +14,7 @@ mod error_modal;
 mod error_ops;
 mod files;
 mod flow;
+mod left_dock_pulse;
 mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;

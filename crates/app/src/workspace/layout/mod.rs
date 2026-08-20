@@ -128,6 +128,10 @@ impl Panel for AgentChatPanel {
 pub(super) struct Dock {
     pub position: DockPosition,
     pub is_open: bool,
+    /// Renders so far. Lets a test assert that a tick which cannot change what
+    /// this dock paints does not repaint it.
+    #[cfg(test)]
+    pub render_count: std::cell::Cell<u32>,
     pub size: f32,
     pub min_size: f32,
     pub max_size: f32,
@@ -172,6 +176,8 @@ impl Dock {
         Self {
             position,
             is_open: false,
+            #[cfg(test)]
+            render_count: std::cell::Cell::new(0),
             size,
             min_size,
             max_size,
@@ -224,6 +230,8 @@ impl Render for Dock {
         _window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
+        #[cfg(test)]
+        self.render_count.set(self.render_count.get() + 1);
         if !self.is_open {
             return div().into_any_element();
         }
