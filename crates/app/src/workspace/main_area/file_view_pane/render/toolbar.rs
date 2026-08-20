@@ -228,6 +228,11 @@ pub(super) fn render_file_viewer_toolbar(
                 .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
                 .text_color(header_text)
                 .child(label)
+                // Blocks the pane's own right-click underneath: this label has a
+                // menu of its own (the file, its worktree), and `.context_menu()`
+                // is a raw window listener that no propagation rule reaches — so
+                // the hitbox is what has to say "handled here".
+                .occlude()
                 .context_menu(menu_builder(move |menu, _window, cx| {
                     let Some(ws) = ws_for_menu.upgrade() else {
                         return menu;

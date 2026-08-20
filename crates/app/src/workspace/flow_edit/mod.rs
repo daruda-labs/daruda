@@ -271,7 +271,14 @@ fn diff_positional_sequence(a: &[Value], b: &[Value], path: &mut Vec<Step>, out:
         // text, so the order only has to be one the caller can apply, and
         // descending keeps the ranges from crossing.
         for ix in old_middle.rev() {
-            path.push(Step::index(ix));
+            // `value: None` for the same reason the keyed path uses it: the
+            // element is the one going away, so it has no index in the new tree
+            // — and claiming it has one is how a removal turns into a write of
+            // whatever now sits at that index.
+            path.push(Step::Index {
+                text: ix,
+                value: None,
+            });
             out.push(Change::Remove { path: path.clone() });
             path.pop();
         }

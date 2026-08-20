@@ -113,6 +113,35 @@ fn next_node_id(file: &FlowFile) -> String {
 /// Take `node` out, and out of everything that pointed at it — every `deps` and
 /// every gate's `rerun`. The mirror of a rename, and the same rule: a name
 /// written in three places has to move in all three.
+/// How many nodes *outside* `going` would lose a reference if `going` were
+/// removed — what the confirm dialog means by "and from what N other nodes run
+/// after".
+///
+/// A set question, not a sum: a node that depends on two of the selection is
+/// one loser, not two, and a node inside the selection is not a loser at all
+/// because it is going too. Counting per-node and correcting arithmetically got
+/// both of those wrong.
+pub(in crate::workspace) fn dependents_outside(file: &FlowFile, going: &[String]) -> usize {
+    use daruda_flow::parse::{GateFailFile, NodeKindFile};
+    file.nodes
+        .iter()
+        .filter(|node| !going.contains(&node.id))
+        .filter(|node| {
+            let rerun = match &node.kind {
+                NodeKindFile::Command {
+                    on_fail: GateFailFile::Repair { rerun, .. },
+                    ..
+                } => rerun.as_slice(),
+                _ => &[],
+            };
+            node.deps
+                .iter()
+                .chain(rerun.iter())
+                .any(|name| going.contains(name))
+        })
+        .count()
+}
+
 pub(in crate::workspace) fn remove_node(file: &mut FlowFile, node: &str) {
     use daruda_flow::parse::{GateFailFile, NodeKindFile};
     file.nodes.retain(|n| n.id != node);
@@ -328,5 +357,76 @@ nodes:
         let before = file.clone();
         node_fields(&mut file, "nobody", &fields_renaming("x"));
         assert_eq!(file, before);
+    }
+}
+
+#[cfg(test)]
+mod dependents_tests {
+    use super::*;
+
+    fn file(text: &str) -> FlowFile {
+        daruda_flow::parse::parse_flow_file(text).expect("fixture parses")
+    }
+
+    const FORK: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: n1
+    kind: agent
+    output: n1.md
+    prompt: one
+  - id: n2
+    kind: agent
+    deps: [n1]
+    output: n2.md
+    prompt: two
+  - id: n3
+    kind: agent
+    deps: [n1, n2]
+    output: n3.md
+    prompt: three
+  - id: n5
+    kind: agent
+    deps: [n1]
+    output: n5.md
+    prompt: five
+  - id: n6
+    kind: agent
+    deps: [n5]
+    output: n6.md
+    prompt: six
+";
+
+    fn going(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Two nodes in unrelated branches: each leaves its own dependent behind, so
+    /// the answer is two. Summing per-node and subtracting the selection size
+    /// said one.
+    #[test]
+    fn two_unrelated_removals_leave_two_dependents() {
+        assert_eq!(dependents_outside(&file(FORK), &going(&["n2", "n5"])), 2);
+    }
+
+    /// A node that depends on *two* of the selection is one loser, not two.
+    #[test]
+    fn a_node_depending_on_two_of_them_is_counted_once() {
+        assert_eq!(dependents_outside(&file(FORK), &going(&["n1", "n2"])), 2);
+    }
+
+    /// A dependent that is going too is not a change left behind.
+    #[test]
+    fn a_dependent_inside_the_selection_does_not_count() {
+        assert_eq!(dependents_outside(&file(FORK), &going(&["n5", "n6"])), 0);
+    }
+
+    #[test]
+    fn a_node_nothing_runs_after_leaves_nobody() {
+        assert_eq!(dependents_outside(&file(FORK), &going(&["n6"])), 0);
     }
 }

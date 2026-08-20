@@ -202,8 +202,6 @@ pub(super) fn fail_kind_of(kind: KindChoice) -> FailKind {
 
 /// A node's own `agent:`, or nothing. Only agent nodes can carry one — a command
 /// node runs a shell line and has no agent of its own.
-/// A node's own `agent:`, or nothing. Only agent nodes can carry one — a command
-/// node runs a shell line and has no agent of its own.
 pub(super) fn agent_fields_of(node: &daruda_flow::parse::NodeFile) -> AgentFields {
     use daruda_flow::parse::NodeKindFile;
     let NodeKindFile::Agent {

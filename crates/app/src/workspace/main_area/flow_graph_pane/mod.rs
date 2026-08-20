@@ -127,11 +127,16 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (text, state) = match read_flow(path).and_then(|text| {
-            let model = policy::model_from(&text)?;
-            Ok((text, model))
-        }) {
-            Ok((text, model)) => (Some(text), build_graph_state(model, window, cx)),
+        // The same rule [`policy::Reload::Unreadable`] carries, because a first
+        // open is a reload against nothing: bytes that were *read* are kept even
+        // when they do not load, so reading them again is nothing to do. Losing
+        // them here made the first watcher tick on a broken file look like a
+        // change and rebuild for no reason.
+        let (text, state) = match read_flow(path) {
+            Ok(text) => match policy::model_from(&text) {
+                Ok(model) => (Some(text), build_graph_state(model, window, cx)),
+                Err(err) => (Some(text), FlowGraphState::Unreadable(err)),
+            },
             Err(err) => (None, FlowGraphState::Unreadable(err)),
         };
         let this = cx.entity().downgrade();

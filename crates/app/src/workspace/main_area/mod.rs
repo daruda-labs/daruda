@@ -33,7 +33,6 @@ use gpui::{
 };
 
 use crate::shell_quote::{Shell, format_paths_for_drop, quote_path};
-use crate::ui::{ContextMenuExt as _, menu_builder};
 use crate::workspace::path_drag::PathDrag;
 
 use self::file_view_pane::render::render_pane_file_viewer;
@@ -155,8 +154,6 @@ fn pane_header(
     let unfocused_text = t.text_muted;
     let cwd_text = t.text_muted;
 
-    let ws = cx.entity().downgrade();
-
     div()
         .id(("pane-hdr", pane_id as usize))
         .flex()
@@ -183,9 +180,6 @@ fn pane_header(
         .when(!is_focused, |d| {
             d.bg(unfocused_bg).text_color(unfocused_text)
         })
-        .context_menu(menu_builder(move |menu, window, cx| {
-            self::pane_menu::pane_context_menu(menu, ws.clone(), pane_id, window, cx)
-        }))
         .child(
             div()
                 .flex_1()

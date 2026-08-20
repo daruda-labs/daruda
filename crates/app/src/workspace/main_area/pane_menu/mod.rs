@@ -21,5 +21,3 @@ mod context;
 mod ops;
 mod sections;
 mod spec;
-
-pub(in crate::workspace) use adapter::pane_context_menu;

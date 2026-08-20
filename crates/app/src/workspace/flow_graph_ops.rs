@@ -362,13 +362,7 @@ impl Workspace {
         let Some(first) = nodes.first().cloned() else {
             return;
         };
-        // Dependents *outside* the selection: a node going with the one that
-        // depends on it is not a change left behind.
-        let dependents = nodes
-            .iter()
-            .map(|node| self.nodes_depending_on(&view, node, cx))
-            .sum::<usize>()
-            .saturating_sub(nodes.len().saturating_sub(1));
+        let dependents = self.dependents_outside(&view, &nodes, cx);
         let body = match nodes.len() {
             1 => s::flow_delete_node_confirm_body(&first, dependents),
             _ => s::flow_delete_nodes_confirm_body(&nodes, dependents),
@@ -395,20 +389,17 @@ impl Workspace {
 
     /// How many other nodes name `node` in their `deps` — what the confirm says
     /// will change besides the node itself.
-    pub(in crate::workspace) fn nodes_depending_on(
+    fn dependents_outside(
         &self,
         view: &gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        node: &str,
+        going: &[String],
         cx: &gpui::App,
     ) -> usize {
         view.read(cx)
             .text()
             .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
             .map(|file| {
-                file.nodes
-                    .iter()
-                    .filter(|n| n.deps.iter().any(|dep| dep == node))
-                    .count()
+                super::main_area::flow_graph_pane::form::apply::dependents_outside(&file, going)
             })
             .unwrap_or(0)
     }

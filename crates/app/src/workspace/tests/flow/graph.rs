@@ -1235,3 +1235,35 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
         "the canvas never saw the press, so the selection stands"
     );
 }
+
+/// A first open is a reload against nothing, and it has to keep the same rule:
+/// bytes that were *read* are kept even when they do not load.
+///
+/// Dropping them made the first watcher tick on a broken file look like a
+/// change — a rebuild and a notify for a file nobody had touched.
+#[gpui::test]
+async fn a_file_that_does_not_load_keeps_its_bytes_from_the_first_open(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, "nodes: [\n");
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the pane opened even though the flow does not load");
+
+    assert!(
+        view.read_with(&vcx, |v, _| v.unreadable_for_test().is_some()),
+        "it says why"
+    );
+    assert!(
+        view.read_with(&vcx, |v, _| v.text().is_some()),
+        "and keeps the bytes, so reading them again is nothing to do"
+    );
+}

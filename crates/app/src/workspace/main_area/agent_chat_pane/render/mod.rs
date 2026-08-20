@@ -107,7 +107,7 @@ use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ContextMenuExt, IconName, StatusPulseClock, button_bare, menu_builder};
+use crate::ui::{IconName, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, agent_run, is_active, tool_fold_key,
 };
@@ -125,7 +125,6 @@ pub(in crate::workspace) fn render(
 ) -> impl IntoElement {
     let pane_id = view.pane_id;
     let content = view;
-    let window_handle = content.window_handle;
     // Own the palette so the render body can use `cx` mutably (listener
     // binding) while reading theme colours — `current` borrows `cx`.
     let dim = content.dim_amount;
@@ -249,16 +248,6 @@ pub(in crate::workspace) fn render(
                 t.file_viewer_scrollbar_thumb_hover,
             ))
             .children(scroll_btn)
-            .context_menu(menu_builder(move |menu, window, cx| {
-                let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                else {
-                    return menu;
-                };
-                crate::workspace::main_area::pane_menu::pane_context_menu(
-                    menu, workspace, pane_id, window, cx,
-                )
-            }))
             .into_any_element()
     };
 

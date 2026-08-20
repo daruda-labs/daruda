@@ -5,30 +5,8 @@ use gpui::{ClipboardItem, Context, Entity, FocusHandle, WeakEntity, Window};
 
 use crate::ui::{PopupMenu, PopupMenuItem};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::PaneId;
 
-use super::sections::compose;
 use super::spec::{Activate, MenuEntry, MenuItemSpec};
-
-pub(in crate::workspace) fn pane_context_menu(
-    menu: PopupMenu,
-    workspace: WeakEntity<Workspace>,
-    pane_id: PaneId,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    let Some(workspace_entity) = workspace.upgrade() else {
-        return menu;
-    };
-    let Some((entries, action_context)) = workspace_entity.update(cx, |ws, cx| {
-        let context = ws.begin_pane_menu(pane_id, None, window, cx)?;
-        let action_context = ws.pane_menu_action_context(pane_id, cx);
-        Some((compose(&context), action_context))
-    }) else {
-        return menu;
-    };
-    build_popup(menu, entries, action_context, workspace, window, cx)
-}
 
 pub(super) fn build_popup_menu(
     entries: Vec<MenuEntry>,
