@@ -21,7 +21,7 @@ use gpui::{
 use super::model::GraphEdge;
 use super::renderer::rgb_u32;
 use crate::surface::strings as s;
-use crate::ui::flow_canvas::{NodeId, Plugin, RenderContext, RenderLayer};
+use crate::ui::flow_canvas::{CanvasNodeId, Plugin, RenderContext, RenderLayer};
 use crate::ui::theme::palette;
 
 /// How far below the row the curve dips, in world units before zoom.
@@ -33,7 +33,7 @@ const STROKE: f32 = 1.4;
 pub(super) struct RerunOverlay {
     /// Flow node id → the canvas node it became. The flow model speaks in
     /// the ids written in the file; the canvas assigns its own.
-    ids: HashMap<String, NodeId>,
+    ids: HashMap<String, CanvasNodeId>,
     edges: Vec<GraphEdge>,
     /// Card size, needed to find a card's bottom-centre. The canvas knows
     /// it too, but only per node; this is the one size every card shares.
@@ -41,7 +41,7 @@ pub(super) struct RerunOverlay {
 }
 
 impl RerunOverlay {
-    pub(super) fn new(ids: HashMap<String, NodeId>, edges: Vec<GraphEdge>) -> Self {
+    pub(super) fn new(ids: HashMap<String, CanvasNodeId>, edges: Vec<GraphEdge>) -> Self {
         Self {
             ids,
             edges,
@@ -137,7 +137,7 @@ impl Plugin for RerunOverlay {
 /// Where the curve leaves and enters a card: the middle of its bottom edge.
 fn bottom_centre(
     ctx: &RenderContext,
-    id: NodeId,
+    id: CanvasNodeId,
     card: gpui::Size<f32>,
 ) -> Option<Point<gpui::Pixels>> {
     let world = ctx.graph.node_world_point(id)?;

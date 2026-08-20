@@ -21,9 +21,17 @@
 /// still says at that size — which daruda's cards answer differently.
 pub use ferrum_flow::{BackgroundPlugin, GraphPlugin, SelectionPlugin, ViewportPlugin};
 pub use ferrum_flow::{
-    FlowCanvas, FlowTheme, Graph, Node, NodeId, NodeRenderer, Plugin, Port, RenderContext,
-    RenderLayer, Viewport,
+    FlowCanvas, FlowTheme, Graph, Node, NodeRenderer, Plugin, Port, RenderContext, RenderLayer,
+    Viewport,
 };
+
+/// Renamed on the way through: a flow node's id is `daruda_flow::NodeId`, and
+/// an unqualified "node id" in a flow editor means that one. This is the
+/// canvas's own handle for a drawn node — a vendored implementation detail
+/// this module exists to hold at arm's length — so it is the one that takes
+/// the qualifier. `scripts/lint-direct-ferrum-flow.sh` is what makes the
+/// rename total: there is no other way in.
+pub use ferrum_flow::NodeId as CanvasNodeId;
 
 /// The canvas exposes its graph immutably and takes edits as commands, so a
 /// host that changes anything — re-stamping a card from a run, framing the

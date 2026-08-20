@@ -35,7 +35,7 @@ use self::renderer::{FlowNodeRenderer, NODE_TYPE, card_for, flow_theme};
 
 use crate::surface::strings as s;
 use crate::ui::flow_canvas::{
-    BackgroundPlugin, Command, CommandContext, FlowCanvas, Graph, GraphPlugin, NodeId,
+    BackgroundPlugin, CanvasNodeId, Command, CommandContext, FlowCanvas, Graph, GraphPlugin,
     SelectionPlugin, ViewportPlugin,
     layout::{LayeredDagLayout, LayoutOptions, LayoutOutput, LayoutStrategy, PositionHint},
 };
@@ -64,7 +64,7 @@ enum FlowGraphState {
         /// which would let a mid-run edit change what a run is colouring.
         model: FlowGraphModel,
         /// Flow node id → the canvas node holding its card.
-        ids: HashMap<String, NodeId>,
+        ids: HashMap<String, CanvasNodeId>,
     },
     Unreadable(FlowGraphError),
 }
@@ -170,7 +170,7 @@ impl FlowGraphView {
         else {
             return;
         };
-        let cards: Vec<(NodeId, serde_json::Value)> = model
+        let cards: Vec<(CanvasNodeId, serde_json::Value)> = model
             .nodes
             .iter()
             .filter_map(|node| {
@@ -460,7 +460,7 @@ impl FlowGraphView {
         if !colouring.is_about(model.nodes.iter().map(|node| node.id.clone())) {
             return;
         }
-        let stamped: Vec<(NodeId, serde_json::Value)> = model
+        let stamped: Vec<(CanvasNodeId, serde_json::Value)> = model
             .nodes
             .iter()
             .filter_map(|node| {
@@ -511,7 +511,7 @@ impl FlowGraphView {
 /// sake and never reached: the flow pane installs no `HistoryPlugin`, so
 /// nothing is bound to run it (the YAML file is the only undo stack).
 struct StampCards {
-    cards: Vec<(NodeId, serde_json::Value)>,
+    cards: Vec<(CanvasNodeId, serde_json::Value)>,
 }
 
 impl Command for StampCards {
@@ -533,7 +533,7 @@ impl Command for StampCards {
 /// Put the selection back on a node after the graph was rebuilt. A command
 /// because that is the only public way to write to the graph.
 struct SelectNode {
-    node: NodeId,
+    node: CanvasNodeId,
 }
 
 impl Command for SelectNode {
@@ -729,8 +729,8 @@ fn build_graph_state(
 /// Build the canvas graph and lay it out. Coordinates are never persisted —
 /// the flow file declares dependencies, not positions — so every open
 /// places the nodes again.
-fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, HashMap<String, NodeId>) {
-    let mut ids: HashMap<String, NodeId> = HashMap::new();
+fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, HashMap<String, CanvasNodeId>) {
+    let mut ids: HashMap<String, CanvasNodeId> = HashMap::new();
     let mut inputs = HashMap::new();
     let mut outputs = HashMap::new();
 
