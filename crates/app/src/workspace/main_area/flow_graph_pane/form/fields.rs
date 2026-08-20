@@ -154,8 +154,8 @@ pub(in crate::workspace) enum Refusal {
 
 pub(super) fn fields_of(node: &daruda_flow::parse::NodeFile) -> NodeFields {
     NodeFields {
-        id: node.id.clone(),
-        deps: node.deps.clone(),
+        id: node.id.clone().into_string(),
+        deps: node.deps.iter().map(|d| d.as_str().to_string()).collect(),
         timeout: node.timeout.map_or(TimeoutField::Absent, TimeoutField::Set),
         cwd: node.cwd.as_ref().map(|p| p.display().to_string()),
         agent: agent_fields_of(node),
@@ -256,7 +256,7 @@ pub(super) fn repair_fields_of(policy: &daruda_flow::parse::GateFailFile) -> Fai
             wait,
         } => FailFields::Repair {
             fix: fix.clone(),
-            rerun: rerun.clone(),
+            rerun: rerun.iter().map(|r| r.as_str().to_string()).collect(),
             max_attempts: AttemptsField::Set(*max_attempts),
             wait: wait.map_or(TimeoutField::Absent, TimeoutField::Set),
         },

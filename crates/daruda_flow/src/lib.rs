@@ -12,6 +12,7 @@ pub mod journal;
 pub mod load;
 pub mod lock;
 pub mod marker;
+pub mod node_id;
 pub mod record;
 pub mod request;
 pub mod resume;
@@ -41,6 +42,4 @@ pub(crate) mod testing;
 
 pub use error::FlowError;
 pub use load::{LoadedFlow, load};
-
-/// A node's identifier as written in the flow file.
-pub type NodeId = String;
+pub use node_id::NodeId;

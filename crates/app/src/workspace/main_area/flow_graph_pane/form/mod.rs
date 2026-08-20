@@ -30,6 +30,7 @@ pub(in crate::workspace) use fields::*;
 use gpui::{App, AppContext as _, Context, Entity, Window};
 
 use crate::ui::InputState;
+use daruda_flow::NodeId;
 use daruda_flow::parse::PermissionPolicyFile;
 
 /// The boxes behind [`AgentFields`].
@@ -92,7 +93,7 @@ const FAIL_ACT: &str = "act";
 pub(in crate::workspace) struct NodeForm {
     /// The node this form was built for, by the id the **file** holds. The
     /// rename case is why this is kept separately from the `id` field.
-    pub(in crate::workspace) node: String,
+    pub(in crate::workspace) node: NodeId,
     /// What it was built from — what dirty compares against.
     initial: NodeFields,
     id: Entity<InputState>,
@@ -119,12 +120,12 @@ impl NodeForm {
     /// show, and the pane is already saying why.
     pub(super) fn build<T: 'static>(
         text: &str,
-        node: &str,
+        node: &NodeId,
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Option<Self> {
         let file = daruda_flow::parse::parse_flow_file(text).ok()?;
-        let found = file.nodes.iter().find(|n| n.id == node)?;
+        let found = file.nodes.iter().find(|n| &n.id == node)?;
         let initial = fields_of(found);
         let agent_open = !initial.agent.is_empty();
 
@@ -164,7 +165,7 @@ impl NodeForm {
             ),
         };
         Some(Self {
-            node: node.to_string(),
+            node: node.clone(),
             initial,
             id,
             deps,

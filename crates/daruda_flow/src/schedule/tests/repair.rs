@@ -25,7 +25,7 @@ fn a_repair_reruns_the_declared_root_and_the_gate() {
         "{:?}",
         report.outcome
     );
-    let seen: Vec<(String, u32)> = runner
+    let seen: Vec<(crate::NodeId, u32)> = runner
         .calls()
         .into_iter()
         .map(|c| (c.node, c.attempt))
@@ -33,16 +33,16 @@ fn a_repair_reruns_the_declared_root_and_the_gate() {
     assert_eq!(
         seen,
         vec![
-            ("implement".to_string(), 1),
-            ("review".to_string(), 1),
-            ("gate".to_string(), 1),
-            ("__fix__".to_string(), 1),
+            (crate::NodeId::from("implement"), 1),
+            (crate::NodeId::from("review"), 1),
+            (crate::NodeId::from("gate"), 1),
+            (crate::NodeId::from("__fix__"), 1),
             // `review` is re-run in a fresh generation, so its own
             // counter starts over…
-            ("review".to_string(), 1),
+            (crate::NodeId::from("review"), 1),
             // …while the gate driving the loop counts up, which is what
             // `max_attempts` bounds.
-            ("gate".to_string(), 2),
+            (crate::NodeId::from("gate"), 2),
         ]
     );
 }
@@ -301,14 +301,17 @@ nodes:
     );
     let (report, _dir) = run(flow, &runner);
     assert!(matches!(report.outcome, RunOutcome::Done));
-    let seen: Vec<(String, u32)> = runner
+    let seen: Vec<(crate::NodeId, u32)> = runner
         .calls()
         .iter()
         .map(|c| (c.node.clone(), c.attempt))
         .collect();
     assert_eq!(
         seen,
-        vec![("design".to_string(), 1), ("design".to_string(), 2)],
+        vec![
+            (crate::NodeId::from("design"), 1),
+            (crate::NodeId::from("design"), 2)
+        ],
         "the node's own counter increases; it is not reset by its own retry"
     );
     // The two-channel rule: the retry prompt is the node's own prompt,

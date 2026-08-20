@@ -486,21 +486,21 @@ mod tests {
 
     fn started(node: &str, attempt: u32) -> FlowEvent {
         FlowEvent::NodeStarted {
-            node: node.to_string(),
+            node: node.into(),
             attempt,
         }
     }
 
     fn passed(node: &str) -> FlowEvent {
         FlowEvent::NodePassed {
-            node: node.to_string(),
+            node: node.into(),
             attempt: 1,
         }
     }
 
     fn failed(node: &str) -> FlowEvent {
         FlowEvent::NodeFailed {
-            node: node.to_string(),
+            node: node.into(),
             attempt: 1,
             failure: daruda_flow::runner::NodeFailure::ContextExhausted,
         }
@@ -579,7 +579,7 @@ mod tests {
             failed("gate"),
             FlowEvent::Rerunning {
                 gate: "gate".into(),
-                members: vec!["verdict".to_string()],
+                members: vec!["verdict".into()],
             },
         ]);
         assert_eq!(
@@ -612,7 +612,10 @@ mod tests {
     fn colouring(of_nodes: &[&str]) -> RunColouring {
         RunColouring {
             states: NodeRunStates::new(),
-            of_nodes: of_nodes.iter().map(|s| s.to_string()).collect(),
+            of_nodes: of_nodes
+                .iter()
+                .map(|s| daruda_flow::NodeId::from(*s))
+                .collect(),
         }
     }
 
@@ -623,17 +626,17 @@ mod tests {
     #[test]
     fn a_colouring_knows_which_nodes_it_is_about() {
         let c = colouring(&["design", "build"]);
-        assert!(c.is_about(["design", "build"].iter().map(|s| s.to_string())));
+        assert!(c.is_about(["design", "build"].iter().map(|s| NodeId::from(*s))));
         assert!(
-            !c.is_about(["design"].iter().map(|s| s.to_string())),
+            !c.is_about(["design"].iter().map(|s| NodeId::from(*s))),
             "a node gone is a different flow"
         );
         assert!(
-            !c.is_about(["design", "build", "ship"].iter().map(|s| s.to_string())),
+            !c.is_about(["design", "build", "ship"].iter().map(|s| NodeId::from(*s))),
             "and so is a node arrived"
         );
         assert!(
-            !c.is_about(["build", "design"].iter().map(|s| s.to_string())),
+            !c.is_about(["build", "design"].iter().map(|s| NodeId::from(*s))),
             "order is part of it — the layout is derived from it"
         );
     }

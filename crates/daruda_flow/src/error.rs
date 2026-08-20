@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn display_names_the_problem_count_without_leaking_wording() {
         let err = FlowError::Validate(vec![ValidationIssue {
-            node: Some("a".to_string()),
+            node: Some("a".into()),
             kind: ValidationKind::MissingAgent,
             message: "detail".to_string(),
         }]);

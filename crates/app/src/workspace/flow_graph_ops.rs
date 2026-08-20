@@ -8,6 +8,7 @@ use std::path::Path;
 #[cfg(feature = "screenshot")]
 use std::path::PathBuf;
 
+use daruda_flow::NodeId;
 use daruda_flow::event::FlowEvent;
 use gpui::{AppContext as _, Context, Window};
 
@@ -145,6 +146,9 @@ impl Workspace {
                 // A toast rather than something in the pane: what would have
                 // carried it — the node's form — is the thing that was replaced.
                 FlowGraphEvent::AddNode => workspace.add_node(&for_path, view.clone(), window, cx),
+                FlowGraphEvent::Connect { out_of, into } => {
+                    workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
+                }
                 FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
                     s::flow_edit_dropped_typing(),
                     "flow.edit_dropped_typing",
@@ -283,14 +287,14 @@ impl Workspace {
             return;
         };
         // The name the write chose, so the selection can land on it.
-        let added = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let added = std::rc::Rc::new(std::cell::RefCell::new(NodeId::from("")));
         let record = added.clone();
         let outcome = self.edit_flow(
             path,
             &base,
             move |file| {
                 *record.borrow_mut() =
-                    super::main_area::flow_graph_pane::form::apply::new_node(file, after.as_deref())
+                    super::main_area::flow_graph_pane::form::apply::new_node(file, after.as_ref())
             },
             window,
             cx,
@@ -304,6 +308,42 @@ impl Workspace {
         }
     }
 
+    /// Record a line the person drew between two cards.
+    ///
+    /// The pane has already taken the edge off the canvas, so a refusal needs
+    /// no undoing here — the picture is the file's again either way, and the
+    /// write's own reload draws the line back when it lands.
+    ///
+    /// A duplicate reaches `edit_flow` as no edits at all, which is
+    /// `NothingToDo` — and `report_edit_refusal` stays quiet on that, because
+    /// the wire had already gone red under the cursor.
+    pub(in crate::workspace) fn connect_nodes(
+        &mut self,
+        path: &Path,
+        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        out_of: &NodeId,
+        into: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(base) = view.read_with(cx, |view, _| view.text().map(str::to_string)) else {
+            return;
+        };
+        let (out_of, into) = (out_of.clone(), into.clone());
+        let outcome = self.edit_flow(
+            path,
+            &base,
+            move |file| {
+                super::main_area::flow_graph_pane::form::apply::connect(file, &out_of, &into)
+            },
+            window,
+            cx,
+        );
+        if let Err(refusal) = outcome {
+            self.report_edit_refusal(&refusal, cx);
+        }
+    }
+
     /// Take the selected node out, and out of everything that pointed at it.
     ///
     /// Refuses the last node: the differ takes the element's lines out and the
@@ -313,7 +353,7 @@ impl Workspace {
         &mut self,
         path: &Path,
         view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        nodes: Vec<String>,
+        nodes: Vec<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -355,7 +395,7 @@ impl Workspace {
         &mut self,
         path: &Path,
         view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        nodes: Vec<String>,
+        nodes: Vec<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -364,7 +404,7 @@ impl Workspace {
         };
         let dependents = self.dependents_outside(&view, &nodes, cx);
         let body = match nodes.len() {
-            1 => s::flow_delete_node_confirm_body(&first, dependents),
+            1 => s::flow_delete_node_confirm_body(first.as_str(), dependents),
             _ => s::flow_delete_nodes_confirm_body(&nodes, dependents),
         };
         let weak = cx.weak_entity();
@@ -392,7 +432,7 @@ impl Workspace {
     fn dependents_outside(
         &self,
         view: &gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-        going: &[String],
+        going: &[NodeId],
         cx: &gpui::App,
     ) -> usize {
         view.read(cx)
@@ -561,7 +601,7 @@ impl Workspace {
             super::flow_request::FlowSource::File(path.clone()),
         );
 
-        let nodes: Vec<String> = self
+        let nodes: Vec<NodeId> = self
             .main_area
             .runtimes
             .get(&lane)

@@ -184,18 +184,18 @@ mod tests {
         vec![
             RunOutcome::Done,
             RunOutcome::Failed {
-                node: "gate".to_string(),
+                node: "gate".into(),
                 failure: NodeFailure::Exit { code: Some(1) },
             },
             RunOutcome::Canceled {
-                node: Some("design".to_string()),
+                node: Some("design".into()),
             },
             RunOutcome::BudgetExhausted {
                 limit: BudgetLimit::NodeRuns,
             },
             RunOutcome::Io(FlowIoError {
                 site: IoSite::Node {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1,
                 },
                 doing: "reading the prompt file",

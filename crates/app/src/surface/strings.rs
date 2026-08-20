@@ -723,8 +723,12 @@ pub fn flow_delete_node_confirm_title() -> String {
 }
 /// The same question for a marquee selection. Names them rather than counting
 /// only: "3 nodes" does not tell you which three you caught in the drag.
-pub fn flow_delete_nodes_confirm_body(nodes: &[String], dependents: usize) -> String {
-    let list = nodes.join(", ");
+pub fn flow_delete_nodes_confirm_body(nodes: &[daruda_flow::NodeId], dependents: usize) -> String {
+    let list = nodes
+        .iter()
+        .map(|n| n.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     if dependents == 0 {
         rust_i18n::t!(
             "flow.delete_nodes_confirm_body",
@@ -5352,7 +5356,12 @@ pub fn flow_invalid_title(name: &str, count: usize) -> String {
 pub fn flow_issue_lines(issues: &[daruda_flow::error::ValidationIssue]) -> Vec<String> {
     issues
         .iter()
-        .map(|issue| flow_issue_line(issue.node.as_deref(), &flow_issue(&issue.kind)))
+        .map(|issue| {
+            flow_issue_line(
+                issue.node.as_ref().map(|n| n.as_str()),
+                &flow_issue(&issue.kind),
+            )
+        })
         .collect()
 }
 

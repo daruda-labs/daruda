@@ -220,10 +220,10 @@ mod tests {
             dir.path(),
             &log_dir,
             &[
-                ("design".to_string(), done.clone()),
-                ("half".to_string(), partial.clone()),
+                ("design".into(), done.clone()),
+                ("half".into(), partial.clone()),
             ],
-            &["design".to_string()],
+            &["design".into()],
         );
 
         assert!(warnings.is_empty(), "{warnings:?}");

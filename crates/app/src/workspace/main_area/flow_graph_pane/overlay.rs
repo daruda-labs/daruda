@@ -11,8 +11,6 @@
 //! climbs, so it never crosses a card. A graph shape that forces it to
 //! cross would need `Overlay` and card-avoiding routing instead.
 
-use std::collections::HashMap;
-
 use gpui::{
     AnyElement, Element as _, ParentElement as _, PathBuilder, Point, Styled as _, canvas, div, px,
     rgb,
@@ -21,6 +19,7 @@ use gpui::{
 use super::model::GraphEdge;
 use super::renderer::rgb_u32;
 use crate::surface::strings as s;
+
 use crate::ui::flow_canvas::{CanvasNodeId, Plugin, RenderContext, RenderLayer};
 use crate::ui::theme::palette;
 
@@ -31,9 +30,9 @@ const SAMPLES: usize = 24;
 const STROKE: f32 = 1.4;
 
 pub(super) struct RerunOverlay {
-    /// Flow node id → the canvas node it became. The flow model speaks in
+    /// Flow node id ↔ the canvas node it became. The flow model speaks in
     /// the ids written in the file; the canvas assigns its own.
-    ids: HashMap<String, CanvasNodeId>,
+    ids: super::node_ids::NodeIds,
     edges: Vec<GraphEdge>,
     /// Card size, needed to find a card's bottom-centre. The canvas knows
     /// it too, but only per node; this is the one size every card shares.
@@ -41,7 +40,7 @@ pub(super) struct RerunOverlay {
 }
 
 impl RerunOverlay {
-    pub(super) fn new(ids: HashMap<String, CanvasNodeId>, edges: Vec<GraphEdge>) -> Self {
+    pub(super) fn new(ids: super::node_ids::NodeIds, edges: Vec<GraphEdge>) -> Self {
         Self {
             ids,
             edges,
@@ -73,13 +72,12 @@ impl Plugin for RerunOverlay {
         let mut curves = Vec::new();
         let mut labels = Vec::new();
         for edge in &self.edges {
-            let (Some(from), Some(to)) = (self.ids.get(&edge.from), self.ids.get(&edge.to)) else {
+            let (Some(from), Some(to)) = (self.ids.canvas(&edge.from), self.ids.canvas(&edge.to))
+            else {
                 continue;
             };
-            let (Some(a), Some(b)) = (
-                bottom_centre(ctx, *from, card),
-                bottom_centre(ctx, *to, card),
-            ) else {
+            let (Some(a), Some(b)) = (bottom_centre(ctx, from, card), bottom_centre(ctx, to, card))
+            else {
                 continue;
             };
             let c1 = Point::new(a.x, a.y + drop);

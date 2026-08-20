@@ -487,7 +487,7 @@ mod tests {
     fn run_md_names_the_node_and_the_reason_it_failed() {
         let report = report_with(
             RunOutcome::Failed {
-                node: "gate".to_string(),
+                node: "gate".into(),
                 failure: NodeFailure::Exit { code: Some(2) },
             },
             Vec::new(),
@@ -505,7 +505,7 @@ mod tests {
         let mut report = report_with(RunOutcome::Done, Vec::new());
         report.node_runs = 2;
         report.nodes = vec![NodeRecord {
-            id: "gate".to_string(),
+            id: "gate".into(),
             attempts: vec![
                 AttemptRecord {
                     attempt: 1,
@@ -558,7 +558,7 @@ mod tests {
         let mut report = report_with(RunOutcome::Done, Vec::new());
         report.node_runs = 2;
         report.nodes = vec![NodeRecord {
-            id: "design".to_string(),
+            id: "design".into(),
             attempts: vec![
                 AttemptRecord {
                     attempt: 1,
@@ -600,7 +600,7 @@ mod tests {
         let mut silent = report_with(RunOutcome::Done, Vec::new());
         silent.node_runs = 1;
         silent.nodes = vec![NodeRecord {
-            id: "design".to_string(),
+            id: "design".into(),
             attempts: vec![attempt(1)],
         }];
         assert!(!render_run_md(&silent).contains("working tree"), "{md}");

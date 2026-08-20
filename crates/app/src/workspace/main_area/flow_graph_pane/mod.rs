@@ -6,11 +6,14 @@
 //! own entity and caching it keeps a run's repaints inside this subtree.
 
 mod click;
+mod connect;
 pub(in crate::workspace) mod form;
 mod frame;
 pub(in crate::workspace) mod model;
+mod node_ids;
 mod overlay;
 mod policy;
+mod port_drag;
 mod renderer;
 
 /// The card-draw counter, for the repaint measurement in `workspace/tests`.
@@ -27,16 +30,20 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Window, div, px,
 };
 
+use daruda_flow::NodeId;
+
 use self::click::NodeClickPlugin;
 use self::frame::FrameGraphPlugin;
 use self::model::{FlowGraphModel, NodeRunState, RunColouring};
+use self::node_ids::NodeIds;
 use self::overlay::RerunOverlay;
+use self::port_drag::FlowEdgeValidator;
 use self::renderer::{FlowNodeRenderer, NODE_TYPE, card_for, flow_theme};
 
 use crate::surface::strings as s;
 use crate::ui::flow_canvas::{
     BackgroundPlugin, CanvasNodeId, Command, CommandContext, FlowCanvas, Graph, GraphPlugin,
-    SelectionPlugin, ViewportPlugin,
+    PortInteractionPlugin, SelectionPlugin, ViewportPlugin,
     layout::{LayeredDagLayout, LayoutOptions, LayoutOutput, LayoutStrategy, PositionHint},
 };
 use crate::ui::theme::palette;
@@ -64,14 +71,17 @@ enum FlowGraphState {
         /// which would let a mid-run edit change what a run is colouring.
         model: FlowGraphModel,
         /// Flow node id → the canvas node holding its card.
-        ids: HashMap<String, CanvasNodeId>,
+        ids: NodeIds,
     },
     Unreadable(FlowGraphError),
 }
 
 /// What the inspector asks the workspace to do. The view emits; the workspace
 /// writes — a view that touched the file would be a second place that knows how.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Not `Copy` since `Connect` carries two ids. Every handler matches on a
+/// reference, so nothing needed changing for that.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FlowGraphEvent {
     Save,
     Revert,
@@ -82,6 +92,13 @@ pub(in crate::workspace) enum FlowGraphEvent {
     TypingDropped,
     /// Add a node, chained after the selected one when there is one.
     AddNode,
+    /// A line was drawn between two cards: `into` is to run after `out_of`.
+    /// The names say the ports rather than from/to, which is the pair that
+    /// gets swapped — see [`connect::dep_from_edge`].
+    Connect {
+        out_of: NodeId,
+        into: NodeId,
+    },
 }
 
 pub(in crate::workspace) struct FlowGraphView {
@@ -174,9 +191,9 @@ impl FlowGraphView {
             .nodes
             .iter()
             .filter_map(|node| {
-                let id = ids.get(&node.id)?;
+                let id = ids.canvas(&node.id)?;
                 let card = card_for(node, NodeRunState::default());
-                Some((*id, serde_json::to_value(&card).unwrap_or_default()))
+                Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();
         canvas.update(cx, |canvas, cx| {
@@ -219,7 +236,10 @@ impl FlowGraphView {
         let this = cx.entity().downgrade();
         self._canvas_watch = Some(window.observe(canvas, cx, move |_canvas, window, cx| {
             // SILENT-OK: the view is gone, so this subscription is being dropped with it — nothing left to reconcile, and nobody left to report to.
-            let _ = this.update(cx, |view, cx| view.reconcile_selection(window, cx));
+            let _ = this.update(cx, |view, cx| {
+                view.reconcile_selection(window, cx);
+                view.reconcile_edges(cx);
+            });
         }));
     }
 
@@ -255,7 +275,7 @@ impl FlowGraphView {
 
     /// Which node is selected, by the flow's own id. `None` when nothing or
     /// several are.
-    pub(in crate::workspace) fn selected_node(&self, cx: &App) -> Option<String> {
+    pub(in crate::workspace) fn selected_node(&self, cx: &App) -> Option<NodeId> {
         match self.selection(cx) {
             Selection::One(node) => Some(node),
             Selection::None | Selection::Many(_) => None,
@@ -269,7 +289,7 @@ impl FlowGraphView {
     /// back, called with a name that was not selected before.
     pub(in crate::workspace) fn select_node_after_add(
         &mut self,
-        node: &str,
+        node: &NodeId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -399,7 +419,7 @@ impl FlowGraphView {
     /// banner would be gone before it was read.
     fn say_if_typing_was_dropped(
         &mut self,
-        typed: Option<(String, form::NodeFields)>,
+        typed: Option<(NodeId, form::NodeFields)>,
         cx: &mut Context<Self>,
     ) {
         let Some((node, fields)) = typed else {
@@ -409,9 +429,7 @@ impl FlowGraphView {
             .form
             .as_ref()
             .map(|form| (form.node.clone(), form.fields(cx)));
-        let rebuilt = rebuilt
-            .as_ref()
-            .map(|(node, fields)| (node.as_str(), fields));
+        let rebuilt = rebuilt.as_ref().map(|(node, fields)| (node, fields));
         if policy::typing_survived(&node, &fields, rebuilt) {
             return;
         }
@@ -420,11 +438,11 @@ impl FlowGraphView {
 
     /// Select `node` on the canvas, if the graph still has it, and build its
     /// form. Used after a reload to put back what was selected before.
-    fn select_node(&mut self, node: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn select_node(&mut self, node: &NodeId, window: &mut Window, cx: &mut Context<Self>) {
         let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
             return;
         };
-        let Some(canvas_id) = ids.get(node).copied() else {
+        let Some(canvas_id) = ids.canvas(node) else {
             return;
         };
         canvas.update(cx, |canvas, cx| {
@@ -464,10 +482,10 @@ impl FlowGraphView {
             .nodes
             .iter()
             .filter_map(|node| {
-                let id = ids.get(&node.id)?;
+                let id = ids.canvas(&node.id)?;
                 let state = colouring.states.get(&node.id).copied().unwrap_or_default();
                 let card = card_for(node, state);
-                Some((*id, serde_json::to_value(&card).unwrap_or_default()))
+                Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();
         canvas.update(cx, |canvas, cx| {
@@ -556,11 +574,11 @@ impl Command for SelectNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum Selection {
     None,
-    One(String),
+    One(NodeId),
     /// More than one, by flow node id. The count the inspector shows is
     /// `len()` — an id list gives that *and* what a delete has to act on, which
     /// a count cannot.
-    Many(Vec<String>),
+    Many(Vec<NodeId>),
 }
 
 impl FlowGraphView {
@@ -575,11 +593,12 @@ impl FlowGraphView {
         };
         let selected = canvas.read(cx).graph().selected_node();
         // Ours only, and in the file's order: a canvas node with no flow id is
-        // nothing this side can name, and a set has no order to show.
-        let mut flow_ids: Vec<String> = ids
+        // nothing this side can name, and a set has no order to show. Asked of
+        // the selection rather than of every node, so panning a large graph
+        // does not walk it.
+        let mut flow_ids: Vec<NodeId> = selected
             .iter()
-            .filter(|(_, canvas_id)| selected.contains(canvas_id))
-            .map(|(flow_id, _)| flow_id.clone())
+            .filter_map(|canvas_id| ids.flow(*canvas_id).cloned())
             .collect();
         flow_ids.sort();
         match flow_ids.len() {
@@ -590,7 +609,7 @@ impl FlowGraphView {
     }
 
     /// Every selected node, one or many. What a delete acts on.
-    pub(in crate::workspace) fn selected_nodes(&self, cx: &App) -> Vec<String> {
+    pub(in crate::workspace) fn selected_nodes(&self, cx: &App) -> Vec<NodeId> {
         match self.selection(cx) {
             Selection::None => Vec::new(),
             Selection::One(node) => vec![node],
@@ -602,7 +621,7 @@ impl FlowGraphView {
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn select_node_for_shot(
         &mut self,
-        node: &str,
+        node: &NodeId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -615,7 +634,7 @@ impl FlowGraphView {
     #[cfg(test)]
     pub(in crate::workspace) fn select_node_for_test(
         &mut self,
-        node: &str,
+        node: &NodeId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -635,7 +654,7 @@ impl FlowGraphView {
     /// The flow's node ids in the order the file declares them — what a
     /// scripted capture walks to put one card in each state.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn node_ids_for_shot(&self) -> Vec<String> {
+    pub(in crate::workspace) fn node_ids_for_shot(&self) -> Vec<NodeId> {
         match &self.state {
             FlowGraphState::Graph { model, .. } => {
                 model.nodes.iter().map(|n| n.id.clone()).collect()
@@ -654,14 +673,14 @@ impl FlowGraphView {
     pub(in crate::workspace) fn cards_for_test(
         &self,
         cx: &App,
-    ) -> HashMap<String, (String, String)> {
+    ) -> HashMap<NodeId, (String, String)> {
         let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
             return HashMap::new();
         };
         let graph = canvas.read(cx).graph();
         ids.iter()
             .filter_map(|(flow_id, node_id)| {
-                let node = graph.nodes().get(node_id)?;
+                let node = graph.nodes().get(&node_id)?;
                 let card: renderer::CardData =
                     serde_json::from_value(node.data_ref().clone()).ok()?;
                 Some((flow_id.clone(), (card.badge, format!("{:?}", card.accent))))
@@ -719,6 +738,10 @@ fn build_graph_state(
             .plugin(GraphPlugin::new())
             .plugin(SelectionPlugin::new())
             .plugin(NodeClickPlugin::new())
+            // The eighth: dragging port to port is how a dependency is drawn.
+            // Its validator is ours, so a refusal shows while the wire is
+            // still being dragged rather than after it is written.
+            .plugin(PortInteractionPlugin::new().validator(FlowEdgeValidator))
             .plugin(FrameGraphPlugin::new())
             .plugin(rerun)
             .build()
@@ -729,8 +752,8 @@ fn build_graph_state(
 /// Build the canvas graph and lay it out. Coordinates are never persisted —
 /// the flow file declares dependencies, not positions — so every open
 /// places the nodes again.
-fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, HashMap<String, CanvasNodeId>) {
-    let mut ids: HashMap<String, CanvasNodeId> = HashMap::new();
+fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, NodeIds) {
+    let mut ids: HashMap<NodeId, CanvasNodeId> = HashMap::new();
     let mut inputs = HashMap::new();
     let mut outputs = HashMap::new();
 
@@ -775,7 +798,7 @@ fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, HashMap<String, CanvasN
             }
         }
     }
-    (graph, ids)
+    (graph, NodeIds::new(ids))
 }
 
 /// Buttons over the graph for the two things a person does to it.
@@ -914,7 +937,10 @@ mod tests {
     #[test]
     fn a_lone_node_is_placed_and_stamped() {
         let (graph, ids) = build_canvas_graph(&model_of(ONE_NODE));
-        assert_eq!(ids.len(), 1, "the flow id maps to a canvas node");
+        assert!(
+            ids.canvas(&NodeId::from("hello")).is_some(),
+            "the flow id maps to a canvas node"
+        );
         let node = graph.nodes().values().next().expect("one node");
         let (x, y) = node.position();
         println!("POS ({x:?}, {y:?}) size={:?}", node.size_ref());

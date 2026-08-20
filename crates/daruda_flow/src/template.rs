@@ -112,8 +112,8 @@ mod tests {
     fn ctx_with(run_dir: &str) -> (PathBuf, HashMap<crate::NodeId, PathBuf>) {
         let run_dir = PathBuf::from(run_dir);
         let mut outputs = HashMap::new();
-        outputs.insert("review".to_string(), run_dir.join("review.md"));
-        outputs.insert("implement".to_string(), run_dir.join("implement.md"));
+        outputs.insert("review".into(), run_dir.join("review.md"));
+        outputs.insert("implement".into(), run_dir.join("implement.md"));
         (run_dir, outputs)
     }
 

@@ -127,7 +127,7 @@ mod tests {
 
         let archived = archive_attempt(
             &log_dir,
-            &[("review".to_string(), Some(output.clone()))],
+            &[("review".into(), Some(output.clone()))],
             1,
             1,
             &[],
@@ -159,8 +159,8 @@ mod tests {
         let archived = archive_attempt(
             &log_dir,
             &[
-                ("review".to_string(), Some(review.clone())),
-                ("summary".to_string(), Some(summary.clone())),
+                ("review".into(), Some(review.clone())),
+                ("summary".into(), Some(summary.clone())),
             ],
             2,
             7,
@@ -190,7 +190,7 @@ mod tests {
 
         let archived = archive_attempt(
             &log_dir,
-            &[("gate".to_string(), None)],
+            &[("gate".into(), None)],
             1,
             1,
             std::slice::from_ref(&gate_log),
@@ -209,8 +209,8 @@ mod tests {
         let output = run_dir.join("NOTES");
         write(&output, "x");
 
-        let archived = archive_attempt(&log_dir, &[("notes".to_string(), Some(output))], 3, 9, &[])
-            .expect("ok");
+        let archived =
+            archive_attempt(&log_dir, &[("notes".into(), Some(output))], 3, 9, &[]).expect("ok");
         assert_eq!(archived, vec![log_dir.join("notes.attempt-3.evidence-9")]);
     }
 
@@ -224,7 +224,7 @@ mod tests {
         write(&output, "half a thought");
 
         let archived =
-            archive_canceled(&log_dir, &"design".to_string(), &output).expect("archiving succeeds");
+            archive_canceled(&log_dir, &"design".into(), &output).expect("archiving succeeds");
 
         assert!(!output.exists(), "the live output must be gone");
         assert_eq!(archived, Some(log_dir.join("design.canceled.md")));
@@ -236,12 +236,8 @@ mod tests {
     fn a_cancel_with_nothing_written_archives_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log_dir = dir.path().join("logs");
-        let archived = archive_canceled(
-            &log_dir,
-            &"design".to_string(),
-            &dir.path().join("design.md"),
-        )
-        .expect("archiving succeeds");
+        let archived = archive_canceled(&log_dir, &"design".into(), &dir.path().join("design.md"))
+            .expect("archiving succeeds");
         assert_eq!(archived, None);
     }
 
@@ -255,14 +251,8 @@ mod tests {
             let output = dir.path().join("run/review.md");
             write(&output, "secret");
 
-            let error = archive_attempt(
-                &log_dir,
-                &[(id.to_string(), Some(output.clone()))],
-                1,
-                1,
-                &[],
-            )
-            .expect_err("must refuse");
+            let error = archive_attempt(&log_dir, &[(id.into(), Some(output.clone()))], 1, 1, &[])
+                .expect_err("must refuse");
 
             assert_eq!(
                 error.source.kind(),

@@ -71,12 +71,12 @@ enum Entry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AttemptLine {
     v: u32,
-    node: String,
+    node: NodeId,
     attempt: u32,
     evidence_seq: u32,
     outcome: OutcomeLine,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    invalidated: Vec<String>,
+    invalidated: Vec<NodeId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     archived: Vec<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -432,6 +432,55 @@ mod tests {
         }
     }
 
+    /// A journal an earlier build left behind still reads. The line is
+    /// written out here by hand rather than round-tripped, because a
+    /// round-trip through our own writer agrees with itself no matter what
+    /// shape it picked — and what has to hold is that `node` and
+    /// `invalidated` are still bare strings, which is how every journal
+    /// already on disk spells them.
+    #[test]
+    fn a_journal_written_before_an_id_was_a_type_still_reads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(JOURNAL_FILE);
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"kind":"started","v":1}"#,
+                "\n",
+                r#"{"kind":"attempt","v":1,"node":"design","attempt":1,"#,
+                r#""evidence_seq":1,"outcome":{"result":"passed"},"#,
+                r#""invalidated":["stale"],"spent":{"node_runs":1}}"#,
+                "\n",
+            ),
+        )
+        .expect("write");
+
+        let replay = read(dir.path());
+        assert_eq!(replay.passed, vec![NodeId::from("design")]);
+        assert_eq!(
+            replay.records[0].attempts[0].invalidated.nodes,
+            vec![NodeId::from("stale")]
+        );
+        assert!(!replay.torn, "a line an older build wrote is not damage");
+    }
+
+    /// The other half of the same contract: what we write now is still what
+    /// an earlier build would recognise.
+    #[test]
+    fn an_id_reaches_the_file_as_a_bare_string() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None).expect("start");
+        append_attempt(
+            dir.path(),
+            &"design".into(),
+            &attempt(1, 1, AttemptOutcome::Passed),
+            &spent(1),
+        )
+        .expect("append");
+        let text = std::fs::read_to_string(dir.path().join(JOURNAL_FILE)).expect("read");
+        assert!(text.contains(r#""node":"design""#), "{text}");
+    }
+
     /// The whole point: which nodes passed survives the process. Nothing
     /// else on disk can say it — a command node's pass writes no file.
     #[test]
@@ -440,14 +489,14 @@ mod tests {
         start(dir.path(), Some("cheap")).expect("start");
         append_attempt(
             dir.path(),
-            &"design".to_string(),
+            &"design".into(),
             &attempt(1, 1, AttemptOutcome::Passed),
             &spent(1),
         )
         .expect("append");
         append_attempt(
             dir.path(),
-            &"gate".to_string(),
+            &"gate".into(),
             &attempt(
                 1,
                 2,
@@ -458,7 +507,7 @@ mod tests {
         .expect("append");
 
         let replay = read(dir.path());
-        assert_eq!(replay.passed, vec!["design".to_string()]);
+        assert_eq!(replay.passed, vec![NodeId::from("design")]);
         assert_eq!(replay.profile.as_deref(), Some("cheap"));
         assert_eq!(replay.spent.node_runs, 2);
         assert_eq!(replay.records.len(), 2, "both nodes have a history");
@@ -474,7 +523,7 @@ mod tests {
         start(dir.path(), None).expect("start");
         append_attempt(
             dir.path(),
-            &"design".to_string(),
+            &"design".into(),
             &attempt(1, 1, AttemptOutcome::Passed),
             &spent(1),
         )
@@ -484,8 +533,8 @@ mod tests {
             2,
             AttemptOutcome::Reported("failed: exit status 1".to_string()),
         );
-        gate.invalidated.nodes = vec!["design".to_string(), "gate".to_string()];
-        append_attempt(dir.path(), &"gate".to_string(), &gate, &spent(2)).expect("append");
+        gate.invalidated.nodes = vec!["design".into(), "gate".into()];
+        append_attempt(dir.path(), &"gate".into(), &gate, &spent(2)).expect("append");
 
         assert!(
             read(dir.path()).passed.is_empty(),
@@ -501,7 +550,7 @@ mod tests {
         start(dir.path(), None).expect("start");
         append_attempt(
             dir.path(),
-            &"design".to_string(),
+            &"design".into(),
             &attempt(1, 1, AttemptOutcome::Passed),
             &Spent {
                 node_runs: 1,
@@ -528,7 +577,7 @@ mod tests {
         for seq in 1..=4 {
             append_attempt(
                 dir.path(),
-                &"a".to_string(),
+                &"a".into(),
                 &attempt(seq, seq, AttemptOutcome::Passed),
                 &spent(seq),
             )
@@ -546,7 +595,7 @@ mod tests {
         start(dir.path(), None).expect("start");
         append_attempt(
             dir.path(),
-            &"design".to_string(),
+            &"design".into(),
             &attempt(1, 1, AttemptOutcome::Passed),
             &spent(1),
         )
@@ -557,7 +606,7 @@ mod tests {
         std::fs::write(&path, text).expect("write");
 
         let replay = read(dir.path());
-        assert_eq!(replay.passed, vec!["design".to_string()]);
+        assert_eq!(replay.passed, vec![NodeId::from("design")]);
         assert_eq!(replay.spent.node_runs, 1, "the torn line was counted");
         assert!(replay.torn, "the tear was swallowed");
     }
@@ -572,7 +621,7 @@ mod tests {
         start(dir.path(), None).expect("start");
         append_attempt(
             dir.path(),
-            &"design".to_string(),
+            &"design".into(),
             &attempt(1, 1, AttemptOutcome::Passed),
             &spent(1),
         )
@@ -584,7 +633,7 @@ mod tests {
         std::fs::write(&path, text).expect("write");
 
         let replay = read(dir.path());
-        assert_eq!(replay.passed, vec!["design".to_string()]);
+        assert_eq!(replay.passed, vec![NodeId::from("design")]);
         assert!(!replay.torn, "a newer entry is not damage");
     }
 

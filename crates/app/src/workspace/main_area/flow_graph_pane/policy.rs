@@ -10,6 +10,7 @@
 
 use super::model::FlowGraphModel;
 use super::{FlowGraphError, form::NodeFields};
+use daruda_flow::NodeId;
 
 /// What is on screen now, as the decision needs it. The canvas is deliberately
 /// absent: it is an entity, and nothing here may hold one.
@@ -105,9 +106,9 @@ fn same_shape(a: &FlowGraphModel, b: &FlowGraphModel) -> bool {
 /// noise. A node that is gone after the rebuild counts as lost — there is
 /// nothing left to compare against.
 pub(super) fn typing_survived(
-    typed_node: &str,
+    typed_node: &NodeId,
     typed: &NodeFields,
-    rebuilt: Option<(&str, &NodeFields)>,
+    rebuilt: Option<(&NodeId, &NodeFields)>,
 ) -> bool {
     rebuilt.is_some_and(|(node, fields)| node == typed_node && fields == typed)
 }
@@ -249,17 +250,25 @@ nodes:
     #[test]
     fn typing_is_lost_unless_the_same_node_comes_back_saying_it() {
         let mine = fields("mine.md");
-        assert!(typing_survived("design", &mine, Some(("design", &mine))));
+        assert!(typing_survived(
+            &"design".into(),
+            &mine,
+            Some((&"design".into(), &mine))
+        ));
         assert!(
-            !typing_survived("design", &mine, Some(("design", &fields("theirs.md")))),
+            !typing_survived(
+                &"design".into(),
+                &mine,
+                Some((&"design".into(), &fields("theirs.md")))
+            ),
             "the file's value replaced it"
         );
         assert!(
-            !typing_survived("design", &mine, Some(("drawing", &mine))),
+            !typing_survived(&"design".into(), &mine, Some((&"drawing".into(), &mine))),
             "a different node is not where it was typed"
         );
         assert!(
-            !typing_survived("design", &mine, None),
+            !typing_survived(&"design".into(), &mine, None),
             "and nothing coming back is the case most worth saying"
         );
     }

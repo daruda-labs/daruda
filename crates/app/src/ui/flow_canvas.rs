@@ -20,6 +20,30 @@
 /// zooming out at 0.7, and both of those are decisions about what a card
 /// still says at that size — which daruda's cards answer differently.
 pub use ferrum_flow::{BackgroundPlugin, GraphPlugin, SelectionPlugin, ViewportPlugin};
+
+/// The eighth plugin, and the only one that writes to the flow file: dragging
+/// between two ports is how a dependency is declared. It takes a validator, so
+/// daruda's own rules are enforced while the wire is still being dragged —
+/// which is the whole reason no vendor patch was needed for it.
+///
+/// `DefaultEdgeValidator` is re-exported alongside because daruda's validator
+/// delegates to it rather than restating "not to itself, one output and one
+/// input" — rules that are the vendor's to keep.
+pub use ferrum_flow::{
+    DefaultEdgeValidator, EdgeValidationError, EdgeValidator, PortInteractionPlugin,
+};
+
+/// An edge as the canvas holds it, for a host reading its graph back. `Edge`'s
+/// ports are what say which nodes it joins; `EdgeId` is what removes it.
+/// `PortKind` tells the two apart, which is what a test drawing an edge by
+/// hand needs.
+pub use ferrum_flow::{Edge, EdgeId, PortId, PortKind};
+
+/// What a node removal does with the node's children. daruda's graph is flat —
+/// a flow file declares no nesting — so the choice never matters in itself;
+/// `Cascade` is passed because a node being removed is one the file does not
+/// name, and promoting anything under it would keep exactly that.
+pub use ferrum_flow::ParentDeletePolicy;
 pub use ferrum_flow::{
     FlowCanvas, FlowTheme, Graph, Node, NodeRenderer, Plugin, Port, RenderContext, RenderLayer,
     Viewport,

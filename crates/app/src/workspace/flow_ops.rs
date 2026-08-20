@@ -252,7 +252,7 @@ impl Workspace {
         let run_dir = request.run_dir.clone();
         let run_dir_for_asks = run_dir.clone();
         // Before the thread takes the request.
-        let nodes_at_start: Vec<String> = request
+        let nodes_at_start: Vec<daruda_flow::NodeId> = request
             .loaded
             .flow()
             .nodes
@@ -727,7 +727,7 @@ impl Workspace {
                     run_dir: run_dir.clone(),
                 },
                 RunStage::Node {
-                    id: "verdict".to_string(),
+                    id: "verdict".into(),
                     attempt: 2,
                 },
             ),
@@ -741,7 +741,7 @@ impl Workspace {
                 lane,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "implement".to_string(),
+                    node: "implement".into(),
                     attempt: 1,
                     ask_id: 1,
                     request: daruda_flow::runner::AskRequest {
@@ -932,7 +932,12 @@ fn file_label(path: &Path) -> String {
 fn issue_report(issues: &[daruda_flow::error::ValidationIssue]) -> String {
     issues
         .iter()
-        .map(|issue| s::flow_issue_line(issue.node.as_deref(), &s::flow_issue(&issue.kind)))
+        .map(|issue| {
+            s::flow_issue_line(
+                issue.node.as_ref().map(|n| n.as_str()),
+                &s::flow_issue(&issue.kind),
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -1042,7 +1047,7 @@ nodes:
     #[test]
     fn a_report_never_shows_the_developer_message() {
         let issues = vec![ValidationIssue {
-            node: Some("gate".to_string()),
+            node: Some("gate".into()),
             kind: ValidationKind::Cycle,
             message: "internal detail nobody should read".to_string(),
         }];
@@ -1057,12 +1062,12 @@ nodes:
     fn the_report_names_every_problem_at_once() {
         let issues = vec![
             ValidationIssue {
-                node: Some("a".to_string()),
+                node: Some("a".into()),
                 kind: ValidationKind::MissingAgent,
                 message: String::new(),
             },
             ValidationIssue {
-                node: Some("b".to_string()),
+                node: Some("b".into()),
                 kind: ValidationKind::DuplicateOutput,
                 message: String::new(),
             },

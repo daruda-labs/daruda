@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use daruda_flow::NodeId;
 use daruda_flow::event::FlowEvent;
 use daruda_flow::runner::CancelToken;
 use daruda_store::project::LaneRef;
@@ -39,7 +40,7 @@ pub(in crate::workspace) struct RunHandle {
     /// executes the flow it resolved at the start, so a file edited since can
     /// draw nodes this run never had — and an id taken by a different node
     /// would otherwise be painted with the old one's state.
-    pub nodes_at_start: Vec<String>,
+    pub nodes_at_start: Vec<NodeId>,
     _thread: std::thread::JoinHandle<()>,
 }
 
@@ -54,18 +55,18 @@ pub(in crate::workspace) enum RunStage {
     /// Submitted; the engine has not announced a node yet.
     Starting,
     Node {
-        id: String,
+        id: NodeId,
         attempt: u32,
     },
     /// A gate's repair is running its fix session.
     Fixing {
-        gate: String,
+        gate: NodeId,
     },
     /// The fix is done and the gate is about to be re-derived. Not
     /// `Node { attempt: 0 }`: a zeroth attempt does not exist, and the
     /// number would have to be read as a sentinel at every use.
     Rederiving {
-        gate: String,
+        gate: NodeId,
     },
     /// Waiting for a person to answer a permission question. Both clocks
     /// are stopped, so the only thing that ends this is an answer or a Stop.
@@ -92,7 +93,7 @@ pub(in crate::workspace) enum RunStage {
 #[derive(Debug)]
 pub(in crate::workspace) struct ParkedAsk {
     pub ask_id: u64,
-    pub node: String,
+    pub node: NodeId,
     /// The attempt that asked — what the run goes back to being on once
     /// the question is answered.
     pub attempt: u32,
@@ -109,7 +110,7 @@ impl RunHandle {
         cancel: CancelToken,
         run_dir: PathBuf,
         source: FlowSource,
-        nodes_at_start: Vec<String>,
+        nodes_at_start: Vec<NodeId>,
         thread: std::thread::JoinHandle<()>,
     ) -> Self {
         Self {
@@ -183,17 +184,17 @@ impl RunStage {
         match self {
             RunStage::Starting => s::status_bar_flow_stage_starting(),
             RunStage::Node { id, attempt } if *attempt > 1 => {
-                s::status_bar_flow_stage_node_retry(id, *attempt)
+                s::status_bar_flow_stage_node_retry(id.as_str(), *attempt)
             }
-            RunStage::Node { id, .. } => s::status_bar_flow_stage_node(id),
-            RunStage::Fixing { gate } => s::status_bar_flow_stage_fixing(gate),
-            RunStage::Rederiving { gate } => s::status_bar_flow_stage_rederiving(gate),
+            RunStage::Node { id, .. } => s::status_bar_flow_stage_node(id.as_str()),
+            RunStage::Fixing { gate } => s::status_bar_flow_stage_fixing(gate.as_str()),
+            RunStage::Rederiving { gate } => s::status_bar_flow_stage_rederiving(gate.as_str()),
             // Names the node like every other stage does: dropping it while
             // asking would leave the one stage that does not say where the
             // run is. For a repair's fix session the engine sends the gate's
             // name, which is what makes that case renderable at all.
             RunStage::Asking { question, .. } => {
-                s::status_bar_flow_stage_asking(&question.node, &question.tool)
+                s::status_bar_flow_stage_asking(question.node.as_str(), &question.tool)
             }
         }
     }
@@ -479,7 +480,7 @@ mod tests {
         (
             ParkedAsk {
                 ask_id: id,
-                node: node.to_string(),
+                node: node.into(),
                 attempt: 1,
                 tool: "write".into(),
                 detail: None,
@@ -590,7 +591,7 @@ mod tests {
         let here = lane(1);
         seeded_run(&mut runs, here, "/run");
         let started = |node: &str| FlowEvent::NodeStarted {
-            node: node.to_string(),
+            node: node.into(),
             attempt: 1,
         };
         assert_eq!(

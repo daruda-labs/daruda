@@ -287,7 +287,7 @@ fn policy_issues(
 
 fn unknown_field(node: &str, field: &str) -> ValidationIssue {
     ValidationIssue {
-        node: Some(node.to_string()),
+        node: Some(NodeId::from(node)),
         kind: ValidationKind::UnknownField {
             field: field.to_string(),
         },
@@ -299,7 +299,7 @@ fn unknown_field(node: &str, field: &str) -> ValidationIssue {
 /// dropped without trace — and it is usually the one being edited.
 fn conflicting_field(node: &str, field: &str, wins: &'static str) -> ValidationIssue {
     ValidationIssue {
-        node: Some(node.to_string()),
+        node: Some(NodeId::from(node)),
         kind: ValidationKind::ConflictingField {
             field: field.to_string(),
             wins,

@@ -166,7 +166,7 @@ impl Fixture {
     fn with_command(dir: tempfile::TempDir, command: String) -> Self {
         let run_dir = dir.path().join("run");
         Self {
-            node: "design".to_string(),
+            node: "design".into(),
             cwd: dir.path().to_path_buf(),
             log_dir: run_dir.join("logs"),
             output: run_dir.join("design.md"),

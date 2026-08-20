@@ -28,7 +28,7 @@ async fn an_answer_only_lands_on_the_question_it_names(cx: &mut TestAppContext) 
                 here,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1,
                     ask_id: 7,
                     request: daruda_flow::runner::AskRequest {
@@ -125,7 +125,7 @@ async fn closing_the_modal_leaves_the_question_standing(cx: &mut TestAppContext)
                 here,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1,
                     ask_id: 3,
                     request: daruda_flow::runner::AskRequest {
@@ -187,7 +187,7 @@ async fn a_question_from_a_lane_out_of_view_does_not_take_the_window(cx: &mut Te
                 elsewhere,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1,
                     ask_id: 4,
                     request: daruda_flow::runner::AskRequest {
@@ -241,7 +241,7 @@ async fn a_question_left_over_from_the_previous_run_is_not_shown_as_this_one_s(
                 here,
                 &previous,
                 daruda_flow::runner::PendingAsk {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1,
                     ask_id: 1,
                     request: daruda_flow::runner::AskRequest {
@@ -293,7 +293,7 @@ async fn stopping_a_run_takes_its_question_down_with_it(cx: &mut TestAppContext)
                 here,
                 &run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 2,
                     ask_id: 9,
                     request: daruda_flow::runner::AskRequest {

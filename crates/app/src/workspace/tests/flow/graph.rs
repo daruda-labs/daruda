@@ -286,7 +286,7 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::NodeStarted {
-                node: "n1".to_string(),
+                node: "n1".into(),
                 attempt: 1,
             },
             cx,
@@ -298,7 +298,7 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::NodePassed {
-                node: "n1".to_string(),
+                node: "n1".into(),
                 attempt: 1,
             },
             cx,
@@ -316,8 +316,8 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::Rerunning {
-                gate: "n6".to_string(),
-                members: vec!["n1".to_string()],
+                gate: "n6".into(),
+                members: vec!["n1".into()],
             },
             cx,
         )
@@ -367,7 +367,7 @@ async fn a_resumed_run_leaves_an_open_graph_alone(cx: &mut TestAppContext) {
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::NodeStarted {
-                node: "n1".to_string(),
+                node: "n1".into(),
                 attempt: 1,
             },
             cx,
@@ -434,22 +434,22 @@ async fn one_run_event_costs_one_frame(cx: &mut TestAppContext) {
         (
             "NodeStarted",
             daruda_flow::event::FlowEvent::NodeStarted {
-                node: "n3".to_string(),
+                node: "n3".into(),
                 attempt: 1,
             },
         ),
         (
             "NodePassed",
             daruda_flow::event::FlowEvent::NodePassed {
-                node: "n3".to_string(),
+                node: "n3".into(),
                 attempt: 1,
             },
         ),
         (
             "Rerunning",
             daruda_flow::event::FlowEvent::Rerunning {
-                gate: "n6".to_string(),
-                members: vec!["n1".to_string(), "n2".to_string(), "n3".to_string()],
+                gate: "n6".into(),
+                members: vec!["n1".into(), "n2".into(), "n3".into()],
             },
         ),
     ] {
@@ -861,7 +861,7 @@ async fn switching_the_theme_recolours_the_graph(cx: &mut TestAppContext) {
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let dark_canvas = view
@@ -886,7 +886,7 @@ async fn switching_the_theme_recolours_the_graph(cx: &mut TestAppContext) {
     );
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selected_node(cx)),
-        Some("design".to_string()),
+        Some("design".into()),
         "and the node that was selected still is"
     );
 }
@@ -913,7 +913,7 @@ async fn a_save_that_changes_no_shape_keeps_the_canvas(cx: &mut TestAppContext) 
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let before = view
@@ -945,7 +945,7 @@ async fn a_save_that_changes_no_shape_keeps_the_canvas(cx: &mut TestAppContext) 
     );
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selected_node(cx)),
-        Some("design".to_string()),
+        Some("design".into()),
         "with the same node selected"
     );
 
@@ -995,7 +995,7 @@ async fn a_reload_keeps_the_colours_of_the_run(cx: &mut TestAppContext) {
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::NodePassed {
-                node: "design".to_string(),
+                node: "design".into(),
                 attempt: 1,
             },
             cx,
@@ -1060,7 +1060,7 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
         ws.apply_flow_event_for_test(
             here,
             &daruda_flow::event::FlowEvent::NodePassed {
-                node: "design".to_string(),
+                node: "design".into(),
                 attempt: 1,
             },
             cx,
@@ -1207,7 +1207,7 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let canvas = view
@@ -1231,7 +1231,7 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
 
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selection(cx)),
-        crate::workspace::main_area::flow_graph_pane::Selection::One("design".to_string()),
+        crate::workspace::main_area::flow_graph_pane::Selection::One("design".into()),
         "the canvas never saw the press, so the selection stands"
     );
 }
@@ -1265,5 +1265,227 @@ async fn a_file_that_does_not_load_keeps_its_bytes_from_the_first_open(cx: &mut 
     assert!(
         view.read_with(&vcx, |v, _| v.text().is_some()),
         "and keeps the bytes, so reading them again is nothing to do"
+    );
+}
+
+/// Three nodes, and a `docs` nothing runs after — something to draw a line to.
+const A_SPARE_NODE: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+  - id: build
+    kind: agent
+    deps: [design]
+    output: build.md
+    prompt: build it
+  - id: docs
+    kind: agent
+    output: docs.md
+    prompt: write them
+";
+
+/// Drawing a line has to reach the file, because the file is the graph: the
+/// canvas edge the vendor plugin added is thrown away on the same notify, and
+/// the line only comes back because the write's reload draws it again.
+///
+/// Asserts the direction on disk, which is the claim `connect.rs` makes in
+/// isolation — here it is carried through the event, the op and the differ.
+#[gpui::test]
+async fn a_line_drawn_between_two_cards_reaches_the_file(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    view.update(&mut vcx, |_, cx| {
+        cx.emit(FlowGraphEvent::Connect {
+            out_of: "build".into(),
+            into: "docs".into(),
+        })
+    });
+    vcx.run_until_parked();
+
+    let text = std::fs::read_to_string(&flow_path).expect("on disk");
+    let file = daruda_flow::parse::parse_flow_file(&text).expect("still a flow");
+    let docs = file.nodes.iter().find(|n| n.id == "docs").expect("docs");
+    assert_eq!(
+        docs.deps,
+        vec![daruda_flow::NodeId::from("build")],
+        "the dep is on the card drawn into:\n{text}"
+    );
+    let build = file.nodes.iter().find(|n| n.id == "build").expect("build");
+    assert_eq!(
+        build.deps,
+        vec![daruda_flow::NodeId::from("design")],
+        "and the card drawn out of gained nothing:\n{text}"
+    );
+}
+
+/// A line that would make the flow run in a circle is refused — the file is
+/// left exactly as it was, **and the canvas does not keep the line**.
+///
+/// The refusal is the engine's, not ours: `edit_flow` puts the whole candidate
+/// back through `load`, so this is the same gate every other flow edit passes.
+/// Asserting the file rather than the toast, as every other refusal test here
+/// does — a toast that said so over a file that changed would be worse than no
+/// toast at all.
+///
+/// The edge count is the half that only a refusal can check. On a *successful*
+/// write the reload rebuilds the canvas from the file, which would hide a
+/// phantom left behind; here nothing is rebuilt, so a `DropEdge` that did not
+/// fire shows up as an extra line that the file does not declare.
+#[gpui::test]
+async fn a_line_that_would_loop_is_refused_and_not_left_on_the_canvas(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
+    let before_edges = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
+
+    // `build` already runs after `design`; running `design` after `build` too
+    // closes the loop.
+    view.update(&mut vcx, |v, cx| {
+        v.draw_edge_for_test(&"build".into(), &"design".into(), cx)
+    });
+    vcx.run_until_parked();
+
+    assert_eq!(
+        std::fs::read_to_string(&flow_path).expect("on disk"),
+        before_text,
+        "a cycle leaves the file untouched"
+    );
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx)),
+        before_edges,
+        "and the refused line is off the canvas, so the picture still matches the file"
+    );
+}
+
+/// The half daruda owns, end to end: an edge appears on the canvas the way a
+/// finished port drag leaves it, and the file comes back saying so.
+///
+/// The two tests above emit `Connect` directly and so never run
+/// `reconcile_edges` — the code holding the invariant. This one does, which is
+/// what makes them more than a test of the differ: without it, a reconcile that
+/// found nothing would leave every one of them passing.
+#[gpui::test]
+async fn an_edge_that_appears_on_the_canvas_is_written_and_taken_off_it(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    // One already: `build` runs after `design`.
+    let before = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
+
+    view.update(&mut vcx, |v, cx| {
+        v.draw_edge_for_test(&"build".into(), &"docs".into(), cx)
+    });
+    vcx.run_until_parked();
+
+    let text = std::fs::read_to_string(&flow_path).expect("on disk");
+    let file = daruda_flow::parse::parse_flow_file(&text).expect("still a flow");
+    let docs = file.nodes.iter().find(|n| n.id == "docs").expect("docs");
+    assert_eq!(
+        docs.deps,
+        vec![daruda_flow::NodeId::from("build")],
+        "the drawn edge reached the file:\n{text}"
+    );
+
+    // And gained exactly one line. The reload rebuilt the canvas from the
+    // file, so the new edge is there because the file says so — a drawn edge
+    // left behind beside it would make this two.
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx)),
+        before + 1,
+        "one new line, not the drawn one plus the reloaded one"
+    );
+}
+
+/// The vendored port plugin will add a node nobody asked for: drop a wire on
+/// empty space and click the dangling endpoint, and it builds a blank node plus
+/// an edge into it. Nothing in the flow file names that node, so the canvas
+/// stops being the file's picture — and the reconcile that only looked at
+/// *edges it could name* skipped straight past it.
+///
+/// Both come off, and the file is never touched: a connection joins two cards
+/// that already exist, which is a decision this asserts rather than assumes.
+#[gpui::test]
+async fn a_blank_node_the_file_never_named_is_taken_off_the_canvas(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
+    let (nodes, edges) = view.read_with(&vcx, |v, cx| {
+        (v.drawn_nodes_for_test(cx), v.drawn_edges_for_test(cx))
+    });
+
+    view.update(&mut vcx, |v, cx| {
+        v.strand_a_blank_node_for_test(&"design".into(), cx)
+    });
+    vcx.run_until_parked();
+
+    let (after_nodes, after_edges) = view.read_with(&vcx, |v, cx| {
+        (v.drawn_nodes_for_test(cx), v.drawn_edges_for_test(cx))
+    });
+    assert_eq!(after_nodes, nodes, "the blank node is gone");
+    assert_eq!(
+        after_edges, edges,
+        "and so is the wire drawn to it — removing the node cascades"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&flow_path).expect("on disk"),
+        before_text,
+        "and nothing was written about a node the file never had"
     );
 }

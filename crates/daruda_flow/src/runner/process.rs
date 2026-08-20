@@ -236,7 +236,7 @@ mod tests {
         fn new(dir: &Path) -> Self {
             let run_dir = dir.join("run");
             Self {
-                node: "gate".to_string(),
+                node: "gate".into(),
                 cwd: dir.to_path_buf(),
                 log_dir: run_dir.join("logs"),
                 run_dir,

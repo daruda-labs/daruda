@@ -152,7 +152,7 @@ nodes:
             assert_eq!(
                 e.site,
                 IoSite::Node {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 1
                 }
             );
@@ -199,7 +199,7 @@ nodes:
             assert_eq!(
                 e.site,
                 IoSite::Node {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     attempt: 2
                 }
             );

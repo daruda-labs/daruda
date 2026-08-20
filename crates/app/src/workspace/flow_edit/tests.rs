@@ -705,14 +705,22 @@ nodes:
 ";
     let after = edited(text, |file| {
         for target in ["n2", "n3"] {
-            crate::workspace::main_area::flow_graph_pane::form::apply::remove_node(file, target);
+            crate::workspace::main_area::flow_graph_pane::form::apply::remove_node(
+                file,
+                &target.into(),
+            );
         }
     });
     let file = daruda_flow::parse::parse_flow_file(&after).expect("still a flow");
     let deps: Vec<(&str, Vec<&str>)> = file
         .nodes
         .iter()
-        .map(|n| (n.id.as_str(), n.deps.iter().map(String::as_str).collect()))
+        .map(|n| {
+            (
+                n.id.as_str(),
+                n.deps.iter().map(daruda_flow::NodeId::as_str).collect(),
+            )
+        })
         .collect();
     assert_eq!(
         deps,

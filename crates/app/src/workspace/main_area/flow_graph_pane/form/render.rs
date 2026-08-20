@@ -154,7 +154,7 @@ pub(in super::super) fn render(
             div()
                 .text_size(px(palette::FLOW_GRAPH_ID_FONT_SIZE))
                 .text_color(primary)
-                .child(form.node.clone()),
+                .child(form.node.clone().into_string()),
         )
         // Directly under the heading, not after the fields: the column scrolls,
         // and a capture found the banner below the fold — which is the same as

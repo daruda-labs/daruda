@@ -39,7 +39,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 format!("`{}` is reserved for the repair session", node.id),
             ));
         }
-        if !is_filename_safe(&node.id) {
+        if !is_filename_safe(node.id.as_str()) {
             issues.push(issue(
                 node.id.clone(),
                 ValidationKind::InvalidNodeId,
@@ -229,7 +229,7 @@ pub(crate) fn check_output_refs(
             issues.push(issue(
                 node.clone(),
                 ValidationKind::UnreachableOutputRef {
-                    referenced: referenced.to_string(),
+                    referenced: NodeId::from(referenced),
                 },
                 format!("`{referenced}` is not an ancestor of `{node}`"),
             ));

@@ -7,6 +7,7 @@
 //! mapping is testable without a workspace, and that a deletion's sweep sits
 //! next to the rename's.
 
+use daruda_flow::NodeId;
 use daruda_flow::parse::FlowFile;
 
 use super::{AttemptsField, FailFields, KindChoice, NodeFields, SourceField, TimeoutField};
@@ -16,14 +17,18 @@ use super::{AttemptsField, FailFields, KindChoice, NodeFields, SourceField, Time
 /// Pure, and the only place that knows how a form maps onto the file: a rename
 /// is this function moving one string and then every reference to it, which the
 /// differ turns into the handful of text edits that says.
-pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &str, fields: &NodeFields) {
+pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fields: &NodeFields) {
     use daruda_flow::parse::{NodeKindFile, PromptSource};
 
-    let Some(index) = file.nodes.iter().position(|n| n.id == node) else {
+    let Some(index) = file.nodes.iter().position(|n| &n.id == node) else {
         return;
     };
     let target = &mut file.nodes[index];
-    target.deps = fields.deps.clone();
+    target.deps = fields
+        .deps
+        .iter()
+        .map(|d| NodeId::from(d.as_str()))
+        .collect();
     target.timeout = match &fields.timeout {
         TimeoutField::Set(duration) => Some(*duration),
         // Unreadable text never reaches here — the form refuses to save on it.
@@ -49,15 +54,15 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &str, fields:
         },
     };
 
-    let renamed = fields.id != node;
-    if !renamed {
+    let new_id = NodeId::from(fields.id.as_str());
+    if &new_id == node {
         return;
     }
-    file.nodes[index].id = fields.id.clone();
+    file.nodes[index].id = new_id.clone();
     for other in file.nodes.iter_mut() {
         for dep in other.deps.iter_mut() {
             if dep == node {
-                *dep = fields.id.clone();
+                *dep = new_id.clone();
             }
         }
         if let NodeKindFile::Command {
@@ -67,7 +72,7 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &str, fields:
         {
             for name in rerun.iter_mut() {
                 if name == node {
-                    *name = fields.id.clone();
+                    *name = new_id.clone();
                 }
             }
         }
@@ -83,12 +88,12 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &str, fields:
 /// An agent with an empty prompt and an output named after it — the shape that
 /// loads, so the graph draws the new card immediately and the person types into
 /// it rather than reading a refusal.
-pub(in crate::workspace) fn new_node(file: &mut FlowFile, after: Option<&str>) -> String {
+pub(in crate::workspace) fn new_node(file: &mut FlowFile, after: Option<&NodeId>) -> NodeId {
     use daruda_flow::parse::{NodeFile, NodeKindFile, PromptSource};
     let id = next_node_id(file);
     file.nodes.push(NodeFile {
         id: id.clone(),
-        deps: after.map(|dep| vec![dep.to_string()]).unwrap_or_default(),
+        deps: after.map(|dep| vec![dep.clone()]).unwrap_or_default(),
         timeout: None,
         cwd: None,
         kind: NodeKindFile::Agent {
@@ -103,11 +108,11 @@ pub(in crate::workspace) fn new_node(file: &mut FlowFile, after: Option<&str>) -
 
 /// `node-1`, `node-2`, … — the first the file has no node for. Numbering from the
 /// count would collide the moment a node is deleted.
-fn next_node_id(file: &FlowFile) -> String {
+fn next_node_id(file: &FlowFile) -> NodeId {
     (1..)
-        .map(|n| format!("node-{n}"))
+        .map(|n| NodeId::from(format!("node-{n}")))
         .find(|candidate| !file.nodes.iter().any(|node| &node.id == candidate))
-        .unwrap_or_else(|| "node".to_string())
+        .unwrap_or_else(|| NodeId::from("node"))
 }
 
 /// Take `node` out, and out of everything that pointed at it — every `deps` and
@@ -121,7 +126,7 @@ fn next_node_id(file: &FlowFile) -> String {
 /// one loser, not two, and a node inside the selection is not a loser at all
 /// because it is going too. Counting per-node and correcting arithmetically got
 /// both of those wrong.
-pub(in crate::workspace) fn dependents_outside(file: &FlowFile, going: &[String]) -> usize {
+pub(in crate::workspace) fn dependents_outside(file: &FlowFile, going: &[NodeId]) -> usize {
     use daruda_flow::parse::{GateFailFile, NodeKindFile};
     file.nodes
         .iter()
@@ -142,9 +147,28 @@ pub(in crate::workspace) fn dependents_outside(file: &FlowFile, going: &[String]
         .count()
 }
 
-pub(in crate::workspace) fn remove_node(file: &mut FlowFile, node: &str) {
+/// Make `into` wait for `out_of` — one line drawn on the canvas, as the file
+/// spells it.
+///
+/// Records the dep on `into`, which is the direction
+/// [`super::super::connect::dep_from_edge`] decided and the only thing about
+/// this function that can be wrong. A link the file already has changes
+/// nothing, and the differ turns that into `NothingToDo`; a node the file does
+/// not have is likewise nothing, because the canvas it was drawn on is by then
+/// out of date.
+pub(in crate::workspace) fn connect(file: &mut FlowFile, out_of: &NodeId, into: &NodeId) {
+    let Some(target) = file.nodes.iter_mut().find(|n| &n.id == into) else {
+        return;
+    };
+    if target.deps.iter().any(|dep| dep == out_of) {
+        return;
+    }
+    target.deps.push(out_of.clone());
+}
+
+pub(in crate::workspace) fn remove_node(file: &mut FlowFile, node: &NodeId) {
     use daruda_flow::parse::{GateFailFile, NodeKindFile};
-    file.nodes.retain(|n| n.id != node);
+    file.nodes.retain(|n| &n.id != node);
     for other in file.nodes.iter_mut() {
         other.deps.retain(|dep| dep != node);
         if let NodeKindFile::Command {
@@ -223,7 +247,7 @@ fn apply_repair(policy: &mut daruda_flow::parse::GateFailFile, fields: &FailFiel
         } => {
             *policy = GateFailFile::Repair {
                 fix: fix.clone(),
-                rerun: rerun.clone(),
+                rerun: rerun.iter().map(|r| NodeId::from(r.as_str())).collect(),
                 max_attempts: attempts_or_one(max_attempts),
                 wait: duration_of(wait),
             };
@@ -294,10 +318,10 @@ nodes:
     #[test]
     fn a_rename_reaches_a_gates_rerun_list() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
-        node_fields(&mut file, "build", &fields_renaming("assemble"));
+        node_fields(&mut file, &"build".into(), &fields_renaming("assemble"));
 
         assert_eq!(file.nodes[0].id, "assemble");
-        assert_eq!(file.nodes[1].deps, vec!["assemble".to_string()]);
+        assert_eq!(file.nodes[1].deps, vec![NodeId::from("assemble")]);
         let NodeKindFile::Command {
             on_fail: GateFailFile::Repair { rerun, .. },
             ..
@@ -307,7 +331,7 @@ nodes:
         };
         assert_eq!(
             rerun,
-            &vec!["assemble".to_string()],
+            &vec![NodeId::from("assemble")],
             "the repair reruns the node under its new name"
         );
     }
@@ -315,20 +339,57 @@ nodes:
     #[test]
     fn a_new_node_takes_the_first_name_the_file_does_not_have() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
-        assert_eq!(new_node(&mut file, Some("check")), "node-1");
+        assert_eq!(new_node(&mut file, Some(&"check".into())), "node-1");
         assert_eq!(new_node(&mut file, None), "node-2");
         // A deletion frees the name again rather than the counter marching on.
-        remove_node(&mut file, "node-1");
+        remove_node(&mut file, &"node-1".into());
         assert_eq!(new_node(&mut file, None), "node-1");
     }
 
     #[test]
     fn a_new_node_is_chained_after_the_one_it_was_added_from() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
-        let id = new_node(&mut file, Some("check"));
+        let id = new_node(&mut file, Some(&"check".into()));
         let added = file.nodes.last().expect("it was added");
         assert_eq!(added.id, id);
-        assert_eq!(added.deps, vec!["check".to_string()]);
+        assert_eq!(added.deps, vec![NodeId::from("check")]);
+    }
+
+    /// The direction, carried through to the file. `connect.rs` asserts that a
+    /// line out of `build` and into `check` *means* `check.deps += build`; this
+    /// asserts the file ends up saying it, and — the half a reversed
+    /// implementation would still pass — that `build` gained nothing.
+    #[test]
+    fn a_connection_is_recorded_on_the_card_it_was_drawn_into() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        connect(&mut file, &"check".into(), &"build".into());
+
+        let build = file.nodes.iter().find(|n| n.id == "build").expect("build");
+        assert_eq!(build.deps, vec![NodeId::from("check")]);
+        let check = file.nodes.iter().find(|n| n.id == "check").expect("check");
+        assert_eq!(
+            check.deps,
+            vec![NodeId::from("build")],
+            "the card drawn out of keeps the deps it had and gains none"
+        );
+    }
+
+    #[test]
+    fn connecting_what_is_already_connected_changes_nothing() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        let before = file.clone();
+        connect(&mut file, &"build".into(), &"check".into());
+        assert_eq!(file, before, "`check` already runs after `build`");
+    }
+
+    /// The canvas the line was drawn on can be out of date by the time the
+    /// write lands — a node that left is not an error, it is nothing to do.
+    #[test]
+    fn connecting_to_a_node_that_is_gone_changes_nothing() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        let before = file.clone();
+        connect(&mut file, &"build".into(), &"drawing".into());
+        assert_eq!(file, before);
     }
 
     /// A deletion is a rename's mirror: the name goes out of every place that
@@ -336,7 +397,7 @@ nodes:
     #[test]
     fn a_deletion_takes_the_mentions_of_it_along() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
-        remove_node(&mut file, "build");
+        remove_node(&mut file, &"build".into());
         assert_eq!(file.nodes.len(), 1);
         assert!(file.nodes[0].deps.is_empty(), "the dep on it is gone");
         let NodeKindFile::Command {
@@ -355,7 +416,7 @@ nodes:
     fn applying_to_a_node_that_is_gone_changes_nothing() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
         let before = file.clone();
-        node_fields(&mut file, "nobody", &fields_renaming("x"));
+        node_fields(&mut file, &"nobody".into(), &fields_renaming("x"));
         assert_eq!(file, before);
     }
 }
@@ -401,8 +462,8 @@ nodes:
     prompt: six
 ";
 
-    fn going(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    fn going(ids: &[&str]) -> Vec<NodeId> {
+        ids.iter().map(|s| NodeId::from(*s)).collect()
     }
 
     /// Two nodes in unrelated branches: each leaves its own dependent behind, so

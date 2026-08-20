@@ -148,7 +148,7 @@ fn park_question(
                 lane,
                 run_dir,
                 daruda_flow::runner::PendingAsk {
-                    node: format!("node-{ask_id}"),
+                    node: format!("node-{ask_id}").into(),
                     attempt: 1,
                     ask_id,
                     request: daruda_flow::runner::AskRequest {

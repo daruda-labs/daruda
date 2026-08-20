@@ -41,7 +41,7 @@ impl Step {
 /// happened, which every wrong ordering also produces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Call {
-    pub(crate) node: String,
+    pub(crate) node: crate::NodeId,
     pub(crate) attempt: u32,
     /// The agent prompt, or the command line — already rendered.
     pub(crate) text: String,
@@ -131,7 +131,7 @@ impl FakeRunner {
 
     /// Just the node ids — for assertions about order that do not care
     /// about attempt numbers or text.
-    pub(crate) fn ids(&self) -> Vec<String> {
+    pub(crate) fn ids(&self) -> Vec<crate::NodeId> {
         self.calls.borrow().iter().map(|c| c.node.clone()).collect()
     }
 
@@ -158,14 +158,14 @@ impl FakeRunner {
             attempt: ctx.attempt,
             text: text.to_string(),
         });
-        let step = self.step_for(ctx.node_id, ctx.attempt);
+        let step = self.step_for(ctx.node_id.as_str(), ctx.attempt);
         let log = ctx.log_dir.join(format!(
             "{}.attempt-{}.evidence-{}.log",
             ctx.node_id, ctx.attempt, ctx.evidence_seq
         ));
         let _ = std::fs::create_dir_all(ctx.log_dir);
         let _ = std::fs::write(&log, format!("{} attempt {}\n", ctx.node_id, ctx.attempt));
-        if self.cancel_at.get(ctx.node_id) == Some(&ctx.attempt) {
+        if self.cancel_at.get(ctx.node_id.as_str()) == Some(&ctx.attempt) {
             ctx.cancel.cancel();
         }
         let (writes, outcome) = match step {
@@ -179,7 +179,7 @@ impl FakeRunner {
         RunResult {
             outcome,
             artifacts: vec![log],
-            usage: self.usage_for(ctx.node_id),
+            usage: self.usage_for(ctx.node_id.as_str()),
             waiting: crate::runner::Waiting {
                 total: self.parked,
                 answers: Vec::new(),

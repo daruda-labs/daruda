@@ -707,7 +707,7 @@ nodes:
         )
         .expect_err("no defaults.agent and no node override");
         assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].node.as_deref(), Some("design"));
+        assert_eq!(issues[0].node, Some(crate::NodeId::from("design")));
         assert!(matches!(issues[0].kind, ValidationKind::MissingAgent));
     }
 

@@ -269,15 +269,15 @@ mod tests {
         ]);
         let g = FlowGraph::build(&flow).expect("acyclic");
 
-        let mut anc = g.ancestors(&"test".to_string());
+        let mut anc = g.ancestors(&"test".into());
         anc.sort();
-        assert_eq!(anc, vec!["design".to_string(), "implement".to_string()]);
+        assert_eq!(anc, vec![NodeId::from("design"), NodeId::from("implement")]);
 
         // `docs` is a descendant of `implement` but NOT an ancestor of
         // `test` — the distinction the rerun set depends on.
-        let mut desc = g.descendants(&"implement".to_string());
+        let mut desc = g.descendants(&"implement".into());
         desc.sort();
-        assert_eq!(desc, vec!["docs".to_string(), "test".to_string()]);
+        assert_eq!(desc, vec![NodeId::from("docs"), NodeId::from("test")]);
     }
 
     //  design --> implement --> docs      (a side branch)
@@ -296,12 +296,12 @@ mod tests {
         // the path to `gate` — its output was derived from code the fix is
         // about to change.
         assert_eq!(
-            g.rerun_closure(&["implement".to_string()]),
+            g.rerun_closure(&["implement".into()]),
             vec![
-                "implement".to_string(),
-                "docs".to_string(),
-                "test".to_string(),
-                "gate".to_string()
+                NodeId::from("implement"),
+                NodeId::from("docs"),
+                NodeId::from("test"),
+                NodeId::from("gate")
             ]
         );
     }
@@ -320,7 +320,7 @@ mod tests {
         let flow = flow_of(&[("a", &["b"]), ("b", &["a"])]);
         match FlowGraph::build(&flow).expect_err("cyclic") {
             GraphError::Cycle(nodes) => {
-                assert!(nodes.contains(&"a".to_string()) && nodes.contains(&"b".to_string()));
+                assert!(nodes.contains(&"a".into()) && nodes.contains(&"b".into()));
             }
             other => panic!("expected a cycle error, got {other:?}"),
         }

@@ -210,7 +210,7 @@ mod tests {
             (RunOutcome::Done, "DONE", RunStatus::Done),
             (
                 RunOutcome::Failed {
-                    node: "design".to_string(),
+                    node: "design".into(),
                     failure: NodeFailure::Exit { code: Some(1) },
                 },
                 "FAILED",
@@ -225,7 +225,7 @@ mod tests {
             ),
             (
                 RunOutcome::Canceled {
-                    node: Some("design".to_string()),
+                    node: Some("design".into()),
                 },
                 "CANCELED",
                 RunStatus::Canceled,

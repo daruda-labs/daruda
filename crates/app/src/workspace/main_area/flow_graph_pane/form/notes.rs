@@ -10,6 +10,7 @@
 //! unreachable output reference: those are about the flow rather than about any
 //! one box, and they stay in the banner where the whole sentence is readable.
 
+use daruda_flow::NodeId;
 use daruda_flow::error::{ValidationIssue, ValidationKind};
 
 /// A box on the inspector that a rule can name.
@@ -42,10 +43,10 @@ pub(in crate::workspace) struct FieldNote {
 /// Issues about *other* nodes are dropped: they are real, and the banner still
 /// carries them, but pointing at this form's `output` box for another node's
 /// duplicate output would send the person to the wrong place.
-pub(in crate::workspace) fn notes_for(issues: &[ValidationIssue], node: &str) -> Vec<FieldNote> {
+pub(in crate::workspace) fn notes_for(issues: &[ValidationIssue], node: &NodeId) -> Vec<FieldNote> {
     issues
         .iter()
-        .filter(|issue| issue.node.as_deref() == Some(node))
+        .filter(|issue| issue.node.as_ref() == Some(node))
         .filter_map(|issue| {
             field_for(&issue.kind).map(|field| FieldNote {
                 field,
@@ -93,7 +94,7 @@ mod tests {
 
     fn issue(node: Option<&str>, kind: ValidationKind) -> ValidationIssue {
         ValidationIssue {
-            node: node.map(str::to_string),
+            node: node.map(NodeId::from),
             kind,
             message: "engine detail".into(),
         }
@@ -103,7 +104,7 @@ mod tests {
     fn a_rule_about_this_node_finds_its_box() {
         let notes = notes_for(
             &[issue(Some("design"), ValidationKind::AgentIdWithoutMode)],
-            "design",
+            &"design".into(),
         );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].field, FormField::Agent);
@@ -121,7 +122,7 @@ mod tests {
     fn a_rule_about_another_node_points_at_nothing_here() {
         let notes = notes_for(
             &[issue(Some("build"), ValidationKind::DuplicateOutput)],
-            "design",
+            &"design".into(),
         );
         assert!(notes.is_empty(), "{notes:?}");
     }
@@ -136,7 +137,7 @@ mod tests {
             },
         ] {
             assert!(
-                notes_for(&[issue(Some("design"), kind.clone())], "design").is_empty(),
+                notes_for(&[issue(Some("design"), kind.clone())], &"design".into()).is_empty(),
                 "{kind:?} is about the flow, not a box"
             );
         }

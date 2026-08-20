@@ -17,7 +17,7 @@ fn a_cancel_mid_node_archives_that_nodes_output_and_stops() {
     let (report, dir) = run(CHAIN, &runner);
 
     match report.outcome {
-        RunOutcome::Canceled { node } => assert_eq!(node.as_deref(), Some("design")),
+        RunOutcome::Canceled { node } => assert_eq!(node, Some("design".into())),
         other => panic!("expected Canceled, got {other:?}"),
     }
     let run_dir = dir.path().join("run");
@@ -59,7 +59,7 @@ nodes:
     // loop's own check — which reports no node, because by then nothing is
     // in flight. `Some("design")` is only reachable by leaving `judge` out.
     match report.outcome {
-        RunOutcome::Canceled { node } => assert_eq!(node.as_deref(), Some("design")),
+        RunOutcome::Canceled { node } => assert_eq!(node, Some("design".into())),
         other => panic!("expected Canceled, got {other:?}"),
     }
     assert_eq!(runner.ids(), vec!["design"], "no retry after a cancel");
@@ -122,7 +122,7 @@ fn a_cancel_during_the_fix_session_is_not_a_failed_fix() {
     );
     let (report, _dir) = run(GATED, &runner);
     match &report.outcome {
-        RunOutcome::Canceled { node } => assert_eq!(node.as_deref(), Some("__fix__")),
+        RunOutcome::Canceled { node } => assert_eq!(node, &Some("__fix__".into())),
         other => panic!("expected Canceled, got {other:?}"),
     }
     assert_eq!(

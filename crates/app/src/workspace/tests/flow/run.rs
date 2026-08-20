@@ -357,7 +357,7 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
         ws.flow_history_for_panel().expect("primed");
 
         let started = |node: &str| daruda_flow::event::FlowEvent::NodeStarted {
-            node: node.to_string(),
+            node: node.into(),
             attempt: 1,
         };
 

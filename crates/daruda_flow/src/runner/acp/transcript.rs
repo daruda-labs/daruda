@@ -49,7 +49,12 @@ pub(super) struct Transcript {
 impl Transcript {
     /// Named the way `ProcessRunner` names its log, so the archive treats
     /// both the same and a reader finds them side by side.
-    pub(super) fn create(log_dir: &Path, node_id: &str, attempt: u32, evidence_seq: u32) -> Self {
+    pub(super) fn create(
+        log_dir: &Path,
+        node_id: &crate::NodeId,
+        attempt: u32,
+        evidence_seq: u32,
+    ) -> Self {
         let path = log_dir.join(format!(
             "{node_id}.attempt-{attempt}.evidence-{evidence_seq}.md"
         ));
@@ -180,7 +185,7 @@ mod tests {
     use super::*;
 
     fn transcript(dir: &Path) -> Transcript {
-        Transcript::create(dir, "design", 1, 7)
+        Transcript::create(dir, &"design".into(), 1, 7)
     }
 
     /// The name `ProcessRunner` uses, so the archive handles both alike and
@@ -222,7 +227,7 @@ mod tests {
     /// otherwise fine, and must not name a file nothing wrote.
     #[test]
     fn an_unwritable_transcript_reports_nothing_and_swallows_its_writes() {
-        let mut t = Transcript::create(Path::new("/proc/nonexistent-dir"), "design", 1, 7);
+        let mut t = Transcript::create(Path::new("/proc/nonexistent-dir"), &"design".into(), 1, 7);
         t.prompt("still fine");
         assert!(t.artifacts().is_empty());
     }

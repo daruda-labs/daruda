@@ -108,7 +108,7 @@ fn a_resumed_run_does_not_repeat_what_the_first_half_finished() {
     );
     assert_eq!(
         runner.ids(),
-        vec!["two".to_string(), "three".to_string()],
+        vec![crate::NodeId::from("two"), crate::NodeId::from("three")],
         "the resumed run re-ran a node that had already passed"
     );
 }

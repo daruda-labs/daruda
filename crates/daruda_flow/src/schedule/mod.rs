@@ -695,7 +695,7 @@ impl<'a> Run<'a> {
         };
         let text = render(fix, &tctx, Surface::Prompt);
 
-        let fix_id = FIX_SESSION_ID.to_string();
+        let fix_id = NodeId::from(FIX_SESSION_ID);
         let fix_ctx = RunContext {
             node_id: &fix_id,
             attempt: ctx.attempt,

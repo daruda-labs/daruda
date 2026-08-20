@@ -268,7 +268,7 @@ fn a_halt_stops_the_branches_that_had_nothing_to_do_with_it() {
     );
 
     assert!(
-        !runner.ids().contains(&"later".to_string()),
+        !runner.ids().contains(&crate::NodeId::from("later")),
         "an unrelated branch ran after a halt: {:?}",
         runner.ids()
     );

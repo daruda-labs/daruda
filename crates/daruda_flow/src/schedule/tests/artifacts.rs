@@ -514,7 +514,7 @@ fn a_gate_failure_records_the_set_it_invalidated() {
     invalidated.sort();
     assert_eq!(
         invalidated,
-        vec!["gate".to_string(), "review".to_string()],
+        vec![NodeId::from("gate"), NodeId::from("review")],
         "the declared root and the gate itself"
     );
     // A passing attempt invalidates nothing, so the line stays off it.
@@ -785,7 +785,7 @@ fn a_run_leaves_a_journal_of_what_it_finished() {
     );
 
     let replay = crate::journal::read(&report.run_dir);
-    assert_eq!(replay.passed, vec!["design".to_string()]);
+    assert_eq!(replay.passed, vec![NodeId::from("design")]);
     assert_eq!(replay.profile.as_deref(), Some("cheap"));
     assert_eq!(replay.spent.node_runs, report.node_runs);
     assert!(!replay.torn);

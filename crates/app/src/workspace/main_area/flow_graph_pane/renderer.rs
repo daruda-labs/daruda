@@ -108,7 +108,7 @@ pub(super) fn card_for(node: &GraphNode, run: NodeRunState) -> CardData {
     };
     let (badge, accent) = badge_for(node, run);
     CardData {
-        id: node.id.clone(),
+        id: node.id.clone().into_string(),
         kind,
         chip,
         meta,

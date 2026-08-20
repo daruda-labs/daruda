@@ -206,7 +206,7 @@ async fn clicking_a_card_selects_it_and_does_not_move_it(cx: &mut TestAppContext
     vcx.run_until_parked();
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selection(cx)),
-        Selection::Many(vec!["build".to_string(), "design".to_string()]),
+        Selection::Many(vec!["build".into(), "design".into()]),
         "shift-click adds the second card, and says which two"
     );
 }
@@ -237,7 +237,7 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
 
     // Selecting the first card fills the form from the file.
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let output = view
@@ -307,13 +307,13 @@ async fn selecting_another_node_rebuilds_the_form(cx: &mut TestAppContext) {
     };
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     assert_eq!(read_output(&mut vcx).as_deref(), Some("design.md"));
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("build", window, cx)
+        v.select_node_for_test(&"build".into(), window, cx)
     });
     vcx.run_until_parked();
     assert_eq!(
@@ -348,7 +348,7 @@ async fn renaming_a_node_takes_the_mentions_of_it_along(cx: &mut TestAppContext)
         .expect("the graph pane opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let id = view
@@ -427,7 +427,7 @@ async fn a_refused_save_says_why_beside_the_fields(cx: &mut TestAppContext) {
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let (deps, output) = view
@@ -510,7 +510,7 @@ async fn the_agent_override_is_read_and_written_one_field_at_a_time(cx: &mut Tes
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
 
@@ -573,7 +573,7 @@ async fn emptying_every_axis_removes_the_agent_block(cx: &mut TestAppContext) {
         .expect("the graph pane opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let states = view.read_with(&vcx, |v, _| {
@@ -635,7 +635,7 @@ nodes:
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let agent_id = view.read_with(&vcx, |v, _| {
@@ -707,7 +707,7 @@ async fn a_fail_policy_grows_a_block_and_gives_it_back(cx: &mut TestAppContext) 
     };
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let (policy, hint, attempts) = fail_states(&mut vcx);
@@ -793,7 +793,7 @@ nodes:
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("check", window, cx)
+        v.select_node_for_test(&"check".into(), window, cx)
     });
     vcx.run_until_parked();
     let (policy, fix, attempts) = view.read_with(&vcx, |v, cx| {
@@ -858,7 +858,7 @@ async fn the_form_blocks_what_cannot_become_a_number_or_a_duration(cx: &mut Test
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
 
@@ -920,7 +920,7 @@ async fn adding_a_node_chains_it_and_selects_it(cx: &mut TestAppContext) {
         .expect("the graph pane opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("build", window, cx)
+        v.select_node_for_test(&"build".into(), window, cx)
     });
     vcx.run_until_parked();
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -940,7 +940,7 @@ async fn adding_a_node_chains_it_and_selects_it(cx: &mut TestAppContext) {
     daruda_flow::load(&after, None).expect("a node that loads, not one to fix first");
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selected_node(cx)),
-        Some("node-1".to_string()),
+        Some("node-1".into()),
         "and the inspector is already on it"
     );
 }
@@ -966,13 +966,7 @@ async fn deleting_a_node_takes_the_dependencies_with_it(cx: &mut TestAppContext)
 
     // `build` depends on `design`; deleting `design` has to take that with it.
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.delete_nodes(
-            &flow_path,
-            view.clone(),
-            vec!["design".to_string()],
-            window,
-            cx,
-        )
+        ws.delete_nodes(&flow_path, view.clone(), vec!["design".into()], window, cx)
     });
     vcx.run_until_parked();
     let after = std::fs::read_to_string(&flow_path).unwrap();
@@ -985,13 +979,7 @@ async fn deleting_a_node_takes_the_dependencies_with_it(cx: &mut TestAppContext)
     // The one node left cannot go: the file would stop being a flow file.
     let before = after;
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.delete_nodes(
-            &flow_path,
-            view.clone(),
-            vec!["build".to_string()],
-            window,
-            cx,
-        )
+        ws.delete_nodes(&flow_path, view.clone(), vec!["build".into()], window, cx)
     });
     vcx.run_until_parked();
     assert_eq!(
@@ -1041,7 +1029,7 @@ async fn a_prompt_can_come_from_a_file_instead(cx: &mut TestAppContext) {
     };
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let (choice, file, inline) = prompt_states(&mut vcx);
@@ -1121,7 +1109,7 @@ async fn a_node_can_become_a_command_and_back(cx: &mut TestAppContext) {
         .expect("the graph pane opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("build", window, cx)
+        v.select_node_for_test(&"build".into(), window, cx)
     });
     vcx.run_until_parked();
     let (kind, run) = view.read_with(&vcx, |v, cx| {
@@ -1209,7 +1197,7 @@ async fn a_refusal_points_at_the_field_it_is_about(cx: &mut TestAppContext) {
         .expect("the graph pane opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let deps = view.read_with(&vcx, |v, _| v.form().expect("a form").deps_state().clone());
@@ -1282,7 +1270,7 @@ async fn typing_lost_to_a_reload_is_reported(cx: &mut TestAppContext) {
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
 
@@ -1343,7 +1331,7 @@ async fn typing_lost_to_adding_a_node_is_reported(cx: &mut TestAppContext) {
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let output = view.read_with(&vcx, |v, cx| {
@@ -1383,7 +1371,7 @@ async fn typing_lost_with_the_node_itself_is_reported(cx: &mut TestAppContext) {
         })
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
-        v.select_node_for_test("design", window, cx)
+        v.select_node_for_test(&"design".into(), window, cx)
     });
     vcx.run_until_parked();
     let output = view.read_with(&vcx, |v, cx| {
@@ -1434,7 +1422,7 @@ async fn deleting_a_multi_selection_takes_every_node_in_it(cx: &mut TestAppConte
         ws.delete_nodes(
             &flow_path,
             view.clone(),
-            vec!["n2".to_string(), "n3".to_string()],
+            vec!["n2".into(), "n3".into()],
             window,
             cx,
         )
@@ -1479,7 +1467,7 @@ async fn a_selection_of_every_node_is_refused(cx: &mut TestAppContext) {
         ws.delete_nodes(
             &flow_path,
             view.clone(),
-            vec!["design".to_string(), "build".to_string()],
+            vec!["design".into(), "build".into()],
             window,
             cx,
         )
