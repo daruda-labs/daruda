@@ -30,6 +30,7 @@
 
 use std::io::Read;
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -229,6 +230,9 @@ where
 #[derive(Debug)]
 pub struct LoginProcess {
     child: Arc<Mutex<Child>>,
+    /// Set once the child has been reaped, so a concurrent cancel knows its
+    /// pid is no longer this process's to name.
+    reaped: Arc<AtomicBool>,
     stdout_buf: Arc<Mutex<CappedBuffer>>,
     stderr_buf: Arc<Mutex<CappedBuffer>>,
     timeout: Duration,
@@ -242,6 +246,7 @@ pub struct LoginProcess {
 #[derive(Debug, Clone)]
 pub struct LoginProcessHandle {
     child: Arc<Mutex<Child>>,
+    reaped: Arc<AtomicBool>,
 }
 
 impl LoginProcessHandle {
@@ -258,14 +263,17 @@ impl LoginProcessHandle {
             // is exactly the attempt a cancel exists to make room for.
             // `spawn_login` already made the child a group leader, so its pid
             // doubles as the group id.
+            //
+            // Gated on *reaped*, not on "still running": the direct child may
+            // well have exited already — `npx` forks and goes — and that is
+            // precisely when the descendants need the signal. A zombie keeps
+            // its pid until we reap it, so the group id stays ours to name.
             #[cfg(unix)]
-            if matches!(child.try_wait(), Ok(None)) {
+            if !self.reaped.load(Ordering::Acquire) {
                 let pgid = child.id() as libc::pid_t;
                 // SAFETY: the child led its own group from `spawn_login`, so the
-                // negative form reaches that group and nothing else. It is not
-                // reaped — checked above, under the same lock that `wait` takes
-                // — so the pid is still this process's to name and cannot have
-                // been reused.
+                // negative form reaches that group and nothing else. Not yet
+                // reaped (checked above), so the pid cannot have been reused.
                 unsafe {
                     libc::kill(-pgid, libc::SIGKILL);
                 }
@@ -324,6 +332,7 @@ pub fn spawn_login(
 
     Ok(LoginProcess {
         child: Arc::new(Mutex::new(child)),
+        reaped: Arc::new(AtomicBool::new(false)),
         stdout_buf,
         stderr_buf,
         timeout,
@@ -356,11 +365,17 @@ const REAP_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// zombie for the app's lifetime: `std::process::Child` has no reaping
 /// `Drop`, so a `Child` that's merely dropped without ever being
 /// `wait`ed leaves its process as a zombie until *this app* exits.
-fn reap_after_cancel(child: &Mutex<Child>) {
+fn reap_after_cancel(child: &Mutex<Child>, reaped: &AtomicBool) {
     for _ in 0..REAP_ATTEMPTS {
         match child.lock() {
             Ok(mut child) => match child.try_wait() {
-                Ok(Some(_)) | Err(_) => return,
+                Ok(Some(_)) => {
+                    // Published so a later cancel does not signal a pid that is
+                    // no longer ours — it may have been handed to someone else.
+                    reaped.store(true, Ordering::Release);
+                    return;
+                }
+                Err(_) => return,
                 Ok(None) => {}
             },
             Err(_) => return,
@@ -381,6 +396,7 @@ impl LoginProcess {
     pub fn cancel(&self) {
         LoginProcessHandle {
             child: Arc::clone(&self.child),
+            reaped: Arc::clone(&self.reaped),
         }
         .cancel();
     }
@@ -394,6 +410,7 @@ impl LoginProcess {
     pub fn handle(&self) -> LoginProcessHandle {
         LoginProcessHandle {
             child: Arc::clone(&self.child),
+            reaped: Arc::clone(&self.reaped),
         }
     }
 
@@ -421,13 +438,16 @@ impl LoginProcess {
                 Err(_) => break PollResult::PollError("login process mutex poisoned".to_string()),
             };
             match polled {
-                Ok(Some(status)) => break PollResult::Exited(status),
+                Ok(Some(status)) => {
+                    self.reaped.store(true, Ordering::Release);
+                    break PollResult::Exited(status);
+                }
                 Ok(None) => {
                     let now = Instant::now();
                     match grace_deadline {
                         Some(expiry) if now >= expiry => {
                             self.cancel();
-                            reap_after_cancel(&self.child);
+                            reap_after_cancel(&self.child, &self.reaped);
                             break PollResult::CredentialsLanded;
                         }
                         Some(_) => {}
@@ -441,7 +461,7 @@ impl LoginProcess {
                                 grace_deadline = Some(now + grace);
                             } else if now >= deadline {
                                 self.cancel();
-                                reap_after_cancel(&self.child);
+                                reap_after_cancel(&self.child, &self.reaped);
                                 break PollResult::TimedOut;
                             }
                         }
@@ -696,6 +716,50 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         false
+    }
+
+    /// The case the group signal exists for, and the one the first attempt at
+    /// it missed: the process daruda spawned **exits first**, leaving the CLI
+    /// it forked holding the OAuth callback port. `npx` is exactly that shape.
+    ///
+    /// Gating the group signal on "not yet reaped" skipped precisely this —
+    /// the direct child is gone, so a cancel touched nothing and the next
+    /// sign-in could not bind the port.
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_kills_a_grandchild_whose_parent_already_exited() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("grandchild.pid");
+        // No `wait`: the shell exits as soon as it has forked and reported.
+        let command = format!(
+            "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {}'",
+            pid_file.display()
+        );
+        let login = spawn_login(&command, &[], &[], Duration::from_secs(20)).expect("spawn");
+        let handle = login.handle();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            if let Ok(raw) = std::fs::read_to_string(&pid_file) {
+                let trimmed = raw.trim().to_string();
+                if !trimmed.is_empty() {
+                    break trimmed;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the forked grandchild never reported its pid"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        // Let the direct child exit before cancelling, which is the whole point.
+        std::thread::sleep(Duration::from_millis(300));
+
+        handle.cancel();
+        assert!(
+            gone_within(&pid, Duration::from_secs(5)),
+            "grandchild {pid} survived a cancel its parent had already left"
+        );
     }
 
     /// A cancelled sign-in has to take the whole login tree with it.
