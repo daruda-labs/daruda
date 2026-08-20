@@ -11,10 +11,10 @@ use crate::lane::git::GitFileEntry;
 use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 
-pub(super) struct UnifiedEntry {
-    pub(super) path: PathBuf,
-    pub(super) staged: Option<GitFileEntry>,
-    pub(super) unstaged: Option<GitFileEntry>,
+pub(in crate::workspace) struct UnifiedEntry {
+    pub(in crate::workspace) path: PathBuf,
+    pub(in crate::workspace) staged: Option<GitFileEntry>,
+    pub(in crate::workspace) unstaged: Option<GitFileEntry>,
 }
 
 pub(super) fn build_unified_list(
@@ -90,32 +90,91 @@ pub(super) fn group_by_dir(
     groups
 }
 
-/// Repo-root-relative paths in the same order the left dock renders them,
-/// minus any rows hidden inside a collapsed dir group. Single source of
-/// truth for the keyboard cursor's navigation order — Workspace's
-/// `move_git_changes_cursor` calls this so future render-side reordering
-/// (sticky conflicts, custom sort) automatically applies to nav.
-pub(in crate::workspace) fn ordered_visible_paths(
+/// One row of the Git Changes list, flattened so the view can address every
+/// drawn thing by a single index and virtualize over it.
+///
+/// Mirrors zed's `git_ui::GitListEntry`: a directory header is a **row**, not
+/// chrome wrapped around a group. Keeping the tree as nested groups forced the
+/// view to build an element per changed file on every render, which is linear
+/// in the change set (measured 6.8 ms at 200 files, 32 ms at 1000).
+pub(in crate::workspace) enum GitChangesRow {
+    DirHeader(GitDirHeaderRow),
+    File(UnifiedEntry),
+}
+
+/// A directory group's header row. Carries everything the header needs to
+/// draw and act, because the group's entries are no longer adjacent to it in
+/// a nested structure.
+pub(in crate::workspace) struct GitDirHeaderRow {
+    /// Lane-relative directory path, as displayed and as keyed in the
+    /// collapsed-dirs set.
+    pub(in crate::workspace) dir: String,
+    pub(in crate::workspace) collapsed: bool,
+    pub(in crate::workspace) state: DirStageState,
+    /// Repo-root-relative paths the header's checkbox acts on — already
+    /// narrowed by `state`, since which side of the index a click moves
+    /// depends on it. Always the git-status form so they round-trip into
+    /// `git_add` / `git_restore_staged`.
+    pub(in crate::workspace) stage_paths: Vec<PathBuf>,
+}
+
+/// The rows the dock draws, in draw order, with collapsed groups' files left
+/// out — one pass over the change set, shared by the renderer and the keyboard
+/// cursor so the two can never disagree about order.
+pub(in crate::workspace) fn build_rows(
     status: &crate::lane::git::GitStatusData,
     collapsed: &std::collections::HashSet<String>,
     wt_paths: &LanePaths<'_>,
-) -> Vec<PathBuf> {
+) -> Vec<GitChangesRow> {
     let unified = build_unified_list(&status.staged, &status.unstaged);
     let groups = group_by_dir(unified, wt_paths);
-    let mut out = Vec::new();
+    let mut rows = Vec::new();
     for (dir_opt, entries) in groups {
         let is_collapsed = dir_opt
             .as_deref()
             .map(|d| collapsed.contains(d))
             .unwrap_or(false);
+        if let Some(dir) = dir_opt {
+            let state = compute_dir_state(&entries);
+            let stage_paths = entries
+                .iter()
+                .filter(|e| match state {
+                    DirStageState::AllStaged => e.staged.is_some(),
+                    DirStageState::NoneStaged | DirStageState::Mixed => e.unstaged.is_some(),
+                })
+                .map(|e| e.path.clone())
+                .collect();
+            rows.push(GitChangesRow::DirHeader(GitDirHeaderRow {
+                state,
+                stage_paths,
+                dir,
+                collapsed: is_collapsed,
+            }));
+        }
         if is_collapsed {
             continue;
         }
-        for e in entries {
-            out.push(e.path);
-        }
+        rows.extend(entries.into_iter().map(GitChangesRow::File));
     }
-    out
+    rows
+}
+
+/// Repo-root-relative paths in the same order the left dock renders them,
+/// minus any rows hidden inside a collapsed dir group. Single source of
+/// truth for the keyboard cursor's navigation order — it reads the same
+/// [`build_rows`] the renderer does, so the two cannot disagree about order.
+pub(in crate::workspace) fn ordered_visible_paths(
+    status: &crate::lane::git::GitStatusData,
+    collapsed: &std::collections::HashSet<String>,
+    wt_paths: &LanePaths<'_>,
+) -> Vec<PathBuf> {
+    build_rows(status, collapsed, wt_paths)
+        .into_iter()
+        .filter_map(|row| match row {
+            GitChangesRow::File(e) => Some(e.path),
+            GitChangesRow::DirHeader(_) => None,
+        })
+        .collect()
 }
 
 /// Tracking indicator for the header — `↑N ↓M` when the local branch
@@ -143,7 +202,7 @@ pub(super) fn count_conflicts(unstaged: &[GitFileEntry]) -> usize {
 
 /// Aggregate staging state of a directory group.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum DirStageState {
+pub(in crate::workspace) enum DirStageState {
     /// Every file in the dir is fully staged (no working-tree leftover).
     AllStaged,
     /// No file in the dir has any staged change.

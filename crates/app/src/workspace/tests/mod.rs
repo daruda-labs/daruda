@@ -14,6 +14,7 @@ mod error_modal;
 mod error_ops;
 mod files;
 mod flow;
+mod git_changes_virtualized;
 mod left_dock_pulse;
 mod lifecycle;
 mod modal_tab_containment;

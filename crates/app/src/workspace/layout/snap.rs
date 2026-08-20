@@ -120,7 +120,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
     pub focused_file_selection: Option<(daruda_store::project::LaneId, std::path::PathBuf, bool)>,
-    pub git_changes_scroll_handle: gpui::ScrollHandle,
+    pub git_changes_scroll_handle: gpui::UniformListScrollHandle,
     /// Scroll handle for the Lanes view card list — the body below the
     /// (fixed) view header. Shared with its scrollbar thumb overlay.
     pub lanes_scroll_handle: gpui::ScrollHandle,
@@ -546,7 +546,7 @@ mod tests {
             git_changes_cursor: None,
             git_changes_panel_focus: cx.focus_handle(),
             focused_file_selection: None,
-            git_changes_scroll_handle: ScrollHandle::new(),
+            git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: ScrollHandle::new(),
             git_commit_input,
             files_panel_focus: cx.focus_handle(),

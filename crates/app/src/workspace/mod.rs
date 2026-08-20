@@ -461,7 +461,7 @@ pub struct Workspace {
     /// re-firing once to capture intervening changes.
     pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::LaneRef>,
     /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
-    pub(in crate::workspace) git_changes_scroll_handle: gpui::ScrollHandle,
+    pub(in crate::workspace) git_changes_scroll_handle: gpui::UniformListScrollHandle,
     /// Scroll handle for the Lanes view card list — shared with the
     /// scrollbar overlay. The view header stays outside the scroll
     /// region, so only the group / project cards move.
@@ -1212,7 +1212,7 @@ impl Workspace {
             mirrors: ConfigMirrors::from_config(config),
             git_status_in_flight: HashSet::new(),
             git_status_pending_repeat: HashSet::new(),
-            git_changes_scroll_handle: gpui::ScrollHandle::new(),
+            git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
             git_commit_input,

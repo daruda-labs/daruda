@@ -5,7 +5,7 @@
 //! Checking/unchecking stages or unstages the file without changing its
 //! position in the list.
 
-mod unified_list;
+pub(in crate::workspace) mod unified_list;
 
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ use crate::ui::theme;
 use daruda_store::project::LaneId;
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, MouseButton, MouseDownEvent, div,
-    prelude::*, px,
+    prelude::*, px, uniform_list,
 };
 
 use crate::lane::paths::LanePaths;
@@ -28,8 +28,8 @@ use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::path_drag::PathDrag;
 use unified_list::{
-    DirStageState, UnifiedEntry, build_unified_list, compute_dir_state, count_conflicts,
-    discard_disabled, group_by_dir, tracking_indicator_text,
+    DirStageState, GitChangesRow, GitDirHeaderRow, UnifiedEntry, count_conflicts, discard_disabled,
+    tracking_indicator_text,
 };
 
 pub(in crate::workspace) use unified_list::ordered_visible_paths;
@@ -37,6 +37,15 @@ pub(in crate::workspace) use unified_list::ordered_visible_paths;
 // ----------------------------------------------------------------
 // Entry point
 // ----------------------------------------------------------------
+
+#[cfg(test)]
+thread_local! {
+    /// Row elements actually built, across all renders. `uniform_list` asks
+    /// only for the range it will paint, so this must stay bounded by the
+    /// viewport no matter how large the change set is.
+    pub(in crate::workspace) static ROWS_BUILT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
 
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let active_id = snap.active.lane;
@@ -55,8 +64,6 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     let status = snap.git_status_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
-
-    let selected: Option<(LaneId, PathBuf, bool)> = snap.focused_file_selection.clone();
 
     // `key_context("GitChanges")` + `track_focus(...)` route arrow / Space /
     // Enter to GitChangesSelectNext / Prev / ToggleStage / Activate only
@@ -77,10 +84,21 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             body = body.child(clean_placeholder(cx));
         }
         Some(s) => {
-            // git status --porcelain paths are repo-root-relative. LanePaths
-            // resolves them to absolute and back to wt-relative for display/git ops.
-            // Safe to unwrap: is_git() was checked at the top of this function.
-            let wt_paths = active_wt.unwrap().paths();
+            let staged_count = s.staged.len();
+            let unstaged_count = s.unstaged.len();
+
+            // Fixed above the list rather than scrolling with it (zed's git
+            // panel does the same): the list is virtualized now, and a
+            // uniform-height list cannot carry a taller widget as row 0. The
+            // stage counts staying put is the point of the trade.
+            body = body.child(summary_bar(
+                staged_count,
+                unstaged_count,
+                stage_in_flight,
+                active_id,
+                snap,
+                cx,
+            ));
 
             // Conflict banner — fixed above the scroll area so it stays
             // visible regardless of where the user is in the file list.
@@ -91,84 +109,78 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                 body = body.child(conflict_banner(conflict_count));
             }
 
-            let unified = build_unified_list(&s.staged, &s.unstaged);
-            let staged_count = s.staged.len();
-            let unstaged_count = s.unstaged.len();
-
-            let scroll_handle = snap.git_changes_scroll_handle.clone();
-            let mut scroll_area = div()
-                .id("git-changes-scroll")
-                .flex()
-                .flex_col()
-                .size_full()
-                .overflow_y_scroll()
-                .track_scroll(&scroll_handle);
-
-            scroll_area = scroll_area.child(summary_bar(
-                staged_count,
-                unstaged_count,
-                stage_in_flight,
-                active_id,
-                snap,
-                cx,
+            // Flatten here, not in `prepare_left_dock_snapshot`: this render
+            // runs only when the dock is actually dirty, while the snapshot is
+            // staged on every workspace render. The flattening is ~0.2 ms per
+            // 1000 files, so where it runs matters more than what it costs.
+            // The list closure outlives this body, so the rows are shared into
+            // it rather than borrowed.
+            // Safe to unwrap: `is_git()` was checked at the top of this fn.
+            let wt_paths = active_wt.unwrap().paths();
+            let rows = std::rc::Rc::new(unified_list::build_rows(
+                s,
+                &snap.git_collapsed_dirs,
+                &wt_paths,
             ));
+            let count = rows.len();
+            let rows_for_list = rows.clone();
+            let scroll_handle = snap.git_changes_scroll_handle.clone();
+            let list = uniform_list(
+                "git-changes-rows",
+                count,
+                cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                    let crate::workspace::layout::DockSnapshot::Left(snap) = &this.snap else {
+                        return Vec::new();
+                    };
+                    let snap = snap.as_ref();
+                    let active_id = snap.active.lane;
+                    let Some(wt) = snap.lanes.iter().find(|w| w.id == active_id) else {
+                        return Vec::new();
+                    };
+                    let wt_paths = wt.paths();
+                    let selected = snap.focused_file_selection.clone();
+                    range
+                        .filter_map(|ix| {
+                            #[cfg(test)]
+                            ROWS_BUILT.with(|n| n.set(n.get() + 1));
+                            let row = rows_for_list.get(ix)?;
+                            Some(match row {
+                                GitChangesRow::DirHeader(dir) => {
+                                    dir_header(ix, dir, active_id, snap, cx)
+                                }
+                                GitChangesRow::File(entry) => {
+                                    let is_cursor = snap
+                                        .git_changes_cursor
+                                        .as_ref()
+                                        .is_some_and(|c| c == &entry.path);
+                                    unified_file_row(
+                                        ix,
+                                        entry,
+                                        active_id,
+                                        &wt_paths,
+                                        selected.as_ref(),
+                                        is_cursor,
+                                        snap,
+                                        cx,
+                                    )
+                                }
+                            })
+                        })
+                        .collect()
+                }),
+            )
+            .track_scroll(&scroll_handle)
+            .size_full();
 
-            // Group entries by parent directory for per-dir stage headers.
-            let groups = group_by_dir(unified, &wt_paths);
-            let mut flat_idx = 0usize;
-            for (dir_idx, (dir_opt, entries)) in groups.iter().enumerate() {
-                let is_collapsed = dir_opt
-                    .as_deref()
-                    .map(|d| snap.git_collapsed_dirs.contains(d))
-                    .unwrap_or(false);
-                if let Some(d) = dir_opt.as_deref() {
-                    let dir_state = compute_dir_state(entries);
-                    scroll_area = scroll_area.child(dir_header(
-                        dir_idx,
-                        d,
-                        is_collapsed,
-                        dir_state,
-                        entries,
-                        active_id,
-                        &wt_paths,
-                        snap,
-                        cx,
-                    ));
-                }
-                if is_collapsed {
-                    // Skip rendering the dir's rows but keep flat_idx in
-                    // sync so future expands re-use the same row ids.
-                    flat_idx += entries.len();
-                    continue;
-                }
-                for entry in entries {
-                    let is_cursor = snap
-                        .git_changes_cursor
-                        .as_ref()
-                        .map(|c| c == &entry.path)
-                        .unwrap_or(false);
-                    scroll_area = scroll_area.child(unified_file_row(
-                        flat_idx,
-                        entry,
-                        active_id,
-                        &wt_paths,
-                        selected.as_ref(),
-                        is_cursor,
-                        snap,
-                        cx,
-                    ));
-                    flat_idx += 1;
-                }
-            }
-
-            let scroll_handle_bar = snap.git_changes_scroll_handle.clone();
+            let scroll_handle_bar = scroll_handle.clone();
             body = body.child(
                 div()
+                    .id("git-changes-scroll")
                     .flex_1()
                     .relative()
                     .overflow_hidden()
-                    .child(scroll_area)
-                    .children(git_changes_scrollbar(&scroll_handle_bar, cx)),
+                    .child(list)
+                    .children(git_changes_scrollbar(&scroll_handle_bar, count, cx)),
             );
 
             body = body.child(commit_footer(snap, cx));
@@ -374,17 +386,18 @@ fn conflict_banner(count: usize) -> impl IntoElement {
 #[allow(clippy::too_many_arguments)]
 fn dir_header(
     dir_idx: usize,
-    dir: &str,
-    is_collapsed: bool,
-    state: DirStageState,
-    entries: &[UnifiedEntry],
+    row: &GitDirHeaderRow,
     lane_id: LaneId,
-    wt_paths: &LanePaths<'_>,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
     let workspace_toggle = snap.workspace.clone();
     let workspace_stage = snap.workspace.clone();
+    let dir = row.dir.as_str();
+    let is_collapsed = row.collapsed;
+    let state = row.state;
+    // Already narrowed to the side a click moves; see `GitDirHeaderRow`.
+    let stage_paths: Vec<PathBuf> = row.stage_paths.clone();
     let dir_owned = dir.to_string();
     let dir_for_toggle = dir_owned.clone();
     let in_flight = snap.git_stage_in_flight;
@@ -404,21 +417,6 @@ fn dir_header(
         IconName::ChevronRight
     } else {
         IconName::ChevronDown
-    };
-
-    // Paths to operate on — always the git-status form (repo-root
-    // relative) so they round-trip into git_add / git_restore_staged.
-    let stage_paths: Vec<PathBuf> = match state {
-        DirStageState::AllStaged => entries
-            .iter()
-            .filter(|e| e.staged.is_some())
-            .map(|e| e.path.clone())
-            .collect(),
-        DirStageState::NoneStaged | DirStageState::Mixed => entries
-            .iter()
-            .filter(|e| e.unstaged.is_some())
-            .map(|e| e.path.clone())
-            .collect(),
     };
 
     let checkbox_id: ElementId = ("git-dir-checkbox", dir_idx).into();
@@ -470,18 +468,19 @@ fn dir_header(
             )
         });
 
-    // Touching wt_paths inside the closure would borrow it across an
-    // FnMut boundary; the dir name alone is enough to look up the
-    // collapse set on the workspace side.
-    let _ = wt_paths;
-
     div()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(theme::GIT_FILE_ROW_GAP))
         .px(px(theme::GIT_HEADER_PAD_X))
-        .py(px(theme::GIT_DIR_HEADER_PAD_Y))
+        // Claims its width for the same reason the file row does.
+        .w_full()
+        // Same height as a file row: `uniform_list` measures one item and
+        // applies it to every row, so a header that sized itself from its
+        // padding would clip or leave a gap. The label keeps its own smaller
+        // font — only the box grows (this is how zed's git panel does it).
+        .h(px(theme::GIT_FILE_ROW_HEIGHT))
         .text_size(px(theme::GIT_DIR_HEADER_FONT_SIZE))
         .text_color(dir_label_color)
         // Chevron + dir name on the left (clickable to toggle collapse),
@@ -666,9 +665,15 @@ fn unified_file_row(
 
     div()
         .id(("git-unified", idx))
+        .debug_selector(|| "git-changes-row".into())
         .flex()
         .flex_row()
         .items_center()
+        // A `uniform_list` item does not inherit the cross-axis stretch the
+        // old `flex_col` scroll area gave it, so the row has to claim the
+        // width itself — without it `flex_1` below has no slack and the
+        // right-aligned checkbox collapses back against the filename.
+        .w_full()
         .h(px(theme::GIT_FILE_ROW_HEIGHT))
         .px(px(theme::GIT_FILE_ROW_PAD_X))
         .gap(px(theme::GIT_FILE_ROW_GAP))
@@ -865,17 +870,27 @@ fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoEl
 // ----------------------------------------------------------------
 
 fn git_changes_scrollbar(
-    handle: &gpui::ScrollHandle,
+    handle: &gpui::UniformListScrollHandle,
+    item_count: usize,
     cx: &gpui::App,
 ) -> Option<crate::ui::scrollbar::Thumb> {
-    let viewport_h = handle.bounds().size.height;
-    let max_offset = handle.max_offset().y;
+    if item_count == 0 {
+        return None;
+    }
+    // `UniformListScrollHandle` exposes no public API for geometry; `.0`
+    // reaches the internal `ListState`, the only stable source (mirrors
+    // `files::build_files_scrollbar`).
+    let state = handle.0.borrow();
+    let viewport_h = state.base_handle.bounds().size.height;
+    let max_offset = state.base_handle.max_offset().y;
+    let offset_y = state.base_handle.offset().y;
+    drop(state);
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "git-changes-scrollbar-thumb",
         viewport_h,
         viewport_h + max_offset,
-        handle.offset().y,
+        offset_y,
         px(0.),
         t.scrollbar_thumb,
         t.dock_scrollbar_thumb_hover,
