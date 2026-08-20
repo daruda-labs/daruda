@@ -215,23 +215,21 @@ pub(super) fn thinking_block(
 }
 
 /// Surfaced error item — error-tinted block.
-/// A button on one of this pane's error surfaces — the connect banner or a
-/// failure card.
+/// A button inside the conversation — on the pane body, whose background
+/// mirrors the terminal's.
 ///
-/// Its colours come from the *pane*, not the window theme, which is what a
-/// `ghost` button gets wrong here twice over. Ghost paints no fill at all, so
-/// the affordance read as a run of plain text; and it takes its label from the
-/// window's `secondary_foreground`, which knows nothing about the agent-chat
-/// background — that background mirrors the terminal's, so a light window theme
-/// over a dark terminal put dark text on a dark surface and the button vanished.
+/// Its colours come from that background, which is what a `ghost` button gets
+/// wrong here twice over: ghost paints no fill at all, so the affordance read
+/// as a run of plain text, and it takes its label from the *window* theme,
+/// which knows nothing about the terminal one. A light window theme over a dark
+/// terminal put dark text on a dark surface and the button vanished.
 ///
 /// The fill and hairline are the same background-derived overlay every card in
-/// this pane already uses (white over a dark pane, black over a light one), so
-/// the chrome tracks whatever the pane sits on. The label is the pane's own
-/// body colour, derived from that same background: an action is not part of
-/// the message it sits under, and colouring it like the error reads as more
-/// error text rather than as something to press.
-pub(super) fn error_action_button(
+/// this pane already uses (white over a dark pane, black over a light one), and
+/// the label is the pane's own body colour. Not the error colour it sits under
+/// — an action is not part of the message, and painting it like one reads as
+/// more error text rather than as something to press.
+pub(super) fn pane_action_button(
     id: impl Into<gpui::ElementId>,
     label: String,
     cx: &mut Context<AgentChatView>,
@@ -245,6 +243,32 @@ pub(super) fn error_action_button(
             // background rather than borrowed from the window theme.
             .hover(theme::agent_chat_border_tint(cx))
             .active(theme::agent_chat_border_tint(cx)),
+    )
+}
+
+/// A button on the status banner — which is *not* the pane body.
+///
+/// The banner composites its tint over the window surface, so it reads light
+/// under a light window theme even when the conversation below is dark. Reusing
+/// the pane palette here painted the pane's near-white label onto that light
+/// banner and the button all but disappeared: the same class of mistake as
+/// ghost's, in the opposite direction.
+///
+/// So the chrome comes from the window theme, which is the surface it actually
+/// sits on — and which flips with that theme, so the pairing holds in both.
+pub(super) fn banner_action_button(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> crate::ui::Button {
+    crate::ui::button(id, label).xsmall().custom(
+        crate::ui::ButtonCustomVariant::new(cx)
+            .color(t.button_widget_bg)
+            .foreground(t.text_primary)
+            .border(t.border)
+            .hover(t.overlay_hover)
+            .active(t.overlay_active),
     )
 }
 
@@ -268,7 +292,7 @@ pub(super) fn failure_block(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let sign_in = matches!(failure.remedy(), daruda_acp::Remedy::Reauthenticate).then(|| {
-        error_action_button(
+        pane_action_button(
             ("agent-chat-failure-reauth", pane_id as usize),
             s::agent_chat_sign_in_again(),
             cx,

@@ -314,9 +314,10 @@ pub(super) fn status_banner(
         ),
     };
     let retry_button = retryable.then(|| {
-        super::blocks::error_action_button(
+        super::blocks::banner_action_button(
             ("agent-chat-retry", pane_id as usize),
             s::agent_chat_retry(),
+            t,
             cx,
         )
         .on_click(cx.listener(move |_this, _ev, _window, cx| {
@@ -338,9 +339,10 @@ pub(super) fn status_banner(
         }))
     });
     let reauth_button = reauthable.then(|| {
-        super::blocks::error_action_button(
+        super::blocks::banner_action_button(
             ("agent-chat-reauth", pane_id as usize),
             s::agent_chat_sign_in_again(),
+            t,
             cx,
         )
         .on_click(cx.listener(move |_this, _ev, _window, cx| {
