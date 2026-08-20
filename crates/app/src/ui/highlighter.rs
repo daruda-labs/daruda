@@ -27,6 +27,15 @@ use gpui::SharedString;
 
 pub use gpui_component::highlighter::{LanguageConfig, LanguageRegistry};
 
+/// How many times a language's tree-sitter queries have been compiled since
+/// process start.
+///
+/// Compiling them is expensive and the vendored highlighter caches the result
+/// per language, so this stops growing once a language has been seen.
+/// Re-exported for the regression test that pins that property
+/// (`workspace::tests::agent_switch_cost`).
+pub use gpui_component::highlighter::query_compilations;
+
 /// Registry name of the no-op language. Its highlight query is empty, so
 /// the highlighter parses nothing and the text renders in the editor's
 /// base foreground.

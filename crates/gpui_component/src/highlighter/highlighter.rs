@@ -1,4 +1,4 @@
-use crate::highlighter::{HighlightTheme, LanguageRegistry};
+use crate::highlighter::{HighlightTheme, LanguageConfig, LanguageRegistry};
 use crate::input::RopeExt;
 
 use anyhow::{Context, Result, anyhow};
@@ -8,6 +8,7 @@ use ropey::{ChunkCursor, Rope};
 use std::{
     collections::{BTreeSet, HashMap},
     ops::Range,
+    sync::{Arc, LazyLock, Mutex},
     usize,
 };
 use sum_tree::Bias;
@@ -15,10 +16,17 @@ use tree_sitter::{
     InputEdit, Node, Parser, Point, Query, QueryCursor, QueryMatch, StreamingIterator, Tree,
 };
 
-/// A syntax highlighter that supports incremental parsing, multiline text,
-/// and caching of highlight results.
+/// daruda patch: the per-language half of a highlighter, split out of
+/// [`SyntaxHighlighter`] so it can be compiled once and shared.
+///
+/// `Query::new` walks the whole grammar (`ts_query__perform_analysis`) and is
+/// the dominant cost of building a highlighter — tens of ms for a large
+/// grammar. Everything here is immutable once built and depends only on the
+/// language, so rebuilding it per highlighted region is pure waste. Mirrors
+/// zed's `language_core::Grammar`, which likewise holds the compiled queries in
+/// the `Arc`d language rather than recompiling per use.
 #[allow(unused)]
-pub struct SyntaxHighlighter {
+pub(crate) struct LanguageQueries {
     language: SharedString,
     query: Option<Query>,
     injection_queries: HashMap<SharedString, Query>,
@@ -33,6 +41,66 @@ pub struct SyntaxHighlighter {
     local_def_capture_index: Option<u32>,
     local_def_value_capture_index: Option<u32>,
     local_ref_capture_index: Option<u32>,
+}
+
+/// daruda patch: compiled queries by canonical language name, for the lifetime
+/// of the process.
+///
+/// Keyed by `LanguageConfig::name`, not the caller's spelling. That is not just
+/// alias dedup (`js` / `javascript`): `LanguageRegistry::language` never returns
+/// `None` — an unrecognised name falls through to a built-in config — and the
+/// callers here include **markdown fence tokens**, which are arbitrary user
+/// text (`console`, `output`, `pseudo`, …). Keying by the caller's spelling
+/// would let a conversation mint an unbounded number of entries, each paying
+/// its own compile. Resolving to the config first collapses them all onto the
+/// one fallback config.
+///
+/// The invariant this rests on: a config's `name` identifies its query sources.
+/// [`LanguageRegistry::register`] evicts by the same key, so the two stay
+/// consistent; registering two different configs that share a `name` would make
+/// them share one compilation.
+static QUERY_CACHE: LazyLock<Mutex<HashMap<SharedString, Arc<LanguageQueries>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// daruda patch: how many times each language's queries have been *compiled*,
+/// counting attempts — the increment happens before a build that can still
+/// fail. The whole point of [`QUERY_CACHE`] is that this stops growing once a
+/// language has been seen, so it is the observable a regression test can assert
+/// on without timing anything. Counted per language rather than in total so a
+/// test can read a number only its own language can move.
+///
+/// A build that fails is deliberately not cached, so a language whose query
+/// source does not compile is retried per call and keeps moving this counter.
+/// That needs an invalid bundled query — which would break that language's
+/// highlighting outright — and `SyntaxHighlighter::new` falls back to the
+/// (cached) `text` config, so the cost is one failed compile, not a stall.
+static QUERY_COMPILATIONS: LazyLock<Mutex<HashMap<SharedString, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// daruda patch: how many times `language`'s queries have been compiled — see
+/// [`QUERY_COMPILATIONS`].
+pub fn query_compilations(language: &str) -> u64 {
+    QUERY_COMPILATIONS
+        .lock()
+        .unwrap()
+        .get(language)
+        .copied()
+        .unwrap_or(0)
+}
+
+/// daruda patch: drop `name`'s compiled queries, so a language re-registered
+/// with different query sources is recompiled on next use. Called by
+/// [`LanguageRegistry::register`] — the only way a config can change.
+pub(crate) fn invalidate_query_cache(name: &SharedString) {
+    QUERY_CACHE.lock().unwrap().remove(name);
+}
+
+/// A syntax highlighter that supports incremental parsing, multiline text,
+/// and caching of highlight results.
+#[allow(unused)]
+pub struct SyntaxHighlighter {
+    /// Shared, compiled once per language.
+    queries: Arc<LanguageQueries>,
 
     /// The last parsed source text.
     text: Rope,
@@ -158,23 +226,23 @@ impl<'a> sum_tree::Dimension<'a, HighlightSummary> for Range<usize> {
 impl SyntaxHighlighter {
     /// Create a new SyntaxHighlighter for HTML.
     pub fn new(lang: &str) -> Self {
-        match Self::build_combined_injections_query(&lang) {
+        match Self::for_language(lang) {
             Ok(result) => result,
             Err(err) => {
                 tracing::warn!(
                     "SyntaxHighlighter init failed, fallback to use `text`, {}",
                     err
                 );
-                Self::build_combined_injections_query("text").unwrap()
+                Self::for_language("text").unwrap()
             }
         }
     }
 
-    /// Build the combined injections query for the given language.
-    ///
-    /// https://github.com/tree-sitter/tree-sitter/blob/v0.25.5/highlight/src/lib.rs#L336
-    fn build_combined_injections_query(lang: &str) -> Result<Self> {
-        let Some(config) = LanguageRegistry::singleton().language(&lang) else {
+    /// daruda patch: assemble a highlighter from the language's shared compiled
+    /// queries plus a fresh parser. Only the parser and the parse state below
+    /// are per-instance; the queries come from [`QUERY_CACHE`].
+    fn for_language(lang: &str) -> Result<Self> {
+        let Some(config) = LanguageRegistry::singleton().language(lang) else {
             return Err(anyhow!(
                 "language {:?} is not registered in `LanguageRegistry`",
                 lang
@@ -185,6 +253,42 @@ impl SyntaxHighlighter {
         parser
             .set_language(&config.language)
             .context("parse set_language")?;
+
+        Ok(Self {
+            queries: LanguageQueries::cached(&config)?,
+            text: Rope::new(),
+            parser,
+            tree: None,
+        })
+    }
+}
+
+impl LanguageQueries {
+    /// daruda patch: this language's compiled queries, building them on first
+    /// use. A concurrent miss may build twice — the result is identical and
+    /// last-write-wins, which is cheaper than holding the lock across a
+    /// multi-millisecond compile and serialising every caller behind it.
+    fn cached(config: &LanguageConfig) -> Result<Arc<Self>> {
+        if let Some(hit) = QUERY_CACHE.lock().unwrap().get(&config.name) {
+            return Ok(hit.clone());
+        }
+        let built = Arc::new(Self::build_combined_injections_query(config)?);
+        QUERY_CACHE
+            .lock()
+            .unwrap()
+            .insert(config.name.clone(), built.clone());
+        Ok(built)
+    }
+
+    /// Build the combined injections query for the given language.
+    ///
+    /// https://github.com/tree-sitter/tree-sitter/blob/v0.25.5/highlight/src/lib.rs#L336
+    fn build_combined_injections_query(config: &LanguageConfig) -> Result<Self> {
+        *QUERY_COMPILATIONS
+            .lock()
+            .unwrap()
+            .entry(config.name.clone())
+            .or_default() += 1;
 
         // Concatenate the query strings, keeping track of the start offset of each section.
         let mut query_source = String::new();
@@ -299,12 +403,11 @@ impl SyntaxHighlighter {
             local_def_capture_index,
             local_def_value_capture_index,
             local_ref_capture_index,
-            text: Rope::new(),
-            parser,
-            tree: None,
         })
     }
+}
 
+impl SyntaxHighlighter {
     pub fn is_empty(&self) -> bool {
         self.text.len() == 0
     }
@@ -360,7 +463,7 @@ impl SyntaxHighlighter {
             return highlights;
         };
 
-        let Some(query) = &self.query else {
+        let Some(query) = &self.queries.query else {
             return highlights;
         };
 
@@ -440,7 +543,7 @@ impl SyntaxHighlighter {
         let end_offset = self.text.clip_offset(node.end_byte(), Bias::Right);
 
         let mut cache = vec![];
-        let Some(query) = &self.injection_queries.get(injection_language) else {
+        let Some(query) = &self.queries.injection_queries.get(injection_language) else {
             return cache;
         };
 
@@ -505,7 +608,7 @@ impl SyntaxHighlighter {
         query: &'a Query,
         query_match: &QueryMatch<'a, 'a>,
     ) -> (Option<SharedString>, Option<Node<'a>>, bool) {
-        let content_capture_index = self.injection_content_capture_index;
+        let content_capture_index = self.queries.injection_content_capture_index;
         // let language_capture_index = self.injection_language_capture_index;
 
         let mut language_name: Option<SharedString> = None;
@@ -540,7 +643,7 @@ impl SyntaxHighlighter {
                 // layer.
                 "injection.self" => {
                     if language_name.is_none() {
-                        language_name = Some(self.language.clone());
+                        language_name = Some(self.queries.language.clone());
                     }
                 }
 

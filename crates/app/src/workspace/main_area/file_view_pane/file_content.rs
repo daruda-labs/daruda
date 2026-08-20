@@ -9,7 +9,7 @@
 //! `load_raw` / `load_diff` helpers stay private and are selected
 //! via [`FileViewMode`].
 
-use super::highlighter::{highlight_hunks, highlight_raw_rows};
+use super::highlighter::{LanguageHint, highlight_hunks, highlight_raw_rows};
 use super::mermaid_theme::MermaidPalette;
 use super::word_diff::apply_word_diff;
 use super::{
@@ -147,7 +147,12 @@ fn load_raw(
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);
-                highlight_raw_rows(&mut raw_rows, ext, syntax_theme, !mermaid_palette.dark);
+                highlight_raw_rows(
+                    &mut raw_rows,
+                    LanguageHint::Extension(ext),
+                    syntax_theme,
+                    !mermaid_palette.dark,
+                );
                 return LoadOutcome::Plain(PaneFileContent::LoadedMarkdown {
                     blocks,
                     raw_rows,
@@ -217,7 +222,12 @@ fn load_diff(
 
             // Syntax highlighting (file extension → language detection).
             let ext = path.extension_str();
-            highlight_hunks(&mut hunks, ext, syntax_theme, !diagram_dark);
+            highlight_hunks(
+                &mut hunks,
+                LanguageHint::Extension(ext),
+                syntax_theme,
+                !diagram_dark,
+            );
 
             // Word-level diff for adjacent Removed/Added pairs.
             apply_word_diff(&mut hunks);

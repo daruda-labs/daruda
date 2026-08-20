@@ -552,7 +552,7 @@ pub(in crate::workspace) fn build_diff_view_model(
     is_light: bool,
     colors: &DiffColors,
 ) -> Option<(DiffEditorModel, DiffStat)> {
-    use crate::workspace::main_area::file_view_pane::highlighter::highlight_hunks;
+    use crate::workspace::main_area::file_view_pane::highlighter::{LanguageHint, highlight_hunks};
     use crate::workspace::main_area::file_view_pane::line_diff::unified_diff_text;
     use crate::workspace::main_area::file_view_pane::word_diff::apply_word_diff;
     use crate::workspace::main_area::file_view_pane::{build_diff_rows, parse_diff_hunks};
@@ -568,7 +568,12 @@ pub(in crate::workspace) fn build_diff_view_model(
     // stat is from the exact same diff that builds the editor below.
     let stat = diff_stat_from_hunks(&hunks);
     let ext = diff.path.extension_str();
-    highlight_hunks(&mut hunks, ext, syntax_theme, is_light);
+    highlight_hunks(
+        &mut hunks,
+        LanguageHint::Extension(ext),
+        syntax_theme,
+        is_light,
+    );
     apply_word_diff(&mut hunks);
     let rows = build_diff_rows(&hunks, false);
     let show_line_numbers = diff.old_text.is_none();

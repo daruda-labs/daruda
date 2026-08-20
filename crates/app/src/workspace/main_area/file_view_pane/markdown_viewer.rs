@@ -8,7 +8,7 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use super::highlighter::highlight_raw_rows;
+use super::highlighter::{LanguageHint, highlight_raw_rows};
 use super::mermaid_theme::MermaidPalette;
 use super::visual::RasterImage;
 use super::{VisualRow, VisualRowKind};
@@ -188,7 +188,12 @@ fn parse_block(
             }
             let mut rows = build_code_rows(&text);
             if let Some(ref l) = lang {
-                highlight_raw_rows(&mut rows, l, syntax_theme, is_light);
+                highlight_raw_rows(
+                    &mut rows,
+                    LanguageHint::FenceToken(l),
+                    syntax_theme,
+                    is_light,
+                );
             }
             Some((MdBlock::CodeBlock { lang, rows }, consumed + 2))
         }
@@ -977,6 +982,36 @@ mod tests {
             blocks[0],
             MdBlock::CodeBlock { lang: Some(_), .. }
         ));
+    }
+
+    /// A fence's info string is a **language name**, not a file extension.
+    /// Resolving it through the extension table left the most common fences
+    /// (`rust`, `python`, `javascript`, …) un-highlighted, while the handful
+    /// whose name happens to equal their extension (`bash`, `java`, `go`)
+    /// worked — which is why the breakage looked arbitrary.
+    #[test]
+    fn fenced_code_blocks_are_highlighted_by_language_name() {
+        let cases = [
+            ("rust", "fn main() { let x = 1; }"),
+            ("python", "def f():\n    return 1"),
+            ("javascript", "function f() { return 1; }"),
+            ("typescript", "function f(): number { return 1; }"),
+            ("ruby", "def f\n  1\nend"),
+            // Name == extension: these already worked, and must keep working.
+            ("bash", "echo hi"),
+            ("go", "func main() { x := 1 }"),
+        ];
+        for (lang, code) in cases {
+            let md = format!("```{lang}\n{code}\n```\n");
+            let blocks = parse_markdown(&md, "base16-ocean.dark", false);
+            let MdBlock::CodeBlock { rows, .. } = &blocks[0] else {
+                panic!("`{lang}` fence did not parse as a code block");
+            };
+            assert!(
+                rows.iter().any(|r| !r.spans.is_empty()),
+                "```{lang} produced no highlighted spans"
+            );
+        }
     }
 
     #[test]

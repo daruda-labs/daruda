@@ -103,6 +103,76 @@ Three groups of changes captured in a single diff:
 
 ---
 
+## `crates/gpui_component/src/highlighter/` — vendored, **compiled-query cache**
+
+Applied in place, like `gpui-component-root.patch` above: daruda is the
+source of truth for the vendored copy, and this section is the record of
+what diverges from `longbridge/gpui-component` v0.5.1.
+
+### Why
+
+`SyntaxHighlighter::new(lang)` compiled the language's tree-sitter queries
+from scratch on every call, and `text::node::CodeBlock::new` calls it **once
+per fenced code block**. Compiling is the expensive part —
+`ts_query__perform_analysis` over the whole grammar — and the result is
+immutable and depends only on the language, so every call after the first was
+waste.
+
+It surfaced as a stall when switching to an agent-chat pane. A pane in an
+inactive tab is not rendered; gpui drops every element state a frame did not
+touch (`Frame::finish`), including the `TextViewState` holding a markdown
+body's parse; and `TextView::request_layout` re-parses **synchronously on the
+main thread**. So one tab switch recompiled the queries for every code block
+on screen. Measured in release, 1920×1080: an ordinary repaint is ~1 ms, a
+switch back was ~23 ms with one visible fence and ~66 ms with three — linear
+in visible fences, independent of conversation length. After the cache, ~1.3 ms
+in all cases.
+
+zed has the same work but never pays it twice: compiled queries live in
+`language_core::Grammar`, built once per language and shared through
+`Arc<Language>` in the `LanguageRegistry`, and the build runs on the
+background executor rather than in a layout pass.
+
+### Patch contents
+
+1. **`highlighter/highlighter.rs`** — split `SyntaxHighlighter` into the
+   per-language half (`LanguageQueries`: the compiled `Query`, the injection
+   queries, the pattern indices and capture indices) and the per-instance half
+   (`text` / `parser` / `tree`). `LanguageQueries` is built by
+   `build_combined_injections_query` — unchanged apart from taking a
+   `&LanguageConfig` instead of resolving the name itself — and handed out as
+   an `Arc` from a process-wide `QUERY_CACHE` keyed by `LanguageConfig::name`.
+   Resolving to the config before keying is load-bearing, not just alias dedup:
+   callers include markdown fence tokens, which are arbitrary user text, and
+   `LanguageRegistry::language` falls back to a built-in config rather than
+   returning `None` — so keying by the caller's spelling would let a
+   conversation mint unbounded entries, each paying its own compile.
+   `SyntaxHighlighter::new` keeps its signature; the registry lookup and parser
+   setup move to `for_language`.
+2. **`highlighter/registry.rs`** — `LanguageRegistry::register` evicts the
+   cache entry it replaces, so a language re-registered with different query
+   sources is recompiled instead of serving a stale compilation.
+3. **Observability for the regression test** — `query_compilations(language)`
+   reports how many times that language has actually been compiled, so the
+   guard asserts the defect (a recompile happened) rather than a wall-clock
+   budget. Re-exported through `crate::ui::highlighter`; the guard is
+   `crates/app/src/workspace/tests/agent_switch_cost.rs`, which registers its
+   own private language so the process-global counter cannot be moved by
+   another test running in parallel.
+
+Thread-safety holds: `tree_sitter::Query` is `Send + Sync`, and nothing mutates
+a query after construction (upstream's `disable_pattern` block is commented
+out). A concurrent cache miss may build twice — identical result, last write
+wins — which is deliberate: holding the lock across a multi-millisecond compile
+would serialise every caller behind it.
+
+### Re-vendor procedure
+
+Copy the fresh upstream `highlighter/` in, then re-apply the split by hand.
+`agent_switch_cost.rs` fails loudly if you forget.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **two source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.

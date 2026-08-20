@@ -5,6 +5,9 @@
 //! configured syntax palette, with unknown names falling back to Daruda tokens.
 //! Public functions are GPUI-free and background-executor safe.
 
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
+
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
 use super::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
@@ -63,13 +66,28 @@ const HIGHLIGHT_NAMES: [&str; 40] = [
 /// `ext` is the file extension (e.g. `"rs"`, `"py"`) used to select the
 /// language. Each hunk is highlighted independently (its display lines
 /// joined and parsed together). Unknown extensions leave lines un-highlighted.
+/// How the caller named the language to highlight.
+///
+/// The two are different vocabularies and resolve through different tables, so
+/// they are separate variants rather than one `&str`: passing a fence's info
+/// string to the extension resolver is what left ```` ```rust ```` (and
+/// `python`, `javascript`, …) un-highlighted while the handful of tokens that
+/// happen to equal their extension (`bash`, `java`, `go`) worked.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::workspace) enum LanguageHint<'a> {
+    /// A file's extension, without the dot — `rs`, `md`.
+    Extension(&'a str),
+    /// A fenced code block's info string — `rust`, `jsx`.
+    FenceToken(&'a str),
+}
+
 pub(in crate::workspace) fn highlight_hunks(
     hunks: &mut [DiffHunk],
-    ext: &str,
+    lang: LanguageHint<'_>,
     theme_name: &str,
     is_light: bool,
 ) {
-    let Some(config) = build_config(ext) else {
+    let Some(config) = build_config(lang) else {
         return;
     };
     let theme = dt_theme::syntax_theme_of(
@@ -114,11 +132,11 @@ pub(in crate::workspace) fn highlight_hunks(
 /// un-highlighted.
 pub(in crate::workspace) fn highlight_raw_rows(
     rows: &mut [VisualRow],
-    ext: &str,
+    lang: LanguageHint<'_>,
     theme_name: &str,
     is_light: bool,
 ) {
-    let Some(config) = build_config(ext) else {
+    let Some(config) = build_config(lang) else {
         return;
     };
     let theme = dt_theme::syntax_theme_of(
@@ -139,14 +157,42 @@ pub(in crate::workspace) fn highlight_raw_rows(
 // Internal
 // ----------------------------------------------------------------
 
-/// Build a configured tree-sitter highlight configuration for the language
-/// resolved from `ext`. Returns `None` for unknown languages or invalid
-/// queries — the caller then leaves the text un-highlighted (the renderer
-/// uses the row's default colour) instead of emitting a default-coloured
-/// span per line.
-fn build_config(ext: &str) -> Option<HighlightConfiguration> {
-    let lang = daruda_core::language::from_extension(ext)
-        .and_then(crate::ui::highlighter::highlightable_config)?;
+/// Compiled highlight configurations by canonical language name, for the
+/// lifetime of the process.
+///
+/// `HighlightConfiguration::new` compiles the language's highlights, injections
+/// and locals queries — the expensive part of highlighting, and immutable once
+/// `configure`d, so it is built once and shared. Keyed by the *resolved*
+/// `LanguageConfig::name`, not the caller's spelling: fence tokens are
+/// arbitrary user text, so keying by the input would let a document mint an
+/// unbounded number of entries, each paying its own compile.
+static CONFIG_CACHE: LazyLock<Mutex<HashMap<String, Arc<HighlightConfiguration>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The configured tree-sitter highlight configuration for `hint`, compiling it
+/// on first use. Returns `None` for unknown languages or invalid queries — the
+/// caller then leaves the text un-highlighted (the renderer uses the row's
+/// default colour) instead of emitting a default-coloured span per line.
+///
+/// A concurrent miss may compile twice: identical result, last write wins, and
+/// cheaper than holding the lock across the compile.
+fn build_config(hint: LanguageHint<'_>) -> Option<Arc<HighlightConfiguration>> {
+    let lang = match hint {
+        LanguageHint::Extension(ext) => daruda_core::language::from_extension(ext)
+            .and_then(crate::ui::highlighter::highlightable_config)?,
+        // A fence info string has no single vocabulary — `rust` and `rs`,
+        // `bash` and `zsh` all appear in real documents. The registry answers
+        // language names plus the short forms it knows; the extension table
+        // covers the rest (`jsx`, `zsh`, `patch`, `hpp`).
+        LanguageHint::FenceToken(token) => crate::ui::highlighter::highlightable_config(token)
+            .or_else(|| {
+                daruda_core::language::from_extension(token)
+                    .and_then(crate::ui::highlighter::highlightable_config)
+            })?,
+    };
+    if let Some(hit) = CONFIG_CACHE.lock().unwrap().get(lang.name.as_ref()) {
+        return Some(hit.clone());
+    }
     let mut config = HighlightConfiguration::new(
         lang.language.clone(),
         lang.name.to_string(),
@@ -156,6 +202,11 @@ fn build_config(ext: &str) -> Option<HighlightConfiguration> {
     )
     .ok()?;
     config.configure(&HIGHLIGHT_NAMES);
+    let config = Arc::new(config);
+    CONFIG_CACHE
+        .lock()
+        .unwrap()
+        .insert(lang.name.to_string(), config.clone());
     Some(config)
 }
 
@@ -268,7 +319,12 @@ mod tests {
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // Unknown extension → no language → lines left intact, no panic.
-        highlight_hunks(&mut hunks, "unknown_ext_xyz", "base16-ocean.dark", false);
+        highlight_hunks(
+            &mut hunks,
+            LanguageHint::Extension("unknown_ext_xyz"),
+            "base16-ocean.dark",
+            false,
+        );
         assert_eq!(hunks[0].lines.len(), 2);
         for line in &hunks[0].lines {
             if let DiffLine::Removed { spans, .. } | DiffLine::Added { spans, .. } = line {
@@ -282,7 +338,12 @@ mod tests {
         use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
         let diff = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let y = 2;\n";
         let mut hunks = parse_diff_hunks(diff);
-        highlight_hunks(&mut hunks, "rs", "base16-ocean.dark", false);
+        highlight_hunks(
+            &mut hunks,
+            LanguageHint::Extension("rs"),
+            "base16-ocean.dark",
+            false,
+        );
 
         // Every display line should be fully covered by spans, and the
         // `let` keyword should not be coloured with the default foreground.
@@ -324,7 +385,7 @@ mod tests {
         // the shared alias table. Both must reach a real highlight query.
         for (ext, source) in [("java", "class A { int x = 1; }"), ("hpp", "int x = 1;")] {
             let mut rows = vec![make(source)];
-            highlight_raw_rows(&mut rows, ext, "daruda", false);
+            highlight_raw_rows(&mut rows, LanguageHint::Extension(ext), "daruda", false);
             assert!(
                 !rows[0].spans.is_empty(),
                 "{ext} should be highlighted, got no spans"
@@ -344,7 +405,12 @@ mod tests {
             spans: Vec::new(),
             word_changes: Vec::new(),
         }];
-        highlight_raw_rows(&mut rows, "unknown_ext_xyz", "base16-ocean.dark", false);
+        highlight_raw_rows(
+            &mut rows,
+            LanguageHint::Extension("unknown_ext_xyz"),
+            "base16-ocean.dark",
+            false,
+        );
         assert!(rows[0].spans.is_empty());
     }
 
@@ -365,7 +431,12 @@ mod tests {
         // must colour BOTH rows as `comment`; a per-line parse would miss
         // the continuation line — this is the reason the rows are joined.
         let mut rows = vec![make("/* a block comment"), make("that spans lines */")];
-        highlight_raw_rows(&mut rows, "rs", "base16-ocean.dark", false);
+        highlight_raw_rows(
+            &mut rows,
+            LanguageHint::Extension("rs"),
+            "base16-ocean.dark",
+            false,
+        );
 
         let comment = dt_theme::syntax_color("comment");
         assert_ne!(comment, dt_theme::syntax_color(""), "palette sanity");
@@ -396,7 +467,7 @@ mod tests {
         // somewhere — proving the selection actually drives the colours.
         let profile = |theme_name: &str| {
             let mut rows = vec![make()];
-            highlight_raw_rows(&mut rows, "rs", theme_name, false);
+            highlight_raw_rows(&mut rows, LanguageHint::Extension("rs"), theme_name, false);
             rows[0]
                 .spans
                 .iter()
@@ -415,13 +486,39 @@ mod tests {
         assert_eq!(daruda, profile("base16-ocean.dark"), "legacy name → daruda");
         // Daruda carries a non-color channel on keywords (bold).
         let mut rows = vec![make()];
-        highlight_raw_rows(&mut rows, "rs", "daruda", false);
+        highlight_raw_rows(&mut rows, LanguageHint::Extension("rs"), "daruda", false);
         assert!(
             rows[0]
                 .spans
                 .iter()
                 .any(|s| s.text.contains("let") && s.style.bold),
             "daruda keyword span should be bold"
+        );
+    }
+
+    /// Compiling a language's tree-sitter queries is the expensive part of
+    /// highlighting, and the result is immutable, so every spelling of a
+    /// language must land on one shared compilation. Without this the markdown
+    /// viewer paid a full compile per fenced code block.
+    #[test]
+    fn a_language_compiles_its_queries_once() {
+        let by_ext = build_config(LanguageHint::Extension("rs")).expect("rust via extension");
+        let by_name = build_config(LanguageHint::FenceToken("rust")).expect("rust via fence");
+        let by_short = build_config(LanguageHint::FenceToken("rs")).expect("rust via short fence");
+        assert!(
+            std::sync::Arc::ptr_eq(&by_ext, &by_name),
+            "`rs` and `rust` compiled separately instead of sharing one config"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&by_ext, &by_short),
+            "the same spelling compiled twice"
+        );
+
+        // A different language must not collide onto the same entry.
+        let java = build_config(LanguageHint::Extension("java")).expect("java");
+        assert!(
+            !std::sync::Arc::ptr_eq(&by_ext, &java),
+            "java and rust share a cache entry"
         );
     }
 

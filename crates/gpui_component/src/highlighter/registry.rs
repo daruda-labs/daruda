@@ -511,6 +511,12 @@ impl LanguageRegistry {
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), config.clone());
+        // daruda patch: compiled queries are cached by `config.name` for the
+        // life of the process, so a re-register with different query sources
+        // must drop the stale compilation. Note the cache identity is
+        // `config.name`, not `lang` — registering two configs that share a
+        // `name` under different keys makes them share one compilation.
+        super::highlighter::invalidate_query_cache(&config.name);
     }
 
     /// Returns a list of all registered language names.
