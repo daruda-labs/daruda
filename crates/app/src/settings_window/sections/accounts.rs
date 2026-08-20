@@ -216,6 +216,15 @@ impl SettingsWindow {
     ) -> AnyElement {
         let slug = recipe_slug(recipe);
         let home = daruda_agent::accounts::recipe_for(recipe).system_home_hint();
+        // The ambient home is the sign-in daruda did not perform, so this is
+        // the only place a user who moved it to a metered login themselves can
+        // be told.
+        let home = match self
+            .signed_in_with(crate::workspace::auth_status_global::LoginTarget::System { recipe })
+        {
+            Some(method) => format!("{home} · {method}"),
+            None => home.to_string(),
+        };
         let actions = div()
             .flex()
             .flex_row()
@@ -251,12 +260,26 @@ impl SettingsWindow {
         row_card(cx)
             .child(row_header(
                 s::settings_accounts_system_title(),
-                home.to_string(),
+                home,
                 is_default,
                 cx,
             ))
             .child(actions)
             .into_any_element()
+    }
+
+    /// The cached sign-in method for `target`, as row copy.
+    ///
+    /// `None` when nothing has been read for that scope, or when the CLI
+    /// answered without naming one — neither is a fact about how the user
+    /// signed in, and rendering either as one would be a guess.
+    fn signed_in_with(
+        &self,
+        target: crate::workspace::auth_status_global::LoginTarget,
+    ) -> Option<String> {
+        let status = self.auth_statuses.get(&target)?;
+        let method = status.auth_method.as_deref()?;
+        Some(s::settings_accounts_signed_in_with(method))
     }
 
     fn render_account_row(
@@ -275,10 +298,21 @@ impl SettingsWindow {
             .clone()
             .unwrap_or_else(s::settings_accounts_unknown_email);
         let last_auth = last_authenticated_label(now_unix(), account.last_authenticated_at);
-        let subtitle = match account.organization.as_deref() {
+        let mut subtitle = match account.organization.as_deref() {
             Some(org) => format!("{org} · {last_auth}"),
             None => last_auth,
         };
+        // How this account signed in, when it has been read. Appended rather
+        // than replacing anything: the plan and the method answer different
+        // questions, and the one that costs money is the method.
+        if let Some(method) =
+            self.signed_in_with(crate::workspace::auth_status_global::LoginTarget::Managed {
+                id: account_id,
+                recipe,
+            })
+        {
+            subtitle = format!("{subtitle} · {method}");
+        }
 
         let actions = div()
             .flex()

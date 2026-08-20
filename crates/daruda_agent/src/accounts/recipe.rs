@@ -40,13 +40,13 @@ pub trait AccountRecipe: Send + Sync {
     /// Suffix appended to an agent's launch command to run this domain's
     /// headless login flow.
     fn login_args(&self) -> &'static str;
-    /// Suffix that makes this domain's CLI report its current auth status as
-    /// JSON, for [`super::auth_status::read_auth_status`].
+    /// How to ask this domain's CLI how the user signed in — arguments plus the
+    /// shape of what it prints, for [`super::auth_status::read_auth_status`].
     ///
-    /// `None` for a domain whose CLI has no such command *confirmed*. Guessing
-    /// one would spawn a process that prints an error, and the reading would
-    /// come back empty in a way indistinguishable from "signed out".
-    fn status_args(&self) -> Option<&'static str>;
+    /// `None` for a domain whose command is not *confirmed*. Guessing one would
+    /// spawn a process that prints an error, and the reading would come back
+    /// empty in a way indistinguishable from "signed out".
+    fn status_probe(&self) -> Option<super::auth_status::AuthStatusProbe>;
     /// The ambient (unmanaged) home this domain reads when no account is
     /// pinned, as a tilde path for display next to the "System" choice.
     fn system_home_hint(&self) -> &'static str;
@@ -221,16 +221,24 @@ mod tests {
         }
     }
 
-    /// Only a domain whose status command is confirmed may claim one — an
-    /// unconfirmed guess would print an error the reader cannot tell from
-    /// "signed out".
+    /// Both domains report how a user signed in, in different shapes — and the
+    /// shape has to travel with the arguments, since reading JSON out of a
+    /// prose line (or the reverse) yields no method at all, which is
+    /// indistinguishable from being signed out.
     #[test]
-    fn only_a_confirmed_status_command_is_advertised() {
-        assert_eq!(
-            recipe_for(AccountRecipeId::Claude).status_args(),
-            Some("--cli auth status --json")
-        );
-        assert_eq!(recipe_for(AccountRecipeId::Codex).status_args(), None);
+    fn each_domain_declares_the_shape_of_its_own_status_output() {
+        use super::super::auth_status::AuthStatusFormat;
+        let claude = recipe_for(AccountRecipeId::Claude)
+            .status_probe()
+            .expect("claude reports status");
+        assert_eq!(claude.args, "--cli auth status --json");
+        assert_eq!(claude.format, AuthStatusFormat::Json);
+
+        let codex = recipe_for(AccountRecipeId::Codex)
+            .status_probe()
+            .expect("codex reports status");
+        assert_eq!(codex.args, "cli login status");
+        assert_eq!(codex.format, AuthStatusFormat::Prose);
     }
 
     #[test]

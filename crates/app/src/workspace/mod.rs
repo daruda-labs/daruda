@@ -10,6 +10,7 @@ pub(crate) mod accounts_global;
 mod actions;
 mod annotation_dialog;
 mod annotation_ops;
+pub(crate) mod auth_status_global;
 mod availability_ops;
 mod claude_session_ops;
 mod claude_status_aggregate;

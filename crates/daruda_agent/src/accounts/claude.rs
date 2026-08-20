@@ -93,8 +93,11 @@ impl AccountRecipe for ClaudeRecipe {
         LOGIN_ARGS
     }
 
-    fn status_args(&self) -> Option<&'static str> {
-        Some(STATUS_ARGS)
+    fn status_probe(&self) -> Option<super::auth_status::AuthStatusProbe> {
+        Some(super::auth_status::AuthStatusProbe {
+            args: STATUS_ARGS,
+            format: super::auth_status::AuthStatusFormat::Json,
+        })
     }
 
     fn system_home_hint(&self) -> &'static str {

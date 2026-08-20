@@ -26,6 +26,11 @@ const AUTH_ENV_STRIP: &[&str] = &[];
 /// `cli login` falls back to the bundled `@openai/codex`.
 const LOGIN_ARGS: &str = "cli login";
 
+/// `codex login status` behind the adapter's `cli` passthrough (it forwards
+/// everything after `cli` to the CLI). Honours `CODEX_HOME`, so it answers for
+/// a managed account and the ambient home alike.
+const STATUS_ARGS: &str = "cli login status";
+
 /// How long `codex login` may linger after writing `auth.json` before it is
 /// cancelled. Value taken from orca's
 /// `WINDOWS_LOGIN_POST_AUTH_EXIT_GRACE_MS` (`codex-accounts/service.ts:55`);
@@ -61,10 +66,15 @@ impl AccountRecipe for CodexRecipe {
         LOGIN_ARGS
     }
 
-    /// Unconfirmed: the codex CLI's status command and its output shape have
-    /// not been captured, and a guess would read as "signed out".
-    fn status_args(&self) -> Option<&'static str> {
-        None
+    /// `codex login status`, reached through the adapter's `cli` passthrough.
+    /// Prose, not JSON — the CLI has no `--json` for it, and the sentence it
+    /// prints names the method (`ChatGPT` / `an API key` / …), which is the
+    /// part that matters.
+    fn status_probe(&self) -> Option<super::auth_status::AuthStatusProbe> {
+        Some(super::auth_status::AuthStatusProbe {
+            args: STATUS_ARGS,
+            format: super::auth_status::AuthStatusFormat::Prose,
+        })
     }
 
     fn system_home_hint(&self) -> &'static str {

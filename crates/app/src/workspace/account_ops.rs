@@ -362,6 +362,18 @@ impl Workspace {
     /// deleted `account_id` and `self.claude`. The system-default entry is
     /// never touched.
     pub(crate) fn clear_account_override(&mut self, account_id: AccountId, cx: &mut Context<Self>) {
+        // Its cached sign-in method goes with it. A later account minted under
+        // the same scope would otherwise inherit a claim about credentials it
+        // never had.
+        for recipe in daruda_store::accounts::AccountRecipeId::all() {
+            crate::workspace::auth_status_global::forget(
+                cx,
+                crate::workspace::account_login_ops::LoginTarget::Managed {
+                    id: account_id,
+                    recipe,
+                },
+            );
+        }
         let mut pane_changed = false;
         for rt in self.main_area.runtimes.values_mut() {
             for p in rt.panes.iter_mut() {

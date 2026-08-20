@@ -99,6 +99,13 @@ pub struct SettingsWindow {
     // `Workspace` window. See `sections/accounts.rs`'s module doc.
     accounts: daruda_store::accounts::AccountsState,
     account_login_busy: bool,
+    /// How each set of credentials was signed in, mirrored from
+    /// `auth_status_global`. A scope absent here has not been read yet, which
+    /// the rows show as nothing rather than as a claim.
+    auth_statuses: std::collections::HashMap<
+        crate::workspace::auth_status_global::LoginTarget,
+        daruda_agent::accounts::auth_status::AuthStatus,
+    >,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -178,6 +185,10 @@ pub struct SettingsWindow {
     /// the app-wide `AccountsGlobal` changes — so an add/reauth/default/
     /// delete in any Workspace window shows here without a restart.
     _accounts_global_subscription: Subscription,
+    /// Held, not dropped: an `observe_global` unsubscribes when its
+    /// `Subscription` falls out of scope, and the readings this one waits for
+    /// arrive *after* construction — every probe is a background subprocess.
+    _auth_status_subscription: Subscription,
     /// Subscription that calls `cx.notify()` whenever the `Updater`
     /// entity changes status — so the About page reflects check /
     /// download / install progress reactively. `None` when the updater
@@ -1312,6 +1323,17 @@ impl SettingsWindow {
                 this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
                 cx.notify();
             });
+        // Same mirror shape for the sign-in readings: a Workspace produces
+        // them off-thread, so they land after this window is already open.
+        crate::workspace::auth_status_global::install_if_absent(cx);
+        let auth_statuses = crate::workspace::auth_status_global::snapshot(cx);
+        let _auth_status_subscription = cx
+            .observe_global::<crate::workspace::auth_status_global::AuthStatusGlobal>(
+                |this, cx| {
+                    this.auth_statuses = crate::workspace::auth_status_global::snapshot(cx);
+                    cx.notify();
+                },
+            );
 
         let result = Self {
             panel_focus_handle: cx.focus_handle(),
@@ -1338,6 +1360,7 @@ impl SettingsWindow {
             session_host_rows,
             accounts,
             account_login_busy,
+            auth_statuses,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -1381,6 +1404,7 @@ impl SettingsWindow {
                     },
                 ),
             _accounts_global_subscription,
+            _auth_status_subscription,
             _updater_subscription,
         };
         // The scroll handle is populated during prepaint, which runs after render.

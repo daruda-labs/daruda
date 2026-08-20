@@ -439,6 +439,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Refresh how each account signed in before the rows that show it are
+        // on screen. Opening Settings is the one moment the user is about to
+        // look, and the reading costs a process spawn — so it is taken here
+        // rather than polled.
+        self.probe_auth_statuses(cx);
         crate::windows::open_settings_window(action.0, window, cx);
     }
 

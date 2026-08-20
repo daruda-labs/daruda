@@ -26,6 +26,7 @@ use daruda_store::observability::log_writer::LogWriter;
 
 use super::{
     AddManagedAccount, PendingLogin, ReauthenticateAccount, ReauthenticateSystem, accounts_global,
+    auth_status_global,
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -43,6 +44,11 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_a
 /// sweep grace period.
 pub(in crate::workspace) const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// Budget for one auth-status probe. Far shorter than a login: nothing here
+/// waits on a human, only on the CLI starting up and printing a line — and a
+/// probe that outlives this is one the user is no longer looking at.
+const AUTH_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Whose credentials a headless login writes into — the key every part of
 /// the flow is tracked by: `Workspace::pending_login`, the process-wide slot
 /// in [`accounts_global`], and each finish path's staleness guard.
@@ -51,8 +57,8 @@ pub(in crate::workspace) const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 *
 /// row for the ambient home), which is why this is an enum rather than an
 /// `AccountId` with a sentinel value: a fake id would make an unreal account
 /// representable everywhere a real one is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum LoginTarget {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum LoginTarget {
     /// A managed account's own isolated config dir.
     Managed {
         id: AccountId,
@@ -614,6 +620,14 @@ impl Workspace {
                 .build(),
             cx,
         );
+        self.probe_auth_status(
+            LoginTarget::Managed {
+                id: account_id,
+                recipe: recipe_id,
+            },
+            true,
+            cx,
+        );
         cx.notify();
     }
 
@@ -726,6 +740,98 @@ impl Workspace {
     /// cleaned up, or superseded by a newer one — so running its finish path
     /// anyway would either double-clean an already-removed dir or clobber an
     /// `InProgress` it knows nothing about.
+    /// Read how each set of credentials daruda can name was signed in, and
+    /// cache it for the Settings rows.
+    ///
+    /// Scoped to domains this user actually has a stake in: one with a managed
+    /// account, or one some configured agent signs into. A probe spawns the
+    /// domain's CLI through `npx` and may pull down a Node runtime to do it
+    /// ([`resolve_node_path_env`]), so probing a domain the user has never
+    /// touched would spend a download on a row they do not care about.
+    pub(in crate::workspace) fn probe_auth_statuses(&mut self, cx: &mut Context<Self>) {
+        let mut targets: Vec<LoginTarget> = AccountRecipeId::all()
+            .filter(|recipe| self.has_stake_in_domain(*recipe))
+            .map(|recipe| LoginTarget::System { recipe })
+            .collect();
+        targets.extend(self.accounts.accounts.iter().map(|a| LoginTarget::Managed {
+            id: a.id,
+            recipe: a.recipe,
+        }));
+        for target in targets {
+            self.probe_auth_status(target, false, cx);
+        }
+    }
+
+    /// Whether this user has anything in `recipe`'s auth domain: an account
+    /// filed under it, or a configured agent that signs into it.
+    ///
+    /// Deliberately *not* satisfied by the built-in adapter fallback that
+    /// [`resolve_login_command`] leans on. That fallback exists so a login can
+    /// always be started on request; it must not turn a passive refresh into a
+    /// download for a domain nothing here uses.
+    fn has_stake_in_domain(&self, recipe: AccountRecipeId) -> bool {
+        stake_in_domain(&self.accounts, &self.agents, recipe)
+    }
+
+    /// One reading, off the UI thread.
+    ///
+    /// The probe spawns the agent's CLI (through `npx` on a default install),
+    /// so it is resolved here and run on the background executor — the same
+    /// division the login flow uses. A domain with no confirmed status command
+    /// is skipped rather than guessed at.
+    ///
+    /// `supersede` marks a caller whose reading is newer than anything already
+    /// running — a login that just changed these credentials. Without it an
+    /// equivalent request is dropped while one is in flight, so reopening
+    /// Settings costs nothing.
+    fn probe_auth_status(&mut self, target: LoginTarget, supersede: bool, cx: &mut Context<Self>) {
+        let recipe_id = target.recipe();
+        let active_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        let Some((command, format)) = resolve_status_command(&self.agents, &active_id, recipe_id)
+        else {
+            return;
+        };
+        let Some(ticket) = auth_status_global::begin_probe(cx, target, supersede) else {
+            return;
+        };
+        let recipe = recipe_for(recipe_id);
+        let env = match target {
+            LoginTarget::Managed { id, .. } => {
+                let dir = account_config_dir(&self.data_dir, id);
+                daruda_config::account_env(recipe.config_dir_env(), &dir, recipe.strip_env())
+            }
+            // The ambient home is read exactly as a pane reads it.
+            LoginTarget::System { .. } => daruda_config::AccountEnv::ambient(),
+        };
+
+        cx.spawn(async move |_this, cx| {
+            let probe_command = command.clone();
+            let reading = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut inject = env.inject.clone();
+                    if let Some(pair) = resolve_node_path_env(&probe_command) {
+                        inject.push(pair);
+                    }
+                    daruda_agent::accounts::auth_status::read_auth_status(
+                        &probe_command,
+                        format,
+                        &inject,
+                        &env.strip,
+                        AUTH_STATUS_TIMEOUT,
+                    )
+                })
+                .await;
+            cx.update(|cx| match reading {
+                Some(reading) => auth_status_global::record(cx, ticket, reading),
+                // Release the scope, or the next probe reads as a duplicate of
+                // one that never answered.
+                None => auth_status_global::abandon_probe(cx, ticket),
+            });
+        })
+        .detach();
+    }
+
     /// Report a managed login that replaced the user's own ambient sign-in.
     ///
     /// Nothing is written back: the store is the user's, and a restore built on
@@ -998,6 +1104,7 @@ impl Workspace {
                         .build(),
                     cx,
                 );
+                self.probe_auth_status(target, true, cx);
                 self.reconnect_panes_after_login(target, cx);
                 cx.notify();
             }
@@ -1124,6 +1231,14 @@ impl Workspace {
                 .build(),
             cx,
         );
+        self.probe_auth_status(
+            LoginTarget::Managed {
+                id: account_id,
+                recipe: recipe_id,
+            },
+            true,
+            cx,
+        );
         // The panes that sent the user here are still sitting on the failure
         // this login just cleared.
         self.reconnect_panes_after_login(
@@ -1172,7 +1287,58 @@ pub(in crate::workspace) fn resolve_login_command(
     active_id: &str,
     requested: AccountRecipeId,
 ) -> String {
-    let login_args = recipe_for(requested).login_args();
+    resolve_agent_command(
+        agents,
+        active_id,
+        requested,
+        recipe_for(requested).login_args(),
+    )
+}
+
+/// The command that asks `requested`'s CLI for its auth status, resolved the
+/// same way [`resolve_login_command`] resolves the login — so the status read
+/// and the login it describes always come from one adapter.
+///
+/// `None` for a domain with no confirmed status command
+/// ([`AccountRecipe::status_probe`](daruda_agent::accounts::AccountRecipe::status_probe)).
+pub(in crate::workspace) fn resolve_status_command(
+    agents: &[daruda_config::AgentDefinition],
+    active_id: &str,
+    requested: AccountRecipeId,
+) -> Option<(
+    String,
+    daruda_agent::accounts::auth_status::AuthStatusFormat,
+)> {
+    let probe = recipe_for(requested).status_probe()?;
+    Some((
+        resolve_agent_command(agents, active_id, requested, probe.args),
+        probe.format,
+    ))
+}
+
+/// Whether `accounts` or `agents` give this user a stake in `recipe`'s domain.
+///
+/// Pure so the gate that keeps a passive refresh from downloading an adapter is
+/// testable without a `Workspace`.
+pub(in crate::workspace) fn stake_in_domain(
+    accounts: &AccountsState,
+    agents: &[daruda_config::AgentDefinition],
+    recipe: AccountRecipeId,
+) -> bool {
+    accounts.accounts.iter().any(|a| a.recipe == recipe)
+        || agents
+            .iter()
+            .any(|a| a.launch.account_recipe(false) == Some(recipe))
+}
+
+/// Append `args` to the adapter launch that serves `requested`'s auth domain.
+fn resolve_agent_command(
+    agents: &[daruda_config::AgentDefinition],
+    active_id: &str,
+    requested: AccountRecipeId,
+    args: &str,
+) -> String {
+    let login_args = args;
     // No lane in scope for this catalog-wide scan — `is_remote: false` is
     // not a guess, it's the honest answer: a bare `Raw` command can't
     // self-report as remote-only (see `account_recipe`'s doc), so this
@@ -1905,6 +2071,113 @@ mod tests {
                 !command.contains(&login_flags(metered)),
                 "the login command runs the per-token billed flow: {command}"
             );
+        }
+    }
+
+    mod status_probe {
+        use super::*;
+        use daruda_agent::accounts::auth_status::AuthStatusFormat;
+
+        fn account(recipe: AccountRecipeId) -> AccountsState {
+            let mut st = AccountsState::default();
+            st.accounts.push(ManagedAccount {
+                id: AccountId::new(),
+                recipe,
+                email: None,
+                organization: None,
+                config_dir: "/x".into(),
+                created_at: 0,
+                last_authenticated_at: 0,
+            });
+            st
+        }
+
+        /// The status read and the login it describes must come from one
+        /// adapter, so this shares `resolve_login_command`'s resolution — and
+        /// pairs it with the format that adapter's CLI actually prints.
+        #[test]
+        fn the_status_command_reuses_the_agent_that_serves_the_domain() {
+            let agents = vec![agent(
+                "pinned",
+                "npx -y @agentclientprotocol/claude-agent-acp@1.2.3",
+            )];
+            let (command, format) =
+                resolve_status_command(&agents, "pinned", AccountRecipeId::Claude)
+                    .expect("claude reports status");
+            assert!(command.starts_with("npx -y @agentclientprotocol/claude-agent-acp@1.2.3"));
+            assert!(command.ends_with("--cli auth status --json"));
+            assert_eq!(format, AuthStatusFormat::Json);
+        }
+
+        /// A domain whose CLI prints a sentence has to be read as one — JSON
+        /// parsing of prose yields no method, which is indistinguishable from
+        /// being signed out.
+        #[test]
+        fn each_domain_gets_the_format_its_cli_prints() {
+            let (command, format) = resolve_status_command(&[], "", AccountRecipeId::Codex)
+                .expect("codex reports status");
+            assert!(command.ends_with("cli login status"));
+            assert_eq!(format, AuthStatusFormat::Prose);
+        }
+
+        /// Nothing here has a stake in a domain with no account and no agent,
+        /// and a probe would spawn `npx` — possibly downloading the adapter and
+        /// a Node runtime — for a row the user does not care about.
+        #[test]
+        fn an_untouched_domain_is_not_probed() {
+            for recipe in AccountRecipeId::all() {
+                assert!(
+                    !stake_in_domain(&AccountsState::default(), &[], recipe),
+                    "{recipe:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn an_account_in_a_domain_is_a_stake_in_it() {
+            assert!(stake_in_domain(
+                &account(AccountRecipeId::Codex),
+                &[],
+                AccountRecipeId::Codex
+            ));
+            assert!(!stake_in_domain(
+                &account(AccountRecipeId::Codex),
+                &[],
+                AccountRecipeId::Claude
+            ));
+        }
+
+        /// A configured agent counts even with no account yet — that is the
+        /// domain whose ambient home the user is signing in to.
+        #[test]
+        fn a_configured_agent_is_a_stake_in_its_domain() {
+            let agents = vec![agent(
+                "claude",
+                "npx -y @agentclientprotocol/claude-agent-acp@latest",
+            )];
+            assert!(stake_in_domain(
+                &AccountsState::default(),
+                &agents,
+                AccountRecipeId::Claude
+            ));
+            assert!(!stake_in_domain(
+                &AccountsState::default(),
+                &agents,
+                AccountRecipeId::Codex
+            ));
+        }
+
+        /// The built-in fallback keeps a *requested* login startable, but must
+        /// not make a passive refresh look like a stake.
+        #[test]
+        fn the_builtin_fallback_is_not_a_stake() {
+            assert!(!stake_in_domain(
+                &AccountsState::default(),
+                &[],
+                AccountRecipeId::Claude
+            ));
+            // …while the command itself still resolves, via that fallback.
+            assert!(resolve_status_command(&[], "", AccountRecipeId::Claude).is_some());
         }
     }
 

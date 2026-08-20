@@ -231,6 +231,11 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| ws.report_error(sample_report(), cx));
         }
         ScreenshotScenario::Settings(section) => {
+            // The same refresh the `OpenSettings` action takes. Without it the
+            // Accounts rows capture blank where the running app shows how each
+            // account signed in — a scenario that under-reports the real screen
+            // is worse than no scenario.
+            workspace.update(cx, |ws, cx| ws.probe_auth_statuses(cx));
             crate::windows::open_settings_window(section, window, cx);
         }
         ScreenshotScenario::PaneContextMenu => {
