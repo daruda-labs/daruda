@@ -471,37 +471,33 @@ impl Interaction for PortConnecting {
         ctx: &mut crate::plugin::PluginContext,
     ) -> crate::canvas::InteractionResult {
         let mouse_world = ctx.screen_to_world(ev.position);
-        if let Some(candidate) = self
-            .candidate_ports
-            .iter()
-            .find(|c| c.bounds.contains(&mouse_world))
-        {
-            let port_id = candidate.id;
+        // What the drag already decided, rather than deciding again. The move
+        // pass has been asking "which port, and would it take?" on every pixel,
+        // and its answer is what the wire's colour has been showing. Asking a
+        // second question here — against `bounds` rather than the `big_bounds`
+        // the move pass uses — is how a wire came to turn green over a ring the
+        // release then refused.
+        if let Some(port_id) = self.hovered_port {
+            if self.validation_error.is_some() {
+                return crate::canvas::InteractionResult::End;
+            }
             let Some(target_port) = ctx.graph.get_port(&port_id) else {
                 return crate::canvas::InteractionResult::End;
             };
             let Some(source_port) = ctx.graph.get_port(&self.port_id) else {
                 return crate::canvas::InteractionResult::End;
             };
-
+            // Which end is the output is the same question the move pass
+            // answered to validate; port kinds do not change under a drag.
             let (source_port, target_port) = match (source_port.kind(), target_port.kind()) {
                 (PortKind::Input, PortKind::Output) => (target_port, source_port),
                 _ => (source_port, target_port),
             };
-
-            match self.validator.validate(source_port, target_port, ctx) {
-                Ok(_) => {
-                    let edge = ctx
-                        .new_edge()
-                        .source(source_port.id())
-                        .target(target_port.id());
-                    ctx.execute_command(CreateEdge::new(edge));
-                }
-                Err(err) => {
-                    ctx.emit(FlowEvent::error(err.message().to_string()));
-                }
-            }
-
+            let edge = ctx
+                .new_edge()
+                .source(source_port.id())
+                .target(target_port.id());
+            ctx.execute_command(CreateEdge::new(edge));
             return crate::canvas::InteractionResult::End;
         }
 
