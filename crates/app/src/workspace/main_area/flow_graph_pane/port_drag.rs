@@ -48,11 +48,17 @@ use super::{FlowGraphEvent, FlowGraphState, FlowGraphView, connect};
 /// scope rule are the vendor's to keep, and restating them here would be a
 /// second copy to drift.
 ///
-/// What it adds is the duplicate. What it deliberately does **not** add is the
-/// cycle: refusing one here would show a red wire and no reason, because the
-/// message a refusal carries (`FlowEvent::Message`) has no consumer in the
-/// vendor or in daruda. Letting it through means the engine refuses it in
-/// `edit_flow` instead and a toast says which nodes the cycle runs through.
+/// What it adds is the two refusals a person can only find out about by
+/// dragging: the connection already exists, and the connection would make the
+/// flow run in a circle.
+///
+/// The cycle is checked **here** as well as in the engine. The engine's gate
+/// stays — it sees a file this side cannot, and it is what catches a cycle
+/// arriving any other way — but a preview whose whole job is to answer before
+/// the button is released cannot answer "yes" to a drop that is about to be
+/// refused. What is lost by refusing early is the engine's wording, which named
+/// the nodes the cycle ran through; what is gained is that the wire says no
+/// while the cursor is still on the port.
 pub(super) struct FlowEdgeValidator;
 
 impl EdgeValidator for FlowEdgeValidator {
@@ -63,31 +69,69 @@ impl EdgeValidator for FlowEdgeValidator {
         ctx: &PluginContext,
     ) -> Result<(), EdgeValidationError> {
         DefaultEdgeValidator.validate(out_of, into, ctx)?;
-        if links(ctx, out_of.node_id(), into.node_id()) {
-            // Never rendered — the wire going red is the whole feedback, and
-            // there is nowhere a `FlowEvent::Message` is read. Worded for a
-            // developer reading a log, not for `surface::strings`.
+        // Worded for a developer reading a log, not for `surface::strings`:
+        // neither message is rendered. The wire going red is the feedback, and
+        // there is nowhere a `FlowEvent::Message` is read.
+        let edges = node_pairs(ctx);
+        let (out_of, into) = (out_of.node_id(), into.node_id());
+        if already_linked(&edges, &out_of, &into) {
             return Err(EdgeValidationError::already_connected(
                 "these cards are already connected".into(),
+            ));
+        }
+        if would_cycle(&edges, out_of, into) {
+            return Err(EdgeValidationError::custom(
+                "cycle".into(),
+                "this would make the flow run in a circle".into(),
             ));
         }
         Ok(())
     }
 }
 
-/// Whether the canvas already runs `into` after `out_of`. Asked of the graph
-/// rather than of the model: by the invariant above they say the same thing,
-/// and the graph is the one already in hand.
-fn links(ctx: &PluginContext, out_of: CanvasNodeId, into: CanvasNodeId) -> bool {
-    ctx.graph.edges().values().any(|edge| {
-        let (Some(source), Some(target)) = (
-            ctx.graph.get_port(&edge.source_port),
-            ctx.graph.get_port(&edge.target_port),
-        ) else {
-            return false;
-        };
-        source.node_id() == out_of && target.node_id() == into
-    })
+/// Every edge as the pair of nodes it joins. Read off the graph rather than the
+/// model: by the invariant above they say the same thing, and the graph is the
+/// one already in hand.
+fn node_pairs(ctx: &PluginContext) -> Vec<(CanvasNodeId, CanvasNodeId)> {
+    ctx.graph
+        .edges()
+        .values()
+        .filter_map(|edge| {
+            let source = ctx.graph.get_port(&edge.source_port)?;
+            let target = ctx.graph.get_port(&edge.target_port)?;
+            Some((source.node_id(), target.node_id()))
+        })
+        .collect()
+}
+
+/// Whether `into` already runs after `out_of`.
+///
+/// Generic so the rule can be tested without a canvas: nothing here needs to
+/// know what a node id is, only that two of them compare.
+fn already_linked<T: Eq>(edges: &[(T, T)], out_of: &T, into: &T) -> bool {
+    edges.iter().any(|(from, to)| from == out_of && to == into)
+}
+
+/// Whether running `into` after `out_of` would close a loop — that is, whether
+/// `out_of` already runs after `into`, directly or through others.
+///
+/// Walks forward from `into`: everything reachable from it must run after it, so
+/// finding `out_of` there means the new edge would point back into its own past.
+fn would_cycle<T: Eq + Copy>(edges: &[(T, T)], out_of: T, into: T) -> bool {
+    let mut frontier = vec![into];
+    let mut seen: Vec<T> = vec![into];
+    while let Some(at) = frontier.pop() {
+        if at == out_of {
+            return true;
+        }
+        for (from, to) in edges {
+            if *from == at && !seen.contains(to) {
+                seen.push(*to);
+                frontier.push(*to);
+            }
+        }
+    }
+    false
 }
 
 /// Take an edge off the canvas. A command because that is the only public way
@@ -338,4 +382,72 @@ impl Command for StrandBlankNode {
     }
 
     fn undo(&mut self, _ctx: &mut CommandContext) {}
+}
+
+/// The two rules the wire's colour turns on, tested without a canvas. Both were
+/// previously only reachable through a real drag, which is how a reversed drop
+/// between two connected cards came to preview as valid.
+#[cfg(test)]
+mod rule_tests {
+    use super::{already_linked, would_cycle};
+
+    /// `design → build`, and `build → ship`.
+    fn chain() -> Vec<(&'static str, &'static str)> {
+        vec![("design", "build"), ("build", "ship")]
+    }
+
+    #[test]
+    fn a_connection_that_exists_is_refused() {
+        assert!(already_linked(&chain(), &"design", &"build"));
+        assert!(!already_linked(&chain(), &"design", &"ship"));
+    }
+
+    /// Direction matters: the reverse of an existing edge is *not* a duplicate,
+    /// which is why it needs the cycle rule and not this one.
+    #[test]
+    fn the_reverse_of_an_existing_connection_is_not_a_duplicate() {
+        assert!(!already_linked(&chain(), &"build", &"design"));
+    }
+
+    /// The case that previewed green: two cards already joined, dragged the
+    /// other way. `build` runs after `design`, so `design` running after
+    /// `build` closes the loop.
+    #[test]
+    fn dragging_back_between_two_connected_cards_would_loop() {
+        assert!(would_cycle(&chain(), "build", "design"));
+    }
+
+    /// And through others, not only directly: `ship` runs after `design` by way
+    /// of `build`.
+    #[test]
+    fn a_loop_through_a_third_card_is_still_a_loop() {
+        assert!(would_cycle(&chain(), "ship", "design"));
+    }
+
+    #[test]
+    fn a_new_connection_that_runs_forward_is_allowed() {
+        // `design → ship` shortens the chain; nothing runs before its own past.
+        assert!(!would_cycle(&chain(), "design", "ship"));
+        // A card nothing is joined to yet.
+        assert!(!would_cycle(&chain(), "ship", "docs"));
+        assert!(!would_cycle::<&str>(&[], "a", "b"));
+    }
+
+    /// A diamond: two paths to the same card, and neither is a loop. Guards the
+    /// walk against reporting a cycle for a node it reaches twice.
+    #[test]
+    fn two_paths_to_one_card_are_not_a_loop() {
+        let diamond = vec![("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")];
+        assert!(!would_cycle(&diamond, "a", "d"));
+        assert!(would_cycle(&diamond, "d", "a"));
+    }
+
+    /// The walk must terminate even on a graph that is already cyclic — a file
+    /// edited by hand can be, and the preview still has to answer.
+    #[test]
+    fn an_already_looping_graph_does_not_hang_the_walk() {
+        let looped = vec![("a", "b"), ("b", "a")];
+        assert!(would_cycle(&looped, "a", "b"));
+        assert!(would_cycle(&looped, "b", "a"));
+    }
 }
