@@ -123,10 +123,15 @@ impl Workspace {
                 })
             }
             PaneContent::FlowGraph(content) => {
-                let selected = content.view.read(cx).selected_node(cx).is_some();
+                let view = content.view.read(cx);
+                let selected = view.selected_node(cx).is_some();
+                let dep_selected = view.has_selected_edge(cx);
                 Some(PaneMenuSnapshot {
                     selection: None,
-                    kind: PaneMenuKind::FlowGraph { selected },
+                    kind: PaneMenuKind::FlowGraph {
+                        selected,
+                        dep_selected,
+                    },
                 })
             }
             PaneContent::File(_) | PaneContent::TaskEditPane(_) => Some(PaneMenuSnapshot {

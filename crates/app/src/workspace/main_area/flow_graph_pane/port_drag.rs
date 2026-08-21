@@ -7,12 +7,18 @@
 //! > **what is drawn is what the file declares** — its nodes, and the `deps`
 //! > between them.
 //!
-//! A difference is answered by taking the edge off the canvas — restoring the
-//! invariant at once — and asking the workspace to write the file. On a write
-//! the reload rebuilds the graph and the line is there again; on a refusal the
-//! canvas is already clean and the reason is a toast. Which means **no refusal
-//! has to be understood here**: stale file, unwritable file, a cycle the engine
-//! caught — all of them leave the same clean picture.
+//! A line drawn but not declared is answered by taking it off the canvas —
+//! restoring the invariant at once — and asking the workspace to write the
+//! file. On a write the reload rebuilds the graph and the line is there again;
+//! on a refusal the canvas is already clean and the reason is a toast. Which
+//! means **no refusal has to be understood here**: stale file, unwritable
+//! file, a cycle the engine caught — all of them leave the same clean picture.
+//!
+//! A dependency declared but no longer drawn is the mirror, and the whole of
+//! how a line is removed: [`super::disconnect`] only takes the edge off the
+//! canvas, and this notices and writes the removal. Both affordances for
+//! removing — the key and the menu — therefore travel the direction that is
+//! already decided and tested here, rather than each editing the file.
 //!
 //! Reading the graph rather than taking an event is also what makes this
 //! self-healing: a disagreement cannot survive a notify, so there is no state
@@ -160,7 +166,13 @@ impl FlowGraphView {
             (strays, drawn)
         };
         let unrecorded = connect::unrecorded(&drawn, &model.deps);
-        if strays.is_empty() && unrecorded.is_none() {
+        // Only asked when nothing was added: one write per pass, and the
+        // reload that follows re-reads the picture anyway.
+        let undrawn = unrecorded
+            .is_none()
+            .then(|| connect::undrawn(&drawn, &model.deps))
+            .flatten();
+        if strays.is_empty() && unrecorded.is_none() && undrawn.is_none() {
             return;
         }
         let canvas = canvas.clone();
@@ -174,6 +186,12 @@ impl FlowGraphView {
         });
         if let Some((_, dep)) = unrecorded {
             cx.emit(FlowGraphEvent::Connect {
+                out_of: dep.from,
+                into: dep.to,
+            });
+        }
+        if let Some(dep) = undrawn {
+            cx.emit(FlowGraphEvent::Disconnect {
                 out_of: dep.from,
                 into: dep.to,
             });

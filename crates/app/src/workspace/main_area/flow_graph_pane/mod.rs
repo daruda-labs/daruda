@@ -7,6 +7,7 @@
 
 mod click;
 mod connect;
+mod disconnect;
 pub(in crate::workspace) mod form;
 mod frame;
 pub(in crate::workspace) mod model;
@@ -33,6 +34,7 @@ use gpui::{
 use daruda_flow::NodeId;
 
 use self::click::NodeClickPlugin;
+use self::disconnect::EdgeDeletePlugin;
 use self::frame::FrameGraphPlugin;
 use self::model::{FlowGraphModel, NodeRunState, RunColouring};
 use self::node_ids::NodeIds;
@@ -96,6 +98,11 @@ pub(in crate::workspace) enum FlowGraphEvent {
     /// The names say the ports rather than from/to, which is the pair that
     /// gets swapped — see [`connect::dep_from_edge`].
     Connect {
+        out_of: NodeId,
+        into: NodeId,
+    },
+    /// A line was taken away: `into` no longer waits for `out_of`.
+    Disconnect {
         out_of: NodeId,
         into: NodeId,
     },
@@ -742,6 +749,8 @@ fn build_graph_state(
             // Its validator is ours, so a refusal shows while the wire is
             // still being dragged rather than after it is written.
             .plugin(PortInteractionPlugin::new().validator(FlowEdgeValidator))
+            // The ninth: Delete on a selected line takes it away again.
+            .plugin(EdgeDeletePlugin)
             .plugin(FrameGraphPlugin::new())
             .plugin(rerun)
             .build()

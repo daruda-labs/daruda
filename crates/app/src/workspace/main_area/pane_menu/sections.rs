@@ -178,7 +178,7 @@ impl PaneMenuSource for FlowGraphMenu {
         // selected — disabled rather than absent, so the row does not appear
         // and disappear under the pointer.
         entries.push(match &ctx.kind {
-            PaneMenuKind::FlowGraph { selected: true } => item(
+            PaneMenuKind::FlowGraph { selected: true, .. } => item(
                 s::flow_delete_node(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, window, cx| {
@@ -186,6 +186,21 @@ impl PaneMenuSource for FlowGraphMenu {
                 })),
             ),
             _ => disabled_item(s::flow_delete_node(), None),
+        });
+        // Acts on the selected line, like its neighbour acts on the selected
+        // node — not on whatever the right-click was over. Asks nothing: a line
+        // is one drag to redraw, and the file is the undo stack.
+        entries.push(match &ctx.kind {
+            PaneMenuKind::FlowGraph {
+                dep_selected: true, ..
+            } => item(
+                s::flow_remove_connection(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, _window, cx| {
+                    ws.disconnect_selected_edge_in_pane(pane_id, cx);
+                })),
+            ),
+            _ => disabled_item(s::flow_remove_connection(), None),
         });
         entries.push(MenuEntry::Separator);
         entries.push(item(
@@ -500,7 +515,10 @@ mod tests {
     /// to copy and nothing to stop.
     #[test]
     fn a_graph_pane_is_offered_the_reload_and_nothing_of_the_others() {
-        let graph = labels(&compose(&base(PaneMenuKind::FlowGraph { selected: true })));
+        let graph = labels(&compose(&base(PaneMenuKind::FlowGraph {
+            selected: true,
+            dep_selected: false,
+        })));
         assert!(
             graph.contains(&s::ctx_reload_flow_graph()),
             "reload is offered: {graph:?}"
@@ -514,6 +532,57 @@ mod tests {
         assert!(
             !labels(&compose(&base(PaneMenuKind::Other))).contains(&s::ctx_reload_flow_graph()),
             "and a pane that is not a graph is not offered it"
+        );
+    }
+
+    /// Removing a line acts on the selected one, so the row is only live when
+    /// there is one — and present either way, so it does not appear and
+    /// disappear under the pointer. Same rule as its neighbour, "Delete Node".
+    #[test]
+    fn removing_a_connection_needs_a_selected_line() {
+        let without = compose(&base(PaneMenuKind::FlowGraph {
+            selected: false,
+            dep_selected: false,
+        }));
+        let with = compose(&base(PaneMenuKind::FlowGraph {
+            selected: false,
+            dep_selected: true,
+        }));
+        assert!(
+            find(&without, &s::flow_remove_connection())
+                .expect("the row is present with nothing selected")
+                .is_disabled()
+        );
+        assert!(
+            !find(&with, &s::flow_remove_connection())
+                .expect("and with a line selected")
+                .is_disabled()
+        );
+    }
+
+    /// A selected line does not make node deletion live, and a selected node
+    /// does not make line removal live — the two gates are independent.
+    #[test]
+    fn a_selected_line_is_not_a_selected_node() {
+        let line_only = compose(&base(PaneMenuKind::FlowGraph {
+            selected: false,
+            dep_selected: true,
+        }));
+        assert!(
+            find(&line_only, &s::flow_delete_node())
+                .expect("present")
+                .is_disabled(),
+            "a line is not a node"
+        );
+        let node_only = compose(&base(PaneMenuKind::FlowGraph {
+            selected: true,
+            dep_selected: false,
+        }));
+        assert!(
+            find(&node_only, &s::flow_remove_connection())
+                .expect("present")
+                .is_disabled(),
+            "and a node is not a line"
         );
     }
 

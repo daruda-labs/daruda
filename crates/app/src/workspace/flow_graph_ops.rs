@@ -149,6 +149,9 @@ impl Workspace {
                 FlowGraphEvent::Connect { out_of, into } => {
                     workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
                 }
+                FlowGraphEvent::Disconnect { out_of, into } => {
+                    workspace.disconnect_nodes(&for_path, view.clone(), out_of, into, window, cx)
+                }
                 FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
                     s::flow_edit_dropped_typing(),
                     "flow.edit_dropped_typing",
@@ -342,6 +345,59 @@ impl Workspace {
         if let Err(refusal) = outcome {
             self.report_edit_refusal(&refusal, cx);
         }
+    }
+
+    /// Forget a line the person took away.
+    ///
+    /// The mirror of [`Self::connect_nodes`], and refused the same way: the
+    /// pane has already taken the edge off the canvas, so nothing here has to
+    /// put a picture back. A dependency the file no longer has is
+    /// `NothingToDo`, which stays quiet.
+    pub(in crate::workspace) fn disconnect_nodes(
+        &mut self,
+        path: &Path,
+        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        out_of: &NodeId,
+        into: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(base) = view.read_with(cx, |view, _| view.text().map(str::to_string)) else {
+            return;
+        };
+        let (out_of, into) = (out_of.clone(), into.clone());
+        let outcome = self.edit_flow(
+            path,
+            &base,
+            move |file| {
+                super::main_area::flow_graph_pane::form::apply::disconnect(file, &out_of, &into)
+            },
+            window,
+            cx,
+        );
+        if let Err(refusal) = outcome {
+            self.report_edit_refusal(&refusal, cx);
+        }
+    }
+
+    /// Remove whatever line the graph has selected. The menu's half of the
+    /// gesture Delete performs; the pane turns it into a `Disconnect`.
+    pub(in crate::workspace) fn disconnect_selected_edge_in_pane(
+        &mut self,
+        pane_id: super::main_area::pane_tree::PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .and_then(|pane| pane.flow_graph_content())
+            .map(|content| content.view.clone())
+        else {
+            return;
+        };
+        view.update(cx, |view, cx| view.drop_selected_edges(cx));
     }
 
     /// Take the selected node out, and out of everything that pointed at it.

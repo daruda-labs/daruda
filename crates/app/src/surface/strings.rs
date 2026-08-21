@@ -715,6 +715,12 @@ pub fn flow_add_node() -> String {
 pub fn flow_delete_node() -> String {
     rust_i18n::t!("flow.delete_node").into_owned()
 }
+/// Removing the selected line between two cards. No ellipsis: unlike deleting
+/// a node it asks nothing — a line is redrawn with one drag, and the file is
+/// the undo stack.
+pub fn flow_remove_connection() -> String {
+    rust_i18n::t!("flow.remove_connection").into_owned()
+}
 pub fn flow_delete_node_last() -> String {
     rust_i18n::t!("flow.delete_node_last").into_owned()
 }

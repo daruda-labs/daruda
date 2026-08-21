@@ -1489,3 +1489,96 @@ async fn a_blank_node_the_file_never_named_is_taken_off_the_canvas(cx: &mut Test
         "and nothing was written about a node the file never had"
     );
 }
+
+/// The mirror of drawing one: a line taken off the canvas has to reach the file
+/// as a removed `deps` entry.
+///
+/// Goes through `drop_selected_edges` — the funnel both affordances share, the
+/// Delete key and the context-menu row — rather than emitting `Disconnect`, so
+/// what is covered is the reconcile noticing the picture stopped drawing a
+/// dependency the file still declares.
+#[gpui::test]
+async fn a_line_taken_off_the_canvas_is_removed_from_the_file(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    view.update(&mut vcx, |v, cx| v.select_every_edge_for_test(cx));
+    vcx.run_until_parked();
+    assert!(
+        view.read_with(&vcx, |v, cx| v.has_selected_edge(cx)),
+        "the line is selected, which is what both affordances act on"
+    );
+
+    view.update(&mut vcx, |v, cx| v.drop_selected_edges(cx));
+    vcx.run_until_parked();
+
+    let text = std::fs::read_to_string(&flow_path).expect("on disk");
+    let file = daruda_flow::parse::parse_flow_file(&text).expect("still a flow");
+    let build = file.nodes.iter().find(|n| n.id == "build").expect("build");
+    assert!(
+        build.deps.is_empty(),
+        "`build` no longer waits for `design`:\n{text}"
+    );
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx)),
+        0,
+        "and the picture agrees — the reload rebuilt it from the file"
+    );
+}
+
+/// Drawing and removing are the same invariant read two ways, so one must not
+/// undo the other: a line drawn, written, and then removed leaves the file as
+/// it started, not with a stray dep or a stray line.
+#[gpui::test]
+async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before = std::fs::read_to_string(&flow_path).expect("on disk");
+
+    view.update(&mut vcx, |v, cx| {
+        v.draw_edge_for_test(&"build".into(), &"docs".into(), cx)
+    });
+    vcx.run_until_parked();
+    view.update(&mut vcx, |v, cx| {
+        v.select_edge_for_test(&"build".into(), &"docs".into(), cx)
+    });
+    vcx.run_until_parked();
+    view.update(&mut vcx, |v, cx| v.drop_selected_edges(cx));
+    vcx.run_until_parked();
+
+    let after = std::fs::read_to_string(&flow_path).expect("on disk");
+    let file = daruda_flow::parse::parse_flow_file(&after).expect("still a flow");
+    let docs = file.nodes.iter().find(|n| n.id == "docs").expect("docs");
+    assert!(docs.deps.is_empty(), "the dep it gained is gone:\n{after}");
+    let build = file.nodes.iter().find(|n| n.id == "build").expect("build");
+    assert_eq!(
+        build.deps,
+        vec![daruda_flow::NodeId::from("design")],
+        "and the dep it always had is untouched:\n{after}"
+    );
+    let _ = before;
+}

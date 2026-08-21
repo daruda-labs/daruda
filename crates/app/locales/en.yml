@@ -1306,6 +1306,7 @@ flow:
   form_fail_label: "When it fails"
   add_node: "Add Node"
   delete_node: "Delete Node…"
+  remove_connection: "Remove Connection"
   delete_node_last: "A flow needs at least one node."
   delete_node_confirm_title: "Delete this node?"
   delete_node_confirm_body: "%{node} will be removed from the flow."

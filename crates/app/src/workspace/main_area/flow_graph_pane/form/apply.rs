@@ -166,6 +166,19 @@ pub(in crate::workspace) fn connect(file: &mut FlowFile, out_of: &NodeId, into: 
     target.deps.push(out_of.clone());
 }
 
+/// Stop `into` waiting for `out_of` — the mirror of [`connect`], and the same
+/// direction: the dep lives on `into`.
+///
+/// A dependency the file does not have changes nothing, which the differ turns
+/// into `NothingToDo`. Only the one edge goes; `into` keeps whatever else it
+/// waits for.
+pub(in crate::workspace) fn disconnect(file: &mut FlowFile, out_of: &NodeId, into: &NodeId) {
+    let Some(target) = file.nodes.iter_mut().find(|n| &n.id == into) else {
+        return;
+    };
+    target.deps.retain(|dep| dep != out_of);
+}
+
 pub(in crate::workspace) fn remove_node(file: &mut FlowFile, node: &NodeId) {
     use daruda_flow::parse::{GateFailFile, NodeKindFile};
     file.nodes.retain(|n| &n.id != node);
@@ -390,6 +403,47 @@ nodes:
         let before = file.clone();
         connect(&mut file, &"build".into(), &"drawing".into());
         assert_eq!(file, before);
+    }
+
+    /// The direction again, from the other side. Removing the line out of
+    /// `build` and into `check` takes `build` out of **`check`'s** deps — and
+    /// leaves `check`'s own place in the file alone.
+    #[test]
+    fn a_disconnection_is_taken_off_the_card_it_was_drawn_into() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        connect(&mut file, &"check".into(), &"build".into());
+        disconnect(&mut file, &"check".into(), &"build".into());
+
+        let build = file.nodes.iter().find(|n| n.id == "build").expect("build");
+        assert!(build.deps.is_empty(), "the dep that was added is gone");
+        let check = file.nodes.iter().find(|n| n.id == "check").expect("check");
+        assert_eq!(
+            check.deps,
+            vec![NodeId::from("build")],
+            "and the one the fixture came with is untouched"
+        );
+    }
+
+    #[test]
+    fn disconnecting_what_was_never_connected_changes_nothing() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        let before = file.clone();
+        disconnect(&mut file, &"check".into(), &"build".into());
+        assert_eq!(file, before, "`build` never waited for `check`");
+    }
+
+    /// The reverse of the same pair is a different dependency — removing it
+    /// must not take the real one with it.
+    #[test]
+    fn disconnecting_the_other_direction_leaves_the_real_one() {
+        let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).expect("fixture parses");
+        disconnect(&mut file, &"check".into(), &"build".into());
+        let check = file.nodes.iter().find(|n| n.id == "check").expect("check");
+        assert_eq!(
+            check.deps,
+            vec![NodeId::from("build")],
+            "`check` still runs after `build`"
+        );
     }
 
     /// A deletion is a rename's mirror: the name goes out of every place that

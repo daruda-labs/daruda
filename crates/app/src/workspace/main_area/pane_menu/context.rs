@@ -53,9 +53,12 @@ pub(super) enum PaneMenuKind {
         busy: bool,
     },
     /// `selected` is whether the graph has exactly one node selected — deleting
-    /// needs one, and the menu opens with or without.
+    /// needs one, and the menu opens with or without. `dep_selected` is the
+    /// same question for a line: clicking one selects it and draws it in the
+    /// accent, so what would be removed is visible before the row is chosen.
     FlowGraph {
         selected: bool,
+        dep_selected: bool,
     },
     Other,
 }

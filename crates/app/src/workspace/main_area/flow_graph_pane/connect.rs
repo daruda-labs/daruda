@@ -47,6 +47,18 @@ pub(super) fn unrecorded<T: Clone>(
     drawn.iter().find(|(_, edge)| !deps.contains(edge)).cloned()
 }
 
+/// The mirror: the first dependency the file declares that is no longer drawn.
+///
+/// Both directions are needed once a line can be taken away as well as added.
+/// While the canvas could only gain edges, "drawn but not declared" was the
+/// whole difference; now "declared but not drawn" is a person removing a
+/// dependency, and it reads the same picture to say so.
+pub(super) fn undrawn<T>(drawn: &[(T, GraphEdge)], deps: &[GraphEdge]) -> Option<GraphEdge> {
+    deps.iter()
+        .find(|dep| !drawn.iter().any(|(_, edge)| edge == *dep))
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +123,33 @@ mod tests {
             None,
             "and neither is an empty one"
         );
+    }
+
+    #[test]
+    fn a_dependency_whose_line_is_gone_is_the_one_to_remove() {
+        let deps = vec![edge("design", "build"), edge("build", "ship")];
+        let still_drawn = drawn(&[(1, edge("design", "build"))]);
+        assert_eq!(undrawn(&still_drawn, &deps), Some(edge("build", "ship")));
+    }
+
+    #[test]
+    fn a_picture_that_draws_every_dependency_removes_nothing() {
+        let deps = vec![edge("design", "build")];
+        assert_eq!(
+            undrawn(&drawn(&[(1, edge("design", "build"))]), &deps),
+            None
+        );
+        assert_eq!(undrawn::<u8>(&[], &[]), None);
+    }
+
+    /// The two directions answer independently, which is what lets one pass
+    /// hold both halves of the invariant.
+    #[test]
+    fn an_added_line_and_a_removed_one_are_separate_answers() {
+        let deps = vec![edge("design", "build")];
+        let canvas = drawn(&[(7, edge("build", "ship"))]);
+        assert_eq!(unrecorded(&canvas, &deps), Some((7, edge("build", "ship"))));
+        assert_eq!(undrawn(&canvas, &deps), Some(edge("design", "build")));
     }
 
     /// The reversal trap from the other side: a canvas holding the opposite
