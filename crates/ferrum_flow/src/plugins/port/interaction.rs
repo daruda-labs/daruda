@@ -372,6 +372,35 @@ struct PortHitCandidate {
     big_bounds: Bounds<Pixels>,
 }
 
+/// How the dragged wire is drawn, given what it is currently over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreviewTint {
+    line: u32,
+    dot: u32,
+    /// Whether the hovered port is ringed, in `line`.
+    ring: bool,
+}
+
+fn preview_tint(theme: &crate::FlowTheme, over_port: bool, refused: bool) -> PreviewTint {
+    match (refused, over_port) {
+        (true, _) => PreviewTint {
+            line: theme.error,
+            dot: theme.error,
+            ring: true,
+        },
+        (false, true) => PreviewTint {
+            line: theme.success,
+            dot: theme.success,
+            ring: true,
+        },
+        (false, false) => PreviewTint {
+            line: theme.port_preview_line,
+            dot: theme.port_preview_dot,
+            ring: false,
+        },
+    }
+}
+
 impl Interaction for PortConnecting {
     fn on_mouse_move(
         &mut self,
@@ -474,18 +503,14 @@ impl Interaction for PortConnecting {
         let position = self.position;
         let target_position = self.target_position;
         let viewport = ctx.viewport().clone();
-        let has_validation_error = self.validation_error.is_some();
-        let line_rgb = if has_validation_error {
-            ctx.theme.error
-        } else {
-            ctx.theme.port_preview_line
-        };
-        let dot_rgb = if has_validation_error {
-            ctx.theme.error
-        } else {
-            ctx.theme.port_preview_dot
-        };
-        let target_highlight = if has_validation_error {
+        let tint = preview_tint(
+            ctx.theme,
+            self.hovered_port.is_some(),
+            self.validation_error.is_some(),
+        );
+        let line_rgb = tint.line;
+        let dot_rgb = tint.dot;
+        let target_highlight = if tint.ring {
             self.hovered_port.and_then(|port_id| {
                 let port = ctx.graph.get_port(&port_id)?;
                 let center = ctx.port_screen_center_by_port_id(port_id)?;
@@ -533,5 +558,48 @@ impl Interaction for PortConnecting {
             )
             .into_any(),
         )
+    }
+}
+
+/// daruda-authored guard for one of the patched behaviours in this vendored
+/// crate (see `patches/README.md`): a drop that would take has to look
+/// different from one that would not, and from empty space.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_port_that_would_take_the_drop_does_not_look_like_empty_space() {
+        let theme = crate::FlowTheme::default();
+        let over_valid = preview_tint(&theme, true, false);
+        let over_nothing = preview_tint(&theme, false, false);
+
+        assert_ne!(
+            over_valid, over_nothing,
+            "a valid target rendered exactly like empty space, so nothing said the drop would take"
+        );
+        assert_eq!(over_valid.line, theme.success);
+        assert!(over_valid.ring, "and the port it would land on is ringed");
+    }
+
+    #[test]
+    fn a_refusal_is_still_the_error_colour() {
+        let theme = crate::FlowTheme::default();
+        let refused = preview_tint(&theme, true, true);
+        assert_eq!(refused.line, theme.error);
+        assert_eq!(refused.dot, theme.error);
+        assert!(refused.ring);
+    }
+
+    /// Empty space keeps upstream's two-tone wire — the line and the dot are
+    /// deliberately different colours there, which a single-colour tint would
+    /// have flattened.
+    #[test]
+    fn empty_space_keeps_its_own_two_colours() {
+        let theme = crate::FlowTheme::default();
+        let neutral = preview_tint(&theme, false, false);
+        assert_eq!(neutral.line, theme.port_preview_line);
+        assert_eq!(neutral.dot, theme.port_preview_dot);
+        assert!(!neutral.ring, "there is no port to ring");
     }
 }

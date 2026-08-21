@@ -162,6 +162,12 @@ pub(super) fn flow_theme(tokens: &PaneSurfaceTokens) -> FlowTheme {
     t.edge_stroke = rgb_u32(tokens.foreground_muted_over_background());
     t.edge_stroke_selected = rgb_u32(palette::FLOW_GRAPH_STATUS_RUNNING);
     t.default_port_fill = rgb_u32(tokens.foreground_muted_over_background());
+    // The wire being dragged between two ports, refused and accepted. Taken
+    // from the run's own status colours rather than picked fresh: a card that
+    // passed is already this green, and one that failed already this red, so a
+    // drag says yes and no in the vocabulary the graph has been using.
+    t.error = rgb_u32(palette::FLOW_GRAPH_STATUS_FAILED);
+    t.success = rgb_u32(palette::FLOW_GRAPH_STATUS_PASSED);
     t
 }
 
