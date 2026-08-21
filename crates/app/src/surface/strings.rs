@@ -896,11 +896,10 @@ pub fn right_panel_flow_retention(keep: usize) -> String {
 }
 
 /// A past run's start time, decoded from its id. Local time, since the
-/// question it answers is "was that the one I ran before lunch".
+/// question it answers is "was that the one I ran before lunch"; no year,
+/// since the list it labels only keeps recent runs.
 pub fn flow_run_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
-    at.with_timezone(&chrono::Local)
-        .format("%m-%d %H:%M")
-        .to_string()
+    super::timestamp::local_month_day_time(at)
 }
 
 /// How a finished run ended. `Running` and `Crashed` are not markers the
@@ -1886,17 +1885,54 @@ pub fn agent_chat_last_active_tooltip(time: &str) -> String {
     rust_i18n::t!("agent_chat.last_active_tooltip", time = time).into_owned()
 }
 
-/// Tooltip on the context meter: the current context-window fill and, when the
-/// agent reports it, cumulative session cost. `used`/`size` are pre-formatted
-/// token counts; `percent` is the fill ratio; `cost` is a pre-formatted cost
-/// string (already `" · <amount currency>"`) or empty when unavailable.
-pub fn agent_chat_context_tooltip(used: &str, size: &str, percent: u8, cost: &str) -> String {
+/// `chrono` pattern for a full date and time. A pattern rather than plain
+/// copy: field order, clock convention and the words around the numbers all
+/// differ per locale. Consumed by [`super::timestamp`], not at call sites.
+pub fn timestamp_date_and_time() -> String {
+    rust_i18n::t!("timestamp.date_and_time").into_owned()
+}
+
+/// `chrono` pattern for a month, day and time — a timestamp whose year the
+/// surrounding UI already implies.
+pub fn timestamp_month_day_and_time() -> String {
+    rust_i18n::t!("timestamp.month_day_and_time").into_owned()
+}
+
+/// Inline label on the context meter. `used`/`size` are pre-formatted token
+/// counts; the separator between them is the locale's business.
+pub fn agent_chat_context_meter(used: &str, size: &str) -> String {
+    rust_i18n::t!("agent_chat.context_meter", used = used, size = size).into_owned()
+}
+
+/// Tooltip on the context meter: the current context-window fill. `used`/`size`
+/// are pre-formatted token counts; `percent` is the fill ratio.
+pub fn agent_chat_context_tooltip(used: &str, size: &str, percent: u8) -> String {
     rust_i18n::t!(
         "agent_chat.context_tooltip",
         used = used,
         size = size,
+        percent = percent.to_string()
+    )
+    .into_owned()
+}
+
+/// Same tooltip for a session whose agent also reports cumulative cost. Its own
+/// pattern, so the separator and where the amount sits relative to the fill
+/// stay translator decisions.
+pub fn agent_chat_context_tooltip_with_cost(
+    used: &str,
+    size: &str,
+    percent: u8,
+    amount: &str,
+    currency: &str,
+) -> String {
+    rust_i18n::t!(
+        "agent_chat.context_tooltip_with_cost",
+        used = used,
+        size = size,
         percent = percent.to_string(),
-        cost = cost
+        amount = amount,
+        currency = currency
     )
     .into_owned()
 }
@@ -5446,6 +5482,19 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// The run list only keeps recent runs, so the label drops the year to
+    /// stay narrow. Asserted zone-independently: whatever the machine's zone,
+    /// a 2026 instant must not print "2026".
+    #[test]
+    fn a_run_start_label_carries_no_year() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-07-01T14:32:05Z")
+            .expect("valid rfc3339")
+            .to_utc();
+        let label = flow_run_started_at(at);
+        assert!(!label.contains("2026"), "{label:?} should have no year");
+        assert!(!label.is_empty());
+    }
 
     /// Recursively collect dotted key paths for every scalar leaf in a
     /// YAML mapping tree (e.g. `common.btn_cancel`).

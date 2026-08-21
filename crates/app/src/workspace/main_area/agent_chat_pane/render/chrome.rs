@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use crate::surface::strings as s;
+use crate::surface::timestamp;
 use crate::ui::theme;
 use crate::ui::{
     ButtonVariants as _, Icon, Selectable as _, Sizable as _, StatusPulseClock, button_bare,
@@ -21,13 +22,12 @@ const ICON_EXPAND: &str = "icons/ui/expand.svg";
 const ICON_COMPRESS: &str = "icons/ui/compress.svg";
 const ICON_WIDTH_WIDE: &str = "icons/ui/width-wide.svg";
 
-/// Pane activity bar: resolved session title on the left, icon controls on the
-/// right. Always rendered: the reading-width toggle is available even while the
-/// conversation is empty or still connecting. The `title` is already resolved
-/// by the caller (`activity_bar_title`, falling back to the agent name). The
-/// fold buttons appear only when `has_items` is true (render purity: no logic
-/// here, just `.when()`).
-/// A bottom hairline separates the bar from the conversation body.
+/// Pane activity bar: resolved session title on the left, the context-window
+/// meter and the icon controls on the right, with a bottom hairline against the
+/// conversation body. Always rendered, so the reading-width toggle stays
+/// reachable while the conversation is empty or still connecting. `title` is
+/// already resolved by the caller (`activity_bar_title`, falling back to the
+/// agent name).
 pub(super) struct ActivityBarProps<'a> {
     pub pane_id: PaneId,
     pub agent_id: &'a str,
@@ -47,13 +47,10 @@ pub(super) fn activity_bar(
         .title
         .map(|s| SharedString::from(s.to_string()))
         .unwrap_or_default();
-    // Last-activity timestamp (from `SessionInfoUpdate.updated_at`) surfaces as a
-    // tooltip on the title rather than inline text — it's low-frequency detail
-    // and the bar is width-constrained (title ellipsizes).
-    let last_active_tooltip: Option<SharedString> = props
-        .last_active
-        .map(format_last_active)
-        .map(|when| SharedString::from(s::agent_chat_last_active_tooltip(&when)));
+    // A tooltip rather than inline text: low-frequency detail, and the bar is
+    // width-constrained (the title ellipsizes). The agent reports it via
+    // `SessionInfoUpdate`; `reconcile_activity` advances it on each settle.
+    let last_active = props.last_active.map(last_active_tooltip);
 
     let expand = button_bare(("agent-chat-expand-all", props.pane_id as usize))
         .ghost()
@@ -121,36 +118,14 @@ pub(super) fn activity_bar(
                         .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), props.dim))
                         .child(title),
                 )
-                .when_some(last_active_tooltip, |el, tip| {
+                .when_some(last_active, |el, tip| {
                     el.tooltip(crate::ui::tooltip::text(tip))
                 }),
         )
         // Context-window meter (from `UsageUpdate`): current fill on the right,
         // detail + optional cost in the tooltip. Distinct from the cumulative
-        // Usage tab. Shown only once the agent reports usage.
-        .when_some(props.usage, |row, u| {
-            let pct = u
-                .used
-                .saturating_mul(100)
-                .checked_div(u.size)
-                .map(|p| p.min(100) as u8)
-                .unwrap_or(0);
-            let cost = u
-                .cost
-                .as_ref()
-                .map(|c| format!(" \u{00b7} {:.2} {}", c.amount, c.currency))
-                .unwrap_or_default();
-            let label = format!(
-                "{} / {}",
-                format_token_count(u.used),
-                format_token_count(u.size)
-            );
-            let tip = s::agent_chat_context_tooltip(
-                &format_token_count(u.used),
-                &format_token_count(u.size),
-                pct,
-                &cost,
-            );
+        // Usage tab.
+        .when_some(props.usage.map(context_meter), |row, meter| {
             row.child(
                 div()
                     .id(("agent-chat-context-meter", props.pane_id as usize))
@@ -160,8 +135,8 @@ pub(super) fn activity_bar(
                         theme::agent_chat_fg_muted(cx),
                         props.dim,
                     ))
-                    .child(SharedString::from(label))
-                    .tooltip(crate::ui::tooltip::text(SharedString::from(tip))),
+                    .child(SharedString::from(meter.label))
+                    .tooltip(crate::ui::tooltip::text(SharedString::from(meter.tooltip))),
             )
         })
         .child(
@@ -188,17 +163,45 @@ fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
     )
 }
 
-/// Format an ISO 8601 timestamp (`2026-07-01T14:32:05.000Z`) into a compact
-/// `YYYY-MM-DD HH:MM` for the last-active tooltip. Best-effort by slicing the
-/// canonical shape (date + `HH:MM`); returns the input unchanged when it does
-/// not match, so a non-standard timestamp still shows rather than being dropped.
-fn format_last_active(iso: &str) -> String {
-    match iso.split_once('T') {
-        Some((date, time)) if date.len() == 10 && time.len() >= 5 => {
-            format!("{date} {}", &time[..5])
-        }
-        _ => iso.to_string(),
+/// The context meter's two pieces of copy, derived from one `UsageUpdate`.
+struct ContextMeter {
+    label: String,
+    tooltip: String,
+}
+
+/// Derive the context-meter copy. `checked_div` keeps a size-0 window — seen
+/// before the first real `UsageUpdate` — from dividing by zero.
+fn context_meter(u: &UsageView) -> ContextMeter {
+    let used = format_token_count(u.used);
+    let size = format_token_count(u.size);
+    let percent = u
+        .used
+        .saturating_mul(100)
+        .checked_div(u.size)
+        .map(|p| p.min(100) as u8)
+        .unwrap_or(0);
+    ContextMeter {
+        label: s::agent_chat_context_meter(&used, &size),
+        tooltip: match &u.cost {
+            Some(c) => s::agent_chat_context_tooltip_with_cost(
+                &used,
+                &size,
+                percent,
+                &format!("{:.2}", c.amount),
+                &c.currency,
+            ),
+            None => s::agent_chat_context_tooltip(&used, &size, percent),
+        },
     }
+}
+
+/// The title's tooltip: when this session was last active, in the machine's
+/// local zone. A timestamp we cannot parse shows verbatim — the protocol
+/// promises ISO 8601, which is wider than the RFC 3339 subset we read, so the
+/// agent's own wording beats an empty tooltip.
+fn last_active_tooltip(iso: &str) -> SharedString {
+    let when = timestamp::local_datetime(iso).unwrap_or_else(|| iso.to_owned());
+    SharedString::from(s::agent_chat_last_active_tooltip(&when))
 }
 
 /// Localized banner copy for a runtime-provisioning milestone.
@@ -501,183 +504,4 @@ pub(super) fn working_indicator(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        AgentSessionStatus, banner_offers_reauth, banner_offers_retry, format_elapsed,
-        format_last_active, format_token_count, running_tool_title, single_line_title,
-    };
-    use daruda_acp::{ChatItem, Remedy, ToolCallItem, ToolKindView, ToolStatusView};
-
-    fn errored(remedy: Remedy) -> AgentSessionStatus {
-        AgentSessionStatus::Error {
-            message: "boom".to_owned(),
-            remedy,
-        }
-    }
-
-    /// The whole point of routing the banner through a remedy: an expired
-    /// login used to get a Retry button that reconnected with the same
-    /// credentials and failed identically.
-    #[test]
-    fn banner_withholds_retry_from_failures_it_cannot_fix() {
-        for remedy in [
-            Remedy::Reauthenticate,
-            Remedy::ExternalAction,
-            Remedy::Configure,
-            Remedy::NoneAvailable,
-        ] {
-            assert!(
-                !banner_offers_retry(&errored(remedy), true),
-                "{remedy:?} is not fixed by reconnecting"
-            );
-        }
-    }
-
-    /// The cwd gate belongs to Retry alone. Signing in again fixes an expired
-    /// login whether or not the pane has a working directory, so inheriting
-    /// that gate would hide the button on exactly the failures it can fix.
-    #[test]
-    fn the_reauth_button_does_not_inherit_the_retry_cwd_gate() {
-        assert!(banner_offers_reauth(&errored(Remedy::Reauthenticate)));
-        assert!(!banner_offers_retry(&errored(Remedy::Reauthenticate), true));
-    }
-
-    /// An organization-blocked account is the case this separation exists for:
-    /// signing in again succeeds and changes nothing, so the button must not
-    /// appear next to a message that already says to ask an admin.
-    #[test]
-    fn only_a_reauthenticable_failure_offers_the_button() {
-        for remedy in [
-            Remedy::Retry,
-            Remedy::ExternalAction,
-            Remedy::Configure,
-            Remedy::NoneAvailable,
-        ] {
-            assert!(
-                !banner_offers_reauth(&errored(remedy)),
-                "{remedy:?} is not fixed by signing in again"
-            );
-        }
-    }
-
-    #[test]
-    fn no_status_but_error_offers_a_reauth_button() {
-        for status in [
-            AgentSessionStatus::Idle,
-            AgentSessionStatus::Connecting,
-            AgentSessionStatus::Connected,
-        ] {
-            assert!(!banner_offers_reauth(&status), "{status:?}");
-        }
-    }
-
-    #[test]
-    fn banner_offers_retry_only_for_a_transient_failure_on_a_connectable_pane() {
-        assert!(banner_offers_retry(&errored(Remedy::Retry), true));
-        // Mechanical gate still applies: no cwd, nothing to reconnect to.
-        assert!(!banner_offers_retry(&errored(Remedy::Retry), false));
-    }
-
-    /// Every non-error status renders its own copy and never a retry button.
-    #[test]
-    fn banner_offers_no_retry_outside_the_error_status() {
-        for status in [
-            AgentSessionStatus::Idle,
-            AgentSessionStatus::Connecting,
-            AgentSessionStatus::Connected,
-        ] {
-            assert!(!banner_offers_retry(&status, true), "{status:?}");
-        }
-    }
-
-    #[test]
-    fn single_line_title_collapses_newlines_tabs_and_runs() {
-        assert_eq!(
-            single_line_title("git commit -m \"line one\nline two\""),
-            "git commit -m \"line one line two\""
-        );
-        assert_eq!(single_line_title("  foo\t\tbar \n baz  "), "foo bar baz");
-        assert_eq!(single_line_title("already clean"), "already clean");
-    }
-
-    #[test]
-    fn format_last_active_cases() {
-        for (input, expected) in [
-            ("2026-07-01T14:32:05.123Z", "2026-07-01 14:32"),
-            ("2026-12-25T09:00:00+09:00", "2026-12-25 09:00"),
-            ("not-a-timestamp", "not-a-timestamp"),
-            ("2026-07-01", "2026-07-01"),
-        ] {
-            assert_eq!(format_last_active(input), expected);
-        }
-    }
-
-    fn tool(id: &str, status: ToolStatusView) -> ChatItem {
-        ChatItem::ToolCall(ToolCallItem {
-            id: id.to_owned(),
-            title: format!("Tool {id}"),
-            kind: ToolKindView::Edit,
-            tool_name: None,
-            status,
-            diffs: Vec::new(),
-            output: Vec::new(),
-            raw_input: None,
-            parent_tool_id: None,
-            exit: None,
-        })
-    }
-
-    #[test]
-    fn running_tool_title_cases() {
-        let items = [
-            ChatItem::AssistantText {
-                text: "a".into(),
-                streaming: true,
-                message_id: None,
-            },
-            tool("c1", ToolStatusView::Completed),
-        ];
-        assert_eq!(running_tool_title(&items), None);
-
-        // Settled (Completed) calls are skipped; the latest *live* one wins.
-        // `Pending` counts as live (see `ToolStatusView::is_live`), so a trailing
-        // Pending call outranks an earlier InProgress one.
-        let items = [
-            tool("c1", ToolStatusView::Completed),
-            tool("c2", ToolStatusView::InProgress),
-            tool("c3", ToolStatusView::Pending),
-        ];
-        assert_eq!(running_tool_title(&items), Some("Tool c3".to_owned()));
-    }
-
-    #[test]
-    fn format_elapsed_cases() {
-        for (secs, expected) in [
-            (0, "0s"),
-            (5, "5s"),
-            (60, "1m00s"),
-            (65, "1m05s"),
-            (600, "10m00s"),
-        ] {
-            assert_eq!(
-                format_elapsed(std::time::Duration::from_secs(secs)),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn format_token_count_cases() {
-        for (tokens, expected) in [
-            (0, "0"),
-            (512, "512"),
-            (999, "999"),
-            (1000, "1k"),
-            (1500, "2k"),
-            (53_000, "53k"),
-            (200_000, "200k"),
-        ] {
-            assert_eq!(format_token_count(tokens), expected);
-        }
-    }
-}
+mod tests;

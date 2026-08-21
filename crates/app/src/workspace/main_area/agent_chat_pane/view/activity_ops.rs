@@ -131,6 +131,10 @@ impl AgentChatView {
                 // child is live — so clearing the timestamps cannot change
                 // `any_running`.
                 self.activity.subagent_last_activity.clear();
+                // The adapter can't be the only source of "last active": it
+                // sends `updatedAt` only alongside a *changed* session title,
+                // so the value would freeze once the title settles.
+                self.session_updated_at = Some(crate::surface::timestamp::now_rfc3339());
                 self.activity.pending_completion.take()
             }
             _ => None,

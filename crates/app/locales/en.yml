@@ -44,6 +44,12 @@ common:
   split_agent_chat_horizontal: "Agent Chat — Split Horizontally"
   split_agent_chat_vertical: "Agent Chat — Split Vertically"
 
+# Wall-clock timestamp shapes (`chrono` patterns). en-US reads on a 12-hour
+# clock; see `surface::timestamp`.
+timestamp:
+  date_and_time: "%b %-d, %Y, %-I:%M %p"
+  month_day_and_time: "%b %-d, %-I:%M %p"
+
 # Command palette and quick switchers
 command:
   check_flow: "Check Flow…"
@@ -338,7 +344,9 @@ agent_chat:
   diff_path_copied: "Copied"
   diff_remote_path_unsupported: "Can't open a remote session's file locally."
   last_active_tooltip: "Last active: %{time}"
-  context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)%{cost}"
+  context_meter: "%{used} / %{size}"
+  context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)"
+  context_tooltip_with_cost: "Context: %{used} / %{size} tokens (%{percent}%) · %{amount} %{currency}"
   plan_label: "Plan"
   plan_dismiss: "Dismiss plan"
   subagent_progress: "%{n} subagents"

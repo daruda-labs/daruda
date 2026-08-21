@@ -5,6 +5,7 @@
 //!   * [`keybindings`] — every `KeyBinding` shortcut string
 //!     (key-remap trigger).
 //!   * [`strings`] — menu and dialog labels (localisation trigger).
+//!   * [`timestamp`] — wall-clock timestamp shapes (localisation trigger).
 //!
 //! Terminal-protocol constants (escape sequences, VT codes) live in
 //! `daruda_terminal::{ansi, vt_codes, vt_limits}`. Terminal-view
@@ -15,3 +16,4 @@ pub mod action_map;
 pub mod constants;
 pub mod keybindings;
 pub mod strings;
+pub mod timestamp;

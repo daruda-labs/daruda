@@ -343,6 +343,39 @@ fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
         .unwrap();
 }
 
+/// The tooltip says "last active", so the timestamp has to advance whenever
+/// this pane goes quiet. The adapter sends `updatedAt` only alongside a
+/// *changed* title, so relying on it alone would freeze the value.
+#[gpui::test]
+fn activity_settle_stamps_last_active(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            assert_eq!(
+                view.session_updated_at, None,
+                "a fresh pane has no activity"
+            );
+
+            view.set_turn_in_flight();
+            view.reconcile_activity(std::time::Instant::now());
+            assert_eq!(
+                view.session_updated_at, None,
+                "still working -- the span has not ended yet"
+            );
+
+            view.set_turn_idle();
+            view.reconcile_activity(std::time::Instant::now());
+            let stamped = view
+                .session_updated_at
+                .clone()
+                .expect("the busy->idle settle stamps last-active");
+            // The field feeds `format_last_active`, which parses RFC 3339.
+            chrono::DateTime::parse_from_rfc3339(&stamped)
+                .unwrap_or_else(|e| panic!("stamped {stamped:?} is not RFC 3339: {e}"));
+        })
+        .unwrap();
+}
+
 /// Activity reconciliation turns `is_busy()` into idle->busy / busy->idle
 /// edges, tracks one busy span across contiguous turns, and fires captured
 /// completion exactly once when the pane settles.
