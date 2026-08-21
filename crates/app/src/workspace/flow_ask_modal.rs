@@ -17,7 +17,7 @@ use crate::ui::{WindowExt as _, button_danger, button_primary};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_form_modal;
-use crate::workspace::flow_ops::AskRowData;
+use crate::workspace::flow_rows::AskRowData;
 
 pub(in crate::workspace) struct FlowAskModal {
     lane: daruda_store::project::LaneRef,

@@ -30,7 +30,7 @@ pub(in crate::workspace) struct Row {
     tag: Option<SharedString>,
 }
 
-/// What the picked flow is for. The two entries share one list and one
+/// What the picked flow is for. The three entries share one list and one
 /// overlay, and differ only in what Enter does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum FlowPurpose {
@@ -41,6 +41,28 @@ pub(in crate::workspace) enum FlowPurpose {
     /// lock, and no profile question: a graph is the file's shape, and
     /// which profile a *run* merged under is a question the run answers.
     Graph,
+}
+
+impl FlowPurpose {
+    /// Whether a run already going in this lane stands in the way.
+    ///
+    /// Only a second run is in its way: the lock is what a run holds while
+    /// it owns the lane's working tree, and two schedulers over one tree is
+    /// the thing it exists to prevent. Reading the file to check it or to
+    /// draw it takes nothing the running one holds.
+    pub(in crate::workspace) fn blocked_by_a_running_flow(self) -> bool {
+        matches!(self, FlowPurpose::Run)
+    }
+
+    /// Whether the file's `profiles` are a question worth asking.
+    ///
+    /// A profile is a layer merged over `defaults`, so it decides what a run
+    /// does and therefore what a check has to check — neither can be
+    /// answered without knowing which one. A graph is the file's shape, and
+    /// no layer moves that.
+    pub(in crate::workspace) fn asks_about_profiles(self) -> bool {
+        matches!(self, FlowPurpose::Run | FlowPurpose::Validate)
+    }
 }
 
 /// One flow file, captured when the picker opens.
@@ -55,11 +77,7 @@ pub(in crate::workspace) struct FlowCandidate {
 
 impl FlowCandidate {
     pub fn from_found(found: crate::workspace::flow_paths::FoundFlow) -> Self {
-        let label = found
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let label = crate::workspace::flow_paths::flow_label(&found.path);
         Self {
             path: found.path,
             label,
@@ -286,12 +304,9 @@ impl FlowPicker {
             return strings::flow_picker_prompt_run();
         };
         match (&c.stage, c.purpose) {
-            (Stage::Profiles { flow, .. }, _) => strings::flow_picker_prompt_profile(
-                &flow
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-            ),
+            (Stage::Profiles { flow, .. }, _) => {
+                strings::flow_picker_prompt_profile(&crate::workspace::flow_paths::flow_label(flow))
+            }
             (Stage::Flows { .. }, FlowPurpose::Validate) => strings::flow_picker_prompt_validate(),
             (Stage::Flows { .. }, FlowPurpose::Run) => strings::flow_picker_prompt_run(),
             (Stage::Flows { .. }, FlowPurpose::Graph) => strings::flow_picker_prompt_graph(),
@@ -627,6 +642,19 @@ mod tests {
             panic!("the first question is which flow");
         };
         assert!(path.ends_with("b.yaml"), "{path:?}");
+    }
+
+    /// The table is the specification: one row per purpose, both columns
+    /// explicit, so adding a variant means stating its answers here rather
+    /// than discovering them from a call site.
+    #[test]
+    fn each_purpose_states_what_it_requires() {
+        use FlowPurpose::*;
+        assert_eq!(
+            [Run, Validate, Graph]
+                .map(|p| (p.blocked_by_a_running_flow(), p.asks_about_profiles())),
+            [(true, true), (false, true), (false, false)]
+        );
     }
 
     /// A lane with no flows still opens — with nothing to pick, so Enter

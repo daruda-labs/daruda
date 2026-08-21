@@ -1,20 +1,24 @@
-//! What a lane's past flow runs were, read off disk.
+//! What a lane's past flow runs were, read off disk, and the two entry
+//! points the workspace reaches it through.
 //!
-//! This is the first caller of `daruda_flow::marker::run_status`. v1 left
-//! the function finished and unused, so a crashed run — the one state that
-//! exists only as a *missing* marker — could be seen on disk and nowhere
-//! else.
+//! Disk is the only witness. `daruda_flow::marker::run_status` is what
+//! reads it, because a crashed run exists solely as a *missing* completion
+//! marker — a status derived from what this process still remembers would
+//! report it as never having happened.
 //!
 //! Reading is not free: it lists a directory and stats a few files per run.
 //! So the result is cached per lane and rebuilt only when something makes
-//! it wrong, never per frame. [`FlowHistory::is_stale_for`] is where that
-//! rule lives, and `Workspace::flow_history` is the one field holding it.
+//! it wrong, never per frame. [`super::flow_cache::LaneCache::get`] is
+//! where that rule lives — it answers only for the lane it was read for —
+//! and `Workspace::flow_history` is the one field holding it.
 
 use std::path::{Path, PathBuf};
 
 use daruda_flow::marker::RunStatus;
 use daruda_store::project::LaneRef;
 use gpui::SharedString;
+
+use super::Workspace;
 
 /// One past run, in the shape the panel draws.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,12 +35,12 @@ pub(in crate::workspace) struct FlowRunEntry {
     pub status: RunStatus,
 }
 
-/// One lane's history, and which lane it is. The pair is the whole cache:
-/// a list without its lane would be shown beside the wrong runs after a
-/// lane switch, which is the failure this type exists to make impossible.
+/// One lane's runs, newest first.
+///
+/// Which lane is [`super::flow_cache::LaneCache`]'s to answer: it holds the
+/// pair, so a list read for one lane cannot be handed out for another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct FlowHistory {
-    lane: LaneRef,
     runs: Vec<FlowRunEntry>,
 }
 
@@ -46,7 +50,7 @@ impl FlowHistory {
     /// Sorted by directory name, which is chronological only because the
     /// host names runs with a leading fixed-width millisecond field — the
     /// same property `daruda_flow`'s retention sweep depends on.
-    pub(in crate::workspace) fn read(lane: LaneRef, runs_dir: &Path) -> Self {
+    pub(in crate::workspace) fn read(runs_dir: &Path) -> Self {
         let mut names: Vec<PathBuf> = std::fs::read_dir(runs_dir)
             .into_iter()
             .flatten()
@@ -58,16 +62,15 @@ impl FlowHistory {
         names.reverse();
 
         let runs = names.into_iter().map(|dir| entry_for(&dir)).collect();
-        Self { lane, runs }
+        Self { runs }
     }
 
     /// A history for `--screenshot`. A run that was killed only exists as a
     /// particular arrangement of files, and a capture cannot make one
     /// without writing into whichever repository happens to be open.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn for_shot(lane: LaneRef, dir: PathBuf) -> Self {
+    pub(in crate::workspace) fn for_shot(dir: PathBuf) -> Self {
         Self {
-            lane,
             runs: vec![
                 FlowRunEntry {
                     dir: dir.join("0000019fee7d80b8-00005ad5-0003"),
@@ -88,9 +91,40 @@ impl FlowHistory {
     pub(in crate::workspace) fn runs(&self) -> &[FlowRunEntry] {
         &self.runs
     }
+}
 
-    pub(in crate::workspace) fn lane(&self) -> LaneRef {
-        self.lane
+impl Workspace {
+    /// The active lane's past runs, reading them if the cache cannot
+    /// answer. The **one** place the history is built.
+    ///
+    /// Derived here rather than pushed from each transition: the active
+    /// lane changes at five call sites (activate, project add / close /
+    /// rename, restore), and a refresh hook on each is a set the next one
+    /// forgets to join. Asking the cache whose lane it holds cannot be
+    /// forgotten.
+    ///
+    /// Reads disk only when the Flows tab is showing and the cache is
+    /// absent or built for another lane — so a tab the user is not on
+    /// costs nothing, and the tab they are on costs one listing per
+    /// change rather than one per frame.
+    pub(in crate::workspace) fn flow_history_for_panel(&mut self) -> Option<FlowHistory> {
+        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
+            return None;
+        }
+        let lane = self.active;
+        if self.flow_history.get(lane).is_none() {
+            let cwd = self.active_lane_root()?;
+            let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd));
+            self.flow_history.put(lane, read);
+        }
+        self.flow_history.get(lane).cloned()
+    }
+
+    /// Drop the cached history so the next snapshot reads disk again.
+    /// Scoped to the lane it happened in — another lane's run says nothing
+    /// about this lane's directory.
+    pub(in crate::workspace) fn invalidate_flow_history(&mut self, lane: LaneRef) {
+        self.flow_history.invalidate_for(lane);
     }
 }
 
@@ -113,10 +147,10 @@ fn entry_for(dir: &Path) -> FlowRunEntry {
     }
 }
 
-/// A run refused before the lock wrote no report, and opening a path that
-/// is not there would replace the question with an unrelated complaint
-/// about a missing file.
-fn report_in(dir: &Path) -> Option<PathBuf> {
+/// The report a run directory holds, if it wrote one. Stat'ed rather than
+/// taken on trust: opening a path that is not there would replace whatever
+/// the caller had to say with an unrelated complaint about a missing file.
+pub(super) fn report_in(dir: &Path) -> Option<PathBuf> {
     let report = dir.join(daruda_flow::record::RUN_REPORT_FILE);
     report.is_file().then_some(report)
 }
@@ -124,13 +158,6 @@ fn report_in(dir: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn lane() -> LaneRef {
-        LaneRef {
-            project: 0,
-            lane: 0,
-        }
-    }
 
     /// A run directory named the way the host names them, optionally with
     /// a completion marker.
@@ -156,7 +183,7 @@ mod tests {
         // No marker and no lock: nothing says what happened.
         run_dir(runs, 1, None);
 
-        let statuses: Vec<RunStatus> = FlowHistory::read(lane(), runs)
+        let statuses: Vec<RunStatus> = FlowHistory::read(runs)
             .runs()
             .iter()
             .map(|r| r.status)
@@ -184,7 +211,7 @@ mod tests {
             run_dir(runs, millis, Some("DONE"));
         }
 
-        let read = FlowHistory::read(lane(), runs);
+        let read = FlowHistory::read(runs);
         let times: Vec<&str> = read.runs().iter().map(|r| r.started.as_ref()).collect();
         let mut descending = times.clone();
         descending.sort();
@@ -197,7 +224,7 @@ mod tests {
     #[test]
     fn a_lane_that_never_ran_a_flow_reads_empty() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let read = FlowHistory::read(lane(), &tmp.path().join("never-created"));
+        let read = FlowHistory::read(&tmp.path().join("never-created"));
         assert!(read.runs().is_empty());
     }
 
@@ -216,7 +243,7 @@ mod tests {
         .expect("report");
         run_dir(runs, 1, Some("FAILED"));
 
-        let read = FlowHistory::read(lane(), runs);
+        let read = FlowHistory::read(runs);
         let reports: Vec<bool> = read.runs().iter().map(|r| r.report.is_some()).collect();
         assert_eq!(reports, vec![true, false]);
     }
@@ -227,7 +254,7 @@ mod tests {
     fn a_directory_that_is_not_a_run_id_shows_no_time() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("scratch")).expect("mkdir");
-        let read = FlowHistory::read(lane(), tmp.path());
+        let read = FlowHistory::read(tmp.path());
         assert_eq!(read.runs().len(), 1);
         assert!(read.runs()[0].started.is_empty(), "invented a start time");
     }

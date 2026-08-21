@@ -11,8 +11,15 @@
 //! opening the same repo should see the same flows. That is the same
 //! reasoning `task_edit_pane`'s `.daruda/task-*.md` files are whitelisted
 //! under.
+//!
+//! [`FlowOrigin`] is defined here, and so are the words that name one: the
+//! panel row and the delete dialog both have to say which of the three
+//! directories a file came from, and neither of those two callers can own the
+//! wording without the other importing it sideways.
 
 use std::path::{Path, PathBuf};
+
+use crate::surface::strings as s;
 
 /// Per-repository daruda directory, checked in with the repo.
 const REPO_DIR: &str = ".daruda";
@@ -31,6 +38,19 @@ const FLOW_EXT_DOT: &str = ".yaml";
 
 pub(in crate::workspace) fn flows_dir(lane_cwd: &Path) -> PathBuf {
     lane_cwd.join(REPO_DIR).join(FLOWS_DIR)
+}
+
+/// What a flow is called on screen: the file name as it is on disk.
+///
+/// One function because this name is on the panel row, the tab, the delete
+/// dialog, the toast and a rename's initial value at once. The fallback is the
+/// whole path rather than nothing: a restored pane takes its path straight from
+/// persisted JSON with nothing checking it, and a tab titled "" says less than
+/// one titled with a path that looks wrong.
+pub(in crate::workspace) fn flow_label(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// Flows that belong to the person rather than to a repository, usable
@@ -75,6 +95,31 @@ pub(in crate::workspace) enum FlowOrigin {
     Global,
 }
 
+/// What the origin word for a flow is, on a row and in a dialog about it.
+pub(in crate::workspace) fn origin_label(origin: FlowOrigin) -> String {
+    match origin {
+        FlowOrigin::Repo => s::right_panel_flow_origin_repo(),
+        FlowOrigin::Project => s::right_panel_flow_origin_project(),
+        FlowOrigin::Global => s::right_panel_flow_origin_global(),
+    }
+}
+
+/// What the delete dialog says about a flow.
+///
+/// It names the origin because three directories can hold the same file name —
+/// the row says which one it is, and a dialog that dropped that would ask about
+/// `deploy.yaml` when two of them exist.
+///
+/// The repository's gets its own sentence, and not the one a warning would use:
+/// a committed file is the *recoverable* case, and what the person actually
+/// needs told is that the deletion lands in the working tree for everyone.
+pub(in crate::workspace) fn delete_confirm_body(name: &str, origin: FlowOrigin) -> String {
+    match origin {
+        FlowOrigin::Repo => s::flow_delete_confirm_body_repo(name),
+        other => s::flow_delete_confirm_body(name, &origin_label(other)),
+    }
+}
+
 /// A flow file and where it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct FoundFlow {
@@ -86,44 +131,72 @@ pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
     lane_cwd.join(REPO_DIR).join(RUNS_DIR)
 }
 
-/// Every flow this lane can run, by name, sorted — the repository's and
-/// the person's own together.
+/// Where this lane's runnable flows come from.
 ///
-/// A union rather than a fallback: "use the global ones only when the repo
-/// has none" means authoring a single repo flow makes every global one
-/// vanish from the picker, which is a cliff nobody asked for. The repo
-/// still has the last word where it has an opinion — see [`merge_flows`].
-/// `global_dir` is passed rather than resolved here: a caller holds it (see
-/// `Workspace::global_flows_dir`), so what the picker offers is decided by
-/// state a test can set and not by whatever the machine happens to have.
-pub(in crate::workspace) fn list_flows(
-    lane_cwd: &Path,
-    project_dir: &Path,
-    global_dir: &Path,
-) -> Vec<FoundFlow> {
-    merge_flows(
-        flow_files_in(&flows_dir(lane_cwd)),
-        flow_files_in(project_dir),
-        flow_files_in(global_dir),
-    )
+/// Named because the three paths are not interchangeable: `lane` is a lane
+/// root and the other two are already-resolved flow directories, so a
+/// consumer holding a bare tuple had to remember which one still needed
+/// [`flows_dir`] applied. `project` is optional rather than empty — a lane
+/// with no project has no project directory, and a placeholder path would be
+/// read and watched as though it were a real one.
+#[derive(Clone, Debug)]
+pub(in crate::workspace) struct FlowSources {
+    pub lane: PathBuf,
+    pub project: Option<PathBuf>,
+    pub global: PathBuf,
 }
 
-/// Narrowest scope wins a name: repo, then project, then global. Sorted by
-/// file name so the list reads alphabetically whatever each entry's origin is
-/// — sorting by path would clump them by directory, which is an ordering
-/// nobody is looking for.
+impl FlowSources {
+    /// Every directory to read or watch, narrowest scope first, with the
+    /// origin a file found there carries.
+    ///
+    /// The one place [`flows_dir`] is applied to the lane root, so listing
+    /// and watching cannot end up anchored on different directories. The
+    /// origin travels along because listing needs it; the watcher drops it.
+    pub(in crate::workspace) fn dirs(&self) -> Vec<(PathBuf, FlowOrigin)> {
+        let mut dirs = vec![(flows_dir(&self.lane), FlowOrigin::Repo)];
+        dirs.extend(
+            self.project
+                .iter()
+                .map(|dir| (dir.clone(), FlowOrigin::Project)),
+        );
+        dirs.push((self.global.clone(), FlowOrigin::Global));
+        dirs
+    }
+
+    /// Every flow this lane can run, by name, sorted — the repository's and
+    /// the person's own together.
+    ///
+    /// A union rather than a fallback: "use the global ones only when the repo
+    /// has none" means authoring a single repo flow makes every global one
+    /// vanish from the picker, which is a cliff nobody asked for. The repo
+    /// still has the last word where it has an opinion — see [`merge_flows`].
+    /// The global directory is a field rather than resolved here: a caller
+    /// fills it in (see `Workspace::flow_sources`), so what the picker offers
+    /// is decided by state a test can set and not by whatever the machine
+    /// happens to have.
+    pub(in crate::workspace) fn list_flows(&self) -> Vec<FoundFlow> {
+        merge_flows(
+            self.dirs()
+                .into_iter()
+                .map(|(dir, origin)| (flow_files_in(&dir), origin))
+                .collect(),
+        )
+    }
+}
+
+/// Narrowest scope wins a name, which is the order `groups` arrives in.
+/// Sorted by file name so the list reads alphabetically whatever each entry's
+/// origin is — sorting by path would clump them by directory, which is an
+/// ordering nobody is looking for.
 ///
 /// The precedence is the same reasoning as the config layers (project section
 /// replaces user section): the closer a flow is to the repository, the more
 /// specifically it was meant for it.
-fn merge_flows(repo: Vec<PathBuf>, project: Vec<PathBuf>, global: Vec<PathBuf>) -> Vec<FoundFlow> {
+fn merge_flows(groups: Vec<(Vec<PathBuf>, FlowOrigin)>) -> Vec<FoundFlow> {
     let mut found: Vec<FoundFlow> = Vec::new();
     let mut claimed: Vec<std::ffi::OsString> = Vec::new();
-    for (paths, origin) in [
-        (repo, FlowOrigin::Repo),
-        (project, FlowOrigin::Project),
-        (global, FlowOrigin::Global),
-    ] {
+    for (paths, origin) in groups {
         for path in paths {
             let Some(name) = path.file_name().map(|n| n.to_os_string()) else {
                 continue;
@@ -230,6 +303,16 @@ mod tests {
         dir
     }
 
+    /// The three sources as a lane actually holds them. `project: None` is
+    /// the ordinary case of a lane whose project has authored nothing.
+    fn sources(lane: &Path, project: Option<&Path>, global: &Path) -> FlowSources {
+        FlowSources {
+            lane: lane.to_path_buf(),
+            project: project.map(|p| p.to_path_buf()),
+            global: global.to_path_buf(),
+        }
+    }
+
     fn names(found: &[FoundFlow]) -> Vec<String> {
         found
             .iter()
@@ -244,11 +327,7 @@ mod tests {
         let lane = lane_with(&["b.yaml", "a.yaml", "notes.md", "c.yml"]);
         let global = tempfile::tempdir().expect("tempdir");
         assert_eq!(
-            names(&list_flows(
-                lane.path(),
-                std::path::Path::new("/nonexistent-project-flows"),
-                global.path()
-            )),
+            names(&sources(lane.path(), None, global.path()).list_flows()),
             vec!["a.yaml", "b.yaml", "c.yml"]
         );
     }
@@ -260,12 +339,9 @@ mod tests {
         let lane = tempfile::tempdir().expect("tempdir");
         let global = tempfile::tempdir().expect("tempdir");
         assert!(
-            list_flows(
-                lane.path(),
-                std::path::Path::new("/nonexistent-project-flows"),
-                global.path()
-            )
-            .is_empty()
+            sources(lane.path(), None, global.path())
+                .list_flows()
+                .is_empty()
         );
     }
 
@@ -276,11 +352,7 @@ mod tests {
         let lane = lane_with(&["b.yaml"]);
         let global = global_with(&["a.yaml", "c.yaml"]);
 
-        let found = list_flows(
-            lane.path(),
-            std::path::Path::new("/nonexistent-project-flows"),
-            global.path(),
-        );
+        let found = sources(lane.path(), None, global.path()).list_flows();
         assert_eq!(names(&found), vec!["a.yaml", "b.yaml", "c.yaml"]);
         assert_eq!(
             found.iter().map(|f| f.origin).collect::<Vec<_>>(),
@@ -296,11 +368,7 @@ mod tests {
         let lane = lane_with(&["ship.yaml"]);
         let global = global_with(&["ship.yaml", "ship.yml"]);
 
-        let found = list_flows(
-            lane.path(),
-            std::path::Path::new("/nonexistent-project-flows"),
-            global.path(),
-        );
+        let found = sources(lane.path(), None, global.path()).list_flows();
         assert_eq!(names(&found), vec!["ship.yaml", "ship.yml"]);
         assert_eq!(found[0].origin, FlowOrigin::Repo);
         assert!(found[0].path.starts_with(lane.path()));
@@ -314,11 +382,7 @@ mod tests {
         let lane = tempfile::tempdir().expect("tempdir");
         let global = global_with(&["a.yaml", "notes.md"]);
         assert_eq!(
-            names(&list_flows(
-                lane.path(),
-                std::path::Path::new("/nonexistent-project-flows"),
-                global.path()
-            )),
+            names(&sources(lane.path(), None, global.path()).list_flows()),
             ["a.yaml"]
         );
     }
@@ -343,7 +407,7 @@ mod tests {
         std::fs::write(project.path().join("only-project.yaml"), "x").expect("write");
         std::fs::write(global.path().join("only-global.yaml"), "x").expect("write");
 
-        let found = list_flows(lane.path(), project.path(), global.path());
+        let found = sources(lane.path(), Some(project.path()), global.path()).list_flows();
         assert_eq!(
             names(&found),
             ["only-global.yaml", "only-project.yaml", "shared.yaml"]
@@ -360,12 +424,37 @@ mod tests {
 
         // Without the repo copy, the project's beats the global one.
         std::fs::remove_file(repo_flows.join("shared.yaml")).expect("rm");
-        let found = list_flows(lane.path(), project.path(), global.path());
+        let found = sources(lane.path(), Some(project.path()), global.path()).list_flows();
         let shared = found
             .iter()
             .find(|f| f.path.ends_with("shared.yaml"))
             .expect("still listed");
         assert_eq!(shared.origin, FlowOrigin::Project);
+    }
+
+    /// A lane whose project has no directory contributes nothing — the list
+    /// is two entries, not three with a placeholder. A stand-in path would be
+    /// read for flows and handed to the watcher as if it named somewhere.
+    /// The lane root arrives resolved, so no caller applies `flows_dir` again.
+    #[test]
+    fn a_lane_without_a_project_offers_two_directories() {
+        let lane = Path::new("/w");
+        let global = Path::new("/g");
+        assert_eq!(
+            sources(lane, None, global).dirs(),
+            vec![
+                (flows_dir(lane), FlowOrigin::Repo),
+                (global.to_path_buf(), FlowOrigin::Global),
+            ]
+        );
+        assert_eq!(
+            sources(lane, Some(Path::new("/p")), global).dirs(),
+            vec![
+                (flows_dir(lane), FlowOrigin::Repo),
+                (PathBuf::from("/p"), FlowOrigin::Project),
+                (global.to_path_buf(), FlowOrigin::Global),
+            ]
+        );
     }
 
     /// What a person types becomes a file name, or says why it cannot.
@@ -398,6 +487,39 @@ mod tests {
         assert_eq!(
             flow_file_name_in(dir.path(), "other"),
             Ok(dir.path().join("other.yaml"))
+        );
+    }
+
+    /// The trap the origin column exists for: two directories holding
+    /// `deploy.yaml`, and a dialog that says only the name.
+    #[test]
+    fn the_delete_dialog_says_which_of_the_same_name_goes() {
+        let project = delete_confirm_body("deploy.yaml", FlowOrigin::Project);
+        let global = delete_confirm_body("deploy.yaml", FlowOrigin::Global);
+        assert_ne!(project, global);
+        assert!(
+            project.contains(&origin_label(FlowOrigin::Project)),
+            "{project}"
+        );
+        assert!(
+            global.contains(&origin_label(FlowOrigin::Global)),
+            "{global}"
+        );
+    }
+
+    /// The repository's copy is not the dangerous one — git has it — so it is
+    /// told apart for what it does say: the deletion reaches the working tree.
+    #[test]
+    fn the_repository_copy_gets_its_own_sentence() {
+        let repo = delete_confirm_body("deploy.yaml", FlowOrigin::Repo);
+        assert!(repo.contains("deploy.yaml"), "{repo}");
+        // Against the shared sentence carrying the word `repo`, not against
+        // another origin's: an origin word alone makes those differ, so a test
+        // comparing them would pass with the repository arm gone.
+        assert_ne!(
+            repo,
+            s::flow_delete_confirm_body("deploy.yaml", &origin_label(FlowOrigin::Repo)),
+            "the repository's copy fell back to the shared sentence"
         );
     }
 }

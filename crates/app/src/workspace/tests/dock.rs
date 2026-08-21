@@ -147,3 +147,66 @@ fn notify_docks_safe_while_dock_is_leased(cx: &mut TestAppContext) {
         });
     });
 }
+
+/// Every "show me this right panel" action opens the dock, not just the tab.
+///
+/// `set_right_dock_view` moves the tab selection and returns early when that
+/// view is already selected, so an affordance built on it alone shows nothing
+/// while the dock is closed — and closed is how it starts. Each action below
+/// was written that way; the assertion that catches it is `is_open`, not the
+/// view, which is why asserting the view is not enough on its own.
+#[gpui::test]
+fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext) {
+    use crate::workspace::{
+        FocusSkillSearch, SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks,
+        SwitchRightPanelTools, SwitchRightPanelUsage,
+    };
+
+    let (wh, ws) = build_workspace(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Each action is checked from a closed dock, or the assertion
+            // below would hold for a handler that only ever moves the tab.
+            let mut check =
+                |view: RightDockView,
+                 act: &mut dyn FnMut(&mut Workspace, &mut Context<Workspace>)| {
+                    if ws_is_open(ws, cx) {
+                        ws.right_dock.update(cx, |d, _| d.toggle());
+                    }
+                    assert!(!ws_is_open(ws, cx), "the fixture left the dock open");
+                    act(ws, cx);
+                    assert!(
+                        ws_is_open(ws, cx),
+                        "{view:?} was selected behind a closed dock, so nothing was shown"
+                    );
+                    assert_eq!(ws.right_dock_view, view);
+                };
+
+            check(RightDockView::Usage, &mut |ws, cx| {
+                ws.on_switch_right_panel_usage(&SwitchRightPanelUsage, window, cx)
+            });
+            check(RightDockView::Skills, &mut |ws, cx| {
+                ws.on_switch_right_panel_skills(&SwitchRightPanelSkills, window, cx)
+            });
+            check(RightDockView::Tools, &mut |ws, cx| {
+                ws.on_switch_right_panel_tools(&SwitchRightPanelTools, window, cx)
+            });
+            check(RightDockView::Tasks, &mut |ws, cx| {
+                ws.on_switch_right_panel_tasks(&SwitchRightPanelTasks, window, cx)
+            });
+            check(RightDockView::Flows, &mut |ws, cx| {
+                ws.on_switch_right_panel_flows(&SwitchRightPanelFlows, window, cx)
+            });
+            // `Cmd+/` promises the query box, which is not rendered at all
+            // while the dock is shut.
+            check(RightDockView::Skills, &mut |ws, cx| {
+                ws.on_focus_skill_search(&FocusSkillSearch, window, cx)
+            });
+        });
+    })
+    .expect("the test window is live");
+}
+
+fn ws_is_open(ws: &Workspace, cx: &gpui::App) -> bool {
+    ws.right_dock.read(cx).is_open
+}

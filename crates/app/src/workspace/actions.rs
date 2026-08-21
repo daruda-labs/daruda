@@ -180,7 +180,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_skills(
@@ -189,7 +189,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tools(
@@ -198,7 +198,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Tools, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Tools, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tasks(
@@ -207,7 +207,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_flows(
@@ -216,7 +216,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
     }
 
     pub(in crate::workspace) fn on_new_skill(
@@ -225,7 +225,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
         crate::workspace::right_dock::skills::open_create_skill_modal(self, None, window, cx);
     }
 
@@ -280,7 +280,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
         let handle = self.skill_search_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
     }

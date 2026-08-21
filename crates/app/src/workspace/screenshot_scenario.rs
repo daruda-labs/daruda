@@ -204,18 +204,19 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::FlowAsking => {
             workspace.update(cx, |ws, cx| {
-                // The tab too: the panel is where the question is answered,
-                // and a capture would otherwise show whichever tab was last
-                // persisted.
-                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+                // The panel too: it is where the question is answered, and a
+                // capture would otherwise inherit whichever tab and dock width
+                // were last persisted.
+                ws.reveal_flows_panel(cx);
                 ws.seed_flow_run_for_shot(true, window, cx);
             });
         }
         ScreenshotScenario::FlowDeleteConfirm => {
-            workspace.update(cx, |ws, cx| {
-                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
-            });
-            crate::workspace::right_dock::flows::ask_before_deleting(
+            // The list the dialog was raised from is the context that says
+            // which flow is about to go; the dialog itself is an overlay
+            // above it either way.
+            workspace.update(cx, |ws, cx| ws.reveal_flows_panel(cx));
+            crate::workspace::flow_file_ops::ask_before_deleting(
                 std::path::PathBuf::from(FLOW_DELETE_SAMPLE_NAME),
                 FLOW_DELETE_SAMPLE_NAME,
                 crate::workspace::flow_paths::FlowOrigin::Repo,
@@ -248,11 +249,10 @@ pub(crate) fn drive(
         ScreenshotScenario::MermaidLightbox => open_mermaid_lightbox_sample(window, cx),
         ScreenshotScenario::FlowGraph => {
             workspace.update(cx, |ws, cx| {
-                // The panel too, and the dock it lives in: the list is where a
-                // flow is opened from, and a capture that inherited a collapsed
-                // dock would show the graph with no way to have reached it.
-                ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
-                ws.right_dock.update(cx, |d, _| d.open());
+                // The panel too: the list is where a flow is opened from, and a
+                // capture that inherited a collapsed dock would show the graph
+                // with no way to have reached it.
+                ws.reveal_flows_panel(cx);
                 ws.open_first_flow_graph_for_shot(window, cx);
             });
         }

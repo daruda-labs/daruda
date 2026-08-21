@@ -1,10 +1,22 @@
-//! Running a flow from the app: the picker, static checking, submission,
-//! and the stop switch.
+//! Running a flow from the app, start to finish: the picker funnel (the
+//! guard, the profile question, the dispatch), the static check that can
+//! refuse before anything is spawned, submission and resume, the stop
+//! switch, and the two ways to a run that is no longer in front of you —
+//! the panel it belongs to and the report it wrote. Every refusal along
+//! the way is worded in one place here, so a flow that cannot run says why
+//! in the same voice however it was started.
 //!
 //! The engine's `execute` blocks, so a run owns a thread and the workspace
 //! owns its [`CancelToken`]. Everything the run has to say comes back on
 //! one `FlowEvent` stream — there is no second completion channel, because
-//! two would be two things to keep in step.
+//! two would be two things to keep in step. Draining that stream, and the
+//! questions beside it, is [`super::flow_events`]'s; a live run's display
+//! shape is [`super::flow_rows`]'s, and a finished one's is
+//! [`super::flow_history`]'s.
+//!
+//! The `--screenshot` and test seeds reach run state directly rather than
+//! by starting a flow: a capture or a test that submitted a real one would
+//! leave a run directory behind in whichever repository was open.
 
 use std::path::{Path, PathBuf};
 
@@ -16,45 +28,12 @@ use gpui::{Context, Window};
 use super::Workspace;
 use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::flow_request::{FlowSubmission, FlowSubmitError, union_strip_env};
-use super::flow_runs::{Advanced, Parked, ParkedAsk, RunHandle, RunStage};
+use super::flow_runs::RunHandle;
+// Only the seeded runs name a stage outright; a real one gets there through
+// the event pump.
+#[cfg(any(test, feature = "screenshot"))]
+use super::flow_runs::RunStage;
 use crate::surface::strings as s;
-
-/// One running flow, flattened for the render pass.
-///
-/// Shared by the two surfaces that draw runs — the status bar chip, which
-/// lists every lane, and the Flows panel, which lists one. They differ in
-/// which rows they get, not in what a row is.
-///
-/// `PartialEq` without `Eq`: the adapter's permission choices carry only
-/// `PartialEq`, and the one thing this derive is for — the right dock's
-/// notify-on-change diff — needs nothing more.
-#[derive(Clone, Debug, PartialEq)]
-pub(in crate::workspace) struct FlowRunRow {
-    pub lane: daruda_store::project::LaneRef,
-    /// `<project>/<lane>` — a run in another lane is the case the chip
-    /// exists for, so the row has to say which lane it is.
-    pub lane_label: gpui::SharedString,
-    /// What that run is doing, already worded (see `RunStage`).
-    pub doing: gpui::SharedString,
-    /// The question this run is waiting on, projected for display. The
-    /// reply channel stays behind in [`super::flow_runs`] — the snapshot is compared
-    /// field by field (`RightDockSnapshot::content_differs`) and a channel
-    /// has no equality, so it could not travel here even if it should.
-    pub asking: Option<AskRowData>,
-    /// How many more are behind the one being shown. Zero for a run with a
-    /// single question, which is every serial run.
-    pub also_waiting: usize,
-}
-
-/// A parked question in the shape a surface draws, plus the id an answer
-/// has to quote back.
-#[derive(Clone, Debug, PartialEq)]
-pub(in crate::workspace) struct AskRowData {
-    pub ask_id: u64,
-    pub tool: gpui::SharedString,
-    pub detail: Option<gpui::SharedString>,
-    pub options: Vec<daruda_acp::PermissionChoice>,
-}
 
 impl Workspace {
     // ---- Picker ----
@@ -92,7 +71,7 @@ impl Workspace {
         }
         let listed = self
             .flow_sources()
-            .map(|(cwd, project, global)| super::flow_paths::list_flows(&cwd, &project, &global))
+            .map(|sources| sources.list_flows())
             .unwrap_or_default();
         self.flow_picker.open(purpose, listed);
         cx.notify();
@@ -110,24 +89,30 @@ impl Workspace {
             self.report_flow_refusal(FlowSubmitError::NoLane, cx);
             return false;
         };
-        match (purpose, self.lane_holder(&cwd)) {
+        // A purpose no running flow stands in the way of does not read the
+        // lock at all: `lane_holder` goes to disk and then probes the pid it
+        // names, for an answer that could not change the outcome.
+        if !purpose.blocked_by_a_running_flow() {
+            return true;
+        }
+        match self.lane_holder(&cwd) {
             // The stop switch is a `CancelToken`, so the only run we can
             // stop is one whose token we are holding — for *this* lane.
             // The map is the authority, not the lock's pid: a token for
             // another lane belongs to this process too and would not stop
             // this one.
-            (FlowPurpose::Run, Some(_)) if self.runs.is_running(self.active) => {
+            Some(_) if self.runs.is_running(self.active) => {
                 self.flow_picker = FlowPicker::Stopping;
                 cx.notify();
                 false
             }
             // Offering "stop it" for a run we cannot reach would be a
             // button that does nothing.
-            (FlowPurpose::Run, Some(holder)) => {
+            Some(holder) => {
                 self.report_flow_refusal(FlowSubmitError::LockHeld { pid: holder.pid }, cx);
                 false
             }
-            _ => true,
+            None => true,
         }
     }
 
@@ -208,7 +193,7 @@ impl Workspace {
         // A flow that declares profiles has one more question to answer, so the
         // picker comes up for it — even when nothing opened the picker to begin
         // with. Everything else is decided.
-        if purpose != FlowPurpose::Graph {
+        if purpose.asks_about_profiles() {
             let profiles = flow_profiles(&path);
             if !profiles.is_empty() {
                 self.flow_picker.ask_profile(purpose, path, profiles);
@@ -251,7 +236,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = file_label(path);
+        let name = super::flow_paths::flow_label(path);
         let (title, body) = match self.check_flow(path, profile, cx) {
             Ok(issues) if issues.is_empty() => (s::flow_valid_title(), s::flow_valid_body(&name)),
             Ok(issues) => (
@@ -376,86 +361,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Every run this window started, in the shape the status bar draws.
-    /// Across lanes on purpose — a run the user cannot currently see is
-    /// exactly what the chip is for.
-    pub(in crate::workspace) fn flow_status_rows(&self) -> Vec<FlowRunRow> {
-        self.flow_rows_matching(|_| true)
-    }
-
-    /// The runs in the lane the right dock is showing. The panel answers
-    /// questions and opens run directories, and both of those belong to one
-    /// lane — `flow-runs/` is per working directory, so a panel spanning
-    /// lanes could not show a coherent history beside them.
-    pub(in crate::workspace) fn flow_rows_for_active_lane(&self) -> Vec<FlowRunRow> {
-        let active = self.active;
-        self.flow_rows_matching(|lane| lane == active)
-    }
-
-    /// The one place a run becomes a row, so the two surfaces cannot drift
-    /// in how they word a stage or order themselves.
-    fn flow_rows_matching(
-        &self,
-        keep: impl Fn(daruda_store::project::LaneRef) -> bool,
-    ) -> Vec<FlowRunRow> {
-        let mut rows: Vec<FlowRunRow> = self
-            .runs
-            .iter()
-            .filter(|(lane, _)| keep(*lane))
-            .map(|(lane, handle)| FlowRunRow {
-                lane,
-                lane_label: self.lane_label_for(lane).into(),
-                doing: handle.doing.describe().into(),
-                asking: match &handle.doing {
-                    RunStage::Asking { question, .. } => Some(AskRowData {
-                        ask_id: question.ask_id,
-                        tool: question.tool.clone().into(),
-                        detail: question.detail.clone().map(Into::into),
-                        options: question.options.clone(),
-                    }),
-                    _ => None,
-                },
-                also_waiting: match &handle.doing {
-                    RunStage::Asking { queued, .. } => queued.len(),
-                    _ => 0,
-                },
-            })
-            .collect();
-        // A `HashMap` has no order, and a surface that reshuffles every
-        // repaint is unreadable.
-        rows.sort_by(|a, b| a.lane_label.cmp(&b.lane_label));
-        rows
-    }
-
-    /// The active lane's past runs, reading them if the cache cannot
-    /// answer. The **one** place the history is built.
-    ///
-    /// Derived here rather than pushed from each transition: the active
-    /// lane changes at five call sites (activate, project add / close /
-    /// rename, restore), and a refresh hook on each is a set the next one
-    /// forgets to join. Comparing against the cache's own lane cannot be
-    /// forgotten.
-    ///
-    /// Reads disk only when the Flows tab is showing and the cache is
-    /// absent or built for another lane — so a tab the user is not on
-    /// costs nothing, and the tab they are on costs one listing per
-    /// change rather than one per frame.
-    pub(in crate::workspace) fn flow_history_for_panel(
-        &mut self,
-    ) -> Option<super::flow_history::FlowHistory> {
-        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
-            return None;
-        }
-        let lane = self.active;
-        if self.flow_history.get(lane).is_none() {
-            let cwd = self.active_lane_root()?;
-            let read =
-                super::flow_history::FlowHistory::read(lane, &super::flow_paths::runs_dir(&cwd));
-            self.flow_history.put(lane, read);
-        }
-        self.flow_history.get(lane).cloned()
-    }
-
     /// Bring the run in `lane` into view: switch to its lane if needed,
     /// open the right dock, and show the Flows tab.
     ///
@@ -473,12 +378,24 @@ impl Workspace {
         if self.active != lane {
             self.activate_lane(lane, window, cx);
         }
-        self.mutate_durable(cx, |ws, cx| {
-            ws.right_dock.update(cx, |d, _| d.open());
-            ws.main_area.pending_resize = true;
-        });
-        self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
-        cx.notify();
+        self.reveal_flows_panel(cx);
+    }
+
+    /// Bring the Flows panel into view: the dock open, the main area told to
+    /// re-measure, and the panel selected.
+    ///
+    /// A named op rather than the steps at each surface, because a copy that
+    /// does two of the three shows nothing: the tab alone lands behind a
+    /// collapsed dock, and a dock opened without `pending_resize` leaves the
+    /// main area measured for the width it had before the panel appeared, so
+    /// a terminal beside it keeps its old column count. The repaint belongs
+    /// here for the same reason — `set_right_dock_view` returns early when
+    /// Flows is already the tab, and then only the dock width moved.
+    ///
+    /// Lane switching is the caller's: a run worth revealing may live in
+    /// another lane, while the capture paths want the lane they are on.
+    pub(in crate::workspace) fn reveal_flows_panel(&mut self, cx: &mut Context<Self>) {
+        self.reveal_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
     }
 
     /// Open a past run's narrative in the active lane. The same view a run
@@ -500,243 +417,18 @@ impl Workspace {
         );
     }
 
-    /// Drop the cached history so the next snapshot reads disk again.
-    /// Scoped to the lane it happened in — another lane's run says nothing
-    /// about this lane's directory.
-    fn invalidate_flow_history(&mut self, lane: daruda_store::project::LaneRef) {
-        self.flow_history.invalidate_for(lane);
-    }
-
-    /// `<project> / <lane>`, the same shape the lane switcher shows.
-    fn lane_label_for(&self, lane_ref: daruda_store::project::LaneRef) -> String {
-        let Some(project) = self.projects.iter().find(|p| p.id == lane_ref.project) else {
-            return String::new();
-        };
-        match project.lanes.iter().find(|l| l.id == lane_ref.lane) {
-            Some(lane) => format!("{} / {}", project.name, lane.display_name()),
-            None => project.name.clone(),
-        }
-    }
-
-    /// Drain the run's stream onto the UI. The channel is unbounded and the
-    /// engine never awaits it, so falling behind here cannot slow the run.
-    fn watch_flow_events(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        events: smol::channel::Receiver<FlowEvent>,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            while let Ok(event) = events.recv().await {
-                let is_end = matches!(event, FlowEvent::RunEnded { .. });
-                // An `Err` here is the workspace being gone, which ends the
-                // pump — the same shape the MCP and JSONL pumps use, and
-                // the reason this is not a silently discarded `Result`.
-                if this
-                    .update_in(cx, |workspace, window, cx| {
-                        workspace.apply_flow_event(lane_ref, &event, window, cx);
-                    })
-                    .is_err()
-                    || is_end
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Drain the run's questions onto the UI. A second pump beside the
-    /// event one: the two carry different things in different directions,
-    /// and folding a reply channel into the narration stream would make
-    /// "can this host answer" indistinguishable from "does it watch".
-    fn watch_flow_asks(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        run_dir: PathBuf,
-        asks: smol::channel::Receiver<daruda_flow::runner::PendingAsk>,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            while let Ok(pending) = asks.recv().await {
-                let run_dir = run_dir.clone();
-                // `update_in` rather than `update`: parking also raises the
-                // question as a modal when its lane is the one in view, and
-                // opening a dialog needs the window.
-                if this
-                    .update_in(cx, |workspace, window, cx| {
-                        workspace.park_flow_ask(lane_ref, &run_dir, pending, window, cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Hold a question until somebody answers it.
-    ///
-    /// `run_dir` names the run the question came from. A channel drains
-    /// before it closes, so a question the engine queued as its run was
-    /// stopping can still arrive after the next run in that lane has taken
-    /// the slot — and `ask_id` restarts at 1 per run, so it would land on
-    /// the newcomer looking exactly like its own. Dropping it releases the
-    /// old run's engine, which is the only thing still waiting on it.
-    fn park_flow_ask(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        run_dir: &Path,
-        pending: daruda_flow::runner::PendingAsk,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let parked = self
-            .runs
-            .park_ask(lane_ref, run_dir, ParkedAsk::new(pending));
-        cx.notify();
-
-        // Only for the question that is now on screen. A queued arrival would
-        // otherwise raise a modal for the *front* question — the one already
-        // being answered — stacking a second copy of it, with the click landing
-        // on whichever is on top.
-        if parked != Parked::Showing {
-            return;
-        }
-
-        // Rows for *this* lane, not the active one: whether it may take the
-        // window is the modal's rule, and pre-filtering here would enforce
-        // it twice — the copy that never runs is the one nothing tests.
-        if let Some(row) = self
-            .flow_rows_matching(|lane| lane == lane_ref)
-            .into_iter()
-            .find(|row| row.lane == lane_ref)
-            .and_then(|row| row.asking)
-        {
-            super::flow_ask_modal::FlowAskModal::raise_if_in_view(
-                cx.weak_entity(),
-                self.active,
-                lane_ref,
-                row,
-                window,
-                cx,
-            );
-        }
-    }
-
-    /// Answer the question `lane` is holding.
-    ///
-    /// `ask_id` is checked rather than trusted: a surface can still be
-    /// painted with a question that has already been answered, and a click
-    /// on that frame must do nothing instead of answering the *next* one.
-    pub(in crate::workspace) fn answer_flow_ask(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
-        ask_id: u64,
-        decision: daruda_acp::PermissionDecision,
-        cx: &mut Context<Self>,
-    ) {
-        if self.runs.answer_ask(lane, ask_id, decision) {
-            cx.notify();
-        }
-    }
-
-    fn apply_flow_event(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        event: &FlowEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.colour_flow_graph(lane_ref, event, cx);
-        let FlowEvent::RunEnded { end } = event else {
-            self.advance_flow_stage(lane_ref, event, cx);
-            return;
-        };
-        // What a completion toast would have said, in the form a person can
-        // actually read afterwards — the run's own narrative. Opened under
-        // the lane the run belongs to, which may no longer be the active
-        // one by the time a long run ends.
-        if let Some(report) = self.settle_flow_run(lane_ref, end, cx) {
-            self.open_pane_file_view(
-                lane_ref.lane,
-                report,
-                /* staged = */ false,
-                super::main_area::file_view_pane::FileViewMode::Preview,
-                window,
-                cx,
-            );
-        }
-    }
-
-    /// Move the run's reported stage along. One `cx.notify()` per node
-    /// boundary, which is as often as the engine has anything new to say —
-    /// far too rarely to be a repaint concern.
-    pub(in crate::workspace) fn advance_flow_stage(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        event: &FlowEvent,
-        cx: &mut Context<Self>,
-    ) {
-        // Leaving `Starting` is the first moment the run directory on disk is
-        // the swept one: retention runs during start-up, after the run announces
-        // itself and before its first node. Refreshing on the announcement
-        // instead would read the pre-sweep listing and leave deleted runs on
-        // screen for the length of the run.
-        match self.runs.advance_stage(lane_ref, event) {
-            Advanced::Nothing => return,
-            Advanced::Moved { left_setup } => {
-                if left_setup {
-                    self.invalidate_flow_history(lane_ref);
-                }
-            }
-        }
-        cx.notify();
-    }
-
-    /// Retire the run `lane_ref` was holding and say what it left to read.
-    /// Separate from opening it so the settling — which lane is released,
-    /// and what the user is told — is decided without a `Window`.
-    pub(in crate::workspace) fn settle_flow_run(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        end: &RunEnd,
-        cx: &mut Context<Self>,
-    ) -> Option<PathBuf> {
-        let run_dir = self.runs.retire(lane_ref);
-        // The run just wrote its completion marker, so the list that reads
-        // those markers is now wrong.
-        self.invalidate_flow_history(lane_ref);
-        if let Some(message) = end_refusal(end) {
-            self.report_error(
-                ErrorReport::new(message)
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("flow.run.ended")
-                    .build(),
-                cx,
-            );
-        }
-        cx.notify();
-        run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
-    }
-
     /// Put a killed run in the panel's history, for `--screenshot`. The
     /// one row with a way back into it — and the only state here that no
     /// scenario can reach without writing into a real repository.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn seed_crashed_run_for_shot(&mut self, cx: &mut Context<Self>) {
-        // The dock too, not only the tab: it restores closed as often as
-        // open, and a capture of the panel behind a collapsed dock shows
-        // nothing at all.
-        self.right_dock.update(cx, |dock, _| dock.open());
-        self.main_area.pending_resize = true;
-        self.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
-        let lane = self.active;
+        // The panel too, not only the history: the dock restores closed as
+        // often as open, and a capture of a row behind a collapsed dock
+        // shows nothing at all.
+        self.reveal_flows_panel(cx);
         let dir = super::flow_paths::runs_dir(&self.active_lane_root().unwrap_or_default());
-        let shot = super::flow_history::FlowHistory::for_shot(lane, dir);
-        self.flow_history.put(lane, shot);
+        let shot = super::flow_history::FlowHistory::for_shot(dir);
+        self.flow_history.put(self.active, shot);
         cx.notify();
     }
 
@@ -747,16 +439,13 @@ impl Workspace {
     /// real run leaves a run directory behind every time it is taken.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn ask_flow_profile_for_shot(&mut self, cx: &mut Context<Self>) {
-        let Some((cwd, project, global)) = self.flow_sources() else {
+        let Some(sources) = self.flow_sources() else {
             return;
         };
-        let Some((path, profiles)) = super::flow_paths::list_flows(&cwd, &project, &global)
-            .into_iter()
-            .find_map(|found| {
-                let names = flow_profiles(&found.path);
-                (!names.is_empty()).then_some((found.path, names))
-            })
-        else {
+        let Some((path, profiles)) = sources.list_flows().into_iter().find_map(|found| {
+            let names = flow_profiles(&found.path);
+            (!names.is_empty()).then_some((found.path, names))
+        }) else {
             return;
         };
         self.flow_picker
@@ -835,37 +524,6 @@ impl Workspace {
             );
         }
         cx.notify();
-    }
-
-    /// Drive one stream event through the real stage machine. The window
-    /// is only needed by the `RunEnded` arm (it opens the report), so a
-    /// test of the stage transitions reaches the same code without one.
-    #[cfg(test)]
-    pub(in crate::workspace) fn apply_flow_event_for_test(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
-        event: &FlowEvent,
-        cx: &mut Context<Self>,
-    ) {
-        // Both halves the real path runs, in the same order. Only the
-        // `RunEnded` report — which opens a pane and so needs a window — is
-        // left to `apply_flow_event` itself.
-        self.colour_flow_graph(lane, event, cx);
-        self.advance_flow_stage(lane, event, cx);
-    }
-
-    /// Park a question on a seeded run, so a test can exercise answering
-    /// without an adapter.
-    #[cfg(test)]
-    pub(in crate::workspace) fn park_flow_ask_for_test(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
-        run_dir: &Path,
-        pending: daruda_flow::runner::PendingAsk,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.park_flow_ask(lane, run_dir, pending, window, cx);
     }
 
     #[cfg(test)]
@@ -954,33 +612,9 @@ fn flow_profiles(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The run's report, when there is one to open.
-///
-/// A run the engine refuses before the lock takes nothing and writes
-/// nothing — `execute` returns `not_started` before the run directory
-/// exists. `Invalid` and `LockHeld` are always that. An I/O failure can
-/// fall on either side of the lock, so for the rest the file itself is the
-/// answer; opening a path that is not there would replace the warning the
-/// user needs with an unrelated one about a missing file.
-fn report_to_open(end: &RunEnd, run_dir: &Path) -> Option<PathBuf> {
-    if matches!(end, RunEnd::Invalid { .. } | RunEnd::LockHeld { .. }) {
-        return None;
-    }
-    let report = run_dir.join(daruda_flow::record::RUN_REPORT_FILE);
-    report.is_file().then_some(report)
-}
-
-/// The file name, which is what the picker showed and therefore what the
-/// user is expecting to read about.
-fn file_label(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 /// Every problem, in the wording the user gets. `ValidationIssue.message`
 /// is developer detail and deliberately never appears here.
-fn issue_report(issues: &[daruda_flow::error::ValidationIssue]) -> String {
+pub(super) fn issue_report(issues: &[daruda_flow::error::ValidationIssue]) -> String {
     issues
         .iter()
         .map(|issue| {
@@ -991,19 +625,6 @@ fn issue_report(issues: &[daruda_flow::error::ValidationIssue]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// What to say about a run that has ended, or `None` when it ended the way
-/// it was meant to and `run.md` is the whole story.
-fn end_refusal(end: &RunEnd) -> Option<String> {
-    match end {
-        RunEnd::Done | RunEnd::Failed { .. } | RunEnd::Canceled { .. } => None,
-        RunEnd::BudgetExhausted { limit } => Some(s::flow_budget_exhausted(*limit)),
-        RunEnd::Io { message, .. } => Some(message.clone()),
-        RunEnd::LockHeld { holder } => Some(s::flow_lock_held(holder.pid)),
-        RunEnd::Invalid { issues } => Some(issue_report(issues)),
-        RunEnd::Unprovisioned { agent, message } => Some(s::flow_unprovisioned(agent, message)),
-    }
 }
 
 #[cfg(test)]
@@ -1100,53 +721,5 @@ nodes:
             },
         ];
         assert_eq!(issue_report(&issues).lines().count(), 2);
-    }
-
-    /// A run the engine refused before the lock wrote no report, so there
-    /// is nothing to open — and opening a path that is not there replaces
-    /// the warning the user needs with an unrelated one about a missing
-    /// file.
-    #[test]
-    fn a_run_that_never_started_has_no_report_to_open() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        // Even with a stale report from an earlier run sitting right there.
-        std::fs::write(
-            dir.path().join(daruda_flow::record::RUN_REPORT_FILE),
-            "# Run",
-        )
-        .expect("write");
-
-        let holder = daruda_flow::lock::LockHolder {
-            pid: 1,
-            run_id: "other".to_string(),
-            started_unix_secs: 1,
-        };
-        assert!(report_to_open(&RunEnd::LockHeld { holder }, dir.path()).is_none());
-        assert!(report_to_open(&RunEnd::Invalid { issues: Vec::new() }, dir.path()).is_none());
-        assert!(report_to_open(&RunEnd::Done, dir.path()).is_some());
-
-        // An I/O failure falls on either side of the lock, so for anything
-        // but the two above the file itself is the only honest answer.
-        let empty = tempfile::tempdir().expect("tempdir");
-        assert!(report_to_open(&RunEnd::Done, empty.path()).is_none());
-    }
-
-    /// A run that ended the way it was asked to has nothing to report — its
-    /// story is `run.md`, which opens either way. Only a run that never got
-    /// to tell one needs a message.
-    #[test]
-    fn only_a_run_that_could_not_speak_for_itself_reports() {
-        assert!(end_refusal(&RunEnd::Done).is_none());
-        assert!(
-            end_refusal(&RunEnd::Canceled { node: None }).is_none(),
-            "the user pressed stop; telling them they stopped it is noise"
-        );
-        assert!(
-            end_refusal(&RunEnd::Unprovisioned {
-                agent: "claude".to_string(),
-                message: "no managed Node.js build".to_string(),
-            })
-            .is_some()
-        );
     }
 }

@@ -172,7 +172,7 @@ impl Workspace {
             .flat_map(|project| {
                 project.lanes.iter().map(|lane| LaneCandidate {
                     path: lane.path.clone(),
-                    label: format!("{}/{}", project.name, lane.display_name()),
+                    label: crate::workspace::lane_ops::lane_label(&project.name, lane),
                 })
             })
             .collect();

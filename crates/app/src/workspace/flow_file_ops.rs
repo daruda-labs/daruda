@@ -12,14 +12,16 @@
 //! a shared flow can live. The working-tree change that a repo flow's edit makes
 //! is the point of it, and the git-changes view is where it shows.
 //!
-//! Origin does reach one decision, and it is the panel's: the sentence the
-//! delete dialog says (`right_dock::flows::delete_confirm_body`), because three
-//! directories can hold one file name.
+//! Origin does reach one decision: the sentence the delete dialog says
+//! ([`flow_paths::delete_confirm_body`](super::flow_paths::delete_confirm_body)),
+//! because three directories can hold one file name. The dialog itself is
+//! [`ask_before_deleting`] here, beside the [`Workspace::delete_flow`] its yes
+//! calls — a panel row is one of the two places it opens from, not its owner.
 
 use std::path::{Path, PathBuf};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{Context, Window};
+use gpui::{App, Context, WeakEntity, Window};
 
 use super::Workspace;
 use crate::surface::strings as s;
@@ -384,20 +386,17 @@ impl Workspace {
         );
     }
 
-    /// The three directories a flow can be listed from, for the active lane.
-    /// Resolved in one place so the picker, the panel and the shot scenarios
-    /// cannot disagree about what this lane can run.
-    pub(in crate::workspace) fn flow_sources(&self) -> Option<(PathBuf, PathBuf, PathBuf)> {
-        let cwd = self.active_lane_root()?;
-        let project = self
-            .active_project()
-            .map(|p| super::flow_paths::project_flows_dir(&self.data_dir, &p.root))
-            .unwrap_or_default();
-        Some((
-            cwd,
-            project,
-            super::flow_paths::global_flows_dir(&self.data_dir),
-        ))
+    /// Where the active lane's flows come from. Resolved in one place so the
+    /// picker, the panel and the shot scenarios cannot disagree about what
+    /// this lane can run.
+    pub(in crate::workspace) fn flow_sources(&self) -> Option<super::flow_paths::FlowSources> {
+        Some(super::flow_paths::FlowSources {
+            lane: self.active_lane_root()?,
+            project: self
+                .active_project()
+                .map(|p| super::flow_paths::project_flows_dir(&self.data_dir, &p.root)),
+            global: super::flow_paths::global_flows_dir(&self.data_dir),
+        })
     }
 
     /// The active lane's flow files, for the panel's list.
@@ -415,11 +414,10 @@ impl Workspace {
         }
         let lane = self.active;
         if self.flow_list.get(lane).is_none() {
-            let Some((cwd, project, global)) = self.flow_sources() else {
+            let Some(sources) = self.flow_sources() else {
                 return Vec::new();
             };
-            let found = super::flow_paths::list_flows(&cwd, &project, &global);
-            self.flow_list.put(lane, found);
+            self.flow_list.put(lane, sources.list_flows());
         }
         self.flow_list.get(lane).cloned().unwrap_or_default()
     }
@@ -450,6 +448,32 @@ impl Workspace {
             .map(|fg| fg.path.clone())
             .collect()
     }
+}
+
+/// Ask, then delete on yes. One funnel so the screenshot scenario opens the
+/// dialog a person actually gets rather than a second copy of it.
+pub(in crate::workspace) fn ask_before_deleting(
+    path: PathBuf,
+    name: &str,
+    origin: super::flow_paths::FlowOrigin,
+    ws: WeakEntity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    crate::workspace::dialog_helpers::open_confirm_dialog(
+        s::flow_delete_confirm_title(),
+        super::flow_paths::delete_confirm_body(name, origin),
+        s::flow_delete_confirm_ok(),
+        crate::ui::dialog::ButtonVariant::Danger,
+        move |_, _window, app| {
+            let path = path.clone();
+            if let Some(ws) = ws.upgrade() {
+                ws.update(app, |ws, cx| ws.delete_flow(&path, cx));
+            }
+        },
+        window,
+        cx,
+    );
 }
 
 /// Why the engine refused the candidate text, in words a person can act on.

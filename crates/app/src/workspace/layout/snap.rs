@@ -405,7 +405,13 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Flow runs in the active lane, for the Flows tab. Only this lane's:
     /// the panel sits beside a per-lane run history, and the status bar
     /// chip is what spans lanes.
-    pub flows: Vec<crate::workspace::flow_ops::FlowRunRow>,
+    pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
+    /// The lane every flow field here belongs to, which is the active one.
+    /// Carried rather than re-asked at click time: a past run's directory
+    /// and the lane it lives in have to agree, and a resume that read the
+    /// lane when the button was pressed could pair one lane's directory
+    /// with another lane's ref.
+    pub flow_lane: daruda_store::project::LaneRef,
     /// The active lane's past runs. `None` when the Flows tab is not
     /// showing — the read is skipped rather than cached for a tab nobody
     /// is looking at.
@@ -495,6 +501,10 @@ impl RightDockSnapshot {
             || self.claude_status_per_session != prev.claude_status_per_session
             || self.tool_use_failure_counts != prev.tool_use_failure_counts
             || self.mcp != prev.mcp
+            // In the diff though nothing draws it: the lane is what a
+            // resume click *sends*, so two lanes whose runs happen to look
+            // alike must still re-stage the panel's handlers.
+            || self.flow_lane != prev.flow_lane
             || self.flows != prev.flows
             || self.flow_history != prev.flow_history
             || self.flow_files != prev.flow_files

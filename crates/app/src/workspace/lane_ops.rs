@@ -45,6 +45,13 @@ pub(in crate::workspace) struct RemoveWorktreePlan {
     pub repo_root: std::path::PathBuf,
 }
 
+/// `"<project> / <lane>"`. One derivation because three surfaces show it —
+/// the lane switcher, a flow run row, the Ports segment's owner column —
+/// and a lane read off two of them at once has to be spelled the same.
+pub(in crate::workspace) fn lane_label(project_name: &str, lane: &crate::lane::Lane) -> String {
+    format!("{project_name} / {}", lane.display_name())
+}
+
 impl Workspace {
     /// Switch to the nth lane (0-indexed) of the active project, sorted
     /// by `tab_order` to match the left-dock order. No-ops when `index`
@@ -96,8 +103,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// One [`LaneCandidate`] per lane across every project, labelled
-    /// `"<project> / <lane>"`.
+    /// One [`LaneCandidate`] per lane across every project, labelled by
+    /// [`lane_label`].
     fn lane_switcher_candidates(&self) -> Vec<LaneCandidate> {
         self.projects
             .iter()
@@ -109,10 +116,23 @@ impl Workspace {
                         project: project_id,
                         lane: lane.id,
                     },
-                    label: format!("{} / {}", project_name, lane.display_name()),
+                    label: lane_label(&project_name, lane),
                 })
             })
             .collect()
+    }
+
+    /// [`lane_label`] for a lane named only by its ref. A row can outlive
+    /// the lane it names, so a stale ref still answers with the project it
+    /// came from rather than with nothing.
+    pub(in crate::workspace) fn lane_label_for(&self, lane_ref: LaneRef) -> String {
+        let Some(project) = self.project_for(lane_ref.project) else {
+            return String::new();
+        };
+        match project.lane(lane_ref.lane) {
+            Some(lane) => lane_label(&project.name, lane),
+            None => project.name.clone(),
+        }
     }
 
     /// Activate the focused lane and close the switcher.

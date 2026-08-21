@@ -15,7 +15,7 @@ fn set_scanned_ports_classifies_orders_and_skips_unchanged_updates(cx: &mut Test
         let project = &ws.projects[0];
         let lane = &project.lanes[0];
         (
-            format!("{}/{}", project.name, lane.display_name()),
+            crate::workspace::lane_ops::lane_label(&project.name, lane),
             lane.path.clone(),
         )
     });

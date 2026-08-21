@@ -74,18 +74,19 @@ impl Workspace {
         }
     }
 
-    /// (Re)spawn the flow watcher for the active lane's three source
-    /// directories. Call it wherever the active lane changes, and after the app
-    /// itself creates or deletes a flow — creating the first one also creates the
+    /// (Re)spawn the flow watcher over the active lane's source directories.
+    /// Call it wherever the active lane changes, and after the app itself
+    /// creates or deletes a flow — creating the first one also creates the
     /// directory the watcher has to be anchored on.
     pub(in crate::workspace) fn respawn_flow_watcher(&mut self, cx: &mut Context<Self>) {
         self._flow_watcher = None;
         self._flow_event_pump = None;
 
-        let Some((cwd, project, global)) = self.flow_sources() else {
+        let Some(sources) = self.flow_sources() else {
             return;
         };
-        let dirs = vec![flow_paths::flows_dir(&cwd), project, global];
+        // The origin is what a *listing* needs; anchoring only needs the paths.
+        let dirs = sources.dirs().into_iter().map(|(dir, _)| dir).collect();
         let (events, handle) = flow_watcher::spawn(dirs, flow_paths::FLOW_EXTENSIONS.to_vec());
         self._flow_event_pump = Some(spawn(events, cx));
         self._flow_watcher = Some(handle);
