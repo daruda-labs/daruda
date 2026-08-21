@@ -827,10 +827,22 @@ fn toolbar(has_selection: bool, cx: &mut Context<FlowGraphView>) -> impl IntoEle
 
     div()
         .absolute()
-        // Or the press goes through to the canvas underneath and starts a
-        // marquee drag: the toolbar sits inside the canvas's own bounds, and
-        // without this both get the same mouse-down.
-        .occlude()
+        // Each interaction it has to swallow, named — rather than `occlude()`,
+        // which blocks every one at once. gpui hit-tests geometrically, so a
+        // sibling painted on top still lets the canvas's own listeners fire;
+        // something has to stop them, or the press goes through and starts a
+        // marquee drag under the toolbar.
+        //
+        // What `occlude()` costs is `Hitbox::is_hovered`: everything behind a
+        // `BlockMouse` hitbox reads as un-hovered, so the canvas concluded the
+        // pointer had *left* the moment it reached this toolbar — inside the
+        // canvas's own bounds — and the vendored selection plugin threw the
+        // marquee away on that news. React Flow draws the same line per
+        // interaction for the same reason (`nodrag` / `nopan` / `nowheel`,
+        // matched against the event target rather than by occlusion).
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .top(px(palette::FLOW_TOOLBAR_INSET))
         .right(px(palette::FLOW_TOOLBAR_INSET))
         .flex()

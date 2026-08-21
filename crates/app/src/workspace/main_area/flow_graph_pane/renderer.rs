@@ -6,7 +6,8 @@
 //! through `crate::ui::flow_canvas` like every other vendored widget.
 
 use gpui::{
-    AnyElement, Element as _, Hsla, IntoElement, ParentElement as _, Styled as _, div, px, rgb,
+    AnyElement, Element as _, Hsla, IntoElement, ParentElement as _, Styled as _, div,
+    prelude::FluentBuilder as _, px, rgb,
 };
 use serde::{Deserialize, Serialize};
 
@@ -187,6 +188,10 @@ pub(super) struct CardPalette {
     pub text_body: u32,
     pub text_mute: u32,
     pub text_subtle: u32,
+    /// The brand accent, for a card the person has selected. Not one of the
+    /// status hues: what a card *is* and what a person has *picked* are
+    /// different things, and only the second is theirs.
+    pub selected_border: u32,
 }
 
 impl CardPalette {
@@ -194,6 +199,7 @@ impl CardPalette {
         Self {
             card_bg: over(tokens.tint, tokens.background),
             pending_border: over(tokens.border_tint, tokens.background),
+            selected_border: rgb_u32(palette::ACCENT),
             chip_bg: over(tokens.active_tint, tokens.background),
             text_body: rgb_u32(tokens.foreground),
             text_mute: rgb_u32(tokens.foreground_muted_over_background()),
@@ -361,28 +367,52 @@ fn kind_dot(card: &CardData, p: CardPalette) -> impl IntoElement {
     }
 }
 
+/// The line a card is outlined with: its colour, and whether it is drawn at
+/// two pixels instead of one.
+///
+/// Selection wins over run status, and loses nothing by doing so. A pending
+/// card's border is a surface tone rather than a status hue, so there is no
+/// meaning to displace; a card that has actually run says so in words on its
+/// badge, which makes the border's colour a second copy. What the border is
+/// *not* free to do is stay the same — a selection nothing draws is a selection
+/// the person cannot see, which is what left them with only the canvas's own
+/// rubber band to go by. That band is dismissed by the next click, and by the
+/// pointer merely reaching the toolbar.
+fn card_outline(selected: bool, status: u32, p: CardPalette) -> (u32, bool) {
+    if selected {
+        (p.selected_border, true)
+    } else {
+        (status, false)
+    }
+}
+
 impl NodeRenderer for FlowNodeRenderer {
     fn render(&self, node: &Node, ctx: &mut RenderContext) -> AnyElement {
         #[cfg(test)]
         CARDS_DRAWN.with(|n| n.set(n.get() + 1));
+        let selected = ctx.graph.selected_node().contains(&node.id());
         let Ok(card) = serde_json::from_value::<CardData>(node.data_ref().clone()) else {
             // A node the view did not stamp. Draw the shell so the graph
             // keeps its shape instead of losing a box.
+            let (line, thick) = card_outline(selected, self.palette.pending_border, self.palette);
             return ctx
                 .node_card_shell_custom(node)
                 .rounded(px(palette::FLOW_GRAPH_CARD_RADIUS))
                 .bg(rgb(self.palette.card_bg))
-                .border_1()
-                .border_color(rgb(self.palette.pending_border))
+                .when(thick, |s| s.border_2())
+                .when(!thick, |s| s.border_1())
+                .border_color(rgb(line))
                 .into_any();
         };
         let accent = rgb(rgb_u32(card.accent.hsla()));
+        let (line, thick) = card_outline(selected, rgb_u32(card.accent.hsla()), self.palette);
         let shell = ctx
             .node_card_shell_custom(node)
             .rounded(px(palette::FLOW_GRAPH_CARD_RADIUS))
             .bg(rgb(self.palette.card_bg))
-            .border_1()
-            .border_color(accent);
+            .when(thick, |s| s.border_2())
+            .when(!thick, |s| s.border_1())
+            .border_color(rgb(line));
 
         // The box the canvas is about to draw this in, not the box the graph
         // declares: it scales with zoom and the text inside does not.
@@ -561,5 +591,53 @@ mod tests {
         // 0.35 → 87px, which is where a six-node chain lands in a pane.
         assert_eq!(density_for(w * 0.35), CardDensity::Marker);
         assert_eq!(density_for(0.0), CardDensity::Marker);
+    }
+
+    /// Values chosen so each field is distinguishable in an assertion; the real
+    /// ones come from the pane's surface tokens, which need a window.
+    fn outline_palette() -> CardPalette {
+        CardPalette {
+            card_bg: 0x00_10_10_10,
+            pending_border: 0x00_20_20_20,
+            chip_bg: 0x00_30_30_30,
+            text_body: 0x00_40_40_40,
+            text_mute: 0x00_50_50_50,
+            text_subtle: 0x00_60_60_60,
+            selected_border: rgb_u32(palette::ACCENT),
+        }
+    }
+
+    /// What a person picked has to be visible, and it was not: the only mark a
+    /// marquee left was the canvas's own rubber band, which the vendored plugin
+    /// drops on the next click *and* the moment the pointer reaches the toolbar.
+    /// The card is where a person looks, and `graph.selected_node()` — what this
+    /// reads — survives both.
+    #[test]
+    fn a_selected_card_is_outlined_differently_from_an_idle_one() {
+        let p = outline_palette();
+        let idle = card_outline(false, p.pending_border, p);
+        let picked = card_outline(true, p.pending_border, p);
+        assert_ne!(idle, picked, "a selection nothing draws cannot be seen");
+        assert_eq!(picked.0, p.selected_border, "and it draws in the accent");
+        assert!(picked.1, "at two pixels, which is daruda's selected signal");
+    }
+
+    /// Selection wins over run status, and the status is not lost with it: a
+    /// card that ran says so in words on its badge, and a pending card's border
+    /// was a surface tone rather than a status hue to begin with.
+    #[test]
+    fn selection_outranks_run_status_on_the_border() {
+        let p = outline_palette();
+        let failed = rgb_u32(CardAccent::Failed.hsla());
+        assert_eq!(
+            card_outline(false, failed, p).0,
+            failed,
+            "left alone it shows the run"
+        );
+        assert_eq!(
+            card_outline(true, failed, p).0,
+            p.selected_border,
+            "picked, it shows what the person picked"
+        );
     }
 }
