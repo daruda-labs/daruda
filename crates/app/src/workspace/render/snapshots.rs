@@ -500,6 +500,7 @@ impl Workspace {
             flows: self.flow_rows_for_active_lane(),
             flow_history: self.flow_history_for_panel(),
             flow_files: self.flow_list_for_panel(),
+            flows_with_unsaved_edits: self.flows_with_unsaved_edits(cx),
         }
     }
 }

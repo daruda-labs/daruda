@@ -413,6 +413,11 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// The flow files this lane can run, for the panel's read-only list.
     /// Empty when the Flows tab is not showing, same as the history above.
     pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
+    /// Which of those have an open graph pane holding unsaved edits — the
+    /// panel's ▶ is off for them. Usually empty. It has to be *in* the snapshot
+    /// rather than read at render time: the panel renders cached, and a field
+    /// the comparison below cannot see would leave a stale button on screen.
+    pub flows_with_unsaved_edits: Vec<std::path::PathBuf>,
 }
 
 /// One auth domain's block in the Usage tab: whose account it is, what the last
@@ -493,6 +498,7 @@ impl RightDockSnapshot {
             || self.flows != prev.flows
             || self.flow_history != prev.flow_history
             || self.flow_files != prev.flow_files
+            || self.flows_with_unsaved_edits != prev.flows_with_unsaved_edits
     }
 }
 

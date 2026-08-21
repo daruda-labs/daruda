@@ -715,6 +715,22 @@ pub fn flow_add_node() -> String {
 pub fn flow_delete_node() -> String {
     rust_i18n::t!("flow.delete_node").into_owned()
 }
+/// Acting on the flow a surface already names — the graph pane's toolbar and
+/// the Flows panel's rows. Distinct from `command.run_flow` / `command.check_flow`,
+/// which end in an ellipsis because they still have to ask which flow.
+pub fn flow_run_tooltip() -> String {
+    rust_i18n::t!("flow.run_tooltip").into_owned()
+}
+pub fn flow_check_tooltip() -> String {
+    rust_i18n::t!("flow.check_tooltip").into_owned()
+}
+/// Why ▶ and ✓ are off. Both read the file, so the inspector's unsaved edits
+/// would not be in what they act on — and a greyed button with no reason is
+/// worse than no button. One string for the two: the button under the pointer
+/// supplies the verb, and a second key would be a second thing to keep in step.
+pub fn flow_needs_save() -> String {
+    rust_i18n::t!("flow.needs_save").into_owned()
+}
 /// Removing the selected line between two cards. No ellipsis: unlike deleting
 /// a node it asks nothing — a line is redrawn with one drag, and the file is
 /// the undo stack.

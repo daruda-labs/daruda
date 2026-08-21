@@ -50,6 +50,16 @@ use crate::ui::flow_canvas::{
 };
 use crate::ui::theme::palette;
 
+/// The toolbar's two act-on-the-flow glyphs. `IconName` — the vendored set —
+/// has no play arrow, so both come from daruda's own Material Symbols icons
+/// and are named by path, the way the file viewer's toolbar names its modes.
+const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
+/// How the tests find ▶ and ✓ to press them. Named here so a test cannot drift
+/// from its button by spelling the selector a second time.
+pub(in crate::workspace) const TOOLBAR_RUN_SELECTOR: &str = "flow-toolbar-run-press";
+pub(in crate::workspace) const TOOLBAR_CHECK_SELECTOR: &str = "flow-toolbar-check-press";
+const ICON_CHECK: &str = "icons/ui/check.svg";
+
 /// Why a flow could not be drawn. Three paths with three wordings, so they
 /// stay three variants rather than one collapsed message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +104,10 @@ pub(in crate::workspace) enum FlowGraphEvent {
     TypingDropped,
     /// Add a node, chained after the selected one when there is one.
     AddNode,
+    /// Run this flow, or report what is wrong with it without running.
+    /// Which flow is not asked — the pane is of one, and it is the one.
+    Run,
+    Validate,
     /// A line was drawn between two cards: `into` is to run after `out_of`.
     /// The names say the ports rather than from/to, which is the pair that
     /// gets swapped — see [`connect::dep_from_edge`].
@@ -371,6 +385,17 @@ impl FlowGraphView {
     /// The form for the selected node, when there is one.
     pub(in crate::workspace) fn form(&self) -> Option<&form::NodeForm> {
         self.form.as_ref()
+    }
+
+    /// Is the inspector holding something the file has not been told about?
+    ///
+    /// `Pane::is_dirty` says `false` for a graph on purpose — the pane is a view
+    /// of a file, not a buffer over it, so it never joins the close prompt. This
+    /// is the narrower question the toolbar asks: running reads the file, so
+    /// while these two disagree, ▶ would run something other than what is on
+    /// screen.
+    pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
+        self.form.as_ref().is_some_and(|form| form.is_dirty(cx))
     }
 
     /// Open or close the inspector's agent-override block.
@@ -816,14 +841,23 @@ fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, NodeIds) {
     (graph, NodeIds::new(ids))
 }
 
-/// Buttons over the graph for the two things a person does to it.
+/// Buttons over the graph: what a person does to the flow, then what they do
+/// with it.
 ///
-/// The menu (`pane_menu::FlowGraphMenu`) has the same two and calls the same
-/// ops — this is a second way in, not a second implementation. It exists because
-/// the menu is a right-click nobody is told about, and adding the first node to
-/// a new flow is the moment that matters most.
-fn toolbar(has_selection: bool, cx: &mut Context<FlowGraphView>) -> impl IntoElement {
-    use crate::ui::{Disableable as _, button_bare};
+/// The menu (`pane_menu::FlowGraphMenu`) has the editing pair and calls the same
+/// ops — that half is a second way in, not a second implementation. It exists
+/// because the menu is a right-click nobody is told about, and adding the first
+/// node to a new flow is the moment that matters most.
+///
+/// Running and checking are here and not in the menu because until now the only
+/// way to run the flow on screen was the palette, which asks which flow — a
+/// question this pane already has the answer to.
+fn toolbar(
+    has_selection: bool,
+    unsaved_form: bool,
+    cx: &mut Context<FlowGraphView>,
+) -> impl IntoElement {
+    use crate::ui::{Disableable as _, Icon, button_bare};
 
     div()
         .absolute()
@@ -863,6 +897,40 @@ fn toolbar(has_selection: bool, cx: &mut Context<FlowGraphView>) -> impl IntoEle
                 .disabled(!has_selection)
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
         )
+        // Both of these read the *file*, so while the inspector holds unsaved
+        // edits they would act on something other than what is on screen — and
+        // ✓ would go further and call it valid. Off for the same reason, and
+        // together: one greyed button beside an identical live one would read as
+        // a glitch rather than as a state. The tooltip carries the reason, since
+        // a disabled button still shows one and grey on its own is not an
+        // answer.
+        .child(
+            button_bare("flow-toolbar-check")
+                .icon(Icon::empty().path(ICON_CHECK))
+                .tooltip(reason_or(unsaved_form, s::flow_check_tooltip()))
+                .disabled(unsaved_form)
+                .debug_selector(|| TOOLBAR_CHECK_SELECTOR.into())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Validate))),
+        )
+        .child(
+            button_bare("flow-toolbar-run")
+                .icon(Icon::empty().path(ICON_PLAY))
+                .tooltip(reason_or(unsaved_form, s::flow_run_tooltip()))
+                .disabled(unsaved_form)
+                // The press is what the disabled state has to actually stop, and
+                // that cannot be seen without a real click.
+                .debug_selector(|| TOOLBAR_RUN_SELECTOR.into())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Run))),
+        )
+}
+
+/// A button's tooltip: why it is off, or what it does.
+fn reason_or(unsaved_form: bool, does: String) -> String {
+    if unsaved_form {
+        s::flow_needs_save()
+    } else {
+        does
+    }
 }
 
 impl Render for FlowGraphView {
@@ -894,6 +962,7 @@ impl Render for FlowGraphView {
                 // The toolbar goes inside the canvas half, not the pane: over the
                 // pane it would sit on the inspector column instead of the graph.
                 let has_selection = !self.selected_nodes(cx).is_empty();
+                let unsaved_form = self.has_unsaved_form(cx);
                 body.child(
                     div()
                         .size_full()
@@ -905,7 +974,7 @@ impl Render for FlowGraphView {
                                 .flex_1()
                                 .h_full()
                                 .child(canvas.clone())
-                                .child(toolbar(has_selection, cx)),
+                                .child(toolbar(has_selection, unsaved_form, cx)),
                         )
                         .child(inspector),
                 )

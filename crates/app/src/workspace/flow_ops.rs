@@ -87,13 +87,29 @@ impl Workspace {
             cx.notify();
             return;
         }
+        if !self.flow_run_guard(purpose, cx) {
+            return;
+        }
+        let listed = self
+            .flow_sources()
+            .map(|(cwd, project, global)| super::flow_paths::list_flows(&cwd, &project, &global))
+            .unwrap_or_default();
+        self.flow_picker.open(purpose, listed);
+        cx.notify();
+    }
+
+    /// Whether `purpose` may go ahead in the active lane, having already said
+    /// why not when it may not.
+    ///
+    /// Design §14's affordance: what says a run is going is the lock, not a
+    /// field this app keeps — so a run started by a previous session, or by
+    /// another window, is recognised the same way. Every way in asks this
+    /// first, whether or not a list of flows is part of it.
+    fn flow_run_guard(&mut self, purpose: FlowPurpose, cx: &mut Context<Self>) -> bool {
         let Some(cwd) = self.active_lane_root() else {
             self.report_flow_refusal(FlowSubmitError::NoLane, cx);
-            return;
+            return false;
         };
-        // Design §14's affordance: what says a run is going is the lock,
-        // not a field this app keeps — so a run started by a previous
-        // session, or by another window, is recognised the same way.
         match (purpose, self.lane_holder(&cwd)) {
             // The stop switch is a `CancelToken`, so the only run we can
             // stop is one whose token we are holding — for *this* lane.
@@ -102,24 +118,17 @@ impl Workspace {
             // this one.
             (FlowPurpose::Run, Some(_)) if self.runs.is_running(self.active) => {
                 self.flow_picker = FlowPicker::Stopping;
+                cx.notify();
+                false
             }
             // Offering "stop it" for a run we cannot reach would be a
             // button that does nothing.
             (FlowPurpose::Run, Some(holder)) => {
                 self.report_flow_refusal(FlowSubmitError::LockHeld { pid: holder.pid }, cx);
-                return;
+                false
             }
-            _ => {
-                let listed = self
-                    .flow_sources()
-                    .map(|(cwd, project, global)| {
-                        super::flow_paths::list_flows(&cwd, &project, &global)
-                    })
-                    .unwrap_or_default();
-                self.flow_picker.open(purpose, listed)
-            }
+            _ => true,
         }
-        cx.notify();
     }
 
     /// The live process holding this lane's run lock, if any. A lock left by
@@ -144,15 +153,65 @@ impl Workspace {
         let picked = self.flow_picker.focused_pick();
         let was_stopping = matches!(self.flow_picker, FlowPicker::Stopping);
 
-        // A flow that declares profiles has one more question to answer,
-        // so the picker stays up for it. Everything else is decided.
-        if let Some(FlowPick::Flow(purpose, path)) = &picked
-            && *purpose != FlowPurpose::Graph
-        {
-            let profiles = flow_profiles(path);
+        match picked {
+            // Which flow, answered. Whatever is left of it belongs to
+            // `start_flow`, which is also where the graph pane's ▶ comes in —
+            // that button knows the flow already and skips only this question.
+            Some(FlowPick::Flow(purpose, path)) => self.start_flow(purpose, path, window, cx),
+            // The second question, so nothing is left to ask.
+            Some(FlowPick::Profile(purpose, path, profile)) => {
+                self.flow_picker.close();
+                cx.notify();
+                self.dispatch_flow(purpose, &path, profile.as_deref(), window, cx);
+            }
+            None => {
+                self.flow_picker.close();
+                cx.notify();
+                if was_stopping {
+                    self.stop_flow_run(cx);
+                }
+            }
+        }
+    }
+
+    /// Run or check `path` without asking which flow.
+    ///
+    /// The guard still runs: a surface that names the flow does not thereby
+    /// know whether the lane is free, and skipping it here would be a second
+    /// answer to "is a run already going" for the lock to disagree with.
+    pub(in crate::workspace) fn run_flow_at(
+        &mut self,
+        path: &Path,
+        purpose: FlowPurpose,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.flow_run_guard(purpose, cx) {
+            return;
+        }
+        self.start_flow(purpose, path.to_path_buf(), window, cx);
+    }
+
+    /// Everything a named flow still has to go through: the profile question
+    /// when the file declares any, then the act itself.
+    ///
+    /// The one place that decides whether a profile is asked for. The guard is
+    /// deliberately not here — the picker ran it before it listed anything, and
+    /// asking twice would drop a `Stopping` picker over a list already shown.
+    fn start_flow(
+        &mut self,
+        purpose: FlowPurpose,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A flow that declares profiles has one more question to answer, so the
+        // picker comes up for it — even when nothing opened the picker to begin
+        // with. Everything else is decided.
+        if purpose != FlowPurpose::Graph {
+            let profiles = flow_profiles(&path);
             if !profiles.is_empty() {
-                self.flow_picker
-                    .ask_profile(*purpose, path.clone(), profiles);
+                self.flow_picker.ask_profile(purpose, path, profiles);
                 cx.notify();
                 return;
             }
@@ -160,18 +219,22 @@ impl Workspace {
 
         self.flow_picker.close();
         cx.notify();
+        self.dispatch_flow(purpose, &path, None, window, cx);
+    }
 
-        if was_stopping {
-            self.stop_flow_run(cx);
-            return;
-        }
-        let Some((purpose, path, profile)) = acted_on(picked) else {
-            return;
-        };
+    /// Act on a flow that has every answer it needs.
+    fn dispatch_flow(
+        &mut self,
+        purpose: FlowPurpose,
+        path: &Path,
+        profile: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match purpose {
-            FlowPurpose::Validate => self.validate_flow(&path, profile.as_deref(), window, cx),
-            FlowPurpose::Run => self.submit_flow_run(&path, profile.as_deref(), cx),
-            FlowPurpose::Graph => self.open_flow_graph(&path, window, cx),
+            FlowPurpose::Validate => self.validate_flow(path, profile, window, cx),
+            FlowPurpose::Run => self.submit_flow_run(path, profile, cx),
+            FlowPurpose::Graph => self.open_flow_graph(path, window, cx),
         }
     }
 
@@ -880,18 +943,6 @@ fn runners_for(request: &daruda_flow::request::RunRequest, node_install_dir: Pat
     }
 }
 
-/// What a pick asks for: the flow, and the profile if a second question
-/// was answered. Separate from the dispatch below so the unpacking is
-/// checkable — the arm that drops the name here is the one that would make
-/// every profiled run silently run as plain `defaults`.
-fn acted_on(picked: Option<FlowPick>) -> Option<(FlowPurpose, PathBuf, Option<String>)> {
-    match picked {
-        Some(FlowPick::Flow(purpose, path)) => Some((purpose, path, None)),
-        Some(FlowPick::Profile(purpose, path, profile)) => Some((purpose, path, profile)),
-        None => None,
-    }
-}
-
 /// The profiles a flow declares, for the second question. A file that
 /// cannot be read or parsed reports none: the run that follows fails on
 /// the same read a moment later and names it properly, and a second
@@ -957,30 +1008,6 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    /// The second question's answer has to survive the unpacking. Dropping
-    /// it here is invisible from either surface — the picker looks right,
-    /// the run starts, and it runs as plain `defaults`.
-    #[test]
-    fn an_answered_profile_reaches_what_the_run_is_built_from() {
-        use super::{FlowPick, FlowPurpose, acted_on};
-        let path = std::path::PathBuf::from("/lane/.daruda/flows/ship.yaml");
-
-        assert_eq!(
-            acted_on(Some(FlowPick::Profile(
-                FlowPurpose::Run,
-                path.clone(),
-                Some("cheap".to_string())
-            ))),
-            Some((FlowPurpose::Run, path.clone(), Some("cheap".to_string())))
-        );
-        // A flow that declares none is run as written, not under a name
-        // invented for it.
-        assert_eq!(
-            acted_on(Some(FlowPick::Flow(FlowPurpose::Validate, path.clone()))),
-            Some((FlowPurpose::Validate, path, None))
-        );
-        assert_eq!(acted_on(None), None);
-    }
     use std::collections::HashMap;
 
     use daruda_acp::LaunchSpec;

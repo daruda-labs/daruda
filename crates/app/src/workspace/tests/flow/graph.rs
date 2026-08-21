@@ -1582,3 +1582,108 @@ async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppCont
     );
     let _ = before;
 }
+
+/// ▶ and ✓ are off while the inspector holds unsaved edits.
+///
+/// A run reads the file, so pressing it then would run the version on disk and
+/// say nothing about the one on screen. `Pane::is_dirty` deliberately answers
+/// `false` for a graph — it is a view of a file, not a buffer over it — so this
+/// button asks its own narrower question, and that is what is asserted here.
+///
+/// The flow declares a profile so an *enabled* press is observable without
+/// starting anything: it would stop at the profile question. Nothing spawns
+/// either way, and the picker is the discriminator.
+#[gpui::test]
+async fn the_act_buttons_are_off_while_the_inspector_has_unsaved_edits(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::{
+        TOOLBAR_CHECK_SELECTOR, TOOLBAR_RUN_SELECTOR,
+    };
+
+    const PROFILED: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+profiles:
+  cheap:
+    agent:
+      model: haiku
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+";
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, PROFILED);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    // Clean first, or the assertion below would hold for a button that is
+    // always off.
+    assert!(
+        !view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)),
+        "the form was dirty before anything was typed"
+    );
+    let press = |vcx: &mut gpui::VisualTestContext, selector: &'static str| {
+        let at = vcx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("the toolbar paints {selector}"));
+        vcx.simulate_click(at.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+    };
+    // Both are live while it is clean, or the assertions below would hold for
+    // buttons that never work at all.
+    for selector in [TOOLBAR_RUN_SELECTOR, TOOLBAR_CHECK_SELECTOR] {
+        press(&mut vcx, selector);
+        assert!(
+            ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+            "{selector} did nothing on a clean form, so this fixture proves nothing"
+        );
+        ws.update(&mut vcx, |ws, cx| ws.close_flow_picker(cx));
+        vcx.run_until_parked();
+    }
+
+    // Now type into it and press again.
+    let output = view
+        .read_with(&vcx, |v, cx| {
+            v.form().expect("a form").body_states(cx).output.clone()
+        })
+        .clone();
+    output.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("spec.md".to_string(), window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(
+        view.read_with(&vcx, |v, cx| v.has_unsaved_form(cx)),
+        "an edited box is dirty"
+    );
+
+    press(&mut vcx, TOOLBAR_RUN_SELECTOR);
+    assert!(
+        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        "the run button was pressable with unsaved edits in the inspector"
+    );
+    // ✓ reads the file too, and would go further than ▶ — it would call the
+    // version on disk valid while the screen shows something else.
+    press(&mut vcx, TOOLBAR_CHECK_SELECTOR);
+    assert!(
+        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        "the check button was pressable with unsaved edits in the inspector"
+    );
+}

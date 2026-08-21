@@ -146,6 +146,15 @@ impl Workspace {
                 // A toast rather than something in the pane: what would have
                 // carried it — the node's form — is the thing that was replaced.
                 FlowGraphEvent::AddNode => workspace.add_node(&for_path, view.clone(), window, cx),
+                // Straight to the funnel the picker enters one question later:
+                // the flow is already named, and the lock — plus the profile
+                // question, when the file declares any — still is not.
+                FlowGraphEvent::Run => {
+                    workspace.run_flow_at(&for_path, FlowPurpose::Run, window, cx)
+                }
+                FlowGraphEvent::Validate => {
+                    workspace.run_flow_at(&for_path, FlowPurpose::Validate, window, cx)
+                }
                 FlowGraphEvent::Connect { out_of, into } => {
                     workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
                 }

@@ -14,10 +14,15 @@ use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings;
 use crate::ui::ContextMenuExt as _;
+use crate::ui::Disableable as _;
 use crate::ui::theme;
 use crate::workspace::flow_ops::FlowRunRow;
 
 use super::super::layout::{Dock, RightDockSnapshot};
+
+/// Same glyph the graph pane's toolbar runs from — one affordance, two places
+/// it is reachable. `IconName` has no play arrow (see `flow_graph_pane`).
+const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
 
 pub(in crate::workspace) fn render(
     snap: &RightDockSnapshot,
@@ -253,6 +258,73 @@ pub(in crate::workspace) fn ask_before_deleting(
     );
 }
 
+/// The ▶ on a row: run this flow without going through the picker's list.
+///
+/// Off while an open graph pane of this flow holds unsaved edits, for the reason
+/// the toolbar's is: a run reads the file. The panel cannot see a pane's form,
+/// so the answer arrives in the snapshot (`flows_with_unsaved_edits`).
+///
+/// The row is clickable too — it opens the graph — so the press has to stop
+/// here. A press and not `occlude()`: a click starts only while the element's
+/// own hitbox reads as hovered, and gpui runs bubble listeners in reverse
+/// registration order, so this wrapper (painted after the row) gets the
+/// mouse-down first and the row never arms its click. `occlude()` would do it
+/// too, by truncating the hit test — but the same truncation is what feeds
+/// `hover`, so the row's highlight would drop out the moment the pointer
+/// reached this button. Right-click is deliberately let through: the row's own
+/// rename/delete menu is the right answer there.
+fn run_button(
+    found: &crate::workspace::flow_paths::FoundFlow,
+    snap: &RightDockSnapshot,
+) -> impl IntoElement {
+    let workspace = snap.workspace.clone();
+    let path = found.path.clone();
+    let unsaved = snap.flows_with_unsaved_edits.contains(&found.path);
+    let id = SharedString::from(format!("flow-run-{}", found.path.display()));
+    let selector = id.to_string();
+    div()
+        .flex_none()
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        // What this wrapper is for cannot be seen without a real hit test, so
+        // the test that presses it needs to find it.
+        .debug_selector(move || selector)
+        .child(
+            crate::ui::button_bare(id)
+                .icon(crate::ui::Icon::empty().path(ICON_PLAY))
+                .tooltip(if unsaved {
+                    strings::flow_needs_save()
+                } else {
+                    strings::flow_run_tooltip()
+                })
+                .disabled(unsaved)
+                .on_click(move |_, window, cx| {
+                    let path = path.clone();
+                    match workspace.update(cx, |ws, cx| {
+                        ws.run_flow_at(
+                            &path,
+                            crate::workspace::command::flow_picker::FlowPurpose::Run,
+                            window,
+                            cx,
+                        )
+                    }) {
+                        Ok(()) => {}
+                        Err(e) => daruda_store::observability::log_writer::LogWriter::log(
+                            daruda_store::observability::error_report::ErrorReport::new(
+                                "Flows panel: workspace gone while running a flow",
+                            )
+                            .severity(
+                                daruda_store::observability::error_report::ErrorSeverity::Warning,
+                            )
+                            .at(file!(), line!())
+                            .with_context("error", format!("{e}"))
+                            .dedup("right_dock.flow.run")
+                            .build(),
+                        ),
+                    }
+                }),
+        )
+}
+
 /// One flow file: its name, where it came from, and a click that draws it.
 ///
 /// The origin is not decoration — the repository's `.daruda/flows/` and the
@@ -311,6 +383,7 @@ fn flow_row(
                 .text_color(t.text_subtle)
                 .child(origin),
         )
+        .child(run_button(found, snap))
         .on_click(move |_, window, cx| {
             let path = path.clone();
             match workspace.update(cx, |ws, cx| ws.open_flow_graph(&path, window, cx)) {

@@ -423,6 +423,33 @@ impl Workspace {
         }
         self.flow_list.get(lane).cloned().unwrap_or_default()
     }
+
+    /// The flows whose graph pane, in this lane, holds unsaved inspector edits.
+    ///
+    /// The panel's ▶ reads the file like the toolbar's does, so it has to be off
+    /// for the same reason — but the panel cannot see a pane's form, and a view
+    /// must not reach across entities to ask. This is that question answered
+    /// once, on the way into the snapshot.
+    ///
+    /// Gated on the tab like the list above: a panel nobody is looking at must
+    /// not cost a walk of the panes, and `is_dirty` reads several inputs per
+    /// form. Only the active lane's panes — a pane in another lane is not the
+    /// one on screen, and is not where this ▶ would run.
+    pub(in crate::workspace) fn flows_with_unsaved_edits(
+        &self,
+        cx: &gpui::App,
+    ) -> Vec<std::path::PathBuf> {
+        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
+            return Vec::new();
+        }
+        self.active_runtime()
+            .panes
+            .iter()
+            .filter_map(|pane| pane.flow_graph_content())
+            .filter(|fg| fg.view.read(cx).has_unsaved_form(cx))
+            .map(|fg| fg.path.clone())
+            .collect()
+    }
 }
 
 /// Why the engine refused the candidate text, in words a person can act on.

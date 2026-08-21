@@ -740,3 +740,235 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
         "the request would find the lock held by a process the resume just called gone"
     );
 }
+
+/// The graph pane's ▶ and the Flows panel's know which flow already, so they
+/// enter the funnel one question in. What is left of it still has to happen —
+/// a profiled flow is asked about, exactly as it would be from the picker.
+#[gpui::test]
+async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // `Validate` rather than `Run`: it walks the same funnel and takes
+            // no lock and starts no session.
+            ws.run_flow_at(
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                window,
+                cx,
+            );
+            assert!(
+                ws.flow_picker.is_open(),
+                "a profiled flow was run without being asked which profile"
+            );
+            let rows = picker_rows(ws);
+            assert_eq!(
+                rows.len(),
+                2,
+                "expected the file's own defaults and one profile: {rows:?}"
+            );
+            // And the question is about *this* flow — the list of flows was
+            // never shown, so nothing else could have named it.
+            ws.flow_picker.move_down();
+            assert_eq!(
+                ws.flow_picker.focused_pick(),
+                Some(crate::workspace::command::flow_picker::FlowPick::Profile(
+                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    flow_path.clone(),
+                    Some("cheap".to_string()),
+                )),
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// And a flow that declares none goes straight through — the picker is never
+/// put on screen at all, which is the whole point of the button.
+#[gpui::test]
+async fn naming_a_flow_with_no_profiles_opens_no_picker(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.run_flow_at(
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                window,
+                cx,
+            );
+            assert!(
+                !ws.flow_picker.is_open(),
+                "a flow with no profiles was asked about one"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// The guard is not the picker's — it belongs to the act. A ▶ pressed while
+/// this lane's run is going asks the one question there is about it, rather
+/// than starting a second run behind the first.
+#[gpui::test]
+async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    // A live lock plus a token this process holds: what `open_flow_picker`
+    // reads to reach `Stopping`, seeded the same way its own test does.
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    std::fs::create_dir_all(&runs).expect("runs dir");
+    std::fs::write(
+        runs.join(".lock"),
+        format!(
+            "pid: {}\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
+            std::process::id()
+        ),
+    )
+    .expect("lock");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let lane_ref = ws.active_ref();
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+            ws.run_flow_at(
+                &flow_path,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                window,
+                cx,
+            );
+            assert!(
+                matches!(
+                    ws.flow_picker,
+                    crate::workspace::command::flow_picker::FlowPicker::Stopping
+                ),
+                "a second run was started behind the first"
+            );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// The ▶ on a Flows-panel row runs the flow and *only* that. The row itself is
+/// clickable — it opens the graph — so a button that let the press through
+/// would do both at once, which is neither of the two things asked for.
+///
+/// The refusal is the fixture: a lock a live process elsewhere holds makes the
+/// press observable without an agent ever being spawned.
+#[gpui::test]
+async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    std::fs::create_dir_all(&runs).expect("runs dir");
+    // pid 1 is the init process on every platform this builds for, so it is
+    // both alive and not us.
+    std::fs::write(
+        runs.join(".lock"),
+        "pid: 1\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
+    )
+    .expect("lock");
+
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, _window, cx| {
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.right_dock.update(cx, |dock, cx| {
+            dock.open();
+            cx.notify();
+        });
+    });
+    // The dock renders `.cached()`, and reaching into it below its own ops is
+    // not what marks it dirty — a real toggle would. One refresh, in the test
+    // only, so the panel is actually painted before it is pressed.
+    vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+
+    // `debug_bounds` takes a `&'static str` and the selector carries a tempdir
+    // path, so it cannot be spelled out the way the agent-chat probes are.
+    let button_id: &'static str =
+        Box::leak(format!("flow-run-{}", flow_path.display()).into_boxed_str());
+    let button = vcx
+        .debug_bounds(button_id)
+        .expect("the Flows panel lists the lane's flow, with a ▶ on its row");
+    vcx.simulate_click(button.center(), gpui::Modifiers::none());
+    vcx.run_until_parked();
+
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws
+            .active_runtime()
+            .panes
+            .iter()
+            .all(|pane| pane.flow_graph_content().is_none())),
+        "the press went through the button to the row underneath"
+    );
+}
+
+/// The panel's ▶ is off too while an open graph of that flow holds unsaved
+/// edits. The panel cannot see a pane's form, so this is really a test of the
+/// snapshot field that carries the answer to it.
+///
+/// Same discriminator as the toolbar's test: a profiled flow stops at the
+/// profile question, so an enabled press is visible and nothing is spawned.
+#[gpui::test]
+async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
+    cx: &mut TestAppContext,
+) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.right_dock.update(cx, |dock, cx| {
+            dock.open();
+            cx.notify();
+        });
+        ws.open_flow_graph(&flow_path, window, cx);
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    let button_id: &'static str =
+        Box::leak(format!("flow-run-{}", flow_path.display()).into_boxed_str());
+    let press = |vcx: &mut gpui::VisualTestContext| {
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let at = vcx
+            .debug_bounds(button_id)
+            .expect("the Flows panel lists the flow with a run button");
+        vcx.simulate_click(at.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+    };
+
+    press(&mut vcx);
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        "the button did nothing on a clean form, so this fixture proves nothing"
+    );
+    ws.update(&mut vcx, |ws, cx| ws.close_flow_picker(cx));
+    vcx.run_until_parked();
+
+    let output = view
+        .read_with(&vcx, |v, cx| {
+            v.form().expect("a form").body_states(cx).output.clone()
+        })
+        .clone();
+    output.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("spec.md".to_string(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    press(&mut vcx);
+    assert!(
+        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        "the panel's run button was pressable with unsaved edits in the graph"
+    );
+}
