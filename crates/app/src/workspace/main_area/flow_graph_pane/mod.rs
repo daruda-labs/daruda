@@ -5,60 +5,51 @@
 //! one `cx.notify()` dirties the whole window. Holding the canvas in its
 //! own entity and caching it keeps a run's repaints inside this subtree.
 
+mod build;
 mod click;
+mod commands;
 mod connect;
 mod disconnect;
 pub(in crate::workspace) mod form;
+mod form_bridge;
 mod frame;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
 mod policy;
 mod port_drag;
+mod render;
 mod renderer;
+mod run_states;
+mod selection;
 
+/// The toolbar's test selectors keep their old path: a test names this module,
+/// not the file a thing happens to live in.
+#[cfg(test)]
+pub(in crate::workspace) use render::toolbar::{TOOLBAR_CHECK_SELECTOR, TOOLBAR_RUN_SELECTOR};
 /// The card-draw counter, for the repaint measurement in `workspace/tests`.
 /// Re-exported rather than opening the module: nothing else in there is any
 /// caller's business.
 #[cfg(test)]
 pub(in crate::workspace) use renderer::CARDS_DRAWN;
+pub(in crate::workspace) use selection::Selection;
 
+#[cfg(test)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Window, div, px,
-};
+use gpui::{App, Context, Entity, EventEmitter, FocusHandle, Focusable, Window};
 
 use daruda_flow::NodeId;
 
-use self::click::NodeClickPlugin;
-use self::disconnect::EdgeDeletePlugin;
-use self::frame::FrameGraphPlugin;
-use self::model::{FlowGraphModel, NodeRunState, RunColouring};
+use self::build::{build_graph_state, read_flow};
+use self::commands::StampCards;
+use self::model::{FlowGraphModel, NodeRunState};
 use self::node_ids::NodeIds;
-use self::overlay::RerunOverlay;
-use self::port_drag::FlowEdgeValidator;
-use self::renderer::{FlowNodeRenderer, NODE_TYPE, card_for, flow_theme};
+use self::renderer::card_for;
 
 use crate::surface::strings as s;
-use crate::ui::flow_canvas::{
-    BackgroundPlugin, CanvasNodeId, Command, CommandContext, FlowCanvas, Graph, GraphPlugin,
-    PortInteractionPlugin, SelectionPlugin, ViewportPlugin,
-    layout::{LayeredDagLayout, LayoutOptions, LayoutOutput, LayoutStrategy, PositionHint},
-};
-use crate::ui::theme::palette;
-
-/// The toolbar's two act-on-the-flow glyphs. `IconName` — the vendored set —
-/// has no play arrow, so both come from daruda's own Material Symbols icons
-/// and are named by path, the way the file viewer's toolbar names its modes.
-const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
-/// How the tests find ▶ and ✓ to press them. Named here so a test cannot drift
-/// from its button by spelling the selector a second time.
-pub(in crate::workspace) const TOOLBAR_RUN_SELECTOR: &str = "flow-toolbar-run-press";
-pub(in crate::workspace) const TOOLBAR_CHECK_SELECTOR: &str = "flow-toolbar-check-press";
-const ICON_CHECK: &str = "icons/ui/check.svg";
+use crate::ui::flow_canvas::{CanvasNodeId, FlowCanvas};
 
 /// Why a flow could not be drawn. Three paths with three wordings, so they
 /// stay three variants rather than one collapsed message.
@@ -264,59 +255,6 @@ impl FlowGraphView {
         }));
     }
 
-    /// Follow the canvas's selection: build the form for a newly selected node,
-    /// drop it when the selection goes away or grows.
-    ///
-    /// Does nothing when the selection has not changed — the canvas notifies for
-    /// pan, zoom and run colouring too, and rebuilding the form on those would
-    /// throw away what the person is typing.
-    fn reconcile_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let wanted = match self.selection(cx) {
-            Selection::One(node) => Some(node),
-            Selection::None | Selection::Many(_) => None,
-        };
-        if wanted == self.form.as_ref().map(|form| form.node.clone()) {
-            return;
-        }
-        let text = self.text.clone();
-        self.form = wanted
-            .zip(text)
-            .and_then(|(node, text)| form::NodeForm::build(&text, &node, window, cx));
-        cx.notify();
-    }
-
-    /// A flow that loaded but holds no nodes — `nodes: []`, which the engine
-    /// accepts. There is nothing to click, so the inspector says to add one.
-    fn is_empty_graph(&self) -> bool {
-        match &self.state {
-            FlowGraphState::Graph { model, .. } => model.nodes.is_empty(),
-            FlowGraphState::Unreadable(_) => false,
-        }
-    }
-
-    /// Which node is selected, by the flow's own id. `None` when nothing or
-    /// several are.
-    pub(in crate::workspace) fn selected_node(&self, cx: &App) -> Option<NodeId> {
-        match self.selection(cx) {
-            Selection::One(node) => Some(node),
-            Selection::None | Selection::Many(_) => None,
-        }
-    }
-
-    /// Select a node that has just been written into the file.
-    ///
-    /// The write's reload has already rebuilt the graph, so the node exists on
-    /// the canvas by now; this is the same path a reload uses to put a selection
-    /// back, called with a name that was not selected before.
-    pub(in crate::workspace) fn select_node_after_add(
-        &mut self,
-        node: &NodeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_node(node, window, cx);
-    }
-
     /// The bytes this view is drawing, which an edit has to be made against.
     /// `None` when the file could not be read — there is nothing to edit then.
     pub(in crate::workspace) fn text(&self) -> Option<&str> {
@@ -381,158 +319,9 @@ impl FlowGraphView {
             FlowGraphState::Unreadable(error) => policy::Drawn::Nothing(error),
         }
     }
-
-    /// The form for the selected node, when there is one.
-    pub(in crate::workspace) fn form(&self) -> Option<&form::NodeForm> {
-        self.form.as_ref()
-    }
-
-    /// Is the inspector holding something the file has not been told about?
-    ///
-    /// `Pane::is_dirty` says `false` for a graph on purpose — the pane is a view
-    /// of a file, not a buffer over it, so it never joins the close prompt. This
-    /// is the narrower question the toolbar asks: running reads the file, so
-    /// while these two disagree, ▶ would run something other than what is on
-    /// screen.
-    pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
-        self.form.as_ref().is_some_and(|form| form.is_dirty(cx))
-    }
-
-    /// Open or close the inspector's agent-override block.
-    pub(in crate::workspace) fn toggle_agent_section(&mut self, cx: &mut Context<Self>) {
-        if let Some(form) = self.form.as_mut() {
-            form.toggle_agent_open();
-            cx.notify();
-        }
-    }
-
-    /// Put a refused save's reason on the form — the sentence, and the boxes it
-    /// names — or clear both.
-    pub(in crate::workspace) fn set_form_refusal(
-        &mut self,
-        message: Option<String>,
-        notes: Vec<form::notes::FieldNote>,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(form) = self.form.as_mut() {
-            form.set_banner(message);
-            form.set_notes(notes);
-            cx.notify();
-        }
-    }
-
-    /// Build the form again from what the file says now — the Revert path.
-    /// Keeps the same node selected; only the boxes go back.
-    pub(in crate::workspace) fn rebuild_form(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(node) = self.form.as_ref().map(|form| form.node.clone()) else {
-            return;
-        };
-        let text = self.text.clone();
-        self.form = text.and_then(|text| form::NodeForm::build(&text, &node, window, cx));
-        cx.notify();
-    }
-
-    /// Say so when a reload replaced something the person had typed.
-    ///
-    /// Not "was the form dirty": the pane that pressed Save is dirty too at the
-    /// moment its own write comes back, and saying it on every successful save
-    /// would be noise. What is actually lost is the difference between what they
-    /// had and what the file now says — zero for the pane that wrote it, and the
-    /// typing itself for a pane that did not. A node that is gone after the
-    /// reload counts too: nothing came back to compare against.
-    ///
-    /// Emitted rather than written onto the form, because the form is the thing
-    /// being replaced. Adding a node rebuilds it for the new one, and a node
-    /// renamed out from under the inspector leaves no form at all — either way a
-    /// banner would be gone before it was read.
-    fn say_if_typing_was_dropped(
-        &mut self,
-        typed: Option<(NodeId, form::NodeFields)>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some((node, fields)) = typed else {
-            return;
-        };
-        let rebuilt = self
-            .form
-            .as_ref()
-            .map(|form| (form.node.clone(), form.fields(cx)));
-        let rebuilt = rebuilt.as_ref().map(|(node, fields)| (node, fields));
-        if policy::typing_survived(&node, &fields, rebuilt) {
-            return;
-        }
-        cx.emit(FlowGraphEvent::TypingDropped);
-    }
-
-    /// Select `node` on the canvas, if the graph still has it, and build its
-    /// form. Used after a reload to put back what was selected before.
-    fn select_node(&mut self, node: &NodeId, window: &mut Window, cx: &mut Context<Self>) {
-        let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
-            return;
-        };
-        let Some(canvas_id) = ids.canvas(node) else {
-            return;
-        };
-        canvas.update(cx, |canvas, cx| {
-            canvas.dispatch_command(SelectNode { node: canvas_id }, cx);
-        });
-        self.reconcile_selection(window, cx);
-    }
-
-    /// Re-stamp the cards from a run's per-node states.
-    ///
-    /// Only the cards change — the graph's shape came from the file and a run
-    /// cannot alter it, so nothing is re-laid-out and nothing moves under the
-    /// person's eyes as a run progresses.
-    ///
-    /// What makes it visible past this view's `.cached()` wrapper is a notify on
-    /// the *canvas*: `execute_command` raises one itself (`plugin.rs`), and the
-    /// one below is ours rather than borrowed, so a future stamp that stops
-    /// going through a `Command` does not silently lose the repaint.
-    /// Colour the cards from `states`, which the run reported about the nodes
-    /// in `of_nodes`.
-    ///
-    /// Nothing is painted when the file no longer has those nodes: a run
-    /// executes the flow it resolved at the start, and an id freed by a delete
-    /// and taken by a rename would otherwise wear the first node's colour.
-    pub(in crate::workspace) fn set_run_states(
-        &mut self,
-        colouring: &RunColouring,
-        cx: &mut Context<Self>,
-    ) {
-        let FlowGraphState::Graph { canvas, model, ids } = &self.state else {
-            return;
-        };
-        if !colouring.is_about(model.nodes.iter().map(|node| node.id.clone())) {
-            return;
-        }
-        let stamped: Vec<(CanvasNodeId, serde_json::Value)> = model
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                let id = ids.canvas(&node.id)?;
-                let state = colouring.states.get(&node.id).copied().unwrap_or_default();
-                let card = card_for(node, state);
-                Some((id, serde_json::to_value(&card).unwrap_or_default()))
-            })
-            .collect();
-        canvas.update(cx, |canvas, cx| {
-            canvas.dispatch_command(StampCards { cards: stamped }, cx);
-            cx.notify();
-        });
-    }
 }
 
 impl FlowGraphView {
-    /// Fall to "the file is gone", because it is.
-    ///
-    /// Nothing re-reads a flow after the first open, so a deleted file would
-    /// otherwise keep drawing from the model already in memory — a graph that
-    /// looks fine and is not there, and a path that goes on being persisted.
     /// Follow the file to its new name. The pane wrapper renames its tab; this
     /// is the other half, so the next reload reads the file that now exists.
     pub(in crate::workspace) fn repoint(&mut self, to: &Path, cx: &mut Context<Self>) {
@@ -540,6 +329,11 @@ impl FlowGraphView {
         cx.notify();
     }
 
+    /// Fall to "the file is gone", because it is.
+    ///
+    /// Nothing re-reads a flow after the first open, so a deleted file would
+    /// otherwise keep drawing from the model already in memory — a graph that
+    /// looks fine and is not there, and a path that goes on being persisted.
     pub(in crate::workspace) fn report_file_gone(&mut self, cx: &mut Context<Self>) {
         self.state = FlowGraphState::Unreadable(FlowGraphError::Read {
             path: self.path.clone(),
@@ -554,125 +348,7 @@ impl FlowGraphView {
     }
 }
 
-/// Write fresh card data onto nodes that already exist.
-///
-/// A command because the canvas hands out its graph immutably and takes edits
-/// this way — there is no `graph_mut`. `undo` is implemented for the trait's
-/// sake and never reached: the flow pane installs no `HistoryPlugin`, so
-/// nothing is bound to run it (the YAML file is the only undo stack).
-struct StampCards {
-    cards: Vec<(CanvasNodeId, serde_json::Value)>,
-}
-
-impl Command for StampCards {
-    fn name(&self) -> &'static str {
-        "daruda_stamp_flow_cards"
-    }
-
-    fn execute(&mut self, ctx: &mut CommandContext) {
-        for (id, data) in &self.cards {
-            if let Some(node) = ctx.graph.get_node_mut(id) {
-                node.set_data(data.clone());
-            }
-        }
-    }
-
-    fn undo(&mut self, _ctx: &mut CommandContext) {}
-}
-
-/// Put the selection back on a node after the graph was rebuilt. A command
-/// because that is the only public way to write to the graph.
-struct SelectNode {
-    node: CanvasNodeId,
-}
-
-impl Command for SelectNode {
-    fn name(&self) -> &'static str {
-        "daruda_select_flow_node"
-    }
-
-    fn execute(&mut self, ctx: &mut CommandContext) {
-        ctx.add_selected_node(self.node, false);
-    }
-
-    fn undo(&mut self, _ctx: &mut CommandContext) {}
-}
-
-/// What the canvas has selected, in the flow's own terms.
-///
-/// Three variants rather than `Option<String>` plus a count: a marquee can take
-/// several cards, and "several" is a state the inspector has to say something
-/// about — it cannot show one node's fields and stay honest.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Selection {
-    None,
-    One(NodeId),
-    /// More than one, by flow node id. The count the inspector shows is
-    /// `len()` — an id list gives that *and* what a delete has to act on, which
-    /// a count cannot.
-    Many(Vec<NodeId>),
-}
-
 impl FlowGraphView {
-    /// Which flow node the canvas has selected.
-    ///
-    /// Read from the canvas rather than mirrored here: the canvas's graph is the
-    /// one thing that knows what was clicked, and a copy on this side would be a
-    /// second answer to the same question.
-    pub(in crate::workspace) fn selection(&self, cx: &App) -> Selection {
-        let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
-            return Selection::None;
-        };
-        let selected = canvas.read(cx).graph().selected_node();
-        // Ours only, and in the file's order: a canvas node with no flow id is
-        // nothing this side can name, and a set has no order to show. Asked of
-        // the selection rather than of every node, so panning a large graph
-        // does not walk it.
-        let mut flow_ids: Vec<NodeId> = selected
-            .iter()
-            .filter_map(|canvas_id| ids.flow(*canvas_id).cloned())
-            .collect();
-        flow_ids.sort();
-        match flow_ids.len() {
-            0 => Selection::None,
-            1 => Selection::One(flow_ids.remove(0)),
-            _ => Selection::Many(flow_ids),
-        }
-    }
-
-    /// Every selected node, one or many. What a delete acts on.
-    pub(in crate::workspace) fn selected_nodes(&self, cx: &App) -> Vec<NodeId> {
-        match self.selection(cx) {
-            Selection::None => Vec::new(),
-            Selection::One(node) => vec![node],
-            Selection::Many(nodes) => nodes,
-        }
-    }
-
-    /// Select a node so a capture can show the inspector.
-    #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn select_node_for_shot(
-        &mut self,
-        node: &NodeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_node(node, window, cx);
-    }
-
-    /// Select a node the way a click would, for tests that are about what the
-    /// selection *does* rather than about hit-testing (which
-    /// `clicking_a_card_selects_it_and_does_not_move_it` covers).
-    #[cfg(test)]
-    pub(in crate::workspace) fn select_node_for_test(
-        &mut self,
-        node: &NodeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_node(node, window, cx);
-    }
-
     /// The canvas entity, for tests that assert where the graph ended up on
     /// screen. `None` when the flow did not load.
     #[cfg(test)]
@@ -726,326 +402,5 @@ impl FlowGraphView {
             FlowGraphState::Graph { .. } => None,
             FlowGraphState::Unreadable(err) => Some(err),
         }
-    }
-}
-
-/// The profile is deliberately `None`. A graph is the file's shape; which
-/// named profile a *run* merged under is a question the run answers.
-/// Read the file, keeping the text: the graph is derived from it and
-/// [`FlowGraphView::reload`] compares against it.
-fn read_flow(path: &Path) -> Result<String, FlowGraphError> {
-    std::fs::read_to_string(path).map_err(|e| FlowGraphError::Read {
-        path: path.to_path_buf(),
-        message: e.to_string(),
-    })
-}
-
-fn build_graph_state(
-    model: FlowGraphModel,
-    window: &mut Window,
-    cx: &mut Context<FlowGraphView>,
-) -> FlowGraphState {
-    let (graph, ids) = build_canvas_graph(&model);
-    // Resolved here, where the colours are readable: neither the canvas's own
-    // theme nor a node renderer can reach `cx` once the canvas is built.
-    let tokens = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx);
-    let rerun = RerunOverlay::new(ids.clone(), model.rerun.clone());
-    let canvas = cx.new(|c| {
-        // Deliberately not `default_plugins()`: no node drag (auto-placed
-        // nodes carry no position to move) and no history (the YAML file
-        // is the single undo stack). Framing is daruda's own (`frame.rs`):
-        // a graph laid out one column-pitch apart outgrows a pane, and how
-        // far out it is worth zooming depends on what our cards say when
-        // they get there.
-        FlowCanvas::builder(graph, c, window)
-            .theme(flow_theme(&tokens))
-            .node_renderer(
-                NODE_TYPE,
-                FlowNodeRenderer {
-                    palette: renderer::CardPalette::of(&tokens),
-                },
-            )
-            .plugin(BackgroundPlugin::new())
-            .plugin(ViewportPlugin::new())
-            .plugin(GraphPlugin::new())
-            .plugin(SelectionPlugin::new())
-            .plugin(NodeClickPlugin::new())
-            // The eighth: dragging port to port is how a dependency is drawn.
-            // Its validator is ours, so a refusal shows while the wire is
-            // still being dragged rather than after it is written. Dangling
-            // links are off: a release that landed on no port ends there, and
-            // a node the file never declared is not something to offer.
-            .plugin(
-                PortInteractionPlugin::new()
-                    .validator(FlowEdgeValidator)
-                    .dangling_links(false),
-            )
-            // The ninth: Delete on a selected line takes it away again.
-            .plugin(EdgeDeletePlugin)
-            .plugin(FrameGraphPlugin::new())
-            .plugin(rerun)
-            .build()
-    });
-    FlowGraphState::Graph { canvas, model, ids }
-}
-
-/// Build the canvas graph and lay it out. Coordinates are never persisted —
-/// the flow file declares dependencies, not positions — so every open
-/// places the nodes again.
-fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, NodeIds) {
-    let mut ids: HashMap<NodeId, CanvasNodeId> = HashMap::new();
-    let mut inputs = HashMap::new();
-    let mut outputs = HashMap::new();
-
-    let mut graph = Graph::build(|g| {
-        for node in &model.nodes {
-            let card = card_for(node, NodeRunState::default());
-            let (nid, ins, outs) = g
-                .create_node(NODE_TYPE)
-                .size(palette::FLOW_GRAPH_NODE_W, palette::FLOW_GRAPH_NODE_H)
-                .input()
-                .output()
-                .data(serde_json::to_value(&card).unwrap_or_default())
-                .build_with_ports();
-            ids.insert(node.id.clone(), nid);
-            inputs.insert(node.id.clone(), ins);
-            outputs.insert(node.id.clone(), outs);
-        }
-        for edge in &model.deps {
-            let (Some(from), Some(to)) = (outputs.get(&edge.from), inputs.get(&edge.to)) else {
-                continue;
-            };
-            let (Some(from), Some(to)) = (from.first(), to.first()) else {
-                continue;
-            };
-            g.create_edge().source(*from).target(*to).build();
-        }
-    });
-
-    if let Ok(LayoutOutput::Delta(delta)) =
-        LayeredDagLayout.compute(&graph, &LayoutOptions::default(), None)
-    {
-        // `NodePositionDelta`'s own fields are crate-private upstream;
-        // `PositionHint` is the public way to read the result.
-        let placed: Vec<_> = PositionHint::from_delta_to(&delta)
-            .positions()
-            .iter()
-            .map(|(id, p)| (*id, *p))
-            .collect();
-        for (id, at) in placed {
-            if let Some(node) = graph.get_node_mut(&id) {
-                node.set_position_with_point(at);
-            }
-        }
-    }
-    (graph, NodeIds::new(ids))
-}
-
-/// Buttons over the graph: what a person does to the flow, then what they do
-/// with it.
-///
-/// The menu (`pane_menu::FlowGraphMenu`) has the editing pair and calls the same
-/// ops — that half is a second way in, not a second implementation. It exists
-/// because the menu is a right-click nobody is told about, and adding the first
-/// node to a new flow is the moment that matters most.
-///
-/// Running and checking are here and not in the menu because until now the only
-/// way to run the flow on screen was the palette, which asks which flow — a
-/// question this pane already has the answer to.
-fn toolbar(
-    has_selection: bool,
-    unsaved_form: bool,
-    cx: &mut Context<FlowGraphView>,
-) -> impl IntoElement {
-    use crate::ui::{Disableable as _, Icon, button_bare};
-
-    div()
-        .absolute()
-        // Each interaction it has to swallow, named — rather than `occlude()`,
-        // which blocks every one at once. gpui hit-tests geometrically, so a
-        // sibling painted on top still lets the canvas's own listeners fire;
-        // something has to stop them, or the press goes through and starts a
-        // marquee drag under the toolbar.
-        //
-        // What `occlude()` costs is `Hitbox::is_hovered`: everything behind a
-        // `BlockMouse` hitbox reads as un-hovered, so the canvas concluded the
-        // pointer had *left* the moment it reached this toolbar — inside the
-        // canvas's own bounds — and the vendored selection plugin threw the
-        // marquee away on that news. React Flow draws the same line per
-        // interaction for the same reason (`nodrag` / `nopan` / `nowheel`,
-        // matched against the event target rather than by occlusion).
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-        .top(px(palette::FLOW_TOOLBAR_INSET))
-        .right(px(palette::FLOW_TOOLBAR_INSET))
-        .flex()
-        .flex_row()
-        .gap(px(palette::FLOW_TOOLBAR_GAP))
-        .child(
-            button_bare("flow-toolbar-add")
-                .icon(crate::ui::IconName::Plus)
-                .tooltip(s::flow_add_node())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::AddNode))),
-        )
-        .child(
-            // Disabled rather than absent: a button that comes and goes under
-            // the pointer is worse than one that says it is not available.
-            button_bare("flow-toolbar-delete")
-                .icon(crate::ui::IconName::Minus)
-                .tooltip(s::flow_delete_node())
-                .disabled(!has_selection)
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
-        )
-        // Both of these read the *file*, so while the inspector holds unsaved
-        // edits they would act on something other than what is on screen — and
-        // ✓ would go further and call it valid. Off for the same reason, and
-        // together: one greyed button beside an identical live one would read as
-        // a glitch rather than as a state. The tooltip carries the reason, since
-        // a disabled button still shows one and grey on its own is not an
-        // answer.
-        .child(
-            button_bare("flow-toolbar-check")
-                .icon(Icon::empty().path(ICON_CHECK))
-                .tooltip(reason_or(unsaved_form, s::flow_check_tooltip()))
-                .disabled(unsaved_form)
-                .debug_selector(|| TOOLBAR_CHECK_SELECTOR.into())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Validate))),
-        )
-        .child(
-            button_bare("flow-toolbar-run")
-                .icon(Icon::empty().path(ICON_PLAY))
-                .tooltip(reason_or(unsaved_form, s::flow_run_tooltip()))
-                .disabled(unsaved_form)
-                // The press is what the disabled state has to actually stop, and
-                // that cannot be seen without a real click.
-                .debug_selector(|| TOOLBAR_RUN_SELECTOR.into())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Run))),
-        )
-}
-
-/// A button's tooltip: why it is off, or what it does.
-fn reason_or(unsaved_form: bool, does: String) -> String {
-    if unsaved_form {
-        s::flow_needs_save()
-    } else {
-        does
-    }
-}
-
-impl Render for FlowGraphView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = div().size_full().track_focus(&self.focus_handle);
-        match &self.state {
-            FlowGraphState::Graph { canvas, .. } => {
-                // A row rather than an overlay: floating the inspector over the
-                // graph would hide the cards it is about.
-                //
-                // Its width is reserved whether or not anything is selected.
-                // Showing it only on selection was tried and is worse: the canvas
-                // narrows, the graph re-fits into what is left, and the whole
-                // picture shifts under the pointer that just clicked — a
-                // shift-click on a second card then misses it. A fixed column
-                // costs the width once and never moves the graph.
-                let inspector = match self.selection(cx) {
-                    Selection::One(_) => match &self.form {
-                        Some(form) => form::render(form, cx).into_any_element(),
-                        None => form::render_empty(cx).into_any_element(),
-                    },
-                    Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),
-                    // Nothing to click is not the same as nothing clicked yet.
-                    Selection::None if self.is_empty_graph() => {
-                        form::render_no_nodes(cx).into_any_element()
-                    }
-                    Selection::None => form::render_empty(cx).into_any_element(),
-                };
-                // The toolbar goes inside the canvas half, not the pane: over the
-                // pane it would sit on the inspector column instead of the graph.
-                let has_selection = !self.selected_nodes(cx).is_empty();
-                let unsaved_form = self.has_unsaved_form(cx);
-                body.child(
-                    div()
-                        .size_full()
-                        .flex()
-                        .flex_row()
-                        .child(
-                            div()
-                                .relative()
-                                .flex_1()
-                                .h_full()
-                                .child(canvas.clone())
-                                .child(toolbar(has_selection, unsaved_form, cx)),
-                        )
-                        .child(inspector),
-                )
-            }
-            FlowGraphState::Unreadable(err) => body
-                .flex()
-                .flex_col()
-                .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
-                .p(px(palette::FLOW_GRAPH_CARD_PAD))
-                .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
-                .text_color(crate::ui::theme::current(cx).text_muted)
-                .children(error_lines(err).into_iter().map(|line| div().child(line))),
-        }
-    }
-}
-
-/// One line per thing wrong. A validation failure reports every issue the
-/// stage saw, and collapsing them to the first would hide the rest.
-fn error_lines(err: &FlowGraphError) -> Vec<String> {
-    match err {
-        FlowGraphError::Read { path, message } => {
-            vec![s::flow_graph_read_failed(
-                &path.display().to_string(),
-                message,
-            )]
-        }
-        FlowGraphError::Parse { detail } => vec![s::flow_graph_parse_failed(detail)],
-        FlowGraphError::Validate { issues } => issues.clone(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn model_of(yaml: &str) -> FlowGraphModel {
-        let loaded = daruda_flow::load(yaml, None).expect("fixture should load");
-        FlowGraphModel::from_flow(loaded.flow())
-    }
-
-    const ONE_NODE: &str = concat!(
-        "version: 1\n",
-        "defaults:\n",
-        "  agent:\n",
-        "    id: claude\n",
-        "    mode: bypassPermissions\n",
-        "nodes:\n",
-        "  - id: hello\n",
-        "    kind: agent\n",
-        "    output: hello.md\n",
-        "    prompt: hi\n",
-    );
-
-    /// A single node still has to land somewhere the viewport can see, and
-    /// still has to carry the card the renderer reads back.
-    #[test]
-    fn a_lone_node_is_placed_and_stamped() {
-        let (graph, ids) = build_canvas_graph(&model_of(ONE_NODE));
-        assert!(
-            ids.canvas(&NodeId::from("hello")).is_some(),
-            "the flow id maps to a canvas node"
-        );
-        let node = graph.nodes().values().next().expect("one node");
-        let (x, y) = node.position();
-        println!("POS ({x:?}, {y:?}) size={:?}", node.size_ref());
-        assert!(
-            f32::from(x).is_finite() && f32::from(y).is_finite(),
-            "placed at ({x:?}, {y:?})"
-        );
-        let card: renderer::CardData =
-            serde_json::from_value(node.data_ref().clone()).expect("the node carries a card");
-        assert_eq!(card.id, "hello");
     }
 }
