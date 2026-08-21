@@ -747,8 +747,14 @@ fn build_graph_state(
             .plugin(NodeClickPlugin::new())
             // The eighth: dragging port to port is how a dependency is drawn.
             // Its validator is ours, so a refusal shows while the wire is
-            // still being dragged rather than after it is written.
-            .plugin(PortInteractionPlugin::new().validator(FlowEdgeValidator))
+            // still being dragged rather than after it is written. Dangling
+            // links are off: a release that landed on no port ends there, and
+            // a node the file never declared is not something to offer.
+            .plugin(
+                PortInteractionPlugin::new()
+                    .validator(FlowEdgeValidator)
+                    .dangling_links(false),
+            )
             // The ninth: Delete on a selected line takes it away again.
             .plugin(EdgeDeletePlugin)
             .plugin(FrameGraphPlugin::new())

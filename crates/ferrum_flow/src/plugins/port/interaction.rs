@@ -33,6 +33,7 @@ struct PendingLinkCommitted {
 pub struct PortInteractionPlugin {
     pending: Option<PendingPortLink>,
     validator: Arc<dyn EdgeValidator>,
+    dangling: bool,
 }
 
 impl Default for PortInteractionPlugin {
@@ -46,11 +47,24 @@ impl PortInteractionPlugin {
         Self {
             pending: None,
             validator: Arc::new(DefaultEdgeValidator),
+            dangling: true,
         }
     }
 
     pub fn validator(mut self, validator: impl EdgeValidator + 'static) -> Self {
         self.validator = Arc::new(validator);
+        self
+    }
+
+    /// Whether releasing over empty space leaves a dangling endpoint that a
+    /// second click turns into a new node. `true` by default.
+    ///
+    /// Off, a release that landed on no port simply ends the drag — nothing is
+    /// drawn and nothing is waiting. For a host whose nodes come from a file
+    /// rather than from the canvas, the dangling wire is a line to nowhere and
+    /// the node it would build has no place to be recorded.
+    pub fn dangling_links(mut self, dangling: bool) -> Self {
+        self.dangling = dangling;
         self
     }
 
@@ -306,6 +320,7 @@ impl Plugin for PortInteractionPlugin {
                     validator: self.validator.clone(),
                     validation_error: None,
                     hovered_port: None,
+                    dangling: self.dangling,
                 });
                 return crate::plugin::EventResult::Stop;
             }
@@ -362,6 +377,8 @@ struct PortConnecting {
     validation_error: Option<()>,
     /// Candidate port currently hovered by cursor (if any).
     hovered_port: Option<PortId>,
+    /// Whether a release over empty space leaves a dangling endpoint behind.
+    dangling: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -488,10 +505,12 @@ impl Interaction for PortConnecting {
             return crate::canvas::InteractionResult::End;
         }
 
-        ctx.emit(FlowEvent::custom(PendingLinkCommitted {
-            source_port: self.port_id,
-            end_world: mouse_world,
-        }));
+        if self.dangling {
+            ctx.emit(FlowEvent::custom(PendingLinkCommitted {
+                source_port: self.port_id,
+                end_world: mouse_world,
+            }));
+        }
         crate::canvas::InteractionResult::End
     }
 
