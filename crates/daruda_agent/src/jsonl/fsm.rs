@@ -303,8 +303,8 @@ mod tests {
     use crate::jsonl::parser::{AssistantMessage, ImageBlock, SessionEntryBase, UserMessage};
     use chrono::{Duration as CDuration, Utc};
 
-    fn now_rfc3339(offset_secs: i64) -> String {
-        (Utc::now() + CDuration::seconds(offset_secs))
+    fn rfc3339_ago(age_secs: i64) -> String {
+        (Utc::now() - CDuration::seconds(age_secs))
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string()
     }
@@ -343,7 +343,7 @@ mod tests {
     fn base(age_secs: i64) -> SessionEntryBase {
         SessionEntryBase {
             uuid: "u".into(),
-            timestamp: now_rfc3339(-age_secs),
+            timestamp: rfc3339_ago(age_secs),
             session_id: None,
             cwd: None,
             version: None,
