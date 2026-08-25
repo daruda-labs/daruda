@@ -17,6 +17,10 @@ daruda_acp = { path = "../daruda_acp" }
 humantime = "2"
 humantime-serde = "1.1"
 petgraph = "0.8"
+# Two output paths differing only in Unicode normalisation are one file on
+# macOS's default filesystem — verified for Latin, Hangul and kana. std has
+# no normaliser, so the duplicate-output rule needs one to mean what it says.
+unicode-normalization = "0.1"
 serde = { workspace = true }
 # The progress journal is append-only NDJSON: the writer can be killed
 # mid-line, and only a per-line format lets the reader drop the tear.

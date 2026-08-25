@@ -49,6 +49,16 @@ enum Entry {
     /// says the crash was in setup.
     Started {
         v: u32,
+        /// The node the run was asked to stop at. Carried here for the same
+        /// reason `profile` is: `run.yaml` records the whole flow, so a
+        /// resume has nowhere else to read the selection back from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<NodeId>,
+        /// Nodes whose output this run reused instead of computing. Recorded
+        /// so a resume treats them as passed — otherwise the unclaimed-output
+        /// sweep would archive the copies out from under it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pinned: Vec<NodeId>,
         /// The profile the run was submitted under. Carried here because
         /// `run.yaml` deliberately records the settings rather than the
         /// name that produced them, so a resume has nowhere else to read it.
@@ -91,6 +101,11 @@ struct AttemptLine {
     waited_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     answers: Vec<AnswerLine>,
+    /// Whether the attempt used a second turn to correct its output.
+    /// Absent on every journal written before it existed, which reads back
+    /// as `false` — an older line describes a run that could not have.
+    #[serde(default, skip_serializing_if = "is_false")]
+    corrected: bool,
     spent: SpentLine,
 }
 
@@ -159,6 +174,8 @@ fn is_false(value: &bool) -> bool {
 /// What the run had spent, in the scheduler's own terms.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Spent {
+    /// Budget units consumed. The journal key keeps its established name for
+    /// compatibility with existing run directories.
     pub node_runs: u32,
     pub parked: Duration,
     pub cost: Option<CostLimit>,
@@ -180,6 +197,12 @@ pub struct Replay {
     pub records: Vec<NodeRecord>,
     pub spent: Spent,
     pub profile: Option<String>,
+    /// The selection the earlier process ran under. Re-applied on resume, or
+    /// the continuation would run the nodes it was told to skip.
+    pub until: Option<NodeId>,
+    /// Nodes the earlier process reused rather than ran. Also in `passed`;
+    /// kept apart so the record can say which of the two it was.
+    pub pinned: Vec<NodeId>,
     /// Whether the journal ended in a torn line — the crash landed
     /// mid-write. Surfaced rather than swallowed: it is the one case where
     /// an attempt really happened and the record cannot show it.
@@ -230,6 +253,7 @@ pub(crate) fn append_attempt(
                     AskAnswer::Unanswered => AnswerLine::Unanswered,
                 })
                 .collect(),
+            corrected: attempt.corrected,
             spent: SpentLine {
                 node_runs: spent.node_runs,
                 parked_ms: millis(spent.parked),
@@ -256,11 +280,18 @@ pub(crate) fn resumed(run_dir: &Path, carried: usize) -> std::io::Result<()> {
 /// Open the journal for this run. Written past the lock and before the
 /// first node, so a directory with no journal at all is one whose crash
 /// came during setup — there is nothing to resume there.
-pub(crate) fn start(run_dir: &Path, profile: Option<&str>) -> std::io::Result<()> {
+pub(crate) fn start(
+    run_dir: &Path,
+    profile: Option<&str>,
+    until: Option<&NodeId>,
+    pinned: &[NodeId],
+) -> std::io::Result<()> {
     append(
         run_dir,
         &Entry::Started {
             v: JOURNAL_VERSION,
+            until: until.cloned(),
+            pinned: pinned.to_vec(),
             profile: profile.map(str::to_string),
         },
     )
@@ -324,7 +355,19 @@ fn warnings_say_cost_mixed(warnings: &[String]) -> bool {
 
 fn absorb(replay: &mut Replay, entry: Entry) {
     match entry {
-        Entry::Started { v, profile } if v <= JOURNAL_VERSION => replay.profile = profile,
+        Entry::Started {
+            v,
+            until,
+            pinned,
+            profile,
+        } if v <= JOURNAL_VERSION => {
+            replay.profile = profile;
+            replay.until = until;
+            // Passed as well as pinned: the sweep skips what passed, and a
+            // copied output nothing claims is exactly what it archives.
+            replay.passed.extend(pinned.iter().cloned());
+            replay.pinned = pinned;
+        }
         Entry::Started { .. } => {}
         // Read past: the boundary is for a person reading the file. What
         // the run needs from a resume — what passed, what it spent — comes
@@ -344,6 +387,7 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 took_ms,
                 waited_ms,
                 answers,
+                corrected,
                 spent,
                 ..
             } = *line;
@@ -369,6 +413,7 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 &mut replay.records,
                 &node,
                 AttemptRecord {
+                    tools: Vec::new(),
                     attempt,
                     evidence_seq,
                     outcome: match outcome {
@@ -397,6 +442,7 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                             })
                             .collect(),
                     },
+                    corrected,
                 },
             );
         }
@@ -414,6 +460,7 @@ mod tests {
 
     fn attempt(n: u32, seq: u32, outcome: AttemptOutcome) -> AttemptRecord {
         AttemptRecord {
+            tools: Vec::new(),
             attempt: n,
             evidence_seq: seq,
             at: FIXED_INSTANT,
@@ -422,6 +469,7 @@ mod tests {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: Waiting::default(),
+            corrected: false,
         }
     }
 
@@ -469,7 +517,7 @@ mod tests {
     #[test]
     fn an_id_reaches_the_file_as_a_bare_string() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -486,7 +534,7 @@ mod tests {
     #[test]
     fn what_passed_reads_back() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), Some("cheap")).expect("start");
+        start(dir.path(), Some("cheap"), None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -520,7 +568,7 @@ mod tests {
     #[test]
     fn invalidation_takes_nodes_back_out_of_the_passed_set() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -547,7 +595,7 @@ mod tests {
     #[test]
     fn mixed_cost_accounting_reads_back() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -573,7 +621,7 @@ mod tests {
     #[test]
     fn the_evidence_counter_continues_where_it_stopped() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         for seq in 1..=4 {
             append_attempt(
                 dir.path(),
@@ -592,7 +640,7 @@ mod tests {
     #[test]
     fn a_line_torn_by_the_kill_costs_only_itself() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -618,7 +666,7 @@ mod tests {
     #[test]
     fn an_entry_from_a_newer_build_is_skipped_not_fatal() {
         let dir = tempfile::tempdir().expect("tempdir");
-        start(dir.path(), None).expect("start");
+        start(dir.path(), None, None, &[]).expect("start");
         append_attempt(
             dir.path(),
             &"design".into(),
@@ -637,6 +685,54 @@ mod tests {
         assert!(!replay.torn, "a newer entry is not damage");
     }
 
+    /// **The trap this closes.** `absorb` destructures with a trailing `..`,
+    /// so a field added to the line compiles clean and is silently dropped on
+    /// resume — a corrected attempt would read back as an ordinary one, and
+    /// the record of a run continued after a crash would understate what it
+    /// cost. Nothing but a round trip catches that.
+    #[test]
+    fn a_correction_survives_the_round_trip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None, None, &[]).expect("start");
+        let mut corrected = attempt(1, 1, AttemptOutcome::Passed);
+        corrected.corrected = true;
+        append_attempt(dir.path(), &"design".into(), &corrected, &spent(2)).expect("append");
+        append_attempt(
+            dir.path(),
+            &"review".into(),
+            &attempt(1, 2, AttemptOutcome::Passed),
+            &spent(3),
+        )
+        .expect("append");
+
+        let replay = read(dir.path());
+        assert!(
+            replay.records[0].attempts[0].corrected,
+            "the correction was dropped on the way back"
+        );
+        assert!(
+            !replay.records[1].attempts[0].corrected,
+            "an ordinary attempt must not read as corrected"
+        );
+    }
+
+    /// The field is skipped when false, so a journal an older build wrote —
+    /// which has no such key — still reads, and every line a run without
+    /// corrections writes is unchanged.
+    #[test]
+    fn an_uncorrected_attempt_writes_no_such_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        append_attempt(
+            dir.path(),
+            &"design".into(),
+            &attempt(1, 1, AttemptOutcome::Passed),
+            &spent(1),
+        )
+        .expect("append");
+        let text = std::fs::read_to_string(dir.path().join(JOURNAL_FILE)).expect("read");
+        assert!(!text.contains("corrected"), "{text}");
+    }
+
     /// A directory with no journal is a run that never got past setup, not
     /// an error — `read` answers with an empty replay and `exists` is how a
     /// caller tells the two apart.
@@ -647,5 +743,22 @@ mod tests {
         let replay = read(dir.path());
         assert!(replay.passed.is_empty() && replay.records.is_empty());
         assert_eq!(replay.next_seq, 0);
+    }
+
+    /// The selection has to survive a crash, or the continuation runs the
+    /// nodes the first process was told to skip.
+    #[test]
+    fn the_selection_reads_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = NodeId::from("design");
+        start(dir.path(), None, Some(&target), &[]).expect("start");
+        assert_eq!(read(dir.path()).until.as_ref(), Some(&target));
+    }
+
+    #[test]
+    fn a_run_with_no_selection_reads_back_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None, None, &[]).expect("start");
+        assert_eq!(read(dir.path()).until, None);
     }
 }

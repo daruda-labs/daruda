@@ -68,7 +68,9 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         | K::AskWithoutMode
         | K::UnknownAgent { .. }
         | K::NobodyToAsk => FormField::Agent,
-        K::MissingPromptFile { .. } | K::PromptFileOutsideFlowDir { .. } => FormField::Prompt,
+        K::EmptyPrompt | K::MissingPromptFile { .. } | K::PromptFileOutsideFlowDir { .. } => {
+            FormField::Prompt
+        }
         K::DuplicateOutput | K::OutputEscapesRunDir | K::OutputInReservedDir { .. } => {
             FormField::Output
         }
@@ -78,8 +80,17 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         // both name the key, but the form has a box per *concept*, and the key
         // it names may be one the form does not show at all.
         K::UnknownField { .. } | K::ConflictingField { .. } => return None,
+        // An `output_schema` has no box: it is written in the YAML editor, so
+        // there is nothing here to point at.
+        K::UnsupportedSchemaKeyword { .. } | K::SchemaKeywordOnWrongKind { .. } => return None,
+        // A pin lives in the pane, not in any box of this form.
+        K::PinnedNodeInRerun { .. } => return None,
         // About the flow, not about a box.
-        K::Cycle
+        // A selection is about the run, not about any box on a node.
+        K::UnknownUntil { .. }
+        | K::UnknownPin { .. }
+        | K::PinnedSourceMissing { .. }
+        | K::Cycle
         | K::UnknownVersion(_)
         | K::UnknownProfile { .. }
         | K::ReservedProfileName

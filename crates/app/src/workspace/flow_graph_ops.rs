@@ -64,6 +64,42 @@ impl Workspace {
         }
     }
 
+    /// Run the flow this pane draws, as far as `until` and reusing whatever it
+    /// has pinned.
+    ///
+    /// The pins are resolved here rather than at the button: this is the last
+    /// moment before the run, and the newest run directory — which is where a
+    /// reused output comes from — is what the guard is about to lock.
+    pub(in crate::workspace) fn run_flow_from_graph(
+        &mut self,
+        path: &Path,
+        until: Option<daruda_flow::NodeId>,
+        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pinned = view.read(cx).pinned_nodes();
+        let selection = super::flow_request::FlowSelection { until, pinned };
+        self.run_flow_at(path, FlowPurpose::Run, selection, window, cx);
+    }
+
+    /// Pin the graph pane's selection, or unpin it.
+    ///
+    /// The colouring goes back on afterwards for the same reason a reload puts
+    /// it back: writing the cards again draws the flow, not the run of it, and
+    /// the run's state lives here rather than on the view.
+    pub(in crate::workspace) fn toggle_flow_pins(
+        &mut self,
+        path: &Path,
+        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        cx: &mut Context<Self>,
+    ) {
+        view.update(cx, |view, cx| view.toggle_pins(cx));
+        if let Some(colouring) = self.runs.colouring_of(self.active, path) {
+            view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
+        }
+    }
+
     /// Open `path` as a graph in a new tab. A dedupe first: a flow already
     /// on screen is activated rather than drawn twice, the same way the file
     /// viewer activates an open file's tab.
@@ -144,11 +180,33 @@ impl Workspace {
                 // the flow is already named, and the lock — plus the profile
                 // question, when the file declares any — still is not.
                 FlowGraphEvent::Run => {
-                    workspace.run_flow_at(&for_path, FlowPurpose::Run, window, cx)
+                    workspace.run_flow_from_graph(&for_path, None, view.clone(), window, cx)
                 }
-                FlowGraphEvent::Validate => {
-                    workspace.run_flow_at(&for_path, FlowPurpose::Validate, window, cx)
+                FlowGraphEvent::RunUntil => {
+                    let until = view.read(cx).selected_node(cx);
+                    // No node selected is no stopping point, so there is
+                    // nothing to run — the button is off for exactly this, and
+                    // falling through would run the whole flow instead.
+                    if let Some(until) = until {
+                        workspace.run_flow_from_graph(
+                            &for_path,
+                            Some(until),
+                            view.clone(),
+                            window,
+                            cx,
+                        );
+                    }
                 }
+                FlowGraphEvent::TogglePins => {
+                    workspace.toggle_flow_pins(&for_path, view.clone(), cx)
+                }
+                FlowGraphEvent::Validate => workspace.run_flow_at(
+                    &for_path,
+                    FlowPurpose::Validate,
+                    super::flow_request::FlowSelection::default(),
+                    window,
+                    cx,
+                ),
                 FlowGraphEvent::Connect { out_of, into } => {
                     workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
                 }
@@ -196,7 +254,10 @@ impl Workspace {
     }
 
     /// The pane already drawing `path` in the active lane, if any.
-    fn find_flow_graph_pane(&self, path: &Path) -> Option<super::main_area::pane_tree::PaneId> {
+    pub(super) fn find_flow_graph_pane(
+        &self,
+        path: &Path,
+    ) -> Option<super::main_area::pane_tree::PaneId> {
         self.active_runtime()
             .panes
             .iter()
@@ -405,6 +466,39 @@ impl Workspace {
                 first.map(|node| (view, node))
             });
         if let Some((view, node)) = node {
+            view.update(cx, |view, cx| view.select_node_for_shot(&node, window, cx));
+        }
+    }
+
+    /// The same graph with its first node's output pinned and the *second* node
+    /// selected — the `--screenshot-scenario flow-graph-pinned` entry point.
+    ///
+    /// The selection moves off the pinned card on purpose: selection wins the
+    /// border, so a pinned card that is also selected shows only its badge, and
+    /// what needs looking at is whether the indicator stands on its own beside a
+    /// pending card. Driven through the real toggle, not a seeded field.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_first_flow_graph_pinned_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_first_flow_graph_selected_for_shot(window, cx);
+        let Some(path) = self.first_flow_path_for_shot() else {
+            return;
+        };
+        let Some(view) = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
+            .map(|fg| fg.view.clone())
+        else {
+            return;
+        };
+        self.toggle_flow_pins(&path, view.clone(), cx);
+        let second = view.read(cx).node_ids_for_shot().get(1).cloned();
+        if let Some(node) = second {
             view.update(cx, |view, cx| view.select_node_for_shot(&node, window, cx));
         }
     }

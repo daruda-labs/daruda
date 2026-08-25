@@ -66,7 +66,9 @@ pub struct RunReport {
     /// Where the run's artifacts and its completion marker are, so the
     /// recording code (P2b-3) needs only the report and not the request.
     pub run_dir: PathBuf,
-    /// Runner calls made, including reruns and fix sessions.
+    /// Budget units consumed: one per runner call, including reruns and fix
+    /// sessions, plus one per in-session correction. The public field keeps
+    /// its established name for compatibility.
     pub node_runs: u32,
     /// Accumulated only while every reported cost shares one currency.
     pub cost: Option<CostLimit>,
@@ -79,8 +81,9 @@ pub struct RunReport {
     /// that wrote this field directly. [`RunReport::warn`] and
     /// [`RunReport::warn_from_setup`] are the two orders there are.
     warnings: Vec<String>,
-    /// Every attempt the run made, in the order the nodes first ran. The
-    /// attempt counts here sum to `node_runs`.
+    /// Every attempt the run made, in the order the nodes first ran. A
+    /// correction is marked on its existing attempt, so it raises
+    /// `node_runs` without adding another attempt.
     pub nodes: Vec<NodeRecord>,
     /// How this run came to be. Neither half is something the run did —
     /// both are facts about how it was started, which is why they travel
@@ -98,6 +101,13 @@ pub struct RunReport {
 pub struct Provenance {
     /// The profile the run was submitted under.
     pub profile: Option<String>,
+    /// The node the run was asked to stop at, when it was asked. Without it
+    /// a reader sees a flow whose later nodes have no attempts and cannot
+    /// tell "asked to stop here" from "died before getting there".
+    pub until: Option<crate::NodeId>,
+    /// Nodes whose output was reused instead of computed. Named, not
+    /// counted: which ones were skipped is the question a reader has.
+    pub pinned: Vec<crate::NodeId>,
     /// How many nodes it started with already done, because it was picked
     /// up rather than started. Zero for a run that began at its first node.
     pub carried_over: usize,
@@ -132,7 +142,7 @@ impl RunReport {
     pub(in crate::schedule) fn completed(
         outcome: RunOutcome,
         run_dir: PathBuf,
-        node_runs: u32,
+        budget_units: u32,
         cost: Option<CostLimit>,
         warnings: Vec<String>,
         nodes: Vec<NodeRecord>,
@@ -141,7 +151,7 @@ impl RunReport {
         Self {
             outcome,
             run_dir,
-            node_runs,
+            node_runs: budget_units,
             cost,
             warnings,
             nodes,

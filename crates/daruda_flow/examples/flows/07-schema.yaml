@@ -1,0 +1,38 @@
+# 7 — a node that owes a *shape*, not just a file.
+#
+# `output_schema` is stated in the injected contract and checked after the
+# turn, so prose, a code fence around the JSON, or a missing field is refused
+# at the node that wrote it. Without the check the gate below is the first
+# thing to notice, and `jq` on prose fails for a reason that names neither the
+# node nor the field.
+#
+# The gate is 2's `grep` gate in JSON, and quotes for the same reason: the
+# engine shell-quotes a substitution because `run_dir` holds the repo path and
+# a bare one splits on a space — so the template stays unquoted here and `jq`'s
+# own filter is what carries the quotes.
+version: 1
+defaults:
+  timeout: 5m
+  agent:
+    id: claude
+    mode: bypassPermissions
+    permission: deny
+
+nodes:
+  - id: verdict
+    kind: agent
+    output: verdict.json
+    output_schema:
+      type: object
+      required: [verdict, reason]
+      properties:
+        verdict: { type: string, enum: [pass, fail] }
+        reason: { type: string }
+    prompt: |
+      Judge nothing — this is a wiring check. Write the object the contract
+      asks for to {{output}}, with `verdict` set to `pass` and one short
+      sentence as `reason`. Create no other file.
+  - id: gate
+    kind: command
+    deps: [verdict]
+    run: "jq -e '.verdict == \"pass\"' {{node.verdict.output}}"

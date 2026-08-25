@@ -4,14 +4,14 @@
 //! directory, so two running at once would corrupt each other.
 
 use crate::NodeId;
+use crate::contract::file::FileContract;
 use crate::error::{FlowIoError, IoSite};
 use crate::event::FlowEvent;
 use crate::graph::FlowGraph;
-use crate::model::{AgentSpec, Flow, Node, NodeKind, Prompt};
-use crate::record::{AttemptOutcome, AttemptRecord, GitStatus, Invalidation};
+use crate::model::{AgentSpec, Flow, Node, NodeKind};
+use crate::record::{AttemptOutcome, AttemptRecord, GitStatus, Invalidation, Reported};
 use crate::request::Budget;
-use crate::runner::{CancelToken, NodeFailure, NodeRunner, RunContext, RunResult};
-use crate::template::{Surface, TemplateContext, render};
+use crate::runner::{CancelToken, NodeFailure, NodeRunner, OutputContract, RunContext, RunResult};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -60,6 +60,11 @@ struct Run<'a> {
     already_passed: Vec<NodeId>,
     /// The profile this run went by, for its record.
     profile: Option<String>,
+    /// The node this run was asked to stop at, for its record. The
+    /// worklist already applied it; `finish` only writes it down.
+    until: Option<NodeId>,
+    /// Nodes reused rather than run, for its record.
+    pinned: Vec<NodeId>,
     /// Where the run narrates itself, or `None` when nobody is watching.
     events: Option<&'a smol::channel::Sender<FlowEvent>>,
     /// Where a `permission: ask` node puts its question. `None` is a host
@@ -67,8 +72,8 @@ struct Run<'a> {
     /// for any flow that could reach `Ask`.
     ask: Option<crate::runner::AskChannel>,
     /// What the run has spent and what it has to say about it. Owned as
-    /// one value so the drive loop cannot reach a counter that only
-    /// `account` may raise — see [`budget::Accounting`].
+    /// one value so the drive loop cannot reach counters outside the
+    /// accounted-call and correction paths — see [`budget::Accounting`].
     spent: budget::Accounting,
     /// Nodes that have produced a result this run, in run order. The rerun
     /// set is intersected with this — a node that never ran has nothing to
@@ -84,11 +89,6 @@ struct Run<'a> {
     /// budget could notice.
     driving: RefCell<HashSet<NodeId>>,
 }
-
-/// A read that failed, labelled and with the path it was given. Everything
-/// a `FlowIoError` needs except the node and attempt, which the reader does
-/// not have.
-type ReadFailure = (&'static str, PathBuf, std::io::Error);
 
 /// Everything one drive needs, borrowed. `execute` builds it from a
 /// `RunRequest`; the crate's own tests build it directly, which is what
@@ -114,6 +114,13 @@ pub(crate) struct RunInputs<'a> {
     /// Where a person is asked for permission. `None` is a host with no
     /// answering surface.
     pub(crate) ask: Option<&'a smol::channel::Sender<crate::runner::PendingAsk>>,
+    /// Run no further than this node. Resolved by the caller so a resume
+    /// re-applies the selection the first process ran under.
+    pub(crate) until: Option<NodeId>,
+    /// Nodes whose output was copied in rather than computed. Treated as
+    /// done, and recorded apart from a resume's carried-over set — one was
+    /// asked for, the other is what a crash left behind.
+    pub(crate) pinned: Vec<NodeId>,
     /// What an earlier process finished, when this is a continuation.
     pub(crate) resume: Option<crate::journal::Replay>,
 }
@@ -130,6 +137,8 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         git_status,
         events,
         ask,
+        until,
+        pinned,
         resume,
     } = inputs;
     let (flow, graph) = (loaded.flow(), loaded.graph());
@@ -170,6 +179,8 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         ask: ask.cloned().map(crate::runner::AskChannel::new),
         spent,
         profile,
+        until: until.clone(),
+        pinned: pinned.clone(),
         // Seeded: a repair's `∩ executed` filter asks which nodes have run,
         // and the ones from before the crash did.
         executed: RefCell::new(passed.clone()),
@@ -192,11 +203,25 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
     // Nodes an earlier process finished start out done. Not skipped inside
     // `drive`: a gate's repair re-runs nodes *because* they already ran,
     // and a blanket skip there would turn every repair into a no-op.
-    let mut done: HashSet<NodeId> = run.already_passed.iter().cloned().collect();
+    // A pin is the user's promise that this output is already valid, so the
+    // node is done before the run starts. Kept out of `already_passed`: that
+    // one means "a crash left this finished", which is a different story for
+    // the record to tell.
+    let mut done: HashSet<NodeId> = run
+        .already_passed
+        .iter()
+        .chain(run.pinned.iter())
+        .cloned()
+        .collect();
+    // A selection is applied to the worklist, not to the flow: `run.yaml`
+    // records what the flow says, and the ready-set filter stays a question
+    // about dependencies.
+    let selected = crate::graph::Selection::of(flow, until.as_ref());
     let mut waiting: Vec<NodeId> = graph
         .topological_order()
         .into_iter()
         .filter(|id| !done.contains(id))
+        .filter(|id| selected.includes(id))
         .collect();
 
     while !waiting.is_empty() {
@@ -290,6 +315,13 @@ impl<'a> Run<'a> {
                 // established it is inside the run's — which is what keeps
                 // the run's single lock covering everywhere it works.
                 let cwd = self.node_cwd(node);
+                // A local because `ctx` borrows it; when there is no output
+                // there is no contract, whatever the node's kind.
+                let contract = output
+                    .as_deref()
+                    .map(|p| FileContract::new(self.run_dir, p, node.kind.output_schema()));
+                // A local because `ctx` borrows it, like `contract` above.
+                let reserve = || self.reserve_extra_turn();
                 let ctx = RunContext {
                     node_id: id,
                     attempt,
@@ -298,6 +330,7 @@ impl<'a> Run<'a> {
                     run_dir: self.run_dir,
                     log_dir: &self.log_dir,
                     output: output.as_deref(),
+                    contract: contract.as_ref().map(|c| c as &dyn OutputContract),
                     evidence_seq: seq,
                     // The node's own budget, but never past the run's
                     // deadline: a runner races only what it is given, so a
@@ -306,7 +339,29 @@ impl<'a> Run<'a> {
                     timeout: self.bounded_timeout(node.timeout),
                     permission: self.permission_for(node),
                     cancel: self.cancel,
+                    reserve_extra_turn: &reserve,
                 };
+
+                // Before the directory is made and before the runner is
+                // called: `create_dir_all` follows a link an earlier node
+                // planted, so a write through one cannot be caught after
+                // the fact — only prevented.
+                if let Some(path) = output.as_deref()
+                    && let Err(failure) = crate::contract::file::preflight(self.run_dir, path)
+                {
+                    // No session was paid for, so there is no attempt to
+                    // record. The node still stopped the run, and a host
+                    // drawing the graph has to be told which one.
+                    self.emit(FlowEvent::NodeFailed {
+                        node: id.clone(),
+                        attempt,
+                        failure: failure.clone(),
+                    });
+                    return Err(RunOutcome::Failed {
+                        node: id.clone(),
+                        failure,
+                    });
+                }
 
                 // An agent writes into `run_dir`, and a nested `output`
                 // such as `reports/out.md` is legal — nothing else creates
@@ -322,9 +377,10 @@ impl<'a> Run<'a> {
                     Ok(text) => text,
                     Err((doing, path, e)) => return Err(node_io(&ctx, doing, path, e)),
                 };
-                // Emitted where the session is about to be paid for, so the
-                // stream's node events pair one-for-one with the runner calls
-                // and with the record's attempts.
+                // Emitted where the session is about to be paid for, so a
+                // `NodeStarted` is one runner call and one recorded attempt.
+                // Not the converse: the preflight above fails a node with
+                // neither.
                 self.emit(FlowEvent::NodeStarted {
                     node: id.clone(),
                     attempt,
@@ -336,19 +392,14 @@ impl<'a> Run<'a> {
                 // node the user just stopped. Its output goes aside too —
                 // everything left live has to be a completed node's.
                 if self.cancel.is_canceled() {
-                    return Err(self.settle_cancel(
-                        &ctx,
-                        id,
-                        output.as_deref(),
-                        result.waiting.clone(),
-                    ));
+                    return Err(self.settle_cancel(&ctx, id, output.as_deref(), &result));
                 }
                 let artifacts = result.artifacts.clone();
                 // Captured before `judge` consumes the result, like
                 // `artifacts` — every `record` below is for this attempt.
-                let waited = result.waiting.clone();
+                let reported = Reported::from(&result);
 
-                let failure = match judge(node, &ctx, result) {
+                let failure = match judge(&ctx, result) {
                     Ok(()) => {
                         // A pass archives nothing: its output stays live for
                         // the nodes downstream to read.
@@ -356,7 +407,7 @@ impl<'a> Run<'a> {
                             &ctx,
                             AttemptOutcome::Passed,
                             Invalidation::default(),
-                            waited,
+                            reported.clone(),
                         );
                         self.emit(FlowEvent::NodePassed {
                             node: id.clone(),
@@ -389,7 +440,7 @@ impl<'a> Run<'a> {
                         &ctx,
                         AttemptOutcome::Failed(failure.clone()),
                         Invalidation::default(),
-                        waited,
+                        reported.clone(),
                     );
                     return Err(RunOutcome::Failed {
                         node: id.clone(),
@@ -413,7 +464,7 @@ impl<'a> Run<'a> {
                                 nodes: set.iter().map(|(id, _)| id.clone()).collect(),
                                 archived: paths.clone(),
                             },
-                            waited.clone(),
+                            reported.clone(),
                         );
                         evidence.extend(paths);
                     }
@@ -425,9 +476,10 @@ impl<'a> Run<'a> {
                             &ctx,
                             AttemptOutcome::Failed(failure.clone()),
                             Invalidation::default(),
-                            waited.clone(),
+                            reported.clone(),
                         );
-                        return Err(node_io(&ctx, doing::ARCHIVE, e.path, e.source));
+                        let (path, source) = e.into_io();
+                        return Err(node_io(&ctx, doing::ARCHIVE, path, source));
                     }
                 }
 
@@ -467,12 +519,15 @@ impl<'a> Run<'a> {
     /// three of them return before `judge` or before any archiving. The
     /// `git_status` ask happens here, so the number of asks equals the
     /// number of attempts.
+    /// What the runner call reported, for the record. Grouped because all of
+    /// it comes from one `RunResult` and every call site was passing the parts
+    /// positionally — and `Default` is the refusal that never made a call.
     fn record(
         &self,
         ctx: &RunContext<'_>,
         outcome: AttemptOutcome,
         invalidated: Invalidation,
-        waited: crate::runner::Waiting,
+        reported: Reported,
     ) {
         let attempt = AttemptRecord {
             attempt: ctx.attempt,
@@ -484,7 +539,9 @@ impl<'a> Run<'a> {
             outcome,
             invalidated,
             git_status: self.git_status.and_then(|ask| ask(ctx.cwd)),
-            waited,
+            waited: reported.waited,
+            corrected: reported.corrected,
+            tools: reported.tools,
         };
         // On disk before the next node starts, through the same funnel the
         // in-memory record goes through — a second write site is a second
@@ -523,73 +580,18 @@ impl<'a> Run<'a> {
         seq
     }
 
-    /// The text this attempt hands the runner: for a command the rendered
-    /// `run`, for an agent the rendered prompt — plus, when `failure` is
-    /// `Some` and the policy is `Retry`, a separator and the rendered hint.
-    /// Fallible because `Prompt::File` and a file-backed hint are both read
-    /// here; nothing downstream can read them. The error carries which of
-    /// the two it was, so a missing hint is never reported as a missing
-    /// prompt; the caller adds the node and attempt it has and this does
-    /// not.
-    fn node_text(
-        &self,
-        node: &Node,
-        ctx: &RunContext<'_>,
-        evidence: &[PathBuf],
-        failure: Option<&NodeFailure>,
-    ) -> Result<String, ReadFailure> {
-        let tctx = TemplateContext {
-            run_dir: self.run_dir,
-            output: ctx.output,
-            node_outputs: &self.node_outputs,
-            failure,
-            attempts: evidence,
-        };
-        match &node.kind {
-            NodeKind::Command { run, .. } => Ok(render(run, &tctx, Surface::Shell)),
-            NodeKind::Agent { prompt, .. } => {
-                let mut text = render(
-                    &self.read_prompt(prompt, doing::READ_PROMPT)?,
-                    &tctx,
-                    Surface::Prompt,
-                );
-                if let (Some(_), PolicyKind::Retry { hint }) = (failure, self.policy_of(node).kind)
-                {
-                    // Two channels, not one: the node's own prompt is
-                    // unchanged and the hint answers the failure that made
-                    // this attempt happen.
-                    text.push_str("\n\n---\n");
-                    text.push_str(&render(
-                        &self.read_prompt(&hint, doing::READ_HINT)?,
-                        &tctx,
-                        Surface::Prompt,
-                    ));
-                }
-                Ok(text)
-            }
-        }
-    }
-
-    /// `doing` is the caller's label because this reads both the node's
-    /// prompt and its hint, and only the caller knows which one it asked for.
-    fn read_prompt(&self, prompt: &Prompt, doing: &'static str) -> Result<String, ReadFailure> {
-        match prompt {
-            Prompt::Inline(text) => Ok(text.clone()),
-            Prompt::File(path) => {
-                let path = self.flow_dir.join(path);
-                std::fs::read_to_string(&path).map_err(|e| (doing, path, e))
-            }
-        }
-    }
-
-    /// Dispatch finished text to the trait. Reads nothing.
+    /// Dispatch finished text through the runner and its accounting funnel.
     async fn call(&self, node: &Node, ctx: &RunContext<'_>, text: &str) -> RunResult {
-        let result = match &node.kind {
-            NodeKind::Agent { agent, .. } => self.runner.run_agent(ctx, agent, text).await,
-            NodeKind::Command { .. } => self.runner.run_command(ctx, text).await,
-        };
-        self.account(&result);
-        result
+        match &node.kind {
+            NodeKind::Agent { agent, .. } => {
+                self.accounted_call(|| self.runner.run_agent(ctx, agent, text))
+                    .await
+            }
+            NodeKind::Command { .. } => {
+                self.accounted_call(|| self.runner.run_command(ctx, text))
+                    .await
+            }
+        }
     }
 
     /// The user stopped the run while this node was in flight.
@@ -603,7 +605,7 @@ impl<'a> Run<'a> {
         ctx: &RunContext<'_>,
         id: &NodeId,
         output: Option<&Path>,
-        waited: crate::runner::Waiting,
+        result: &RunResult,
     ) -> RunOutcome {
         let mut archived = Vec::new();
         if let Some(output) = output {
@@ -614,9 +616,10 @@ impl<'a> Run<'a> {
                         ctx,
                         AttemptOutcome::Canceled,
                         Invalidation::default(),
-                        waited,
+                        Reported::from(result),
                     );
-                    return node_io(ctx, doing::ARCHIVE_CANCELED, e.path, e.source);
+                    let (path, source) = e.into_io();
+                    return node_io(ctx, doing::ARCHIVE_CANCELED, path, source);
                 }
             }
         }
@@ -629,142 +632,10 @@ impl<'a> Run<'a> {
                 nodes: Vec::new(),
                 archived,
             },
-            waited,
+            Reported::from(result),
         );
         RunOutcome::Canceled {
             node: Some(id.clone()),
-        }
-    }
-
-    /// One repair generation: run the `fix`, then re-derive what the gate's
-    /// failure invalidated. `Err` ends the run — a failed fix changed
-    /// nothing, so re-deriving would only re-prove the same verdict.
-    async fn repair(
-        &self,
-        fix: &str,
-        rerun: &[NodeId],
-        ctx: &RunContext<'_>,
-        gate: &NodeId,
-        evidence: &[PathBuf],
-        failure: &NodeFailure,
-    ) -> Result<(), RunOutcome> {
-        self.run_fix(fix, ctx, evidence, failure).await?;
-        // Each member starts a fresh generation of its own — that is the
-        // rule that gives a nested gate its cap back.
-        let members = self.rerun_members(rerun, gate);
-        // The computed set, not the declared roots: a host cannot infer the
-        // closure, the `∩ executed` filter or the recursion guard. An empty
-        // one still says work resumed.
-        self.emit(FlowEvent::Rerunning {
-            gate: gate.clone(),
-            members: members.clone(),
-        });
-        for member in members {
-            self.drive(&member).await?;
-        }
-        Ok(())
-    }
-
-    /// Run `fix` as `flow.default_agent` under `FIX_SESSION_ID`. `Err` when
-    /// the fix itself fails — the set is then not re-derived, because
-    /// nothing was changed.
-    async fn run_fix(
-        &self,
-        fix: &str,
-        ctx: &RunContext<'_>,
-        evidence: &[PathBuf],
-        failure: &NodeFailure,
-    ) -> Result<(), RunOutcome> {
-        // `crate::validate` rejects a repair without an agent, so reaching
-        // this arm means that rule has a hole; reporting beats a panic.
-        let Some(agent) = &self.flow.default_agent else {
-            return Err(RunOutcome::Failed {
-                node: ctx.node_id.clone(),
-                failure: NodeFailure::SessionError(
-                    "this flow names no agent for a repair's fix session".to_string(),
-                ),
-            });
-        };
-
-        let tctx = TemplateContext {
-            run_dir: self.run_dir,
-            output: None,
-            node_outputs: &self.node_outputs,
-            failure: Some(failure),
-            attempts: evidence,
-        };
-        let text = render(fix, &tctx, Surface::Prompt);
-
-        let fix_id = NodeId::from(FIX_SESSION_ID);
-        let fix_ctx = RunContext {
-            node_id: &fix_id,
-            attempt: ctx.attempt,
-            // Its own: the fix is a session of its own, and dating it from
-            // the gate's start would report it as having taken the gate's
-            // whole life.
-            started_at: std::time::SystemTime::now(),
-            cwd: self.cwd,
-            run_dir: self.run_dir,
-            log_dir: &self.log_dir,
-            // The fix owes no file: it edits the tree, and the re-derived
-            // nodes are what produce evidence of that.
-            output: None,
-            evidence_seq: self.take_seq(),
-            // The gate's own timeout, by design (§6): a fix is a prompt
-            // inside a policy rather than a node, so nothing else would
-            // bound it and a hung fix session's only defence would be the
-            // run's wall clock — which every other gate then has to share.
-            //
-            // The sharp edge that buys: a gate declared `timeout: 30s`
-            // because it only runs `grep` gives its fix session 30s too.
-            // An author wanting a longer repair raises the gate's.
-            timeout: ctx.timeout,
-            permission: self.permission_for_fix(agent),
-            cancel: self.cancel,
-        };
-        // A fix is a real agent session and can take minutes. With no event
-        // for it a host sits on `NodeFailed` and looks hung.
-        self.emit(FlowEvent::FixStarted {
-            gate: ctx.node_id.clone(),
-        });
-        // A fix is a session the run paid for, so it counts like any other.
-        let result = self.runner.run_agent(&fix_ctx, agent, &text).await;
-        self.account(&result);
-        // The fix never reaches `drive_inner` or `judge`, so its fate is
-        // sealed here instead.
-        let recorded = if self.cancel.is_canceled() {
-            AttemptOutcome::Canceled
-        } else {
-            match &result.outcome {
-                Ok(()) => AttemptOutcome::Passed,
-                Err(failure) => AttemptOutcome::Failed(failure.clone()),
-            }
-        };
-        self.record(
-            &fix_ctx,
-            recorded,
-            Invalidation::default(),
-            result.waiting.clone(),
-        );
-        // Like any node: a cancel that interrupted the session is not a
-        // failure of it, and reporting one would be wrong about why the run
-        // stopped. The fix owes no output, so there is nothing to archive.
-        if self.cancel.is_canceled() {
-            // No `FixEnded`: a stop is not an ending the fix reached, and
-            // `failure: None` would say it succeeded. `RunEnded` follows and
-            // says why — the same rule an interrupted node follows.
-            return Err(RunOutcome::Canceled { node: Some(fix_id) });
-        }
-        self.emit(FlowEvent::FixEnded {
-            gate: ctx.node_id.clone(),
-            failure: result.outcome.as_ref().err().cloned(),
-        });
-        match result.outcome {
-            Ok(()) => Ok(()),
-            Err(failure) => Err(RunOutcome::Failed {
-                node: fix_id,
-                failure,
-            }),
         }
     }
 }
@@ -849,65 +720,6 @@ impl Run<'_> {
     }
 }
 
-/// The next set of nodes to run together: ready, in declaration order, at
-/// most `parallel` of them, and **no two sharing a working directory**.
-///
-/// That last rule is the whole safety argument. Two agents editing one tree
-/// at once corrupt each other, and no amount of care inside a node prevents
-/// it — so nodes that would share a directory are simply not put in the
-/// same wave. A flow asking for eight at once still gets one at a time if
-/// all eight work in the same place.
-fn take_ready_batch(
-    flow: &Flow,
-    cwd: &Path,
-    waiting: &mut Vec<NodeId>,
-    done: &HashSet<NodeId>,
-    parallel: usize,
-) -> Vec<NodeId> {
-    let mut batch: Vec<NodeId> = Vec::new();
-    let mut taken_dirs: Vec<PathBuf> = Vec::new();
-    waiting.retain(|id| {
-        if batch.len() >= parallel || !deps_are_done(flow, id, done) {
-            return true;
-        }
-        let Some(node) = flow.nodes.iter().find(|n| &n.id == id) else {
-            return true;
-        };
-        let dir = working_tree_of(cwd, node);
-        if taken_dirs.contains(&dir) {
-            return true;
-        }
-        taken_dirs.push(dir);
-        batch.push(id.clone());
-        false
-    });
-    batch
-}
-
-/// Which directory a node actually works in, as something two nodes can be
-/// compared on.
-///
-/// **Resolved, not compared as written.** `a` and `./a` are one directory
-/// spelled two ways, and a string comparison puts both in the same wave —
-/// bypassing the one rule this whole feature rests on with a `./`. The
-/// same goes for `A` and `a` on the case-insensitive filesystem macOS
-/// ships by default, and for a symlink pointing at a directory already
-/// taken.
-///
-/// `canonicalize` answers all three, because it asks the filesystem rather
-/// than the spelling. It needs the directory to exist, which
-/// `validate_request` has already established; if it fails anyway — the
-/// directory went away mid-run — the lexical form is the fallback, and
-/// erring toward *different* there only costs some overlap, never safety,
-/// because a directory that is gone is not one two nodes can corrupt.
-fn working_tree_of(cwd: &Path, node: &Node) -> PathBuf {
-    let joined = match &node.cwd {
-        Some(relative) => cwd.join(relative),
-        None => cwd.to_path_buf(),
-    };
-    std::fs::canonicalize(&joined).unwrap_or(joined)
-}
-
 /// Every future to completion, in one place.
 ///
 /// Hand-rolled because `futures-lite` — what `smol` brings — has `zip` for
@@ -938,39 +750,25 @@ async fn join_all<T>(mut futures: Vec<Pin<Box<dyn Future<Output = T> + '_>>>) ->
     settled.into_iter().flatten().collect()
 }
 
-/// Whether everything this node waits on has finished.
+/// A runner reporting success is necessary but not sufficient for a node
+/// that owes a file: a turn that ended cleanly without writing anything
+/// still fails.
 ///
-/// A question about the flow, not about the run: `deps` is what the file
-/// says, and asking the graph would be asking the same thing one
-/// indirection away. Free-standing for the same reason — it needs no run
-/// state, and a method would have implied it did.
-pub(crate) fn deps_are_done(flow: &Flow, id: &NodeId, done: &HashSet<NodeId>) -> bool {
-    flow.nodes
-        .iter()
-        .find(|n| &n.id == id)
-        .is_none_or(|node| node.deps.iter().all(|dep| done.contains(dep)))
-}
-
-/// A runner reporting success is necessary but not sufficient for an agent
-/// node: the file contract is the scheduler's to enforce, so a turn that
-/// ended cleanly without writing anything still fails.
-fn judge(node: &Node, ctx: &RunContext<'_>, result: RunResult) -> Result<(), NodeFailure> {
+/// The runner's verdict is answered first: asking the filesystem about an
+/// attempt that already failed would only rename its failure.
+fn judge(ctx: &RunContext<'_>, result: RunResult) -> Result<(), NodeFailure> {
     result.outcome?;
-    if let (NodeKind::Agent { .. }, Some(path)) = (&node.kind, ctx.output) {
-        let wrote_something = std::fs::metadata(path)
-            .map(|m| m.len() > 0)
-            .unwrap_or(false);
-        if !wrote_something {
-            return Err(NodeFailure::NoOutput {
-                expected: path.to_path_buf(),
-            });
-        }
+    if let Some(contract) = ctx.contract {
+        contract.check()?;
     }
     Ok(())
 }
 
 mod budget;
 mod policy;
+mod prompt;
+mod ready;
+mod repair;
 mod report;
 mod run;
 
@@ -979,6 +777,7 @@ pub use report::{BudgetLimit, RunOutcome, RunReport};
 pub use run::execute;
 
 use policy::PolicyKind;
+use ready::take_ready_batch;
 
 #[cfg(test)]
 mod tests;

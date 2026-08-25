@@ -1,0 +1,326 @@
+//! Which nodes this pane will reuse instead of running, and when that stops
+//! being true.
+//!
+//! A pin is this machine at this moment: it names an output a previous run
+//! already produced, so it belongs to the pane rather than to the flow file —
+//! writing one into a committed file would tell every other reader to skip a
+//! node they have never run. Nothing here reaches disk.
+//!
+//! GPUI-free, for the reason [`super::policy`] is: the rule worth getting right
+//! is when a pin has to go, and that is a question about two texts.
+
+use std::collections::BTreeSet;
+
+use daruda_flow::NodeId;
+use daruda_flow::parse::parse_flow_file;
+
+/// The nodes whose output is pinned, in the file's own vocabulary.
+///
+/// A set rather than a list: pinning twice is pinning, and the order a person
+/// clicked in says nothing about the run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) struct PinSet {
+    nodes: BTreeSet<NodeId>,
+}
+
+impl PinSet {
+    pub(in crate::workspace) fn contains(&self, node: &NodeId) -> bool {
+        self.nodes.contains(node)
+    }
+
+    pub(in crate::workspace) fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Every pinned node, sorted. What a run is handed.
+    pub(in crate::workspace) fn to_vec(&self) -> Vec<NodeId> {
+        self.nodes.iter().cloned().collect()
+    }
+
+    /// Pin `nodes`, or unpin them if every one is already pinned.
+    ///
+    /// One gesture for both directions, and "all of them" rather than "any of
+    /// them" is what makes a marquee over a half-pinned group finish the job
+    /// instead of undoing the half that was done.
+    pub(in crate::workspace) fn toggle(&mut self, nodes: &[NodeId]) {
+        if nodes.iter().all(|node| self.nodes.contains(node)) {
+            for node in nodes {
+                self.nodes.remove(node);
+            }
+        } else {
+            self.nodes.extend(nodes.iter().cloned());
+        }
+    }
+
+    pub(in crate::workspace) fn remove(&mut self, node: &NodeId) {
+        self.nodes.remove(node);
+    }
+
+    pub(in crate::workspace) fn clear(&mut self) {
+        self.nodes.clear();
+    }
+
+    /// What one press of the pin button would do to `reusable` — the selected
+    /// nodes that have an output at all.
+    pub(in crate::workspace) fn action_for(&self, reusable: Vec<NodeId>) -> PinAction {
+        if reusable.is_empty() {
+            PinAction::Unavailable
+        } else if reusable.iter().all(|node| self.nodes.contains(node)) {
+            PinAction::Unpin(reusable)
+        } else {
+            PinAction::Pin(reusable)
+        }
+    }
+}
+
+/// What the pin button offers, given what is selected.
+///
+/// The nodes ride inside the variants because the tooltip names them and the
+/// press acts on them, and a list beside a verb is a pair that can disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum PinAction {
+    /// Nothing selected whose output could be reused.
+    Unavailable,
+    Pin(Vec<NodeId>),
+    Unpin(Vec<NodeId>),
+}
+
+/// The pins that still hold after the file went from `was` to `now`.
+///
+/// A pin says "what this node produced last time is still what it would
+/// produce". What can make that false is the node's own definition **and
+/// every definition upstream of it**: a node reads its ancestors' outputs, so
+/// rewriting `design`'s prompt changes what `build` would produce without
+/// touching a character of `build`. Comparing each node against itself alone
+/// kept `build` pinned across exactly that edit and reused an output computed
+/// from a design the run had just replaced — with nothing on screen saying so.
+///
+/// Clearing everything on any edit would mean re-pinning on every iteration,
+/// which is the whole value of the feature; so the rule is the closure: a pin
+/// survives when its node and all of its ancestors read the same, and a
+/// sibling's edit still costs nothing.
+///
+/// Text that does not parse — either side — clears the lot. There is no
+/// node-by-node comparison to make then, and the safe answer to "I cannot tell"
+/// is to pay for the node. `defaults` and `profiles` count as every node's own
+/// definition, because they are what an unstated axis resolves to.
+pub(in crate::workspace) fn surviving(pins: &PinSet, was: Option<&str>, now: &str) -> PinSet {
+    // Every reload runs this, and most panes have pinned nothing — no reason to
+    // parse two files to answer a question about an empty set.
+    if pins.is_empty() {
+        return PinSet::default();
+    }
+    let (Some(was), Ok(now)) = (
+        was.and_then(|t| parse_flow_file(t).ok()),
+        parse_flow_file(now),
+    ) else {
+        return PinSet::default();
+    };
+    if was.defaults != now.defaults || was.profiles != now.profiles {
+        return PinSet::default();
+    }
+    let unchanged = |id: &NodeId| {
+        let before = was.nodes.iter().find(|n| &n.id == id);
+        let after = now.nodes.iter().find(|n| &n.id == id);
+        matches!((before, after), (Some(a), Some(b)) if a == b)
+    };
+    let kept = pins
+        .nodes
+        .iter()
+        .filter(|id| unchanged(id) && with_ancestors(&now, id).iter().all(&unchanged))
+        .cloned()
+        .collect();
+    PinSet { nodes: kept }
+}
+
+/// `id` and everything it transitively depends on, read off `deps` in the
+/// parsed file.
+///
+/// The parsed file rather than a built graph: this runs on text that has not
+/// been resolved and may not even be runnable, and the question — which
+/// definitions feed this node — is answerable without either. A dep naming a
+/// node the file lacks is simply not walked; `daruda_flow`'s own validation
+/// is what reports that, and a pin is not the place to repeat it.
+fn with_ancestors(file: &daruda_flow::parse::FlowFile, id: &NodeId) -> BTreeSet<NodeId> {
+    let mut seen = BTreeSet::new();
+    // A `deps` cycle is refused at load, but this runs on unvalidated text —
+    // so termination comes from the visited set, not from the file.
+    let mut pending = vec![id.clone()];
+    while let Some(next) = pending.pop() {
+        if !seen.insert(next.clone()) {
+            continue;
+        }
+        if let Some(node) = file.nodes.iter().find(|n| n.id == next) {
+            pending.extend(node.deps.iter().cloned());
+        }
+    }
+    seen.remove(id);
+    seen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TWO: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+  - id: build
+    kind: agent
+    deps: [design]
+    output: build.md
+    prompt: build it
+";
+
+    fn pinned(nodes: &[&str]) -> PinSet {
+        let mut set = PinSet::default();
+        set.toggle(&nodes.iter().map(|n| NodeId::from(*n)).collect::<Vec<_>>());
+        set
+    }
+
+    #[test]
+    fn toggling_pins_then_unpins_the_same_nodes() {
+        let mut set = PinSet::default();
+        set.toggle(&["design".into()]);
+        assert!(set.contains(&"design".into()));
+        set.toggle(&["design".into()]);
+        assert!(set.is_empty());
+    }
+
+    /// One button, and what it offers follows the selection rather than a mode
+    /// the person has to remember they are in.
+    #[test]
+    fn the_button_offers_the_direction_the_selection_is_not_already_in() {
+        let none = PinSet::default();
+        assert_eq!(none.action_for(Vec::new()), PinAction::Unavailable);
+        assert_eq!(
+            none.action_for(vec!["design".into()]),
+            PinAction::Pin(vec!["design".into()])
+        );
+        assert_eq!(
+            pinned(&["design"]).action_for(vec!["design".into()]),
+            PinAction::Unpin(vec!["design".into()])
+        );
+        assert_eq!(
+            pinned(&["design"]).action_for(vec!["design".into(), "build".into()]),
+            PinAction::Pin(vec!["design".into(), "build".into()]),
+            "one of the two is not pinned, so the press finishes the job"
+        );
+    }
+
+    /// A marquee over a group where one is already pinned finishes the job.
+    /// Toggling each one separately would undo that one.
+    #[test]
+    fn a_half_pinned_group_becomes_wholly_pinned() {
+        let mut set = pinned(&["design"]);
+        set.toggle(&["design".into(), "build".into()]);
+        assert_eq!(
+            set.to_vec(),
+            vec![NodeId::from("build"), NodeId::from("design")]
+        );
+    }
+
+    /// The rule the feature lives on: editing one node must not cost the pin
+    /// on another, or every iteration starts by re-pinning everything.
+    #[test]
+    fn only_the_node_that_changed_loses_its_pin() {
+        let edited = TWO.replace("build it", "build it twice");
+        let kept = surviving(&pinned(&["design", "build"]), Some(TWO), &edited);
+        assert_eq!(kept.to_vec(), vec![NodeId::from("design")]);
+    }
+
+    /// The direction the old rule missed: `build` reads `design`'s output, so
+    /// rewriting `design` changes what `build` would produce without touching
+    /// a character of `build`. Keeping that pin reuses an output computed from
+    /// a design the run is about to replace.
+    #[test]
+    fn a_pin_does_not_outlive_an_edit_to_what_it_depends_on() {
+        let edited = TWO.replace("write a line", "write three lines");
+        let kept = surviving(&pinned(&["design", "build"]), Some(TWO), &edited);
+        assert!(
+            kept.is_empty(),
+            "design changed, so neither it nor build still holds: {:?}",
+            kept.to_vec()
+        );
+    }
+
+    /// And the direction that must keep working, or every iteration starts by
+    /// re-pinning: a sibling with no path to the pinned node costs it nothing.
+    #[test]
+    fn a_pin_outlives_an_edit_to_a_node_it_does_not_depend_on() {
+        const FORK: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+  - id: notes
+    kind: agent
+    output: notes.md
+    prompt: take notes
+";
+        let edited = FORK.replace("take notes", "take better notes");
+        let kept = surviving(&pinned(&["design"]), Some(FORK), &edited);
+        assert_eq!(kept.to_vec(), vec![NodeId::from("design")]);
+    }
+
+    #[test]
+    fn a_node_that_left_the_file_loses_its_pin() {
+        let gone = TWO.replace(
+            "  - id: build\n    kind: agent\n    deps: [design]\n    output: build.md\n    prompt: build it\n",
+            "",
+        );
+        let kept = surviving(&pinned(&["design", "build"]), Some(TWO), &gone);
+        assert_eq!(kept.to_vec(), vec![NodeId::from("design")]);
+    }
+
+    /// Reformatting the file around a node is not a change to that node, and
+    /// the comparison is of the parsed node rather than of its bytes.
+    #[test]
+    fn a_node_that_reads_the_same_keeps_its_pin() {
+        let moved = TWO.replace("version: 1\n", "version: 1\n# a comment\n");
+        let kept = surviving(&pinned(&["design", "build"]), Some(TWO), &moved);
+        assert_eq!(
+            kept.to_vec(),
+            vec![NodeId::from("build"), NodeId::from("design")]
+        );
+    }
+
+    /// A node states one axis and inherits the rest, so an edit to `defaults`
+    /// changes what every node would produce without changing any node's own
+    /// lines. Comparing nodes alone would keep pins that are no longer true.
+    #[test]
+    fn changing_what_every_node_inherits_clears_every_pin() {
+        let other_agent = TWO.replace("id: claude", "id: codex");
+        assert!(surviving(&pinned(&["design"]), Some(TWO), &other_agent).is_empty());
+    }
+
+    #[test]
+    fn text_that_does_not_parse_clears_every_pin() {
+        assert!(
+            surviving(&pinned(&["design"]), Some("nodes: ["), TWO).is_empty(),
+            "the old text could not be compared against"
+        );
+        assert!(
+            surviving(&pinned(&["design"]), Some(TWO), "nodes: [").is_empty(),
+            "the new text could not be compared against"
+        );
+        assert!(
+            surviving(&pinned(&["design"]), None, TWO).is_empty(),
+            "there was no old text at all"
+        );
+    }
+}

@@ -367,3 +367,78 @@ fn the_record_dates_every_attempt() {
         "the record's attempts are not in the order they settled"
     );
 }
+
+/// A resume has to keep saying which nodes were reused. `absorb` kept pins
+/// apart from `passed` for exactly this, and a continuation that read back only
+/// the latter reported a reused node as one that simply ran.
+#[test]
+fn a_resumed_run_still_names_what_it_reused() {
+    // Agent nodes, because a command node writes nothing and so can hold no
+    // pin at all.
+    const THREE_AGENTS: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: one
+    kind: agent
+    output: one.md
+    prompt: write
+  - id: two
+    kind: agent
+    deps: [one]
+    output: two.md
+    prompt: write
+  - id: three
+    kind: agent
+    deps: [two]
+    output: three.md
+    prompt: write
+";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source = dir.path().join("earlier-one.md");
+    std::fs::write(&source, "reused\n").expect("the earlier output");
+
+    let mut request = request_for(THREE_AGENTS, dir.path());
+    request.pinned = vec![crate::request::PinnedOutput {
+        node: "one".into(),
+        from: source,
+    }];
+    let report = execute(
+        &request,
+        &FakeRunner::new().cancel_at("three", 1),
+        &CancelToken::default(),
+    );
+    assert_eq!(
+        report
+            .provenance
+            .pinned
+            .iter()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one"],
+        "the first half did not record the pin"
+    );
+    for marker in ["DONE", "FAILED", "CANCELED"] {
+        let _ = std::fs::remove_file(report.run_dir.join(marker));
+    }
+    std::fs::write(
+        report.run_dir.parent().expect("runs dir").join(".lock"),
+        format!(
+            "pid: 999999\nrun_id: {}\nstarted_unix_secs: 1\n",
+            report.run_dir.file_name().expect("name").to_string_lossy()
+        ),
+    )
+    .expect("lock");
+
+    let resumed = resume_run(&report.run_dir, THREE_AGENTS, &FakeRunner::new());
+    assert_eq!(
+        resumed
+            .provenance
+            .pinned
+            .iter()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one"],
+        "the continuation forgot which node it reused"
+    );
+}

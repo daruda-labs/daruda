@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// Wall-clock cap for one run. Long enough for a multi-node flow with
 /// repairs, short enough that a wedged adapter does not run overnight.
 pub const DEFAULT_TIMEOUT_MINUTES: u32 = 90;
-/// Cap on runner calls — reruns and fix sessions included. The defence
+/// Cap on budget units — one per runner call or correction turn. The defence
 /// against a repair loop that keeps re-deriving the same nodes.
 pub const DEFAULT_MAX_NODE_RUNS: u32 = 100;
 
@@ -26,7 +26,7 @@ pub const DEFAULT_MAX_NODE_RUNS: u32 = 100;
 pub struct FlowConfig {
     /// Minutes before a run is stopped. `0` disables the deadline.
     pub timeout_minutes: u32,
-    /// Maximum runner calls in one run. `0` disables the count.
+    /// Maximum budget units in one run. `0` disables the count.
     pub max_node_runs: u32,
     /// Cost ceiling in `cost_currency`. `0` disables it, which is the
     /// default — see the module doc.

@@ -2300,6 +2300,11 @@ pub const FLOW_GRAPH_STATUS_PASSED: Hsla = SUCCESS;
 pub const FLOW_GRAPH_STATUS_RETRIED: Hsla = WARNING;
 /// A node that failed and stopped the run.
 pub const FLOW_GRAPH_STATUS_FAILED: Hsla = ERROR;
+/// A node whose finished output is pinned, so this run will not compute it.
+/// Its own hue rather than one of the four above: nothing happened to this
+/// node, which is a different kind of fact from passing or failing, and the
+/// four are already spoken for.
+pub const FLOW_GRAPH_STATUS_PINNED: Hsla = hsla(186.0, 0.50, 0.52, 1.0);
 
 #[cfg(test)]
 mod tests {

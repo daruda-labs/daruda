@@ -1,0 +1,14 @@
+[package]
+name = "acp_replay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Serve a recorded ACP wire log back to a client, so a flow run can be replayed"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

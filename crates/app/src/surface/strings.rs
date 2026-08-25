@@ -553,6 +553,12 @@ pub fn flow_graph_status_failed() -> String {
 pub fn flow_graph_status_fixing() -> String {
     rust_i18n::t!("flow.graph_status_fixing").into_owned()
 }
+/// A node whose output this run will reuse rather than compute. On the badge
+/// line because that line answers "what happens next", and for a pinned node
+/// the answer is nothing.
+pub fn flow_graph_status_pinned() -> String {
+    rust_i18n::t!("flow.graph_status_pinned").into_owned()
+}
 /// A node that retries itself, shown when the run is not driving it.
 pub fn flow_graph_policy_retry(max_attempts: u32) -> String {
     rust_i18n::t!("flow.graph_policy_retry", max = max_attempts).into_owned()
@@ -665,6 +671,11 @@ pub fn flow_form_prompt_file_label() -> String {
 pub fn flow_form_output_label() -> String {
     rust_i18n::t!("flow.form_output_label").into_owned()
 }
+/// The contract the engine injects into the node's prompt and judges it by —
+/// stated on the form because the prompt an author types is not where it lives.
+pub fn flow_form_output_help() -> String {
+    rust_i18n::t!("flow.form_output_help").into_owned()
+}
 pub fn flow_form_run_label() -> String {
     rust_i18n::t!("flow.form_run_label").into_owned()
 }
@@ -731,6 +742,46 @@ pub fn flow_check_tooltip() -> String {
 pub fn flow_needs_save() -> String {
     rust_i18n::t!("flow.needs_save").into_owned()
 }
+/// Run only as far as one node — it and what it depends on, nothing after.
+/// Names the node, because "partly" is not a thing a person can act on and the
+/// selection this reads is also what the inspector is showing.
+pub fn flow_run_until_tooltip(node: &str) -> String {
+    rust_i18n::t!("flow.run_until_tooltip", node = node).into_owned()
+}
+/// Why ▶| is off with nothing, or several things, selected. One node is what a
+/// stopping point is: a run cannot end at two places.
+pub fn flow_run_until_needs_one() -> String {
+    rust_i18n::t!("flow.run_until_needs_one").into_owned()
+}
+/// Reusing a finished output instead of paying for it again, and taking that
+/// back. Both name the nodes for the reason the delete question does: a count
+/// does not tell you which ones a marquee caught.
+pub fn flow_pin_tooltip(nodes: &[daruda_flow::NodeId]) -> String {
+    rust_i18n::t!("flow.pin_tooltip", nodes = node_list(nodes)).into_owned()
+}
+pub fn flow_unpin_tooltip(nodes: &[daruda_flow::NodeId]) -> String {
+    rust_i18n::t!("flow.unpin_tooltip", nodes = node_list(nodes)).into_owned()
+}
+/// Why the pin is off: a gate writes no output, so there is nothing of its to
+/// reuse — it runs every time.
+pub fn flow_pin_needs_agent() -> String {
+    rust_i18n::t!("flow.pin_needs_agent").into_owned()
+}
+/// A pin that could not be honoured: no finished run holds that node's output,
+/// so it runs. Said rather than dropped — the pin was there to save the money
+/// this run is about to spend.
+pub fn flow_pin_unavailable(nodes: &[daruda_flow::NodeId]) -> String {
+    rust_i18n::t!("flow.pin_unavailable", nodes = node_list(nodes)).into_owned()
+}
+/// Node ids as one phrase. One place, so two lists cannot be punctuated
+/// differently.
+fn node_list(nodes: &[daruda_flow::NodeId]) -> String {
+    nodes
+        .iter()
+        .map(daruda_flow::NodeId::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 /// Removing the selected line between two cards. No ellipsis: unlike deleting
 /// a node it asks nothing — a line is redrawn with one drag, and the file is
 /// the undo stack.
@@ -746,11 +797,7 @@ pub fn flow_delete_node_confirm_title() -> String {
 /// The same question for a marquee selection. Names them rather than counting
 /// only: "3 nodes" does not tell you which three you caught in the drag.
 pub fn flow_delete_nodes_confirm_body(nodes: &[daruda_flow::NodeId], dependents: usize) -> String {
-    let list = nodes
-        .iter()
-        .map(|n| n.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let list = node_list(nodes);
     if dependents == 0 {
         rust_i18n::t!(
             "flow.delete_nodes_confirm_body",
@@ -5490,6 +5537,33 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
             field => field,
             path => path.display()
         ),
+        K::EmptyPrompt => rust_i18n::t!("flow.issue_empty_prompt"),
+        K::UnknownPin { node } => {
+            rust_i18n::t!("flow.issue_unknown_pin", node => node.as_str())
+        }
+        K::PinnedSourceMissing { node, path } => rust_i18n::t!(
+            "flow.issue_pinned_source_missing",
+            node => node.as_str(),
+            path => path
+        ),
+        K::UnknownUntil { node } => {
+            rust_i18n::t!("flow.issue_unknown_until", node => node.as_str())
+        }
+        K::UnsupportedSchemaKeyword { keyword } => {
+            rust_i18n::t!("flow.issue_unsupported_schema_keyword", keyword => keyword)
+        }
+        K::PinnedNodeInRerun { node, gate } => rust_i18n::t!(
+            "flow.issue_pinned_node_in_rerun",
+            node => node.as_str(),
+            gate => gate.as_str()
+        ),
+        K::SchemaKeywordOnWrongKind { keyword, kind } => {
+            rust_i18n::t!(
+                "flow.issue_schema_keyword_on_wrong_kind",
+                keyword => keyword,
+                kind => kind
+            )
+        }
     }
     .into_owned()
 }

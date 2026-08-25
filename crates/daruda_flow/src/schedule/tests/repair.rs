@@ -299,7 +299,7 @@ nodes:
             },
         ],
     );
-    let (report, _dir) = run(flow, &runner);
+    let (report, dir) = run(flow, &runner);
     assert!(matches!(report.outcome, RunOutcome::Done));
     let seen: Vec<(crate::NodeId, u32)> = runner
         .calls()
@@ -314,17 +314,18 @@ nodes:
         ],
         "the node's own counter increases; it is not reset by its own retry"
     );
-    // The two-channel rule: the retry prompt is the node's own prompt,
-    // then a separator, then the rendered hint. Nothing else observes
+    // Where the channel order is pinned: the node's own prompt, then the
+    // rendered hint, then the output contract last. Nothing else observes
     // that the hint was rendered at all.
+    let contract = expected_contract(&dir.path().join("run"), "design.md");
     assert_eq!(
         runner.calls()[1].text,
-        "write\n\n---\nit failed with the turn failed: boom"
+        format!("write\n\n---\nit failed with the turn failed: boom\n\n---\n{contract}")
     );
-    // …and the first attempt has no hint, because there is no failure
-    // to answer yet. Asserting only `calls[1]` would let an
+    // …and the first attempt has the contract but no hint, because there
+    // is no failure to answer yet. Asserting only `calls[1]` would let an
     // implementation append an empty hint to every attempt.
-    assert_eq!(runner.calls()[0].text, "write");
+    assert_eq!(runner.calls()[0].text, format!("write\n\n---\n{contract}"));
 }
 
 /// The `∩ executed` half of invariant 3. `docs` sits downstream of the

@@ -270,6 +270,8 @@ fn a_node_never_gets_longer_than_the_run_has_left() {
     };
     let _ = smol::block_on(run_flow(
         RunInputs {
+            pinned: Vec::new(),
+            until: None,
             loaded: &loaded,
             flow_dir: dir.path(),
             cwd: dir.path(),
@@ -365,6 +367,8 @@ fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
     };
     let _ = smol::block_on(run_flow(
         RunInputs {
+            pinned: Vec::new(),
+            until: None,
             loaded: &loaded,
             flow_dir: dir.path(),
             cwd: dir.path(),
@@ -387,4 +391,135 @@ fn a_node_after_a_long_wait_is_not_handed_a_dead_budget() {
             "a node was clipped against the un-adjusted deadline: {given:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A correction turn spent inside an in-flight call
+// ---------------------------------------------------------------------------
+
+/// One node, two parallel siblings, and one turn of headroom between them.
+const FORK_AFTER_A_SEED: &str = "\
+version: 1
+defaults: { agent: { id: claude }, parallel: 2 }
+nodes:
+  - id: seed
+    kind: command
+    run: \"true\"
+  - id: left
+    kind: agent
+    deps: [seed]
+    cwd: a
+    output: left.md
+    prompt: write
+  - id: right
+    kind: agent
+    deps: [seed]
+    cwd: b
+    output: right.md
+    prompt: write
+";
+
+/// Two calls that overlap while asking for corrections — the shape a
+/// `parallel` wave really has, and the one a synchronous fake cannot pose.
+struct Simultaneous(FakeRunner);
+
+impl NodeRunner for Simultaneous {
+    fn run_agent<'a>(
+        &'a self,
+        ctx: &'a RunContext<'a>,
+        agent: &'a crate::model::AgentSpec,
+        prompt: &'a str,
+    ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
+        Box::pin(async move {
+            let result = self.0.run_agent(ctx, agent, prompt).await;
+            smol::future::yield_now().await;
+            result
+        })
+    }
+
+    fn run_command<'a>(
+        &'a self,
+        ctx: &'a RunContext<'a>,
+        run: &'a str,
+    ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
+        self.0.run_command(ctx, run)
+    }
+}
+
+/// **A correction is counted where it is granted.** The first turn is
+/// charged before runner code starts, and a granted correction consumes the
+/// next slot before the following node can start.
+#[test]
+fn a_correction_turn_is_counted_and_leaves_no_budget_for_the_next_node() {
+    let runner = FakeRunner::new().corrects("design");
+    let budget = Budget {
+        max_node_runs: Some(2),
+        ..Budget::unlimited()
+    };
+    let (report, _dir) = run_with_budget(CHAIN, &runner, budget);
+
+    assert_eq!(runner.corrections(), 1, "the correction was never granted");
+    assert_eq!(
+        report.node_runs, 2,
+        "one node, two turns — the correction is a turn the run paid for"
+    );
+    assert_eq!(
+        runner.ids(),
+        vec!["design"],
+        "the next node started on a budget the correction had already spent"
+    );
+    assert!(
+        matches!(
+            report.outcome,
+            RunOutcome::BudgetExhausted {
+                limit: BudgetLimit::NodeRuns
+            }
+        ),
+        "{:?}",
+        report.outcome
+    );
+}
+
+/// The first turn is already in flight when the runner asks to correct it.
+/// With only one slot, granting the correction would spend two turns under a
+/// cap of one.
+#[test]
+fn an_in_flight_first_turn_uses_the_only_budget_slot() {
+    let runner = FakeRunner::new().corrects("design");
+    let budget = Budget {
+        max_node_runs: Some(1),
+        ..Budget::unlimited()
+    };
+    let (report, _dir) = run_with_budget(CHAIN, &runner, budget);
+
+    assert_eq!(runner.corrections(), 0, "a second turn exceeded the cap");
+    assert_eq!(report.node_runs, 1);
+    assert_eq!(runner.ids(), vec!["design"]);
+    assert!(matches!(
+        report.outcome,
+        RunOutcome::BudgetExhausted {
+            limit: BudgetLimit::NodeRuns
+        }
+    ));
+}
+
+/// **The parallel double-spend.** Two nodes in one wave ask for the last
+/// correction slot. Reserving it immediately prevents both from spending
+/// the same allowance.
+#[test]
+fn two_nodes_in_one_wave_cannot_both_be_granted_the_last_turn() {
+    let runner = Simultaneous(FakeRunner::new().corrects("left").corrects("right"));
+    // Seed, both siblings' first turns, and one correction.
+    let budget = Budget {
+        max_node_runs: Some(4),
+        ..Budget::unlimited()
+    };
+    let (report, _dir) = run_with_budget(FORK_AFTER_A_SEED, &runner, budget);
+
+    assert_eq!(
+        runner.0.corrections(),
+        1,
+        "the same remaining turn was granted to both nodes"
+    );
+    assert_eq!(report.node_runs, 4);
 }

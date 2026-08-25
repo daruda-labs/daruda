@@ -1,7 +1,7 @@
 # End-to-end scenario
 
 Everything else about this crate is green against a scripted adapter and a
-fake runner. These five flows are the part that only a real agent can answer,
+fake runner. These seven flows are the part that only a real agent can answer,
 so this is a checklist for a person, not a test suite.
 
 ```bash
@@ -15,9 +15,11 @@ the working tree, and step 3 asks one to create a file.
 `DARUDA_FLOW_AGENT` overrides the adapter command; unset, it launches the
 same one the app does.
 
-**All five passed against a real agent on 2026-08-10**, along with the
-cancel and cleanliness checks below. The list stays because it is what to
-re-run when the runners change — a green suite says nothing about any of it.
+**1 to 5 passed against a real agent on 2026-08-10**, along with the
+cancel and cleanliness checks below. **6 and 7 have not been run against a
+real agent at all** — every box under them is outstanding. The list stays
+because it is what to re-run when the runners change — a green suite says
+nothing about any of it.
 
 > **`node_install_dir` must sit outside the repository.** The `.gitignore`
 > the engine writes covers `flow-runs/` only, so a managed runtime unpacked
@@ -64,8 +66,8 @@ The gate fails, a fix session runs, the rerun set is re-derived.
       `verdict.attempt-1.evidence-*.md` — separate from the live `verdict.md`
 - [x] `run.md` lists both of `verdict`'s attempts and says what the failure
       invalidated (`re-derived \`verdict\`, \`gate\``)
-- [x] the fix session appears in `run.md` as `__fix__`, and the attempt
-      counts add up to the session count
+- [x] the fix session appears in `run.md` as `__fix__`, and its call is
+      included in the budget-unit total
 
 **What is being judged is the engine's sequence, not the agent's work.** The
 prompt tells `verdict` to fail the first time and to look for the file the
@@ -89,6 +91,35 @@ not the run directory the record lands in, and the file it names can change.
 
 **Recording a model the session never used is worse than not running**, which
 is why this fails instead of falling back.
+
+## 6 — `06-ask.yaml` · a person answers mid-turn
+
+Not runnable by `examples/run_flow`: it wires no answering surface, so the
+request is refused at submission. **Run this one from the app.**
+
+- [ ] `run_flow` refuses the flow, naming that there is nobody to ask
+- [ ] from the app, the agent's Bash call raises a question, and answering it
+      lets the turn finish and write `touched.md`
+- [ ] `run.md` says the attempt waited, and for how long
+- [ ] refusing instead fails the node, and the failure line says a person
+      refused rather than only that no output was written
+
+**`mode: default` is what makes this ask at all.** `bypassPermissions` — what
+every other example pins, and daruda's own config default — never prompts, so
+`permission: ask` under it is asked nothing and nothing reports that.
+
+## 7 — `07-schema.yaml` · the output owes a shape
+
+- [ ] `verdict.json` is a single JSON object, with no prose and no code fence
+- [ ] the `jq` gate passes
+- [ ] a run where the agent writes prose instead fails **at `verdict`**, and
+      `run.md` names the file and the schema problem — not the gate
+- [ ] a first turn that misses the shape is asked again on the same session,
+      and `run.md` marks the attempt as corrected
+
+**What is being judged is where the failure lands.** Without the check the
+gate is the first thing to notice, and `jq` on prose fails for a reason that
+names neither the node nor the field.
 
 ---
 

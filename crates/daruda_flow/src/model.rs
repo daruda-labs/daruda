@@ -2,6 +2,7 @@
 //! that `defaults` could have filled. Built only by `crate::resolve`.
 
 use crate::NodeId;
+use crate::parse::SchemaSubset;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -51,12 +52,27 @@ pub enum NodeKind {
         agent: AgentSpec,
         prompt: Prompt,
         output: PathBuf,
+        /// The shape `output`'s contents must have, when the node declares
+        /// one. The wire type unchanged, box included: there is nothing for
+        /// `defaults` to fill in and nothing to merge, so a resolved twin
+        /// would be a second thing to keep in step for no gain.
+        output_schema: Option<Box<SchemaSubset>>,
         on_fail: AgentFail,
     },
     Command {
         run: String,
         on_fail: GateFail,
     },
+}
+
+impl NodeKind {
+    /// The shape this node's output must have, when it owes one at all.
+    pub fn output_schema(&self) -> Option<&SchemaSubset> {
+        match self {
+            NodeKind::Agent { output_schema, .. } => output_schema.as_deref(),
+            NodeKind::Command { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

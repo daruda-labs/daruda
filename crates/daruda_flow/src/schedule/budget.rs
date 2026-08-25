@@ -7,34 +7,37 @@
 //!
 //! The state those questions need lives in [`Accounting`] rather than on
 //! `Run` beside the drive loop's own. Splitting the *file* alone left every
-//! cell reachable from everywhere; a counter that only `account` may raise
-//! is worth more than a counter anyone may.
+//! cell reachable from everywhere; a counter that only the accounted-call
+//! path and the correction reservation may raise is worth more than a
+//! counter anyone may.
 
 use super::{BudgetLimit, Run, RunOutcome, RunReport};
 use crate::record::NodeRecord;
 use crate::request::{Budget, CostLimit};
 use crate::runner::RunResult;
 use std::cell::{Cell, RefCell};
+use std::future::Future;
 use std::time::Duration;
 
 /// What the run has spent, and what it has to say about it.
 ///
 /// Interior mutability for the same reason the rest of `Run` has it: a
 /// gate's repair records from inside a nested drive. Every field is private
-/// — the only ways in are [`Accounting::account`] and
-/// [`Accounting::warn`], which is what keeps "what the budget counts" and
-/// "what the run actually paid for" from drifting apart.
+/// — the only ways into its totals are the accounted-call path, the
+/// correction reservation and [`Accounting::warn`]. That is what keeps
+/// "what the budget counts" and "what the run actually consumed" from
+/// drifting apart.
 #[derive(Default)]
 pub(super) struct Accounting {
-    /// Runner calls made so far — what `max_node_runs` bounds.
-    node_runs: Cell<u32>,
+    /// Budget units consumed so far — what `max_node_runs` bounds. Every
+    /// runner call consumes one; a correction turn reserves another.
+    budget_units: Cell<u32>,
     /// Time the run spent waiting for a person, summed over every call.
     ///
     /// The wall-clock ceiling is an absolute `Instant`, so a node clock
     /// that stops does nothing for it: without this, granting a permission
     /// after a long think would end the run at the next node boundary.
-    /// Raised only by [`Accounting::account`], like `node_runs` — the
-    /// budget's own rule.
+    /// Raised only by [`Accounting::account_result`] — the budget's own rule.
     parked: Cell<Duration>,
     /// The run's reported cost so far, in the first currency seen.
     cost: RefCell<Option<CostLimit>>,
@@ -49,7 +52,7 @@ pub(super) struct Accounting {
 impl Accounting {
     /// Start from what an earlier process had already spent.
     ///
-    /// Cost and runner calls carry: they are money and work that really
+    /// Cost and budget units carry: they are money and work that really
     /// happened, and a resume that forgot them would let a `max_node_runs`
     /// of 50 run 50 more. **`parked` does not carry.** It exists only to
     /// push out a wall-clock deadline that was set before the waiting
@@ -58,7 +61,7 @@ impl Accounting {
     /// a wait that is already behind it.
     pub(super) fn resumed(spent: crate::journal::Spent, records: Vec<NodeRecord>) -> Self {
         Self {
-            node_runs: Cell::new(spent.node_runs),
+            budget_units: Cell::new(spent.node_runs),
             parked: Cell::new(Duration::ZERO),
             cost: RefCell::new(spent.cost),
             cost_mixed: Cell::new(spent.cost_mixed),
@@ -79,7 +82,7 @@ impl Accounting {
     /// counters live here.
     pub(super) fn spent(&self) -> crate::journal::Spent {
         crate::journal::Spent {
-            node_runs: self.node_runs.get(),
+            node_runs: self.budget_units.get(),
             parked: self.parked.get(),
             cost: self.cost.borrow().clone(),
             cost_mixed: self.cost_mixed.get(),
@@ -91,10 +94,13 @@ impl Accounting {
         record(&mut self.records.borrow_mut());
     }
 
-    /// Every runner call passes through here, so what the budget counts
-    /// cannot drift from the sessions the run actually paid for.
-    pub(super) fn account(&self, result: &RunResult) {
-        self.node_runs.set(self.node_runs.get() + 1);
+    /// Charge the budget unit every runner call consumes.
+    fn charge_call(&self) {
+        self.budget_units.set(self.budget_units.get() + 1);
+    }
+
+    /// Fold in the figures known only once a runner call has settled.
+    fn account_result(&self, result: &RunResult) {
         self.parked.set(self.parked.get() + result.waiting.total);
 
         let Some(cost) = result.usage.as_ref().and_then(|u| u.cost.as_ref()) else {
@@ -129,6 +135,23 @@ impl Accounting {
         }
     }
 
+    /// Permission to spend one more budget unit on a correction turn inside
+    /// a call already under way.
+    ///
+    /// **A reservation, not a question** — granting it raises the count here
+    /// and now. The call itself was already charged by
+    /// [`Accounting::charge_call`], so the ceiling covers both units and
+    /// concurrent calls cannot spend the same remaining allowance. Asking
+    /// [`Accounting::exhausted`] rather than the unit count alone is what
+    /// makes the wall clock and the cost ceiling cover a correction too.
+    fn try_reserve_extra_turn(&self, budget: &Budget) -> bool {
+        if self.exhausted(budget).is_some() {
+            return false;
+        }
+        self.budget_units.set(self.budget_units.get() + 1);
+        true
+    }
+
     /// Two currencies are not comparable, so a total reported in another
     /// currency leaves the limit unenforced rather than wrongly tripped;
     /// [`Accounting::finish`] is what makes that visible.
@@ -160,7 +183,7 @@ impl Accounting {
         }
         if budget
             .max_node_runs
-            .is_some_and(|max| self.node_runs.get() >= max)
+            .is_some_and(|max| self.budget_units.get() >= max)
         {
             return Some(BudgetLimit::NodeRuns);
         }
@@ -207,7 +230,7 @@ impl Accounting {
         RunReport::completed(
             outcome,
             run_dir,
-            self.node_runs.get(),
+            self.budget_units.get(),
             self.cost.into_inner(),
             self.warnings.into_inner(),
             self.records.into_inner(),
@@ -231,17 +254,37 @@ impl Run<'_> {
             self.budget,
             super::report::Provenance {
                 profile: self.profile.clone(),
+                until: self.until.clone(),
+                pinned: self.pinned.clone(),
                 carried_over: self.already_passed.len(),
             },
         )
     }
 
-    pub(super) fn account(&self, result: &RunResult) {
-        self.spent.account(result);
+    /// Run one scheduler call through the complete accounting path. The
+    /// closure matters: constructing a runner future may execute synchronous
+    /// code, so it must happen only after this call's budget unit is charged.
+    pub(super) async fn accounted_call<F, Fut>(&self, call: F) -> RunResult
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = RunResult>,
+    {
+        self.spent.charge_call();
+        let result = call().await;
+        self.spent.account_result(&result);
+        result
     }
 
     pub(super) fn budget_exhausted(&self) -> Option<BudgetLimit> {
         self.spent.exhausted(self.budget)
+    }
+
+    /// What a runner asks through `RunContext::reserve_extra_turn`. Charged
+    /// on the spot — see [`budget::Accounting::try_reserve_extra_turn`].
+    ///
+    /// [`budget::Accounting::try_reserve_extra_turn`]: Accounting::try_reserve_extra_turn
+    pub(super) fn reserve_extra_turn(&self) -> bool {
+        self.spent.try_reserve_extra_turn(self.budget)
     }
 
     /// A node's timeout, clipped to what is left of the run's deadline. The
@@ -280,6 +323,7 @@ mod tests {
 
     fn call(parked: Duration) -> RunResult {
         RunResult {
+            tools: Vec::new(),
             outcome: Ok(()),
             artifacts: Vec::new(),
             usage: None,
@@ -287,6 +331,14 @@ mod tests {
                 total: parked,
                 answers: Vec::new(),
             },
+            corrected: false,
+        }
+    }
+
+    fn capped(runs: u32) -> Budget {
+        Budget {
+            max_node_runs: Some(runs),
+            ..Budget::unlimited()
         }
     }
 
@@ -316,7 +368,7 @@ mod tests {
             "a deadline half an hour gone must trip on its own"
         );
 
-        spent.account(&call(Duration::from_secs(60)));
+        spent.account_result(&call(Duration::from_secs(60)));
         assert!(
             spent.exhausted(&budget).is_none(),
             "an hour of waiting did not move a deadline thirty seconds past"
@@ -328,7 +380,7 @@ mod tests {
     #[test]
     fn waiting_less_than_the_overrun_still_ends_the_run() {
         let spent = Accounting::default();
-        spent.account(&call(Duration::from_secs(5)));
+        spent.account_result(&call(Duration::from_secs(5)));
         let budget = deadline_in(Duration::from_secs(30), true);
         assert!(matches!(
             spent.exhausted(&budget),
@@ -341,19 +393,20 @@ mod tests {
     #[test]
     fn a_run_without_a_deadline_never_gets_one() {
         let spent = Accounting::default();
-        spent.account(&call(Duration::from_secs(60)));
+        spent.account_result(&call(Duration::from_secs(60)));
         assert!(spent.deadline(&Budget::unlimited()).is_none());
         assert!(spent.exhausted(&Budget::unlimited()).is_none());
     }
 
-    /// `account` is the only raiser, and it is the funnel every runner call
-    /// already passes through — so what the budget forgives cannot drift
-    /// from what the run actually waited.
+    /// `account_result` is the funnel every settled runner call passes
+    /// through, so what the budget forgives cannot drift from what the run
+    /// actually waited.
     #[test]
     fn every_call_s_waiting_adds_up() {
         let spent = Accounting::default();
         for _ in 0..3 {
-            spent.account(&call(Duration::from_secs(10)));
+            spent.charge_call();
+            spent.account_result(&call(Duration::from_secs(10)));
         }
         let budget = deadline_in(Duration::from_secs(25), true);
         assert!(
@@ -362,13 +415,64 @@ mod tests {
         );
         // And the same calls still count against the run-count ceiling: a
         // parked call is a call.
-        let counted = Budget {
-            max_node_runs: Some(3),
-            ..Budget::unlimited()
-        };
         assert!(matches!(
-            spent.exhausted(&counted),
+            spent.exhausted(&capped(3)),
             Some(BudgetLimit::NodeRuns)
         ));
+    }
+
+    /// A reservation is spent the moment it is granted, so two callers
+    /// cannot both be told yes on the strength of one remaining turn. A
+    /// predicate — "is the budget exhausted?" — consumes nothing and grants
+    /// both, which is the parallel double-spend.
+    #[test]
+    fn a_reservation_is_consumed_so_one_spare_turn_is_granted_once() {
+        let spent = Accounting::default();
+        spent.charge_call();
+        spent.account_result(&call(Duration::ZERO));
+        let budget = capped(2);
+
+        assert!(spent.try_reserve_extra_turn(&budget), "one turn was left");
+        assert!(
+            !spent.try_reserve_extra_turn(&budget),
+            "the same turn was granted twice"
+        );
+        assert_eq!(spent.spent().node_runs, 2, "the grant is what raises it");
+    }
+
+    /// A correction asks from inside the call that spent the first turn. If
+    /// that in-flight turn is absent from the count, a cap of one grants two.
+    #[test]
+    fn an_in_flight_first_turn_leaves_no_room_for_a_correction() {
+        let spent = Accounting::default();
+        spent.charge_call();
+
+        assert!(!spent.try_reserve_extra_turn(&capped(1)));
+        assert_eq!(spent.spent().node_runs, 1, "a refusal charges nothing");
+    }
+
+    /// Both turns are counted before they start. Settling the call adds its
+    /// waiting and cost without charging either turn again.
+    #[test]
+    fn a_reserved_turn_is_counted_alongside_the_call_that_spent_it() {
+        let spent = Accounting::default();
+        let budget = capped(2);
+        spent.charge_call();
+        assert!(spent.try_reserve_extra_turn(&budget));
+        spent.account_result(&call(Duration::ZERO));
+        assert_eq!(spent.spent().node_runs, 2, "one call, two turns");
+        assert!(matches!(
+            spent.exhausted(&budget),
+            Some(BudgetLimit::NodeRuns)
+        ));
+    }
+
+    /// One rule for all three ceilings: the wall clock refuses a correction
+    /// the same way a spent run count does.
+    #[test]
+    fn an_expired_deadline_refuses_a_correction_too() {
+        let spent = Accounting::default();
+        assert!(!spent.try_reserve_extra_turn(&deadline_in(Duration::from_secs(30), true)));
+        assert_eq!(spent.spent().node_runs, 0, "a refusal charges nothing");
     }
 }

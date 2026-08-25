@@ -16,6 +16,7 @@ mod frame;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
+pub(in crate::workspace) mod pins;
 mod policy;
 mod port_drag;
 mod render;
@@ -23,10 +24,13 @@ mod renderer;
 mod run_states;
 mod selection;
 
+pub(in crate::workspace) use pins::PinSet;
 /// The toolbar's test selectors keep their old path: a test names this module,
 /// not the file a thing happens to live in.
 #[cfg(test)]
-pub(in crate::workspace) use render::toolbar::{TOOLBAR_CHECK_SELECTOR, TOOLBAR_RUN_SELECTOR};
+pub(in crate::workspace) use render::toolbar::{
+    TOOLBAR_CHECK_SELECTOR, TOOLBAR_PIN_SELECTOR, TOOLBAR_RUN_SELECTOR, TOOLBAR_RUN_UNTIL_SELECTOR,
+};
 /// The card-draw counter, for the repaint measurement in `workspace/tests`.
 /// Re-exported rather than opening the module: nothing else in there is any
 /// caller's business.
@@ -44,7 +48,7 @@ use daruda_flow::NodeId;
 
 use self::build::{build_graph_state, read_flow};
 use self::commands::StampCards;
-use self::model::{FlowGraphModel, NodeRunState};
+use self::model::{FlowGraphModel, GraphNodeKind, NodeRunState};
 use self::node_ids::NodeIds;
 use self::renderer::card_for;
 
@@ -98,6 +102,14 @@ pub(in crate::workspace) enum FlowGraphEvent {
     /// Run this flow, or report what is wrong with it without running.
     /// Which flow is not asked — the pane is of one, and it is the one.
     Run,
+    /// Run only as far as the selected node. A second glyph rather than a mode
+    /// on [`Self::Run`]: the selection is what the *inspector* follows, so
+    /// clicking a node to edit it must not quietly narrow the next run.
+    RunUntil,
+    /// Reuse the selected nodes' finished output instead of computing it, or
+    /// stop doing so. Which nodes is the view's to say — the same selection a
+    /// delete reads.
+    TogglePins,
     Validate,
     /// A line was drawn between two cards: `into` is to run after `out_of`.
     /// The names say the ports rather than from/to, which is the pair that
@@ -126,6 +138,12 @@ pub(in crate::workspace) struct FlowGraphView {
     /// reports our own writes back to us, and fsevents reports more than
     /// writes. `None` when the file could not be read at all.
     text: Option<String>,
+    /// Nodes whose finished output this pane will reuse rather than run.
+    ///
+    /// Here and nowhere else: a pin is this machine at this moment, and the
+    /// flow file is committed and read by people who never made the run it
+    /// points at. Dropped node by node on reload — see [`pins::surviving`].
+    pins: PinSet,
     /// The selected node's fields, when exactly one node is selected. Built in
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
@@ -163,7 +181,10 @@ impl FlowGraphView {
         // change and rebuild for no reason.
         let (text, state) = match read_flow(path) {
             Ok(text) => match policy::model_from(&text) {
-                Ok(model) => (Some(text), build_graph_state(model, window, cx)),
+                Ok(model) => (
+                    Some(text),
+                    build_graph_state(model, &PinSet::default(), window, cx),
+                ),
                 Err(err) => (Some(text), FlowGraphState::Unreadable(err)),
             },
             Err(err) => (None, FlowGraphState::Unreadable(err)),
@@ -179,6 +200,7 @@ impl FlowGraphView {
             path: path.to_path_buf(),
             state,
             text,
+            pins: PinSet::default(),
             form: None,
             _canvas_watch: None,
             _theme_watch: theme_watch,
@@ -204,7 +226,7 @@ impl FlowGraphView {
             .iter()
             .filter_map(|node| {
                 let id = ids.canvas(&node.id)?;
-                let card = card_for(node, NodeRunState::default());
+                let card = card_for(node, NodeRunState::default(), self.pins.contains(&node.id));
                 Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();
@@ -225,7 +247,7 @@ impl FlowGraphView {
             return;
         };
         let was_selected = self.form.as_ref().map(|form| form.node.clone());
-        self.state = build_graph_state(model.clone(), window, cx);
+        self.state = build_graph_state(model.clone(), &self.pins.clone(), window, cx);
         self.form = None;
         self.watch_canvas(window, cx);
         if let Some(node) = was_selected {
@@ -288,12 +310,14 @@ impl FlowGraphView {
         match policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn()) {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
+                self.pins = pins::surviving(&self.pins, self.text.as_deref(), &text);
                 self.restamp(&model, cx);
                 self.text = Some(text);
                 self.rebuild_form(window, cx);
             }
             policy::Reload::Rebuild { text, model } => {
-                self.state = build_graph_state(model, window, cx);
+                self.pins = pins::surviving(&self.pins, self.text.as_deref(), &text);
+                self.state = build_graph_state(model, &self.pins.clone(), window, cx);
                 self.text = Some(text);
                 self.form = None;
                 self.watch_canvas(window, cx);
@@ -302,6 +326,9 @@ impl FlowGraphView {
                 }
             }
             policy::Reload::Unreadable { text, error } => {
+                // Nothing left to compare a pin against, and the graph it named
+                // is gone off the screen with it.
+                self.pins.clear();
                 self.state = FlowGraphState::Unreadable(error);
                 self.text = text;
                 self.form = None;
@@ -318,6 +345,75 @@ impl FlowGraphView {
             FlowGraphState::Graph { model, .. } => policy::Drawn::Graph(model),
             FlowGraphState::Unreadable(error) => policy::Drawn::Nothing(error),
         }
+    }
+}
+
+impl FlowGraphView {
+    /// What one press of the pin button would do, given what is selected.
+    pub(in crate::workspace) fn pin_action(&self, cx: &App) -> pins::PinAction {
+        self.pins.action_for(self.reusable_selection(cx))
+    }
+
+    /// Every pinned node, for the run about to be submitted.
+    pub(in crate::workspace) fn pinned_nodes(&self) -> Vec<NodeId> {
+        self.pins.to_vec()
+    }
+
+    /// Pin the selection, or unpin it, and write the cards again so the graph
+    /// says which. A run's colours are not put back here — the caller does
+    /// that, exactly as it does after a reload, because the run's state lives
+    /// on the workspace and not on this view.
+    /// Forget pins the run could not honour.
+    ///
+    /// A pin whose source run has been swept is gone for good, so leaving it
+    /// set drew the card as reused on every later press while the node was
+    /// quietly paid for again. The one warning that said so is long dismissed
+    /// by then; the card is the only thing still on screen.
+    pub(in crate::workspace) fn drop_pins(&mut self, nodes: &[NodeId], cx: &mut Context<Self>) {
+        let before = self.pins.clone();
+        for node in nodes {
+            self.pins.remove(node);
+        }
+        if self.pins == before {
+            return;
+        }
+        let FlowGraphState::Graph { model, .. } = &self.state else {
+            return;
+        };
+        let model = model.clone();
+        self.restamp(&model, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_pins(&mut self, cx: &mut Context<Self>) {
+        let nodes = self.reusable_selection(cx);
+        if nodes.is_empty() {
+            return;
+        }
+        self.pins.toggle(&nodes);
+        let FlowGraphState::Graph { model, .. } = &self.state else {
+            return;
+        };
+        let model = model.clone();
+        self.restamp(&model, cx);
+        cx.notify();
+    }
+
+    /// The selected nodes that have an output to reuse — the agent ones. A gate
+    /// writes nothing, so pinning one would name a file that does not exist and
+    /// the engine would refuse the whole run over it.
+    fn reusable_selection(&self, cx: &App) -> Vec<NodeId> {
+        let FlowGraphState::Graph { model, .. } = &self.state else {
+            return Vec::new();
+        };
+        let selected = self.selected_nodes(cx);
+        model
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.kind, GraphNodeKind::Agent { .. }))
+            .map(|node| node.id.clone())
+            .filter(|id| selected.contains(id))
+            .collect()
     }
 }
 

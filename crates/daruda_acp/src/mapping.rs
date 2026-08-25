@@ -924,7 +924,10 @@ fn choice_of(option: &PermissionOption) -> PermissionChoice {
     }
 }
 
-fn status_of(status: &ToolCallStatus) -> ToolStatusView {
+/// Public because a consumer may fold `session/update`s without building chat
+/// items — the flow engine records what tools a node used and keeps no payload.
+/// What a protocol value means stays this module's answer either way.
+pub fn status_of(status: &ToolCallStatus) -> ToolStatusView {
     match status {
         ToolCallStatus::Pending => ToolStatusView::Pending,
         ToolCallStatus::InProgress => ToolStatusView::InProgress,
@@ -934,7 +937,8 @@ fn status_of(status: &ToolCallStatus) -> ToolStatusView {
     }
 }
 
-fn kind_of(kind: &ToolKind) -> ToolKindView {
+/// Public for the same reason as [`status_of`].
+pub fn kind_of(kind: &ToolKind) -> ToolKindView {
     match kind {
         ToolKind::Read => ToolKindView::Read,
         ToolKind::Edit => ToolKindView::Edit,

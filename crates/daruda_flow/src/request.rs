@@ -50,6 +50,20 @@ pub struct RunRequest {
     /// `events` channel and only prints what arrives, so keying on that
     /// would let an `ask` flow start there and park forever.
     pub ask: Option<smol::channel::Sender<crate::runner::PendingAsk>>,
+    /// Run no further than this node — it and its ancestors, nothing
+    /// downstream. `None` runs the whole flow.
+    ///
+    /// A run-scoped axis rather than a flow-file one: the file describes what
+    /// should happen, and a selection says which part of that to spend money
+    /// on this time. Recorded in the journal, not in `run.yaml`.
+    pub until: Option<NodeId>,
+    /// Outputs to reuse instead of recomputing. Each names a node and where
+    /// its finished output lives now — a previous run's directory.
+    ///
+    /// The engine copies each into this run's directory before the first node,
+    /// so every run directory stays self-contained: `archive` and
+    /// `{{node.<id>.output}}` both assume the output is inside it.
+    pub pinned: Vec<PinnedOutput>,
     /// What an earlier process had already finished, when this is a run
     /// being picked up rather than started.
     ///
@@ -58,6 +72,46 @@ pub struct RunRequest {
     /// and pairing a replay with a different flow would skip nodes by name
     /// in a graph that never had them.
     pub resume: Option<crate::journal::Replay>,
+}
+
+impl RunRequest {
+    /// The selection this run actually runs under.
+    ///
+    /// Two sources, because a continuation is handed no selection of its own:
+    /// `build_resume_request` sends `until: None` and the axis comes back off
+    /// the journal instead. Every question about which nodes this run will
+    /// reach — what to validate, what to provision, what to walk — has to ask
+    /// this rather than the field, or a resumed run is refused over a node it
+    /// was told to skip.
+    pub(crate) fn effective_until(&self) -> Option<&NodeId> {
+        self.until
+            .as_ref()
+            .or_else(|| self.resume.as_ref().and_then(|r| r.until.as_ref()))
+    }
+
+    /// The nodes this run will reach.
+    ///
+    /// **Every per-node question at submission asks this, never
+    /// `loaded.flow().nodes` directly.** The two read the same in the common
+    /// case and differ exactly when a selection is set, so a site that reaches
+    /// past it looks correct and refuses a run over a node it stops before.
+    /// That has now happened twice on this axis, which is why the reachable
+    /// set has a name here rather than a filter each caller remembers.
+    pub(crate) fn selected_nodes(&self) -> impl Iterator<Item = &crate::model::Node> {
+        let selected = crate::graph::Selection::of(self.loaded.flow(), self.effective_until());
+        self.loaded
+            .flow()
+            .nodes
+            .iter()
+            .filter(move |node| selected.includes(&node.id))
+    }
+}
+
+/// One reused output: which node owes it, and where the copy comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedOutput {
+    pub node: NodeId,
+    pub from: PathBuf,
 }
 
 /// A cost ceiling is only meaningful in a currency, and two currencies do
@@ -75,7 +129,8 @@ pub struct Budget {
     /// When the run must stop. The host computes it from configured
     /// duration and start time; the engine only compares.
     pub deadline: Option<std::time::Instant>,
-    /// Every runner call counts, including reruns and fix sessions.
+    /// Maximum budget units: every runner call consumes one, including
+    /// reruns and fix sessions; an in-session correction consumes another.
     pub max_node_runs: Option<u32>,
     /// Only enforceable while the agent reports a cost, which is why the
     /// run's report carries a warning when it never does.
@@ -127,9 +182,48 @@ pub type AskGitStatus = Box<dyn Fn(&std::path::Path) -> Option<String> + Send>;
 pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     check_absolute(request, &mut issues);
+    if let Some(target) = &request.until
+        && !request.loaded.flow().nodes.iter().any(|n| &n.id == target)
+    {
+        issues.push(ValidationIssue {
+            node: None,
+            kind: ValidationKind::UnknownUntil {
+                node: target.clone(),
+            },
+            message: format!("`{target}` is not a node in this flow"),
+        });
+    }
+    for pin in &request.pinned {
+        if !request.loaded.flow().nodes.iter().any(|n| n.id == pin.node) {
+            issues.push(ValidationIssue {
+                node: None,
+                kind: ValidationKind::UnknownPin {
+                    node: pin.node.clone(),
+                },
+                message: format!("`{}` is not a node in this flow", pin.node),
+            });
+        } else if !pin.from.is_file() {
+            issues.push(ValidationIssue {
+                node: Some(pin.node.clone()),
+                kind: ValidationKind::PinnedSourceMissing {
+                    node: pin.node.clone(),
+                    path: pin.from.display().to_string(),
+                },
+                message: format!(
+                    "the output pinned for `{}` is not at {}",
+                    pin.node,
+                    pin.from.display()
+                ),
+            });
+        }
+    }
+    check_no_pin_blocks_a_repair(request, &mut issues);
     let mut checked_agents = HashSet::new();
-
-    for node in &request.loaded.flow().nodes {
+    // Per-node checks follow the selection: refusing a run over a node it was
+    // told not to run is exactly what `until` exists to get past — a flow with
+    // a half-written tail is the normal state while iterating on its head.
+    // The flow-level checks above stay unconditional.
+    for node in request.selected_nodes() {
         // Before the node kinds split: a command node runs somewhere too,
         // and a missing directory fails it just as surely.
         check_node_cwd(request, node, &mut issues);
@@ -151,6 +245,19 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
             &mut checked_agents,
             &mut issues,
         );
+        // Asked here and not in `crate::validate` on purpose: `new_node`
+        // seeds an empty prompt so a fresh card can be typed into, so a blank
+        // one is a legitimate file to author and only an illegitimate one to
+        // run. Refusing at load would blank the canvas the author needs.
+        if matches!(prompt, Prompt::Inline(text) if text.trim().is_empty()) {
+            issues.push(ValidationIssue {
+                node: Some(node.id.clone()),
+                kind: ValidationKind::EmptyPrompt,
+                message:
+                    "an agent node with a blank prompt would open a session and ask it nothing"
+                        .to_string(),
+            });
+        }
         // A file-backed prompt hides its `{{node.x.output}}` references from
         // `crate::validate`, which never opens the file; this is the only
         // stage that knows `flow_dir`, so the ancestor rule is applied here.
@@ -200,12 +307,54 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
 /// The default agent counts even when no node names `ask`: a repair's
 /// `fix` session runs as `flow.default_agent` and inherits its policy, so
 /// a flow of nothing but `deny` nodes can still ask.
+/// Refuse a run whose pins would make a repair futile.
+///
+/// A gate's `rerun` names nodes to run again so the gate's verdict can
+/// change; a pin says one of those must not run at all. Honouring the pin —
+/// which is what the scheduler does, since a pinned node never enters
+/// `executed` — leaves the repair paying for a fix session per attempt and
+/// re-testing an input nothing touched. Silently dropping the pin instead
+/// would spend money the user said not to spend. Neither is ours to pick, so
+/// the run is refused while it still costs nothing and the author unpins or
+/// drops the rerun.
+fn check_no_pin_blocks_a_repair(request: &RunRequest, issues: &mut Vec<ValidationIssue>) {
+    if request.pinned.is_empty() {
+        return;
+    }
+    let graph = request.loaded.graph();
+    for gate in request.selected_nodes() {
+        let NodeKind::Command {
+            on_fail: crate::model::GateFail::Repair { rerun, .. },
+            ..
+        } = &gate.kind
+        else {
+            continue;
+        };
+        let closure = graph.rerun_closure(rerun);
+        for pin in &request.pinned {
+            if closure.contains(&pin.node) {
+                issues.push(ValidationIssue {
+                    node: Some(pin.node.clone()),
+                    kind: ValidationKind::PinnedNodeInRerun {
+                        node: pin.node.clone(),
+                        gate: gate.id.clone(),
+                    },
+                    message: format!(
+                        "`{}` is pinned, but `{}`'s repair re-runs it to change its own verdict",
+                        pin.node, gate.id
+                    ),
+                });
+            }
+        }
+    }
+}
+
 fn check_someone_can_answer(request: &RunRequest, issues: &mut Vec<ValidationIssue>) {
     if request.ask.is_some() {
         return;
     }
     let flow = request.loaded.flow();
-    let node_asks = flow.nodes.iter().find_map(|node| match &node.kind {
+    let node_asks = request.selected_nodes().find_map(|node| match &node.kind {
         NodeKind::Agent { agent, .. } if agent.permission == PermissionPolicy::Ask => {
             Some(node.id.clone())
         }
@@ -348,339 +497,4 @@ fn check_absolute(request: &RunRequest, issues: &mut Vec<ValidationIssue>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `execute` blocks, so a host runs it on a thread of its own and the
-    /// request has to cross. The two callbacks are the only thing that could
-    /// stop it, which is why they are declared `+ Send`.
-    #[test]
-    fn a_request_and_its_report_can_cross_a_thread() {
-        fn assert_send<T: Send>() {}
-        assert_send::<RunRequest>();
-        assert_send::<crate::schedule::RunReport>();
-    }
-
-    use crate::error::ValidationKind;
-    use crate::load::load;
-
-    fn spec(command: &str) -> daruda_acp::LaunchSpec {
-        daruda_acp::LaunchSpec {
-            command: command.to_string(),
-            strip_env: Vec::new(),
-        }
-    }
-
-    fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest {
-        let loaded = load(text, None).expect("valid flow");
-        RunRequest {
-            loaded,
-            cwd: dir.to_path_buf(),
-            run_dir: dir.join("run"),
-            flow_dir: dir.to_path_buf(),
-            agents: agents.iter().map(|a| (a.to_string(), spec("x"))).collect(),
-            node_install_dir: dir.to_path_buf(),
-            budget: Budget::unlimited(),
-            is_alive: Box::new(|_| true),
-            git_status: None,
-            events: None,
-            ask: None,
-            resume: None,
-        }
-    }
-
-    const AGENT_FLOW: &str = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt: write
-";
-
-    #[test]
-    fn an_agent_id_absent_from_the_catalog_is_rejected() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let req = request_for(AGENT_FLOW, &["codex"], dir.path());
-        let issues = validate_request(&req);
-        assert!(
-            issues.iter().any(|i| matches!(&i.kind,
-                ValidationKind::UnknownAgent { id } if id == "claude")),
-            "{issues:?}"
-        );
-    }
-
-    #[test]
-    fn a_known_agent_id_passes() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let req = request_for(AGENT_FLOW, &["claude"], dir.path());
-        assert_eq!(validate_request(&req), Vec::new());
-    }
-
-    /// `prompt_file` is relative to the flow file, not to the working
-    /// directory — a flow kept in `.daruda/flows/` names its prompts
-    /// beside itself.
-    #[test]
-    fn a_missing_prompt_file_is_rejected_and_a_present_one_is_not() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt_file: ./prompts/a.md
-";
-        let req = request_for(flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req)
-                .iter()
-                .any(|i| matches!(i.kind, ValidationKind::MissingPromptFile { .. })),
-            "the file does not exist yet"
-        );
-
-        std::fs::create_dir_all(dir.path().join("prompts")).expect("mkdir");
-        std::fs::write(dir.path().join("prompts/a.md"), "hi").expect("write");
-        assert_eq!(validate_request(&req), Vec::new());
-    }
-
-    /// File-backed prompts are relative to the flow file and must stay
-    /// under that directory. An absolute path that happens to exist is
-    /// still not a valid flow-local prompt.
-    #[test]
-    fn an_absolute_prompt_file_is_rejected_even_if_it_exists() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let outside_dir = tempfile::tempdir().expect("outside tempdir");
-        let outside = outside_dir.path().join("outside.md");
-        std::fs::write(&outside, "hi").expect("write outside");
-        let flow = format!(
-            "\
-version: 1
-defaults: {{ agent: {{ id: claude }} }}
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt_file: {}
-",
-            outside.display()
-        );
-        let req = request_for(&flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req)
-                .iter()
-                .any(|i| matches!(i.kind, ValidationKind::PromptFileOutsideFlowDir { .. })),
-            "absolute paths must not be accepted just because they exist"
-        );
-
-        let parent_flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt_file: ../outside.md
-";
-        let req = request_for(parent_flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req)
-                .iter()
-                .any(|i| matches!(i.kind, ValidationKind::PromptFileOutsideFlowDir { .. })),
-            "`..` must be rejected before existence is checked"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_prompt_file_symlink_escaping_the_flow_dir_is_rejected() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let outside_dir = tempfile::tempdir().expect("outside tempdir");
-        let outside = outside_dir.path().join("outside.md");
-        std::fs::write(&outside, "hi").expect("write outside");
-        std::fs::create_dir_all(dir.path().join("prompts")).expect("mkdir");
-        std::os::unix::fs::symlink(&outside, dir.path().join("prompts/link.md")).expect("symlink");
-
-        let flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt_file: ./prompts/link.md
-";
-        let req = request_for(flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req)
-                .iter()
-                .any(|i| matches!(i.kind, ValidationKind::PromptFileOutsideFlowDir { .. })),
-            "canonical containment must be checked after existence"
-        );
-    }
-
-    /// A repair fix runs as `flow.default_agent`. A command-only flow can
-    /// therefore need an agent even though no node has kind `agent`.
-    #[test]
-    fn a_repair_default_agent_absent_from_the_catalog_is_rejected() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: gate
-    kind: command
-    run: \"true\"
-    on_fail:
-      repair:
-        fix: fix it from {{attempts}}
-        max_attempts: 2
-";
-        let req = request_for(flow, &["codex"], dir.path());
-        assert!(
-            validate_request(&req).iter().any(|i| matches!(&i.kind,
-                ValidationKind::UnknownAgent { id } if id == "claude")),
-            "the repair session's default agent must be checked"
-        );
-    }
-
-    /// The inline form of this is rejected by `validate`; the file form
-    /// reached the runner untouched and rendered to an empty string, so the
-    /// flow silently ran with a hole in its prompt.
-    #[test]
-    fn an_unreachable_output_ref_inside_a_prompt_file_is_rejected() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join("design.md"),
-            "continue from {{node.review.output}}",
-        )
-        .expect("write");
-        let flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: design
-    kind: agent
-    output: design.md
-    prompt_file: design.md
-  - id: review
-    kind: agent
-    deps: [design]
-    output: review.md
-    prompt: read {{node.design.output}}
-";
-        let req = request_for(flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req).iter().any(|i| matches!(&i.kind,
-                ValidationKind::UnreachableOutputRef { referenced } if referenced == "review")),
-            "`review` is downstream of `design`, so its output cannot exist yet"
-        );
-    }
-
-    /// A retry's `hint_file` is the same kind of reference and must be
-    /// checked the same way — it is read only on a failure path, which is
-    /// exactly when a missing file is most expensive to discover.
-    #[test]
-    fn a_missing_hint_file_is_rejected_too() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let flow = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt: write
-    on_fail:
-      retry:
-        max_attempts: 2
-        hint_file: ./missing-hint.md
-";
-        let req = request_for(flow, &["claude"], dir.path());
-        assert!(
-            validate_request(&req)
-                .iter()
-                .any(|i| matches!(i.kind, ValidationKind::MissingPromptFile { .. }))
-        );
-    }
-
-    const ASKS: &str = "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    agent: { id: claude, mode: default, permission: ask }
-    output: a.md
-    prompt: write
-";
-
-    /// Only the *repair* can ask: no node names `ask`, but the fix session
-    /// runs as `defaults.agent` and inherits its policy. Checking nodes
-    /// alone lets this flow start and park with nobody to release it.
-    const REPAIR_ASKS: &str = "\
-version: 1
-defaults: { agent: { id: claude, mode: default, permission: ask } }
-nodes:
-  - id: gate
-    kind: command
-    run: \"true\"
-    on_fail:
-      repair:
-        fix: fix it, see {{attempts}}
-        max_attempts: 2
-        wait: 0s
-";
-
-    /// **A channel is not a capability.** `examples/run_flow.rs` hands over
-    /// an `events` sender and only *prints* what arrives — so keying this
-    /// check on `events` would let an `ask` flow start there and park until
-    /// somebody noticed. The port a host wires only to answer questions is
-    /// the one thing that means it can.
-    #[test]
-    fn an_ask_flow_is_refused_when_only_the_narration_channel_is_wired() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut req = request_for(ASKS, &["claude"], dir.path());
-        let (tx, _rx) = smol::channel::unbounded();
-        req.events = Some(tx);
-
-        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
-        assert!(
-            kinds.contains(&ValidationKind::NobodyToAsk),
-            "an ask flow was accepted with nowhere to ask: {kinds:?}"
-        );
-    }
-
-    /// The same refusal for a flow only a repair can make ask.
-    #[test]
-    fn a_flow_whose_only_asker_is_its_repair_is_refused_too() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let req = request_for(REPAIR_ASKS, &["claude"], dir.path());
-        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
-        assert!(kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
-    }
-
-    /// And a host that did wire the port runs.
-    #[test]
-    fn an_ask_flow_with_somewhere_to_ask_is_accepted() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut req = request_for(ASKS, &["claude"], dir.path());
-        let (tx, _rx) = smol::channel::unbounded();
-        req.ask = Some(tx);
-
-        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
-        assert!(!kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
-    }
-
-    /// A flow nobody would ever ask about is unaffected — the check must
-    /// not become a reason every host needs an answering surface.
-    #[test]
-    fn a_flow_that_never_asks_needs_no_answering_surface() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let req = request_for(AGENT_FLOW, &["claude"], dir.path());
-        let kinds: Vec<_> = validate_request(&req).into_iter().map(|i| i.kind).collect();
-        assert!(!kinds.contains(&ValidationKind::NobodyToAsk), "{kinds:?}");
-    }
-}
+mod tests;

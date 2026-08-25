@@ -65,6 +65,22 @@ pub(in crate::workspace) enum FlowSource {
     Resumed { run_dir: PathBuf },
 }
 
+/// Which part of a flow to spend money on this time.
+///
+/// A run-scoped axis beside `profile`, and threaded the same way: both are
+/// answers a surface gives about *this* run that the committed file must not
+/// carry. Default is the whole flow, computed fresh — which is what every
+/// surface but the graph pane's two partial-run glyphs asks for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) struct FlowSelection {
+    /// Run no further than this node — it and its ancestors.
+    pub until: Option<daruda_flow::NodeId>,
+    /// Nodes whose finished output to reuse rather than compute. Ids, not
+    /// files: which past run holds one cannot be answered until the profile
+    /// is known, and the profile is asked for after this is built.
+    pub pinned: Vec<daruda_flow::NodeId>,
+}
+
 /// A request and the stream that narrates it. The receiver is handed back
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
@@ -164,9 +180,11 @@ impl Workspace {
         &mut self,
         flow_path: &Path,
         profile: Option<&str>,
+        selection: &FlowSelection,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let submission = self.assemble_flow_request(flow_path, profile, FlowPurpose::Run, cx)?;
+        let submission =
+            self.assemble_flow_request(flow_path, profile, selection, FlowPurpose::Run, cx)?;
         let issues = daruda_flow::request::validate_request(&submission.request);
         if issues.is_empty() {
             Ok(submission)
@@ -193,8 +211,15 @@ impl Workspace {
         profile: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<Vec<daruda_flow::error::ValidationIssue>, FlowSubmitError> {
-        let submission =
-            self.assemble_flow_request(flow_path, profile, FlowPurpose::Validate, cx)?;
+        // The whole flow, always: ✓ answers "could this file run", and a
+        // question about a slice of it is not that question.
+        let submission = self.assemble_flow_request(
+            flow_path,
+            profile,
+            &FlowSelection::default(),
+            FlowPurpose::Validate,
+            cx,
+        )?;
         Ok(daruda_flow::request::validate_request(&submission.request))
     }
 
@@ -230,6 +255,8 @@ impl Workspace {
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         let request = RunRequest {
+            until: None,
+            pinned: Vec::new(),
             loaded: resumed.loaded,
             run_dir: run_dir.to_path_buf(),
             // The run's own directory: `run.yaml` inlined every file-backed
@@ -265,6 +292,7 @@ impl Workspace {
         &mut self,
         flow_path: &Path,
         profile: Option<&str>,
+        selection: &FlowSelection,
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
@@ -278,6 +306,11 @@ impl Workspace {
         })?;
         let loaded = daruda_flow::load(&text, profile).map_err(FlowSubmitError::Load)?;
 
+        // Here and not at the surface that asked: which past run holds a
+        // pinned output depends on the profile, and the profile is only
+        // settled by the time this runs.
+        let pinned = self.resolve_flow_pins(flow_path, profile, &selection.pinned, cx);
+
         let agents =
             self.flow_agent_catalog(lane_ref, &cwd, purpose, &referenced_agents(&loaded), cx)?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
@@ -285,6 +318,8 @@ impl Workspace {
         let (ask_tx, ask_rx) = smol::channel::unbounded();
 
         let request = RunRequest {
+            until: selection.until.clone(),
+            pinned,
             loaded,
             run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id()),
             flow_dir: flow_path

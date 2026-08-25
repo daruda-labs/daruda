@@ -24,6 +24,30 @@ pub enum NodeFailure {
     NoOutput {
         expected: PathBuf,
     },
+    /// Something other than a plain file is standing where the output
+    /// belongs — a link, most often, whose target's size would otherwise
+    /// pass for work this node did.
+    OutputNotAFile {
+        expected: PathBuf,
+    },
+    /// The output path does not stay inside the run directory: a link on
+    /// the way to it, or on it, points somewhere else.
+    OutputEscapes {
+        expected: PathBuf,
+        resolved: PathBuf,
+    },
+    /// The output is a plain file this node wrote, and its contents are not
+    /// the shape the node declared.
+    ///
+    /// One `problem` and a count, not the list: this reaches `run.md`, the
+    /// journal's `reason` and a repair's `{{failure}}`, all of which want a
+    /// line. The whole list goes to the correction prompt, which is the only
+    /// reader that can act on it.
+    OutputSchema {
+        expected: PathBuf,
+        problem: String,
+        more: usize,
+    },
     /// `stop_reason` was `MaxTokens` — the output may be truncated.
     ContextExhausted,
     /// `stop_reason` was `MaxTurnRequests`.
@@ -91,6 +115,33 @@ impl std::fmt::Display for NodeFailure {
             NodeFailure::NoOutput { expected } => {
                 write!(f, "no output written to {}", expected.display())
             }
+            NodeFailure::OutputNotAFile { expected } => {
+                write!(f, "{} is not a plain file", expected.display())
+            }
+            NodeFailure::OutputEscapes { expected, resolved } => write!(
+                f,
+                "the output {} resolves through a link, to {}",
+                expected.display(),
+                resolved.display()
+            ),
+            NodeFailure::OutputSchema {
+                expected,
+                problem,
+                more: 0,
+            } => write!(
+                f,
+                "{} does not match its output schema: {problem}",
+                expected.display()
+            ),
+            NodeFailure::OutputSchema {
+                expected,
+                problem,
+                more,
+            } => write!(
+                f,
+                "{} does not match its output schema: {problem} (and {more} more)",
+                expected.display()
+            ),
             NodeFailure::ContextExhausted => {
                 write!(f, "the context window ran out; the output may be truncated")
             }
@@ -115,6 +166,78 @@ impl std::fmt::Display for NodeFailure {
             ),
             NodeFailure::Exit { code: Some(c) } => write!(f, "exited with status {c}"),
             NodeFailure::Exit { code: None } => write!(f, "was killed by a signal"),
+        }
+    }
+}
+
+/// Whether what a node wrote is what it owed.
+///
+/// A trait so the rule has one implementation and two moments to be asked
+/// at: the scheduler asks after the runner has returned, and a correction
+/// turn has to ask while the session it would speak into is still open.
+pub trait OutputContract {
+    fn check(&self) -> Result<(), ContractBreach>;
+}
+
+/// Every reason one output did not meet its contract.
+///
+/// Separate from [`NodeFailure`] because the two are read by different
+/// readers. A `NodeFailure`'s `Display` is deliberately one terse line —
+/// it is rendered into `run.md`, the journal's `reason`, and a repair
+/// prompt's `{{failure}}` — while an agent being asked to correct what it
+/// wrote needs every reason it was wrong, not the first one.
+///
+/// `first` plus `rest` rather than a `Vec`: an `Err` carrying no reason is
+/// then unrepresentable, and there is always a line to lead with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractBreach {
+    pub kind: BreachKind,
+    /// Always at least one line.
+    pub first: String,
+    pub rest: Vec<String>,
+}
+
+/// Which way the contract was not met. Each variant carries what its
+/// failure line names, so a breach cannot be built without the paths the
+/// [`NodeFailure`] it becomes needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BreachKind {
+    /// Nothing on the path, or a file with nothing in it — the same thing
+    /// to whoever reads it next.
+    Missing {
+        expected: PathBuf,
+    },
+    NotAFile {
+        expected: PathBuf,
+    },
+    Escapes {
+        expected: PathBuf,
+        resolved: PathBuf,
+    },
+    /// The file is this node's and its contents are not the declared shape.
+    /// The problems themselves are the breach's lines — this carries only what
+    /// the failure line names.
+    Schema {
+        expected: PathBuf,
+    },
+}
+
+/// The one place a breach becomes the failure a run reports, so the two
+/// vocabularies cannot drift into disagreeing about the same file.
+impl From<ContractBreach> for NodeFailure {
+    fn from(breach: ContractBreach) -> Self {
+        let ContractBreach { kind, first, rest } = breach;
+        match kind {
+            BreachKind::Missing { expected } => NodeFailure::NoOutput { expected },
+            BreachKind::NotAFile { expected } => NodeFailure::OutputNotAFile { expected },
+            BreachKind::Escapes { expected, resolved } => {
+                NodeFailure::OutputEscapes { expected, resolved }
+            }
+            BreachKind::Schema { expected } => NodeFailure::OutputSchema {
+                expected,
+                problem: first,
+                more: rest.len(),
+            },
         }
     }
 }
@@ -312,6 +435,11 @@ pub struct RunContext<'a> {
     /// inside a parent repair generation; evidence ids never do, so logs
     /// and archived outputs do not collide.
     pub evidence_seq: u32,
+    /// What this attempt's output has to be for the node to pass, when the
+    /// node owes one. `None` exactly when `output` is: a command node and a
+    /// repair's fix session owe no file, and a contract on either would
+    /// fail them for not writing something never asked for.
+    pub contract: Option<&'a dyn OutputContract>,
     pub timeout: Duration,
     pub permission: Permission<'a>,
     /// The run's stop switch, observable mid-turn: a real runner watches it
@@ -319,6 +447,34 @@ pub struct RunContext<'a> {
     /// The scheduler only sees it between calls, which is too late to stop
     /// a turn that is already running.
     pub cancel: &'a CancelToken,
+    /// Permission to spend one more budget unit on a correction turn inside
+    /// this call — **a reservation, not a question**: `true` means the run's
+    /// budget has already been charged for it.
+    ///
+    /// The scheduler charges the call's first turn before entering runner
+    /// code. An additional turn has to use this door while the session is
+    /// still open so the same ceiling covers both.
+    pub reserve_extra_turn: &'a dyn Fn() -> bool,
+}
+
+/// One tool call a node's turn made, as the protocol reported it.
+///
+/// The name is the protocol's coarse `kind` (`read`, `execute`, …) and not the
+/// agent's own tool name: that is resolved through the session's adapter, which
+/// a runner does not hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolUse {
+    pub name: String,
+    pub outcome: ToolOutcome,
+}
+
+/// How a tool call ended. `Unsettled` is its own answer, not a failure: a turn
+/// that ended while a call was still running says something a reader needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolOutcome {
+    Ok,
+    Failed,
+    Unsettled,
 }
 
 /// What one attempt produced. Carries more than a verdict because the
@@ -337,9 +493,18 @@ pub struct RunResult {
     /// The run's own deadline is an absolute `Instant`, so the node clock
     /// stopping does nothing for it — `total` is what the scheduler
     /// subtracts so a long approval does not end the run the moment it is
-    /// granted. It rides on the result because every runner call already
-    /// passes through `Run::call` → `account`, which keeps one raiser.
+    /// granted. It rides on the result because every scheduler call passes
+    /// through `Run::accounted_call`, which keeps one accounting path.
     pub waiting: Waiting,
+    /// Whether this call used a second turn to correct its output.
+    ///
+    /// Recorded because it consumes another budget unit: without it, a node
+    /// that only passed on its correction is byte-identical in the record to
+    /// one that got it right first time.
+    pub corrected: bool,
+    /// What tools the turn used, in the order it reached for them. A
+    /// diagnostic aid, not a decision input — nothing in the engine reads it.
+    pub tools: Vec<ToolUse>,
 }
 
 /// One attempt at one node. Async because a real runner has to race the
@@ -395,6 +560,25 @@ impl NodeRunner for Runners {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// The run's own line has to name the same file the breach was about,
+    /// or the two vocabularies are describing different outputs.
+    #[test]
+    fn a_breach_becomes_the_failure_that_names_the_same_file() {
+        let expected = PathBuf::from("/run/design.md");
+        let breach = ContractBreach {
+            kind: BreachKind::Missing {
+                expected: expected.clone(),
+            },
+            first: "nothing usable is at /run/design.md".to_string(),
+            rest: vec!["it needs a `## Risks` section".to_string()],
+        };
+
+        assert_eq!(
+            NodeFailure::from(breach),
+            NodeFailure::NoOutput { expected }
+        );
+    }
 
     #[test]
     fn failure_display_is_prompt_facing_and_names_the_cause() {

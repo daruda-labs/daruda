@@ -16,7 +16,7 @@ use crate::ui::theme::palette;
 
 pub(super) mod toolbar;
 
-use self::toolbar::toolbar;
+use self::toolbar::{ToolbarState, toolbar};
 
 impl Render for FlowGraphView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -44,8 +44,12 @@ impl Render for FlowGraphView {
                 };
                 // The toolbar goes inside the canvas half, not the pane: over the
                 // pane it would sit on the inspector column instead of the graph.
-                let has_selection = !self.selected_nodes(cx).is_empty();
-                let unsaved_form = self.has_unsaved_form(cx);
+                let state = ToolbarState {
+                    has_selection: !self.selected_nodes(cx).is_empty(),
+                    unsaved_form: self.has_unsaved_form(cx),
+                    until: self.selected_node(cx),
+                    pin: self.pin_action(cx),
+                };
                 body.child(
                     div()
                         .size_full()
@@ -57,7 +61,7 @@ impl Render for FlowGraphView {
                                 .flex_1()
                                 .h_full()
                                 .child(canvas.clone())
-                                .child(toolbar(has_selection, unsaved_form, cx)),
+                                .child(toolbar(state, cx)),
                         )
                         .child(inspector),
                 )

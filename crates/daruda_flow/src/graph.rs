@@ -36,6 +36,50 @@ impl std::fmt::Display for GraphError {
 
 impl std::error::Error for GraphError {}
 
+/// The nodes a run will actually visit.
+///
+/// One question asked in three places — which nodes the scheduler walks, which
+/// agents get provisioned, and which nodes are worth validating — so it has one
+/// answer. Three near-agreements is how a `until` run downloads a runtime for a
+/// node it will not reach, or is refused over a node it was told to skip.
+///
+/// `Everything` rather than a materialised set of every id: the common case
+/// selects nothing, and it should not cost a set to say so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    Everything,
+    /// A node and its ancestors. Closed under deps by construction, so
+    /// nothing in here can wait on something outside it.
+    UpTo(std::collections::HashSet<NodeId>),
+}
+
+impl Selection {
+    /// What `until` selects out of `flow`.
+    ///
+    /// A flow whose graph will not build selects everything. The run is going
+    /// to fail on that graph anyway, and until then the safe direction is to
+    /// validate more rather than less.
+    pub fn of(flow: &Flow, until: Option<&NodeId>) -> Self {
+        let Some(target) = until else {
+            return Selection::Everything;
+        };
+        let Ok(graph) = FlowGraph::build(flow) else {
+            return Selection::Everything;
+        };
+        let mut set: std::collections::HashSet<NodeId> =
+            graph.ancestors(target).into_iter().collect();
+        set.insert(target.clone());
+        Selection::UpTo(set)
+    }
+
+    pub fn includes(&self, id: &NodeId) -> bool {
+        match self {
+            Selection::Everything => true,
+            Selection::UpTo(set) => set.contains(id),
+        }
+    }
+}
+
 /// A resolved flow's dependency graph, built once and queried many times.
 #[derive(Debug)]
 pub struct FlowGraph {

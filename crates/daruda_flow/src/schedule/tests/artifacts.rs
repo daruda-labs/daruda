@@ -13,8 +13,9 @@ use super::*;
 /// and the model — a field added to one and forgotten in the conversion
 /// disappears from `run.yaml` silently. A fixture that names half the axes
 /// guards half of them, so this one names all of them: both prompt shapes,
-/// both `on_fail` shapes and everything inside them, and every agent axis
-/// including the two `defaults` fills in.
+/// both `on_fail` shapes and everything inside them, every agent axis
+/// including the two `defaults` fills in, and an `output_schema` deep enough
+/// to reach every keyword the subset spells.
 const INHERITING: &str = "\
 version: 1
 defaults:
@@ -29,7 +30,15 @@ nodes:
       model: opus
       effort: high
       permission: allow_once
-    output: design.md
+    output: design.json
+    output_schema:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: { type: string, enum: [pass, fail] }
+        risks:
+          type: array
+          items: { type: string }
     prompt: write it
     on_fail:
       retry:
@@ -51,7 +60,14 @@ nodes:
 /// Run a flow and hand back what landed in its `run.yaml`.
 fn run_yaml_of(text: &str) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
-    let runner = FakeRunner::new();
+    // `design` declares an `output_schema`, so the default one-line write would
+    // breach the contract — and cost this fixture two retry waits.
+    let runner = FakeRunner::new().script(
+        "design",
+        vec![Step::Ok {
+            writes: Some("{\"verdict\": \"pass\"}\n".to_string()),
+        }],
+    );
     let report = execute(
         &request_for(text, dir.path()),
         &runner,

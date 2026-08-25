@@ -130,16 +130,17 @@ pub(crate) fn archive_unclaimed_outputs(
 ) -> Vec<String> {
     let mut warnings = Vec::new();
     for (id, output) in outputs {
-        if passed.contains(id) || !output.is_file() {
+        // Asked without following links, so all three link shapes reach the
+        // archive's refusal: `is_file` is false for a dangling one and for
+        // one to a directory, which would skip both without a word.
+        if passed.contains(id) || std::fs::symlink_metadata(output).is_err() {
             continue;
         }
         match crate::archive::archive_canceled(log_dir, id, output) {
             Ok(_) => {}
             Err(e) => warnings.push(format!(
                 "`{id}` left a partial output that could not be moved aside, so it may be \
-                 mistaken for a finished one: {} ({})",
-                e.path.display(),
-                e.source
+                 mistaken for a finished one: {e}"
             )),
         }
     }
@@ -229,5 +230,43 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
         assert!(done.is_file(), "a passed node's output was taken away");
         assert!(!partial.exists(), "the partial output is still live");
+    }
+
+    /// A link where an output belongs is residue too, and every shape of one
+    /// has to say so: on `is_file` a dangling link and one to a directory are
+    /// both indistinguishable from nothing written, so the sweep passed over
+    /// them and left them live for `judge` to read.
+    #[test]
+    fn every_shape_of_link_left_behind_is_reported_rather_than_skipped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_dir = dir.path().join("logs");
+        let elsewhere = dir.path().join("elsewhere.md");
+        std::fs::write(&elsewhere, "someone else's work\n").expect("write");
+        let a_directory = dir.path().join("a-directory");
+        std::fs::create_dir_all(&a_directory).expect("mkdir");
+
+        for (name, target) in [
+            ("to_a_file", elsewhere.clone()),
+            ("dangling", dir.path().join("never-written.md")),
+            ("to_a_directory", a_directory.clone()),
+        ] {
+            let output = dir.path().join(format!("{name}.md"));
+            std::os::unix::fs::symlink(&target, &output).expect("symlink");
+
+            let warnings = archive_unclaimed_outputs(
+                dir.path(),
+                &log_dir,
+                &[(name.into(), output.clone())],
+                &[],
+            );
+
+            assert_eq!(warnings.len(), 1, "{name}: {warnings:?}");
+            assert!(warnings[0].contains(name), "{name}: {warnings:?}");
+            assert!(
+                std::fs::symlink_metadata(&output).is_ok(),
+                "{name}: a refused link is left where a reader can see it"
+            );
+            std::fs::remove_file(&output).expect("unlink");
+        }
     }
 }

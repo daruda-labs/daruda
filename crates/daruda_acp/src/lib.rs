@@ -29,14 +29,15 @@ pub use agent_client_protocol::schema::v1::SessionId;
 // `PermissionKindView` because that mapping renders an unrecognized kind as a
 // reject, which is right for a UI and wrong for anything selecting on it.
 pub use agent_client_protocol::schema::v1::{
-    ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate,
+    ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate, ToolCall, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind,
 };
 pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run_one_shot};
 pub use failure::{AcpFailure, FailureKind, Remedy, RuntimeKind};
 pub use login_method::{LoginMethod, LoginMethodKind, TerminalCommand, parse_login_methods};
 pub use mapping::{
     SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
-    finalize_streaming, permission_item, subagent_activity, touched_tool_id,
+    finalize_streaming, kind_of, permission_item, status_of, subagent_activity, touched_tool_id,
 };
 pub use model::{
     ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,

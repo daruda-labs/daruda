@@ -7,13 +7,48 @@
 use crate::NodeId;
 use std::path::{Path, PathBuf};
 
-/// A failed move, with the path it was on. The set can hold several nodes,
-/// so "archiving failed" without a path leaves the caller unable to say
-/// which member of it died.
+/// Why one node's evidence could not be put aside. Every variant carries
+/// the path: the set can hold several nodes, so "archiving failed" without
+/// one leaves the caller unable to say which member of it died.
 #[derive(Debug)]
-pub struct ArchiveError {
-    pub path: PathBuf,
-    pub source: std::io::Error,
+pub enum ArchiveError {
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// A link is standing where the output belongs. Renaming it would file
+    /// the link as evidence, and `{{attempts}}` then tells the next agent
+    /// to read a path that resolves to whatever it points at.
+    OutputIsLink { path: PathBuf },
+}
+
+impl ArchiveError {
+    /// The scheduler reports paths, not archive internals, so every failure
+    /// reaches it as an I/O one. A refusal has no `errno` and carries its
+    /// reason in the message instead.
+    pub fn into_io(self) -> (PathBuf, std::io::Error) {
+        let message = self.to_string();
+        match self {
+            ArchiveError::Io { path, source } => (path, source),
+            ArchiveError::OutputIsLink { path } => (
+                path,
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, message),
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for ArchiveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArchiveError::Io { path, source } => {
+                write!(f, "could not move {}: {source}", path.display())
+            }
+            ArchiveError::OutputIsLink { path } => {
+                write!(f, "{} is a link, not evidence", path.display())
+            }
+        }
+    }
 }
 
 /// Move each node's live output into `log_dir` under an attempt- and
@@ -28,7 +63,7 @@ pub fn archive_attempt(
     evidence_seq: u32,
     artifacts: &[PathBuf],
 ) -> Result<Vec<PathBuf>, ArchiveError> {
-    std::fs::create_dir_all(log_dir).map_err(|source| ArchiveError {
+    std::fs::create_dir_all(log_dir).map_err(|source| ArchiveError::Io {
         path: log_dir.to_path_buf(),
         source,
     })?;
@@ -57,7 +92,7 @@ pub fn archive_canceled(
     node: &NodeId,
     output: &Path,
 ) -> Result<Option<PathBuf>, ArchiveError> {
-    std::fs::create_dir_all(log_dir).map_err(|source| ArchiveError {
+    std::fs::create_dir_all(log_dir).map_err(|source| ArchiveError::Io {
         path: log_dir.to_path_buf(),
         source,
     })?;
@@ -73,8 +108,19 @@ fn move_aside(
     stamp: &str,
     output: &Path,
 ) -> Result<Option<PathBuf>, ArchiveError> {
-    if !output.is_file() {
-        return Ok(None);
+    // Asked without following links: a link here is neither a file to move
+    // nor an absence to skip over quietly, and `is_file` cannot tell the
+    // three apart.
+    match std::fs::symlink_metadata(output) {
+        // Nothing was written, which is not an error.
+        Err(_) => return Ok(None),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(ArchiveError::OutputIsLink {
+                path: output.to_path_buf(),
+            });
+        }
+        Ok(meta) if !meta.is_file() => return Ok(None),
+        Ok(_) => {}
     }
     let name = match output.extension().and_then(|e| e.to_str()) {
         Some(ext) => format!("{id}.{stamp}.{ext}"),
@@ -85,7 +131,7 @@ fn move_aside(
     // a plain filename; refusing here too keeps a caller that skipped it
     // from renaming an output to wherever the id points.
     if Path::new(&name).components().count() != 1 {
-        return Err(ArchiveError {
+        return Err(ArchiveError::Io {
             path: output.to_path_buf(),
             source: std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -96,7 +142,7 @@ fn move_aside(
     let destination = log_dir.join(name);
     // `rename` keeps the bytes and clears the live path in one step, so
     // there is no window where both exist.
-    std::fs::rename(output, &destination).map_err(|source| ArchiveError {
+    std::fs::rename(output, &destination).map_err(|source| ArchiveError::Io {
         path: output.to_path_buf(),
         source,
     })?;
@@ -254,13 +300,61 @@ mod tests {
             let error = archive_attempt(&log_dir, &[(id.into(), Some(output.clone()))], 1, 1, &[])
                 .expect_err("must refuse");
 
-            assert_eq!(
-                error.source.kind(),
-                std::io::ErrorKind::InvalidInput,
-                "`{id}`"
-            );
-            assert_eq!(error.path, output, "the refusal names the file it was on");
+            let (path, source) = error.into_io();
+            assert_eq!(source.kind(), std::io::ErrorKind::InvalidInput, "`{id}`");
+            assert_eq!(path, output, "the refusal names the file it was on");
             assert!(output.is_file(), "`{id}` must leave the output untouched");
         }
+    }
+
+    /// A link is not evidence. Archiving it would file the link under
+    /// `logs/` and hand that path to a repair agent through `{{attempts}}`,
+    /// which is an instruction to read whatever it points at — and skipping
+    /// it silently would let the node's refusal go unreported.
+    #[test]
+    fn a_linked_output_is_refused_rather_than_archived_or_skipped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run_dir = dir.path();
+        let log_dir = run_dir.join("logs");
+        let elsewhere = run_dir.join("elsewhere.md");
+        write(&elsewhere, "someone else's work");
+        let output = run_dir.join("review.md");
+        std::os::unix::fs::symlink(&elsewhere, &output).expect("symlink");
+
+        let error = archive_attempt(
+            &log_dir,
+            &[("review".into(), Some(output.clone()))],
+            1,
+            1,
+            &[],
+        )
+        .expect_err("a link must be refused, not quietly skipped");
+
+        assert!(
+            matches!(&error, ArchiveError::OutputIsLink { path } if path == &output),
+            "{error:?}"
+        );
+        assert!(
+            !log_dir.join("review.attempt-1.evidence-1.md").exists(),
+            "the link must not be filed as evidence"
+        );
+        assert!(
+            std::fs::read_to_string(&elsewhere).expect("read") == "someone else's work",
+            "the target must be left where it is"
+        );
+    }
+
+    /// A directory standing where the output belongs is not evidence
+    /// either, and not a refusal: nothing was written.
+    #[test]
+    fn a_directory_where_the_output_belongs_archives_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_dir = dir.path().join("logs");
+        let output = dir.path().join("review.md");
+        std::fs::create_dir_all(&output).expect("mkdir");
+
+        let archived = archive_attempt(&log_dir, &[("review".into(), Some(output))], 1, 1, &[])
+            .expect("archiving succeeds");
+        assert!(archived.is_empty());
     }
 }

@@ -131,7 +131,8 @@ fn a_cancel_during_the_fix_session_is_not_a_failed_fix() {
         "nothing is re-derived after the stop"
     );
     // A stop is a third fate for the fix session, and one the run still paid
-    // for. Left out of the record, the totals stop agreeing.
+    // for. This run has no correction, so leaving it out also breaks the
+    // equality below.
     let fix = report.node(FIX_SESSION_ID).expect("a fix ran");
     assert!(matches!(fix.attempts[0].outcome, AttemptOutcome::Canceled));
     let recorded: usize = report.nodes.iter().map(|n| n.attempts.len()).sum();

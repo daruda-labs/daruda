@@ -1,26 +1,52 @@
 //! The buttons over the graph.
 //!
-//! Their own file because the toolbar carries its own vocabulary — two icon
-//! paths, two test selectors, and the rule that decides what each button says.
+//! Their own file because the toolbar carries its own vocabulary — four icon
+//! paths, four test selectors, and the rule that decides what each button says.
 
 use gpui::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _, div, px,
 };
 
+use daruda_flow::NodeId;
+
+use super::super::pins::PinAction;
 use super::super::{FlowGraphEvent, FlowGraphView};
 use crate::surface::strings as s;
 use crate::ui::theme::palette;
 
-/// The two act-on-the-flow glyphs. `IconName` — the vendored set — has no play
-/// arrow, so both come from daruda's own Material Symbols icons and are named by
-/// path, the way the file viewer's toolbar names its modes.
+/// The act-on-the-flow glyphs. `IconName` — the vendored set — has no play
+/// arrow, no pin and nothing that reads as "stop here", so all four come from
+/// daruda's own Material Symbols icons and are named by path, the way the file
+/// viewer's toolbar names its modes.
 const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
 const ICON_CHECK: &str = "icons/ui/check.svg";
+/// `skip_next` — a play arrow against a bar. The same vocabulary as ▶ plus the
+/// one thing that makes it partial: it ends somewhere.
+const ICON_RUN_UNTIL: &str = "icons/ui/skip-next.svg";
+/// `keep` — Material Symbols' push pin, which is also the engine's own word
+/// for what this does (`RunRequest::pinned`).
+const ICON_PIN: &str = "icons/ui/keep.svg";
 
-/// How the tests find ▶ and ✓ to press them. Named here so a test cannot drift
-/// from its button by spelling the selector a second time.
+/// How the tests find the buttons to press them. Named here so a test cannot
+/// drift from its button by spelling the selector a second time.
 pub(in crate::workspace) const TOOLBAR_RUN_SELECTOR: &str = "flow-toolbar-run-press";
 pub(in crate::workspace) const TOOLBAR_CHECK_SELECTOR: &str = "flow-toolbar-check-press";
+pub(in crate::workspace) const TOOLBAR_RUN_UNTIL_SELECTOR: &str = "flow-toolbar-run-until-press";
+pub(in crate::workspace) const TOOLBAR_PIN_SELECTOR: &str = "flow-toolbar-pin-press";
+
+/// Everything the toolbar decides from, gathered once.
+///
+/// A struct rather than four positional arguments: three of them would be
+/// `bool`, and a call site that swapped two would compile.
+pub(super) struct ToolbarState {
+    pub(super) has_selection: bool,
+    pub(super) unsaved_form: bool,
+    /// The node a partial run would stop at — the selection, when it is
+    /// exactly one node. `None` is nothing to stop at, which is what makes ▶|
+    /// off rather than a run of the whole flow.
+    pub(super) until: Option<NodeId>,
+    pub(super) pin: PinAction,
+}
 
 /// Buttons over the graph: what a person does to the flow, then what they do
 /// with it.
@@ -32,13 +58,32 @@ pub(in crate::workspace) const TOOLBAR_CHECK_SELECTOR: &str = "flow-toolbar-chec
 ///
 /// Running and checking are here and not in the menu because until now the only
 /// way to run the flow on screen was the palette, which asks which flow — a
-/// question this pane already has the answer to.
-pub(super) fn toolbar(
-    has_selection: bool,
-    unsaved_form: bool,
-    cx: &mut Context<FlowGraphView>,
-) -> impl IntoElement {
+/// question this pane already has the answer to. The two partial-run glyphs are
+/// here for the same reason and one more: what they act on is the selection,
+/// which is only visible on this canvas.
+pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> impl IntoElement {
     use crate::ui::{Disableable as _, Icon, button_bare};
+
+    let ToolbarState {
+        has_selection,
+        unsaved_form,
+        until,
+        pin,
+    } = state;
+    // ▶| reads the file exactly as ▶ does, so unsaved edits stop it first;
+    // after that its own question is whether there is one node to stop at.
+    let until_off = unsaved_form || until.is_none();
+    let until_says = match (&until, unsaved_form) {
+        (_, true) => s::flow_needs_save(),
+        (Some(node), false) => s::flow_run_until_tooltip(node.as_str()),
+        (None, false) => s::flow_run_until_needs_one(),
+    };
+    // The pin touches no file, so unsaved edits are none of its business.
+    let (pin_says, pin_off) = match &pin {
+        PinAction::Unavailable => (s::flow_pin_needs_agent(), true),
+        PinAction::Pin(nodes) => (s::flow_pin_tooltip(nodes), false),
+        PinAction::Unpin(nodes) => (s::flow_unpin_tooltip(nodes), false),
+    };
 
     div()
         .absolute()
@@ -72,7 +117,17 @@ pub(super) fn toolbar(
                 .disabled(!has_selection)
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
         )
-        // Both of these read the *file*, so while the inspector holds unsaved
+        .child(
+            // Beside delete rather than beside ▶: both act on the selection,
+            // and neither spends anything.
+            button_bare("flow-toolbar-pin")
+                .icon(Icon::empty().path(ICON_PIN))
+                .tooltip(pin_says)
+                .disabled(pin_off)
+                .debug_selector(|| TOOLBAR_PIN_SELECTOR.into())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::TogglePins))),
+        )
+        // These three read the *file*, so while the inspector holds unsaved
         // edits they would act on something other than what is on screen — and
         // ✓ would go further and call it valid. Off for the same reason, and
         // together: one greyed button beside an identical live one would read as
@@ -96,6 +151,17 @@ pub(super) fn toolbar(
                 // that cannot be seen without a real click.
                 .debug_selector(|| TOOLBAR_RUN_SELECTOR.into())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Run))),
+        )
+        .child(
+            // After ▶ and not instead of it: a partial run is the exception,
+            // and the button that runs the whole flow must not change meaning
+            // because a card happens to be selected.
+            button_bare("flow-toolbar-run-until")
+                .icon(Icon::empty().path(ICON_RUN_UNTIL))
+                .tooltip(until_says)
+                .disabled(until_off)
+                .debug_selector(|| TOOLBAR_RUN_UNTIL_SELECTOR.into())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::RunUntil))),
         )
 }
 

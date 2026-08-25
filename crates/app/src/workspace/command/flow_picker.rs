@@ -141,6 +141,10 @@ pub(in crate::workspace) enum Stage {
     /// declares any — a file with none is run the moment it is picked.
     Profiles {
         flow: PathBuf,
+        /// How far to run and what to reuse, as the surface that opened this
+        /// asked for it. Carried rather than re-derived on the way out: the
+        /// graph pane's selection can have moved while the list was up.
+        selection: crate::workspace::flow_request::FlowSelection,
         candidates: Vec<ProfileCandidate>,
     },
 }
@@ -187,7 +191,12 @@ pub(in crate::workspace) enum FlowPick {
     /// because only it can read the file.
     Flow(FlowPurpose, PathBuf),
     /// A profile for the flow already picked. `None` is the file as written.
-    Profile(FlowPurpose, PathBuf, Option<String>),
+    Profile(
+        FlowPurpose,
+        PathBuf,
+        crate::workspace::flow_request::FlowSelection,
+        Option<String>,
+    ),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -221,11 +230,18 @@ impl FlowPicker {
     /// Ask which profile `flow` runs under. The query and the focus start
     /// over: they were about a different list, and carrying them would
     /// filter profile names by whatever was typed to find the file.
-    pub fn ask_profile(&mut self, purpose: FlowPurpose, flow: PathBuf, names: Vec<String>) {
+    pub fn ask_profile(
+        &mut self,
+        purpose: FlowPurpose,
+        flow: PathBuf,
+        selection: crate::workspace::flow_request::FlowSelection,
+        names: Vec<String>,
+    ) {
         *self = FlowPicker::Choosing(Choosing {
             purpose,
             stage: Stage::Profiles {
                 flow,
+                selection,
                 candidates: std::iter::once(ProfileCandidate::defaults())
                     .chain(names.into_iter().map(ProfileCandidate::named))
                     .collect(),
@@ -322,9 +338,14 @@ impl FlowPicker {
                 c.purpose,
                 candidates.get(index)?.path.clone(),
             )),
-            Stage::Profiles { flow, candidates } => Some(FlowPick::Profile(
+            Stage::Profiles {
+                flow,
+                selection,
+                candidates,
+            } => Some(FlowPick::Profile(
                 c.purpose,
                 flow.clone(),
+                selection.clone(),
                 candidates.get(index)?.name.clone(),
             )),
         }

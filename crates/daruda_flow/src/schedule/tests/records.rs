@@ -124,8 +124,7 @@ fn the_fix_session_is_in_the_record_like_any_other_attempt() {
     assert_eq!(fix.attempts.len(), 1);
     assert!(matches!(fix.attempts[0].outcome, AttemptOutcome::Passed));
 
-    // The two totals have to agree, which is the reason this record is
-    // worth keeping at all.
+    // This fixture has no correction turns, so every budget unit has a record.
     let recorded: usize = report.nodes.iter().map(|n| n.attempts.len()).sum();
     assert_eq!(recorded as u32, report.node_runs);
 }
@@ -147,9 +146,9 @@ fn the_attempt_that_ends_the_run_is_recorded_with_no_evidence() {
 }
 
 /// Archiving can fail after an attempt has already run and been counted.
-/// The record has to keep that attempt anyway — otherwise the sum of
-/// attempts stops matching `node_runs`, and every reader that reconciles
-/// the two is wrong on exactly the runs that went badly.
+/// The record has to keep that attempt anyway. This fixture has no
+/// correction turn, so dropping it would also make the budget-unit and
+/// attempt totals disagree.
 #[test]
 fn an_attempt_whose_archive_failed_is_still_in_the_record() {
     let dir = tempfile::tempdir().expect("tempdir");

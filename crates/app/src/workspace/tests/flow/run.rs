@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::workspace::flow_request::FlowSelection;
+
 /// The engine refuses a relative path *by name*, and it does so after
 /// taking the lock and writing the run directory is no longer possible —
 /// but only because it now checks first. A request the app builds must
@@ -17,7 +19,7 @@ async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContex
 
     let (lane_ref, issues) = ws.update(cx, |ws, cx| {
         let submission = ws
-            .build_flow_request(&flow_path, None, cx)
+            .build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
             .unwrap_or_else(|_| panic!("a local lane with a valid flow builds a request"));
         (
             submission.lane,
@@ -53,7 +55,9 @@ async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let request = ws
-        .update(cx, |ws, cx| ws.build_flow_request(&flow_path, None, cx))
+        .update(cx, |ws, cx| {
+            ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+        })
         .expect("a local lane with a valid flow builds a request")
         .request;
 
@@ -84,7 +88,8 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
     );
 
     let refused = ws.update(cx, |ws, cx| {
-        ws.build_flow_request(&flow_path, None, cx).is_err()
+        ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+            .is_err()
     });
     assert!(refused, "a node depending on nothing should not run");
     assert!(
@@ -150,7 +155,7 @@ nodes:
     );
 
     let refused = ws.update(cx, |ws, cx| {
-        match ws.build_flow_request(&flow_path, None, cx) {
+        match ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx) {
             Err(crate::workspace::flow_request::FlowSubmitError::Invalid(issues)) => issues,
             Err(_) => panic!("refused, but not for the reason under test"),
             Ok(_) => panic!("a flow naming an unconfigured agent was accepted"),
@@ -521,6 +526,7 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile(
                     crate::workspace::command::flow_picker::FlowPurpose::Run,
                     flow_path.clone(),
+                    FlowSelection::default(),
                     Some("cheap".to_string()),
                 )),
                 "the second question answered with something other than the profile"
@@ -584,11 +590,11 @@ async fn the_chosen_profile_reaches_the_request(cx: &mut TestAppContext) {
 
     let (plain, chosen) = ws.update(cx, |ws, cx| {
         let plain = ws
-            .build_flow_request(&flow_path, None, cx)
+            .build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
             .expect("builds")
             .request;
         let chosen = ws
-            .build_flow_request(&flow_path, Some("cheap"), cx)
+            .build_flow_request(&flow_path, Some("cheap"), &FlowSelection::default(), cx)
             .expect("builds")
             .request;
         (
@@ -755,6 +761,7 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
             ws.run_flow_at(
                 &flow_path,
                 crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                FlowSelection::default(),
                 window,
                 cx,
             );
@@ -776,6 +783,7 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile(
                     crate::workspace::command::flow_picker::FlowPurpose::Validate,
                     flow_path.clone(),
+                    FlowSelection::default(),
                     Some("cheap".to_string()),
                 )),
             );
@@ -795,6 +803,7 @@ async fn naming_a_flow_with_no_profiles_opens_no_picker(cx: &mut TestAppContext)
             ws.run_flow_at(
                 &flow_path,
                 crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                FlowSelection::default(),
                 window,
                 cx,
             );
@@ -833,6 +842,7 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
             ws.run_flow_at(
                 &flow_path,
                 crate::workspace::command::flow_picker::FlowPurpose::Run,
+                FlowSelection::default(),
                 window,
                 cx,
             );

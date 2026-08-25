@@ -58,6 +58,7 @@ fn one_changed_scalar_changes_one_line_and_keeps_the_comment() {
             agent: None,
             prompt: PromptSource::Prompt("build it".into()),
             output: "artifact.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });
@@ -111,6 +112,7 @@ fn a_new_node_is_appended_under_the_dash_its_siblings_use() {
             agent: None,
             prompt: PromptSource::Prompt("ship it".into()),
             output: "ship.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
         file.nodes.push(ship);
@@ -160,6 +162,7 @@ fn a_block_scalar_stays_a_block_scalar() {
             agent: None,
             prompt: PromptSource::Prompt("write the design\nin three lines\nnow\n".into()),
             output: "design.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });
@@ -178,6 +181,7 @@ fn a_plain_scalar_that_grew_a_newline_is_promoted_to_a_block_scalar() {
             agent: None,
             prompt: PromptSource::Prompt("build it\nthen check it\n".into()),
             output: "build.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });
@@ -200,6 +204,7 @@ fn a_prompt_whose_first_line_is_indented_still_loads_and_says_the_same_thing() {
             agent: None,
             prompt: PromptSource::Prompt(prompt.into()),
             output: "build.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });
@@ -295,6 +300,7 @@ nodes:
             agent: None,
             prompt: PromptSource::Prompt("something else".into()),
             output: "design.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     })
@@ -360,6 +366,7 @@ fn a_new_nested_mapping_is_written_as_a_block() {
             }),
             prompt: PromptSource::Prompt("write the design\nin two lines\n".into()),
             output: "design.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });
@@ -487,6 +494,7 @@ fn a_new_key_takes_the_line_of_the_one_it_replaces() {
             agent: None,
             prompt: PromptSource::PromptFile("brief.md".into()),
             output: "build.md".into(),
+            output_schema: None,
             on_fail: Default::default(),
         };
     });

@@ -45,7 +45,7 @@ impl FlowGraphView {
             .filter_map(|node| {
                 let id = ids.canvas(&node.id)?;
                 let state = colouring.states.get(&node.id).copied().unwrap_or_default();
-                let card = card_for(node, state);
+                let card = card_for(node, state, self.pins.contains(&node.id));
                 Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();

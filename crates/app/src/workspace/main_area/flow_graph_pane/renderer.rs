@@ -65,6 +65,7 @@ pub(super) enum CardAccent {
     Passed,
     Retried,
     Failed,
+    Pinned,
 }
 
 impl CardAccent {
@@ -75,12 +76,13 @@ impl CardAccent {
             Self::Passed => palette::FLOW_GRAPH_STATUS_PASSED,
             Self::Retried => palette::FLOW_GRAPH_STATUS_RETRIED,
             Self::Failed => palette::FLOW_GRAPH_STATUS_FAILED,
+            Self::Pinned => palette::FLOW_GRAPH_STATUS_PINNED,
         }
     }
 }
 
-/// Build the card for one node under one run state.
-pub(super) fn card_for(node: &GraphNode, run: NodeRunState) -> CardData {
+/// Build the card for one node under one run state, pinned or not.
+pub(super) fn card_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> CardData {
     let kind = match &node.kind {
         GraphNodeKind::Agent { .. } => CardKind::Agent,
         GraphNodeKind::Gate { .. } => CardKind::Gate,
@@ -107,7 +109,7 @@ pub(super) fn card_for(node: &GraphNode, run: NodeRunState) -> CardData {
             line.clone(),
         ),
     };
-    let (badge, accent) = badge_for(node, run);
+    let (badge, accent) = badge_for(node, run, pinned);
     CardData {
         id: node.id.clone().into_string(),
         kind,
@@ -126,8 +128,16 @@ fn timeout_label(timeout: std::time::Duration) -> String {
 
 /// A card says what the run is doing to this node; with no run to report,
 /// it says what the node would do to itself on failure. Both answer the
-/// same question — what happens next — so they share one line.
-fn badge_for(node: &GraphNode, run: NodeRunState) -> (String, CardAccent) {
+/// same question — what happens next — so they share one line, and a pin is
+/// a third answer to it: nothing, because the output is already there.
+///
+/// The pin only speaks while no run is driving the node. Once one is, what it
+/// reports is the truth about this run — a pinned node reads as passed, which
+/// is what the engine made it.
+fn badge_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> (String, CardAccent) {
+    if pinned && run == NodeRunState::Pending {
+        return (s::flow_graph_status_pinned(), CardAccent::Pinned);
+    }
     match run {
         NodeRunState::Running { attempt } if attempt > 1 => {
             (s::flow_graph_status_attempt(attempt), CardAccent::Retried)
@@ -533,7 +543,7 @@ mod tests {
             (NodeRunState::Failed, CardAccent::Failed),
             (NodeRunState::Fixing, CardAccent::Retried),
         ] {
-            assert_eq!(card_for(&node, state).accent, want, "for {state:?}");
+            assert_eq!(card_for(&node, state, false).accent, want, "for {state:?}");
         }
     }
 
@@ -542,8 +552,8 @@ mod tests {
     #[test]
     fn a_first_attempt_reads_as_running_not_as_a_number() {
         let node = agent_node(FailPolicy::Halt);
-        let first = card_for(&node, NodeRunState::Running { attempt: 1 }).badge;
-        let third = card_for(&node, NodeRunState::Running { attempt: 3 }).badge;
+        let first = card_for(&node, NodeRunState::Running { attempt: 1 }, false).badge;
+        let third = card_for(&node, NodeRunState::Running { attempt: 3 }, false).badge;
         assert_ne!(first, third);
         assert!(
             third.contains('3'),
@@ -555,19 +565,43 @@ mod tests {
     /// `rerun` case draws no edge, so the card is the only place it shows.
     #[test]
     fn a_pending_node_reports_its_failure_policy() {
-        let halt = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending);
+        let halt = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending, false);
         assert!(halt.badge.is_empty(), "halting is the absence of a policy");
 
         let retry = card_for(
             &agent_node(FailPolicy::Retry { max_attempts: 2 }),
             NodeRunState::Pending,
+            false,
         );
         assert!(retry.badge.contains('2'), "{}", retry.badge);
     }
 
+    /// A pin is what happens next while nothing is running, so it takes the
+    /// badge — and gives it straight back once the run has something to say,
+    /// because then the run's report is the truth about this node.
+    #[test]
+    fn a_pin_speaks_only_until_the_run_does() {
+        let node = agent_node(FailPolicy::Retry { max_attempts: 2 });
+        let waiting = card_for(&node, NodeRunState::Pending, true);
+        assert_eq!(waiting.accent, CardAccent::Pinned);
+        assert!(!waiting.badge.is_empty());
+        assert_ne!(
+            waiting.badge,
+            card_for(&node, NodeRunState::Pending, false).badge,
+            "a pinned card said the same thing as an unpinned one"
+        );
+
+        let running = card_for(&node, NodeRunState::Passed, true);
+        assert_eq!(
+            running,
+            card_for(&node, NodeRunState::Passed, false),
+            "the run's report is the same card either way"
+        );
+    }
+
     #[test]
     fn an_agent_card_lists_the_axes_worth_seeing() {
-        let card = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending);
+        let card = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending, false);
         assert!(card.meta.contains("claude"), "{}", card.meta);
         assert!(card.meta.contains("high"), "{}", card.meta);
         assert!(

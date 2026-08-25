@@ -280,6 +280,68 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
     );
 }
 
+/// **A save must not delete what the form cannot show.** The inspector has no
+/// box for an `output_schema`, so the fields it writes back are rebuilt from a
+/// node that never carried one — and the differ turns a dropped key into a
+/// deletion edit. Asserted twice: a save that changes nothing, and a save that
+/// changes one other field.
+#[gpui::test]
+async fn saving_the_form_keeps_the_output_schema_the_form_cannot_show(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_A_SCHEMA);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    let before = std::fs::read_to_string(&flow_path).expect("readable");
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::Save));
+    vcx.run_until_parked();
+    assert_eq!(
+        std::fs::read_to_string(&flow_path).expect("readable"),
+        before,
+        "a save that changed nothing rewrote the file"
+    );
+
+    // And a save that really changes one box leaves the rest of the node alone.
+    let prompt = view
+        .read_with(&vcx, |v, cx| {
+            Some(v.form()?.body_states(cx).prompt.inline.clone())
+        })
+        .expect("an agent node has a prompt");
+    prompt.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("write two lines".to_string(), window, cx)
+    });
+    view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::Save));
+    vcx.run_until_parked();
+
+    let after = std::fs::read_to_string(&flow_path).expect("readable");
+    assert_eq!(
+        after,
+        before.replace("prompt: write a line", "prompt: write two lines"),
+        "one box, one line — and the schema is still there"
+    );
+    let reloaded = daruda_flow::load(&after, None).expect("what was written loads");
+    assert!(
+        reloaded.flow().nodes[0].kind.output_schema().is_some(),
+        "the engine still sees a shape to judge the output by"
+    );
+}
+
 /// Switching cards switches the form, and does not carry the old node's text
 /// across.
 #[gpui::test]

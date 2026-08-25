@@ -97,11 +97,14 @@ impl ProcessRunner {
             }
         };
         RunResult {
+            tools: Vec::new(),
             outcome,
             artifacts,
             usage: None,
-            // A shell step opens no session, so nothing can ask.
+            // A shell step opens no session, so nothing can ask and there is
+            // no contract to correct.
             waiting: crate::runner::Waiting::default(),
+            corrected: false,
         }
     }
 
@@ -150,10 +153,12 @@ fn open_log(log_dir: &Path, log_path: &Path) -> std::io::Result<std::fs::File> {
 /// code: nothing exited, and inventing one would read as a real verdict.
 fn failed(artifacts: Vec<PathBuf>, message: String) -> RunResult {
     RunResult {
+        tools: Vec::new(),
         outcome: Err(NodeFailure::SessionError(message)),
         artifacts,
         usage: None,
         waiting: crate::runner::Waiting::default(),
+        corrected: false,
     }
 }
 
@@ -254,10 +259,14 @@ mod tests {
                 run_dir: &self.run_dir,
                 log_dir: &self.log_dir,
                 output: None,
+                contract: None,
                 evidence_seq: 1,
                 timeout: self.timeout,
                 permission: crate::runner::Permission::Deny,
                 cancel: &self.cancel,
+                // A command node owes no file, so nothing here can ask for
+                // another turn.
+                reserve_extra_turn: &|| false,
             }
         }
 

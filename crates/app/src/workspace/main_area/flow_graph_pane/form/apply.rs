@@ -46,6 +46,7 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
                 SourceField::File(path) => PromptSource::PromptFile(path.into()),
             },
             output: std::path::PathBuf::from(&fields.body.output),
+            output_schema: schema_of(&target.kind),
             on_fail: retry_of(&target.kind, &fields.body.on_fail),
         },
         KindChoice::Command => NodeKindFile::Command {
@@ -100,6 +101,7 @@ pub(in crate::workspace) fn new_node(file: &mut FlowFile, after: Option<&NodeId>
             agent: None,
             prompt: PromptSource::Prompt(String::new()),
             output: std::path::PathBuf::from(format!("{id}.md")),
+            output_schema: None,
             on_fail: Default::default(),
         },
     });
@@ -191,6 +193,22 @@ pub(in crate::workspace) fn remove_node(file: &mut FlowFile, node: &NodeId) {
         {
             rerun.retain(|name| name != node);
         }
+    }
+}
+
+/// The shape the node already declared for its output, carried across a save.
+///
+/// **The form has no box for it** — a schema is written in the YAML editor — so
+/// rebuilding the node without this deletes it. The differ compares key by key,
+/// which turns a dropped field into a deletion edit in the file: every save on
+/// every agent node would quietly take the schema with it.
+fn schema_of(
+    kind: &daruda_flow::parse::NodeKindFile,
+) -> Option<Box<daruda_flow::parse::SchemaSubset>> {
+    use daruda_flow::parse::NodeKindFile;
+    match kind {
+        NodeKindFile::Agent { output_schema, .. } => output_schema.clone(),
+        NodeKindFile::Command { .. } => None,
     }
 }
 

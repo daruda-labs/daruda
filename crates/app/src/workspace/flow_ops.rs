@@ -27,7 +27,7 @@ use gpui::{Context, Window};
 
 use super::Workspace;
 use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
-use super::flow_request::{FlowSubmission, FlowSubmitError, union_strip_env};
+use super::flow_request::{FlowSelection, FlowSubmission, FlowSubmitError, union_strip_env};
 use super::flow_runs::RunHandle;
 // Only the seeded runs name a stage outright; a real one gets there through
 // the event pump.
@@ -142,12 +142,14 @@ impl Workspace {
             // Which flow, answered. Whatever is left of it belongs to
             // `start_flow`, which is also where the graph pane's ▶ comes in —
             // that button knows the flow already and skips only this question.
-            Some(FlowPick::Flow(purpose, path)) => self.start_flow(purpose, path, window, cx),
+            Some(FlowPick::Flow(purpose, path)) => {
+                self.start_flow(purpose, path, FlowSelection::default(), window, cx)
+            }
             // The second question, so nothing is left to ask.
-            Some(FlowPick::Profile(purpose, path, profile)) => {
+            Some(FlowPick::Profile(purpose, path, selection, profile)) => {
                 self.flow_picker.close();
                 cx.notify();
-                self.dispatch_flow(purpose, &path, profile.as_deref(), window, cx);
+                self.dispatch_flow(purpose, &path, profile.as_deref(), &selection, window, cx);
             }
             None => {
                 self.flow_picker.close();
@@ -168,13 +170,14 @@ impl Workspace {
         &mut self,
         path: &Path,
         purpose: FlowPurpose,
+        selection: FlowSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !self.flow_run_guard(purpose, cx) {
             return;
         }
-        self.start_flow(purpose, path.to_path_buf(), window, cx);
+        self.start_flow(purpose, path.to_path_buf(), selection, window, cx);
     }
 
     /// Everything a named flow still has to go through: the profile question
@@ -187,6 +190,7 @@ impl Workspace {
         &mut self,
         purpose: FlowPurpose,
         path: PathBuf,
+        selection: FlowSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -196,7 +200,12 @@ impl Workspace {
         if purpose.asks_about_profiles() {
             let profiles = flow_profiles(&path);
             if !profiles.is_empty() {
-                self.flow_picker.ask_profile(purpose, path, profiles);
+                // The selection rides into the picker rather than being asked
+                // for again on the way out: the profile stage already carries
+                // what has been decided so far, and which nodes to spend on is
+                // one of those things.
+                self.flow_picker
+                    .ask_profile(purpose, path, selection, profiles);
                 cx.notify();
                 return;
             }
@@ -204,7 +213,7 @@ impl Workspace {
 
         self.flow_picker.close();
         cx.notify();
-        self.dispatch_flow(purpose, &path, None, window, cx);
+        self.dispatch_flow(purpose, &path, None, &selection, window, cx);
     }
 
     /// Act on a flow that has every answer it needs.
@@ -213,12 +222,13 @@ impl Workspace {
         purpose: FlowPurpose,
         path: &Path,
         profile: Option<&str>,
+        selection: &FlowSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match purpose {
             FlowPurpose::Validate => self.validate_flow(path, profile, window, cx),
-            FlowPurpose::Run => self.submit_flow_run(path, profile, cx),
+            FlowPurpose::Run => self.submit_flow_run(path, profile, selection, cx),
             FlowPurpose::Graph => self.open_flow_graph(path, window, cx),
         }
     }
@@ -262,8 +272,14 @@ impl Workspace {
 
     // ---- Stage 2: the run ----
 
-    fn submit_flow_run(&mut self, path: &Path, profile: Option<&str>, cx: &mut Context<Self>) {
-        match self.build_flow_request(path, profile, cx) {
+    fn submit_flow_run(
+        &mut self,
+        path: &Path,
+        profile: Option<&str>,
+        selection: &FlowSelection,
+        cx: &mut Context<Self>,
+    ) {
+        match self.build_flow_request(path, profile, selection, cx) {
             Ok(submission) => self.start_flow_thread(submission, cx),
             Err(e) => self.report_flow_refusal(e, cx),
         }
@@ -449,7 +465,7 @@ impl Workspace {
             return;
         };
         self.flow_picker
-            .ask_profile(FlowPurpose::Run, path, profiles);
+            .ask_profile(FlowPurpose::Run, path, FlowSelection::default(), profiles);
         cx.notify();
     }
 
@@ -657,6 +673,8 @@ nodes:
     fn request_with(strip: &[&str]) -> RunRequest {
         let loaded = daruda_flow::load(MIXED_FLOW, None).expect("the fixture flow loads");
         RunRequest {
+            until: None,
+            pinned: Vec::new(),
             loaded,
             cwd: PathBuf::from("/lane"),
             run_dir: PathBuf::from("/lane/runs/1"),

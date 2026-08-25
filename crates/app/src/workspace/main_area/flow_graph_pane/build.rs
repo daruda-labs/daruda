@@ -17,6 +17,7 @@ use super::frame::FrameGraphPlugin;
 use super::model::{FlowGraphModel, NodeRunState};
 use super::node_ids::NodeIds;
 use super::overlay::RerunOverlay;
+use super::pins::PinSet;
 use super::port_drag::FlowEdgeValidator;
 use super::renderer::{FlowNodeRenderer, NODE_TYPE, card_for, flow_theme};
 use super::{FlowGraphError, FlowGraphState, FlowGraphView, renderer};
@@ -38,12 +39,17 @@ pub(super) fn read_flow(path: &Path) -> Result<String, FlowGraphError> {
 
 /// Turn a model into a canvas: the graph, the plugins that make it behave the
 /// way this pane needs, and the id map between the two.
+///
+/// The pins come in with the model because a card is `(node, state, pinned)`
+/// and this is the one place the cards are first written. Stamping them on
+/// afterwards would flash a graph with the pins missing.
 pub(super) fn build_graph_state(
     model: FlowGraphModel,
+    pins: &PinSet,
     window: &mut Window,
     cx: &mut Context<FlowGraphView>,
 ) -> FlowGraphState {
-    let (graph, ids) = build_canvas_graph(&model);
+    let (graph, ids) = build_canvas_graph(&model, pins);
     // Resolved here, where the colours are readable: neither the canvas's own
     // theme nor a node renderer can reach `cx` once the canvas is built.
     let tokens = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx);
@@ -90,14 +96,14 @@ pub(super) fn build_graph_state(
 /// Build the canvas graph and lay it out. Coordinates are never persisted —
 /// the flow file declares dependencies, not positions — so every open
 /// places the nodes again.
-fn build_canvas_graph(model: &FlowGraphModel) -> (Graph, NodeIds) {
+fn build_canvas_graph(model: &FlowGraphModel, pins: &PinSet) -> (Graph, NodeIds) {
     let mut ids: HashMap<NodeId, CanvasNodeId> = HashMap::new();
     let mut inputs = HashMap::new();
     let mut outputs = HashMap::new();
 
     let mut graph = Graph::build(|g| {
         for node in &model.nodes {
-            let card = card_for(node, NodeRunState::default());
+            let card = card_for(node, NodeRunState::default(), pins.contains(&node.id));
             let (nid, ins, outs) = g
                 .create_node(NODE_TYPE)
                 .size(palette::FLOW_GRAPH_NODE_W, palette::FLOW_GRAPH_NODE_H)
@@ -165,7 +171,7 @@ mod tests {
     /// still has to carry the card the renderer reads back.
     #[test]
     fn a_lone_node_is_placed_and_stamped() {
-        let (graph, ids) = build_canvas_graph(&model_of(ONE_NODE));
+        let (graph, ids) = build_canvas_graph(&model_of(ONE_NODE), &PinSet::default());
         assert!(
             ids.canvas(&NodeId::from("hello")).is_some(),
             "the flow id maps to a canvas node"

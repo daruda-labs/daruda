@@ -9,6 +9,7 @@ mod ask;
 mod files;
 mod graph;
 mod inspector;
+mod partial;
 mod run;
 
 use super::*;
@@ -45,6 +46,27 @@ nodes:
   - id: design
     kind: agent
     output: design.md
+    prompt: write a line
+";
+
+/// A node declaring a shape for its output. The inspector has no box for one —
+/// it is written in the YAML editor — so this fixture is what proves a save
+/// does not take it away.
+const WITH_A_SCHEMA: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.json
+    output_schema:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: { type: string, enum: [pass, fail] }
     prompt: write a line
 ";
 

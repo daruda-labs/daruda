@@ -69,6 +69,35 @@ pub struct AttemptRecord {
     /// writing nothing reads as a plain "no output written" unless the
     /// refusal is on the same page.
     pub waited: crate::runner::Waiting,
+    /// What the attempt's turn reached for. A diagnostic aid so `run.md`
+    /// answers "did it try to write the file" without opening the transcript.
+    /// Not journaled: a resumed run's earlier attempts lose it, which costs a
+    /// reader nothing the transcript beside them does not still say.
+    pub tools: Vec<crate::runner::ToolUse>,
+    /// Whether this attempt used a second turn to correct its output.
+    /// Recorded because it consumes another budget unit and nothing else in
+    /// the line would say so.
+    pub corrected: bool,
+}
+
+/// What a runner call reported, for the record. One struct because every
+/// piece comes from one `RunResult` and the call sites were threading them
+/// positionally; `Default` is the refusal that never made a call.
+#[derive(Clone, Default)]
+pub(crate) struct Reported {
+    pub(crate) waited: crate::runner::Waiting,
+    pub(crate) corrected: bool,
+    pub(crate) tools: Vec<crate::runner::ToolUse>,
+}
+
+impl From<&crate::runner::RunResult> for Reported {
+    fn from(result: &crate::runner::RunResult) -> Self {
+        Self {
+            waited: result.waiting.clone(),
+            corrected: result.corrected,
+            tools: result.tools.clone(),
+        }
+    }
 }
 
 /// The blast radius of one failed attempt. The two travel together because
@@ -133,6 +162,23 @@ pub fn render_run_md(report: &RunReport) -> String {
     if let Some(profile) = &report.provenance.profile {
         out.push_str(&format!("- **Profile** — `{profile}`\n"));
     }
+    if !report.provenance.pinned.is_empty() {
+        let names: Vec<&str> = report
+            .provenance
+            .pinned
+            .iter()
+            .map(|n| n.as_str())
+            .collect();
+        out.push_str(&format!(
+            "- **Reused** — {} did not run; their output was pinned from an earlier run\n",
+            names.join(", ")
+        ));
+    }
+    if let Some(until) = &report.provenance.until {
+        out.push_str(&format!(
+            "- **Stopped at** — `{until}`, as the run asked; nothing downstream ran\n"
+        ));
+    }
     if report.provenance.carried_over > 0 {
         out.push_str(&format!(
             "- **Continued** — picked up with {} node(s) already done\n",
@@ -149,11 +195,18 @@ pub fn render_run_md(report: &RunReport) -> String {
 
     out.push_str("\n## Attempts\n\n");
     if report.nodes.is_empty() {
-        out.push_str("Nothing ran.\n");
+        // A node can fail before any session is paid for — a refused output
+        // path — and "nothing ran" then contradicts the failure line above it.
+        out.push_str(&match &report.outcome {
+            RunOutcome::Failed { node, .. } => {
+                format!("`{node}` failed before a session opened, so no attempt was recorded.\n")
+            }
+            _ => "Nothing ran.\n".to_string(),
+        });
         return out;
     }
     out.push_str(&format!(
-        "**Sessions:** {} · **Nodes:** {}\n",
+        "**Budget units:** {} · **Nodes:** {}\n",
         report.node_runs,
         report.nodes.len()
     ));
@@ -213,7 +266,7 @@ fn said(waiting: &crate::runner::Waiting) -> String {
 fn limit_of(limit: &BudgetLimit) -> &'static str {
     match limit {
         BudgetLimit::WallClock => "the run's wall-clock limit",
-        BudgetLimit::NodeRuns => "the run's node-run limit",
+        BudgetLimit::NodeRuns => "the run's budget-unit limit",
         BudgetLimit::Cost => "the run's cost limit",
     }
 }
@@ -230,7 +283,7 @@ fn cost_standing(total: Option<&CostLimit>) -> String {
             total.currency
         ),
         None => "not enforceable: no agent reported a cost, so nothing was measured against a \
-                 ceiling — the node-run cap and the per-node timeouts were the only limits in \
+                 ceiling — the budget-unit cap and the per-node timeouts were the only limits in \
                  force."
             .to_string(),
     }
@@ -268,6 +321,51 @@ fn took(duration: Duration) -> String {
 ///
 /// Evidence is named relative to `run_dir`, which is where this file itself
 /// lives: an absolute path here is one long prefix repeated on every line.
+/// `read x3, execute (1 failed), edit` — a count per name, with failures and
+/// calls the turn never settled called out, since those are the ones a reader
+/// is looking for.
+fn tools_said(tools: &[crate::runner::ToolUse]) -> String {
+    use crate::runner::ToolOutcome;
+    let mut order: Vec<&str> = Vec::new();
+    let mut counts: std::collections::HashMap<&str, (usize, usize, usize)> =
+        std::collections::HashMap::new();
+    for tool in tools {
+        let entry = counts.entry(tool.name.as_str()).or_insert_with(|| {
+            order.push(tool.name.as_str());
+            (0, 0, 0)
+        });
+        entry.0 += 1;
+        match tool.outcome {
+            ToolOutcome::Failed => entry.1 += 1,
+            ToolOutcome::Unsettled => entry.2 += 1,
+            ToolOutcome::Ok => {}
+        }
+    }
+    order
+        .into_iter()
+        .map(|name| {
+            let (total, failed, unsettled) = counts[name];
+            let mut said = if total > 1 {
+                format!("{name} x{total}")
+            } else {
+                name.to_string()
+            };
+            let mut notes = Vec::new();
+            if failed > 0 {
+                notes.push(format!("{failed} failed"));
+            }
+            if unsettled > 0 {
+                notes.push(format!("{unsettled} unsettled"));
+            }
+            if !notes.is_empty() {
+                said.push_str(&format!(" ({})", notes.join(", ")));
+            }
+            said
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path) {
     out.push_str(&format!(
         "- attempt {} (evidence {}) — {} at {}{}\n",
@@ -288,6 +386,18 @@ fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path)
             attempt.waited.total.as_secs(),
             said(&attempt.waited)
         ));
+    }
+    // What it reached for, so "did it even try to write the file" is answered
+    // here rather than by opening the transcript. Grouped by name because the
+    // count is the question, not the order.
+    if !attempt.tools.is_empty() {
+        out.push_str(&format!("  - used {}\n", tools_said(&attempt.tools)));
+    }
+    // The budget-unit total includes this second turn, but the attempt count
+    // does not — and an attempt that passed on its correction reads exactly
+    // like one that got it right first time without this line.
+    if attempt.corrected {
+        out.push_str("  - spent a correction turn: the first turn left no usable output\n");
     }
     // The set first: it says why the attempts below it happened again,
     // which is otherwise only inferable from repeated attempt numbers.
@@ -328,281 +438,4 @@ fn ended_as(outcome: &AttemptOutcome) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    /// A settled instant, so a record rendered in a test reads the same on
-    /// every machine and at every hour. `Instant::now()` in a fixture is a
-    /// test that passes because nobody looked at the line it produced.
-    const FIXED_INSTANT: std::time::SystemTime = std::time::SystemTime::UNIX_EPOCH;
-
-    use crate::runner::{AskAnswer, Waiting};
-    use std::time::Duration;
-
-    fn waited(total_secs: u64, answers: Vec<AskAnswer>) -> Waiting {
-        Waiting {
-            total: Duration::from_secs(total_secs),
-            answers,
-        }
-    }
-
-    /// The gap a real run exposed: a person refused the tool the node
-    /// needed, the agent correctly declined to write a file claiming it had
-    /// done the work, and `run.md` said only "no output written". The
-    /// refusal *is* the reason, and a reader had to open the transcript to
-    /// find it.
-    #[test]
-    fn a_refusal_is_on_the_same_page_as_the_failure_it_caused() {
-        let mut out = String::new();
-        push_attempt_lines(
-            &mut out,
-            &AttemptRecord {
-                attempt: 1,
-                evidence_seq: 1,
-                at: FIXED_INSTANT,
-                took: Duration::from_secs(0),
-                outcome: AttemptOutcome::Failed(NodeFailure::NoOutput {
-                    expected: PathBuf::from("/run/touched.md"),
-                }),
-                invalidated: Invalidation::default(),
-                git_status: None,
-                waited: waited(1, vec![AskAnswer::Refused]),
-            },
-            Path::new("/run"),
-        );
-        assert!(out.contains("refused"), "{out}");
-        assert!(out.contains("no output written"), "{out}");
-    }
-
-    /// An approval needs no telling — the work went ahead, which the
-    /// outcome already says. Only the duration is worth a line.
-    #[test]
-    fn an_approval_adds_no_commentary() {
-        let mut out = String::new();
-        push_attempt_lines(
-            &mut out,
-            &AttemptRecord {
-                attempt: 1,
-                evidence_seq: 1,
-                at: FIXED_INSTANT,
-                took: Duration::from_secs(0),
-                outcome: AttemptOutcome::Passed,
-                invalidated: Invalidation::default(),
-                git_status: None,
-                waited: waited(143, vec![AskAnswer::Allowed]),
-            },
-            Path::new("/run"),
-        );
-        assert!(out.contains("waited 143s"), "{out}");
-        assert!(!out.contains("refused"), "{out}");
-    }
-
-    /// An attempt nobody was asked anything in says nothing about waiting.
-    #[test]
-    fn an_attempt_that_asked_nothing_stays_silent() {
-        let mut out = String::new();
-        push_attempt_lines(
-            &mut out,
-            &AttemptRecord {
-                attempt: 1,
-                evidence_seq: 1,
-                at: FIXED_INSTANT,
-                took: Duration::from_secs(0),
-                outcome: AttemptOutcome::Passed,
-                invalidated: Invalidation::default(),
-                git_status: None,
-                waited: Waiting::default(),
-            },
-            Path::new("/run"),
-        );
-        assert!(!out.contains("waited"), "{out}");
-    }
-
-    use super::*;
-
-    fn attempt(n: u32) -> AttemptRecord {
-        AttemptRecord {
-            attempt: n,
-            evidence_seq: n,
-            at: FIXED_INSTANT,
-            took: Duration::from_secs(0),
-            outcome: AttemptOutcome::Passed,
-            invalidated: Invalidation {
-                nodes: Vec::new(),
-                archived: Vec::new(),
-            },
-            git_status: None,
-            waited: Default::default(),
-        }
-    }
-
-    /// A report with nothing but an ending and whatever the run had to say
-    /// about itself — the shape the lead of `run.md` is rendered from.
-    fn report_with(outcome: RunOutcome, warnings: Vec<String>) -> RunReport {
-        let mut report = RunReport::refused(PathBuf::from("run"), outcome);
-        for warning in warnings {
-            report.warn(warning);
-        }
-        report
-    }
-
-    /// The first thing a user reads has to be whether the guard rails were
-    /// actually guarding. A cost limit that never applied looks identical to
-    /// one that held, unless the report says so.
-    #[test]
-    fn run_md_leads_with_whether_the_cost_limit_applied() {
-        let report = report_with(
-            RunOutcome::Done,
-            vec!["nothing reported a cost, so the 5 USD limit never applied".to_string()],
-        );
-        let md = render_run_md(&report);
-        let first_lines: String = md.lines().take(6).collect::<Vec<_>>().join("\n");
-        assert!(first_lines.contains("never applied"), "{md}");
-        // The engine's warning is the evidence; the lead has to state the
-        // conclusion itself, because a run with no limit set issues no
-        // warning and still leaves the ceiling unmeasurable.
-        assert!(first_lines.contains("no agent reported a cost"), "{md}");
-    }
-
-    /// A run that measured a cost and one that measured none must not read
-    /// the same — that difference is the whole point of the leading line.
-    ///
-    /// The amount is a running sum of `f64`s, so it arrives carrying its own
-    /// accumulation error. A ledger line reading `0.30000000000000004 USD`
-    /// is noise in a document about whether a ceiling held.
-    #[test]
-    fn run_md_says_so_when_a_cost_was_measured() {
-        let mut report = report_with(RunOutcome::Done, Vec::new());
-        report.cost = Some(CostLimit {
-            amount: 0.1 + 0.2,
-            currency: "USD".to_string(),
-        });
-        let md = render_run_md(&report);
-        let first_lines: String = md.lines().take(6).collect::<Vec<_>>().join("\n");
-        assert!(first_lines.contains("0.3 USD"), "{md}");
-        assert!(!first_lines.contains("no agent reported a cost"), "{md}");
-    }
-
-    /// A failure's reason is the thing someone opens this file for. Naming
-    /// only the node would leave them re-reading logs to find out why.
-    #[test]
-    fn run_md_names_the_node_and_the_reason_it_failed() {
-        let report = report_with(
-            RunOutcome::Failed {
-                node: "gate".into(),
-                failure: NodeFailure::Exit { code: Some(2) },
-            },
-            Vec::new(),
-        );
-        let md = render_run_md(&report);
-        assert!(md.contains("gate"), "{md}");
-        assert!(md.contains("exit"), "{md}");
-    }
-
-    /// Every attempt, not just the last: a run that passed on attempt 3 is a
-    /// different story from one that passed first time, and the difference is
-    /// what a user tunes their flow on.
-    #[test]
-    fn run_md_lists_every_attempt_with_its_evidence() {
-        let mut report = report_with(RunOutcome::Done, Vec::new());
-        report.node_runs = 2;
-        report.nodes = vec![NodeRecord {
-            id: "gate".into(),
-            attempts: vec![
-                AttemptRecord {
-                    attempt: 1,
-                    evidence_seq: 3,
-                    at: FIXED_INSTANT,
-                    took: Duration::from_secs(0),
-                    outcome: AttemptOutcome::Failed(NodeFailure::Exit { code: Some(1) }),
-                    invalidated: Invalidation {
-                        nodes: Vec::new(),
-                        archived: vec![PathBuf::from("run/logs/gate.attempt-1.evidence-3.log")],
-                    },
-                    git_status: None,
-                    waited: Default::default(),
-                },
-                AttemptRecord {
-                    attempt: 2,
-                    evidence_seq: 6,
-                    at: FIXED_INSTANT,
-                    took: Duration::from_secs(0),
-                    outcome: AttemptOutcome::Passed,
-                    invalidated: Invalidation {
-                        nodes: Vec::new(),
-                        archived: Vec::new(),
-                    },
-                    git_status: None,
-                    waited: Default::default(),
-                },
-            ],
-        }];
-        let md = render_run_md(&report);
-        assert!(
-            md.contains("attempt 1 (evidence 3) — failed: exited with status 1"),
-            "{md}"
-        );
-        assert!(md.contains("attempt 2 (evidence 6) — passed"), "{md}");
-        // The evidence belongs to the attempt that produced it, so the path
-        // has to be there and not merely the fact that something was moved —
-        // named from the run directory this file itself sits in.
-        assert!(
-            md.contains("archived `logs/gate.attempt-1.evidence-3.log`"),
-            "{md}"
-        );
-    }
-
-    /// The design records the tree because the engine deliberately does not
-    /// manage it. A run that dirtied the tree and a run that did not must not
-    /// read the same.
-    #[test]
-    fn run_md_shows_the_tree_state_when_the_host_answered() {
-        let mut report = report_with(RunOutcome::Done, Vec::new());
-        report.node_runs = 2;
-        report.nodes = vec![NodeRecord {
-            id: "design".into(),
-            attempts: vec![
-                AttemptRecord {
-                    attempt: 1,
-                    evidence_seq: 1,
-                    at: FIXED_INSTANT,
-                    took: Duration::from_secs(0),
-                    outcome: AttemptOutcome::Passed,
-                    invalidated: Invalidation {
-                        nodes: Vec::new(),
-                        archived: Vec::new(),
-                    },
-                    git_status: Some(" M src/lib.rs\n?? notes.md".to_string()),
-                    waited: Default::default(),
-                },
-                // The host answering "nothing changed" is an answer, not a
-                // silence — a clean tree after an attempt is a fact.
-                AttemptRecord {
-                    attempt: 1,
-                    evidence_seq: 2,
-                    at: FIXED_INSTANT,
-                    took: Duration::from_secs(0),
-                    outcome: AttemptOutcome::Passed,
-                    invalidated: Invalidation {
-                        nodes: Vec::new(),
-                        archived: Vec::new(),
-                    },
-                    git_status: Some(String::new()),
-                    waited: Default::default(),
-                },
-            ],
-        }];
-        let md = render_run_md(&report);
-        assert!(md.contains(" M src/lib.rs"), "{md}");
-        assert!(md.contains("?? notes.md"), "{md}");
-        assert!(md.contains("clean"), "{md}");
-
-        // A host with nothing to say leaves no note at all, rather than an
-        // empty one a reader would take for a clean tree.
-        let mut silent = report_with(RunOutcome::Done, Vec::new());
-        silent.node_runs = 1;
-        silent.nodes = vec![NodeRecord {
-            id: "design".into(),
-            attempts: vec![attempt(1)],
-        }];
-        assert!(!render_run_md(&silent).contains("working tree"), "{md}");
-    }
-}
+mod tests;

@@ -142,7 +142,7 @@ fn the_working_tree_note_is_taken_where_the_node_ran() {
 /// else would notice it always returning true.
 #[test]
 fn a_node_waits_for_what_it_depends_on() {
-    use crate::schedule::deps_are_done;
+    use crate::schedule::ready::deps_are_done;
 
     let loaded = load(CHAIN, None).expect("valid flow");
     let flow = loaded.flow();

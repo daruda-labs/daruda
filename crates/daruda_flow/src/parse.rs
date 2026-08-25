@@ -92,6 +92,14 @@ pub enum NodeKindFile {
         #[serde(flatten)]
         prompt: PromptSource,
         output: PathBuf,
+        /// The shape the output's contents must have, checked as JSON.
+        /// Absent is what every node did before this existed: the file only
+        /// has to be there.
+        ///
+        /// Boxed because this is the largest thing an agent node can carry and
+        /// almost no node declares one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_schema: Option<Box<SchemaSubset>>,
         #[serde(default, with = "yaml_serde::with::singleton_map")]
         on_fail: AgentFailFile,
     },
@@ -125,6 +133,63 @@ pub enum PermissionPolicyFile {
     Deny,
     AllowOnce,
     Ask,
+}
+
+/// The slice of JSON Schema an `output_schema` may spell.
+///
+/// Unknown *properties in the data* are allowed on purpose — there is no
+/// `additionalProperties`. The schema reaches the agent as prompt text, which
+/// gets extra invented fields where a provider-enforced structured response
+/// does not, and refusing what cannot be enforced only buys another node run.
+///
+/// Keywords this build does not enforce land in [`SchemaSubset::rest`] rather
+/// than failing the parse, so a flow naming one stays readable and editable.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SchemaSubset {
+    #[serde(rename = "type")]
+    pub kind: SchemaKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, SchemaSubset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Box<SchemaSubset>>,
+    /// `Value`, not `String`: `enum: [1, 2]` is legal JSON Schema, and a
+    /// `Vec<String>` here would make it a parse error — which takes the whole
+    /// file's graph and inspector away instead of naming one node.
+    #[serde(default, rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<Vec<serde_json::Value>>,
+    /// Keywords this build does not enforce. `crate::validate` refuses them by
+    /// name, with the node attached.
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchemaKind {
+    Object,
+    Array,
+    String,
+    Number,
+    Integer,
+    Boolean,
+}
+
+impl SchemaKind {
+    /// The word a refusal uses, which is the word the schema was written in.
+    /// The only rendering of a kind there is — a `Display` beside it would be a
+    /// second one to keep in step.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SchemaKind::Object => "object",
+            SchemaKind::Array => "array",
+            SchemaKind::String => "string",
+            SchemaKind::Number => "number",
+            SchemaKind::Integer => "integer",
+            SchemaKind::Boolean => "boolean",
+        }
+    }
 }
 
 /// A node's prompt: inline prose or a sibling file, under keys `prompt:` /
@@ -194,7 +259,14 @@ pub fn parse_flow_file(text: &str) -> Result<FlowFile, FlowError> {
 const NODE_KEYS: &[&str] = &["id", "deps", "timeout", "kind", "cwd"];
 /// Keys an agent node adds. `prompt` / `prompt_file` are one choice, and
 /// naming both is its own error below rather than an unknown key.
-const AGENT_KEYS: &[&str] = &["agent", "prompt", "prompt_file", "output", "on_fail"];
+const AGENT_KEYS: &[&str] = &[
+    "agent",
+    "prompt",
+    "prompt_file",
+    "output",
+    "output_schema",
+    "on_fail",
+];
 const COMMAND_KEYS: &[&str] = &["run", "on_fail"];
 const RETRY_KEYS: &[&str] = &["hint", "hint_file", "max_attempts", "wait"];
 const REPAIR_KEYS: &[&str] = &["fix", "rerun", "max_attempts", "wait"];
@@ -394,8 +466,10 @@ nodes:
                 agent,
                 prompt,
                 output,
+                output_schema,
                 on_fail,
             } => {
+                assert_eq!(*output_schema, None, "no declared shape, none owed");
                 let agent = agent.as_ref().expect("node overrides the agent axis");
                 assert_eq!(agent.effort.as_deref(), Some("high"));
                 assert_eq!(
@@ -567,6 +641,75 @@ nodes:
             kinds
                 .iter()
                 .all(|k| matches!(k, ValidationKind::UnknownField { .. }))
+        );
+    }
+
+    /// The key allowlist is hand-maintained, so a field added to the wire
+    /// type and forgotten here deserializes fine and is then refused as an
+    /// unknown one — which takes every flow using the feature with it. Both
+    /// halves asserted together: the key is known, and a typo of it is not.
+    #[test]
+    fn an_output_schema_is_a_known_key_and_a_typo_of_it_is_not() {
+        let flow = |key: &str| {
+            format!(
+                "\
+version: 1
+nodes:
+  - id: a
+    kind: agent
+    agent: {{ id: claude, mode: bypassPermissions }}
+    output: a.json
+    prompt: write
+    {key}:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: {{ type: string }}
+"
+            )
+        };
+        crate::load(&flow("output_schema"), None).expect("output_schema is a known key");
+        assert_eq!(
+            kinds_for(&flow("output_schemas")),
+            vec![ValidationKind::UnknownField {
+                field: "output_schemas".to_string()
+            }]
+        );
+    }
+
+    /// Every keyword this build does not enforce has to *parse*, landing in
+    /// `rest` for a node-named refusal: a parse error here would take the whole
+    /// file's graph and inspector away instead. Which is also why `enum` holds
+    /// `Value`s — `enum: [1, 2]` is legal JSON Schema (refused in
+    /// `contract::schema`, not by serde).
+    #[test]
+    fn an_unenforced_keyword_lands_in_rest_rather_than_failing_the_parse() {
+        let file = parse_flow_file(
+            "\
+version: 1
+nodes:
+  - id: a
+    kind: agent
+    output: a.json
+    prompt: write
+    output_schema:
+      type: object
+      properties:
+        n: { type: integer, additionalProperties: false, enum: [1, 2] }
+",
+        )
+        .expect("an unenforced keyword still parses");
+        let NodeKindFile::Agent {
+            output_schema: Some(schema),
+            ..
+        } = &file.nodes[0].kind
+        else {
+            panic!("expected an agent node with a schema");
+        };
+        assert_eq!(
+            schema.properties["n"].rest.get("additionalProperties"),
+            Some(&serde_json::Value::Bool(false)),
+            "the keyword has to survive at the level it was written"
         );
     }
 

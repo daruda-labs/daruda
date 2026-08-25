@@ -35,6 +35,7 @@ const NAME_FLOW_GRAPH_RUNNING: &str = "flow-graph-running";
 const NAME_FLOW_GRAPH_FORM: &str = "flow-graph-form";
 /// CLI token for the inspector showing why a save was refused.
 const NAME_FLOW_GRAPH_FORM_REFUSED: &str = "flow-graph-form-refused";
+const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 /// CLI token for the flow delete confirmation, on the repository's copy.
 const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
@@ -112,6 +113,10 @@ pub(crate) enum ScreenshotScenario {
     /// only way to look at the column's width against the graph it takes width
     /// from, and at whether a prompt box that size is worth reading.
     FlowGraphForm,
+    /// The same graph with its first node's output pinned. The only way to see
+    /// whether a pinned card is distinguishable from a pending one beside it,
+    /// and whether the pin glyph in the toolbar reads as a pin at 16px.
+    FlowGraphPinned,
     /// The inspector after a save the engine refused. The only way to look at
     /// the banner — where it sits, and whether the engine's sentence reads as
     /// something a person can act on.
@@ -156,6 +161,7 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_RUNNING => Some(Self::FlowGraphRunning),
             NAME_FLOW_GRAPH_FORM => Some(Self::FlowGraphForm),
             NAME_FLOW_GRAPH_FORM_REFUSED => Some(Self::FlowGraphFormRefused),
+            NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
@@ -264,6 +270,11 @@ pub(crate) fn drive(
         ScreenshotScenario::FlowGraphForm => {
             workspace.update(cx, |ws, cx| {
                 ws.open_first_flow_graph_selected_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::FlowGraphPinned => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_first_flow_graph_pinned_for_shot(window, cx)
             });
         }
         ScreenshotScenario::FlowGraphFormRefused => {

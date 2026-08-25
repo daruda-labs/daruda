@@ -21,7 +21,7 @@ pub(in super::super) fn render(
     use crate::surface::strings as s;
     use crate::ui::select::select;
     use crate::ui::theme::{current, palette};
-    use crate::ui::{Disableable as _, button, button_danger, button_primary, field_column};
+    use crate::ui::{Disableable as _, button, button_danger, button_primary};
     use gpui::{ParentElement as _, Styled as _, div, px};
 
     // Status hues stay the UI theme's — an error is an error on any surface.
@@ -40,6 +40,7 @@ pub(in super::super) fn render(
             form,
             super::notes::FormField::Id,
             s::flow_form_id_label(),
+            None,
             field(form.id_state(), cx, 0),
             cx,
         ))
@@ -47,6 +48,7 @@ pub(in super::super) fn render(
             form,
             super::notes::FormField::Deps,
             s::flow_form_deps_label(),
+            None,
             field(form.deps_state(), cx, 1),
             cx,
         ));
@@ -58,6 +60,7 @@ pub(in super::super) fn render(
     rows = rows.child(field_column(
         s::flow_form_kind_label(),
         select(body.kind_select, cx, 2),
+        cx,
     ));
     rows = match body.kind {
         KindChoice::Agent => rows
@@ -72,6 +75,7 @@ pub(in super::super) fn render(
                 form,
                 super::notes::FormField::Output,
                 s::flow_form_output_label(),
+                Some(s::flow_form_output_help()),
                 field(body.output, cx, 5),
                 cx,
             ))
@@ -80,6 +84,7 @@ pub(in super::super) fn render(
             .child(field_column(
                 s::flow_form_run_label(),
                 field(body.run, cx, 3),
+                cx,
             ))
             .child(fail_section(body.on_fail, FailShape::Repair, cx)),
     };
@@ -88,11 +93,13 @@ pub(in super::super) fn render(
         .child(field_column(
             s::flow_form_timeout_label(),
             field(form.timeout_state(), cx, 4),
+            cx,
         ))
         .child(field_with_note(
             form,
             super::notes::FormField::Cwd,
             s::flow_form_cwd_label(),
+            None,
             field(form.cwd_state(), cx, 5),
             cx,
         ))
@@ -169,25 +176,34 @@ pub(in super::super) fn render(
         .child(footer)
 }
 
-/// A labelled box, with the engine's reason under it when there is one for this
-/// box. The note is what turns "the flow would not load" into "this field".
+/// A labelled box, with a standing description of the field and the engine's
+/// reason under it when there is one for this box. The note is what turns "the
+/// flow would not load" into "this field"; the help is the rule that holds even
+/// when nothing is wrong, which is the only place an author meets it.
 fn field_with_note(
     form: &NodeForm,
     field: super::notes::FormField,
     label: String,
+    help: Option<String>,
     body: impl IntoElement,
     cx: &gpui::App,
 ) -> impl IntoElement {
-    use crate::ui::field_column;
     use crate::ui::theme::{current, palette};
     use gpui::{ParentElement as _, Styled as _, div, px};
 
     let error = current(cx).banner_error_text;
+    let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
     div()
         .flex()
         .flex_col()
         .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
-        .child(field_column(label, body))
+        .child(field_column(label, body, cx))
+        .children(help.map(|help| {
+            div()
+                .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
+                .text_color(muted)
+                .child(help)
+        }))
         .children(form.note_for(field).map(|note| {
             div()
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
@@ -206,7 +222,6 @@ fn source_row(
     tab: isize,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
-    use crate::ui::field_column;
     use crate::ui::select::select;
     use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, div, px};
@@ -219,6 +234,7 @@ fn source_row(
         .child(field_column(
             if from_file { file_label } else { inline_label },
             select(&states.choice, cx, tab),
+            cx,
         ))
         .child(if from_file {
             field(&states.file, cx, tab + 1).into_any_element()
@@ -242,7 +258,6 @@ fn fail_section(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
-    use crate::ui::field_column;
     use crate::ui::select::select;
     use crate::ui::theme::palette;
     use gpui::{ParentElement as _, Styled as _, div, px};
@@ -255,6 +270,7 @@ fn fail_section(
         .child(field_column(
             s::flow_form_fail_label(),
             select(&states.policy, cx, 11),
+            cx,
         ));
     if !acting {
         return section;
@@ -271,20 +287,24 @@ fn fail_section(
             .child(field_column(
                 s::flow_form_fix_label(),
                 field(&states.fix, cx, 12),
+                cx,
             ))
             .child(field_column(
                 s::flow_form_rerun_label(),
                 field(&states.rerun, cx, 13),
+                cx,
             )),
     };
     section
         .child(field_column(
             s::flow_form_attempts_label(),
             field(&states.max_attempts, cx, 14),
+            cx,
         ))
         .child(field_column(
             s::flow_form_wait_label(),
             field(&states.wait, cx, 15),
+            cx,
         ))
 }
 
@@ -299,9 +319,9 @@ fn agent_section(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     use crate::surface::strings as s;
+    use crate::ui::disclosure;
     use crate::ui::select::select;
     use crate::ui::theme::{current, palette};
-    use crate::ui::{disclosure, field_column};
     use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
 
     let muted = crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground_muted;
@@ -342,22 +362,27 @@ fn agent_section(
             .child(field_column(
                 s::flow_form_agent_id_label(),
                 field(&states.id, cx, 6),
+                cx,
             ))
             .child(field_column(
                 s::flow_form_agent_mode_label(),
                 field(&states.mode, cx, 7),
+                cx,
             ))
             .child(field_column(
                 s::flow_form_agent_model_label(),
                 field(&states.model, cx, 8),
+                cx,
             ))
             .child(field_column(
                 s::flow_form_agent_effort_label(),
                 field(&states.effort, cx, 9),
+                cx,
             ))
             .child(field_column(
                 s::flow_form_agent_permission_label(),
                 select(&states.permission, cx, 10),
+                cx,
             ));
     }
     section
@@ -384,6 +409,37 @@ pub(in super::super) fn render_empty(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
     note(crate::surface::strings::flow_form_no_selection(), cx)
+}
+
+/// A labelled field on the pane's own surface, not the modal one.
+///
+/// `crate::ui::field_column` draws its label with `crate::ui::Label`, whose own
+/// doc says to prefer it "whenever the surrounding widget's natural foreground
+/// colour is what you want" — and here it is not: `Label` takes the UI theme's
+/// foreground while this pane's background is mirrored from the terminal, so a
+/// light UI theme put dark text on a dark pane. Same reasoning as `field`
+/// below, one step further out.
+///
+/// The modal font and gap tokens are kept deliberately: what was wrong is the
+/// colour, and re-picking the geometry here would move every row.
+fn field_column(
+    label: impl Into<gpui::SharedString>,
+    body: impl gpui::IntoElement,
+    cx: &gpui::App,
+) -> impl gpui::IntoElement {
+    use crate::ui::theme::palette;
+    use gpui::{ParentElement as _, Styled as _, div, px};
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(palette::MODAL_PANEL_GAP))
+        .child(
+            div()
+                .text_size(px(palette::MODAL_BODY_FONT_SIZE))
+                .text_color(crate::ui::theme::PaneSurfaceTokens::flow_graph(cx).foreground)
+                .child(label.into()),
+        )
+        .child(div().w_full().child(body))
 }
 
 /// A text box on the pane's own surface, not the modal one.

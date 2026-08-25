@@ -98,6 +98,16 @@ pub enum ValidationKind {
     DuplicateId,
     /// A node depends on an id no node declares.
     UnknownDep { dep: NodeId },
+    /// A run was asked to stop at a node the flow does not have. Refused
+    /// rather than ignored: silently running everything would spend the
+    /// money the request was trying not to spend.
+    UnknownUntil { node: NodeId },
+    /// A pinned output names a node the flow does not have.
+    UnknownPin { node: NodeId },
+    /// A pinned output's source is not there. Refused rather than run: a pin
+    /// is the user's promise that this output is valid, and a promise about a
+    /// file that is gone would quietly starve everything downstream of it.
+    PinnedSourceMissing { node: NodeId, path: String },
     /// The declared graph is cyclic.
     Cycle,
     /// An agent node names a catalog id the host did not supply.
@@ -118,6 +128,27 @@ pub enum ValidationKind {
     /// whatever directory the process happens to be in — which is neither
     /// the lane nor the run.
     RelativeRequestPath { field: &'static str },
+    /// An agent node whose inline prompt is blank. Refused at submission
+    /// rather than at load: a node added in the graph editor starts empty on
+    /// purpose, so the file is legitimate to author and only illegitimate to
+    /// run — a blank prompt opens a paid session and asks it nothing.
+    EmptyPrompt,
+    /// A keyword an `output_schema` may spell but this build does not
+    /// enforce — `$ref`, `oneOf`, `additionalProperties`, `format`. Refused
+    /// rather than dropped: a schema whose keywords go unenforced promises a
+    /// reader a check that never runs.
+    UnsupportedSchemaKeyword { keyword: String },
+    /// `enum` on a type other than `string`, which is the only one the check
+    /// A pinned node sits in the rerun set of a gate this run reaches, so the
+    /// repair cannot do what it says: reusing the output and re-running the
+    /// node that produces it are the same node, asked for both ways.
+    PinnedNodeInRerun { node: NodeId, gate: NodeId },
+    /// A schema keyword this build enforces, but on a different type than the
+    /// one it is written under — so it would be read and then never asked.
+    SchemaKeywordOnWrongKind {
+        keyword: &'static str,
+        kind: &'static str,
+    },
     /// A file-backed prompt is not a flow-local relative path, or resolves
     /// outside the directory containing the flow file.
     PromptFileOutsideFlowDir {

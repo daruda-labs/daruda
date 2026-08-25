@@ -32,6 +32,7 @@ pub mod model;
 // files edits the file as written, not the resolved flow, so the pre-resolve
 // wire types are a contract to it. Changing one is an API break.
 pub(crate) mod archive;
+pub(crate) mod contract;
 pub mod parse;
 pub(crate) mod resolve;
 pub(crate) mod template;

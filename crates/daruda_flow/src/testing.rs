@@ -5,8 +5,8 @@
 use crate::model::AgentSpec;
 use crate::runner::{NodeFailure, NodeRunner, RunContext, RunResult};
 use daruda_acp::{CostView, UsageView};
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 
 /// What the fake does for one attempt at one node. Every arm writes first
 /// and reports second, because an agent that fails mid-turn still leaves
@@ -61,6 +61,19 @@ pub(crate) struct FakeRunner {
     /// separate axis from `Step`, because when a stop lands is independent
     /// of what the interrupted attempt was going to do.
     cancel_at: HashMap<String, u32>,
+    /// Nodes whose call asks the run for one more correction unit, through
+    /// the same door the real runner corrects a broken output through. A
+    /// separate axis from `Step` for the reason `cancel_at` is: what a call
+    /// spends is independent of how it ends.
+    ///
+    /// The correction itself is **not** simulated here — a fake that wrote
+    /// the file on its second imaginary turn would be this scheduler's logic
+    /// restated inside the fake, and would pass with `settle` never sending
+    /// anything. What these tests are about is the budget.
+    corrects: HashSet<String>,
+    /// Reservations the run granted, so a test can say how many correction
+    /// units were consumed across a whole wave.
+    granted: Cell<u32>,
     /// Reported by every call as time spent waiting for a person. Scripted
     /// rather than really waited — what this exercises is the run's ceiling
     /// arithmetic, and a test that actually slept could not run.
@@ -74,6 +87,8 @@ impl FakeRunner {
             script: HashMap::new(),
             default_cost: None,
             cancel_at: HashMap::new(),
+            corrects: HashSet::new(),
+            granted: Cell::new(0),
             cost: HashMap::new(),
             parked: std::time::Duration::ZERO,
             calls: RefCell::new(Vec::new()),
@@ -99,6 +114,18 @@ impl FakeRunner {
     pub(crate) fn cancel_at(mut self, node: &str, attempt: u32) -> Self {
         self.cancel_at.insert(node.to_string(), attempt);
         self
+    }
+
+    /// Ask the run for one more budget unit from inside this node's every
+    /// call, the way a runner correcting a broken output does.
+    pub(crate) fn corrects(mut self, node: &str) -> Self {
+        self.corrects.insert(node.to_string());
+        self
+    }
+
+    /// How many extra turns the run actually granted.
+    pub(crate) fn corrections(&self) -> u32 {
+        self.granted.get()
     }
 
     /// Report this cost from every call. Each call is its own session, so
@@ -168,6 +195,10 @@ impl FakeRunner {
         if self.cancel_at.get(ctx.node_id.as_str()) == Some(&ctx.attempt) {
             ctx.cancel.cancel();
         }
+        let corrected = self.corrects.contains(ctx.node_id.as_str()) && (ctx.reserve_extra_turn)();
+        if corrected {
+            self.granted.set(self.granted.get() + 1);
+        }
         let (writes, outcome) = match step {
             Step::Ok { writes } => (writes, Ok(())),
             Step::Fail { writes, failure } => (writes, Err(failure)),
@@ -177,6 +208,7 @@ impl FakeRunner {
             let _ = std::fs::write(path, text);
         }
         RunResult {
+            tools: Vec::new(),
             outcome,
             artifacts: vec![log],
             usage: self.usage_for(ctx.node_id.as_str()),
@@ -184,6 +216,7 @@ impl FakeRunner {
                 total: self.parked,
                 answers: Vec::new(),
             },
+            corrected,
         }
     }
 

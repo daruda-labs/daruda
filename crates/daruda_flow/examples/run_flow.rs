@@ -85,6 +85,8 @@ fn main() {
 
     let request = RunRequest {
         loaded,
+        until: None,
+        pinned: Vec::new(),
         cwd: cwd.clone(),
         run_dir: run_dir.clone(),
         flow_dir,
@@ -130,7 +132,7 @@ fn main() {
 
     println!("\n--- {} ---", run_dir.display());
     println!("{:?}", report.outcome);
-    println!("sessions: {}", report.node_runs);
+    println!("budget units: {}", report.node_runs);
     for warning in report.warnings() {
         println!("warning: {warning}");
     }

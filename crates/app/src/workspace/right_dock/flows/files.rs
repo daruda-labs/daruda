@@ -155,6 +155,10 @@ fn run_button(
                         ws.run_flow_at(
                             &path,
                             crate::workspace::command::flow_picker::FlowPurpose::Run,
+                            // The whole flow: this row names a file, not a
+                            // node, and a pin is a thing you can only see on
+                            // the graph.
+                            crate::workspace::flow_request::FlowSelection::default(),
                             window,
                             cx,
                         )

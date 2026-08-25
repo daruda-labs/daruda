@@ -79,6 +79,8 @@ nodes:
     let runner = FakeRunner::new();
     let _ = smol::block_on(run_flow(
         RunInputs {
+            pinned: Vec::new(),
+            until: None,
             loaded: &loaded,
             flow_dir: dir.path(),
             cwd: dir.path(),
@@ -100,10 +102,16 @@ nodes:
         .expect("design ran");
     assert_eq!(
         design.text,
-        format!("write {}", run_dir.join("design.md").display()),
+        format!(
+            "write {}\n\n---\n{}",
+            run_dir.join("design.md").display(),
+            expected_contract(&run_dir, "design.md")
+        ),
         "a prompt is prose and must not be quoted"
     );
 
+    // A command node owes no file, so nothing is appended to what the shell
+    // is handed — a contract block in here would be run as a command.
     let gate = calls.iter().find(|c| c.node == "gate").expect("gate ran");
     assert_eq!(
         gate.text,
@@ -133,6 +141,8 @@ nodes:
     let runner = FakeRunner::new();
     let report = smol::block_on(run_flow(
         RunInputs {
+            pinned: Vec::new(),
+            until: None,
             loaded: &loaded,
             flow_dir: dir.path(),
             cwd: dir.path(),
@@ -265,4 +275,66 @@ fn the_shipped_example_flows_still_load() {
         checked += 1;
     }
     assert!(checked >= 5, "only {checked} example flows were checked");
+}
+
+/// The money the selection axis exists to save: `CHAIN`'s third node is an
+/// agent, so running to the second must not pay for it.
+///
+/// `run.yaml` needs no test here — it is written from the flow, and a
+/// selection never touches the flow, which is the whole reason the worklist
+/// is what gets filtered.
+#[test]
+fn a_run_asked_to_stop_at_a_node_leaves_its_descendants_alone() {
+    let runner = FakeRunner::new();
+    let (report, _dir) = run_until(CHAIN, &runner, "test");
+    assert!(matches!(report.outcome, RunOutcome::Done), "{report:?}");
+    assert_eq!(
+        runner.ids(),
+        vec!["design", "test"],
+        "the target and its ancestor, and nothing downstream"
+    );
+    assert_eq!(
+        report.provenance.until.as_ref().map(|n| n.as_str()),
+        Some("test"),
+        "the record says where it was asked to stop"
+    );
+}
+
+/// What the pin is for: the agent is not paid for, and the gate downstream
+/// still reads its output — so the reuse is invisible to everything but the
+/// budget and the record.
+#[test]
+fn a_pinned_node_is_not_run_and_its_output_is_still_read() {
+    const GATED: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write
+  - id: gate
+    kind: command
+    deps: [design]
+    run: \"grep -q reused {{node.design.output}}\"
+";
+    let runner = FakeRunner::new();
+    let (report, _dir) = run_pinned(GATED, &runner, "design", "design.md", "reused\n");
+    assert!(matches!(report.outcome, RunOutcome::Done), "{report:?}");
+    assert!(
+        !runner.ids().iter().any(|id| id == "design"),
+        "the pinned node was run anyway: {:?}",
+        runner.ids()
+    );
+    assert_eq!(report.node_runs, 1, "only the gate was paid for");
+    assert_eq!(
+        report
+            .provenance
+            .pinned
+            .iter()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        vec!["design"],
+        "the record says which node was reused"
+    );
 }

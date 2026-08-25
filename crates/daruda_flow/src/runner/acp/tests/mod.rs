@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::model::PermissionPolicy;
-use crate::runner::CancelToken;
+use crate::runner::{CancelToken, OutputContract};
 use daruda_acp::{CostView, UsageView};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -148,6 +148,12 @@ struct Fixture {
     /// fixture because `Permission::Ask` borrows it, so it has to outlive
     /// the `RunContext` built from it.
     ask: Option<crate::runner::AskChannel>,
+    /// Held for the same reason as `ask`: the `RunContext` borrows it.
+    contract: crate::contract::file::FileContract,
+    /// What the run's budget answers when the runner asks to spend one more
+    /// turn. Owned rather than built in `context`, which cannot hand out a
+    /// reference to a closure of its own.
+    reserve: Box<dyn Fn() -> bool>,
     grace: Duration,
     settings_budget: Duration,
 }
@@ -161,21 +167,39 @@ impl Fixture {
         Self::with_command(dir, format!("/bin/sh {}", path.display()))
     }
 
+    /// A fixture whose adapter script has to name the fixture's own output
+    /// — a path that does not exist until the temp dir does.
+    fn with_script_for_output(build: impl Fn(&Path) -> String) -> Self {
+        let fixture = Self::with_script("");
+        let script = build(&fixture.output);
+        std::fs::write(fixture.cwd.join("adapter.sh"), script).expect("write the adapter");
+        fixture
+    }
+
     /// A fixture whose adapter is `command` verbatim — the only way to
     /// pose a launch that cannot connect at all.
+    ///
+    /// **The output is already on disk**, so the contract is met and a turn
+    /// here is one turn: every fixture that is about a turn's *shape* stays
+    /// about that. A correction test calls [`Fixture::owes_its_output`].
     fn with_command(dir: tempfile::TempDir, command: String) -> Self {
         let run_dir = dir.path().join("run");
+        let output = run_dir.join("design.md");
+        std::fs::create_dir_all(&run_dir).expect("the run directory");
+        std::fs::write(&output, "already written\n").expect("seed the output");
         Self {
             node: "design".into(),
             cwd: dir.path().to_path_buf(),
             log_dir: run_dir.join("logs"),
-            output: run_dir.join("design.md"),
+            contract: crate::contract::file::FileContract::new(&run_dir, &output, None),
+            output,
             run_dir,
             cancel: CancelToken::default(),
             command,
             timeout: Duration::from_secs(60),
             permission: PermissionPolicy::Deny,
             ask: None,
+            reserve: Box::new(|| true),
             grace: CANCEL_GRACE,
             settings_budget: SETTINGS_BUDGET,
             _dir: dir,
@@ -191,6 +215,7 @@ impl Fixture {
             run_dir: &self.run_dir,
             log_dir: &self.log_dir,
             output: Some(&self.output),
+            contract: Some(&self.contract),
             evidence_seq: 1,
             timeout: self.timeout,
             // The same promotion `Run::permission_for` makes: a policy
@@ -202,7 +227,29 @@ impl Fixture {
                 (PermissionPolicy::Ask, None) => crate::runner::Permission::Deny,
             },
             cancel: &self.cancel,
+            reserve_extra_turn: self.reserve.as_ref(),
         }
+    }
+
+    /// Give the node a declared shape as well as a path, so the contract is
+    /// about what is *in* the file and not only that it is there.
+    fn wants_json(&mut self, schema: &str) {
+        let schema: crate::parse::SchemaSubset =
+            yaml_serde::from_str(schema).expect("the fixture is a schema");
+        self.contract =
+            crate::contract::file::FileContract::new(&self.run_dir, &self.output, Some(&schema));
+    }
+
+    /// Take the seeded output away, so the turn ends owing a file and the
+    /// contract has something to refuse.
+    fn owes_its_output(&self) {
+        std::fs::remove_file(&self.output).expect("the seeded output");
+    }
+
+    /// What the contract says about what is on disk now, in the terms the
+    /// scheduler would report it in.
+    fn judged(&self) -> Result<(), NodeFailure> {
+        self.contract.check().map_err(NodeFailure::from)
     }
 
     /// The runner this fixture's adapter is registered in.
@@ -304,6 +351,53 @@ fn spec(id: &str) -> AgentSpec {
     }
 }
 
+/// An adapter that counts the prompts it is sent, records the count where a
+/// test can read it, and runs `on_second` before answering the second one.
+///
+/// The count is the whole point: a script that answers every prompt the same
+/// way cannot tell "one turn" from "one turn and a correction", which is the
+/// only thing these tests are about.
+fn counting_adapter(prompts: &Path, on_second: &str) -> String {
+    counting_adapter_stopping(prompts, on_second, "end_turn")
+}
+
+/// The same, with the *second* prompt's stop reason chosen. The first one
+/// always ends cleanly, because a turn that did not is never corrected at
+/// all — so this is the only way to pose a correction that itself failed.
+fn counting_adapter_stopping(prompts: &Path, on_second: &str, second_stop: &str) -> String {
+    let counter = prompts.display();
+    format!(
+        r#"count=0
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+{INITIALIZE}
+{NEW_SESSION}
+*'"method":"session/prompt"'*)
+  count=$((count+1))
+  printf '%s' "$count" > "{counter}"
+  stop=end_turn
+  if [ "$count" -ge 2 ]; then
+    stop={second_stop}
+    {on_second}
+  fi
+  printf '{{"jsonrpc":"2.0","id":"%s","result":{{"stopReason":"%s"}}}}\n' "$id" "$stop" ;;
+  esac
+done
+"#
+    )
+}
+
+/// How many prompts the adapter was sent. A missing file is none — the
+/// session never got that far.
+fn prompts_sent(counter: &Path) -> u32 {
+    std::fs::read_to_string(counter)
+        .unwrap_or_default()
+        .trim()
+        .parse()
+        .unwrap_or(0)
+}
+
 /// A scratch directory the fake adapter records into. Separate from the
 /// fixture's own, whose path is only known after the script is built.
 fn probe(name: &str) -> (tempfile::TempDir, PathBuf) {
@@ -313,5 +407,6 @@ fn probe(name: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 mod control;
+mod correction;
 mod settings;
 mod turns;

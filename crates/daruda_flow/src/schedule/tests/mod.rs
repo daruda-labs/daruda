@@ -49,17 +49,79 @@ fn run_with_cancel(
     run_with(text, runner, cancel, Budget::unlimited())
 }
 
+/// `dyn` because a handful of tests wrap the fake in a runner of their own
+/// — a link planter, a lock stealer, two calls in flight at once.
 fn run_with_budget(
     text: &str,
-    runner: &FakeRunner,
+    runner: &dyn NodeRunner,
     budget: Budget,
 ) -> (RunReport, tempfile::TempDir) {
     run_with(text, runner, &CancelToken::default(), budget)
 }
 
+/// Run with `node` pinned, its output already sitting where the copy step
+/// would have put it — so this level tests the skip and what downstream sees,
+/// not the copy itself (that is `schedule::run`'s, tested there).
+fn run_pinned(
+    text: &str,
+    runner: &dyn NodeRunner,
+    node: &str,
+    output: &str,
+    body: &str,
+) -> (RunReport, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let run_dir = dir.path().join("run");
+    std::fs::create_dir_all(&run_dir).expect("run dir");
+    std::fs::write(run_dir.join(output), body).expect("place the pinned output");
+    let loaded = load(text, None).expect("valid flow");
+    let report = smol::block_on(run_flow(
+        RunInputs {
+            until: None,
+            pinned: vec![crate::NodeId::from(node)],
+            loaded: &loaded,
+            flow_dir: dir.path(),
+            cwd: dir.path(),
+            run_dir: &run_dir,
+            cancel: &CancelToken::default(),
+            budget: &Budget::unlimited(),
+            git_status: None,
+            events: None,
+            ask: None,
+            resume: None,
+        },
+        runner,
+    ));
+    (report, dir)
+}
+
+/// Run no further than `target`, which is the whole point of the selection
+/// axis — every other helper passes `None`.
+fn run_until(text: &str, runner: &dyn NodeRunner, target: &str) -> (RunReport, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let loaded = load(text, None).expect("valid flow");
+    let report = smol::block_on(run_flow(
+        RunInputs {
+            pinned: Vec::new(),
+            until: Some(crate::NodeId::from(target)),
+            loaded: &loaded,
+            flow_dir: dir.path(),
+            cwd: dir.path(),
+            run_dir: &dir.path().join("run"),
+            cancel: &CancelToken::default(),
+            budget: &Budget::unlimited(),
+            git_status: None,
+            events: None,
+            ask: None,
+            resume: None,
+        },
+        runner,
+    ));
+    (report, dir)
+}
+
 fn run_with(
     text: &str,
-    runner: &FakeRunner,
+    runner: &dyn NodeRunner,
     cancel: &CancelToken,
     budget: Budget,
 ) -> (RunReport, tempfile::TempDir) {
@@ -67,6 +129,8 @@ fn run_with(
     let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {
+            pinned: Vec::new(),
+            until: None,
             loaded: &loaded,
             flow_dir: dir.path(),
             cwd: dir.path(),
@@ -81,6 +145,19 @@ fn run_with(
         runner,
     ));
     (report, dir)
+}
+
+/// The contract block the scheduler appends, spelled out rather than asked
+/// of the code under test — a test that composed it the same way would pass
+/// whatever the wording became. `output` is relative, the way a flow
+/// declares it; the block must state the absolute path.
+pub(super) fn expected_contract(run_dir: &Path, output: &str) -> String {
+    format!(
+        "OUTPUT CONTRACT (machine-validated):\n\
+         When you are done, write your result to {}.\n\
+         The file must exist and be non-empty; a symlink is refused.",
+        run_dir.join(output).display()
+    )
 }
 
 const GATED: &str = "\
@@ -123,6 +200,8 @@ pub(super) fn request_for_profile(
     let loaded = load(text, profile).expect("valid flow");
     crate::request::RunRequest {
         loaded,
+        until: None,
+        pinned: Vec::new(),
         cwd: dir.to_path_buf(),
         run_dir: dir.join(".daruda/flow-runs/01J"),
         flow_dir: dir.to_path_buf(),
@@ -216,9 +295,11 @@ impl NodeRunner for LockLoser {
 mod artifacts;
 mod budgets;
 mod cancel;
+mod contract;
 mod lifecycle;
 mod ordering;
 mod parallel;
+mod prompts;
 mod records;
 mod repair;
 mod resuming;

@@ -73,9 +73,15 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
             NodeKind::Agent {
                 prompt,
                 output,
+                output_schema,
                 on_fail,
                 ..
             } => {
+                // Delegated: what the check enforces and what is refused here
+                // are one statement about the subset, so they live together.
+                if let Some(schema) = output_schema {
+                    issues.extend(crate::contract::schema::issues(schema, &node.id));
+                }
                 if output.components().any(|c| {
                     matches!(
                         c,
@@ -114,8 +120,10 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 }
                 // Folded, for the same reason as the reserved-directory
                 // check above: on macOS's default filesystem `Out.md` and
-                // `out.md` are one file, so two nodes that pass an exact
-                // comparison silently overwrite each other — and whatever
+                // `out.md` are one file — and so are two spellings of the
+                // same character that differ only in Unicode normalisation,
+                // which is why case alone was not enough. Two nodes that
+                // pass an exact comparison silently overwrite each other — and whatever
                 // reads `{{node.first.output}}` downstream gets the second
                 // node's work without anything saying so.
                 //
@@ -124,12 +132,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 // flow file is committed and shared, and one that works on
                 // Linux and quietly corrupts on macOS is worse than one
                 // refused on both.
-                let canonical: String = output
-                    .components()
-                    .filter(|c| !matches!(c, std::path::Component::CurDir))
-                    .collect::<std::path::PathBuf>()
-                    .to_string_lossy()
-                    .to_lowercase();
+                let canonical: String = canonical_output(output);
                 if let Some(previous) = seen_outputs.insert(canonical, &node.id) {
                     issues.push(issue(
                         node.id.clone(),
@@ -183,6 +186,31 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
     }
 
     issues
+}
+
+/// An output path folded to what the filesystem would treat it as.
+///
+/// Three foldings, each for something macOS's default filesystem does: `.`
+/// components dropped (`./a.md` is `a.md`), case lowered, and Unicode
+/// composed. The last is the one std cannot do and the one that reaches
+/// beyond Latin — `각` written as one character and as three are the same
+/// file, and so are the two spellings of `が`.
+///
+/// A heuristic, deliberately: the exact table a given macOS version folds by
+/// is not ours to reproduce. Composing catches the spellings a person or an
+/// editor actually produces, and erring toward refusing a pair a
+/// case-sensitive filesystem would keep apart is the trade already taken
+/// above.
+fn canonical_output(output: &std::path::Path) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    output
+        .components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect::<std::path::PathBuf>()
+        .to_string_lossy()
+        .to_lowercase()
+        .nfc()
+        .collect()
 }
 
 fn issue(node: NodeId, kind: ValidationKind, message: String) -> ValidationIssue {
@@ -250,6 +278,47 @@ mod tests {
         let flow = resolve(parse_flow_file(text).expect("parses"), None).expect("resolves");
         let graph = FlowGraph::build(&flow).expect("acyclic");
         validate(&flow, &graph)
+    }
+
+    /// A schema keyword this build does not enforce is refused **softly**: the
+    /// file still parses, so the refusal names the node and is worded for a
+    /// reader. `deny_unknown_fields` on the schema type would have made it a
+    /// raw serde error instead. The canvas goes either way — the pane maps a
+    /// validation failure to `Reload::Unreadable` exactly as it does a parse
+    /// one.
+    #[test]
+    fn an_unenforced_schema_keyword_is_a_node_named_issue_on_a_readable_file() {
+        for keyword in ["additionalProperties: false", "$ref: '#/defs/v'"] {
+            let text = format!(
+                "\
+version: 1
+defaults: {{ agent: {{ id: claude }} }}
+nodes:
+  - id: design
+    kind: agent
+    output: design.json
+    prompt: write
+    output_schema:
+      type: object
+      {keyword}
+      properties:
+        verdict: {{ type: string }}
+"
+            );
+            crate::parse::parse_flow_file(&text)
+                .unwrap_or_else(|e| panic!("{keyword} must leave the file readable: {e}"));
+            let issues = issues_for(&text);
+            assert_eq!(issues.len(), 1, "{issues:?}");
+            assert_eq!(issues[0].node.as_ref(), Some(&NodeId::from("design")));
+            assert!(
+                matches!(
+                    issues[0].kind,
+                    ValidationKind::UnsupportedSchemaKeyword { .. }
+                ),
+                "{:?}",
+                issues[0].kind
+            );
+        }
     }
 
     /// The design document's flagship example. It must pass its own
@@ -482,6 +551,43 @@ nodes:
                 .any(|i| matches!(i.kind, ValidationKind::OutputInReservedDir { .. })),
             "{issues:?}"
         );
+    }
+
+    /// The gap case-folding alone left, and the one that reaches past Latin:
+    /// the same word composed and decomposed is one file on macOS's default
+    /// filesystem, so a flow naming both silently has one node overwrite the
+    /// other. Verified against a real APFS volume for Latin, Hangul and kana
+    /// before this rule was written.
+    #[test]
+    fn output_paths_differing_only_in_unicode_normalisation_are_rejected() {
+        for (composed, decomposed) in [("각.md", "각.md"), ("Å.md", "Å.md"), ("が.md", "が.md")]
+        {
+            assert_ne!(
+                composed, decomposed,
+                "the fixture only bites while the two spellings differ"
+            );
+            let issues = issues_for(&format!(
+                "\
+version: 1
+defaults: {{ agent: {{ id: claude }} }}
+nodes:
+  - id: a
+    kind: agent
+    output: \"{composed}\"
+    prompt: write
+  - id: b
+    kind: agent
+    output: \"{decomposed}\"
+    prompt: write
+"
+            ));
+            assert!(
+                issues
+                    .iter()
+                    .any(|i| matches!(i.kind, ValidationKind::DuplicateOutput)),
+                "`{composed}` and `{decomposed}` are one file: {issues:?}"
+            );
+        }
     }
 
     #[test]

@@ -111,6 +111,17 @@ impl Workspace {
         if self.right_dock_view != daruda_store::project::RightDockView::Flows {
             return None;
         }
+        self.flow_history_of_active_lane()
+    }
+
+    /// The active lane's past runs, whatever tab is showing. The **one** place
+    /// the history is built; the panel adds its own gate above.
+    ///
+    /// Ungated because a pin resolves against a finished run's directory, and
+    /// that question is asked from the graph pane — where the Flows tab is
+    /// exactly what is *not* on screen. It costs one directory listing, and
+    /// only when the cache is absent or belongs to another lane.
+    pub(in crate::workspace) fn flow_history_of_active_lane(&mut self) -> Option<FlowHistory> {
         let lane = self.active;
         if self.flow_history.get(lane).is_none() {
             let cwd = self.active_lane_root()?;

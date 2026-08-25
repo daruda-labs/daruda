@@ -32,6 +32,7 @@ pub(in crate::workspace) mod flow_history;
 mod flow_node_ops;
 mod flow_ops;
 mod flow_paths;
+mod flow_pins;
 pub(in crate::workspace) mod flow_request;
 mod flow_rows;
 pub(in crate::workspace) mod flow_runs;
