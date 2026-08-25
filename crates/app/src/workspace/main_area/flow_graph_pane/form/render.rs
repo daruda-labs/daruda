@@ -103,11 +103,17 @@ pub(in super::super) fn render(
             field(form.cwd_state(), cx, 5),
             cx,
         ))
-        .child(agent_section(form, cx));
+        // Agent nodes only: `agent:` lives inside the file's `Agent` variant, so
+        // a command node cannot carry one — offering the boxes there is
+        // offering fields no save could keep. Nothing is hidden by this: the
+        // rules that point at this block all name agent nodes, and a repair's
+        // missing agent points at the `fix` box instead.
+        .children((body.kind == KindChoice::Agent).then(|| agent_section(form, cx)));
 
     if let Some(refusal) = &refusal {
         let message = match refusal {
             Refusal::EmptyId => s::flow_form_id_required(),
+            Refusal::InvalidId => s::flow_form_id_invalid(),
             Refusal::Timeout(text) => s::flow_form_timeout_unreadable(text),
             Refusal::Attempts(text) => s::flow_form_attempts_unreadable(text),
             Refusal::OutputRequired => s::flow_form_output_required(),

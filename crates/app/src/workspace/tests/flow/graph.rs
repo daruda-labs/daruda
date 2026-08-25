@@ -542,7 +542,7 @@ nodes:
 /// wording belongs to `s::flow_issue`, keyed off `kind`. Reaching for the
 /// message is the mistake this guards.
 #[gpui::test]
-async fn a_flow_that_fails_validation_reports_it_in_the_pane(cx: &mut TestAppContext) {
+async fn a_flow_that_fails_validation_still_draws_and_says_which_card(cx: &mut TestAppContext) {
     const CLASHING: &str = "\
 version: 1
 defaults:
@@ -574,33 +574,32 @@ nodes:
                 .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
         })
         .expect("the pane opened");
-    let issues = view.read_with(&vcx, |v, _| match v.unreadable_for_test() {
-        Some(crate::workspace::main_area::flow_graph_pane::FlowGraphError::Validate { issues }) => {
-            issues.clone()
-        }
-        other => panic!("expected a validation failure, got {other:?}"),
-    });
-    assert!(!issues.is_empty(), "it says what is wrong");
+
     assert!(
-        issues.iter().any(|line| line.contains("two")),
-        "and names the node it is about: {issues:?}"
+        view.read_with(&vcx, |v, _| v.unreadable_for_test().is_none()),
+        "the flow resolved and its graph built, so there is a picture to draw"
     );
-    // The engine's own `message` is developer detail and says so. None of it may
-    // reach the pane — being worded by `s::flow_issue` is the whole point.
-    let engine_text: Vec<String> = match daruda_flow::load(CLASHING, None) {
-        Err(daruda_flow::FlowError::Validate(raw)) => {
-            raw.iter().map(|i| i.message.clone()).collect()
-        }
-        other => panic!("the fixture has to fail validation, got {other:?}"),
-    };
-    for developer_line in &engine_text {
-        assert!(
-            !issues
-                .iter()
-                .any(|line| line.contains(developer_line.as_str())),
-            "the engine's wording reached the pane: {developer_line:?} in {issues:?}"
-        );
-    }
+    let issues = view.read_with(&vcx, |v, cx| v.card_issues_for_test(cx));
+    assert_eq!(
+        issues.get(&daruda_flow::NodeId::from("two")),
+        Some(&1),
+        "{issues:?}"
+    );
+    assert_eq!(
+        issues.values().filter(|count| **count > 0).count(),
+        1,
+        "only the card at fault says so: {issues:?}"
+    );
+
+    // Drawing it is not permission to run it: every path to a paid session
+    // asks `load`, which still refuses exactly what it refused before.
+    assert!(
+        matches!(
+            daruda_flow::load(CLASHING, None),
+            Err(daruda_flow::FlowError::Validate(_))
+        ),
+        "the run is still refused"
+    );
 }
 
 /// Reading the same bytes again does nothing.

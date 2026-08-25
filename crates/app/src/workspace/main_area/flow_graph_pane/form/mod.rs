@@ -118,35 +118,58 @@ impl NodeForm {
     /// Build a form for `node` out of the file's own text. `None` when the text
     /// does not parse or holds no such node — both mean there is nothing to
     /// show, and the pane is already saying why.
+    /// `issues` is what the engine already refuses about the file on disk, as
+    /// opposed to what it would refuse about an edit. Both end up in the same
+    /// boxes: a person opening a node the canvas marked has to be told which
+    /// field it is about, and being told only after pressing Save is being
+    /// told too late.
     pub(super) fn build<T: 'static>(
         text: &str,
         node: &NodeId,
+        issues: &[daruda_flow::error::ValidationIssue],
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Option<Self> {
         let file = daruda_flow::parse::parse_flow_file(text).ok()?;
         let found = file.nodes.iter().find(|n| &n.id == node)?;
         let initial = fields_of(found);
-        let agent_open = !initial.agent.is_empty();
+        let notes = notes::notes_for(issues, node);
+        // Same rule `set_notes` follows: a note about the override block is no
+        // note at all while the block is closed, which is how it opens by
+        // default only when there is something to see.
+        let agent_open = !initial.agent.is_empty()
+            || notes
+                .iter()
+                .any(|note| note.field == notes::FormField::Agent);
 
         let id = single_line(&initial.id, window, cx);
         let deps = single_line(&initial.deps.join(", "), window, cx);
         let timeout = single_line(&timeout_text(&initial.timeout), window, cx);
         let cwd = single_line(initial.cwd.as_deref().unwrap_or_default(), window, cx);
+        // What an unstated axis resolves to, read off the file's own `defaults`.
+        let inherited = file.defaults.agent.clone().unwrap_or_default();
         let agent = AgentStates {
-            id: single_line(initial.agent.id.as_deref().unwrap_or_default(), window, cx),
-            model: single_line(
+            id: single_line_inheriting(
+                initial.agent.id.as_deref().unwrap_or_default(),
+                inherited.id.as_deref(),
+                window,
+                cx,
+            ),
+            model: single_line_inheriting(
                 initial.agent.model.as_deref().unwrap_or_default(),
+                inherited.model.as_deref(),
                 window,
                 cx,
             ),
-            effort: single_line(
+            effort: single_line_inheriting(
                 initial.agent.effort.as_deref().unwrap_or_default(),
+                inherited.effort.as_deref(),
                 window,
                 cx,
             ),
-            mode: single_line(
+            mode: single_line_inheriting(
                 initial.agent.mode.as_deref().unwrap_or_default(),
+                inherited.mode.as_deref(),
                 window,
                 cx,
             ),
@@ -177,7 +200,7 @@ impl NodeForm {
             // something to see — and closed when it does not.
             agent_open,
             banner: None,
-            notes: Vec::new(),
+            notes,
         })
     }
 
@@ -224,6 +247,11 @@ impl NodeForm {
         let fields = self.fields(cx);
         if fields.id.is_empty() {
             return Some(Refusal::EmptyId);
+        }
+        // The engine's own rule, asked a beat earlier: it refuses the same
+        // name after a save round-trip, which is too late to be useful.
+        if !daruda_flow::node_id_is_wellformed(&fields.id) {
+            return Some(Refusal::InvalidId);
         }
         if let TimeoutField::Unreadable(text) = fields.timeout {
             return Some(Refusal::Timeout(text));
@@ -576,6 +604,29 @@ fn selected_permission(
         Some(v) if v == "ask" => Some(PermissionPolicyFile::Ask),
         _ => None,
     }
+}
+
+/// The same box, with what an empty one means written in it.
+///
+/// The five agent axes are overrides: empty is not "nothing", it is "whatever
+/// `defaults` says". The card shows the resolved value and the box showed a
+/// blank, so the two disagreed on screen about the same node — this is the box
+/// saying what the card already says.
+fn single_line_inheriting<T: 'static>(
+    value: &str,
+    inherited: Option<&str>,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) -> Entity<InputState> {
+    let value = value.to_string();
+    let hint = inherited.map(crate::surface::strings::flow_form_inherited);
+    cx.new(|cx| {
+        let state = InputState::new(window, cx).default_value(value);
+        match hint {
+            Some(hint) => state.placeholder(hint),
+            None => state,
+        }
+    })
 }
 
 fn single_line<T: 'static>(

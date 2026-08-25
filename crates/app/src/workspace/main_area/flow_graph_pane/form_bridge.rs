@@ -60,7 +60,8 @@ impl FlowGraphView {
             return;
         };
         let text = self.text.clone();
-        self.form = text.and_then(|text| form::NodeForm::build(&text, &node, window, cx));
+        let issues = self.current_issues();
+        self.form = text.and_then(|text| form::NodeForm::build(&text, &node, &issues, window, cx));
         cx.notify();
     }
 

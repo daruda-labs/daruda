@@ -1596,3 +1596,239 @@ async fn the_delete_key_asks_to_remove_the_selected_node(cx: &mut TestAppContext
     vcx.run_until_parked();
     assert_eq!(asked.get(), 1, "an unrelated notify asks nothing");
 }
+
+/// The card says which node is at fault; the inspector has to say which box.
+/// It only ever spoke about a save it had just refused, so a person following
+/// the card to the node was told nothing and had to press Save to find out.
+#[gpui::test]
+async fn the_inspector_names_the_box_a_standing_issue_is_about(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::form::notes::FormField;
+
+    const CLASHING: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: one
+    kind: agent
+    output: same.md
+    prompt: a
+  - id: two
+    kind: agent
+    output: same.md
+    prompt: b
+";
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, CLASHING);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the pane opened");
+
+    // Clicking the card the canvas marked, and nothing else.
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"two".into(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    let note = view.read_with(&vcx, |v, _| {
+        v.form()
+            .expect("a form")
+            .note_for_test(FormField::Output)
+            .map(str::to_string)
+    });
+    assert_eq!(
+        note.as_deref(),
+        Some(
+            crate::surface::strings::flow_issue(
+                &daruda_flow::error::ValidationKind::DuplicateOutput
+            )
+            .as_str()
+        ),
+        "no save was pressed, and it still says where to look"
+    );
+}
+
+/// The half the rename forgot: `deps` moved, and the prompt that reads the
+/// renamed node's output did not — leaving a file whose text names a node it
+/// no longer has, for the person who pressed rename to go and find.
+#[gpui::test]
+async fn renaming_a_node_moves_the_prompts_that_read_it(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    const READS_ITS_INPUT: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+  - id: build
+    kind: agent
+    deps: [design]
+    output: build.md
+    prompt: implement {{node.design.output}}
+  - id: gate
+    kind: command
+    deps: [build]
+    run: \"test -s {{node.design.output}}\"
+";
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, READS_ITS_INPUT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    let id = view
+        .read_with(&vcx, |v, _| v.form().map(|form| form.id_state().clone()))
+        .expect("a form for the selected node");
+    id.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("blueprint".to_string(), window, cx)
+    });
+    view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::Save));
+    vcx.run_until_parked();
+
+    let after = std::fs::read_to_string(&flow_path).expect("readable");
+    assert!(
+        !after.contains("node.design.output"),
+        "no mention of the old name is left:\n{after}"
+    );
+    assert!(
+        after.contains("implement {{node.blueprint.output}}"),
+        "the agent's prompt followed:\n{after}"
+    );
+    assert!(
+        after.contains("{{node.blueprint.output}}\"")
+            || after.contains("test -s {{node.blueprint.output}}"),
+        "and so did the gate's command:\n{after}"
+    );
+    daruda_flow::load(&after, None).expect("and the flow still loads");
+}
+
+/// A command node cannot carry an `agent:` — it lives inside the file's
+/// `Agent` variant — so offering those boxes was offering fields no save could
+/// keep.
+#[gpui::test]
+async fn a_gate_is_not_offered_an_agent_it_cannot_have(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::form::fields::KindChoice;
+
+    const AGENT_AND_GATE: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write a line
+  - id: gate
+    kind: command
+    deps: [design]
+    run: \"true\"
+";
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, AGENT_AND_GATE);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    let kind_of = |vcx: &mut gpui::VisualTestContext, node: &str| {
+        view.update_in(vcx, |v, window, cx| {
+            v.select_node_for_test(&node.into(), window, cx)
+        });
+        vcx.run_until_parked();
+        view.read_with(vcx, |v, cx| v.form().expect("a form").body_states(cx).kind)
+    };
+    assert_eq!(kind_of(&mut vcx, "design"), KindChoice::Agent);
+    assert_eq!(kind_of(&mut vcx, "gate"), KindChoice::Command);
+}
+
+/// The engine refuses a name that cannot be a filename, and it did so only
+/// after a save round-trip — which is the one moment the person has stopped
+/// looking at the box.
+#[gpui::test]
+async fn a_name_the_engine_could_not_use_is_refused_while_it_is_typed(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::form::fields::Refusal;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    let id = view
+        .read_with(&vcx, |v, _| v.form().map(|f| f.id_state().clone()))
+        .expect("a form");
+
+    for bad in ["a/b", "design.v2", "a b"] {
+        id.update_in(&mut vcx, |state, window, cx| {
+            state.set_value(bad.to_string(), window, cx)
+        });
+        vcx.run_until_parked();
+        assert_eq!(
+            view.read_with(&vcx, |v, cx| v.form().expect("a form").refusal(cx)),
+            Some(Refusal::InvalidId),
+            "`{bad}` is not a name the engine could use"
+        );
+    }
+
+    id.update_in(&mut vcx, |state, window, cx| {
+        state.set_value("design_v2".to_string(), window, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        view.read_with(&vcx, |v, cx| v.form().expect("a form").refusal(cx)),
+        None,
+        "and an ordinary one is not refused"
+    );
+}

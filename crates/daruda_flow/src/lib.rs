@@ -42,5 +42,9 @@ pub(crate) mod validate;
 pub(crate) mod testing;
 
 pub use error::FlowError;
-pub use load::{LoadedFlow, load};
+pub use load::{Inspected, LoadedFlow, inspect, load};
+// The one template question an editor asks. The module stays crate-private:
+// rendering needs a run's context, which nothing outside a run has.
 pub use node_id::NodeId;
+pub use template::rename_output_refs;
+pub use validate::node_id_is_wellformed;

@@ -39,7 +39,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 format!("`{}` is reserved for the repair session", node.id),
             ));
         }
-        if !is_filename_safe(node.id.as_str()) {
+        if !node_id_is_wellformed(node.id.as_str()) {
             issues.push(issue(
                 node.id.clone(),
                 ValidationKind::InvalidNodeId,
@@ -224,7 +224,12 @@ fn issue(node: NodeId, kind: ValidationKind, message: String) -> ValidationIssue
 /// An id has to survive being pasted into a filename, since that is how a
 /// failed attempt's evidence is named. `.` is out along with the separators
 /// it composes into: it also delimits `{{node.<id>.output}}`.
-fn is_filename_safe(id: &str) -> bool {
+///
+/// Public because an editor asks the same question a beat earlier: a form that
+/// let the name through and then reported the engine's refusal after a save
+/// round-trip is two answers to one rule, and the second one arrives too late
+/// to be useful.
+pub fn node_id_is_wellformed(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()

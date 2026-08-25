@@ -88,6 +88,41 @@ fn resolve(token: &str, ctx: &TemplateContext<'_>) -> Option<String> {
     }
 }
 
+/// Point every `{{node.<from>.output}}` in `text` at `to`.
+///
+/// Here rather than in the editor that calls it: this file is what decides
+/// what a template token means, and a rewriter that spelled the token itself
+/// would be a second answer to that — the kind that stays right until one of
+/// them changes.
+///
+/// Scans the same way [`render`] does, so an unterminated `{{` or a token that
+/// is not an output reference is copied through rather than swallowed. Only
+/// exact matches move: a node called `design` is not `design2`.
+pub fn rename_output_refs(text: &str, from: &NodeId, to: &NodeId) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("}}") else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let token = &after[..end];
+        let renamed = token
+            .strip_prefix("node.")
+            .and_then(|rest| rest.strip_suffix(".output"))
+            .filter(|id| *id == from.as_str())
+            .map(|_| format!("node.{to}.output"));
+        out.push_str("{{");
+        out.push_str(renamed.as_deref().unwrap_or(token));
+        out.push_str("}}");
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn emit(value: &str, surface: Surface) -> String {
     match surface {
         Surface::Prompt => value.to_string(),
@@ -239,6 +274,48 @@ mod tests {
         assert_eq!(
             render("grep -q x {{output}}", &ctx, Surface::Shell),
             "grep -q x ''"
+        );
+    }
+
+    /// A rename has to reach the prompts, or it produces a file whose text
+    /// names a node that is not there — and the person who pressed rename has
+    /// to go find them.
+    #[test]
+    fn a_rename_moves_only_the_reference_it_is_about() {
+        let moved = rename_output_refs(
+            "read {{node.design.output}} and {{node.design2.output}}, write {{output}}",
+            &NodeId::from("design"),
+            &NodeId::from("blueprint"),
+        );
+        assert_eq!(
+            moved, "read {{node.blueprint.output}} and {{node.design2.output}}, write {{output}}",
+            "an exact match moves; a longer name that starts the same does not"
+        );
+    }
+
+    /// Scanned the way `render` scans, so text it does not understand comes
+    /// out unchanged rather than being swallowed.
+    #[test]
+    fn a_rename_leaves_everything_it_does_not_understand_alone() {
+        let from = NodeId::from("design");
+        let to = NodeId::from("blueprint");
+        for text in [
+            "no templates here",
+            "{{unknown}} and {{node.design.output}}",
+            "an unterminated {{node.design.output",
+            "{{node.design.other}}",
+        ] {
+            let moved = rename_output_refs(text, &from, &to);
+            assert_eq!(
+                moved.contains("{{node.design.output}}"),
+                text.contains("{{node.design.output}}") && !text.contains("{{unknown}}"),
+                "for {text:?} -> {moved:?}"
+            );
+            assert!(!moved.is_empty(), "nothing is swallowed: {text:?}");
+        }
+        assert_eq!(
+            rename_output_refs("an unterminated {{node.design.output", &from, &to),
+            "an unterminated {{node.design.output"
         );
     }
 }

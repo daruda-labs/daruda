@@ -19,6 +19,7 @@ use super::node_ids::NodeIds;
 use super::overlay::RerunOverlay;
 use super::pins::PinSet;
 use super::port_drag::FlowEdgeValidator;
+use super::renderer::CardFacts;
 use super::renderer::{FlowNodeRenderer, NODE_TYPE, card_for, flow_theme};
 use super::{FlowGraphError, FlowGraphState, FlowGraphView, renderer};
 use crate::ui::flow_canvas::{
@@ -109,7 +110,17 @@ fn build_canvas_graph(model: &FlowGraphModel, pins: &PinSet) -> (Graph, NodeIds)
 
     let mut graph = Graph::build(|g| {
         for node in &model.nodes {
-            let card = card_for(node, NodeRunState::default(), pins.contains(&node.id));
+            let card = card_for(
+                node,
+                CardFacts {
+                    run: NodeRunState::default(),
+                    pinned: pins.contains(&node.id),
+                    issues: model.issues_naming(&node.id),
+                    // A fresh canvas draws the file, not what an edit just did
+                    // to the pins — `restamp` is what carries that.
+                    unpinned: None,
+                },
+            );
             let (nid, ins, outs) = g
                 .create_node(NODE_TYPE)
                 .size(palette::FLOW_GRAPH_NODE_W, palette::FLOW_GRAPH_NODE_H)
@@ -157,7 +168,7 @@ mod tests {
 
     fn model_of(yaml: &str) -> FlowGraphModel {
         let loaded = daruda_flow::load(yaml, None).expect("fixture should load");
-        FlowGraphModel::from_flow(loaded.flow())
+        FlowGraphModel::from_flow(loaded.flow(), Vec::new())
     }
 
     const ONE_NODE: &str = concat!(

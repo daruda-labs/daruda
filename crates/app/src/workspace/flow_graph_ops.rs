@@ -79,6 +79,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let pinned = view.read(cx).pinned_nodes();
+        // Pressing Run is the person having acted on whatever the cards were
+        // saying about pins that went away.
+        view.update(cx, |view, cx| view.forget_unpinned(cx));
         let selection = super::flow_request::FlowSelection { until, pinned };
         self.run_flow_at(path, FlowPurpose::Run, selection, window, cx);
     }

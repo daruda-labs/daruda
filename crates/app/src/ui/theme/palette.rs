@@ -2306,6 +2306,15 @@ pub const FLOW_GRAPH_STATUS_FAILED: Hsla = ERROR;
 /// four are already spoken for.
 pub const FLOW_GRAPH_STATUS_PINNED: Hsla = hsla(186.0, 0.50, 0.52, 1.0);
 
+/// A card the engine refuses to run: it names how many rules this node breaks.
+///
+/// Its own hue, and its own place on the card, because it is a different axis
+/// from the six above. Those say what a *run* did; this says the flow is not
+/// runnable at all, and the two are true at the same time — a card still
+/// wearing the last run's green can be one you have since broken. Sharing
+/// `WARNING` with `RETRIED` would put both facts in one colour on one card.
+pub const FLOW_GRAPH_ISSUE: Hsla = hsla(280.0, 0.45, 0.62, 1.0);
+
 #[cfg(test)]
 mod tests {
     use super::*;

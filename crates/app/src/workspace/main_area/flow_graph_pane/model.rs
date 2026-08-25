@@ -25,6 +25,13 @@ pub(in crate::workspace) struct FlowGraphModel {
     /// graph edge; giving it an `Edge` would put it in the same visual
     /// vocabulary as `deps` and say the wrong thing.
     pub rerun: Vec<GraphEdge>,
+    /// What the engine's graph-dependent rules refuse about this flow.
+    ///
+    /// Carried rather than turned into a refusal, because they are about a
+    /// flow that resolved and whose graph built — so the cards can be drawn
+    /// and the ones at fault can say so. The run still refuses it: the engine
+    /// asks `load`, which is `inspect` plus that refusal.
+    pub issues: Vec<daruda_flow::error::ValidationIssue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +181,10 @@ pub(in crate::workspace) fn apply_run_event(states: &mut NodeRunStates, event: &
 }
 
 impl FlowGraphModel {
-    pub(in crate::workspace) fn from_flow(flow: &Flow) -> Self {
+    pub(in crate::workspace) fn from_flow(
+        flow: &Flow,
+        issues: Vec<daruda_flow::error::ValidationIssue>,
+    ) -> Self {
         let mut deps = Vec::new();
         let mut rerun = Vec::new();
         let nodes = flow
@@ -208,7 +218,22 @@ impl FlowGraphModel {
                 }
             })
             .collect();
-        Self { nodes, deps, rerun }
+        Self {
+            nodes,
+            deps,
+            rerun,
+            issues,
+        }
+    }
+
+    /// How many refusals name `node`. Flow-level ones — a cycle, an unknown
+    /// version — name none, and stay in the banner where the whole sentence
+    /// is readable.
+    pub(in crate::workspace) fn issues_naming(&self, node: &NodeId) -> usize {
+        self.issues
+            .iter()
+            .filter(|issue| issue.node.as_ref() == Some(node))
+            .count()
     }
 }
 
@@ -294,7 +319,7 @@ mod tests {
         let yaml = format!("{AGENT_DEFAULTS}{nodes}");
         let loaded = daruda_flow::load(&yaml, None)
             .unwrap_or_else(|e| panic!("fixture should load: {e}\n{yaml}"));
-        FlowGraphModel::from_flow(loaded.flow())
+        FlowGraphModel::from_flow(loaded.flow(), Vec::new())
     }
 
     fn edge(from: &str, to: &str) -> GraphEdge {

@@ -146,6 +146,9 @@ pub(in crate::workspace) enum AttemptsField {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum Refusal {
     EmptyId,
+    /// A name the engine could not use — it becomes a filename and it
+    /// delimits `{{node.<id>.output}}`.
+    InvalidId,
     Timeout(String),
     Attempts(String),
     OutputRequired,

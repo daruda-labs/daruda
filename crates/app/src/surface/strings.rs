@@ -532,6 +532,40 @@ pub fn flow_picker_prompt_graph() -> String {
 pub fn flow_graph_kind_agent() -> String {
     rust_i18n::t!("flow.graph_kind_agent").into_owned()
 }
+/// What an empty agent box resolves to. Shown as the box's placeholder, so
+/// "blank" reads as "inherits this" rather than as "nothing".
+pub fn flow_form_inherited(from: &str) -> String {
+    rust_i18n::t!("flow.form_inherited", value => from).into_owned()
+}
+
+/// Why a card's pin went away, one reason per function.
+///
+/// Five plain functions rather than one taking the reason: `surface` imports
+/// nothing from `workspace`, and the enum is the pane's. The pane matches; this
+/// only words.
+pub fn flow_graph_unpinned_node_changed() -> String {
+    rust_i18n::t!("flow.graph_unpinned_node_changed").into_owned()
+}
+pub fn flow_graph_unpinned_node_gone() -> String {
+    rust_i18n::t!("flow.graph_unpinned_node_gone").into_owned()
+}
+pub fn flow_graph_unpinned_upstream(node: &str) -> String {
+    rust_i18n::t!("flow.graph_unpinned_upstream", node => node).into_owned()
+}
+pub fn flow_graph_unpinned_inherited() -> String {
+    rust_i18n::t!("flow.graph_unpinned_inherited").into_owned()
+}
+pub fn flow_graph_unpinned_unreadable() -> String {
+    rust_i18n::t!("flow.graph_unpinned_unreadable").into_owned()
+}
+pub fn flow_graph_unpinned_source_gone() -> String {
+    rust_i18n::t!("flow.graph_unpinned_source_gone").into_owned()
+}
+/// How many rules a card's node breaks. The count only — which rules is the
+/// inspector's to say, and the card has no room for a sentence.
+pub fn flow_graph_issue_count(count: usize) -> String {
+    rust_i18n::t!("flow.graph_issue_count", count => count).into_owned()
+}
 /// Chip on a command node — a gate whose exit code is the verdict.
 pub fn flow_graph_kind_gate() -> String {
     rust_i18n::t!("flow.graph_kind_gate").into_owned()
@@ -684,6 +718,11 @@ pub fn flow_form_timeout_label() -> String {
 }
 pub fn flow_form_id_required() -> String {
     rust_i18n::t!("flow.form_id_required").into_owned()
+}
+/// A name the engine could not use. Says the rule rather than only refusing:
+/// the person is looking at the box and needs to know what to type instead.
+pub fn flow_form_id_invalid() -> String {
+    rust_i18n::t!("flow.form_id_invalid").into_owned()
 }
 pub fn flow_form_timeout_unreadable(text: &str) -> String {
     rust_i18n::t!("flow.form_timeout_unreadable", text = text).into_owned()

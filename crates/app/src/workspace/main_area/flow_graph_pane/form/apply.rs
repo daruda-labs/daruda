@@ -77,6 +77,7 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
                 }
             }
         }
+        rename_output_refs_in(other, node, &new_id);
     }
 }
 
@@ -115,6 +116,43 @@ fn next_node_id(file: &FlowFile) -> NodeId {
         .map(|n| NodeId::from(format!("node-{n}")))
         .find(|candidate| !file.nodes.iter().any(|node| &node.id == candidate))
         .unwrap_or_else(|| NodeId::from("node"))
+}
+
+/// Point every `{{node.<old>.output}}` in this node's own text at the new name.
+///
+/// The four template-bearing fields, which is the list `crate::validate` walks
+/// when it checks the same references — a rename that moved `deps` and left
+/// these behind produced a file whose prompts named a node that no longer
+/// exists, and the person who pressed rename had to go find them.
+///
+/// A file-backed prompt or hint is out of reach: its text is in another file
+/// this module does not open. `UnreachableOutputRef` still reports it, on the
+/// card, which is the same place it would have appeared anyway.
+fn rename_output_refs_in(node: &mut daruda_flow::parse::NodeFile, from: &NodeId, to: &NodeId) {
+    use daruda_flow::parse::{AgentFailFile, GateFailFile, HintSource, NodeKindFile, PromptSource};
+    let rewrite = |text: &mut String| *text = daruda_flow::rename_output_refs(text, from, to);
+    match &mut node.kind {
+        NodeKindFile::Agent {
+            prompt, on_fail, ..
+        } => {
+            if let PromptSource::Prompt(text) = prompt {
+                rewrite(text);
+            }
+            if let AgentFailFile::Retry {
+                hint: HintSource::Hint(text),
+                ..
+            } = on_fail
+            {
+                rewrite(text);
+            }
+        }
+        NodeKindFile::Command { run, on_fail } => {
+            rewrite(run);
+            if let GateFailFile::Repair { fix, .. } = on_fail {
+                rewrite(fix);
+            }
+        }
+    }
 }
 
 /// Take `node` out, and out of everything that pointed at it — every `deps` and

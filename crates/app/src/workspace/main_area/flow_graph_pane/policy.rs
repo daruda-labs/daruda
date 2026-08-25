@@ -74,9 +74,19 @@ pub(super) fn decide(
     }
 }
 
+/// The model to draw, and what the engine refuses about it.
+///
+/// `inspect` rather than `load`: the graph-dependent rules run on a resolved
+/// flow and a built graph, so a flow they refuse is one that can still be
+/// drawn — and a card that says where the problem is beats a banner that took
+/// the picture away. The stages before that leave nothing to draw and stay a
+/// refusal here.
 pub(super) fn model_from(text: &str) -> Result<FlowGraphModel, FlowGraphError> {
-    match daruda_flow::load(text, None) {
-        Ok(loaded) => Ok(FlowGraphModel::from_flow(loaded.flow())),
+    match daruda_flow::inspect(text, None) {
+        Ok(inspected) => Ok(FlowGraphModel::from_flow(
+            inspected.loaded.flow(),
+            inspected.issues,
+        )),
         Err(daruda_flow::FlowError::Parse(detail)) => Err(FlowGraphError::Parse { detail }),
         // Worded here, not carried: `ValidationIssue.message` is the engine's
         // developer detail and says so, and `s::flow_issue` exists to be the

@@ -103,9 +103,10 @@ impl FlowGraphView {
             return;
         }
         let text = self.text.clone();
+        let issues = self.current_issues();
         self.form = wanted
             .zip(text)
-            .and_then(|(node, text)| form::NodeForm::build(&text, &node, window, cx));
+            .and_then(|(node, text)| form::NodeForm::build(&text, &node, &issues, window, cx));
         cx.notify();
     }
 

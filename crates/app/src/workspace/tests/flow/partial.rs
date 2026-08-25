@@ -384,3 +384,126 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
         "▶| ran with two nodes selected"
     );
 }
+
+/// A pin that went away has to say why on the card it went away from. Editing
+/// an upstream node drops a downstream pin — correct, and invisible: the badge
+/// went from "reused" to whatever the node's failure policy is, which reads
+/// like nothing happened.
+#[gpui::test]
+async fn a_dropped_pin_names_the_upstream_node_that_did_it(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = graph_view(&ws, &vcx);
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"build".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    press(&mut vcx, TOOLBAR_PIN_SELECTOR);
+    assert_eq!(
+        pinned_cards(&view, &vcx),
+        vec![daruda_flow::NodeId::from("build")]
+    );
+
+    // `design` is what `build` reads, so rewriting it is rewriting what build
+    // would produce — without touching a character of build.
+    std::fs::write(
+        &flow_path,
+        TWO_NODE_CHAIN.replace("write a line", "write three lines"),
+    )
+    .expect("write");
+    view.update_in(&mut vcx, |v, window, cx| v.reload(window, cx));
+    vcx.run_until_parked();
+
+    assert!(
+        pinned_cards(&view, &vcx).is_empty(),
+        "the pin is gone, which was already true"
+    );
+    let badge = view
+        .read_with(&vcx, |v, cx| v.cards_for_test(cx))
+        .get(&daruda_flow::NodeId::from("build"))
+        .map(|(badge, _)| badge.clone())
+        .expect("build has a card");
+    assert_eq!(
+        badge,
+        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        "and the card says which node took it away"
+    );
+}
+
+/// The reason has to outlive a reload of a flow that has run before.
+///
+/// Restoring a finished run's colours rewrites every card, including ones the
+/// run said nothing about — so it erased the reason one frame after an edit
+/// produced it, for any flow that had ever been run. Which is every flow a
+/// person is iterating on, and iterating is when the reason is worth having.
+#[gpui::test]
+async fn a_previous_runs_colours_do_not_erase_why_a_pin_went(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let here = ws.update(&mut vcx, |ws, _| ws.active);
+    let view = graph_view(&ws, &vcx);
+
+    ws.update(&mut vcx, |ws, _| {
+        ws.seed_flow_run_of_for_test(
+            here,
+            lane.path().join("run"),
+            crate::workspace::flow_request::FlowSource::File(flow_path.clone()),
+        )
+    });
+    ws.update(&mut vcx, |ws, cx| {
+        ws.apply_flow_event_for_test(
+            here,
+            &daruda_flow::event::FlowEvent::NodePassed {
+                node: "design".into(),
+                attempt: 1,
+            },
+            cx,
+        )
+    });
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"build".into(), window, cx)
+    });
+    vcx.run_until_parked();
+    press(&mut vcx, TOOLBAR_PIN_SELECTOR);
+
+    std::fs::write(
+        &flow_path,
+        TWO_NODE_CHAIN.replace("write a line", "write three lines"),
+    )
+    .expect("write");
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.reload_flow_graphs(None, window, cx)
+    });
+    vcx.run_until_parked();
+
+    let badge = |vcx: &gpui::VisualTestContext| {
+        view.read_with(vcx, |v, cx| v.cards_for_test(cx))
+            .get(&daruda_flow::NodeId::from("build"))
+            .map(|(badge, _)| badge.clone())
+            .expect("build has a card")
+    };
+    assert_eq!(
+        badge(&vcx),
+        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        "the colours came back and the reason survived them"
+    );
+
+    // And the other half of the rule: pressing Run is having acted on it.
+    view.update_in(&mut vcx, |v, _, cx| v.forget_unpinned(cx));
+    vcx.run_until_parked();
+    assert_ne!(
+        badge(&vcx),
+        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        "a run clears it"
+    );
+}

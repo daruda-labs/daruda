@@ -42,9 +42,26 @@ pub fn profiles(text: &str) -> Result<Vec<String>, FlowError> {
     Ok(parse::parse_flow_file(text)?.profiles.into_keys().collect())
 }
 
+/// A flow that resolved and whose graph built, beside whatever the
+/// graph-dependent rules refused about it.
+///
+/// Both halves are real, and that is the whole point: [`validate::validate`]
+/// runs *on* a resolved flow and a built graph, so every issue it reports is
+/// about a flow that can be drawn. An editor can show the picture and the
+/// problem together, where [`load`] has to choose one.
+///
+/// The earlier stages have no such pair to offer — a file that does not parse,
+/// resolve, or build a graph leaves nothing to draw — so they stay `Err`.
+pub struct Inspected {
+    pub loaded: LoadedFlow,
+    /// Empty when the flow is runnable. Non-empty means [`load`] refuses it.
+    pub issues: Vec<ValidationIssue>,
+}
+
 /// Parse, merge under `profile`, build the graph, and run the
-/// graph-dependent rules.
-pub fn load(text: &str, profile: Option<&str>) -> Result<LoadedFlow, FlowError> {
+/// graph-dependent rules — reporting the last stage's verdict rather than
+/// acting on it.
+pub fn inspect(text: &str, profile: Option<&str>) -> Result<Inspected, FlowError> {
     let file = parse::parse_flow_file(text)?;
     // After the shape parses and before anything is merged: these are the
     // keys serde could not police itself (see `parse::schema_issues`), and
@@ -56,10 +73,22 @@ pub fn load(text: &str, profile: Option<&str>) -> Result<LoadedFlow, FlowError> 
     let flow = resolve::resolve(file, profile).map_err(FlowError::Validate)?;
     let graph = FlowGraph::build(&flow).map_err(|e| FlowError::Validate(vec![graph_issue(e)]))?;
     let issues = validate::validate(&flow, &graph);
-    if issues.is_empty() {
-        Ok(LoadedFlow { flow, graph })
+    Ok(Inspected {
+        loaded: LoadedFlow { flow, graph },
+        issues,
+    })
+}
+
+/// The same, for everyone who needs a flow that will actually run.
+///
+/// Every path to an agent session goes through here, so the rules stay a
+/// refusal no matter what the editor is willing to draw.
+pub fn load(text: &str, profile: Option<&str>) -> Result<LoadedFlow, FlowError> {
+    let inspected = inspect(text, profile)?;
+    if inspected.issues.is_empty() {
+        Ok(inspected.loaded)
     } else {
-        Err(FlowError::Validate(issues))
+        Err(FlowError::Validate(inspected.issues))
     }
 }
 
@@ -181,5 +210,71 @@ nodes:
             }
             other => panic!("expected a validation error, got {other:?}"),
         }
+    }
+
+    /// The split the editor needs: a rule the last stage refuses is about a
+    /// flow that resolved and whose graph built, so both are there to draw —
+    /// while `load`, which every path to a paid session goes through, still
+    /// refuses it.
+    #[test]
+    fn a_graph_rule_refuses_a_run_and_still_yields_a_flow_to_draw() {
+        // Two nodes writing one file: caught by `validate`, which needs the
+        // resolved flow it is about.
+        const CLASHING: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: a
+    kind: agent
+    output: shared.md
+    prompt: write
+  - id: b
+    kind: agent
+    deps: [a]
+    output: shared.md
+    prompt: write
+";
+        let inspected = inspect(CLASHING, None).expect("it resolves and its graph builds");
+        assert_eq!(
+            inspected.loaded.flow().nodes.len(),
+            2,
+            "both cards are there"
+        );
+        assert!(
+            inspected
+                .issues
+                .iter()
+                .any(|i| matches!(i.kind, ValidationKind::DuplicateOutput)),
+            "{:?}",
+            inspected.issues
+        );
+        assert!(
+            matches!(load(CLASHING, None), Err(FlowError::Validate(_))),
+            "and it is still not runnable"
+        );
+    }
+
+    /// The earlier stages have nothing to offer an editor: a cycle leaves no
+    /// graph, so `inspect` fails the same way `load` does rather than handing
+    /// back half a picture.
+    #[test]
+    fn a_stage_before_the_last_one_leaves_nothing_to_draw() {
+        const CYCLIC: &str = "\
+version: 1
+nodes:
+  - id: a
+    kind: command
+    deps: [b]
+    run: \"true\"
+  - id: b
+    kind: command
+    deps: [a]
+    run: \"true\"
+";
+        assert!(matches!(inspect(CYCLIC, None), Err(FlowError::Validate(_))));
+        assert!(
+            inspect("nodes: [", None).is_err(),
+            "and neither does a parse error"
+        );
     }
 }

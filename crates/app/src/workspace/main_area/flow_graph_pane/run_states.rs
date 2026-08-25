@@ -39,13 +39,30 @@ impl FlowGraphView {
         if !colouring.is_about(model.nodes.iter().map(|node| node.id.clone())) {
             return;
         }
+        // Read before the state below is borrowed, and kept: this is called to
+        // put a *previous* run's colours back after a reload, which is not the
+        // person having acted on anything. Blanking it here erased the reason
+        // one frame after an edit produced it, whenever the flow had ever run.
+        let unpinned = self.unpinned.clone();
+        let pins = self.pins.clone();
         let stamped: Vec<(CanvasNodeId, serde_json::Value)> = model
             .nodes
             .iter()
             .filter_map(|node| {
                 let id = ids.canvas(&node.id)?;
                 let state = colouring.states.get(&node.id).copied().unwrap_or_default();
-                let card = card_for(node, state, self.pins.contains(&node.id));
+                let card = card_for(
+                    node,
+                    super::renderer::CardFacts {
+                        run: state,
+                        pinned: pins.contains(&node.id),
+                        issues: model.issues_naming(&node.id),
+                        unpinned: unpinned
+                            .iter()
+                            .find(|(id, _)| id == &node.id)
+                            .map(|(_, why)| why),
+                    },
+                );
                 Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();

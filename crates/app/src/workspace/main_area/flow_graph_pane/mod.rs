@@ -149,6 +149,12 @@ pub(in crate::workspace) struct FlowGraphView {
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
     form: Option<form::NodeForm>,
+    /// Pins this pane has just let go of, and why.
+    ///
+    /// Kept until the next edit or the next run — an edit replaces the answer
+    /// and a run is the person having acted on it. A toast would be gone
+    /// before either, and the node it is about is on screen the whole time.
+    unpinned: Vec<(NodeId, pins::PinDropped)>,
     /// Set by the canvas plugin that sees a Delete on a selected card, read
     /// on the next canvas notify. Here rather than in the canvas because the
     /// canvas is rebuilt on every reload and the question outlives it.
@@ -203,6 +209,7 @@ impl FlowGraphView {
             }
         });
         let mut view = Self {
+            unpinned: Vec::new(),
             delete_request,
             path: path.to_path_buf(),
             state,
@@ -220,6 +227,10 @@ impl FlowGraphView {
     /// Write the cards again onto the canvas that is already there — which
     /// [`policy::Reload::Restamp`] has decided is still the right one.
     fn restamp(&mut self, model: &FlowGraphModel, cx: &mut Context<Self>) {
+        // Read off `self` before the state is borrowed mutably below: the
+        // cards need both, and the pins are the smaller half to copy.
+        let pins = self.pins.clone();
+        let unpinned = self.unpinned.clone();
         let FlowGraphState::Graph {
             canvas,
             model: current,
@@ -233,7 +244,18 @@ impl FlowGraphView {
             .iter()
             .filter_map(|node| {
                 let id = ids.canvas(&node.id)?;
-                let card = card_for(node, NodeRunState::default(), self.pins.contains(&node.id));
+                let card = card_for(
+                    node,
+                    renderer::CardFacts {
+                        run: NodeRunState::default(),
+                        pinned: pins.contains(&node.id),
+                        issues: model.issues_naming(&node.id),
+                        unpinned: unpinned
+                            .iter()
+                            .find(|(id, _)| id == &node.id)
+                            .map(|(_, why)| why),
+                    },
+                );
                 Some((id, serde_json::to_value(&card).unwrap_or_default()))
             })
             .collect();
@@ -275,6 +297,42 @@ impl FlowGraphView {
     /// form makes `InputState` entities, which need a window. Re-installed after
     /// every reload: a reload builds a new canvas, and the old subscription
     /// watches an entity nobody draws any more.
+    /// Forget why pins went away, because a run is starting.
+    ///
+    /// The other half of the rule an edit's drop follows: an edit replaces the
+    /// answer, and pressing Run is the person having acted on it. Restoring a
+    /// *finished* run's colours is neither, which is why this is its own call
+    /// rather than something the stamping does.
+    pub(in crate::workspace) fn forget_unpinned(&mut self, cx: &mut Context<Self>) {
+        if self.unpinned.is_empty() {
+            return;
+        }
+        self.unpinned.clear();
+        let FlowGraphState::Graph { model, .. } = &self.state else {
+            return;
+        };
+        let model = model.clone();
+        self.restamp(&model, cx);
+    }
+
+    /// Take what an edit did to the pins: what still holds, and what does not
+    /// along with the reason the cards will show.
+    fn absorb_surviving(&mut self, surviving: pins::Surviving) {
+        self.pins = surviving.kept;
+        self.unpinned = surviving.dropped;
+    }
+
+    /// What the engine refuses about the file as it stands.
+    ///
+    /// Cloned rather than borrowed: every caller goes on to build a form,
+    /// which needs `&mut self`.
+    fn current_issues(&self) -> Vec<daruda_flow::error::ValidationIssue> {
+        match &self.state {
+            FlowGraphState::Graph { model, .. } => model.issues.clone(),
+            FlowGraphState::Unreadable(_) => Vec::new(),
+        }
+    }
+
     /// Everything this view owes the canvas after it changed.
     ///
     /// A method rather than a closure body so a test can run it without a
@@ -336,13 +394,13 @@ impl FlowGraphView {
         match policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn()) {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
-                self.pins = pins::surviving(&self.pins, self.text.as_deref(), &text);
+                self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.restamp(&model, cx);
                 self.text = Some(text);
                 self.rebuild_form(window, cx);
             }
             policy::Reload::Rebuild { text, model } => {
-                self.pins = pins::surviving(&self.pins, self.text.as_deref(), &text);
+                self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.state =
                     build_graph_state(model, &self.pins.clone(), &self.delete_request, window, cx);
                 self.text = Some(text);
@@ -404,6 +462,14 @@ impl FlowGraphView {
         if self.pins == before {
             return;
         }
+        // Said on the card for the same reason an edit's drop is: the toast is
+        // gone in a moment and the node is on screen the whole time.
+        self.unpinned = nodes
+            .iter()
+            .filter(|node| before.contains(node))
+            .map(|node| (node.clone(), pins::PinDropped::SourceGone))
+            .collect();
+        {}
         let FlowGraphState::Graph { model, .. } = &self.state else {
             return;
         };
@@ -535,6 +601,22 @@ impl FlowGraphView {
                 let card: renderer::CardData =
                     serde_json::from_value(node.data_ref().clone()).ok()?;
                 Some((flow_id.clone(), (card.badge, format!("{:?}", card.accent))))
+            })
+            .collect()
+    }
+
+    /// How many rules each card says its node breaks.
+    pub(in crate::workspace) fn card_issues_for_test(&self, cx: &App) -> HashMap<NodeId, usize> {
+        let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
+            return HashMap::new();
+        };
+        let graph = canvas.read(cx).graph();
+        ids.iter()
+            .filter_map(|(flow_id, node_id)| {
+                let node = graph.nodes().get(&node_id)?;
+                let card: renderer::CardData =
+                    serde_json::from_value(node.data_ref().clone()).ok()?;
+                Some((flow_id.clone(), card.issues))
             })
             .collect()
     }

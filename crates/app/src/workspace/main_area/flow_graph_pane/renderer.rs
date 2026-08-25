@@ -46,6 +46,18 @@ pub(super) struct CardData {
     /// Run status, or the failure policy when no run is driving this node.
     pub badge: String,
     pub accent: CardAccent,
+    /// `retry ×2` / `repair ×2`, or empty for a node that halts.
+    ///
+    /// Its own field and not the badge: how a node is *configured* stays true
+    /// while a run is driving it and while its output is pinned, and the badge
+    /// can only hold one of the three. It used to lose to both.
+    #[serde(default)]
+    pub policy: String,
+    /// How many rules this node breaks. Drawn beside the kind chip rather than
+    /// in the accent, because "the run passed" and "you have since broken it"
+    /// are both true at once and the accent can only hold one.
+    #[serde(default)]
+    pub issues: usize,
 }
 
 /// What sort of node a card is drawn for.
@@ -82,7 +94,20 @@ impl CardAccent {
 }
 
 /// Build the card for one node under one run state, pinned or not.
-pub(super) fn card_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> CardData {
+/// Everything about a node that is not in the node: what a run said, what the
+/// pane decided, what the engine refuses. Bundled because they arrive from
+/// three different places and a positional list of four had already stopped
+/// reading as anything.
+pub(super) struct CardFacts<'a> {
+    pub run: NodeRunState,
+    pub pinned: bool,
+    /// How many rules this node breaks.
+    pub issues: usize,
+    /// Why its pin went away on the last edit, when it did.
+    pub unpinned: Option<&'a super::pins::PinDropped>,
+}
+
+pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
     let kind = match &node.kind {
         GraphNodeKind::Agent { .. } => CardKind::Agent,
         GraphNodeKind::Gate { .. } => CardKind::Gate,
@@ -109,7 +134,8 @@ pub(super) fn card_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> Car
             line.clone(),
         ),
     };
-    let (badge, accent) = badge_for(node, run, pinned);
+    let (badge, accent) = badge_for(&facts);
+    let policy = policy_label(node);
     CardData {
         id: node.id.clone().into_string(),
         kind,
@@ -118,6 +144,8 @@ pub(super) fn card_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> Car
         summary,
         badge,
         accent,
+        policy,
+        issues: facts.issues,
     }
 }
 
@@ -134,11 +162,37 @@ fn timeout_label(timeout: std::time::Duration) -> String {
 /// The pin only speaks while no run is driving the node. Once one is, what it
 /// reports is the truth about this run — a pinned node reads as passed, which
 /// is what the engine made it.
-fn badge_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> (String, CardAccent) {
-    if pinned && run == NodeRunState::Pending {
+/// How this node answers its own failure, when it answers at all.
+fn policy_label(node: &GraphNode) -> String {
+    match node.fail {
+        FailPolicy::Halt => String::new(),
+        FailPolicy::Retry { max_attempts } => s::flow_graph_policy_retry(max_attempts),
+        FailPolicy::Repair { max_attempts, .. } => s::flow_graph_policy_repair(max_attempts),
+    }
+}
+
+/// The pane's own words for a dropped pin. Matched here rather than in
+/// `surface`, which imports nothing from `workspace`.
+fn unpinned_label(why: &super::pins::PinDropped) -> String {
+    use super::pins::PinDropped as D;
+    match why {
+        D::NodeChanged => s::flow_graph_unpinned_node_changed(),
+        D::NodeGone => s::flow_graph_unpinned_node_gone(),
+        D::UpstreamChanged { node } => s::flow_graph_unpinned_upstream(node.as_str()),
+        D::InheritedAxesChanged => s::flow_graph_unpinned_inherited(),
+        D::Unreadable => s::flow_graph_unpinned_unreadable(),
+        D::SourceGone => s::flow_graph_unpinned_source_gone(),
+    }
+}
+
+/// What is happening to this node right now, and nothing else — the node
+/// itself is no longer an input, because everything the badge used to say
+/// about how it is configured moved to [`policy_label`].
+fn badge_for(facts: &CardFacts<'_>) -> (String, CardAccent) {
+    if facts.pinned && facts.run == NodeRunState::Pending {
         return (s::flow_graph_status_pinned(), CardAccent::Pinned);
     }
-    match run {
+    match facts.run {
         NodeRunState::Running { attempt } if attempt > 1 => {
             (s::flow_graph_status_attempt(attempt), CardAccent::Retried)
         }
@@ -146,17 +200,17 @@ fn badge_for(node: &GraphNode, run: NodeRunState, pinned: bool) -> (String, Card
         NodeRunState::Passed => (s::flow_graph_status_passed(), CardAccent::Passed),
         NodeRunState::Failed => (s::flow_graph_status_failed(), CardAccent::Failed),
         NodeRunState::Fixing => (s::flow_graph_status_fixing(), CardAccent::Retried),
-        NodeRunState::Pending => match node.fail {
-            FailPolicy::Halt => (String::new(), CardAccent::Pending),
-            FailPolicy::Retry { max_attempts } => (
-                s::flow_graph_policy_retry(max_attempts),
-                CardAccent::Pending,
-            ),
-            FailPolicy::Repair { max_attempts, .. } => (
-                s::flow_graph_policy_repair(max_attempts),
-                CardAccent::Pending,
-            ),
-        },
+        // Before the failure policy and after everything a run said: a pin
+        // that has just gone is news, and the policy is not — but a run in
+        // progress is about this run, and the pin was about the last one.
+        NodeRunState::Pending if facts.unpinned.is_some() => (
+            unpinned_label(facts.unpinned.expect("just checked")),
+            CardAccent::Pending,
+        ),
+        // Nothing: what a run is doing is the badge's, and this node is not
+        // being run. The failure policy has its own slot — it is configuration
+        // and stays true whatever a run says.
+        NodeRunState::Pending => (String::new(), CardAccent::Pending),
     }
 }
 
@@ -202,6 +256,10 @@ pub(super) struct CardPalette {
     /// status hues: what a card *is* and what a person has *picked* are
     /// different things, and only the second is theirs.
     pub selected_border: u32,
+    /// A card the engine refuses to run. Its own hue for the reason
+    /// [`palette::FLOW_GRAPH_ISSUE`] gives: it is a different axis from the
+    /// status hues and can be true alongside any of them.
+    pub issue: u32,
 }
 
 impl CardPalette {
@@ -214,6 +272,7 @@ impl CardPalette {
             text_body: rgb_u32(tokens.foreground),
             text_mute: rgb_u32(tokens.foreground_muted_over_background()),
             text_subtle: rgb_u32(tokens.foreground_subtle_over_background()),
+            issue: rgb_u32(palette::FLOW_GRAPH_ISSUE),
         }
     }
 }
@@ -325,6 +384,8 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
                 .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
                 .child(card.chip.clone()),
         )
+        .children(policy_chip(card, p))
+        .children(issue_marker(card, p))
         .child(div().flex_grow())
         .child(
             div()
@@ -332,6 +393,40 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
                 .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
                 .child(card.badge.clone()),
         )
+}
+
+/// The node's failure policy, beside the kind chip and worded like it.
+///
+/// Muted rather than accented: it is not news, it is how the node is set up —
+/// and it has to sit next to what the node *is* rather than next to what is
+/// happening to it, or it reads as a status.
+fn policy_chip(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
+    (!card.policy.is_empty()).then(|| {
+        div()
+            .px(px(palette::FLOW_GRAPH_CHIP_PAD_X))
+            .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
+            .text_color(rgb(p.text_mute))
+            .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
+            .child(card.policy.clone())
+    })
+}
+
+/// How many rules this node breaks, when it breaks any.
+///
+/// Beside the kind chip and in its own colour, so it does not compete with the
+/// status badge on the other end of the row: a card can be green from the last
+/// run and broken since, and both have to be readable at once. The count is
+/// the whole message — which rules is the inspector's to say, and the card has
+/// no room for a sentence.
+fn issue_marker(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
+    (card.issues > 0).then(|| {
+        div()
+            .px(px(palette::FLOW_GRAPH_CHIP_PAD_X))
+            .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
+            .text_color(rgb(p.issue))
+            .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
+            .child(s::flow_graph_issue_count(card.issues))
+    })
 }
 
 fn full_body(card: &CardData, p: CardPalette) -> impl IntoElement {
@@ -543,7 +638,11 @@ mod tests {
             (NodeRunState::Failed, CardAccent::Failed),
             (NodeRunState::Fixing, CardAccent::Retried),
         ] {
-            assert_eq!(card_for(&node, state, false).accent, want, "for {state:?}");
+            assert_eq!(
+                card_for(&node, facts(state, false)).accent,
+                want,
+                "for {state:?}"
+            );
         }
     }
 
@@ -552,8 +651,8 @@ mod tests {
     #[test]
     fn a_first_attempt_reads_as_running_not_as_a_number() {
         let node = agent_node(FailPolicy::Halt);
-        let first = card_for(&node, NodeRunState::Running { attempt: 1 }, false).badge;
-        let third = card_for(&node, NodeRunState::Running { attempt: 3 }, false).badge;
+        let first = card_for(&node, facts(NodeRunState::Running { attempt: 1 }, false)).badge;
+        let third = card_for(&node, facts(NodeRunState::Running { attempt: 3 }, false)).badge;
         assert_ne!(first, third);
         assert!(
             third.contains('3'),
@@ -562,18 +661,32 @@ mod tests {
     }
 
     /// With no run driving it, a node that repairs still says so — the empty
-    /// `rerun` case draws no edge, so the card is the only place it shows.
+    /// How a node answers its own failure is configuration, not news, and it
+    /// stays true while a run drives the node and while its output is pinned.
+    /// Sharing the badge with both meant it vanished under either — which is
+    /// most of the time anyone is looking at the graph.
     #[test]
-    fn a_pending_node_reports_its_failure_policy() {
-        let halt = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending, false);
-        assert!(halt.badge.is_empty(), "halting is the absence of a policy");
+    fn the_failure_policy_survives_a_pin_and_a_run() {
+        let node = agent_node(FailPolicy::Retry { max_attempts: 2 });
+        for facts in [
+            facts(NodeRunState::Pending, false),
+            facts(NodeRunState::Pending, true),
+            facts(NodeRunState::Running { attempt: 1 }, false),
+            facts(NodeRunState::Passed, false),
+        ] {
+            let card = card_for(&node, facts);
+            assert!(card.policy.contains('2'), "{:?}", card.policy);
+        }
+    }
 
-        let retry = card_for(
-            &agent_node(FailPolicy::Retry { max_attempts: 2 }),
-            NodeRunState::Pending,
-            false,
+    #[test]
+    fn halting_is_the_absence_of_a_policy() {
+        let card = card_for(
+            &agent_node(FailPolicy::Halt),
+            facts(NodeRunState::Pending, false),
         );
-        assert!(retry.badge.contains('2'), "{}", retry.badge);
+        assert!(card.policy.is_empty());
+        assert!(card.badge.is_empty(), "and nothing is happening either");
     }
 
     /// A pin is what happens next while nothing is running, so it takes the
@@ -582,26 +695,29 @@ mod tests {
     #[test]
     fn a_pin_speaks_only_until_the_run_does() {
         let node = agent_node(FailPolicy::Retry { max_attempts: 2 });
-        let waiting = card_for(&node, NodeRunState::Pending, true);
+        let waiting = card_for(&node, facts(NodeRunState::Pending, true));
         assert_eq!(waiting.accent, CardAccent::Pinned);
         assert!(!waiting.badge.is_empty());
         assert_ne!(
             waiting.badge,
-            card_for(&node, NodeRunState::Pending, false).badge,
+            card_for(&node, facts(NodeRunState::Pending, false)).badge,
             "a pinned card said the same thing as an unpinned one"
         );
 
-        let running = card_for(&node, NodeRunState::Passed, true);
+        let running = card_for(&node, facts(NodeRunState::Passed, true));
         assert_eq!(
             running,
-            card_for(&node, NodeRunState::Passed, false),
+            card_for(&node, facts(NodeRunState::Passed, false)),
             "the run's report is the same card either way"
         );
     }
 
     #[test]
     fn an_agent_card_lists_the_axes_worth_seeing() {
-        let card = card_for(&agent_node(FailPolicy::Halt), NodeRunState::Pending, false);
+        let card = card_for(
+            &agent_node(FailPolicy::Halt),
+            facts(NodeRunState::Pending, false),
+        );
         assert!(card.meta.contains("claude"), "{}", card.meta);
         assert!(card.meta.contains("high"), "{}", card.meta);
         assert!(
@@ -627,6 +743,17 @@ mod tests {
         assert_eq!(density_for(0.0), CardDensity::Marker);
     }
 
+    /// A card's facts with nothing but a run state and a pin — what every
+    /// assertion below is about.
+    fn facts(run: NodeRunState, pinned: bool) -> CardFacts<'static> {
+        CardFacts {
+            run,
+            pinned,
+            issues: 0,
+            unpinned: None,
+        }
+    }
+
     /// Values chosen so each field is distinguishable in an assertion; the real
     /// ones come from the pane's surface tokens, which need a window.
     fn outline_palette() -> CardPalette {
@@ -638,6 +765,7 @@ mod tests {
             text_mute: 0x00_50_50_50,
             text_subtle: 0x00_60_60_60,
             selected_border: rgb_u32(palette::ACCENT),
+            issue: 0x00_70_70_70,
         }
     }
 
