@@ -72,12 +72,60 @@ impl Selection {
         Selection::UpTo(set)
     }
 
+    /// Whether a repair's `fix` session can happen in this run.
+    ///
+    /// Only a gate declares one, so a selection that stops before every gate
+    /// reaches no repair — and the repair agent it would have run as is not
+    /// this run's business to validate, ask for, or download.
+    pub fn reaches_a_repair(&self, flow: &Flow) -> bool {
+        flow.nodes.iter().any(|node| {
+            self.includes(&node.id)
+                && matches!(
+                    &node.kind,
+                    crate::model::NodeKind::Command {
+                        on_fail: crate::model::GateFail::Repair { .. },
+                        ..
+                    }
+                )
+        })
+    }
+
     pub fn includes(&self, id: &NodeId) -> bool {
         match self {
             Selection::Everything => true,
             Selection::UpTo(set) => set.contains(id),
         }
     }
+}
+
+/// Every agent a run of `flow` under `until` could open a session as.
+///
+/// One answer for the four questions that ask it — which agents the catalog
+/// must hold, which of them can put a question to a person, which runtimes to
+/// download, and which the host may refuse for this lane. Each used to walk
+/// the whole flow, so a run selecting a head node was validated, refused, and
+/// provisioned for a tail it never reaches.
+///
+/// The repair agent is in the list only when a selected gate can call for one.
+/// It is not any node's agent — it is the one a `fix` session runs as — so
+/// nothing else would ever name it.
+pub fn agents_in_play<'f>(flow: &'f Flow, until: Option<&NodeId>) -> Vec<&'f str> {
+    let selected = Selection::of(flow, until);
+    let mut ids: Vec<&str> = flow
+        .nodes
+        .iter()
+        .filter(|node| selected.includes(&node.id))
+        .filter_map(|node| match &node.kind {
+            crate::model::NodeKind::Agent { agent, .. } => Some(agent.id.as_str()),
+            crate::model::NodeKind::Command { .. } => None,
+        })
+        .collect();
+    if selected.reaches_a_repair(flow)
+        && let Some(repair) = flow.default_agent.as_ref()
+    {
+        ids.push(repair.id.as_str());
+    }
+    ids
 }
 
 /// A resolved flow's dependency graph, built once and queried many times.

@@ -6,7 +6,7 @@ use crate::error::{FlowIoError, IoSite};
 use crate::event::{FlowEvent, RunEnd, emit};
 use crate::lock::{LockError, RunLock};
 use crate::marker::{DEFAULT_KEEP_RUNS, sweep_old_runs, write_marker};
-use crate::model::{Flow, NodeKind};
+use crate::model::Flow;
 use crate::request::RunRequest;
 use crate::runner::{CancelToken, NodeRunner};
 use daruda_acp::LaunchSpec;
@@ -253,7 +253,7 @@ fn execute_with(
 /// that may never happen.
 fn provision_agents(request: &RunRequest, provision: &Provision<'_>) -> Result<(), RunOutcome> {
     let mut prepared = HashSet::new();
-    for id in agent_ids(request) {
+    for id in request.selected_agents() {
         if !prepared.insert(id) {
             continue;
         }
@@ -268,30 +268,6 @@ fn provision_agents(request: &RunRequest, provision: &Provision<'_>) -> Result<(
         }
     }
     Ok(())
-}
-
-/// Every agent this run could open a session as: one per agent node it will
-/// reach, then the repair agent. With repeats — the caller dedupes.
-///
-/// Reachable nodes only, because provisioning downloads runtimes: a run that
-/// fetched node.js for a node it stops short of would spend minutes on work
-/// it then throws away. The repair agent stays unconditional — any node it
-/// does reach can fail.
-fn agent_ids(request: &RunRequest) -> impl Iterator<Item = &str> {
-    request
-        .selected_nodes()
-        .filter_map(|node| match &node.kind {
-            NodeKind::Agent { agent, .. } => Some(agent.id.as_str()),
-            NodeKind::Command { .. } => None,
-        })
-        .chain(
-            request
-                .loaded
-                .flow()
-                .default_agent
-                .iter()
-                .map(|agent| agent.id.as_str()),
-        )
 }
 
 /// Set the directory this run's siblings live in up: hide it from git, then
@@ -392,7 +368,17 @@ fn copy_pinned_outputs(request: &RunRequest) -> (Vec<crate::NodeId>, Vec<String>
             .collect();
     let mut took = Vec::new();
     let mut warnings = Vec::new();
-    for pin in &request.pinned {
+    // A pin outside the selection is not this run's business. Copying it
+    // anyway put a file in the run directory that no node here produced and
+    // recorded it as reused, in a run whose own report says it stopped before
+    // that node — and the journal counts a pinned node as passed, so the next
+    // resume would skip it on the strength of an output it never saw made.
+    let selected = crate::graph::Selection::of(request.loaded.flow(), request.effective_until());
+    for pin in request
+        .pinned
+        .iter()
+        .filter(|pin| selected.includes(&pin.node))
+    {
         let Some(dest) = outputs.get(&pin.node) else {
             continue;
         };
@@ -463,6 +449,24 @@ nodes:
 
     /// No node names an agent, and yet a repair's `fix` would open a session
     /// as `defaults.agent`.
+    /// No node names an agent, and yet a repair's `fix` would open a session
+    /// as `defaults.agent`. The repair is the whole fixture: without one
+    /// nothing here could ever open a session, and provisioning would be
+    /// paying to download a runtime for work the flow cannot ask for.
+    const COMMAND_ONLY_WITH_REPAIR: &str = "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: gate
+    kind: command
+    run: \"true\"
+    on_fail:
+      repair:
+        fix: fix it from {{attempts}}
+        max_attempts: 2
+";
+
+    /// The same, minus the repair — so nothing in it can open a session.
     const COMMAND_ONLY: &str = "\
 version: 1
 defaults: { agent: { id: claude } }
@@ -682,7 +686,7 @@ nodes:
         let provisioned = RefCell::new(Vec::new());
 
         let report = execute_with(
-            &request_for(COMMAND_ONLY, dir.path()),
+            &request_for(COMMAND_ONLY_WITH_REPAIR, dir.path()),
             &FakeRunner::new(),
             &CancelToken::default(),
             &|id, _| {
@@ -697,6 +701,32 @@ nodes:
             report.outcome
         );
         assert_eq!(provisioned.into_inner(), vec!["claude"]);
+    }
+
+    /// And the other direction: a flow with no repair has nothing that can
+    /// open an agent session, so the agent its `defaults` names is a runtime
+    /// nobody will ask for. Downloading one is minutes spent on nothing.
+    #[test]
+    fn a_flow_that_cannot_open_a_session_provisions_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provisioned = RefCell::new(Vec::new());
+
+        let report = execute_with(
+            &request_for(COMMAND_ONLY, dir.path()),
+            &FakeRunner::new(),
+            &CancelToken::default(),
+            &|id, _| {
+                provisioned.borrow_mut().push(id.to_string());
+                Ok(())
+            },
+        );
+
+        assert!(
+            matches!(report.outcome, RunOutcome::Done),
+            "{:?}",
+            report.outcome
+        );
+        assert!(provisioned.into_inner().is_empty());
     }
 
     /// Provisioning is what makes a run possible at all, so its failure is the
@@ -747,6 +777,37 @@ nodes:
         assert_eq!(
             std::fs::read_to_string(request.run_dir.join("a.md")).expect("copied"),
             "reused\n"
+        );
+    }
+
+    /// A pin on a node the run stops before belongs to a later run, not this
+    /// one. Copying it put a file in the directory that nothing here produced
+    /// and named the node reused — in a run whose report says it stopped
+    /// upstream of it — and the journal counts a pinned node as passed, so a
+    /// resume would then skip it on the strength of an output it never saw
+    /// made.
+    #[test]
+    fn a_pin_beyond_the_selection_is_not_copied_or_counted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("earlier.md");
+        std::fs::write(&source, "from a run before\n").expect("source");
+        let mut request = request_for(TWO_AGENTS, dir.path());
+        request.until = Some(crate::NodeId::from("design"));
+        request.pinned = vec![crate::request::PinnedOutput {
+            node: "review".into(),
+            from: source,
+        }];
+
+        let (took, warnings) = copy_pinned_outputs(&request);
+
+        assert!(took.is_empty(), "{took:?}");
+        assert!(
+            warnings.is_empty(),
+            "not a failure, just not this run: {warnings:?}"
+        );
+        assert!(
+            !request.run_dir.join("review.md").exists(),
+            "no node here writes it"
         );
     }
 

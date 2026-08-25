@@ -89,6 +89,12 @@ impl RunRequest {
             .or_else(|| self.resume.as_ref().and_then(|r| r.until.as_ref()))
     }
 
+    /// Every agent this run could open a session as, repair included when a
+    /// selected gate can call for one. See [`crate::graph::agents_in_play`].
+    pub(crate) fn selected_agents(&self) -> Vec<&str> {
+        crate::graph::agents_in_play(self.loaded.flow(), self.effective_until())
+    }
+
     /// The nodes this run will reach.
     ///
     /// **Every per-node question at submission asks this, never
@@ -193,8 +199,11 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
             message: format!("`{target}` is not a node in this flow"),
         });
     }
+    let selected = crate::graph::Selection::of(request.loaded.flow(), request.effective_until());
     for pin in &request.pinned {
         if !request.loaded.flow().nodes.iter().any(|n| n.id == pin.node) {
+            // Asked of every pin, selection or not: naming a node the flow
+            // does not have is wrong about the flow, not about this run.
             issues.push(ValidationIssue {
                 node: None,
                 kind: ValidationKind::UnknownPin {
@@ -202,7 +211,11 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
                 },
                 message: format!("`{}` is not a node in this flow", pin.node),
             });
-        } else if !pin.from.is_file() {
+        } else if selected.includes(&pin.node) && !pin.from.is_file() {
+            // Where the source sits only matters for a pin this run will use.
+            // A pin on a node it stops before is not copied, so refusing the
+            // run over that file would be refusing it for a node it does not
+            // run.
             issues.push(ValidationIssue {
                 node: Some(pin.node.clone()),
                 kind: ValidationKind::PinnedSourceMissing {
@@ -287,7 +300,11 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
         }
     }
 
-    if let Some(agent) = &request.loaded.flow().default_agent {
+    // The repair agent, and only when a gate this run reaches can call for
+    // one: a flow whose repairs are all downstream of where this run stops
+    // never opens a `fix` session, so an agent it could not run is not this
+    // run's problem.
+    if let Some(agent) = repair_agent_in_play(request) {
         check_agent_id(
             &agent.id,
             None,
@@ -353,16 +370,13 @@ fn check_someone_can_answer(request: &RunRequest, issues: &mut Vec<ValidationIss
     if request.ask.is_some() {
         return;
     }
-    let flow = request.loaded.flow();
     let node_asks = request.selected_nodes().find_map(|node| match &node.kind {
         NodeKind::Agent { agent, .. } if agent.permission == PermissionPolicy::Ask => {
             Some(node.id.clone())
         }
         _ => None,
     });
-    let repair_asks = flow
-        .default_agent
-        .as_ref()
+    let repair_asks = repair_agent_in_play(request)
         .is_some_and(|agent| agent.permission == PermissionPolicy::Ask);
     if node_asks.is_none() && !repair_asks {
         return;
@@ -372,6 +386,18 @@ fn check_someone_can_answer(request: &RunRequest, issues: &mut Vec<ValidationIss
         kind: ValidationKind::NobodyToAsk,
         message: "this run asks a person for permission but was given no way to ask".to_string(),
     });
+}
+
+/// The agent a repair's `fix` would run as, when this run can reach a repair
+/// at all. `None` when the flow names none, or when every gate that could
+/// call for one is past where this run stops.
+fn repair_agent_in_play(request: &RunRequest) -> Option<&crate::model::AgentSpec> {
+    let flow = request.loaded.flow();
+    let selected = crate::graph::Selection::of(flow, request.effective_until());
+    selected
+        .reaches_a_repair(flow)
+        .then_some(flow.default_agent.as_ref())
+        .flatten()
 }
 
 fn check_agent_id(

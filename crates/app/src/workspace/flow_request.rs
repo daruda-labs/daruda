@@ -124,17 +124,19 @@ pub(in crate::workspace) fn union_strip_env(agents: &HashMap<String, LaunchSpec>
 /// strip list below stays wider on purpose: a command node should not
 /// inherit any configured account's credentials, whether or not this
 /// particular flow launches that agent.
+/// Every agent a run of this flow under `until` could open a session as.
+///
+/// Selection-aware, and the engine's own answer rather than a second one: the
+/// catalog this feeds refuses an agent the lane cannot run, so walking the
+/// whole flow blocked a run stopping at a head node because of a remote agent
+/// on a tail node it never reaches.
 pub(in crate::workspace) fn referenced_agents(
     loaded: &daruda_flow::LoadedFlow,
+    until: Option<&daruda_flow::NodeId>,
 ) -> std::collections::HashSet<String> {
-    let flow = loaded.flow();
-    flow.nodes
-        .iter()
-        .filter_map(|node| match &node.kind {
-            daruda_flow::model::NodeKind::Agent { agent, .. } => Some(agent.id.clone()),
-            daruda_flow::model::NodeKind::Command { .. } => None,
-        })
-        .chain(flow.default_agent.iter().map(|a| a.id.clone()))
+    daruda_flow::graph::agents_in_play(loaded.flow(), until)
+        .into_iter()
+        .map(str::to_owned)
         .collect()
 }
 
@@ -247,7 +249,7 @@ impl Workspace {
             lane_ref,
             &cwd,
             FlowPurpose::Run,
-            &referenced_agents(&resumed.loaded),
+            &referenced_agents(&resumed.loaded, resumed.replay.until.as_ref()),
             cx,
         )?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
@@ -311,8 +313,13 @@ impl Workspace {
         // settled by the time this runs.
         let pinned = self.resolve_flow_pins(flow_path, profile, &selection.pinned, cx);
 
-        let agents =
-            self.flow_agent_catalog(lane_ref, &cwd, purpose, &referenced_agents(&loaded), cx)?;
+        let agents = self.flow_agent_catalog(
+            lane_ref,
+            &cwd,
+            purpose,
+            &referenced_agents(&loaded, selection.until.as_ref()),
+            cx,
+        )?;
         let node_install_dir = daruda_store::persistence::node_install_dir();
         let (tx, rx) = smol::channel::unbounded();
         let (ask_tx, ask_rx) = smol::channel::unbounded();
@@ -518,7 +525,7 @@ mod tests {
             None,
         )
         .expect("loads");
-        assert!(referenced_agents(&command_only).is_empty());
+        assert!(referenced_agents(&command_only, None).is_empty());
 
         // The repair's fix runs as `defaults.agent`, which may be no
         // node's agent — so the default counts even when nothing names it.
@@ -540,8 +547,46 @@ nodes:
         )
         .expect("loads");
         assert_eq!(
-            referenced_agents(&repairing),
+            referenced_agents(&repairing, None),
             std::collections::HashSet::from(["claude".to_string()])
+        );
+    }
+
+    /// The catalog refuses an agent this lane cannot run, so asking it about
+    /// a node the run stops before refused the run over an agent it would
+    /// never launch — and the tail is exactly where an unfinished flow keeps
+    /// the agent it has not settled on yet.
+    #[test]
+    fn a_selection_does_not_name_the_agents_beyond_it() {
+        let two = daruda_flow::load(
+            "\
+version: 1
+defaults:
+  agent: { id: claude, mode: bypassPermissions }
+nodes:
+  - id: design
+    kind: agent
+    output: design.md
+    prompt: write
+  - id: review
+    kind: agent
+    deps: [design]
+    agent: { id: codex, mode: auto }
+    output: review.md
+    prompt: write
+",
+            None,
+        )
+        .expect("loads");
+        assert_eq!(
+            referenced_agents(&two, None),
+            std::collections::HashSet::from(["claude".to_string(), "codex".to_string()]),
+            "the whole flow does launch both"
+        );
+        assert_eq!(
+            referenced_agents(&two, Some(&daruda_flow::NodeId::from("design"))),
+            std::collections::HashSet::from(["claude".to_string()]),
+            "`codex` belongs to `review`, which this run stops before"
         );
     }
 

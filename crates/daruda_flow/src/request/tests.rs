@@ -468,6 +468,53 @@ nodes:
     assert!(!validate_request(&req).is_empty());
 }
 
+/// The repair agent is not any node's — it is the one a `fix` session runs as
+/// — so nothing but a gate puts it in play. A run stopping before every gate
+/// opens no fix session, and was still refused for an agent the catalog lacks
+/// and for having nowhere to answer a question it cannot be asked.
+#[test]
+fn a_repair_beyond_the_selection_needs_neither_an_agent_nor_a_surface() {
+    const TAIL_REPAIRS: &str = "\
+version: 1
+defaults: { agent: { id: codex, mode: default, permission: ask } }
+nodes:
+  - id: design
+    kind: agent
+    agent: { id: claude, mode: default, permission: deny }
+    output: design.md
+    prompt: write
+  - id: gate
+    kind: command
+    deps: [design]
+    run: \"true\"
+    on_fail:
+      repair:
+        fix: fix it from {{attempts}}
+        max_attempts: 2
+";
+    let dir = tempfile::tempdir().expect("tempdir");
+    // `codex` is the repair agent and is deliberately absent from the catalog.
+    let mut req = request_for(TAIL_REPAIRS, &["claude"], dir.path());
+
+    let kinds = |req: &RunRequest| -> Vec<ValidationKind> {
+        validate_request(req).into_iter().map(|i| i.kind).collect()
+    };
+    let whole = kinds(&req);
+    assert!(
+        whole.contains(&ValidationKind::UnknownAgent {
+            id: "codex".to_string()
+        }) && whole.contains(&ValidationKind::NobodyToAsk),
+        "the whole flow does reach the repair: {whole:?}"
+    );
+
+    req.until = Some(NodeId::from("design"));
+    assert_eq!(
+        kinds(&req),
+        Vec::new(),
+        "`gate` is the only thing that could open a fix session"
+    );
+}
+
 /// A pin and a gate's `rerun` naming the same node ask for opposite things.
 /// The scheduler honours the pin (a pinned node never enters `executed`, so
 /// `rerun_members` drops it), which left the repair paying for a fix session
