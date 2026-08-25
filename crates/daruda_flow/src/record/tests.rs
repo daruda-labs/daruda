@@ -40,6 +40,7 @@ fn a_refusal_is_on_the_same_page_as_the_failure_it_caused() {
             git_status: None,
             waited: waited(1, vec![AskAnswer::Refused]),
             corrected: false,
+            usage: None,
         },
         Path::new("/run"),
     );
@@ -83,6 +84,7 @@ fn a_turn_that_reached_for_nothing_adds_no_line() {
             waited: Waiting::default(),
             corrected: false,
             tools: Vec::new(),
+            usage: None,
         },
         Path::new("/run"),
     );
@@ -107,6 +109,7 @@ fn an_approval_adds_no_commentary() {
             git_status: None,
             waited: waited(143, vec![AskAnswer::Allowed]),
             corrected: false,
+            usage: None,
         },
         Path::new("/run"),
     );
@@ -131,6 +134,7 @@ fn a_corrected_attempt_says_so() {
         git_status: None,
         waited: Waiting::default(),
         corrected: true,
+        usage: None,
     };
     push_attempt_lines(&mut out, &attempt, Path::new("/run"));
     assert!(out.contains("correction turn"), "{out}");
@@ -158,6 +162,7 @@ fn an_attempt_that_asked_nothing_stays_silent() {
             git_status: None,
             waited: Waiting::default(),
             corrected: false,
+            usage: None,
         },
         Path::new("/run"),
     );
@@ -181,6 +186,7 @@ fn attempt(n: u32) -> AttemptRecord {
         git_status: None,
         waited: Default::default(),
         corrected: false,
+        usage: None,
     }
 }
 
@@ -277,6 +283,7 @@ fn run_md_lists_every_attempt_with_its_evidence() {
                 git_status: None,
                 waited: Default::default(),
                 corrected: false,
+                usage: None,
             },
             AttemptRecord {
                 tools: Vec::new(),
@@ -292,6 +299,7 @@ fn run_md_lists_every_attempt_with_its_evidence() {
                 git_status: None,
                 waited: Default::default(),
                 corrected: false,
+                usage: None,
             },
         ],
     }];
@@ -336,6 +344,7 @@ fn run_md_shows_the_tree_state_when_the_host_answered() {
                 git_status: Some(" M src/lib.rs\n?? notes.md".to_string()),
                 waited: Default::default(),
                 corrected: false,
+                usage: None,
             },
             // The host answering "nothing changed" is an answer, not a
             // silence — a clean tree after an attempt is a fact.
@@ -353,6 +362,7 @@ fn run_md_shows_the_tree_state_when_the_host_answered() {
                 git_status: Some(String::new()),
                 waited: Default::default(),
                 corrected: false,
+                usage: None,
             },
         ],
     }];
@@ -370,4 +380,39 @@ fn run_md_shows_the_tree_state_when_the_host_answered() {
         attempts: vec![attempt(1)],
     }];
     assert!(!render_run_md(&silent).contains("working tree"), "{md}");
+}
+
+/// The run's total bounds the spend; it does not say which node did the
+/// spending. A session's last reported figure *is* that node's, so keeping it
+/// per attempt turns the account from "was this too much" into "which one".
+#[test]
+fn an_attempt_says_what_its_own_session_cost() {
+    let mut attempt = attempt(1);
+    attempt.usage = Some(daruda_acp::UsageView {
+        used: 90_000,
+        size: 200_000,
+        cost: Some(daruda_acp::CostView {
+            amount: 0.1234,
+            currency: "USD".to_string(),
+        }),
+    });
+    let mut out = String::new();
+    push_attempt_lines(&mut out, &attempt, Path::new("/run"));
+
+    assert!(out.contains("cost 0.1234 USD"), "{out}");
+    assert!(
+        out.contains("context 45%"),
+        "the share that predicts a failure:\n{out}"
+    );
+}
+
+/// A command node opens no session, and an adapter may report nothing — both
+/// are "not known", which is a different thing from zero and must not be
+/// written as one.
+#[test]
+fn an_attempt_that_reported_no_usage_says_nothing_about_it() {
+    let mut out = String::new();
+    push_attempt_lines(&mut out, &attempt(1), Path::new("/run"));
+    assert!(!out.contains("cost "), "{out}");
+    assert!(!out.contains("context "), "{out}");
 }

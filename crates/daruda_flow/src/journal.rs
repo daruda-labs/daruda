@@ -414,6 +414,8 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 &node,
                 AttemptRecord {
                     tools: Vec::new(),
+                    // Not journaled, like `tools`: the total is, and it adds up.
+                    usage: None,
                     attempt,
                     evidence_seq,
                     outcome: match outcome {
@@ -470,6 +472,7 @@ mod tests {
             git_status: None,
             waited: Waiting::default(),
             corrected: false,
+            usage: None,
         }
     }
 

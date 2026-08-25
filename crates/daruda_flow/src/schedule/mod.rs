@@ -542,6 +542,7 @@ impl<'a> Run<'a> {
             waited: reported.waited,
             corrected: reported.corrected,
             tools: reported.tools,
+            usage: reported.usage,
         };
         // On disk before the next node starts, through the same funnel the
         // in-memory record goes through — a second write site is a second

@@ -78,6 +78,19 @@ pub struct AttemptRecord {
     /// Recorded because it consumes another budget unit and nothing else in
     /// the line would say so.
     pub corrected: bool,
+    /// What this attempt's session reported it had used by the time it ended.
+    ///
+    /// The run already sums the cost to bound it, and a ceiling is not an
+    /// answer to "which node was expensive" — the sum says a flow cost $0.71
+    /// and leaves the reader to guess which of five nodes spent it. Each node
+    /// is its own session, so the figure a session ends on *is* that node's,
+    /// which is what makes keeping it per attempt as honest as summing it.
+    ///
+    /// `None` for a command node and for an agent whose adapter reports
+    /// nothing. Not journaled, for the same reason [`Self::tools`] is not: a
+    /// resumed run's earlier attempts lose it, and the total — which is
+    /// journaled — still adds up.
+    pub usage: Option<daruda_acp::UsageView>,
 }
 
 /// What a runner call reported, for the record. One struct because every
@@ -88,6 +101,7 @@ pub(crate) struct Reported {
     pub(crate) waited: crate::runner::Waiting,
     pub(crate) corrected: bool,
     pub(crate) tools: Vec<crate::runner::ToolUse>,
+    pub(crate) usage: Option<daruda_acp::UsageView>,
 }
 
 impl From<&crate::runner::RunResult> for Reported {
@@ -96,6 +110,7 @@ impl From<&crate::runner::RunResult> for Reported {
             waited: result.waiting.clone(),
             corrected: result.corrected,
             tools: result.tools.clone(),
+            usage: result.usage.clone(),
         }
     }
 }
@@ -366,6 +381,27 @@ fn tools_said(tools: &[crate::runner::ToolUse]) -> String {
         .join(", ")
 }
 
+/// `cost 0.1200 USD, context 45%` — what a session had used when it ended.
+///
+/// Both halves are optional and the line is skipped when neither is there: a
+/// command node opens no session, and an adapter that reports nothing leaves
+/// the figure genuinely unknown rather than zero.
+///
+/// The context share is the one that predicts a *failure*: an attempt that
+/// ended at 98% is the one to split before it runs out, and the cost alone
+/// does not say so.
+fn usage_said(usage: Option<&daruda_acp::UsageView>) -> Option<String> {
+    let usage = usage?;
+    let mut parts = Vec::new();
+    if let Some(cost) = usage.cost.as_ref() {
+        parts.push(format!("cost {:.4} {}", cost.amount, cost.currency));
+    }
+    if let Some(share) = usage.used.saturating_mul(100).checked_div(usage.size) {
+        parts.push(format!("context {}%", share.min(100)));
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
 fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path) {
     out.push_str(&format!(
         "- attempt {} (evidence {}) — {} at {}{}\n",
@@ -396,6 +432,12 @@ fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path)
     // The budget-unit total includes this second turn, but the attempt count
     // does not — and an attempt that passed on its correction reads exactly
     // like one that got it right first time without this line.
+    // What this node cost, beside what it did. The run's total is a ceiling's
+    // arithmetic and answers "was it too much"; this answers "which one", and
+    // a reader deciding what to change next needs the second.
+    if let Some(line) = usage_said(attempt.usage.as_ref()) {
+        out.push_str(&format!("  - {line}\n"));
+    }
     if attempt.corrected {
         out.push_str("  - spent a correction turn: the first turn left no usable output\n");
     }
