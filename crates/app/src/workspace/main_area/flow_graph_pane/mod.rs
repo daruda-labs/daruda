@@ -9,6 +9,7 @@ mod build;
 mod click;
 mod commands;
 mod connect;
+mod delete_key;
 mod disconnect;
 pub(in crate::workspace) mod form;
 mod form_bridge;
@@ -148,6 +149,10 @@ pub(in crate::workspace) struct FlowGraphView {
     /// [`Self::reconcile_selection`] — a handler — rather than in `render`,
     /// which must not create entities.
     form: Option<form::NodeForm>,
+    /// Set by the canvas plugin that sees a Delete on a selected card, read
+    /// on the next canvas notify. Here rather than in the canvas because the
+    /// canvas is rebuilt on every reload and the question outlives it.
+    delete_request: delete_key::DeleteRequest,
     /// Keeps the canvas observation alive: the canvas is where a click lands, so
     /// its notify is what tells this view the selection moved.
     _canvas_watch: Option<gpui::Subscription>,
@@ -179,11 +184,12 @@ impl FlowGraphView {
         // when they do not load, so reading them again is nothing to do. Losing
         // them here made the first watcher tick on a broken file look like a
         // change and rebuild for no reason.
+        let delete_request = delete_key::DeleteRequest::default();
         let (text, state) = match read_flow(path) {
             Ok(text) => match policy::model_from(&text) {
                 Ok(model) => (
                     Some(text),
-                    build_graph_state(model, &PinSet::default(), window, cx),
+                    build_graph_state(model, &PinSet::default(), &delete_request, window, cx),
                 ),
                 Err(err) => (Some(text), FlowGraphState::Unreadable(err)),
             },
@@ -197,6 +203,7 @@ impl FlowGraphView {
             }
         });
         let mut view = Self {
+            delete_request,
             path: path.to_path_buf(),
             state,
             text,
@@ -247,7 +254,13 @@ impl FlowGraphView {
             return;
         };
         let was_selected = self.form.as_ref().map(|form| form.node.clone());
-        self.state = build_graph_state(model.clone(), &self.pins.clone(), window, cx);
+        self.state = build_graph_state(
+            model.clone(),
+            &self.pins.clone(),
+            &self.delete_request,
+            window,
+            cx,
+        );
         self.form = None;
         self.watch_canvas(window, cx);
         if let Some(node) = was_selected {
@@ -262,6 +275,22 @@ impl FlowGraphView {
     /// form makes `InputState` entities, which need a window. Re-installed after
     /// every reload: a reload builds a new canvas, and the old subscription
     /// watches an entity nobody draws any more.
+    /// Everything this view owes the canvas after it changed.
+    ///
+    /// A method rather than a closure body so a test can run it without a
+    /// canvas notify to hang it on — the delete below is reported by a plugin
+    /// and answered here, and neither half is reachable from a key press in a
+    /// headless window.
+    fn on_canvas_notified(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reconcile_selection(window, cx);
+        self.reconcile_edges(cx);
+        // The workspace owns the dialog and the write, so this asks rather
+        // than acts — the same event the toolbar and the menu emit.
+        if self.delete_request.take() {
+            cx.emit(FlowGraphEvent::Delete);
+        }
+    }
+
     fn watch_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let FlowGraphState::Graph { canvas, .. } = &self.state else {
             self._canvas_watch = None;
@@ -270,10 +299,7 @@ impl FlowGraphView {
         let this = cx.entity().downgrade();
         self._canvas_watch = Some(window.observe(canvas, cx, move |_canvas, window, cx| {
             // SILENT-OK: the view is gone, so this subscription is being dropped with it — nothing left to reconcile, and nobody left to report to.
-            let _ = this.update(cx, |view, cx| {
-                view.reconcile_selection(window, cx);
-                view.reconcile_edges(cx);
-            });
+            let _ = this.update(cx, |view, cx| view.on_canvas_notified(window, cx));
         }));
     }
 
@@ -317,7 +343,8 @@ impl FlowGraphView {
             }
             policy::Reload::Rebuild { text, model } => {
                 self.pins = pins::surviving(&self.pins, self.text.as_deref(), &text);
-                self.state = build_graph_state(model, &self.pins.clone(), window, cx);
+                self.state =
+                    build_graph_state(model, &self.pins.clone(), &self.delete_request, window, cx);
                 self.text = Some(text);
                 self.form = None;
                 self.watch_canvas(window, cx);
@@ -470,6 +497,26 @@ impl FlowGraphView {
 
 #[cfg(test)]
 impl FlowGraphView {
+    /// A canvas notify with no key behind it — pan, zoom, run colouring.
+    pub(in crate::workspace) fn notified_for_test(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_canvas_notified(window, cx);
+    }
+
+    /// Press Delete on the selected cards, as far as the canvas plugin gets:
+    /// it records the key and the next notify is what answers it.
+    pub(in crate::workspace) fn press_delete_for_test(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.delete_request.ask_for_test();
+        self.on_canvas_notified(window, cx);
+    }
+
     /// Each node's card as the canvas actually holds it, keyed by flow node id
     /// and reduced to the two fields a run changes. Reading it back through the
     /// canvas is the point: it proves the stamp reached the graph the renderer

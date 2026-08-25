@@ -46,6 +46,7 @@ pub(super) fn read_flow(path: &Path) -> Result<String, FlowGraphError> {
 pub(super) fn build_graph_state(
     model: FlowGraphModel,
     pins: &PinSet,
+    delete_request: &super::delete_key::DeleteRequest,
     window: &mut Window,
     cx: &mut Context<FlowGraphView>,
 ) -> FlowGraphState {
@@ -86,6 +87,11 @@ pub(super) fn build_graph_state(
             )
             // Delete on a selected line takes it away again.
             .plugin(EdgeDeletePlugin)
+            // And under it, the same key on a selected card — which asks
+            // first, so this only records that it was pressed.
+            .plugin(super::delete_key::NodeDeletePlugin::new(
+                delete_request.clone(),
+            ))
             .plugin(FrameGraphPlugin::new())
             .plugin(rerun)
             .build()

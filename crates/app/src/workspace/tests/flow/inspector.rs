@@ -1549,3 +1549,50 @@ async fn a_selection_of_every_node_is_refused(cx: &mut TestAppContext) {
         "and it says why"
     );
 }
+
+/// Delete takes a line away when one is selected, and did nothing at all when a
+/// card was — the menu row was the only way to remove a node. The key now asks
+/// the same question the menu does, dialog and all.
+#[gpui::test]
+async fn the_delete_key_asks_to_remove_the_selected_node(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let seen = asked.clone();
+    let _sub = vcx.update(|_, cx| {
+        cx.subscribe(&view, move |_, event: &FlowGraphEvent, _| {
+            if matches!(event, FlowGraphEvent::Delete) {
+                seen.set(seen.get() + 1);
+            }
+        })
+    });
+
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.press_delete_for_test(window, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(asked.get(), 1, "the key asks, exactly once");
+
+    // The view is notified for pan, zoom and run colouring too; only a press
+    // may put the dialog up.
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.notified_for_test(window, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(asked.get(), 1, "an unrelated notify asks nothing");
+}
