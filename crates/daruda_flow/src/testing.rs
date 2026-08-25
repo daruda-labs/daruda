@@ -6,7 +6,7 @@ use crate::model::AgentSpec;
 use crate::runner::{NodeFailure, NodeRunner, RunContext, RunResult};
 use daruda_acp::{CostView, UsageView};
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// What the fake does for one attempt at one node. Every arm writes first
 /// and reports second, because an agent that fails mid-turn still leaves
@@ -61,16 +61,19 @@ pub(crate) struct FakeRunner {
     /// separate axis from `Step`, because when a stop lands is independent
     /// of what the interrupted attempt was going to do.
     cancel_at: HashMap<String, u32>,
-    /// Nodes whose call asks the run for one more correction unit, through
-    /// the same door the real runner corrects a broken output through. A
-    /// separate axis from `Step` for the reason `cancel_at` is: what a call
+    /// Nodes whose call asks the run for more turns, through the same door
+    /// the real runner asks for one. The value is how many *extra* it asks
+    /// for — a node allowed five turns asks four times.
+    ///
+    /// A separate axis from `Step` for the reason `cancel_at` is: what a call
     /// spends is independent of how it ends.
     ///
-    /// The correction itself is **not** simulated here — a fake that wrote
+    /// The turns themselves are **not** simulated here — a fake that wrote
     /// the file on its second imaginary turn would be this scheduler's logic
     /// restated inside the fake, and would pass with `settle` never sending
-    /// anything. What these tests are about is the budget.
-    corrects: HashSet<String>,
+    /// anything. What these tests are about is the budget, which is exactly
+    /// what a five-turn node can exhaust and a one-turn node cannot.
+    corrects: HashMap<String, u32>,
     /// Reservations the run granted, so a test can say how many correction
     /// units were consumed across a whole wave.
     granted: Cell<u32>,
@@ -87,7 +90,7 @@ impl FakeRunner {
             script: HashMap::new(),
             default_cost: None,
             cancel_at: HashMap::new(),
-            corrects: HashSet::new(),
+            corrects: HashMap::new(),
             granted: Cell::new(0),
             cost: HashMap::new(),
             parked: std::time::Duration::ZERO,
@@ -118,8 +121,15 @@ impl FakeRunner {
 
     /// Ask the run for one more budget unit from inside this node's every
     /// call, the way a runner correcting a broken output does.
-    pub(crate) fn corrects(mut self, node: &str) -> Self {
-        self.corrects.insert(node.to_string());
+    pub(crate) fn corrects(self, node: &str) -> Self {
+        self.takes_turns(node, 2)
+    }
+
+    /// The same, for a node allowed more than two — it asks for every turn
+    /// past the first and stops at the first the run will not grant.
+    pub(crate) fn takes_turns(mut self, node: &str, turns: u32) -> Self {
+        self.corrects
+            .insert(node.to_string(), turns.saturating_sub(1));
         self
     }
 
@@ -195,8 +205,16 @@ impl FakeRunner {
         if self.cancel_at.get(ctx.node_id.as_str()) == Some(&ctx.attempt) {
             ctx.cancel.cancel();
         }
-        let corrected = self.corrects.contains(ctx.node_id.as_str()) && (ctx.reserve_extra_turn)();
-        if corrected {
+        // Every extra turn asks, and stops at the first refusal — which is
+        // what the real loop does when the budget will not grant another.
+        let wanted = self
+            .corrects
+            .get(ctx.node_id.as_str())
+            .copied()
+            .unwrap_or(0);
+        let mut extra = 0;
+        while extra < wanted && (ctx.reserve_extra_turn)() {
+            extra += 1;
             self.granted.set(self.granted.get() + 1);
         }
         let (writes, outcome) = match step {
@@ -216,8 +234,8 @@ impl FakeRunner {
                 total: self.parked,
                 answers: Vec::new(),
             },
-            // One prompt, plus the extra this fake was told to reserve.
-            turns: if corrected { 2 } else { 1 },
+            // One prompt, plus whatever extras the run granted.
+            turns: 1 + extra,
         }
     }
 

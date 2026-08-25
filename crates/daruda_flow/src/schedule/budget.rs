@@ -30,7 +30,8 @@ use std::time::Duration;
 #[derive(Default)]
 pub(super) struct Accounting {
     /// Budget units consumed so far — what `max_node_runs` bounds. Every
-    /// runner call consumes one; a correction turn reserves another.
+    /// runner call consumes one, and every turn past its first reserves
+    /// another — so a node allowed five turns can take five, not two.
     budget_units: Cell<u32>,
     /// Time the run spent waiting for a person, summed over every call.
     ///

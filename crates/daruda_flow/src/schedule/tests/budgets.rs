@@ -448,6 +448,46 @@ impl NodeRunner for Simultaneous {
 
 /// **A correction is counted where it is granted.** The first turn is
 /// charged before runner code starts, and a granted correction consumes the
+/// A node allowed many turns can exhaust the run on its own, and the ceiling
+/// is what stops it — turn by turn, in the middle of a node, not between two.
+///
+/// This is the pairing nothing exercised: the loop's own tests stub the
+/// reservation as a closure, and the budget's own tests had a fake that could
+/// ask for exactly one extra. A five-turn node against a three-unit run is the
+/// case the two have to agree on.
+#[test]
+fn a_node_allowed_five_turns_is_stopped_by_the_run_s_ceiling() {
+    let runner = FakeRunner::new().takes_turns("design", 5);
+    let budget = Budget {
+        max_node_runs: Some(3),
+        ..Budget::unlimited()
+    };
+    let (report, _dir) = run_with_budget(CHAIN, &runner, budget);
+
+    assert_eq!(
+        runner.corrections(),
+        2,
+        "the first turn plus two more is the whole ceiling"
+    );
+    assert_eq!(report.node_runs, 3);
+    assert_eq!(
+        runner.ids(),
+        vec!["design"],
+        "one node spent everything the run had"
+    );
+    assert!(
+        matches!(
+            report.outcome,
+            RunOutcome::BudgetExhausted {
+                limit: BudgetLimit::NodeRuns,
+                ..
+            }
+        ),
+        "{:?}",
+        report.outcome
+    );
+}
+
 /// next slot before the following node can start.
 #[test]
 fn a_correction_turn_is_counted_and_leaves_no_budget_for_the_next_node() {
