@@ -241,15 +241,10 @@ pub fn validate_request(request: &RunRequest) -> Vec<ValidationIssue> {
         // and a missing directory fails it just as surely.
         check_node_cwd(request, node, &mut issues);
 
-        let NodeKind::Agent {
-            agent,
-            prompt,
-            on_fail,
-            ..
-        } = &node.kind
-        else {
+        let NodeKind::Agent(body) = &node.kind else {
             continue;
         };
+        let (agent, prompt, on_fail) = (&body.agent, &body.prompt, &body.on_fail);
 
         check_agent_id(
             &agent.id,
@@ -371,7 +366,7 @@ fn check_someone_can_answer(request: &RunRequest, issues: &mut Vec<ValidationIss
         return;
     }
     let node_asks = request.selected_nodes().find_map(|node| match &node.kind {
-        NodeKind::Agent { agent, .. } if agent.permission == PermissionPolicy::Ask => {
+        NodeKind::Agent(body) if body.agent.permission == PermissionPolicy::Ask => {
             Some(node.id.clone())
         }
         _ => None,

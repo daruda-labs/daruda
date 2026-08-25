@@ -116,7 +116,7 @@ pub fn agents_in_play<'f>(flow: &'f Flow, until: Option<&NodeId>) -> Vec<&'f str
         .iter()
         .filter(|node| selected.includes(&node.id))
         .filter_map(|node| match &node.kind {
-            crate::model::NodeKind::Agent { agent, .. } => Some(agent.id.as_str()),
+            crate::model::NodeKind::Agent(body) => Some(body.agent.id.as_str()),
             crate::model::NodeKind::Command { .. } => None,
         })
         .collect();

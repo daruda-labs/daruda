@@ -39,39 +39,36 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
         rules::cwd_stays_inside_the_run(node, &mut issues);
 
         match &node.kind {
-            NodeKind::Agent {
-                prompt,
-                output,
-                output_schema,
-                continue_until,
-                max_turns,
-                on_fail,
-                ..
-            } => {
+            NodeKind::Agent(body) => {
                 // Delegated: what the check enforces and what is refused here
                 // are one statement about the subset, so they live together.
-                if let Some(schema) = output_schema {
+                if let Some(schema) = &body.output_schema {
                     issues.extend(crate::contract::schema::issues(schema, id));
                 }
                 rules::continue_until_is_readable(
                     id,
-                    continue_until.as_deref(),
-                    output_schema.as_deref(),
+                    body.continue_until.as_ref(),
+                    body.output_schema.as_ref(),
                     &mut issues,
                 );
-                rules::turn_cap_allows_a_prompt(id, *max_turns, &mut issues);
-                rules::output_stays_inside_the_run_dir(id, output, &mut issues);
-                rules::output_avoids_the_engines_dir(id, output, &mut issues);
-                rules::output_is_not_already_claimed(id, output, &mut claimed_outputs, &mut issues);
+                rules::turn_cap_allows_a_prompt(id, body.max_turns, &mut issues);
+                rules::output_stays_inside_the_run_dir(id, &body.output, &mut issues);
+                rules::output_avoids_the_engines_dir(id, &body.output, &mut issues);
+                rules::output_is_not_already_claimed(
+                    id,
+                    &body.output,
+                    &mut claimed_outputs,
+                    &mut issues,
+                );
 
                 let mut texts = Vec::new();
-                if let Prompt::Inline(text) = prompt {
+                if let Prompt::Inline(text) = &body.prompt {
                     texts.push(text.as_str());
                 }
                 if let AgentFail::Retry {
                     hint: Prompt::Inline(text),
                     ..
-                } = on_fail
+                } = &body.on_fail
                 {
                     texts.push(text.as_str());
                 }

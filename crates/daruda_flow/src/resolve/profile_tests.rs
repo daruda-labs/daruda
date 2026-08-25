@@ -41,7 +41,7 @@ fn model_of(flow: &Flow, id: &str) -> Option<String> {
         .iter()
         .find(|n| n.id == id)
         .and_then(|n| match &n.kind {
-            NodeKind::Agent { agent, .. } => agent.model.clone(),
+            NodeKind::Agent(body) => body.agent.model.clone(),
             NodeKind::Command { .. } => None,
         })
 }
@@ -81,7 +81,7 @@ fn a_profile_beats_defaults_and_a_node_beats_the_profile() {
 fn a_profile_only_replaces_what_it_names() {
     let flow = resolved(Some("cheap"));
     let agent = match &flow.nodes[0].kind {
-        NodeKind::Agent { agent, .. } => agent.clone(),
+        NodeKind::Agent(body) => body.agent.clone(),
         NodeKind::Command { .. } => panic!("agent node"),
     };
     assert_eq!(agent.id, "claude");

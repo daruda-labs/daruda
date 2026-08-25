@@ -258,10 +258,8 @@ fn the_shipped_example_flows_still_load() {
         // A file-backed prompt names a path relative to the flow file, so a
         // fixture whose prompt moved is broken in a way `load` cannot see.
         for node in &flow.nodes {
-            if let crate::model::NodeKind::Agent {
-                prompt: crate::model::Prompt::File(rel),
-                ..
-            } = &node.kind
+            if let crate::model::NodeKind::Agent(body) = &node.kind
+                && let crate::model::Prompt::File(rel) = &body.prompt
             {
                 let resolved = flows.join(rel);
                 assert!(

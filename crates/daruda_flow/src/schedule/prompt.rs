@@ -41,9 +41,9 @@ impl Run<'_> {
         };
         match &node.kind {
             NodeKind::Command { run, .. } => Ok(render(run, &tctx, Surface::Shell)),
-            NodeKind::Agent { prompt, .. } => {
+            NodeKind::Agent(body) => {
                 let mut text = render(
-                    &self.read_prompt(prompt, doing::READ_PROMPT)?,
+                    &self.read_prompt(&body.prompt, doing::READ_PROMPT)?,
                     &tctx,
                     Surface::Prompt,
                 );

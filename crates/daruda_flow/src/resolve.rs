@@ -84,18 +84,21 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
                     });
                 }
                 match merge_agent(defaults.agent.as_ref(), override_.as_ref()) {
-                    Some(spec) => NodeKind::Agent {
+                    Some(spec) => NodeKind::Agent(Box::new(crate::model::AgentBody {
                         agent: {
                             check_ask_has_a_mode(&spec, Some(&node.id), &mut issues);
                             spec
                         },
                         prompt: resolve_prompt(prompt),
                         output,
-                        output_schema,
-                        continue_until,
+                        // Unboxed on the way in: the wire type boxes these
+                        // because almost no node declares them, and the model
+                        // boxes the whole arm instead.
+                        output_schema: output_schema.map(|schema| *schema),
+                        continue_until: continue_until.map(|done| *done),
                         max_turns: max_turns.unwrap_or(crate::model::DEFAULT_MAX_TURNS),
                         on_fail: resolve_agent_fail(on_fail),
-                    },
+                    })),
                     None => {
                         issues.push(ValidationIssue {
                             node: Some(node.id.clone()),
@@ -218,27 +221,20 @@ fn inline(prompt: &Prompt, flow_dir: &Path) -> Result<String, PathBuf> {
 
 fn node_kind_file(kind: &NodeKind, flow_dir: &Path) -> NodeKindFile {
     match kind {
-        NodeKind::Agent {
-            agent,
-            prompt,
-            output,
-            output_schema,
-            continue_until,
-            max_turns,
-            on_fail,
-        } => NodeKindFile::Agent {
-            agent: Some(node_agent_override(agent)),
-            prompt: match inline(prompt, flow_dir) {
+        NodeKind::Agent(body) => NodeKindFile::Agent {
+            agent: Some(node_agent_override(&body.agent)),
+            prompt: match inline(&body.prompt, flow_dir) {
                 Ok(text) => PromptSource::Prompt(text),
                 Err(path) => PromptSource::PromptFile(path),
             },
-            output: output.clone(),
-            output_schema: output_schema.clone(),
-            continue_until: continue_until.clone(),
+            output: body.output.clone(),
+            output_schema: body.output_schema.clone().map(Box::new),
+            continue_until: body.continue_until.clone().map(Box::new),
             // Written back only when it is not the default, so a flow that
             // never mentioned turns does not grow a line on a round trip.
-            max_turns: (*max_turns != crate::model::DEFAULT_MAX_TURNS).then_some(*max_turns),
-            on_fail: match on_fail {
+            max_turns: (body.max_turns != crate::model::DEFAULT_MAX_TURNS)
+                .then_some(body.max_turns),
+            on_fail: match &body.on_fail {
                 AgentFail::Halt => AgentFailFile::Halt,
                 AgentFail::Retry {
                     hint,
@@ -301,7 +297,7 @@ fn agent_override(spec: &AgentSpec) -> AgentOverride {
 
 fn unanimous_agent_from_nodes(nodes: &[Node]) -> Option<AgentSpec> {
     let mut agents = nodes.iter().filter_map(|n| match &n.kind {
-        NodeKind::Agent { agent, .. } => Some(agent),
+        NodeKind::Agent(body) => Some(&body.agent),
         NodeKind::Command { .. } => None,
     });
     let first = agents.next()?.clone();

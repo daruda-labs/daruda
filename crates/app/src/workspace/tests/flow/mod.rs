@@ -91,7 +91,7 @@ nodes:
 
 fn model_of_first_node(request: &daruda_flow::request::RunRequest) -> Option<String> {
     match &request.loaded.flow().nodes[0].kind {
-        daruda_flow::model::NodeKind::Agent { agent, .. } => agent.model.clone(),
+        daruda_flow::model::NodeKind::Agent(body) => body.agent.model.clone(),
         daruda_flow::model::NodeKind::Command { .. } => None,
     }
 }

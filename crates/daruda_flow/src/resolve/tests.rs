@@ -144,7 +144,8 @@ fn node_overrides_merge_field_by_field_against_defaults() {
         "inherited from defaults"
     );
     match &design.kind {
-        NodeKind::Agent { agent, .. } => {
+        NodeKind::Agent(body) => {
+            let agent = &body.agent;
             assert_eq!(agent.effort.as_deref(), Some("high"), "the node's own axis");
             assert_eq!(agent.id, "claude", "every unnamed axis comes from defaults");
             assert_eq!(agent.mode.as_deref(), Some("bypassPermissions"));
@@ -204,7 +205,7 @@ nodes:
             }
             crate::model::GateFail::Halt => panic!("expected repair"),
         },
-        NodeKind::Agent { .. } => panic!("expected a command node"),
+        NodeKind::Agent(_) => panic!("expected a command node"),
     }
 }
 

@@ -114,7 +114,7 @@ fn reusable_output(
         return None;
     }
     match now.kind {
-        daruda_flow::model::NodeKind::Agent { output, .. } => Some(output),
+        daruda_flow::model::NodeKind::Agent(body) => Some(body.output),
         daruda_flow::model::NodeKind::Command { .. } => None,
     }
 }

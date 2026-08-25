@@ -590,8 +590,8 @@ impl<'a> Run<'a> {
     /// Dispatch finished text through the runner and its accounting funnel.
     async fn call(&self, node: &Node, ctx: &RunContext<'_>, text: &str) -> RunResult {
         match &node.kind {
-            NodeKind::Agent { agent, .. } => {
-                self.accounted_call(|| self.runner.run_agent(ctx, agent, text))
+            NodeKind::Agent(body) => {
+                self.accounted_call(|| self.runner.run_agent(ctx, &body.agent, text))
                     .await
             }
             NodeKind::Command { .. } => {
@@ -679,14 +679,14 @@ pub(crate) fn node_outputs(flow: &Flow, run_dir: &Path) -> Vec<(NodeId, PathBuf)
 
 fn node_output(node: &Node, run_dir: &Path) -> Option<PathBuf> {
     match &node.kind {
-        NodeKind::Agent { output, .. } => Some(run_dir.join(output)),
+        NodeKind::Agent(body) => Some(run_dir.join(&body.output)),
         NodeKind::Command { .. } => None,
     }
 }
 
 fn permission_of(node: &Node) -> crate::model::PermissionPolicy {
     match &node.kind {
-        NodeKind::Agent { agent, .. } => agent.permission,
+        NodeKind::Agent(body) => body.agent.permission,
         // A command node launches no agent, so nothing can ask for
         // permission; the value is inert and never read.
         NodeKind::Command { .. } => crate::model::PermissionPolicy::Deny,

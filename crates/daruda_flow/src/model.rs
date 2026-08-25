@@ -62,62 +62,71 @@ pub struct Node {
 /// command nodes must not have to name an agent it never launches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
-    Agent {
-        agent: AgentSpec,
-        prompt: Prompt,
-        output: PathBuf,
-        /// The shape `output`'s contents must have, when the node declares
-        /// one. The wire type unchanged, box included: there is nothing for
-        /// `defaults` to fill in and nothing to merge, so a resolved twin
-        /// would be a second thing to keep in step for no gain.
-        output_schema: Option<Box<SchemaSubset>>,
-        /// What the output has to say before this node is finished. `None` is
-        /// the rule that held before this existed: a well-formed output is a
-        /// finished node.
-        ///
-        /// The wire type unchanged, for the same reason `output_schema` is:
-        /// `defaults` has nothing to fill in here, so a resolved twin would be
-        /// a second thing to keep in step for no gain.
-        continue_until: Option<Box<DoneWhen>>,
-        /// How many prompts one attempt may send, the first included.
-        ///
-        /// Resolved rather than optional, because the absent case has a real
-        /// answer: 2 is what the correction turn already allowed, so a flow
-        /// written before this field behaves as it did.
-        max_turns: u32,
-        on_fail: AgentFail,
-    },
+    /// Boxed whole rather than field by field. An agent node carries a
+    /// struct's worth of state and a command node carries two fields, so
+    /// inlining it makes every `Node` in the flow pay that difference — which
+    /// is what the per-field boxes here were for. One box answers it once,
+    /// instead of the next field added re-asking it.
+    Agent(Box<AgentBody>),
     Command {
         run: String,
         on_fail: GateFail,
     },
 }
 
+/// Everything an agent node runs on. Its own type because [`NodeKind`]'s two
+/// arms are nothing alike in size, and because a rule that needs several of
+/// these fields can now take one reference instead of a seven-field pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentBody {
+    pub agent: AgentSpec,
+    pub prompt: Prompt,
+    pub output: PathBuf,
+    /// The shape `output`'s contents must have, when the node declares one.
+    /// The wire type unchanged: there is nothing for `defaults` to fill in and
+    /// nothing to merge, so a resolved twin would be a second thing to keep in
+    /// step for no gain.
+    pub output_schema: Option<SchemaSubset>,
+    /// What the output has to say before this node is finished. `None` is the
+    /// rule that held before this existed: a well-formed output is a finished
+    /// node.
+    ///
+    /// The wire type unchanged, for the same reason `output_schema` is.
+    pub continue_until: Option<DoneWhen>,
+    /// How many prompts one attempt may send, the first included.
+    ///
+    /// Resolved rather than optional, because the absent case has a real
+    /// answer: 2 is what the correction turn already allowed, so a flow
+    /// written before this field behaves as it did.
+    pub max_turns: u32,
+    pub on_fail: AgentFail,
+}
+
 impl NodeKind {
-    /// The shape this node's output must have, when it owes one at all.
-    pub fn output_schema(&self) -> Option<&SchemaSubset> {
+    /// What this node runs on, when it is an agent node at all. The one match
+    /// on the kind — everything below reads through it.
+    pub fn agent_body(&self) -> Option<&AgentBody> {
         match self {
-            NodeKind::Agent { output_schema, .. } => output_schema.as_deref(),
+            NodeKind::Agent(body) => Some(body),
             NodeKind::Command { .. } => None,
         }
+    }
+
+    /// The shape this node's output must have, when it owes one at all.
+    pub fn output_schema(&self) -> Option<&SchemaSubset> {
+        self.agent_body()?.output_schema.as_ref()
     }
 
     /// What this node's output has to say before it is finished, when the node
     /// asked for more than a well-formed file.
     pub fn continue_until(&self) -> Option<&DoneWhen> {
-        match self {
-            NodeKind::Agent { continue_until, .. } => continue_until.as_deref(),
-            NodeKind::Command { .. } => None,
-        }
+        self.agent_body()?.continue_until.as_ref()
     }
 
     /// How many prompts one attempt of this node may send, the first included.
     /// A command node runs once — there is no turn to spend.
     pub fn max_turns(&self) -> u32 {
-        match self {
-            NodeKind::Agent { max_turns, .. } => *max_turns,
-            NodeKind::Command { .. } => 1,
-        }
+        self.agent_body().map_or(1, |body| body.max_turns)
     }
 }
 
@@ -177,4 +186,38 @@ pub enum GateFail {
         max_attempts: u32,
         wait: Duration,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The reason [`NodeKind::Agent`] holds a box. Stated as a comparison
+    /// rather than a byte count so it holds on any target: what matters is
+    /// that a `Node` carries a pointer to the agent body and not the body,
+    /// because a flow of nothing but command nodes would otherwise pay for
+    /// seven fields it has none of.
+    #[test]
+    fn a_node_kind_stays_smaller_than_an_agent_body() {
+        assert!(
+            std::mem::size_of::<NodeKind>() < std::mem::size_of::<AgentBody>(),
+            "NodeKind {} vs AgentBody {} — is the body still boxed?",
+            std::mem::size_of::<NodeKind>(),
+            std::mem::size_of::<AgentBody>(),
+        );
+    }
+
+    /// A command node owes no output and spends no turn, and the accessors
+    /// answer for it rather than making every caller match the kind.
+    #[test]
+    fn a_command_node_has_no_agent_body() {
+        let kind = NodeKind::Command {
+            run: "true".to_string(),
+            on_fail: GateFail::Halt,
+        };
+        assert!(kind.agent_body().is_none());
+        assert!(kind.output_schema().is_none());
+        assert!(kind.continue_until().is_none());
+        assert_eq!(kind.max_turns(), 1, "one run, no turn to spend");
+    }
 }

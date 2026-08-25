@@ -239,23 +239,18 @@ impl FlowGraphModel {
 
 fn kind_of(kind: &NodeKind) -> GraphNodeKind {
     match kind {
-        NodeKind::Agent {
-            agent,
-            prompt,
-            output,
-            ..
-        } => GraphNodeKind::Agent {
+        NodeKind::Agent(body) => GraphNodeKind::Agent {
             agent: AgentAxes {
-                id: agent.id.clone(),
-                model: agent.model.clone(),
-                effort: agent.effort.clone(),
-                mode: agent.mode.clone(),
+                id: body.agent.id.clone(),
+                model: body.agent.model.clone(),
+                effort: body.agent.effort.clone(),
+                mode: body.agent.mode.clone(),
             },
-            prompt: match prompt {
+            prompt: match &body.prompt {
                 Prompt::Inline(text) => PromptSummary::Inline(first_line(text)),
                 Prompt::File(path) => PromptSummary::File(path.clone()),
             },
-            output: output.clone(),
+            output: body.output.clone(),
         },
         NodeKind::Command { run, .. } => GraphNodeKind::Gate { run: run.clone() },
     }
@@ -263,20 +258,18 @@ fn kind_of(kind: &NodeKind) -> GraphNodeKind {
 
 fn fail_of(kind: &NodeKind) -> FailPolicy {
     match kind {
-        NodeKind::Agent {
-            on_fail: AgentFail::Halt,
-            ..
-        }
-        | NodeKind::Command {
+        // Two levels for the agent arm rather than one nested pattern: its
+        // body is boxed, and a box cannot be matched through.
+        NodeKind::Agent(body) => match &body.on_fail {
+            AgentFail::Halt => FailPolicy::Halt,
+            AgentFail::Retry { max_attempts, .. } => FailPolicy::Retry {
+                max_attempts: *max_attempts,
+            },
+        },
+        NodeKind::Command {
             on_fail: GateFail::Halt,
             ..
         } => FailPolicy::Halt,
-        NodeKind::Agent {
-            on_fail: AgentFail::Retry { max_attempts, .. },
-            ..
-        } => FailPolicy::Retry {
-            max_attempts: *max_attempts,
-        },
         NodeKind::Command {
             on_fail:
                 GateFail::Repair {

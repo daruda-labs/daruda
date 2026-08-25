@@ -24,21 +24,31 @@ pub(super) enum PolicyKind {
     Repair { fix: String, rerun: Vec<NodeId> },
 }
 
+/// One attempt and no wait — what both kinds mean by `halt`.
+fn halt() -> Policy {
+    Policy {
+        kind: PolicyKind::Halt,
+        max_attempts: 1,
+        wait: Duration::ZERO,
+    }
+}
+
 impl Run<'_> {
     pub(super) fn policy_of(&self, node: &Node) -> Policy {
         match &node.kind {
-            NodeKind::Agent {
-                on_fail:
-                    AgentFail::Retry {
-                        hint,
-                        max_attempts,
-                        wait,
-                    },
-                ..
-            } => Policy {
-                kind: PolicyKind::Retry { hint: hint.clone() },
-                max_attempts: *max_attempts,
-                wait: *wait,
+            // Two levels rather than one nested pattern: an agent node's body
+            // is boxed, and a box cannot be matched through.
+            NodeKind::Agent(body) => match &body.on_fail {
+                AgentFail::Retry {
+                    hint,
+                    max_attempts,
+                    wait,
+                } => Policy {
+                    kind: PolicyKind::Retry { hint: hint.clone() },
+                    max_attempts: *max_attempts,
+                    wait: *wait,
+                },
+                AgentFail::Halt => halt(),
             },
             NodeKind::Command {
                 on_fail:
@@ -57,18 +67,10 @@ impl Run<'_> {
                 max_attempts: *max_attempts,
                 wait: *wait,
             },
-            NodeKind::Agent {
-                on_fail: AgentFail::Halt,
-                ..
-            }
-            | NodeKind::Command {
+            NodeKind::Command {
                 on_fail: GateFail::Halt,
                 ..
-            } => Policy {
-                kind: PolicyKind::Halt,
-                max_attempts: 1,
-                wait: Duration::ZERO,
-            },
+            } => halt(),
         }
     }
 
