@@ -112,6 +112,10 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
         GraphNodeKind::Agent { .. } => CardKind::Agent,
         GraphNodeKind::Gate { .. } => CardKind::Gate,
     };
+    // The failure policy joins the axes rather than taking a slot of its own:
+    // it is configuration, this line is what a node is configured as, and a
+    // card is 250pt — four things in the header truncated all four to nothing.
+    let policy = policy_label(node);
     let (chip, meta, summary) = match &node.kind {
         GraphNodeKind::Agent { agent, prompt, .. } => {
             let mut axes = vec![agent.id.clone()];
@@ -119,6 +123,7 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
             axes.extend(agent.effort.clone());
             axes.extend(agent.mode.clone());
             axes.push(timeout_label(node.timeout));
+            axes.extend((!policy.is_empty()).then(|| policy.clone()));
             (
                 s::flow_graph_kind_agent(),
                 axes.join(" · "),
@@ -130,12 +135,15 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
         }
         GraphNodeKind::Gate { run: line } => (
             s::flow_graph_kind_gate(),
-            timeout_label(node.timeout),
+            [timeout_label(node.timeout)]
+                .into_iter()
+                .chain((!policy.is_empty()).then(|| policy.clone()))
+                .collect::<Vec<_>>()
+                .join(" · "),
             line.clone(),
         ),
     };
     let (badge, accent) = badge_for(&facts);
-    let policy = policy_label(node);
     CardData {
         id: node.id.clone().into_string(),
         kind,
@@ -374,9 +382,17 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
     div()
         .flex()
         .items_center()
+        .w_full()
+        // A card is a fixed width and all four of these can be true at once —
+        // a retrying node that breaks a rule and has just lost its pin. The row
+        // clips, and the badge gives up its width first: it is the longest, and
+        // it is the one whose full text the inspector carries anyway. Without
+        // this it drew past the card's own border.
+        .overflow_hidden()
         .gap(px(palette::FLOW_GRAPH_CARD_ROW_GAP))
         .child(
             div()
+                .flex_none()
                 .px(px(palette::FLOW_GRAPH_CHIP_PAD_X))
                 .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
                 .bg(rgb(p.chip_bg))
@@ -384,31 +400,29 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
                 .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
                 .child(card.chip.clone()),
         )
-        .children(policy_chip(card, p))
         .children(issue_marker(card, p))
         .child(div().flex_grow())
         .child(
             div()
-                .text_color(accent)
+                .min_w_0()
+                .truncate()
+                .text_color(rgb(badge_ink(card, accent, p)))
                 .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
                 .child(card.badge.clone()),
         )
 }
 
-/// The node's failure policy, beside the kind chip and worded like it.
+/// What colour the badge's words take.
 ///
-/// Muted rather than accented: it is not news, it is how the node is set up —
-/// and it has to sit next to what the node *is* rather than next to what is
-/// happening to it, or it reads as a status.
-fn policy_chip(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
-    (!card.policy.is_empty()).then(|| {
-        div()
-            .px(px(palette::FLOW_GRAPH_CHIP_PAD_X))
-            .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
-            .text_color(rgb(p.text_mute))
-            .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
-            .child(card.policy.clone())
-    })
+/// The accent, except when it is `Pending` — that one is a hairline meant for
+/// a border, and as text it is not there. A pending card's badge is not
+/// nothing, though: it is why a pin has just gone, which is the news on that
+/// card and was drawn in a colour nobody could read.
+fn badge_ink(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> u32 {
+    match card.accent {
+        CardAccent::Pending => p.text_body,
+        _ => rgb_u32(gpui::Hsla::from(accent)),
+    }
 }
 
 /// How many rules this node breaks, when it breaks any.
@@ -421,6 +435,7 @@ fn policy_chip(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
 fn issue_marker(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
     (card.issues > 0).then(|| {
         div()
+            .flex_none()
             .px(px(palette::FLOW_GRAPH_CHIP_PAD_X))
             .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
             .text_color(rgb(p.issue))
@@ -441,13 +456,23 @@ fn full_body(card: &CardData, p: CardPalette) -> impl IntoElement {
                 .child(card.id.clone()),
         )
         .child(
+            // One line, like the summary below and for the same reason: the
+            // card is a fixed height, so a second line does not add a line —
+            // it pushes the header out of the box.
             div()
+                .min_w_0()
+                .truncate()
                 .text_color(rgb(p.text_mute))
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
                 .child(card.meta.clone()),
         )
         .child(
+            // One line: the card is a fixed height and this is a preview of a
+            // prompt, so a second line pushes the header out of the box rather
+            // than telling anyone more.
             div()
+                .min_w_0()
+                .truncate()
                 .text_color(rgb(p.text_subtle))
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
                 .child(card.summary.clone()),

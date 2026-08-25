@@ -473,6 +473,91 @@ impl Workspace {
         }
     }
 
+    /// A flow written for the capture, exercising every card affordance at
+    /// once — the `--screenshot-scenario flow-graph-authoring` entry point.
+    ///
+    /// Written rather than found: what a seeded lane happens to hold cannot be
+    /// relied on to break a rule, declare a retry, and take `defaults`, and
+    /// these four affordances only became worth looking at together — three of
+    /// them share the card header and nothing in code says whether they fit.
+    ///
+    /// In a temp directory, so a capture leaves nothing in the lane. The pin is
+    /// pressed and then invalidated by rewriting what it depends on, which is
+    /// the only way to see the reason a pin went away.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_authoring_flow_graph_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // `one` and `two` write the same file, which the graph-dependent rules
+        // refuse — and refuse about a flow that still draws. `two` retries, so
+        // the policy chip has something to say beside the issue count.
+        const BEFORE: &str = "\
+version: 1
+defaults:
+  agent:
+    id: claude
+    mode: bypassPermissions
+nodes:
+  - id: design
+    kind: agent
+    output: same.md
+    prompt: Read DESIGN.md and write the design.
+  - id: build
+    kind: agent
+    deps: [design]
+    output: same.md
+    prompt: Implement {{node.design.output}}.
+    on_fail:
+      retry:
+        max_attempts: 2
+        hint: The build did not land.
+";
+        let dir = std::env::temp_dir().join("daruda-shot-authoring");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let path = dir.join("authoring.yaml");
+        if std::fs::write(&path, BEFORE).is_err() {
+            return;
+        }
+        self.open_flow_graph(&path, window, cx);
+        let Some(view) = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
+            .map(|fg| fg.view.clone())
+        else {
+            return;
+        };
+
+        // Pin `build`, then rewrite what it reads so the pin goes and says why.
+        view.update(cx, |view, cx| {
+            view.select_node_for_shot(&"build".into(), window, cx)
+        });
+        self.toggle_flow_pins(&path, view.clone(), cx);
+        if std::fs::write(
+            &path,
+            BEFORE.replace("write the design", "write the design twice"),
+        )
+        .is_err()
+        {
+            return;
+        }
+        view.update(cx, |view, cx| view.reload(window, cx));
+
+        // Land on an agent node that overrides nothing and open the block it
+        // does not fill: closed by default is right for the app and wrong for
+        // a capture, and the placeholders are the only thing in there worth
+        // looking at.
+        view.update(cx, |view, cx| {
+            view.select_node_for_shot(&"design".into(), window, cx);
+            view.toggle_agent_section(cx);
+        });
+    }
+
     /// The same graph with its first node's output pinned and the *second* node
     /// selected — the `--screenshot-scenario flow-graph-pinned` entry point.
     ///

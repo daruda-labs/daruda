@@ -36,6 +36,9 @@ const NAME_FLOW_GRAPH_FORM: &str = "flow-graph-form";
 /// CLI token for the inspector showing why a save was refused.
 const NAME_FLOW_GRAPH_FORM_REFUSED: &str = "flow-graph-form-refused";
 const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
+/// CLI token for the card affordances that only exist while authoring: an
+/// issue count, a failure policy, a dropped pin's reason, inherited defaults.
+const NAME_FLOW_GRAPH_AUTHORING: &str = "flow-graph-authoring";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 /// CLI token for the flow delete confirmation, on the repository's copy.
 const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
@@ -121,6 +124,9 @@ pub(crate) enum ScreenshotScenario {
     /// the banner — where it sits, and whether the engine's sentence reads as
     /// something a person can act on.
     FlowGraphFormRefused,
+    /// A flow the engine refuses, with a pin that has just gone — the only way
+    /// to see the card header carrying three things at once.
+    FlowGraphAuthoring,
     /// An agent-chat pane parked on an expired login: the connect banner with
     /// its remedy buttons, and the failure card the conversation ends on.
     AgentChatFailure,
@@ -162,6 +168,7 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_FORM => Some(Self::FlowGraphForm),
             NAME_FLOW_GRAPH_FORM_REFUSED => Some(Self::FlowGraphFormRefused),
             NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
+            NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
@@ -275,6 +282,11 @@ pub(crate) fn drive(
         ScreenshotScenario::FlowGraphPinned => {
             workspace.update(cx, |ws, cx| {
                 ws.open_first_flow_graph_pinned_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::FlowGraphAuthoring => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_authoring_flow_graph_for_shot(window, cx)
             });
         }
         ScreenshotScenario::FlowGraphFormRefused => {
