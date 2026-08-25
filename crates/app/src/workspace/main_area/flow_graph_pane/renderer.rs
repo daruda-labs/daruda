@@ -12,6 +12,10 @@ use gpui::{
 use serde::{Deserialize, Serialize};
 
 use super::model::{FailPolicy, GraphNode, GraphNodeKind, NodeRunState, PromptSummary};
+/// `refresh` — a cycle, for a node that answers its own failure by going
+/// round again. Served through the vendored set's fallback (`assets.rs`).
+const ICON_RETRIES: &str = "icons/refresh.svg";
+
 use crate::surface::strings as s;
 use crate::ui::flow_canvas::{FlowTheme, Node, NodeRenderer, Port, RenderContext};
 use crate::ui::theme::{PaneSurfaceTokens, palette};
@@ -112,10 +116,7 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
         GraphNodeKind::Agent { .. } => CardKind::Agent,
         GraphNodeKind::Gate { .. } => CardKind::Gate,
     };
-    // The failure policy joins the axes rather than taking a slot of its own:
-    // it is configuration, this line is what a node is configured as, and a
-    // card is 250pt — four things in the header truncated all four to nothing.
-    let policy = policy_label(node);
+    let policy = policy_attempts(node);
     let (chip, meta, summary) = match &node.kind {
         GraphNodeKind::Agent { agent, prompt, .. } => {
             let mut axes = vec![agent.id.clone()];
@@ -123,7 +124,6 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
             axes.extend(agent.effort.clone());
             axes.extend(agent.mode.clone());
             axes.push(timeout_label(node.timeout));
-            axes.extend((!policy.is_empty()).then(|| policy.clone()));
             (
                 s::flow_graph_kind_agent(),
                 axes.join(" · "),
@@ -135,11 +135,7 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
         }
         GraphNodeKind::Gate { run: line } => (
             s::flow_graph_kind_gate(),
-            [timeout_label(node.timeout)]
-                .into_iter()
-                .chain((!policy.is_empty()).then(|| policy.clone()))
-                .collect::<Vec<_>>()
-                .join(" · "),
+            timeout_label(node.timeout),
             line.clone(),
         ),
     };
@@ -170,12 +166,16 @@ fn timeout_label(timeout: std::time::Duration) -> String {
 /// The pin only speaks while no run is driving the node. Once one is, what it
 /// reports is the truth about this run — a pinned node reads as passed, which
 /// is what the engine made it.
-/// How this node answers its own failure, when it answers at all.
-fn policy_label(node: &GraphNode) -> String {
+/// How many times this node will answer its own failure, when it answers at
+/// all. The count alone: *which* mechanism is a question the kind chip beside
+/// it already answers — an agent retries, a gate repairs — so spelling it out
+/// spent width on something the card had said a centimetre to the left.
+fn policy_attempts(node: &GraphNode) -> String {
     match node.fail {
         FailPolicy::Halt => String::new(),
-        FailPolicy::Retry { max_attempts } => s::flow_graph_policy_retry(max_attempts),
-        FailPolicy::Repair { max_attempts, .. } => s::flow_graph_policy_repair(max_attempts),
+        FailPolicy::Retry { max_attempts } | FailPolicy::Repair { max_attempts, .. } => {
+            s::flow_graph_policy_attempts(max_attempts)
+        }
     }
 }
 
@@ -400,6 +400,7 @@ fn full_header(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> impl Into
                 .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
                 .child(card.chip.clone()),
         )
+        .children(policy_chip(card, p))
         .children(issue_marker(card, p))
         .child(div().flex_grow())
         .child(
@@ -423,6 +424,32 @@ fn badge_ink(card: &CardData, accent: gpui::Rgba, p: CardPalette) -> u32 {
         CardAccent::Pending => p.text_body,
         _ => rgb_u32(gpui::Hsla::from(accent)),
     }
+}
+
+/// A cycle glyph and a count: this node tries again on failure, this many
+/// times.
+///
+/// A glyph and not a word because a card is 250pt and the header can hold
+/// four things at once — spelled out, all four truncated to nothing. Muted
+/// like the kind chip: it is how the node is set up, not news.
+fn policy_chip(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
+    (!card.policy.is_empty()).then(|| {
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(palette::FLOW_GRAPH_POLICY_GLYPH_GAP))
+            .text_color(rgb(p.text_mute))
+            .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
+            .child(
+                gpui::svg()
+                    .size(px(palette::FLOW_GRAPH_POLICY_GLYPH_SIZE))
+                    .flex_none()
+                    .path(ICON_RETRIES)
+                    .text_color(rgb(p.text_mute)),
+            )
+            .child(card.policy.clone())
+    })
 }
 
 /// How many rules this node breaks, when it breaks any.

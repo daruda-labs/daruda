@@ -2218,6 +2218,12 @@ pub const FLOW_GRAPH_ID_FONT_SIZE: f32 = FONT_SIZE_LG;
 pub const FLOW_GRAPH_META_FONT_SIZE: f32 = FONT_SIZE_SM;
 /// The `AGENT` / `GATE` chip.
 pub const FLOW_GRAPH_CHIP_FONT_SIZE: f32 = FONT_SIZE_XS;
+
+/// The retry glyph on a card, and the gap before its count. Sized to the chip
+/// text beside it rather than to an icon scale: it reads as one token with the
+/// number, not as a button.
+pub const FLOW_GRAPH_POLICY_GLYPH_SIZE: f32 = FONT_SIZE_XS;
+pub const FLOW_GRAPH_POLICY_GLYPH_GAP: f32 = 2.0;
 /// Chip padding X (px).
 pub const FLOW_GRAPH_CHIP_PAD_X: f32 = PAD_SM;
 /// Chip corner radius (px).

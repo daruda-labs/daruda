@@ -594,14 +594,12 @@ pub fn flow_graph_status_pinned() -> String {
     rust_i18n::t!("flow.graph_status_pinned").into_owned()
 }
 /// A node that retries itself, shown when the run is not driving it.
-pub fn flow_graph_policy_retry(max_attempts: u32) -> String {
-    rust_i18n::t!("flow.graph_policy_retry", max = max_attempts).into_owned()
+/// How many attempts a node's failure policy allows. Beside the retry glyph,
+/// which is what says the policy exists at all.
+pub fn flow_graph_policy_attempts(max: u32) -> String {
+    rust_i18n::t!("flow.graph_policy_attempts", max => max).into_owned()
 }
-/// A gate that repairs. Said even when `rerun` is empty — an empty set
-/// re-runs the gate alone, and no edge would otherwise reveal the policy.
-pub fn flow_graph_policy_repair(max_attempts: u32) -> String {
-    rust_i18n::t!("flow.graph_policy_repair", max = max_attempts).into_owned()
-}
+
 /// Label on the dashed edge a gate's repair sends back.
 pub fn flow_graph_rerun_edge() -> String {
     rust_i18n::t!("flow.graph_rerun_edge").into_owned()
