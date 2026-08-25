@@ -100,6 +100,25 @@ pub enum NodeKindFile {
         /// almost no node declares one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output_schema: Option<Box<SchemaSubset>>,
+        /// What the output has to say before this node is finished.
+        ///
+        /// Absent is the rule that held before this existed: a well-formed
+        /// output is a finished node. Present means an output that parses and
+        /// matches its schema can still leave the node unfinished, which is
+        /// how a node keeps going without a person telling it to.
+        ///
+        /// Boxed for the reason `output_schema` is: almost no node declares
+        /// one, and unboxed it makes the agent variant much larger than the
+        /// command variant for every node that does not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        continue_until: Option<Box<DoneWhenFile>>,
+        /// How many prompts one attempt may send, the first included.
+        ///
+        /// Absent is 2 — the first prompt plus the one correction turn that
+        /// existed before this field. A flow that wants a node to keep going
+        /// raises it; `1` turns both off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_turns: Option<u32>,
         #[serde(default, with = "yaml_serde::with::singleton_map")]
         on_fail: AgentFailFile,
     },
@@ -256,6 +275,18 @@ pub fn parse_flow_file(text: &str) -> Result<FlowFile, FlowError> {
 }
 
 /// Keys every node may carry, whatever its kind.
+/// One field of the output, and the value that means finished.
+///
+/// A field-and-value pair rather than an expression: an expression would need
+/// its own validation, its own display in the inspector and its own way to be
+/// debugged when it silently never matches. `state: done` is what the case
+/// this exists for actually needs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DoneWhenFile {
+    pub field: String,
+    pub equals: serde_json::Value,
+}
+
 const NODE_KEYS: &[&str] = &["id", "deps", "timeout", "kind", "cwd"];
 /// Keys an agent node adds. `prompt` / `prompt_file` are one choice, and
 /// naming both is its own error below rather than an unknown key.
@@ -265,6 +296,8 @@ const AGENT_KEYS: &[&str] = &[
     "prompt_file",
     "output",
     "output_schema",
+    "continue_until",
+    "max_turns",
     "on_fail",
 ];
 const COMMAND_KEYS: &[&str] = &["run", "on_fail"];
@@ -467,9 +500,16 @@ nodes:
                 prompt,
                 output,
                 output_schema,
+                continue_until,
+                max_turns,
                 on_fail,
             } => {
                 assert_eq!(*output_schema, None, "no declared shape, none owed");
+                // A flow written before these fields existed reads with both
+                // absent — which is what makes `DEFAULT_MAX_TURNS` the
+                // behaviour that already held rather than a new one.
+                assert_eq!(*continue_until, None);
+                assert_eq!(*max_turns, None);
                 let agent = agent.as_ref().expect("node overrides the agent axis");
                 assert_eq!(agent.effort.as_deref(), Some("high"));
                 assert_eq!(

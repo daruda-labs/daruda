@@ -95,6 +95,13 @@ pub(in super::super) fn render(
             field(form.timeout_state(), cx, 4),
             cx,
         ))
+        // Beside the timeout because both are ceilings on one attempt — one on
+        // its clock, one on how many times it may be prompted.
+        .child(field_column(
+            s::flow_form_turns_label(),
+            field(form.turns_state(), cx, 4),
+            cx,
+        ))
         .child(field_with_note(
             form,
             super::notes::FormField::Cwd,
@@ -116,6 +123,7 @@ pub(in super::super) fn render(
             Refusal::InvalidId => s::flow_form_id_invalid(),
             Refusal::Timeout(text) => s::flow_form_timeout_unreadable(text),
             Refusal::Attempts(text) => s::flow_form_attempts_unreadable(text),
+            Refusal::Turns(text) => s::flow_form_turns_unreadable(text),
             Refusal::OutputRequired => s::flow_form_output_required(),
             Refusal::RunRequired => s::flow_form_run_required(),
         };

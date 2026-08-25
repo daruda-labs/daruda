@@ -240,11 +240,14 @@ nodes:
     }
 
     fn fields(output: &str) -> NodeFields {
-        use super::super::form::{BodyFields, FailFields, KindChoice, SourceField, TimeoutField};
+        use super::super::form::{
+            BodyFields, FailFields, KindChoice, SourceField, TimeoutField, TurnsField,
+        };
         NodeFields {
             id: "design".into(),
             deps: Vec::new(),
             timeout: TimeoutField::Absent,
+            max_turns: TurnsField::Absent,
             cwd: None,
             agent: Default::default(),
             body: BodyFields {

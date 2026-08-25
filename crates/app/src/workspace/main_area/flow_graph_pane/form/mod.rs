@@ -99,6 +99,7 @@ pub(in crate::workspace) struct NodeForm {
     id: Entity<InputState>,
     deps: Entity<InputState>,
     timeout: Entity<InputState>,
+    max_turns: Entity<InputState>,
     cwd: Entity<InputState>,
     agent: AgentStates,
     body: Body,
@@ -145,6 +146,7 @@ impl NodeForm {
         let id = single_line(&initial.id, window, cx);
         let deps = single_line(&initial.deps.join(", "), window, cx);
         let timeout = single_line(&timeout_text(&initial.timeout), window, cx);
+        let max_turns = single_line(&turns_text(&initial.max_turns), window, cx);
         let cwd = single_line(initial.cwd.as_deref().unwrap_or_default(), window, cx);
         // What an unstated axis resolves to, read off the file's own `defaults`.
         let inherited = file.defaults.agent.clone().unwrap_or_default();
@@ -193,6 +195,7 @@ impl NodeForm {
             id,
             deps,
             timeout,
+            max_turns,
             cwd,
             agent,
             body,
@@ -210,6 +213,7 @@ impl NodeForm {
             id: read(&self.id, cx).trim().to_string(),
             deps: parse_deps(&read(&self.deps, cx)),
             timeout: parse_timeout(read(&self.timeout, cx).trim()),
+            max_turns: parse_turns(read(&self.max_turns, cx).trim()),
             cwd: some_if_filled(read(&self.cwd, cx).trim()),
             agent: AgentFields {
                 id: some_if_filled(read(&self.agent.id, cx).trim()),
@@ -252,6 +256,9 @@ impl NodeForm {
         // name after a save round-trip, which is too late to be useful.
         if !daruda_flow::node_id_is_wellformed(&fields.id) {
             return Some(Refusal::InvalidId);
+        }
+        if let TurnsField::Unreadable(text) = fields.max_turns {
+            return Some(Refusal::Turns(text));
         }
         if let TimeoutField::Unreadable(text) = fields.timeout {
             return Some(Refusal::Timeout(text));
@@ -357,6 +364,10 @@ impl NodeForm {
 
     pub(in crate::workspace) fn timeout_state(&self) -> &Entity<InputState> {
         &self.timeout
+    }
+
+    pub(in crate::workspace) fn turns_state(&self) -> &Entity<InputState> {
+        &self.max_turns
     }
 
     pub(in crate::workspace) fn body_states(&self, cx: &App) -> BodyStates<'_> {
@@ -612,6 +623,26 @@ fn selected_permission(
 /// `defaults` says". The card shows the resolved value and the box showed a
 /// blank, so the two disagreed on screen about the same node — this is the box
 /// saying what the card already says.
+/// The turn cap as the box shows it. Empty is absent, which is the engine's
+/// default and the only thing a node that never mentioned turns may write back.
+fn turns_text(field: &TurnsField) -> String {
+    match field {
+        TurnsField::Absent => String::new(),
+        TurnsField::Set(n) => n.to_string(),
+        TurnsField::Unreadable(text) => text.clone(),
+    }
+}
+
+fn parse_turns(text: &str) -> TurnsField {
+    if text.is_empty() {
+        return TurnsField::Absent;
+    }
+    text.parse().map_or_else(
+        |_| TurnsField::Unreadable(text.to_string()),
+        TurnsField::Set,
+    )
+}
+
 fn single_line_inheriting<T: 'static>(
     value: &str,
     inherited: Option<&str>,

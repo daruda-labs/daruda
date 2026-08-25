@@ -281,10 +281,14 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
 }
 
 /// **A save must not delete what the form cannot show.** The inspector has no
-/// box for an `output_schema`, so the fields it writes back are rebuilt from a
-/// node that never carried one — and the differ turns a dropped key into a
-/// deletion edit. Asserted twice: a save that changes nothing, and a save that
-/// changes one other field.
+/// box for `output_schema`, `continue_until` or `max_turns`, so the fields it
+/// writes back are rebuilt from a node that never carried them — and the differ
+/// turns a dropped key into a deletion edit. Asserted twice: a save that
+/// changes nothing, and a save that changes one other field.
+///
+/// `continue_until` is the one that would hurt most quietly: losing it turns a
+/// node that keeps going until it says done back into a node that stops after
+/// one turn, and nothing on screen would say why the work got shorter.
 #[gpui::test]
 async fn saving_the_form_keeps_the_output_schema_the_form_cannot_show(cx: &mut TestAppContext) {
     use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
@@ -339,6 +343,10 @@ async fn saving_the_form_keeps_the_output_schema_the_form_cannot_show(cx: &mut T
     assert!(
         reloaded.flow().nodes[0].kind.output_schema().is_some(),
         "the engine still sees a shape to judge the output by"
+    );
+    assert!(
+        after.contains("continue_until:") && after.contains("max_turns: 4"),
+        "and it still knows to keep going until the output says so:\n{after}"
     );
 }
 
@@ -1831,4 +1839,60 @@ async fn a_name_the_engine_could_not_use_is_refused_while_it_is_typed(cx: &mut T
         None,
         "and an ordinary one is not refused"
     );
+}
+
+/// The turn cap is a ceiling on one attempt, like the timeout beside it, so it
+/// gets a box. `continue_until` does not: it names a field of the schema and
+/// carries a JSON value, and a text box would turn `equals: 1` into
+/// `equals: "1"` on the way back — the same reason `output_schema` is written
+/// in the YAML editor.
+#[gpui::test]
+async fn the_turn_cap_has_a_box_and_an_empty_one_writes_no_key(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_A_SCHEMA);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane opened");
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    let turns = view
+        .read_with(&vcx, |v, _| Some(v.form()?.turns_state().clone()))
+        .expect("an agent node has a turn box");
+    assert_eq!(
+        turns.read_with(&vcx, |state, _| state.value().to_string()),
+        "4",
+        "the box shows what the file said"
+    );
+
+    // Clearing it takes the key back out rather than writing a default.
+    turns.update_in(&mut vcx, |state, window, cx| {
+        state.set_value(String::new(), window, cx)
+    });
+    view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::Save));
+    vcx.run_until_parked();
+
+    let after = std::fs::read_to_string(&flow_path).expect("readable");
+    assert!(
+        !after.contains("max_turns"),
+        "an empty box wrote a key back:\n{after}"
+    );
+    assert!(
+        after.contains("continue_until:"),
+        "and the field with no box is still there:\n{after}"
+    );
+    daruda_flow::load(&after, None).expect("what was written loads");
 }

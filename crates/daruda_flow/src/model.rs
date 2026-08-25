@@ -26,6 +26,20 @@ pub struct Flow {
     pub nodes: Vec<Node>,
 }
 
+/// One field of the output, and the value that means finished.
+///
+/// The wire type re-exported rather than mirrored: there is nothing to resolve
+/// — no default fills a field name in — and two spellings of the same pair
+/// would be two places for it to drift.
+pub use crate::parse::DoneWhenFile as DoneWhen;
+
+/// Turns one attempt may spend when the flow does not say.
+///
+/// Two, because that is what the correction turn already allowed: the first
+/// prompt, and one more if the output was not usable. A flow written before
+/// `max_turns` existed behaves exactly as it did.
+pub const DEFAULT_MAX_TURNS: u32 = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
@@ -57,6 +71,20 @@ pub enum NodeKind {
         /// `defaults` to fill in and nothing to merge, so a resolved twin
         /// would be a second thing to keep in step for no gain.
         output_schema: Option<Box<SchemaSubset>>,
+        /// What the output has to say before this node is finished. `None` is
+        /// the rule that held before this existed: a well-formed output is a
+        /// finished node.
+        ///
+        /// The wire type unchanged, for the same reason `output_schema` is:
+        /// `defaults` has nothing to fill in here, so a resolved twin would be
+        /// a second thing to keep in step for no gain.
+        continue_until: Option<Box<DoneWhen>>,
+        /// How many prompts one attempt may send, the first included.
+        ///
+        /// Resolved rather than optional, because the absent case has a real
+        /// answer: 2 is what the correction turn already allowed, so a flow
+        /// written before this field behaves as it did.
+        max_turns: u32,
         on_fail: AgentFail,
     },
     Command {
@@ -71,6 +99,24 @@ impl NodeKind {
         match self {
             NodeKind::Agent { output_schema, .. } => output_schema.as_deref(),
             NodeKind::Command { .. } => None,
+        }
+    }
+
+    /// What this node's output has to say before it is finished, when the node
+    /// asked for more than a well-formed file.
+    pub fn continue_until(&self) -> Option<&DoneWhen> {
+        match self {
+            NodeKind::Agent { continue_until, .. } => continue_until.as_deref(),
+            NodeKind::Command { .. } => None,
+        }
+    }
+
+    /// How many prompts one attempt of this node may send, the first included.
+    /// A command node runs once — there is no turn to spend.
+    pub fn max_turns(&self) -> u32 {
+        match self {
+            NodeKind::Agent { max_turns, .. } => *max_turns,
+            NodeKind::Command { .. } => 1,
         }
     }
 }

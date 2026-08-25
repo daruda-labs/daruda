@@ -66,7 +66,11 @@ impl Run<'_> {
                 if let Some(output) = ctx.output {
                     push_channel(
                         &mut text,
-                        &crate::contract::prompt::block(output, node.kind.output_schema()),
+                        &crate::contract::prompt::block(
+                            output,
+                            node.kind.output_schema(),
+                            node.kind.continue_until(),
+                        ),
                     );
                 }
                 Ok(text)

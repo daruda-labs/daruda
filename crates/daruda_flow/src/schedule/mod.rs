@@ -317,12 +317,18 @@ impl<'a> Run<'a> {
                 let cwd = self.node_cwd(node);
                 // A local because `ctx` borrows it; when there is no output
                 // there is no contract, whatever the node's kind.
-                let contract = output
-                    .as_deref()
-                    .map(|p| FileContract::new(self.run_dir, p, node.kind.output_schema()));
+                let contract = output.as_deref().map(|p| {
+                    FileContract::new(
+                        self.run_dir,
+                        p,
+                        node.kind.output_schema(),
+                        node.kind.continue_until(),
+                    )
+                });
                 // A local because `ctx` borrows it, like `contract` above.
                 let reserve = || self.reserve_extra_turn();
                 let ctx = RunContext {
+                    max_turns: node.kind.max_turns(),
                     node_id: id,
                     attempt,
                     started_at: std::time::SystemTime::now(),
@@ -540,7 +546,7 @@ impl<'a> Run<'a> {
             invalidated,
             git_status: self.git_status.and_then(|ask| ask(ctx.cwd)),
             waited: reported.waited,
-            corrected: reported.corrected,
+            turns: reported.turns,
             tools: reported.tools,
             usage: reported.usage,
         };

@@ -138,6 +138,20 @@ pub enum ValidationKind {
     /// rather than dropped: a schema whose keywords go unenforced promises a
     /// reader a check that never runs.
     UnsupportedSchemaKeyword { keyword: String },
+    /// `continue_until` on a node whose output is not a JSON object — there is
+    /// nothing to read a field out of.
+    ContinueUntilWithoutObjectSchema,
+    /// `continue_until` names a field the schema does not declare, so nothing
+    /// tells the agent to write it.
+    ContinueUntilFieldNotDeclared { field: String },
+    /// The field is declared but optional: an agent that omits it leaves the
+    /// node finished by default, which is the opposite of what was asked.
+    ContinueUntilFieldNotRequired { field: String },
+    /// `continue_until` waits for a value the field's own `enum` does not
+    /// allow, so the output can never say it.
+    ContinueUntilValueNotAllowed { field: String },
+    /// `max_turns: 0` — an attempt that may send no prompt cannot run.
+    MaxTurnsIsZero,
     /// `enum` on a type other than `string`, which is the only one the check
     /// A pinned node sits in the rerun set of a gate this run reaches, so the
     /// repair cannot do what it says: reusing the output and re-running the

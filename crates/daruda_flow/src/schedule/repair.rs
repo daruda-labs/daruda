@@ -74,6 +74,9 @@ impl Run<'_> {
         let fix_id = NodeId::from(FIX_SESSION_ID);
         let reserve = || self.reserve_extra_turn();
         let fix_ctx = RunContext {
+            // A fix session writes no file, so there is no contract to go round
+            // for and nothing a second turn could change.
+            max_turns: 1,
             node_id: &fix_id,
             attempt: ctx.attempt,
             // Its own: the fix is a session of its own, and dating it from

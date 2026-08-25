@@ -95,15 +95,56 @@ pub(crate) struct FileContract {
     /// Owned for the same reason as the paths, and cloned per attempt: a
     /// schema is a few dozen bytes against an agent turn.
     schema: Option<SchemaSubset>,
+    /// What the output has to say before this node is finished. `None` is the
+    /// rule that held before this existed: a well-formed output is a finished
+    /// node.
+    done_when: Option<crate::model::DoneWhen>,
 }
 
 impl FileContract {
-    pub(crate) fn new(run_dir: &Path, output: &Path, schema: Option<&SchemaSubset>) -> Self {
+    pub(crate) fn new(
+        run_dir: &Path,
+        output: &Path,
+        schema: Option<&SchemaSubset>,
+        done_when: Option<&crate::model::DoneWhen>,
+    ) -> Self {
         Self {
             run_dir: run_dir.to_path_buf(),
             output: output.to_path_buf(),
             schema: schema.cloned(),
+            done_when: done_when.cloned(),
         }
+    }
+
+    /// Whether the output says the work is over.
+    ///
+    /// Asked last, and only after the shape held: reading a field out of a
+    /// file whose contents are the wrong shape reports "not finished" for what
+    /// is really a malformed output, and sends the agent to fix the wrong
+    /// thing. `crate::validate` has already refused a `continue_until` whose
+    /// field the schema does not require, so a file that matched the schema
+    /// has the field.
+    fn says_it_is_done(
+        &self,
+        contents: Option<&serde_json::Value>,
+        done_when: &crate::model::DoneWhen,
+    ) -> Result<(), ContractBreach> {
+        let value = contents.and_then(|value| value.get(&done_when.field));
+        if value == Some(&done_when.equals) {
+            return Ok(());
+        }
+        Err(ContractBreach {
+            kind: BreachKind::Unfinished {
+                expected: self.output.clone(),
+            },
+            first: format!(
+                "`{}` is {} and the node is finished when it is {}",
+                done_when.field,
+                value.map_or_else(|| "absent".to_string(), |v| v.to_string()),
+                done_when.equals
+            ),
+            rest: Vec::new(),
+        })
     }
 
     /// The declared shape, asked of the file's contents parsed as JSON.
@@ -112,13 +153,20 @@ impl FileContract {
     /// already established that a plain, non-empty file of this node's is
     /// there, so what is left is about its contents — and re-asking the agent
     /// to write it is a plausible fix either way.
-    fn shape_holds(&self, schema: &SchemaSubset) -> Result<(), ContractBreach> {
+    fn shape_holds(
+        &self,
+        schema: &SchemaSubset,
+    ) -> Result<Option<serde_json::Value>, ContractBreach> {
         let problems = match std::fs::read_to_string(&self.output) {
             Err(e) => vec![format!("the file could not be read: {e}")],
             Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
                 Err(e) => vec![format!("the file is not a single JSON value: {e}")],
                 Ok(value) => match crate::contract::schema::validate(&value, schema) {
-                    Ok(()) => return Ok(()),
+                    // Handed back rather than dropped: the verdict below asks
+                    // about a field of this same value, and reading the file a
+                    // second time per turn buys nothing but a chance for the
+                    // two answers to be about different bytes.
+                    Ok(()) => return Ok(Some(value)),
                     Err(problems) => problems,
                 },
             },
@@ -185,8 +233,17 @@ impl OutputContract for FileContract {
         // Last, and only when the node declared one: a shape question about a
         // file that is absent, or is not this node's work, would report the
         // wrong problem.
-        match &self.schema {
-            Some(schema) => self.shape_holds(schema),
+        let contents = match &self.schema {
+            Some(schema) => self.shape_holds(schema)?,
+            // No shape was asked for, so nothing has parsed the file — and the
+            // verdict below needs it parsed. A node that declares
+            // `continue_until` always declares an object schema too
+            // (`crate::validate` refuses one without), so this only reads when
+            // there is no verdict either.
+            None => None,
+        };
+        match &self.done_when {
+            Some(done_when) => self.says_it_is_done(contents.as_ref(), done_when),
             None => Ok(()),
         }
     }
@@ -210,6 +267,10 @@ fn breach(kind: BreachKind) -> ContractBreach {
             "{} resolves through a link to {}, outside the run directory",
             expected.display(),
             resolved.display()
+        ),
+        BreachKind::Unfinished { expected } => format!(
+            "{} is there and does not say the work is over",
+            expected.display()
         ),
         // Every line of a schema breach is the check's, so it cannot be worded
         // from the kind alone.

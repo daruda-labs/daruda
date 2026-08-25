@@ -55,6 +55,8 @@ fn an_update_that_changes_nothing_is_no_edit_at_all() {
 fn one_changed_scalar_changes_one_line_and_keeps_the_comment() {
     let after = edited(FLOW, |file| {
         file.nodes[1].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt("build it".into()),
             output: "artifact.md".into(),
@@ -109,6 +111,8 @@ fn a_new_node_is_appended_under_the_dash_its_siblings_use() {
         ship.id = "ship".into();
         ship.deps = vec!["build".into()];
         ship.kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt("ship it".into()),
             output: "ship.md".into(),
@@ -159,6 +163,8 @@ nodes:
 fn a_block_scalar_stays_a_block_scalar() {
     let after = edited(FLOW, |file| {
         file.nodes[0].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt("write the design\nin three lines\nnow\n".into()),
             output: "design.md".into(),
@@ -178,6 +184,8 @@ fn a_block_scalar_stays_a_block_scalar() {
 fn a_plain_scalar_that_grew_a_newline_is_promoted_to_a_block_scalar() {
     let after = edited(FLOW, |file| {
         file.nodes[1].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt("build it\nthen check it\n".into()),
             output: "build.md".into(),
@@ -201,6 +209,8 @@ fn a_prompt_whose_first_line_is_indented_still_loads_and_says_the_same_thing() {
     let prompt = "  fn main() {}\nexplain the above\n";
     let after = edited(FLOW, |file| {
         file.nodes[1].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt(prompt.into()),
             output: "build.md".into(),
@@ -210,6 +220,8 @@ fn a_prompt_whose_first_line_is_indented_still_loads_and_says_the_same_thing() {
     });
     let reparsed = daruda_flow::parse::parse_flow_file(&after).expect("what we wrote parses");
     let NodeKindFile::Agent {
+        continue_until: None,
+        max_turns: None,
         prompt: PromptSource::Prompt(back),
         ..
     } = &reparsed.nodes[1].kind
@@ -273,7 +285,13 @@ nodes:
     agent: {id: claude, mode: bypassPermissions}
 ";
     let err = edits_for_update(flow_mapping, |file| {
-        let NodeKindFile::Agent { agent, .. } = &mut file.nodes[0].kind else {
+        let NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            agent,
+            ..
+        } = &mut file.nodes[0].kind
+        else {
             panic!("agent node");
         };
         agent.as_mut().expect("has an override").model = Some("opus".into());
@@ -297,6 +315,8 @@ nodes:
 ";
     let err = edits_for_update(folded, |file| {
         file.nodes[0].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt("something else".into()),
             output: "design.md".into(),
@@ -358,6 +378,8 @@ fn two_new_fields_in_one_mapping_are_one_edit() {
 fn a_new_nested_mapping_is_written_as_a_block() {
     let after = edited(FLOW, |file| {
         file.nodes[0].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: Some(daruda_flow::parse::AgentOverride {
                 id: Some("codex".into()),
                 model: Some("gpt".into()),
@@ -491,6 +513,8 @@ nodes:
 fn a_new_key_takes_the_line_of_the_one_it_replaces() {
     let after = edited(FLOW, |file| {
         file.nodes[1].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::PromptFile("brief.md".into()),
             output: "build.md".into(),
@@ -521,7 +545,13 @@ nodes:
       hello
 ";
     let after = edited(text, |file| {
-        if let NodeKindFile::Agent { prompt, .. } = &mut file.nodes[0].kind {
+        if let NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            prompt,
+            ..
+        } = &mut file.nodes[0].kind
+        {
             *prompt = PromptSource::Prompt("new text\n".into());
         }
     });
@@ -530,7 +560,13 @@ nodes:
     // property, so once is not enough to prove it.
     assert!(
         edits_for_update(&after, |file| {
-            if let NodeKindFile::Agent { prompt, .. } = &mut file.nodes[0].kind {
+            if let NodeKindFile::Agent {
+                continue_until: None,
+                max_turns: None,
+                prompt,
+                ..
+            } = &mut file.nodes[0].kind
+            {
                 *prompt = PromptSource::Prompt("third\n".into());
             }
         })
@@ -554,7 +590,13 @@ nodes:
 
 ";
     let err = edits_for_update(text, |file| {
-        if let NodeKindFile::Agent { prompt, .. } = &mut file.nodes[0].kind {
+        if let NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            prompt,
+            ..
+        } = &mut file.nodes[0].kind
+        {
             *prompt = PromptSource::Prompt("new text\n".into());
         }
     })
@@ -582,7 +624,13 @@ nodes:
         max_attempts: 2
 ";
     let err = edits_for_update(text, |file| {
-        if let NodeKindFile::Agent { on_fail, .. } = &mut file.nodes[0].kind {
+        if let NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            on_fail,
+            ..
+        } = &mut file.nodes[0].kind
+        {
             *on_fail = Default::default();
         }
     })
@@ -639,7 +687,13 @@ nodes:
       # keep retrying
 ";
     let err = edits_for_update(text, |file| {
-        if let NodeKindFile::Agent { on_fail, .. } = &mut file.nodes[0].kind {
+        if let NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            on_fail,
+            ..
+        } = &mut file.nodes[0].kind
+        {
             *on_fail = Default::default();
         }
     })

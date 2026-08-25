@@ -10,7 +10,9 @@
 use daruda_flow::NodeId;
 use daruda_flow::parse::FlowFile;
 
-use super::{AttemptsField, FailFields, KindChoice, NodeFields, SourceField, TimeoutField};
+use super::{
+    AttemptsField, FailFields, KindChoice, NodeFields, SourceField, TimeoutField, TurnsField,
+};
 
 /// Write `fields` onto the node `node` names, mentions included.
 ///
@@ -47,6 +49,13 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
             },
             output: std::path::PathBuf::from(&fields.body.output),
             output_schema: schema_of(&target.kind),
+            continue_until: continue_until_of(&target.kind),
+            max_turns: match &fields.max_turns {
+                TurnsField::Set(n) => Some(*n),
+                // Absent stays absent: a node that never mentioned turns must
+                // not grow the key because someone renamed it.
+                TurnsField::Absent | TurnsField::Unreadable(_) => None,
+            },
             on_fail: retry_of(&target.kind, &fields.body.on_fail),
         },
         KindChoice::Command => NodeKindFile::Command {
@@ -99,6 +108,10 @@ pub(in crate::workspace) fn new_node(file: &mut FlowFile, after: Option<&NodeId>
         timeout: None,
         cwd: None,
         kind: NodeKindFile::Agent {
+            // A fresh card keeps the rule that held before these existed: one
+            // prompt, one correction, finished when the output is well-formed.
+            continue_until: None,
+            max_turns: None,
             agent: None,
             prompt: PromptSource::Prompt(String::new()),
             output: std::path::PathBuf::from(format!("{id}.md")),
@@ -250,6 +263,21 @@ fn schema_of(
     }
 }
 
+/// Kept, not rebuilt, for the same reason `schema_of` is: it names a field of
+/// the schema and carries a JSON value, so a text box would turn `equals: 1`
+/// into `equals: "1"` on the way back. A save that dropped it would take a
+/// node's "keep going until it says done" away as a side effect of renaming
+/// it.
+fn continue_until_of(
+    kind: &daruda_flow::parse::NodeKindFile,
+) -> Option<Box<daruda_flow::parse::DoneWhenFile>> {
+    use daruda_flow::parse::NodeKindFile;
+    match kind {
+        NodeKindFile::Agent { continue_until, .. } => continue_until.clone(),
+        NodeKindFile::Command { .. } => None,
+    }
+}
+
 /// The retry the form describes, starting from whatever the node held — so a
 /// node that was already an agent keeps anything the form does not carry.
 fn retry_of(
@@ -370,6 +398,7 @@ nodes:
             id: to.to_string(),
             deps: Vec::new(),
             timeout: TimeoutField::Absent,
+            max_turns: TurnsField::Absent,
             cwd: None,
             agent: Default::default(),
             body: BodyFields {

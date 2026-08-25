@@ -33,9 +33,10 @@ struct Recording<'a> {
     /// When this call began reading the stream — here rather than passed
     /// alongside, so the timeout race and the correction gate read one clock.
     started: Instant,
-    /// Set where a correction turn is used: the scheduler records that this
-    /// attempt consumed two budget units rather than one.
-    corrected: &'a Cell<bool>,
+    /// Prompts sent so far, the first included. A `Cell` for the same reason
+    /// the rest of `Recording` is: `keep_going` runs inside the drive and has
+    /// only a shared reference to it.
+    turns: &'a Cell<u32>,
     /// What the turn reached for, folded as the updates arrive.
     tools: &'a RefCell<tools::ToolTrace>,
 }
@@ -155,14 +156,14 @@ impl AcpRunner {
         opened.prompt(prompt);
         let log = RefCell::new(opened);
         let park = Park::default();
-        let corrected = Cell::new(false);
+        let turns = Cell::new(1);
         let traced = RefCell::new(tools::ToolTrace::default());
         let rec = Recording {
             usage: &usage,
             log: &log,
             park: &park,
             started,
-            corrected: &corrected,
+            turns: &turns,
             tools: &traced,
         };
 
@@ -207,7 +208,7 @@ impl AcpRunner {
             artifacts: log.artifacts(),
             usage: usage.into_inner(),
             waiting: park.waiting(Instant::now()),
-            corrected: corrected.get(),
+            turns: turns.get(),
             tools: traced.into_inner().finish(),
         }
     }
@@ -243,7 +244,7 @@ impl AcpRunner {
         // Only a turn that ended cleanly reaches here, which is also the only
         // turn the contract is ever asked about: `judge` answers the runner's
         // verdict first.
-        correction::correct_once(events, session, ctx, rec).await
+        correction::keep_going(events, session, ctx, rec).await
     }
 }
 
@@ -284,6 +285,15 @@ struct Park {
 }
 
 impl Park {
+    /// Whether anybody has refused anything in this call.
+    ///
+    /// The whole call and not the last turn: the refusal that matters most
+    /// happens on the *first* one, before the loop that reads this has
+    /// started, and a per-turn reading misses exactly that case.
+    fn any_refused(&self) -> bool {
+        self.answers.borrow().contains(&AskAnswer::Refused)
+    }
+
     /// Ended waits plus the one in progress. **Including the one in
     /// progress is the whole point**: a deadline computed from finished
     /// waits alone expires in the middle of a long one, which is exactly
@@ -573,7 +583,7 @@ fn failed(message: String) -> RunResult {
         usage: None,
         // Nothing opened, so nothing waited and nothing was corrected.
         waiting: Waiting::default(),
-        corrected: false,
+        turns: 0,
     }
 }
 

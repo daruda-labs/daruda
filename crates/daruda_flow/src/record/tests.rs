@@ -39,7 +39,7 @@ fn a_refusal_is_on_the_same_page_as_the_failure_it_caused() {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: waited(1, vec![AskAnswer::Refused]),
-            corrected: false,
+            turns: 1,
             usage: None,
         },
         Path::new("/run"),
@@ -82,7 +82,7 @@ fn a_turn_that_reached_for_nothing_adds_no_line() {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: Waiting::default(),
-            corrected: false,
+            turns: 1,
             tools: Vec::new(),
             usage: None,
         },
@@ -108,7 +108,7 @@ fn an_approval_adds_no_commentary() {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: waited(143, vec![AskAnswer::Allowed]),
-            corrected: false,
+            turns: 1,
             usage: None,
         },
         Path::new("/run"),
@@ -133,16 +133,16 @@ fn a_corrected_attempt_says_so() {
         invalidated: Invalidation::default(),
         git_status: None,
         waited: Waiting::default(),
-        corrected: true,
+        turns: 3,
         usage: None,
     };
     push_attempt_lines(&mut out, &attempt, Path::new("/run"));
-    assert!(out.contains("correction turn"), "{out}");
+    assert!(out.contains("sent 3 prompts"), "{out}");
 
     let mut plain = String::new();
-    attempt.corrected = false;
+    attempt.turns = 1;
     push_attempt_lines(&mut plain, &attempt, Path::new("/run"));
-    assert!(!plain.contains("correction"), "{plain}");
+    assert!(!plain.contains("prompts"), "{plain}");
 }
 
 /// An attempt nobody was asked anything in says nothing about waiting.
@@ -161,7 +161,7 @@ fn an_attempt_that_asked_nothing_stays_silent() {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: Waiting::default(),
-            corrected: false,
+            turns: 1,
             usage: None,
         },
         Path::new("/run"),
@@ -185,7 +185,7 @@ fn attempt(n: u32) -> AttemptRecord {
         },
         git_status: None,
         waited: Default::default(),
-        corrected: false,
+        turns: 1,
         usage: None,
     }
 }
@@ -282,7 +282,7 @@ fn run_md_lists_every_attempt_with_its_evidence() {
                 },
                 git_status: None,
                 waited: Default::default(),
-                corrected: false,
+                turns: 1,
                 usage: None,
             },
             AttemptRecord {
@@ -298,7 +298,7 @@ fn run_md_lists_every_attempt_with_its_evidence() {
                 },
                 git_status: None,
                 waited: Default::default(),
-                corrected: false,
+                turns: 1,
                 usage: None,
             },
         ],
@@ -343,7 +343,7 @@ fn run_md_shows_the_tree_state_when_the_host_answered() {
                 },
                 git_status: Some(" M src/lib.rs\n?? notes.md".to_string()),
                 waited: Default::default(),
-                corrected: false,
+                turns: 1,
                 usage: None,
             },
             // The host answering "nothing changed" is an answer, not a
@@ -361,7 +361,7 @@ fn run_md_shows_the_tree_state_when_the_host_answered() {
                 },
                 git_status: Some(String::new()),
                 waited: Default::default(),
-                corrected: false,
+                turns: 1,
                 usage: None,
             },
         ],

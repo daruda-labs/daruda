@@ -6,7 +6,7 @@ use super::*;
 /// The contract asked the way a caller asks it, reported the way a run
 /// reports it — so these assertions cover the conversion too.
 fn met(run_dir: &Path, output: &Path) -> Result<(), NodeFailure> {
-    FileContract::new(run_dir, output, None)
+    FileContract::new(run_dir, output, None, None)
         .check()
         .map_err(NodeFailure::from)
 }
@@ -14,7 +14,7 @@ fn met(run_dir: &Path, output: &Path) -> Result<(), NodeFailure> {
 /// The same, for a node that also declared a shape.
 fn met_shaped(run_dir: &Path, output: &Path, schema: &str) -> Result<(), NodeFailure> {
     let schema: SchemaSubset = yaml_serde::from_str(schema).expect("the fixture is a schema");
-    FileContract::new(run_dir, output, Some(&schema))
+    FileContract::new(run_dir, output, Some(&schema), None)
         .check()
         .map_err(NodeFailure::from)
 }
@@ -282,4 +282,86 @@ fn a_parent_swapped_for_a_link_to_a_sibling_output_is_not_this_nodes_work() {
         ),
         "resolving inside the run directory is not the same as being written there"
     );
+}
+
+/// A `continue_until` node's output is judged twice: it has to be the declared
+/// shape, and it has to say the work is over. `in_progress` satisfies the
+/// first — the schema allows it — which is the whole reason the second exists.
+fn met_until(
+    run_dir: &Path,
+    output: &Path,
+    schema: &str,
+    field: &str,
+    done: &str,
+) -> Result<(), NodeFailure> {
+    let schema: SchemaSubset = yaml_serde::from_str(schema).expect("the fixture is a schema");
+    let done_when = crate::model::DoneWhen {
+        field: field.to_string(),
+        equals: serde_json::Value::String(done.to_string()),
+    };
+    FileContract::new(run_dir, output, Some(&schema), Some(&done_when))
+        .check()
+        .map_err(NodeFailure::from)
+}
+
+const STATED: &str = "\
+type: object
+required: [state]
+properties:
+  state: { type: string, enum: [in_progress, done] }
+";
+
+#[test]
+fn an_output_that_says_it_is_done_meets_the_contract() {
+    let (_dir, run_dir, _) = fixture();
+    let output = run_dir.join("out.json");
+    std::fs::write(&output, r#"{"state": "done"}"#).expect("write");
+    assert_eq!(
+        met_until(&run_dir, &output, STATED, "state", "done"),
+        Ok(())
+    );
+}
+
+/// The case the whole feature is for: a well-formed output that has not
+/// finished. Without the second question this node would pass here and its
+/// work would stop after one turn.
+#[test]
+fn an_output_that_says_it_is_still_going_does_not() {
+    let (_dir, run_dir, _) = fixture();
+    let output = run_dir.join("out.json");
+    std::fs::write(&output, r#"{"state": "in_progress"}"#).expect("write");
+    let refused = met_until(&run_dir, &output, STATED, "state", "done")
+        .expect_err("an unfinished output is not a met contract");
+    let said = format!("{refused}");
+    assert!(said.contains("in_progress"), "{said}");
+    assert!(said.contains("state"), "{said}");
+}
+
+/// Order matters: reading a field out of a file whose contents are the wrong
+/// shape would report "not finished" for what is really a malformed output,
+/// and send the agent to fix the wrong thing.
+#[test]
+fn a_malformed_output_is_reported_as_malformed_not_as_unfinished() {
+    let (_dir, run_dir, _) = fixture();
+    let output = run_dir.join("out.json");
+    std::fs::write(&output, "not json at all").expect("write");
+    let said = format!(
+        "{}",
+        met_until(&run_dir, &output, STATED, "state", "done").expect_err("not a JSON value")
+    );
+    assert!(said.contains("JSON"), "{said}");
+    assert!(
+        !said.contains("does not say the work is over"),
+        "the shape is the problem, not the verdict:\n{said}"
+    );
+}
+
+/// A node that declared no `continue_until` reads exactly as it did before
+/// this existed — a well-formed output is a finished node.
+#[test]
+fn a_node_that_asked_for_no_verdict_is_finished_when_its_output_is_well_formed() {
+    let (_dir, run_dir, _) = fixture();
+    let output = run_dir.join("out.json");
+    std::fs::write(&output, r#"{"state": "in_progress"}"#).expect("write");
+    assert_eq!(met_shaped(&run_dir, &output, STATED), Ok(()));
 }

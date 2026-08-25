@@ -104,7 +104,8 @@ impl ProcessRunner {
             // A shell step opens no session, so nothing can ask and there is
             // no contract to correct.
             waiting: crate::runner::Waiting::default(),
-            corrected: false,
+            // A command runs its line once; there is no turn to spend.
+            turns: 1,
         }
     }
 
@@ -158,7 +159,7 @@ fn failed(artifacts: Vec<PathBuf>, message: String) -> RunResult {
         artifacts,
         usage: None,
         waiting: crate::runner::Waiting::default(),
-        corrected: false,
+        turns: 0,
     }
 }
 
@@ -252,6 +253,8 @@ mod tests {
 
         fn context(&self) -> RunContext<'_> {
             RunContext {
+                // A command runs once; there is no turn to spend.
+                max_turns: 1,
                 node_id: &self.node,
                 attempt: 1,
                 started_at: std::time::SystemTime::now(),

@@ -49,7 +49,7 @@ fn a_turn_that_wrote_the_wrong_shape_is_asked_again_and_then_writes_json() {
 
     assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
     assert_eq!(prompts_sent(&counter), 2, "the correction never went out");
-    assert!(result.corrected);
+    assert_eq!(result.turns, 2);
     assert_eq!(fixture.judged(), Ok(()), "the correction did not land");
 }
 
@@ -88,7 +88,7 @@ fn a_turn_that_wrote_nothing_is_asked_again_and_then_writes_it() {
 
     assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
     assert_eq!(prompts_sent(&counter), 2, "the correction never went out");
-    assert!(result.corrected, "the second turn went unrecorded");
+    assert_eq!(result.turns, 2, "the second turn went unrecorded");
     assert_eq!(fixture.judged(), Ok(()), "the correction did not land");
 }
 
@@ -129,7 +129,7 @@ fn a_correction_that_changes_nothing_still_reports_what_was_owed() {
     let result = fixture.run(&spec(AGENT));
 
     assert_eq!(prompts_sent(&counter), 2);
-    assert!(result.corrected);
+    assert_eq!(result.turns, 2);
     assert_eq!(result.outcome, Ok(()), "the turn itself ended cleanly");
     assert_eq!(
         fixture.judged(),
@@ -185,7 +185,7 @@ fn a_refused_reservation_stops_the_correction_before_it_is_sent() {
 
     assert_eq!(prompts_sent(&counter), 1, "the run paid past its ceiling");
     assert!(
-        !result.corrected,
+        result.turns == 1,
         "a refused correction must not be recorded as one"
     );
 }
@@ -210,7 +210,7 @@ fn a_budget_smaller_than_the_correction_floor_sends_none() {
 
     assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
     assert_eq!(prompts_sent(&counter), 1, "a doomed correction was sent");
-    assert!(!result.corrected);
+    assert_eq!(result.turns, 1);
 }
 
 /// An adapter that counts prompts *and* asks for permission on the first
@@ -285,7 +285,7 @@ fn a_long_wait_for_a_person_still_gets_its_correction() {
         2,
         "the person's time was charged to the node"
     );
-    assert!(result.corrected);
+    assert_eq!(result.turns, 2);
 }
 
 /// A link where the output belongs is a refusal, not a mistake to point
@@ -304,7 +304,7 @@ fn a_link_where_the_output_belongs_is_not_asked_again() {
     let result = fixture.run(&spec(AGENT));
 
     assert_eq!(prompts_sent(&counter), 1, "a refusal was argued with");
-    assert!(!result.corrected);
+    assert_eq!(result.turns, 1);
     assert!(matches!(
         fixture.judged(),
         Err(NodeFailure::OutputNotAFile { .. })
@@ -376,5 +376,149 @@ fn a_turn_that_wrote_its_output_is_never_asked_twice() {
 
     assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
     assert_eq!(prompts_sent(&counter), 1, "a met contract bought a turn");
-    assert!(!result.corrected);
+    assert_eq!(result.turns, 1);
+}
+
+const STATED: &str = "\
+type: object
+required: [state]
+properties:
+  state: { type: string, enum: [in_progress, done] }
+";
+
+/// Shell that writes `in_progress` the first time it runs and `done` the
+/// second — an agent that reports partial work and carries on, which is the
+/// behaviour "continue" was being clicked for.
+///
+/// `counting_adapter` only runs a body from the *second* prompt, so the first
+/// turn writes nothing at all. That makes this fixture pass through both
+/// reasons to go round: a missing output, then an unfinished one.
+fn finishes_on_its_second_run(output: &Path, counter: &Path) -> String {
+    format!(
+        r#"n=$(cat "{c}" 2>/dev/null || echo 0)
+n=$((n+1)); printf '%s' "$n" > "{c}"
+if [ "$n" -ge 2 ]; then s=done; else s=in_progress; fi
+printf '{{"state":"%s"}}\n' "$s" > "{o}""#,
+        c = counter.display(),
+        o = output.display()
+    )
+}
+
+/// The click this whole feature removes. Three turns, two reasons to go round
+/// — nothing written, then written but unfinished — and nobody asked whether
+/// to continue.
+#[test]
+fn a_node_that_reports_partial_work_is_carried_on_until_it_says_done() {
+    let (_probe, counter) = probe("prompts");
+    let (_turns, turn_file) = probe("turns");
+    let mut fixture = Fixture::with_script_for_output(|output| {
+        counting_adapter(&counter, &finishes_on_its_second_run(output, &turn_file))
+    });
+    fixture.wants_done_when(STATED, "state", "done");
+    fixture.wants_turns(4);
+
+    let result = fixture.run(&spec(AGENT));
+
+    assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
+    assert_eq!(
+        prompts_sent(&counter),
+        3,
+        "one prompt per turn, and no fourth once it said done"
+    );
+    assert_eq!(fixture.judged(), Ok(()));
+}
+
+/// `max_turns: 1` is a node that gets no second chance — not even the
+/// correction turn that existed before this loop did.
+#[test]
+fn a_node_allowed_one_turn_is_never_asked_again() {
+    let (_probe, counter) = probe("prompts");
+    let mut fixture =
+        Fixture::with_script_for_output(|output| counting_adapter(&counter, &writes(output)));
+    fixture.wants_json(VERDICT);
+    fixture.wants_turns(1);
+
+    let result = fixture.run(&spec(AGENT));
+
+    assert_eq!(prompts_sent(&counter), 1, "a second prompt went out");
+    assert_eq!(result.turns, 1);
+    assert!(
+        matches!(fixture.judged(), Err(NodeFailure::OutputSchema { .. })),
+        "and the node is judged on what one turn left behind"
+    );
+}
+
+/// Running out of turns with the work unfinished fails the node. Passing it
+/// would hand a half-written output to whatever reads it next, and the run
+/// would look like it worked.
+#[test]
+fn running_out_of_turns_still_unfinished_fails_the_node() {
+    let (_probe, counter) = probe("prompts");
+    let (_turns, turn_file) = probe("turns");
+    let mut fixture = Fixture::with_script_for_output(|output| {
+        // Needs three prompts to reach `done` and is allowed two.
+        counting_adapter(&counter, &finishes_on_its_second_run(output, &turn_file))
+    });
+    fixture.wants_done_when(STATED, "state", "done");
+    fixture.wants_turns(2);
+
+    let result = fixture.run(&spec(AGENT));
+
+    assert_eq!(prompts_sent(&counter), 2, "it spent exactly what it had");
+    assert_eq!(result.outcome, Ok(()), "the turns themselves ended cleanly");
+    assert!(
+        matches!(fixture.judged(), Err(NodeFailure::OutputSchema { .. })),
+        "and the node fails on what is on disk: {:?}",
+        fixture.judged()
+    );
+}
+
+/// **A refusal ends the loop.** The design said the opposite — that a refused
+/// turn should not come out of the cap, because a person saying no is not the
+/// agent failing to progress — and implemented that way it does not
+/// terminate: a policy refusing every turn decrements nothing, and the loop
+/// runs until the clock or the budget stops it, having spent both on turns
+/// that were always going to be refused.
+///
+/// Ending is also what the rest of the engine already does with a refusal —
+/// `NodeFailure::forbids_retry` counts it for the same reason.
+#[test]
+fn a_refused_turn_ends_the_loop_rather_than_being_exempt_from_the_cap() {
+    let (_probe, counter) = probe("prompts");
+    let (_answers, answered) = probe("answer.json");
+    let mut fixture = Fixture::with_script(&asking_counting_adapter(
+        &counter,
+        REJECT_ONCE_OPTION,
+        &answered,
+        "",
+    ));
+    fixture.owes_its_output();
+    // Room for many turns, so what stops the loop is the refusal and not the
+    // cap or the clock.
+    fixture.wants_turns(9);
+    fixture.timeout = Duration::from_secs(120);
+
+    let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::from_millis(1), |_| {
+        Person::Answers(PermissionDecision::Reject {
+            option_id: "no".to_string(),
+        })
+    });
+
+    assert_eq!(asked.len(), 1, "asked once, refused once");
+    assert_eq!(
+        prompts_sent(&counter),
+        1,
+        "the refusal stopped it before a second prompt went out"
+    );
+    assert_eq!(result.turns, 1);
+    assert!(
+        result.waiting.any_refused(),
+        "and the record says a person refused, so the failure below is not \
+         read as the agent simply not writing"
+    );
+    assert!(
+        matches!(fixture.judged(), Err(NodeFailure::NoOutput { .. })),
+        "{:?}",
+        fixture.judged()
+    );
 }

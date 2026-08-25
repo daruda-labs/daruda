@@ -150,6 +150,7 @@ struct Fixture {
     ask: Option<crate::runner::AskChannel>,
     /// Held for the same reason as `ask`: the `RunContext` borrows it.
     contract: crate::contract::file::FileContract,
+    max_turns: u32,
     /// What the run's budget answers when the runner asks to spend one more
     /// turn. Owned rather than built in `context`, which cannot hand out a
     /// reference to a closure of its own.
@@ -188,10 +189,11 @@ impl Fixture {
         std::fs::create_dir_all(&run_dir).expect("the run directory");
         std::fs::write(&output, "already written\n").expect("seed the output");
         Self {
+            max_turns: crate::model::DEFAULT_MAX_TURNS,
             node: "design".into(),
             cwd: dir.path().to_path_buf(),
             log_dir: run_dir.join("logs"),
-            contract: crate::contract::file::FileContract::new(&run_dir, &output, None),
+            contract: crate::contract::file::FileContract::new(&run_dir, &output, None, None),
             output,
             run_dir,
             cancel: CancelToken::default(),
@@ -208,6 +210,9 @@ impl Fixture {
 
     fn context(&self) -> RunContext<'_> {
         RunContext {
+            // Two: the first prompt and the one extra the correction turn always
+            // allowed. A test that wants a longer loop raises it.
+            max_turns: self.max_turns,
             node_id: &self.node,
             attempt: 1,
             started_at: std::time::SystemTime::now(),
@@ -233,11 +238,39 @@ impl Fixture {
 
     /// Give the node a declared shape as well as a path, so the contract is
     /// about what is *in* the file and not only that it is there.
+    /// How many prompts one attempt may send. Two is what the correction turn
+    /// always allowed; a test about the loop raises it, and a test about a node
+    /// that gets no second chance sets one.
+    fn wants_turns(&mut self, max_turns: u32) {
+        self.max_turns = max_turns;
+    }
+
+    /// The output has to say this before the node is finished — the second
+    /// question the contract asks once a node declares one.
+    fn wants_done_when(&mut self, schema: &str, field: &str, done: &str) {
+        let schema: crate::parse::SchemaSubset =
+            yaml_serde::from_str(schema).expect("the fixture is a schema");
+        let done_when = crate::model::DoneWhen {
+            field: field.to_string(),
+            equals: serde_json::Value::String(done.to_string()),
+        };
+        self.contract = crate::contract::file::FileContract::new(
+            &self.run_dir,
+            &self.output,
+            Some(&schema),
+            Some(&done_when),
+        );
+    }
+
     fn wants_json(&mut self, schema: &str) {
         let schema: crate::parse::SchemaSubset =
             yaml_serde::from_str(schema).expect("the fixture is a schema");
-        self.contract =
-            crate::contract::file::FileContract::new(&self.run_dir, &self.output, Some(&schema));
+        self.contract = crate::contract::file::FileContract::new(
+            &self.run_dir,
+            &self.output,
+            Some(&schema),
+            None,
+        );
     }
 
     /// Take the seeded output away, so the turn ends owing a file and the

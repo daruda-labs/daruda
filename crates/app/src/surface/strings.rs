@@ -719,6 +719,14 @@ pub fn flow_form_id_required() -> String {
 }
 /// A name the engine could not use. Says the rule rather than only refusing:
 /// the person is looking at the box and needs to know what to type instead.
+/// Label on the turn-cap box. Says "prompts" rather than "turns": a turn is
+/// the protocol's word and a prompt is what the person is capping.
+pub fn flow_form_turns_label() -> String {
+    rust_i18n::t!("flow.form_turns_label").into_owned()
+}
+pub fn flow_form_turns_unreadable(text: &str) -> String {
+    rust_i18n::t!("flow.form_turns_unreadable", text => text).into_owned()
+}
 pub fn flow_form_id_invalid() -> String {
     rust_i18n::t!("flow.form_id_invalid").into_owned()
 }
@@ -5589,6 +5597,19 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::UnsupportedSchemaKeyword { keyword } => {
             rust_i18n::t!("flow.issue_unsupported_schema_keyword", keyword => keyword)
         }
+        K::ContinueUntilWithoutObjectSchema => {
+            rust_i18n::t!("flow.issue_continue_until_needs_object")
+        }
+        K::ContinueUntilFieldNotDeclared { field } => {
+            rust_i18n::t!("flow.issue_continue_until_undeclared", field => field)
+        }
+        K::ContinueUntilFieldNotRequired { field } => {
+            rust_i18n::t!("flow.issue_continue_until_optional", field => field)
+        }
+        K::ContinueUntilValueNotAllowed { field } => {
+            rust_i18n::t!("flow.issue_continue_until_value_forbidden", field => field)
+        }
+        K::MaxTurnsIsZero => rust_i18n::t!("flow.issue_max_turns_zero"),
         K::PinnedNodeInRerun { node, gate } => rust_i18n::t!(
             "flow.issue_pinned_node_in_rerun",
             node => node.as_str(),

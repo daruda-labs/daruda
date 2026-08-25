@@ -74,6 +74,8 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 prompt,
                 output,
                 output_schema,
+                continue_until,
+                max_turns,
                 on_fail,
                 ..
             } => {
@@ -81,6 +83,19 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 // are one statement about the subset, so they live together.
                 if let Some(schema) = output_schema {
                     issues.extend(crate::contract::schema::issues(schema, &node.id));
+                }
+                check_continue_until(
+                    continue_until.as_deref(),
+                    output_schema.as_deref(),
+                    &node.id,
+                    &mut issues,
+                );
+                if *max_turns == 0 {
+                    issues.push(issue(
+                        node.id.clone(),
+                        ValidationKind::MaxTurnsIsZero,
+                        "an attempt has to be allowed at least one prompt".to_string(),
+                    ));
                 }
                 if output.components().any(|c| {
                     matches!(
@@ -211,6 +226,82 @@ fn canonical_output(output: &std::path::Path) -> String {
         .to_lowercase()
         .nfc()
         .collect()
+}
+
+/// Whether a `continue_until` can be read at all.
+///
+/// Three ways it cannot, and each fails the same way if unchecked: the node
+/// runs its turns, nothing ever matches, and it fails on the turn cap having
+/// spent every session. The rules exist so that happens at load instead.
+fn check_continue_until(
+    done_when: Option<&crate::model::DoneWhen>,
+    schema: Option<&crate::parse::SchemaSubset>,
+    node: &NodeId,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let Some(done_when) = done_when else {
+        return;
+    };
+    // Read out of the output's JSON, so the output has to be a JSON object.
+    let Some(schema) = schema.filter(|s| s.kind == crate::parse::SchemaKind::Object) else {
+        issues.push(issue(
+            node.clone(),
+            ValidationKind::ContinueUntilWithoutObjectSchema,
+            "`continue_until` reads a field out of the output, which needs an \
+             `output_schema` of `type: object`"
+                .to_string(),
+        ));
+        return;
+    };
+    if !schema.properties.contains_key(&done_when.field) {
+        issues.push(issue(
+            node.clone(),
+            ValidationKind::ContinueUntilFieldNotDeclared {
+                field: done_when.field.clone(),
+            },
+            format!(
+                "`{}` is not in this node's `output_schema`, so nothing tells the agent to write it",
+                done_when.field
+            ),
+        ));
+        return;
+    }
+    // A value the field cannot hold is the same defect as a field that is not
+    // there: the node spends every turn and fails on the cap. This one is the
+    // easiest to write by accident, because the enum and the verdict are two
+    // lines apart and a typo in either reads fine.
+    if let Some(allowed) = schema
+        .properties
+        .get(&done_when.field)
+        .and_then(|field| field.allowed.as_ref())
+        && !allowed.contains(&done_when.equals)
+    {
+        issues.push(issue(
+            node.clone(),
+            ValidationKind::ContinueUntilValueNotAllowed {
+                field: done_when.field.clone(),
+            },
+            format!(
+                "`{}` is not one of the values `{}` allows, so the output could never say it",
+                done_when.equals, done_when.field
+            ),
+        ));
+        return;
+    }
+    // Optional would mean an agent that writes nothing leaves the node
+    // finished, which is the opposite of what `continue_until` asks for.
+    if !schema.required.contains(&done_when.field) {
+        issues.push(issue(
+            node.clone(),
+            ValidationKind::ContinueUntilFieldNotRequired {
+                field: done_when.field.clone(),
+            },
+            format!(
+                "`{}` has to be in `required`, or an output that omits it counts as finished",
+                done_when.field
+            ),
+        ));
+    }
 }
 
 fn issue(node: NodeId, kind: ValidationKind, message: String) -> ValidationIssue {
@@ -808,6 +899,162 @@ nodes:
                 .iter()
                 .any(|i| matches!(i.kind, ValidationKind::ReservedNodeId)),
             "{issues:?}"
+        );
+    }
+
+    /// Each of the three ways a `continue_until` cannot be read fails the
+    /// same way if unchecked: the node spends every turn it is allowed, never
+    /// matches, and fails on the cap — having paid for a session per turn.
+    /// The point of these rules is that it happens at load instead.
+    #[test]
+    fn a_continue_until_nothing_could_read_is_rejected() {
+        type Wanted = fn(&ValidationKind) -> bool;
+        let cases: [(&str, Wanted); 3] = [
+            // No schema at all: nothing to read a field out of.
+            (
+                "    continue_until: { field: state, equals: done }\n",
+                |k| matches!(k, ValidationKind::ContinueUntilWithoutObjectSchema),
+            ),
+            // A schema that does not declare the field.
+            (
+                "    continue_until: { field: state, equals: done }
+    output_schema:
+      type: object
+      required: [other]
+      properties:
+        other: { type: string }
+",
+                |k| matches!(k, ValidationKind::ContinueUntilFieldNotDeclared { .. }),
+            ),
+            // Declared but optional: an output that omits it would count as
+            // finished, which is the opposite of what was asked.
+            (
+                "    continue_until: { field: state, equals: done }
+    output_schema:
+      type: object
+      properties:
+        state: { type: string }
+",
+                |k| matches!(k, ValidationKind::ContinueUntilFieldNotRequired { .. }),
+            ),
+        ];
+        for (tail, wanted) in cases {
+            let issues = issues_for(&format!(
+                "\
+version: 1
+defaults: {{ agent: {{ id: claude }} }}
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+{tail}"
+            ));
+            assert!(
+                issues.iter().any(|i| wanted(&i.kind)),
+                "for {tail:?} got {issues:?}"
+            );
+        }
+    }
+
+    /// The one easiest to write by accident: the enum and the verdict are two
+    /// lines apart, and a typo in either reads fine. Without this rule the
+    /// node spends every turn it is allowed — a paid session each — and fails
+    /// on the cap having never had a value it could report.
+    #[test]
+    fn a_continue_until_waiting_for_a_value_the_enum_forbids_is_rejected() {
+        let issues = issues_for(
+            "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+    continue_until: { field: state, equals: complete }
+    output_schema:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [in_progress, done] }
+",
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i.kind, ValidationKind::ContinueUntilValueNotAllowed { .. })),
+            "{issues:?}"
+        );
+    }
+
+    /// A field with no `enum` takes any value, so there is nothing to check
+    /// against — the rule must not refuse that.
+    #[test]
+    fn a_continue_until_on_a_field_with_no_enum_is_accepted() {
+        let issues = issues_for(
+            "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+    continue_until: { field: state, equals: anything }
+    output_schema:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string }
+",
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// The shape that works, so the rules above are not refusing everything.
+    #[test]
+    fn a_continue_until_the_agent_is_told_to_write_is_accepted() {
+        let issues = issues_for(
+            "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+    continue_until: { field: state, equals: done }
+    max_turns: 5
+    output_schema:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [in_progress, done] }
+",
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// An attempt that may send no prompt cannot run at all.
+    #[test]
+    fn max_turns_of_zero_is_rejected() {
+        let issues = issues_for(
+            "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.md
+    prompt: write
+    max_turns: 0
+",
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i.kind, ValidationKind::MaxTurnsIsZero))
         );
     }
 

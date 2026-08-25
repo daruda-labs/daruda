@@ -31,7 +31,7 @@ const TEN_MINUTES: Duration = Duration::from_secs(600);
 /// a second ask can answer.
 #[test]
 fn a_missing_output_with_time_left_is_worth_one_more_ask() {
-    assert!(may_correct(
+    assert!(may_go_again(
         &missing(),
         false,
         Duration::from_secs(60),
@@ -45,7 +45,7 @@ fn a_missing_output_with_time_left_is_worth_one_more_ask() {
 /// and the session it would be asked in still holds the schema.
 #[test]
 fn a_misshapen_output_is_worth_one_more_ask_too() {
-    assert!(may_correct(
+    assert!(may_go_again(
         &misshapen(),
         false,
         Duration::from_secs(60),
@@ -70,7 +70,7 @@ fn a_link_or_an_escape_is_never_corrected() {
         },
     ] {
         assert!(
-            !may_correct(
+            !may_go_again(
                 &breach(kind.clone()),
                 false,
                 Duration::ZERO,
@@ -88,7 +88,7 @@ fn a_link_or_an_escape_is_never_corrected() {
 #[test]
 fn a_canceled_run_buys_no_correction() {
     for breach in [missing(), misshapen()] {
-        assert!(!may_correct(
+        assert!(!may_go_again(
             &breach,
             true,
             Duration::ZERO,
@@ -104,7 +104,7 @@ fn a_canceled_run_buys_no_correction() {
 /// the thing to put right.
 #[test]
 fn a_turn_that_has_nearly_spent_its_budget_does_not_start_one() {
-    assert!(!may_correct(
+    assert!(!may_go_again(
         &missing(),
         false,
         Duration::from_secs(590),
@@ -119,7 +119,7 @@ fn a_turn_that_has_nearly_spent_its_budget_does_not_start_one() {
 /// of work — would be refused for the time somebody else took.
 #[test]
 fn a_long_wait_for_a_person_does_not_deny_a_correction() {
-    assert!(may_correct(
+    assert!(may_go_again(
         &missing(),
         false,
         Duration::from_secs(600),

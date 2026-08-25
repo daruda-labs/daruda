@@ -101,10 +101,17 @@ struct AttemptLine {
     waited_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     answers: Vec<AnswerLine>,
-    /// Whether the attempt used a second turn to correct its output.
-    /// Absent on every journal written before it existed, which reads back
-    /// as `false` — an older line describes a run that could not have.
-    #[serde(default, skip_serializing_if = "is_false")]
+    /// How many prompts the attempt sent, the first included. Absent on a
+    /// journal written before turns were counted; `corrected` below is what
+    /// such a line has to say instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turns: Option<u32>,
+    /// **Read, never written.** The flag `turns` replaced: a line carrying it
+    /// knew only that the attempt had spent more than one turn, so it reads
+    /// back as the floor that claim allows — two. Kept rather than dropped
+    /// because dropping it would silently turn every corrected attempt in an
+    /// existing journal into an ordinary one.
+    #[serde(default, skip_serializing)]
     corrected: bool,
     spent: SpentLine,
 }
@@ -253,7 +260,8 @@ pub(crate) fn append_attempt(
                     AskAnswer::Unanswered => AnswerLine::Unanswered,
                 })
                 .collect(),
-            corrected: attempt.corrected,
+            turns: (attempt.turns > 1).then_some(attempt.turns),
+            corrected: false,
             spent: SpentLine {
                 node_runs: spent.node_runs,
                 parked_ms: millis(spent.parked),
@@ -387,6 +395,7 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                 took_ms,
                 waited_ms,
                 answers,
+                turns,
                 corrected,
                 spent,
                 ..
@@ -444,7 +453,9 @@ fn absorb(replay: &mut Replay, entry: Entry) {
                             })
                             .collect(),
                     },
-                    corrected,
+                    // The new key when the line has it, and what the old flag
+                    // could assert when it does not.
+                    turns: turns.unwrap_or(if corrected { 2 } else { 1 }),
                 },
             );
         }
@@ -471,7 +482,7 @@ mod tests {
             invalidated: Invalidation::default(),
             git_status: None,
             waited: Waiting::default(),
-            corrected: false,
+            turns: 1,
             usage: None,
         }
     }
@@ -690,16 +701,16 @@ mod tests {
 
     /// **The trap this closes.** `absorb` destructures with a trailing `..`,
     /// so a field added to the line compiles clean and is silently dropped on
-    /// resume — a corrected attempt would read back as an ordinary one, and
-    /// the record of a run continued after a crash would understate what it
-    /// cost. Nothing but a round trip catches that.
+    /// resume — an attempt that spent four turns would read back as one that
+    /// spent one, and the record of a run continued after a crash would
+    /// understate what it cost. Nothing but a round trip catches that.
     #[test]
-    fn a_correction_survives_the_round_trip() {
+    fn a_turn_count_survives_the_round_trip() {
         let dir = tempfile::tempdir().expect("tempdir");
         start(dir.path(), None, None, &[]).expect("start");
-        let mut corrected = attempt(1, 1, AttemptOutcome::Passed);
-        corrected.corrected = true;
-        append_attempt(dir.path(), &"design".into(), &corrected, &spent(2)).expect("append");
+        let mut carried_on = attempt(1, 1, AttemptOutcome::Passed);
+        carried_on.turns = 4;
+        append_attempt(dir.path(), &"design".into(), &carried_on, &spent(2)).expect("append");
         append_attempt(
             dir.path(),
             &"review".into(),
@@ -709,21 +720,44 @@ mod tests {
         .expect("append");
 
         let replay = read(dir.path());
-        assert!(
-            replay.records[0].attempts[0].corrected,
-            "the correction was dropped on the way back"
+        assert_eq!(
+            replay.records[0].attempts[0].turns, 4,
+            "the count was dropped on the way back"
         );
-        assert!(
-            !replay.records[1].attempts[0].corrected,
-            "an ordinary attempt must not read as corrected"
+        assert_eq!(
+            replay.records[1].attempts[0].turns, 1,
+            "and a one-turn attempt does not inherit it"
         );
     }
 
-    /// The field is skipped when false, so a journal an older build wrote —
-    /// which has no such key — still reads, and every line a run without
-    /// corrections writes is unchanged.
+    /// A journal an older build wrote knows only `corrected: true` — that the
+    /// attempt spent more than one turn, not how many. It reads back as the
+    /// floor that claim allows, which is the most an old line can honestly
+    /// assert. Dropping the key instead would turn every corrected attempt in
+    /// an existing journal into an ordinary one.
     #[test]
-    fn an_uncorrected_attempt_writes_no_such_key() {
+    fn an_older_journals_corrected_flag_reads_as_two_turns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        start(dir.path(), None, None, &[]).expect("start");
+        // Hand-written, because the point is a line this build no longer
+        // writes: only `corrected`, with no `turns` at all.
+        let line = "{\"kind\":\"attempt\",\"v\":1,\"node\":\"design\",\"attempt\":1,\
+                    \"evidence_seq\":1,\"outcome\":{\"result\":\"passed\"},\
+                    \"corrected\":true,\"spent\":{\"node_runs\":2}}\n";
+        let path = dir.path().join(JOURNAL_FILE);
+        let mut text = std::fs::read_to_string(&path).expect("started");
+        text.push_str(line);
+        std::fs::write(&path, text).expect("append by hand");
+
+        let replay = read(dir.path());
+        assert_eq!(replay.records[0].attempts[0].turns, 2);
+    }
+
+    /// The key is skipped at one turn, so every line a run that never carried
+    /// a node on writes is unchanged — and `corrected` is never written at
+    /// all, because nothing reads it but an older journal's own lines.
+    #[test]
+    fn a_one_turn_attempt_writes_no_turn_key() {
         let dir = tempfile::tempdir().expect("tempdir");
         append_attempt(
             dir.path(),

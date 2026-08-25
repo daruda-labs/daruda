@@ -66,6 +66,8 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
                 prompt,
                 output,
                 output_schema,
+                continue_until,
+                max_turns,
                 on_fail,
             } => {
                 // Checked here, not in `crate::validate`: after merging,
@@ -90,6 +92,8 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
                         prompt: resolve_prompt(prompt),
                         output,
                         output_schema,
+                        continue_until,
+                        max_turns: max_turns.unwrap_or(crate::model::DEFAULT_MAX_TURNS),
                         on_fail: resolve_agent_fail(on_fail),
                     },
                     None => {
@@ -219,6 +223,8 @@ fn node_kind_file(kind: &NodeKind, flow_dir: &Path) -> NodeKindFile {
             prompt,
             output,
             output_schema,
+            continue_until,
+            max_turns,
             on_fail,
         } => NodeKindFile::Agent {
             agent: Some(node_agent_override(agent)),
@@ -228,6 +234,10 @@ fn node_kind_file(kind: &NodeKind, flow_dir: &Path) -> NodeKindFile {
             },
             output: output.clone(),
             output_schema: output_schema.clone(),
+            continue_until: continue_until.clone(),
+            // Written back only when it is not the default, so a flow that
+            // never mentioned turns does not grow a line on a round trip.
+            max_turns: (*max_turns != crate::model::DEFAULT_MAX_TURNS).then_some(*max_turns),
             on_fail: match on_fail {
                 AgentFail::Halt => AgentFailFile::Halt,
                 AgentFail::Retry {

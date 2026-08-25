@@ -220,6 +220,16 @@ pub enum BreachKind {
     Schema {
         expected: PathBuf,
     },
+    /// The output is this node's, well-formed, and does not say the work is
+    /// over — the node declared `continue_until` and the field it named says
+    /// otherwise.
+    ///
+    /// A breach rather than a verdict of its own because everything that
+    /// follows one is what this needs too: another turn on the open session,
+    /// a line in the record, a failure if the turns run out.
+    Unfinished {
+        expected: PathBuf,
+    },
 }
 
 /// The one place a breach becomes the failure a run reports, so the two
@@ -234,6 +244,15 @@ impl From<ContractBreach> for NodeFailure {
                 NodeFailure::OutputEscapes { expected, resolved }
             }
             BreachKind::Schema { expected } => NodeFailure::OutputSchema {
+                expected,
+                problem: first,
+                more: rest.len(),
+            },
+            // Reported as the schema failure it is a cousin of: the file is
+            // there and its contents are not what the node was asked for.
+            // Distinguishing the two in the *failure* would split a vocabulary
+            // whose only reader is a person, and `first` already says which.
+            BreachKind::Unfinished { expected } => NodeFailure::OutputSchema {
                 expected,
                 problem: first,
                 more: rest.len(),
@@ -440,6 +459,13 @@ pub struct RunContext<'a> {
     /// repair's fix session owe no file, and a contract on either would
     /// fail them for not writing something never asked for.
     pub contract: Option<&'a dyn OutputContract>,
+    /// How many prompts this attempt may send, the first included.
+    ///
+    /// Rides here rather than being read off the node, for the same reason
+    /// `contract` does: the runner is handed what it may do, not the flow to
+    /// work it out from. A fix session and a command node get 1 — there is
+    /// nothing for a second turn to change.
+    pub max_turns: u32,
     pub timeout: Duration,
     pub permission: Permission<'a>,
     /// The run's stop switch, observable mid-turn: a real runner watches it
@@ -500,8 +526,12 @@ pub struct RunResult {
     ///
     /// Recorded because it consumes another budget unit: without it, a node
     /// that only passed on its correction is byte-identical in the record to
-    /// one that got it right first time.
-    pub corrected: bool,
+    /// How many prompts this call sent, the first included.
+    ///
+    /// Recorded because every turn past the first spends a budget unit:
+    /// without it, a node that only got there on its third turn is
+    /// byte-identical in the record to one that got it right first time.
+    pub turns: u32,
     /// What tools the turn used, in the order it reached for them. A
     /// diagnostic aid, not a decision input — nothing in the engine reads it.
     pub tools: Vec<ToolUse>,

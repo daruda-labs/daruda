@@ -216,7 +216,8 @@ impl FakeRunner {
                 total: self.parked,
                 answers: Vec::new(),
             },
-            corrected,
+            // One prompt, plus the extra this fake was told to reserve.
+            turns: if corrected { 2 } else { 1 },
         }
     }
 

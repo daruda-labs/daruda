@@ -15,7 +15,11 @@ const HEADER: &str = "OUTPUT CONTRACT (machine-validated):";
 /// The block appended to the prompt of a node that owes a file. `output` is
 /// the absolute path the scheduler resolved — the agent cannot be told a
 /// relative one, because its working directory is not the run directory.
-pub(crate) fn block(output: &Path, schema: Option<&SchemaSubset>) -> String {
+pub(crate) fn block(
+    output: &Path,
+    schema: Option<&SchemaSubset>,
+    done_when: Option<&crate::model::DoneWhen>,
+) -> String {
     let mut block = String::from(HEADER);
     block.push_str(&format!(
         "\nWhen you are done, write your result to {}.",
@@ -30,6 +34,18 @@ pub(crate) fn block(output: &Path, schema: Option<&SchemaSubset>) -> String {
              and no code fence around it. Properties the schema does not name are ignored:\n",
         );
         block.push_str(&schema_json(schema));
+    }
+    // Said last, after the shape it is a field of. This is the line that
+    // replaces asking a person: an agent told it will be prompted again has no
+    // reason to stop and ask whether it should continue.
+    if let Some(done_when) = done_when {
+        block.push_str(&format!(
+            "\nWrite `{field}` as {done} only when the work is finished. While there is more \
+             to do, write what you have so far along with `{field}` set to anything else, and \
+             you will be prompted to carry on — do not stop to ask whether you should.",
+            field = done_when.field,
+            done = done_when.equals
+        ));
     }
     block
 }
@@ -58,6 +74,28 @@ pub(crate) fn correction(breach: &ContractBreach) -> String {
         text.push_str(&format!("\n- {reason}"));
     }
     text.push_str("\nSatisfy the contract now. Change nothing else.");
+    text
+}
+
+/// What the agent is told when its output is well-formed and says the work is
+/// not over yet.
+///
+/// A different sentence from [`correction`] because a different thing
+/// happened: nothing is broken, so telling the agent to "satisfy the contract"
+/// would send it to re-check work that was already right. What it needs is the
+/// one thing a fresh turn does not have — where it left off — which is why the
+/// output's own words are read back rather than summarised.
+pub(crate) fn continue_from(breach: &ContractBreach) -> String {
+    let mut text = String::from(
+        "Your output says the work is not finished. Carry on from where you left off.",
+    );
+    // The breach's line already names the field and what it held, which is the
+    // agent's own note to itself one turn ago.
+    text.push_str(&format!("\n- {}", breach.first));
+    text.push_str(
+        "\nWhen it is finished, say so in the output. Do not start over and do not ask \
+         whether to continue.",
+    );
     text
 }
 

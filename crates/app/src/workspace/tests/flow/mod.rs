@@ -67,6 +67,8 @@ nodes:
       required: [verdict]
       properties:
         verdict: { type: string, enum: [pass, fail] }
+    continue_until: { field: verdict, equals: pass }
+    max_turns: 4
     prompt: write a line
 ";
 

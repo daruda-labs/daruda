@@ -331,7 +331,7 @@ mod tests {
                 total: parked,
                 answers: Vec::new(),
             },
-            corrected: false,
+            turns: 1,
         }
     }
 

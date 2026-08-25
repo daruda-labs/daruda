@@ -74,10 +74,13 @@ pub struct AttemptRecord {
     /// Not journaled: a resumed run's earlier attempts lose it, which costs a
     /// reader nothing the transcript beside them does not still say.
     pub tools: Vec<crate::runner::ToolUse>,
-    /// Whether this attempt used a second turn to correct its output.
-    /// Recorded because it consumes another budget unit and nothing else in
-    /// the line would say so.
-    pub corrected: bool,
+    /// How many prompts this attempt sent, the first included.
+    ///
+    /// A count rather than the `corrected` flag it replaces: every turn past
+    /// the first spends a budget unit, and "more than one" does not say
+    /// whether a node allowed five is using two or all five — which is the
+    /// only signal for whether the cap is set right.
+    pub turns: u32,
     /// What this attempt's session reported it had used by the time it ended.
     ///
     /// The run already sums the cost to bound it, and a ceiling is not an
@@ -99,7 +102,7 @@ pub struct AttemptRecord {
 #[derive(Clone, Default)]
 pub(crate) struct Reported {
     pub(crate) waited: crate::runner::Waiting,
-    pub(crate) corrected: bool,
+    pub(crate) turns: u32,
     pub(crate) tools: Vec<crate::runner::ToolUse>,
     pub(crate) usage: Option<daruda_acp::UsageView>,
 }
@@ -108,7 +111,7 @@ impl From<&crate::runner::RunResult> for Reported {
     fn from(result: &crate::runner::RunResult) -> Self {
         Self {
             waited: result.waiting.clone(),
-            corrected: result.corrected,
+            turns: result.turns,
             tools: result.tools.clone(),
             usage: result.usage.clone(),
         }
@@ -438,8 +441,14 @@ fn push_attempt_lines(out: &mut String, attempt: &AttemptRecord, run_dir: &Path)
     if let Some(line) = usage_said(attempt.usage.as_ref()) {
         out.push_str(&format!("  - {line}\n"));
     }
-    if attempt.corrected {
-        out.push_str("  - spent a correction turn: the first turn left no usable output\n");
+    // The budget-unit total includes these, but the attempt count does not —
+    // and an attempt that only got there on its third turn reads exactly like
+    // one that got it right first time without this line.
+    if attempt.turns > 1 {
+        out.push_str(&format!(
+            "  - sent {} prompts: the earlier turns left the work unfinished\n",
+            attempt.turns
+        ));
     }
     // The set first: it says why the attempts below it happened again,
     // which is otherwise only inferable from repeated attempt numbers.

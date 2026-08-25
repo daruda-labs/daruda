@@ -21,6 +21,8 @@ pub(in crate::workspace) struct NodeFields {
     pub id: String,
     pub deps: Vec<String>,
     pub timeout: TimeoutField,
+    /// How many prompts one attempt may send. Absent is the engine's default.
+    pub max_turns: TurnsField,
     /// Where the node runs, relative to the run's directory. Empty is the run's
     /// own directory — the engine refuses an absolute one or one that climbs out,
     /// and that refusal stays the engine's.
@@ -142,6 +144,19 @@ pub(in crate::workspace) enum AttemptsField {
     Unreadable(String),
 }
 
+/// How many prompts one attempt may send, as the box holds it.
+///
+/// `Absent` is a real answer — the engine has a default and a node that never
+/// mentioned turns must not grow the key on a save — which is why this is
+/// shaped like [`TimeoutField`] and not like [`AttemptsField`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum TurnsField {
+    Absent,
+    Set(u32),
+    /// What was typed, which is not a count.
+    Unreadable(String),
+}
+
 /// Why a save is refused before the file is touched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum Refusal {
@@ -149,6 +164,8 @@ pub(in crate::workspace) enum Refusal {
     /// A name the engine could not use — it becomes a filename and it
     /// delimits `{{node.<id>.output}}`.
     InvalidId,
+    /// The turn box holds something that is not a count.
+    Turns(String),
     Timeout(String),
     Attempts(String),
     OutputRequired,
@@ -160,6 +177,7 @@ pub(super) fn fields_of(node: &daruda_flow::parse::NodeFile) -> NodeFields {
         id: node.id.clone().into_string(),
         deps: node.deps.iter().map(|d| d.as_str().to_string()).collect(),
         timeout: node.timeout.map_or(TimeoutField::Absent, TimeoutField::Set),
+        max_turns: turns_of(node),
         cwd: node.cwd.as_ref().map(|p| p.display().to_string()),
         agent: agent_fields_of(node),
         body: body_fields_of(node),
@@ -205,6 +223,17 @@ pub(super) fn fail_kind_of(kind: KindChoice) -> FailKind {
 
 /// A node's own `agent:`, or nothing. Only agent nodes can carry one — a command
 /// node runs a shell line and has no agent of its own.
+/// The turn cap as the file holds it. A command node has no turns to cap.
+fn turns_of(node: &daruda_flow::parse::NodeFile) -> TurnsField {
+    use daruda_flow::parse::NodeKindFile;
+    match &node.kind {
+        NodeKindFile::Agent { max_turns, .. } => {
+            max_turns.map_or(TurnsField::Absent, TurnsField::Set)
+        }
+        NodeKindFile::Command { .. } => TurnsField::Absent,
+    }
+}
+
 pub(super) fn agent_fields_of(node: &daruda_flow::parse::NodeFile) -> AgentFields {
     use daruda_flow::parse::NodeKindFile;
     let NodeKindFile::Agent {
