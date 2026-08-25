@@ -86,7 +86,7 @@ fn a_link_or_an_escape_is_never_corrected() {
 /// asserted for both fixable kinds, since the gate order is what decides
 /// it and a kind added past the cancel check would slip through.
 #[test]
-fn a_canceled_run_buys_no_correction() {
+fn a_canceled_run_buys_no_further_turn() {
     for breach in [missing(), misshapen()] {
         assert!(!may_go_again(
             &breach,
@@ -98,10 +98,9 @@ fn a_canceled_run_buys_no_correction() {
     }
 }
 
-/// A correction started on the last seconds of a budget dies as a
-/// `Timeout`, which reports the clock and buries both the breach and the
-/// attempt to fix it — and hands a repair's `{{failure}}` "timed out" as
-/// the thing to put right.
+/// A turn started on the last seconds of a budget dies as a `Timeout`, which
+/// reports the clock and buries both the breach and the attempt to answer it —
+/// and hands a repair's `{{failure}}` "timed out" as the thing to put right.
 #[test]
 fn a_turn_that_has_nearly_spent_its_budget_does_not_start_one() {
     assert!(!may_go_again(
@@ -114,11 +113,11 @@ fn a_turn_that_has_nearly_spent_its_budget_does_not_start_one() {
 }
 
 /// **The sign that matters.** The node's clock stops while a person is
-/// waited on, so the time a correction has to fit into is work time. On
+/// waited on, so the time another turn has to fit into is work time. On
 /// `elapsed + paused` this turn — nine minutes of waiting and a minute
 /// of work — would be refused for the time somebody else took.
 #[test]
-fn a_long_wait_for_a_person_does_not_deny_a_correction() {
+fn a_long_wait_for_a_person_does_not_deny_another_turn() {
     assert!(may_go_again(
         &missing(),
         false,

@@ -1,14 +1,15 @@
-//! Going round again: whether a turn that ended without meeting its contract
-//! is worth another, and what to say when it is.
+//! The turns after the first: whether a turn that ended without meeting its
+//! contract is worth another, and what to say when it is.
 //!
-//! Two reasons to go round. The output is broken — that is the correction turn
-//! this file started as. Or the output is fine and says the work is not over,
-//! which is a node that would otherwise stop after one turn and wait for a
-//! person to say "continue".
+//! Two reasons to go round. The output is broken, which asks for a
+//! correction. Or the output is fine and says the work is not over, which is a
+//! node that would otherwise stop after one turn and wait for a person to say
+//! "continue".
 //!
-//! Here rather than in `runner/mod.rs` because only this runner can correct
-//! anything — a command node owes no file — and because the arithmetic below
-//! is `interrupted`'s rule about waiting, read from the other side.
+//! Here rather than in `runner/mod.rs` because only this runner has turns to
+//! spend — a command node owes no file and runs once — and because the
+//! arithmetic below is `interrupted`'s rule about waiting, read from the other
+//! side.
 
 use super::{Answering, Recording, drain};
 use crate::runner::{BreachKind, ContractBreach, NodeFailure, RunContext};
@@ -16,21 +17,21 @@ use daruda_acp::{AcpEvent, AcpSessionHandle};
 use smol::stream::Stream;
 use std::time::{Duration, Instant};
 
-/// How much of a node's budget a correction turn has to have left to be
-/// worth paying for. A correction is a whole agent turn — the same order as
-/// the settings budget the handshake gives one reply — and one started with
-/// less than this dies as a `Timeout`, which reports the clock and buries
-/// both the contract breach and the attempt to fix it.
-const CORRECTION_FLOOR: Duration = Duration::from_secs(30);
+/// How much of a node's budget another turn has to have left to be worth
+/// paying for. Any further turn is a whole agent turn — the same order as the
+/// settings budget the handshake gives one reply — and one started with less
+/// than this dies as a `Timeout`, which reports the clock and buries both the
+/// contract breach and the attempt to answer it.
+const NEXT_TURN_FLOOR: Duration = Duration::from_secs(30);
 
 /// Whether one more turn on the session that just ended could plausibly
 /// put `breach` right, given what the turn has already spent.
 ///
 /// `elapsed` and `paused` arrive separately because the node's clock stops
 /// while a person is waited on: `interrupted` extends the deadline by
-/// `paused`, so the time a correction has to fit into is work time. Adding
-/// the wait instead would deny a correction to any ordinary turn that
-/// happened to sit through a permission grant.
+/// `paused`, so the time another turn has to fit into is work time. Adding the
+/// wait instead would deny one to any ordinary turn that happened to sit
+/// through a permission grant.
 fn may_go_again(
     breach: &ContractBreach,
     canceled: bool,
@@ -56,7 +57,7 @@ fn may_go_again(
         return false;
     }
     let worked = elapsed.saturating_sub(paused);
-    worked.saturating_add(CORRECTION_FLOOR) <= timeout
+    worked.saturating_add(NEXT_TURN_FLOOR) <= timeout
 }
 
 /// One more turn on the open session, for a breach a second ask could

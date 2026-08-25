@@ -12,7 +12,7 @@ use daruda_acp::{
     PermissionOptionKind, UsageView, connect_agent_session,
 };
 use smol::stream::{Stream, StreamExt};
-mod correction;
+mod another_turn;
 mod settings;
 mod tools;
 mod transcript;
@@ -31,7 +31,7 @@ struct Recording<'a> {
     /// code after it, which is what this struct already collects.
     park: &'a Park,
     /// When this call began reading the stream — here rather than passed
-    /// alongside, so the timeout race and the correction gate read one clock.
+    /// alongside, so the timeout race and the next-turn gate read one clock.
     started: Instant,
     /// Prompts sent so far, the first included. A `Cell` for the same reason
     /// the rest of `Recording` is: `keep_going` runs inside the drive and has
@@ -244,7 +244,7 @@ impl AcpRunner {
         // Only a turn that ended cleanly reaches here, which is also the only
         // turn the contract is ever asked about: `judge` answers the runner's
         // verdict first.
-        correction::keep_going(events, session, ctx, rec).await
+        another_turn::keep_going(events, session, ctx, rec).await
     }
 }
 
