@@ -9,7 +9,7 @@
 
 use crate::error::{ValidationIssue, ValidationKind};
 use crate::model::{
-    AgentFail, AgentSpec, Flow, GateFail, Node, NodeKind, PermissionPolicy, Prompt,
+    AgentBody, AgentFail, AgentSpec, Flow, GateFail, Node, NodeKind, PermissionPolicy, Prompt,
 };
 use crate::parse::{
     AgentFailFile, AgentOverride, Defaults, FlowFile, GateFailFile, HintSource, NodeFile,
@@ -221,35 +221,51 @@ fn inline(prompt: &Prompt, flow_dir: &Path) -> Result<String, PathBuf> {
 
 fn node_kind_file(kind: &NodeKind, flow_dir: &Path) -> NodeKindFile {
     match kind {
-        NodeKind::Agent(body) => NodeKindFile::Agent {
-            agent: Some(node_agent_override(&body.agent)),
-            prompt: match inline(&body.prompt, flow_dir) {
-                Ok(text) => PromptSource::Prompt(text),
-                Err(path) => PromptSource::PromptFile(path),
-            },
-            output: body.output.clone(),
-            output_schema: body.output_schema.clone().map(Box::new),
-            continue_until: body.continue_until.clone().map(Box::new),
-            // Written back only when it is not the default, so a flow that
-            // never mentioned turns does not grow a line on a round trip.
-            max_turns: (body.max_turns != crate::model::DEFAULT_MAX_TURNS)
-                .then_some(body.max_turns),
-            on_fail: match &body.on_fail {
-                AgentFail::Halt => AgentFailFile::Halt,
-                AgentFail::Retry {
-                    hint,
-                    max_attempts,
-                    wait,
-                } => AgentFailFile::Retry {
-                    hint: match inline(hint, flow_dir) {
-                        Ok(text) => HintSource::Hint(text),
-                        Err(path) => HintSource::HintFile(path),
-                    },
-                    max_attempts: *max_attempts,
-                    wait: Some(*wait),
+        // Taken apart field by field rather than read through `body`: a field
+        // added to `AgentBody` then fails to compile *here*, which is what
+        // makes someone decide whether it survives the trip back out. One
+        // dropped silently is not a cosmetic loss — `run.yaml` is read back to
+        // decide whether a pin still names the same node, so the node would
+        // stop matching itself and the pin would quietly go unhonoured.
+        NodeKind::Agent(body) => {
+            let AgentBody {
+                agent,
+                prompt,
+                output,
+                output_schema,
+                continue_until,
+                max_turns,
+                on_fail,
+            } = &**body;
+            NodeKindFile::Agent {
+                agent: Some(node_agent_override(agent)),
+                prompt: match inline(prompt, flow_dir) {
+                    Ok(text) => PromptSource::Prompt(text),
+                    Err(path) => PromptSource::PromptFile(path),
                 },
-            },
-        },
+                output: output.clone(),
+                output_schema: output_schema.clone().map(Box::new),
+                continue_until: continue_until.clone().map(Box::new),
+                // Written back only when it is not the default, so a flow that
+                // never mentioned turns does not grow a line on a round trip.
+                max_turns: (*max_turns != crate::model::DEFAULT_MAX_TURNS).then_some(*max_turns),
+                on_fail: match on_fail {
+                    AgentFail::Halt => AgentFailFile::Halt,
+                    AgentFail::Retry {
+                        hint,
+                        max_attempts,
+                        wait,
+                    } => AgentFailFile::Retry {
+                        hint: match inline(hint, flow_dir) {
+                            Ok(text) => HintSource::Hint(text),
+                            Err(path) => HintSource::HintFile(path),
+                        },
+                        max_attempts: *max_attempts,
+                        wait: Some(*wait),
+                    },
+                },
+            }
+        }
         NodeKind::Command { run, on_fail } => NodeKindFile::Command {
             run: run.clone(),
             on_fail: match on_fail {
