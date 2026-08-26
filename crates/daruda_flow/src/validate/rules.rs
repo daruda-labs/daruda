@@ -15,7 +15,7 @@ use std::path::{Component, Path};
 use super::{SUPPORTED_VERSION, check_output_refs, issue, node_id_is_wellformed};
 use crate::NodeId;
 use crate::error::{ValidationIssue, ValidationKind};
-use crate::model::{DoneWhen, Flow, Node};
+use crate::model::{AgentSpec, DoneWhen, Flow, Node};
 use crate::parse::{SchemaKind, SchemaSubset};
 
 /// Whether a path reaches outside the directory it is resolved against.
@@ -284,8 +284,12 @@ pub(super) fn repair_names_the_failure(
 }
 
 /// A repair runs its fix in an agent session, so the flow has to name one.
-pub(super) fn repair_has_an_agent(node: &NodeId, flow: &Flow, issues: &mut Vec<ValidationIssue>) {
-    if flow.default_agent.is_none() {
+pub(super) fn repair_has_an_agent(
+    node: &NodeId,
+    default_agent: Option<&AgentSpec>,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    if default_agent.is_none() {
         issues.push(issue(
             node.clone(),
             ValidationKind::RepairWithoutAgent,

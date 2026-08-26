@@ -32,7 +32,7 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
 
     for node in &flow.nodes {
         let id = &node.id;
-        let seen = &ancestors[id];
+        let reachable = &ancestors[id];
 
         rules::id_is_not_reserved(node, &mut issues);
         rules::id_is_wellformed(node, &mut issues);
@@ -72,17 +72,17 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                 {
                     texts.push(text.as_str());
                 }
-                rules::output_refs_name_ancestors(id, &texts, seen, &mut issues);
+                rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
             }
             NodeKind::Command { run, on_fail } => {
                 let mut texts = vec![run.as_str()];
                 if let GateFail::Repair { fix, rerun, .. } = on_fail {
                     rules::repair_names_the_failure(id, fix, &mut issues);
-                    rules::repair_has_an_agent(id, flow, &mut issues);
-                    rules::rerun_roots_are_ancestors(id, rerun, seen, &mut issues);
+                    rules::repair_has_an_agent(id, flow.default_agent.as_ref(), &mut issues);
+                    rules::rerun_roots_are_ancestors(id, rerun, reachable, &mut issues);
                     texts.push(fix.as_str());
                 }
-                rules::output_refs_name_ancestors(id, &texts, seen, &mut issues);
+                rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
             }
         }
     }
