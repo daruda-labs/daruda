@@ -1686,3 +1686,167 @@ nodes:
         "the check button was pressable with unsaved edits in the inspector"
     );
 }
+
+/// Holding the pan key has to reach the pointer, and the only path there is
+/// the plugin writing a shared flag and the pane reading it on the next canvas
+/// notify. Asserted end to end because both halves looked right in isolation
+/// while the cursor never changed on screen.
+#[gpui::test]
+async fn holding_the_pan_key_reaches_the_pointer(cx: &mut TestAppContext) {
+    use crate::ui::cursor::CursorReach;
+    use gpui::CursorStyle;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane just opened");
+
+    assert_eq!(
+        view.read_with(&vcx, |v, _| v.pan_cursor_for_test()),
+        None,
+        "nothing held, so the canvas draws its own pointer"
+    );
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.hold_pan_key_for_test(true, window, cx)
+    });
+    assert_eq!(
+        view.read_with(&vcx, |v, _| v.pan_cursor_for_test()),
+        Some(CursorReach::Hovered(CursorStyle::OpenHand)),
+        "an open hand says a drag would move the view"
+    );
+
+    // Holding the key alone asks for nothing window-wide: the open hand is the
+    // pointer's shape over the canvas, and saying it everywhere would claim the
+    // inspector and the docks too.
+    crate::ui::cursor::painted::clear();
+    vcx.draw(
+        gpui::Point::default(),
+        gpui::size(gpui::px(1400.), gpui::px(900.)),
+        |_, _| gpui::Empty,
+    );
+    assert!(
+        !crate::ui::cursor::painted::all()
+            .iter()
+            .any(|(style, _)| *style == CursorStyle::OpenHand),
+        "the open hand stays bound to the canvas"
+    );
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.hold_pan_key_for_test(false, window, cx)
+    });
+    assert_eq!(
+        view.read_with(&vcx, |v, _| v.pan_cursor_for_test()),
+        None,
+        "let go, so the pointer goes back to the canvas"
+    );
+}
+
+/// Space types a character as far as gpui is concerned, so holding it to pan
+/// re-hides the pointer on every auto-repeat — and the platform only brings it
+/// back when the mouse moves. A drag that pauses with the key still down was
+/// left with no pointer at all until the user jiggled it.
+#[gpui::test]
+async fn holding_the_pan_key_stops_the_pointer_being_hidden(cx: &mut TestAppContext) {
+    use gpui::CursorHideMode;
+
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+
+    let view = ws
+        .read_with(&vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+        })
+        .expect("the graph pane just opened");
+
+    let was = vcx.update(|_, cx| cx.cursor_hide_mode());
+    assert_ne!(
+        was,
+        CursorHideMode::Never,
+        "the app hides on typing by default, which is what this suspends"
+    );
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.hold_pan_key_for_test(true, window, cx)
+    });
+    assert_eq!(
+        vcx.update(|_, cx| cx.cursor_hide_mode()),
+        CursorHideMode::Never,
+        "nothing is typed on a canvas, so the pointer stays put"
+    );
+
+    view.update_in(&mut vcx, |v, window, cx| {
+        v.hold_pan_key_for_test(false, window, cx)
+    });
+    assert_eq!(
+        vcx.update(|_, cx| cx.cursor_hide_mode()),
+        was,
+        "and the app's own policy comes back exactly as it was"
+    );
+}
+
+/// **The defect the count exists for.** Two flow files mean two panes, each
+/// suspending the one app-wide policy. Saving "what it was" per pane made the
+/// second save the first's override and hand it back as the app's own, leaving
+/// hide-on-typing off for the rest of the session.
+#[gpui::test]
+async fn two_panes_hand_the_policy_back_once(cx: &mut TestAppContext) {
+    let (lane, ws, flow_a, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
+    let flow_b = crate::workspace::flow_paths::flows_dir(lane.path()).join("other.yaml");
+    std::fs::write(&flow_b, LONG_CHAIN).expect("write the second flow");
+
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let was = vcx.update(|_, cx| cx.cursor_hide_mode());
+
+    let newest = |ws: &gpui::Entity<Workspace>,
+                  vcx: &mut gpui::VisualTestContext,
+                  path: &std::path::Path| {
+        ws.update_in(vcx, |ws, window, cx| ws.open_flow_graph(path, window, cx));
+        vcx.run_until_parked();
+        ws.read_with(vcx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .filter_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
+                .next_back()
+        })
+        .expect("a graph pane")
+    };
+    let a = newest(&ws, &mut vcx, &flow_a);
+    let b = newest(&ws, &mut vcx, &flow_b);
+    assert_ne!(a.entity_id(), b.entity_id(), "two panes, one per flow file");
+
+    a.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(true, w, cx));
+    b.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(true, w, cx));
+    a.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(false, w, cx));
+    assert_eq!(
+        vcx.update(|_, cx| cx.cursor_hide_mode()),
+        gpui::CursorHideMode::Never,
+        "one let go, the other is still holding"
+    );
+
+    b.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(false, w, cx));
+    assert_eq!(
+        vcx.update(|_, cx| cx.cursor_hide_mode()),
+        was,
+        "and the last one hands the app's own policy back"
+    );
+}

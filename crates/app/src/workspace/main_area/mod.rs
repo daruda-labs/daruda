@@ -26,6 +26,7 @@ pub(in crate::workspace) mod task_edit_pane;
 
 pub(in crate::workspace) use context::MainAreaContext;
 
+use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme;
 use gpui::{
     AnyElement, AnyView, ClickEvent, Context, CursorStyle, ExternalPaths, IntoElement, MouseButton,
@@ -74,6 +75,7 @@ fn drop_target_overlay(half: DropHalf, cx: &mut Context<Workspace>) -> impl Into
 fn pane_divider(
     is_horizontal: bool,
     leaf_id: PaneId,
+    dragging: bool,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let hit = theme::RESIZE_HANDLE_HIT_PX;
@@ -91,7 +93,12 @@ fn pane_divider(
         let base = div()
             .id(div_id)
             .absolute()
-            .cursor(overlay_cursor)
+            // Hitbox-bound while idle, window-wide once held: the drag is
+            // what takes the pointer off the divider. See `ui::cursor`.
+            .cursor_reach(Some(crate::ui::cursor::CursorReach::while_dragging(
+                overlay_cursor,
+                dragging,
+            )))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
@@ -214,6 +221,9 @@ pub(in crate::workspace) fn render_layout(
     font_family: SharedString,
     zoomed_pane_id: Option<PaneId>,
     drop_target: Option<(PaneId, DropHalf)>,
+    // The divider being held, if one is — its cursor has to reach past the
+    // few pixels it occupies, since a drag is what pulls the pointer off them.
+    dragged_divider: Option<PaneId>,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
@@ -415,6 +425,7 @@ pub(in crate::workspace) fn render_layout(
                     font_family.clone(),
                     zoomed_pane_id,
                     drop_target,
+                    dragged_divider,
                     cx,
                 );
                 let ratio = ratios[i];
@@ -422,7 +433,12 @@ pub(in crate::workspace) fn render_layout(
                 container = container.child(cell);
                 if i + 1 < n {
                     let leaf_id = left_first_leaf;
-                    container = container.child(pane_divider(is_horizontal, leaf_id, cx));
+                    container = container.child(pane_divider(
+                        is_horizontal,
+                        leaf_id,
+                        dragged_divider == Some(leaf_id),
+                        cx,
+                    ));
                 }
             }
             container.into_any_element()

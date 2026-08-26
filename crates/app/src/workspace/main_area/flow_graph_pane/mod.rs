@@ -24,6 +24,7 @@ mod render;
 mod renderer;
 mod run_states;
 mod selection;
+mod space_pan;
 
 pub(in crate::workspace) use pins::PinSet;
 /// The toolbar's test selectors keep their old path: a test names this module,
@@ -159,9 +160,20 @@ pub(in crate::workspace) struct FlowGraphView {
     /// on the next canvas notify. Here rather than in the canvas because the
     /// canvas is rebuilt on every reload and the question outlives it.
     delete_request: delete_key::DeleteRequest,
+    pan_armed: space_pan::PanArmed,
+    /// What the cursor was last drawn as. The state itself lives in a plugin
+    /// and changes without the pane hearing, so the change is what has to be
+    /// noticed — repainting on every canvas notify would repaint on every pan
+    /// frame, and the cursor is not what those are about.
+    pan_cursor_shown: Option<crate::ui::cursor::CursorReach>,
+    /// Whether this pane is one of the holders keeping the pointer on screen.
+    /// Its own field because the count it feeds is app-wide: releasing twice
+    /// would hand the policy back while another pane still needs it held.
+    holds_the_pointer: bool,
     /// Keeps the canvas observation alive: the canvas is where a click lands, so
     /// its notify is what tells this view the selection moved.
     _canvas_watch: Option<gpui::Subscription>,
+    _focus_watch: Option<gpui::Subscription>,
     /// Keeps the theme observation alive. The canvas takes its colours when it
     /// is built and has no setter for them, so a theme switch is answered by
     /// building it again.
@@ -191,11 +203,19 @@ impl FlowGraphView {
         // them here made the first watcher tick on a broken file look like a
         // change and rebuild for no reason.
         let delete_request = delete_key::DeleteRequest::default();
+        let pan_armed = space_pan::PanArmed::default();
         let (text, state) = match read_flow(path) {
             Ok(text) => match policy::model_from(&text) {
                 Ok(model) => (
                     Some(text),
-                    build_graph_state(model, &PinSet::default(), &delete_request, window, cx),
+                    build_graph_state(
+                        model,
+                        &PinSet::default(),
+                        &delete_request,
+                        &pan_armed,
+                        window,
+                        cx,
+                    ),
                 ),
                 Err(err) => (Some(text), FlowGraphState::Unreadable(err)),
             },
@@ -211,17 +231,39 @@ impl FlowGraphView {
         let mut view = Self {
             unpinned: Vec::new(),
             delete_request,
+            pan_armed,
+            pan_cursor_shown: None,
+            holds_the_pointer: false,
             path: path.to_path_buf(),
             state,
             text,
             pins: PinSet::default(),
             form: None,
             _canvas_watch: None,
+            _focus_watch: None,
             _theme_watch: theme_watch,
             focus_handle: cx.focus_handle(),
         };
         view.watch_canvas(window, cx);
+        view.watch_focus(window, cx);
         view
+    }
+
+    /// A key release only reaches the canvas that has the focus, so a pane
+    /// that loses it while the pan key is down would stay armed for good —
+    /// drawing a hand over nothing and holding the app's pointer policy open.
+    ///
+    /// Not covered by a test: gpui's focus listeners run inside a draw and read
+    /// a path that is blanked while the window is inactive, which is what a
+    /// test window always is (`Window::is_window_active` is false there).
+    fn watch_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._focus_watch =
+            Some(
+                cx.on_focus_out(&self.focus_handle, window, |view, _, window, cx| {
+                    view.pan_armed.let_go();
+                    view.on_canvas_notified(window, cx);
+                }),
+            );
     }
 
     /// Write the cards again onto the canvas that is already there — which
@@ -280,6 +322,7 @@ impl FlowGraphView {
             model.clone(),
             &self.pins.clone(),
             &self.delete_request,
+            &self.pan_armed,
             window,
             cx,
         );
@@ -347,6 +390,37 @@ impl FlowGraphView {
         if self.delete_request.take() {
             cx.emit(FlowGraphEvent::Delete);
         }
+        // The one place the mirror is updated, so the cursor and the plugin
+        // cannot drift.
+        let cursor = self.pan_armed.cursor();
+        if cursor != self.pan_cursor_shown {
+            self.pan_cursor_shown = cursor;
+            self.hold_the_pointer_visible(cursor.is_some(), cx);
+            cx.notify();
+        }
+    }
+
+    /// Suspend the app's hide-on-typing policy while the pan key is down.
+    ///
+    /// gpui hides the pointer on any key that produces a character, and space
+    /// produces one (`gpui_macos::events` gives it `key_char = " "`). Held down
+    /// to pan, its auto-repeat re-hides on every tick — and the platform only
+    /// brings the pointer back when the mouse *moves*, so a drag that pauses
+    /// with the key still down leaves it hidden until the user jiggles it.
+    /// Nothing is typed on a canvas, so the policy has nothing to protect here.
+    ///
+    /// Counted by [`crate::ui::cursor`] rather than saved here: the policy is
+    /// one app-wide value and there can be a pane per flow file.
+    fn hold_the_pointer_visible(&mut self, hold: bool, cx: &mut Context<Self>) {
+        if hold == self.holds_the_pointer {
+            return;
+        }
+        self.holds_the_pointer = hold;
+        if hold {
+            crate::ui::cursor::hold_pointer_visible(cx);
+        } else {
+            crate::ui::cursor::release_pointer_visible(cx);
+        }
     }
 
     fn watch_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -401,8 +475,14 @@ impl FlowGraphView {
             }
             policy::Reload::Rebuild { text, model } => {
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
-                self.state =
-                    build_graph_state(model, &self.pins.clone(), &self.delete_request, window, cx);
+                self.state = build_graph_state(
+                    model,
+                    &self.pins.clone(),
+                    &self.delete_request,
+                    &self.pan_armed,
+                    window,
+                    cx,
+                );
                 self.text = Some(text);
                 self.form = None;
                 self.watch_canvas(window, cx);
@@ -570,6 +650,25 @@ impl FlowGraphView {
         cx: &mut Context<Self>,
     ) {
         self.on_canvas_notified(window, cx);
+    }
+
+    /// Hold or release the pan key as far as the canvas plugin gets: it writes
+    /// the shared state and the next notify is what the view makes of it.
+    pub(in crate::workspace) fn hold_pan_key_for_test(
+        &mut self,
+        held: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pan_armed.set_held_for_test(held);
+        self.on_canvas_notified(window, cx);
+    }
+
+    /// What the pane would draw the pointer as.
+    pub(in crate::workspace) fn pan_cursor_for_test(
+        &self,
+    ) -> Option<crate::ui::cursor::CursorReach> {
+        self.pan_cursor_shown
     }
 
     /// Press Delete on the selected cards, as far as the canvas plugin gets:

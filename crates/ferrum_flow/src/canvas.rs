@@ -443,6 +443,17 @@ impl FlowCanvas {
     }
 
     fn on_mouse_up(&mut self, ev: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // A live interaction is served by `forward_release_to_interaction`
+        // instead, which is not gated on the pointer being over the canvas.
+        // Exactly one of the two forwards any given release.
+        if self.interaction.handler.is_some() {
+            return;
+        }
+        self.release(ev, cx);
+    }
+
+    /// The release itself, from whichever of the two listeners is the right one.
+    fn release(&mut self, ev: &MouseUpEvent, cx: &mut Context<Self>) {
         self.handle_event(FlowEvent::Input(InputEvent::MouseUp(ev.clone())), cx);
         self.process_event_queue(cx);
     }
@@ -538,6 +549,32 @@ impl Render for FlowCanvas {
             }
         };
 
+        // A release for an interaction this canvas started, whether or not the
+        // pointer is still over it.
+        //
+        // `div`'s own mouse-up listeners are gated on `Hitbox::is_hovered`,
+        // which answers false both when the pointer has left — dragging a view
+        // is dragging it away — and, less obviously, whenever the last input
+        // was a key. A key held through the drag auto-repeats, so a release
+        // landing between two repeats was simply dropped, and the interaction
+        // stayed installed with nothing to end it.
+        let forward_release_to_interaction = {
+            let entity = entity.clone();
+            move |_: Bounds<Pixels>, _: (), window: &mut Window, _: &mut App| {
+                let entity = entity.clone();
+                window.on_mouse_event(move |ev: &MouseUpEvent, phase, _window, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    entity.update(cx, |canvas, cx| {
+                        if canvas.interaction.handler.is_some() {
+                            canvas.release(ev, cx);
+                        }
+                    });
+                });
+            }
+        };
+
         let layers_root = div()
             .size_full()
             .children(RenderLayer::ALL.iter().map(|layer| {
@@ -551,7 +588,12 @@ impl Render for FlowCanvas {
         let measured_stack = div()
             .size_full()
             .on_children_prepainted(sync_canvas_bounds)
-            .child(layers_root);
+            .child(layers_root)
+            .child(
+                canvas(|_, _, _| (), forward_release_to_interaction)
+                    .absolute()
+                    .size_full(),
+            );
 
         div()
             .id("ferrum_flow_canvas")

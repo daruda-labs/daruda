@@ -48,6 +48,7 @@ pub(super) fn build_graph_state(
     model: FlowGraphModel,
     pins: &PinSet,
     delete_request: &super::delete_key::DeleteRequest,
+    pan_armed: &super::space_pan::PanArmed,
     window: &mut Window,
     cx: &mut Context<FlowGraphView>,
 ) -> FlowGraphState {
@@ -86,6 +87,9 @@ pub(super) fn build_graph_state(
                     .validator(FlowEdgeValidator)
                     .dangling_links(false),
             )
+            // Over everything above: space held turns any drag into a pan,
+            // whatever it started on.
+            .plugin(super::space_pan::SpacePanPlugin::new(pan_armed.clone()))
             // Delete on a selected line takes it away again.
             .plugin(EdgeDeletePlugin)
             // And under it, the same key on a selected card — which asks

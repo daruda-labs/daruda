@@ -69,6 +69,11 @@ pub use ferrum_flow::{
     EventResult, FlowEvent, InputEvent, PluginContext, primary_platform_modifier,
 };
 
+/// A drag that outlives the press that began it — the canvas routes moves and
+/// the release to it until it ends. Here because panning the view is one, and
+/// the vendor's own pan is not reachable to add a third way into.
+pub use ferrum_flow::{Interaction, InteractionResult};
+
 pub mod layout {
     //! Automatic placement. daruda never persists node coordinates — the
     //! flow file declares dependencies, not positions — so every graph is

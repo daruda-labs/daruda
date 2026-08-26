@@ -23,6 +23,7 @@ pub mod chart;
 pub mod checkbox;
 pub mod code_copy_button;
 pub mod code_editor;
+pub mod cursor;
 pub mod dialog;
 pub mod disclosure;
 pub mod divider;

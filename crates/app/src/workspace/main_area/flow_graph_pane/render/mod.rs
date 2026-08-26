@@ -12,6 +12,7 @@ use gpui::{
 
 use super::{FlowGraphError, FlowGraphState, FlowGraphView, Selection, form};
 use crate::surface::strings as s;
+use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme::palette;
 
 pub(super) mod toolbar;
@@ -60,6 +61,12 @@ impl Render for FlowGraphView {
                                 .relative()
                                 .flex_1()
                                 .h_full()
+                                // An open hand says a drag would move the view
+                                // rather than whatever it lands on; a closed
+                                // one says it is moving, and reaches the whole
+                                // window because a pan redraws this every
+                                // frame.
+                                .cursor_reach(self.pan_cursor_shown)
                                 .child(canvas.clone())
                                 .child(toolbar(state, cx)),
                         )

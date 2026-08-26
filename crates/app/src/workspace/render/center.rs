@@ -31,6 +31,8 @@ pub(in crate::workspace) fn render_center_content(
     ws: &Workspace,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
+    // Which divider is being held, so its cursor can reach past itself.
+    let dragged_divider = ws.main_area.drag_state.map(|drag| drag.left_first_leaf);
     // Availability gate runs FIRST, before any tab lookup. An
     // inaccessible active lane must show the empty-state even when
     // `tabs` is non-empty — a lane whose runtime entry still holds tabs
@@ -62,6 +64,7 @@ pub(in crate::workspace) fn render_center_content(
                     SharedString::from(ws.font_family.clone()),
                     None,
                     ws.main_area.pane_drop_hover,
+                    dragged_divider,
                     cx,
                 )
             } else {
@@ -73,6 +76,7 @@ pub(in crate::workspace) fn render_center_content(
                     SharedString::from(ws.font_family.clone()),
                     ws.main_area.zoomed_pane_id,
                     ws.main_area.pane_drop_hover,
+                    dragged_divider,
                     cx,
                 )
             }
@@ -85,6 +89,7 @@ pub(in crate::workspace) fn render_center_content(
                 SharedString::from(ws.font_family.clone()),
                 None,
                 ws.main_area.pane_drop_hover,
+                dragged_divider,
                 cx,
             )
         }

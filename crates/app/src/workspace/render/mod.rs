@@ -6,6 +6,7 @@
 //!   • Pane header (per pane)     — built by `pane_header()`, only in split mode.
 //!                                   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`.
 
+use crate::ui::cursor::{CursorReach, CursorReachExt as _};
 use crate::ui::theme;
 use crate::ui::{
     ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button,
@@ -193,6 +194,7 @@ fn dock_toggle_icon(
 fn dock_resize_handle(
     position: DockPosition,
     dock_size: f32,
+    dragged_dock: Option<DockPosition>,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let hit = theme::RESIZE_HANDLE_HIT_PX;
@@ -205,7 +207,10 @@ fn dock_resize_handle(
         DockPosition::Bottom => ("dock-resize-bottom", CursorStyle::ResizeUpDown),
     };
 
-    let mut handle = div().id(id_str).absolute().cursor(cursor);
+    // Not `.cursor()`: a hitbox-bound style stops applying the moment the drag
+    // pulls the pointer off these few pixels, which is immediately.
+    let reach = CursorReach::while_dragging(cursor, dragged_dock == Some(position));
+    let mut handle = div().id(id_str).absolute().cursor_reach(Some(reach));
     handle = match position {
         DockPosition::Left => handle.left(px(handle_start)).w(px(hit)).top_0().bottom_0(),
         DockPosition::Right => handle.right(px(handle_start)).w(px(hit)).top_0().bottom_0(),
@@ -451,6 +456,8 @@ impl Render for Workspace {
         });
 
         // Read dock display state after staging snapshots.
+        // Which handle is being held, so its cursor can reach past itself.
+        let dragged_dock = self.dock_drag.map(|drag| drag.position);
         let (left_dock_open, left_dock_size) = {
             let d = self.left_dock.read(cx);
             (d.is_open, d.size)
@@ -910,6 +917,7 @@ impl Render for Workspace {
                 el.child(dock_resize_handle(
                     DockPosition::Bottom,
                     bottom_dock_size,
+                    dragged_dock,
                     cx,
                 ))
             });
@@ -957,10 +965,20 @@ impl Render for Workspace {
                 )
             })
             .when(left_dock_open, |el| {
-                el.child(dock_resize_handle(DockPosition::Left, left_dock_size, cx))
+                el.child(dock_resize_handle(
+                    DockPosition::Left,
+                    left_dock_size,
+                    dragged_dock,
+                    cx,
+                ))
             })
             .when(right_dock_open, |el| {
-                el.child(dock_resize_handle(DockPosition::Right, right_dock_size, cx))
+                el.child(dock_resize_handle(
+                    DockPosition::Right,
+                    right_dock_size,
+                    dragged_dock,
+                    cx,
+                ))
             });
 
         // Status bar. Resolve the focused pane's title eagerly into an owned
