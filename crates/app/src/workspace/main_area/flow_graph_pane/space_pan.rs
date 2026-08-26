@@ -45,6 +45,10 @@ const PRIORITY: i32 = 130;
 struct PanState {
     held: bool,
     panning: bool,
+    /// Whether the pointer is over the canvas. Not about the cursor's *shape* —
+    /// it is what says the app's hide-on-typing policy has nothing to protect
+    /// here, and it has to be true before the key is pressed rather than after.
+    hovering: bool,
 }
 
 /// What the pointer should look like over the canvas, shared with the view.
@@ -74,6 +78,19 @@ impl PanArmed {
         self.0.get().panning
     }
 
+    /// Whether the pointer is over the canvas, and so whether the pan key can
+    /// be pressed at all.
+    pub(super) fn over_the_canvas(&self) -> bool {
+        self.0.get().hovering
+    }
+
+    fn set_hovering(&self, hovering: bool) {
+        self.0.set(PanState {
+            hovering,
+            ..self.0.get()
+        });
+    }
+
     fn set_held(&self, held: bool) {
         self.0.set(PanState {
             held,
@@ -93,6 +110,13 @@ impl PanArmed {
     /// with no key down — and keep the app's pointer policy suspended.
     pub(super) fn let_go(&self) {
         self.set_held(false);
+    }
+
+    /// Move the pointer the way the plugin does, for a test about what the view
+    /// makes of it.
+    #[cfg(test)]
+    pub(in crate::workspace) fn set_hovering_for_test(&self, over: bool) {
+        self.set_hovering(over);
     }
 
     /// Write `held` the way the plugin does, for a test about what the view
@@ -152,15 +176,14 @@ impl SpacePanPlugin {
     /// see the `Hover` arm. Taken as an argument so the whole state machine
     /// can be tested without a canvas to drag on.
     fn absorb(&mut self, event: &InputEvent, dragging: bool) -> Verdict {
-        let was = self.armed.held();
+        let was = self.armed.0.get();
         // A pan cannot outlive the interaction that is doing it. Nothing else
         // clears `panning` — only [`SpacePan::on_mouse_up`] does — so an
         // interaction ended by any other means (cancelled by another plugin, or
         // a canvas rebuilt under it while the button was down) would leave the
         // closed hand drawn over a canvas nobody is dragging, for good. The
         // hand is put right on the next event instead.
-        let stale_pan = !dragging && self.armed.panning();
-        if stale_pan {
+        if !dragging && self.armed.panning() {
             self.armed.set_panning(false);
         }
         match event {
@@ -179,13 +202,22 @@ impl SpacePanPlugin {
             // mid-pan — and panning a graph as far as the pane's edge is
             // ordinary. Disarming there would leave a still-pressed key
             // needing a release and a fresh press before the next pan.
-            InputEvent::Hover(false) if !dragging => self.armed.set_held(false),
+            InputEvent::Hover(false) if !dragging => {
+                self.armed.set_held(false);
+                self.armed.set_hovering(false);
+            }
+            // Left mid-drag: the key is kept (the pan runs on), but the pointer
+            // is elsewhere and the policy is no longer ours to hold.
+            InputEvent::Hover(false) => self.armed.set_hovering(false),
+            InputEvent::Hover(true) => self.armed.set_hovering(true),
             InputEvent::MouseDown(ev) if self.armed.held() && ev.button == MouseButton::Left => {
                 return Verdict::PanFrom(ev.position);
             }
             _ => {}
         }
-        if self.armed.held() == was && !stale_pan {
+        // Compared whole: the view is told about any of the three, and the two
+        // it does not draw a cursor from still decide what it holds open.
+        if self.armed.0.get() == was {
             Verdict::Ignored
         } else {
             Verdict::Rearmed

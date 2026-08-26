@@ -395,19 +395,28 @@ impl FlowGraphView {
         let cursor = self.pan_armed.cursor();
         if cursor != self.pan_cursor_shown {
             self.pan_cursor_shown = cursor;
-            self.hold_the_pointer_visible(cursor.is_some(), cx);
             cx.notify();
         }
+        // Not keyed on the cursor: gpui hides the pointer inside the very
+        // KeyDown that arms the pan, before anything here has run, so the
+        // policy has to be down *before* the key is pressed.
+        self.hold_the_pointer_visible(self.pan_armed.over_the_canvas(), cx);
     }
 
-    /// Suspend the app's hide-on-typing policy while the pan key is down.
+    /// Suspend the app's hide-on-typing policy while the pointer is over the
+    /// canvas.
     ///
     /// gpui hides the pointer on any key that produces a character, and space
     /// produces one (`gpui_macos::events` gives it `key_char = " "`). Held down
     /// to pan, its auto-repeat re-hides on every tick — and the platform only
     /// brings the pointer back when the mouse *moves*, so a drag that pauses
     /// with the key still down leaves it hidden until the user jiggles it.
-    /// Nothing is typed on a canvas, so the policy has nothing to protect here.
+    ///
+    /// Keyed on the pointer rather than on the key, because the hide happens
+    /// inside the same KeyDown that arms the pan: reacting to the key is always
+    /// one hide too late, and that one lasts until the mouse moves. Over a
+    /// canvas the policy has nothing to protect — nothing here is typed — and
+    /// the pointer being over it is what says so before any key arrives.
     ///
     /// Counted by [`crate::ui::cursor`] rather than saved here: the policy is
     /// one app-wide value and there can be a pane per flow file.
@@ -649,6 +658,17 @@ impl FlowGraphView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.on_canvas_notified(window, cx);
+    }
+
+    /// Move the pointer onto or off the canvas as far as the plugin gets.
+    pub(in crate::workspace) fn hover_canvas_for_test(
+        &mut self,
+        over: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pan_armed.set_hovering_for_test(over);
         self.on_canvas_notified(window, cx);
     }
 

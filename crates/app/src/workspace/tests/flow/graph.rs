@@ -1753,14 +1753,13 @@ async fn holding_the_pan_key_reaches_the_pointer(cx: &mut TestAppContext) {
     );
 }
 
-/// Space types a character as far as gpui is concerned, so holding it to pan
-/// re-hides the pointer on every auto-repeat — and the platform only brings it
-/// back when the mouse moves. A drag that pauses with the key still down was
-/// left with no pointer at all until the user jiggled it.
+/// **Why the pointer, not the key.** gpui hides the pointer inside the same
+/// KeyDown that arms the pan, before anything in the pane has run — so keying
+/// the suspension on the key is always one hide too late, and that one lasts
+/// until the mouse moves. The pointer being over the canvas is what says the
+/// policy has nothing to protect, and it is true before any key arrives.
 #[gpui::test]
-async fn holding_the_pan_key_stops_the_pointer_being_hidden(cx: &mut TestAppContext) {
-    use gpui::CursorHideMode;
-
+async fn the_pointer_over_the_canvas_is_what_suspends_the_policy(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1768,6 +1767,7 @@ async fn holding_the_pan_key_stops_the_pointer_being_hidden(cx: &mut TestAppCont
     });
     vcx.run_until_parked();
 
+    let was = vcx.update(|_, cx| cx.cursor_hide_mode());
     let view = ws
         .read_with(&vcx, |ws, _| {
             ws.active_runtime()
@@ -1777,36 +1777,32 @@ async fn holding_the_pan_key_stops_the_pointer_being_hidden(cx: &mut TestAppCont
         })
         .expect("the graph pane just opened");
 
-    let was = vcx.update(|_, cx| cx.cursor_hide_mode());
-    assert_ne!(
-        was,
-        CursorHideMode::Never,
-        "the app hides on typing by default, which is what this suspends"
-    );
-
-    view.update_in(&mut vcx, |v, window, cx| {
-        v.hold_pan_key_for_test(true, window, cx)
-    });
+    // No key touched yet — the pointer arriving is enough.
+    view.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
     assert_eq!(
         vcx.update(|_, cx| cx.cursor_hide_mode()),
-        CursorHideMode::Never,
-        "nothing is typed on a canvas, so the pointer stays put"
+        gpui::CursorHideMode::Never,
+        "down before the key can hide anything"
+    );
+    assert_eq!(
+        view.read_with(&vcx, |v, _| v.pan_cursor_for_test()),
+        None,
+        "and nothing is drawn over the canvas until the key is held"
     );
 
-    view.update_in(&mut vcx, |v, window, cx| {
-        v.hold_pan_key_for_test(false, window, cx)
-    });
+    view.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(false, w, cx));
     assert_eq!(
         vcx.update(|_, cx| cx.cursor_hide_mode()),
         was,
-        "and the app's own policy comes back exactly as it was"
+        "the pointer left, so the policy is not ours to hold"
     );
 }
 
 /// **The defect the count exists for.** Two flow files mean two panes, each
-/// suspending the one app-wide policy. Saving "what it was" per pane made the
-/// second save the first's override and hand it back as the app's own, leaving
-/// hide-on-typing off for the rest of the session.
+/// suspending the one app-wide policy while the pointer is over it. Saving
+/// "what it was" per pane made the second save the first's override and hand it
+/// back as the app's own, leaving hide-on-typing off for the rest of the
+/// session.
 #[gpui::test]
 async fn two_panes_hand_the_policy_back_once(cx: &mut TestAppContext) {
     let (lane, ws, flow_a, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
@@ -1834,16 +1830,16 @@ async fn two_panes_hand_the_policy_back_once(cx: &mut TestAppContext) {
     let b = newest(&ws, &mut vcx, &flow_b);
     assert_ne!(a.entity_id(), b.entity_id(), "two panes, one per flow file");
 
-    a.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(true, w, cx));
-    b.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(true, w, cx));
-    a.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(false, w, cx));
+    a.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
+    b.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
+    a.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(false, w, cx));
     assert_eq!(
         vcx.update(|_, cx| cx.cursor_hide_mode()),
         gpui::CursorHideMode::Never,
         "one let go, the other is still holding"
     );
 
-    b.update_in(&mut vcx, |v, w, cx| v.hold_pan_key_for_test(false, w, cx));
+    b.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(false, w, cx));
     assert_eq!(
         vcx.update(|_, cx| cx.cursor_hide_mode()),
         was,
