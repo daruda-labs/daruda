@@ -11,6 +11,11 @@
 #                                   in accessed_entities so cx.notify() is not
 #                                   silently dropped after an out-of-element
 #                                   entity read.
+#   gpui-held-key-keeps-modality.patch
+#                                 — a key's auto-repeat no longer counts as new
+#                                   keyboard input, so holding one through a
+#                                   mouse drag stops flipping the input modality
+#                                   and refresh()ing the window on every tick.
 #
 # Usage:
 #   ./scripts/apply-gpui-patch.sh          # auto-detect checkout path
@@ -22,6 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 IME_PATCH="$REPO_DIR/patches/gpui-ime-cjk-path-a.patch"
 NOTIFY_PATCH="$REPO_DIR/patches/gpui-notify-lost-wakeup.patch"
+MODALITY_PATCH="$REPO_DIR/patches/gpui-held-key-keeps-modality.patch"
 
 # Resolve the GPUI source checkout path from Cargo.lock
 find_gpui_checkout() {
@@ -121,6 +127,22 @@ else
         echo "✓ GPUI notify-lost-wakeup patch applied successfully."
     else
         echo "ERROR: Failed to apply notify-lost-wakeup patch." >&2
+        exit 1
+    fi
+fi
+
+# ---- gpui-held-key-keeps-modality.patch ----
+MODALITY_TARGET="$CHECKOUT/crates/gpui/src/window.rs"
+if grep -q 'PlatformInput::KeyDown(ev) if !ev.is_held' "$MODALITY_TARGET" 2>/dev/null; then
+    echo "✓ GPUI held-key-keeps-modality patch already applied."
+else
+    echo "Applying GPUI held-key-keeps-modality patch…"
+    if git apply --check "$MODALITY_PATCH" 2>/dev/null; then
+        git apply "$MODALITY_PATCH"
+        CHANGED=1
+        echo "✓ GPUI held-key-keeps-modality patch applied successfully."
+    else
+        echo "ERROR: Failed to apply held-key-keeps-modality patch." >&2
         exit 1
     fi
 fi

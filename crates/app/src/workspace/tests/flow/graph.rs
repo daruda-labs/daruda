@@ -1846,3 +1846,59 @@ async fn two_panes_hand_the_policy_back_once(cx: &mut TestAppContext) {
         "and the last one hands the app's own policy back"
     );
 }
+
+/// **The gpui patch this pan depends on** (`patches/gpui-held-key-keeps-modality.patch`).
+///
+/// A held key auto-repeats, and each repeat used to flip the window's input
+/// modality back to Keyboard while the drag's own moves flipped it to Mouse.
+/// Every flip calls `Window::refresh`, which bypasses *every* cached view for
+/// that frame — tens of full-tree repaints a second for as long as the pan
+/// lasts. A repeat says nothing a first press has not already said.
+#[gpui::test]
+async fn an_auto_repeat_does_not_flip_the_input_modality(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+
+    let space = |held: bool| gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke {
+            modifiers: gpui::Modifiers::default(),
+            key: "space".to_string(),
+            key_char: Some(" ".to_string()),
+        },
+        is_held: held,
+        prefer_character_input: false,
+    };
+    let moved = || gpui::MouseMoveEvent {
+        position: gpui::point(gpui::px(40.), gpui::px(40.)),
+        modifiers: gpui::Modifiers::default(),
+        pressed_button: None,
+    };
+
+    // A first press is real keyboard input.
+    vcx.simulate_event(space(false));
+    assert!(
+        vcx.update(|window, _| window.last_input_was_keyboard()),
+        "a press is keyboard input"
+    );
+
+    // Moving the mouse hands the modality over, as it always did.
+    vcx.simulate_event(moved());
+    assert!(
+        !vcx.update(|window, _| window.last_input_was_keyboard()),
+        "a move is mouse input"
+    );
+
+    // And now the auto-repeats, which is what a pan is full of. Without the
+    // patch each of these takes it back and refreshes the window.
+    for _ in 0..5 {
+        vcx.simulate_event(space(true));
+        assert!(
+            !vcx.update(|window, _| window.last_input_was_keyboard()),
+            "a repeat is not new keyboard input"
+        );
+    }
+}

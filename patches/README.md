@@ -20,6 +20,49 @@ Patch contents: route non-ASCII `key_char` (Korean jamo, Japanese
 kana, …) through macOS IME-first dispatch (PATH A) so composition
 works during IMK Mach Port initialization delays.
 
+## `gpui-held-key-keeps-modality.patch`
+
+Targets the **cargo git checkout** of GPUI, on the same terms as the
+CJK patch above: auto-applied by `scripts/apply-gpui-patch.sh`,
+idempotent on the marker `PlatformInput::KeyDown(ev) if !ev.is_held`.
+
+One line in `Window::dispatch_event`'s input-modality decision: an
+**auto-repeat no longer counts as new keyboard input**.
+
+`last_input_modality` exists for focus-visible styling and hover
+suppression, and every change to it calls `Window::refresh` — which
+sets `refreshing` and so **bypasses every `AnyView::cached` for that
+frame** (the one global invalidation daruda otherwise bans on a hot
+path; see the root `CLAUDE.md`). Only `KeyDown` and
+`MouseMove`/`MouseDown` set it; `MouseUp` leaves it alone.
+
+So a key *held* through a mouse drag — daruda's space-to-pan on the
+flow canvas — put the window in a loop: each OS auto-repeat took the
+modality back to Keyboard, each of the drag's own moves handed it to
+Mouse, and each flip refreshed the whole tree. At macOS's repeat rate
+that is tens of full, cache-defeating repaints a second for as long as
+the drag lasts. Measured on a minimal workspace, a refreshed frame
+costs **2.0×** a plain one (1.11 ms → 2.26 ms, release); the real
+figure is higher, since what `refresh` throws away is exactly the
+cached subtrees a minimal workspace does not have.
+
+The same flip-flop is why the pointer kept vanishing: the hide fires
+inside a `key_char` KeyDown, so every repeat re-armed it.
+
+Semantics: a repeat says nothing a first press has not already said.
+The first press still claims the modality. What changes is that a key
+held while the mouse is used no longer takes it back — and having moved
+the mouse, Mouse is the truthful answer. Upstream has not addressed
+this, and zed never reaches it: its app code uses `is_held` nowhere,
+its drag-modifying gestures are all real modifiers (which arrive as
+`ModifiersChanged` and do not touch the modality), and its one
+hand-cursor pan — the image viewer — needs no key at all. daruda is on
+this path because it wanted the canvas convention (space to pan), so
+the risk here is daruda's own.
+
+Guarded by `an_auto_repeat_does_not_flip_the_input_modality`
+(`workspace/tests/flow/graph.rs`), which fails with the patch reverted.
+
 ## `gpui-component-input-state-ime-selection.patch`
 
 Targets the **vendored `crates/gpui_component/src/input/state.rs`**

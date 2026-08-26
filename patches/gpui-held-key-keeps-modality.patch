@@ -1,0 +1,21 @@
+diff --git a/crates/gpui/src/window.rs b/crates/gpui/src/window.rs
+index 61257ea404..eb771b2fbd 100644
+--- a/crates/gpui/src/window.rs
++++ b/crates/gpui/src/window.rs
+@@ -4334,7 +4334,15 @@ impl Window {
+         // doesn't show hover highlights on the item under the mouse cursor.
+         let old_modality = self.last_input_modality;
+         self.last_input_modality = match &event {
+-            PlatformInput::KeyDown(_) => InputModality::Keyboard,
++            // An auto-repeat is not a new keyboard interaction. A key held
++            // through a mouse drag — space to pan a canvas, say — repeats at
++            // the OS rate, and each tick flipped the modality back to Keyboard
++            // while the drag's own moves flipped it to Mouse. Every flip calls
++            // `refresh()`, which sets `refreshing` and so bypasses *every*
++            // cached view for that frame: tens of full-tree repaints a second
++            // for as long as the drag lasts. The first press still counts;
++            // holding it says nothing new.
++            PlatformInput::KeyDown(ev) if !ev.is_held => InputModality::Keyboard,
+             PlatformInput::MouseMove(_) | PlatformInput::MouseDown(_) => InputModality::Mouse,
+             _ => self.last_input_modality,
+         };
