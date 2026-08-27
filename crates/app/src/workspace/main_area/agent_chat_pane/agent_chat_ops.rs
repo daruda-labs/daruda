@@ -25,6 +25,11 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
+/// Steps the narrowed screenshot scenario keeps. One of the offered choices,
+/// and small enough against the seed that the tail-more row has a real count.
+#[cfg(feature = "screenshot")]
+const SHOT_TAIL_WINDOW: usize = 3;
+
 /// The catalog's default agent id — the first entry, or the built-in Claude id
 /// if the catalog is somehow empty (the config layer guarantees non-empty, so
 /// the fallback is purely defensive).
@@ -610,6 +615,56 @@ impl Workspace {
                 daruda_acp::Remedy::Reauthenticate,
                 cx,
             );
+        });
+    }
+
+    /// Park an agent-chat pane on a settled transcript — the
+    /// `--screenshot-scenario agent-chat` entry point.
+    ///
+    /// Everything the Step layer, the activity-bar chips and the status rollup
+    /// need is in the seed, so the pane lands in its default state (`Mode: Auto`
+    /// / `Filter: All` / `Steps: All`) with real work to fold.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_transcript_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.seed_transcript_for_shot(super::shot_transcript::sample_transcript(), cx);
+        });
+    }
+
+    /// The same transcript with both narrowing controls engaged, so the
+    /// filtered-away and tail-more placeholder rows render side by side — the
+    /// only way to see whether the two read as siblings.
+    ///
+    /// Driven through the ops the chips call rather than by writing the fields,
+    /// so the capture shows what a user's clicks actually produce.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_narrowed_transcript_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::display_filter::FilterFacet;
+        use super::rows::tail::TailWindow;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            // Tools only: the reasoning and prose rows drop out, which is what
+            // the filtered-away row counts.
+            v.toggle_display_facet(FilterFacet::Tools, cx);
+            v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
         });
     }
 

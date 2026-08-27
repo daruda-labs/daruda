@@ -543,7 +543,9 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::FlowRunning
         | ScreenshotScenario::FlowAsking
         | ScreenshotScenario::FlowDeleteConfirm
-        | ScreenshotScenario::AgentChatFailure => None,
+        | ScreenshotScenario::AgentChatFailure
+        | ScreenshotScenario::AgentChat
+        | ScreenshotScenario::AgentChatNarrowed => None,
     }
 }
 

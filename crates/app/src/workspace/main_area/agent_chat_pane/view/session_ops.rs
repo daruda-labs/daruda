@@ -276,6 +276,20 @@ impl AgentChatView {
         self.reproject(cx);
     }
 
+    /// Replace the conversation with a fixed transcript for a `--screenshot`
+    /// capture, then re-derive the projection exactly as a live event would.
+    /// The one seeding entry point, so a scenario cannot leave `rows` and the
+    /// virtualized list out of step with `items`.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_transcript_for_shot(
+        &mut self,
+        items: Vec<daruda_acp::ChatItem>,
+        cx: &mut Context<Self>,
+    ) {
+        self.items = items;
+        self.reproject(cx);
+    }
+
     pub(in crate::workspace) fn set_tail_window(
         &mut self,
         tail: TailWindow,
