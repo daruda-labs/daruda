@@ -9,12 +9,16 @@ use daruda_acp::{
 use gpui::{Context, Window};
 
 use super::super::agent_chat_helpers::{
-    cancel_pending_permission, collect_foldable_keys, fold_active, fold_key_item_index,
+    cancel_pending_permission, collect_foldable_keys, fold_context, fold_key_item_index,
     permission_card_mut,
 };
-use super::super::fold::{FoldKey, FoldState};
+use super::super::display_filter::{DisplayFilter, FilterFacet};
+use super::super::fold::FoldKey;
+use super::super::fold_mode::FoldMode;
+use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
+use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::{AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
@@ -136,10 +140,10 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Resolve `active` via the shared `fold_active` — the same source
+        // Resolve the context via the shared `fold_context` — the same source
         // `rows::project` uses to derive the default collapsed state — so the
         // first click flips the *visible* state rather than a stale re-derivation.
-        let active = fold_active(&key, &self.items);
+        let ctx = fold_context(&key, &self.items);
         // Resolve before the key moves into `fold.toggle` below: a nested fold
         // (a tool card's own body, one of its diffs, its raw-input disclosure,
         // or a nested subagent card) only changes its *owning row's* rendered
@@ -151,18 +155,21 @@ impl AgentChatView {
         let item_ix = fold_key_item_index(&key, &self.items);
         // A card's own fold decides whether its body — and so its embed editors —
         // is on screen at all. Narrow the follow-up reconcile to that card;
-        // response / tool-group folds only flip row visibility, leaving each
-        // card's own state (and its embeds) untouched.
+        // response / step / tool-group folds only flip row visibility, leaving
+        // each card's own state (and its embeds) untouched.
         let embed_scope = match &key {
             FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
             FoldKey::Assistant(_)
             | FoldKey::Thinking(_)
             | FoldKey::Response(_)
             | FoldKey::ToolGroup(_)
+            | FoldKey::Step(_)
+            | FoldKey::Tail(_)
+            | FoldKey::Filtered(_)
             | FoldKey::Diff(_)
             | FoldKey::ToolRawInput(_) => None,
         };
-        self.fold.toggle(key, active);
+        self.fold.toggle(key, ctx);
         let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {
             self.reconcile_embeds_after_fold(&scope, window, cx);
@@ -231,6 +238,93 @@ impl AgentChatView {
                 let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
             }
         });
+    }
+
+    pub(in crate::workspace) fn set_tail_window(
+        &mut self,
+        tail: TailWindow,
+        cx: &mut Context<Self>,
+    ) {
+        // Choosing the seeded value still detaches the pane from config.
+        let choice = PaneChoice::Chosen(tail);
+        let choice_changed = self.tail != choice;
+        let reveal_changed = self.fold.clear_tail_reveals();
+        if !choice_changed && !reveal_changed {
+            return;
+        }
+        self.tail = choice;
+        self.rebuild_rows();
+        self.list_state.remeasure();
+        cx.notify();
+
+        if choice_changed {
+            let window_handle = self.window_handle;
+            cx.defer(move |cx| {
+                if let Some(workspace) =
+                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+                {
+                    // SILENT-OK: the window may close before the deferred save runs.
+                    let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
+                }
+            });
+        }
+    }
+
+    pub(in crate::workspace) fn set_fold_mode(&mut self, mode: FoldMode, cx: &mut Context<Self>) {
+        if self.fold.chosen_mode() == Some(mode) {
+            return;
+        }
+        self.fold.set_mode(mode);
+        self.rebuild_rows();
+        self.list_state.remeasure();
+        cx.notify();
+
+        let window_handle = self.window_handle;
+        cx.defer(move |cx| {
+            if let Some(workspace) =
+                crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+            {
+                // SILENT-OK: the window may close before the deferred save runs.
+                let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
+            }
+        });
+    }
+
+    pub(in crate::workspace) fn toggle_display_facet(
+        &mut self,
+        facet: FilterFacet,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_display_filter(self.display_filter.value().toggled(facet), cx);
+    }
+
+    pub(in crate::workspace) fn clear_display_filter(&mut self, cx: &mut Context<Self>) {
+        self.set_display_filter(DisplayFilter::default(), cx);
+    }
+
+    fn set_display_filter(&mut self, filter: DisplayFilter, cx: &mut Context<Self>) {
+        let choice = PaneChoice::Chosen(filter);
+        let choice_changed = self.display_filter != choice;
+        let reveal_changed = self.fold.clear_filter_reveals();
+        if !choice_changed && !reveal_changed {
+            return;
+        }
+        self.display_filter = choice;
+        self.rebuild_rows();
+        self.list_state.remeasure();
+        cx.notify();
+
+        if choice_changed {
+            let window_handle = self.window_handle;
+            cx.defer(move |cx| {
+                if let Some(workspace) =
+                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+                {
+                    // SILENT-OK: the window may close before the deferred save runs.
+                    let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
+                }
+            });
+        }
     }
 
     /// Collapse / expand the bottom plan region. The plan is a derived render
@@ -302,7 +396,7 @@ impl AgentChatView {
         self.activity.cancel_in_flight = false;
         self.session_usage = None;
         self.assets.clear();
-        self.fold = FoldState::default();
+        self.fold.clear_overrides();
         self.session_config = SessionConfig::default();
         self.plan.clear();
         self.plan_collapsed = false;

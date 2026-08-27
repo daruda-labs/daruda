@@ -26,9 +26,13 @@ use gpui::{
     ListState, Pixels, ScrollHandle, Subscription, Task, Window, prelude::*, px,
 };
 
+use super::display_filter::DisplayFilter;
 use super::fold::FoldState;
+use super::fold_mode::FoldMode;
+use super::pane_choice::PaneChoice;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
-use super::rows::{LiveSubagentUnits, RenderRow};
+use super::rows::tail::TailWindow;
+use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -481,12 +485,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// methods stay `impl AgentChatView` since they also need `queue.turn`
     /// and `items`, neither of which moved into `ActivityTracker`.
     pub(in crate::workspace) activity: ActivityTracker,
-    /// Per-conversation fold state — which blocks the user has explicitly
-    /// expanded / collapsed. Transient / session-only; never serialized.
+    /// Persisted pane mode plus session-only block overrides.
     pub(in crate::workspace) fold: FoldState,
     /// Per-pane content-column width mode. Persisted by the workspace snapshot;
     /// default `Full` keeps existing pane-wide wrapping.
     pub(in crate::workspace) content_width: ChatContentWidth,
+    /// Tail window and whether it still follows config.
+    pub(in crate::workspace) tail: PaneChoice<TailWindow>,
+    /// Display filter and whether it still follows config.
+    pub(in crate::workspace) display_filter: PaneChoice<DisplayFilter>,
     /// Virtualized conversation list state (gpui `list`). [`FollowMode::Tail`]
     /// auto-scrolls with streaming output and re-engages when the user scrolls
     /// back to the bottom. Synced with `items` via [`Self::sync_list_after`].
@@ -500,6 +507,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// cached here rather than recomputed per query. Derived cache — rebuilt in
     /// [`Self::rebuild_rows`] alongside `rows`, its single update site.
     pub(in crate::workspace) live_units: LiveSubagentUnits,
+    /// Cached subtree-aware display-filter matches.
+    pub(in crate::workspace) filter_matches: FilterMatchIndex,
+    /// Cached start of the newest turn.
+    pub(in crate::workspace) turn_boundary: super::agent_chat_helpers::TurnBoundary,
     /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
     /// The Workspace owns the resolved value (user + project config layers), so it
     /// cannot be derived here — but a fold expand materializes diff editors
@@ -596,6 +607,9 @@ impl AgentChatView {
         agent_id: String,
         agent_name: String,
         title: Option<String>,
+        tail: TailWindow,
+        display_filter: DisplayFilter,
+        fold_mode: FoldMode,
         cx: &mut Context<Self>,
     ) -> Self {
         // Re-rasterize mermaid diagrams when the UI theme changes. The chat
@@ -633,8 +647,10 @@ impl AgentChatView {
             telegram_first_response_watch: None,
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
-            fold: FoldState::default(),
+            fold: FoldState::with_mode(fold_mode),
             content_width: ChatContentWidth::Full,
+            tail: PaneChoice::Seeded(tail),
+            display_filter: PaneChoice::Seeded(display_filter),
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
                 // arrive. `Top` alignment + `Tail` follow = scroll history up
@@ -647,6 +663,8 @@ impl AgentChatView {
             },
             rows: Vec::new(),
             live_units: LiveSubagentUnits::default(),
+            filter_matches: FilterMatchIndex::default(),
+            turn_boundary: Default::default(),
             syntax_theme: None,
             activity_title: None,
             session_config: SessionConfig::default(),

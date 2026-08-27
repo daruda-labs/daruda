@@ -9,9 +9,9 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
 use gpui::Context;
 
-use super::super::agent_chat_helpers::{activity_bar_title, apply_info_field};
+use super::super::agent_chat_helpers::{TurnBoundary, activity_bar_title, apply_info_field};
 use super::super::reconcile::ReconcileScope;
-use super::super::rows::{LiveSubagentUnits, RowKind, project};
+use super::super::rows::{FilterMatchIndex, LiveSubagentUnits, RowKind, project_with_filter_index};
 use super::super::window_access::WindowAccess;
 use super::{
     ActivityState, AgentChatView, AgentSessionStatus, TelegramFirstResponseEffect,
@@ -561,8 +561,18 @@ impl AgentChatView {
         // and every tool card's badge read this one, instead of each re-deriving
         // it by scanning `items`.
         self.live_units = LiveSubagentUnits::build(&self.items);
+        self.filter_matches =
+            FilterMatchIndex::build(&self.items, self.display_filter.value(), &self.live_units);
+        self.turn_boundary = TurnBoundary::of(&self.items);
         self.activity_title = activity_bar_title(self.session_title.as_deref(), &self.items);
-        self.rows = project(&self.items, &self.fold, awaiting_response, &self.live_units);
+        self.rows = project_with_filter_index(
+            &self.items,
+            &self.fold,
+            awaiting_response,
+            &self.live_units,
+            self.tail.value(),
+            &self.filter_matches,
+        );
 
         if let Some(at) = old
             .iter()

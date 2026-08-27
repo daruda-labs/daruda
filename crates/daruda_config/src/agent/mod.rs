@@ -536,6 +536,13 @@ pub struct AgentConfig {
     /// reading-width mode. Clamped to
     /// [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
     pub reading_width: f32,
+    /// Initial visible trailing-step count; `0` shows every step.
+    pub tail_window: u8,
+    /// Initial display-filter facet tokens. Unknown tokens are ignored.
+    pub display_filter: Vec<String>,
+    /// Initial fold preset and optional `"<turn>.<block>=<rule>"` overrides.
+    /// Presets are `auto`, `summary`, and `expanded`; unknown tokens are ignored.
+    pub fold_mode: Vec<String>,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
     /// the option stays in the session state and the agent can still change it.
@@ -579,6 +586,12 @@ pub const READING_WIDTH_MAX: f32 = 2400.0;
 /// Default readable-content column width for AgentChat.
 pub const READING_WIDTH_DEFAULT: f32 = 700.0;
 
+/// Sentinel meaning every work step is visible.
+pub const TAIL_WINDOW_ALL: u8 = 0;
+/// Tail-window sizes offered by the AgentChat chip.
+pub const TAIL_WINDOW_CHOICES: [u8; 4] = [1, 3, 5, 10];
+pub const TAIL_WINDOW_DEFAULT: u8 = TAIL_WINDOW_ALL;
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -586,6 +599,9 @@ impl Default for AgentConfig {
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
+            tail_window: TAIL_WINDOW_DEFAULT,
+            display_filter: Vec::new(),
+            fold_mode: Vec::new(),
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }

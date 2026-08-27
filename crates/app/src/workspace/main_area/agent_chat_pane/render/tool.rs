@@ -25,15 +25,15 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    diff_editor_key, fold_active, renders_raw_input, renders_subagent_instructions,
-    suppresses_live_subagent_output, tool_fold_key, tool_image_key,
+    TurnBoundary, diff_editor_key, fold_context_at, renders_raw_input,
+    renders_subagent_instructions, suppresses_live_subagent_output, tool_fold_key, tool_image_key,
 };
-use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    LiveSubagentUnits, SUBAGENT_NEST_DEPTH_CAP,
+    FilterMatchIndex, LiveSubagentUnits, SUBAGENT_NEST_DEPTH_CAP, effective_tool_status,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -58,9 +58,12 @@ struct OutputBlockContext<'a> {
 pub(super) fn tool_card(
     key: FoldKey,
     expanded: bool,
+    ix: usize,
     tc: &ToolCallItem,
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
+    filter_matches: &FilterMatchIndex,
+    boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
@@ -72,17 +75,14 @@ pub(super) fn tool_card(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let markdown_links = AgentChatMarkdownLinks::new(pane_id, window_handle);
+    let turn = boundary.at(ix);
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
     // `Completed` when its SDK call returns, but the child tool calls stream in
     // and run afterward (see `LiveSubagentUnits`). While any nested
     // descendant is live the unit is still working, so the badge reads
     // in-progress until the whole subtree settles.
-    let effective_status = if !tc.status.is_live() && live_units.contains(&tc.id) {
-        ToolStatusView::InProgress
-    } else {
-        tc.status
-    };
+    let effective_status = effective_tool_status(tc, live_units);
     let (badge_text, badge_fg) = tool_status_badge(effective_status, t, dim, cx);
     // A live tool gets animated trailing dots (Running. / .. / ...) so the
     // in-progress state reads as live, not just a static amber label. `Pending`
@@ -185,7 +185,7 @@ pub(super) fn tool_card(
             // expanded, so the pretty-print of a large `raw_input` blob stays off the
             // render hot path (GPUI has no partial redraw) with no manual gate.
             let raw_key = FoldKey::ToolRawInput(tc.id.clone());
-            let raw_expanded = fold.is_expanded(&raw_key, false);
+            let raw_expanded = fold.is_expanded(&raw_key, FoldContext::new(turn, false));
             let raw_header = FoldHeader::bare().leading(
                 div()
                     .flex_none()
@@ -299,6 +299,7 @@ pub(super) fn tool_card(
                 editor,
                 assets.diff_stats,
                 fold,
+                turn,
                 t,
                 dim,
                 pane_id,
@@ -337,14 +338,15 @@ pub(super) fn tool_card(
         // would otherwise recurse until the stack overflows — an uncatchable abort
         // that takes the whole window down. Past the cap the children are simply not
         // nested (the parent card still renders), which no real conversation hits.
-        let children: Vec<&ToolCallItem> = if depth < SUBAGENT_NEST_DEPTH_CAP {
+        let children: Vec<(usize, &ToolCallItem)> = if depth < SUBAGENT_NEST_DEPTH_CAP {
             items
                 .iter()
-                .filter_map(|it| match it {
+                .enumerate()
+                .filter_map(|(cix, it)| match it {
                     ChatItem::ToolCall(c)
                         if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) =>
                     {
-                        Some(c)
+                        filter_matches.keeps_tool(c).then_some((cix, c))
                     }
                     _ => None,
                 })
@@ -365,19 +367,25 @@ pub(super) fn tool_card(
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(subagent_label)),
             );
-            for child in children {
+            for (child_ix, child) in children {
                 // A nested child may itself be a subagent launch (a subagent that
                 // spawns its own subagent), so key it the same way as a top-level
                 // card — collapsed by default when it is one.
                 let child_key = tool_fold_key(child);
-                let child_expanded = fold.is_expanded(&child_key, fold_active(&child_key, items));
+                let child_expanded = fold.is_expanded(
+                    &child_key,
+                    fold_context_at(&child_key, child_ix, items, boundary),
+                );
                 body = body.child(
                     tool_card(
                         child_key,
                         child_expanded,
+                        child_ix,
                         child,
                         items,
                         live_units,
+                        filter_matches,
+                        boundary,
                         assets,
                         fold,
                         t,
@@ -682,8 +690,9 @@ fn tool_kind_label(kind: ToolKindView) -> String {
 }
 
 /// Map a tool kind to a leading header icon, so a tool call's type reads at a
-/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon.
-fn tool_kind_icon(kind: ToolKindView) -> IconName {
+/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon. Shared
+/// with the step header, which leads with the icon of its run's dominant kind.
+pub(super) fn tool_kind_icon(kind: ToolKindView) -> IconName {
     // The vendored `IconName` set has no pencil/edit glyph, so Edit falls back
     // to `File` (Read already uses `Eye`, so no visual collision).
     match kind {

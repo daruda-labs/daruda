@@ -1,4 +1,5 @@
-use super::super::fold::FoldKey;
+use super::super::fold::{FoldContext, FoldKey};
+use super::super::fold_mode::FoldPreset;
 use super::super::rows::RowKind;
 
 fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
@@ -71,6 +72,9 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             "claude".to_string(),
             "Claude".to_string(),
             None,
+            super::super::rows::tail::TailWindow::All,
+            super::super::display_filter::DisplayFilter::default(),
+            super::super::fold_mode::FoldMode::default(),
             cx,
         )
     })
@@ -1160,11 +1164,15 @@ fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext
                 priority: PlanPriority::Medium,
                 status: PlanStatus::Pending,
             });
-            view.fold.toggle(FoldKey::Tool("call-1".into()), true);
+            view.fold
+                .toggle(FoldKey::Tool("call-1".into()), FoldContext::past(true));
             assert!(
-                !view.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                !view
+                    .fold
+                    .is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(true)),
                 "sanity: override collapsed the block while active"
             );
+            view.fold.set_mode(FoldPreset::Expanded.mode());
 
             view.reset_for_new_session(cx);
 
@@ -1185,8 +1193,14 @@ fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext
             assert!(view.turn_is_idle(), "reset clears the in-flight turn flag");
             assert!(view.plan.is_empty(), "reset clears the execution plan");
             assert!(
-                view.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                view.fold
+                    .is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(true)),
                 "reset drops fold overrides back to the natural default"
+            );
+            assert_eq!(
+                view.fold.chosen_mode(),
+                Some(FoldPreset::Expanded.mode()),
+                "reset keeps the pane's fold mode: it is a user preference, not                  conversation state, and wiping it here also erases it from disk"
             );
         })
         .unwrap();

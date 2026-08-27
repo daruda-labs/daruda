@@ -17,6 +17,8 @@ use gpui::{App, Context, Window};
 use super::Workspace;
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
+use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode;
+use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
@@ -683,9 +685,30 @@ impl Workspace {
                             // `initial_modes` instead).
                             let mode_id = ac.mode_id.clone();
                             let content_width = deserialize_chat_content_width(ac.content_width);
+                            // Missing pane choices retain the constructor's config seeds.
+                            let tail = ac.tail_window.map(deserialize_chat_tail_window);
+                            let display_filter = ac.display_filter.as_ref().map(|tokens| {
+                                crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter::from_tokens(
+                                    tokens.iter().map(String::as_str),
+                                )
+                            });
+                            let fold_mode = ac.fold_mode.as_ref().map(|tokens| {
+                                crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode::from_tokens(
+                                    tokens.iter().map(String::as_str),
+                                )
+                            });
                             content.view.update(cx, |v, _| {
                                 v.last_known_mode_id = mode_id;
                                 v.content_width = content_width;
+                                if let Some(tail) = tail {
+                                    v.tail = PaneChoice::Chosen(tail);
+                                }
+                                if let Some(filter) = display_filter {
+                                    v.display_filter = PaneChoice::Chosen(filter);
+                                }
+                                if let Some(mode) = fold_mode {
+                                    v.fold.set_mode(mode);
+                                }
                             });
                         }
                         restored
@@ -864,6 +887,28 @@ fn serialize_chat_content_width(
     }
 }
 
+fn serialize_chat_tail_window(
+    tail: crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow,
+) -> daruda_store::project::SerializedChatTailWindow {
+    use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+    match tail {
+        TailWindow::All => daruda_store::project::SerializedChatTailWindow::All,
+        last @ TailWindow::Last(_) => {
+            daruda_store::project::SerializedChatTailWindow::Last(last.size())
+        }
+    }
+}
+
+fn deserialize_chat_tail_window(
+    tail: daruda_store::project::SerializedChatTailWindow,
+) -> crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow {
+    use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+    match tail {
+        daruda_store::project::SerializedChatTailWindow::All => TailWindow::All,
+        daruda_store::project::SerializedChatTailWindow::Last(n) => TailWindow::last(n),
+    }
+}
+
 fn deserialize_chat_content_width(
     mode: daruda_store::project::SerializedChatContentWidth,
 ) -> crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth {
@@ -954,6 +999,13 @@ fn serialize_pane_content(
             account_id: ac.account.to_persisted(),
             mode_id: v.last_known_mode_id.clone(),
             content_width: serialize_chat_content_width(v.content_width),
+            // Persist only explicit choices so untouched panes keep following config.
+            tail_window: v.tail.chosen().map(serialize_chat_tail_window),
+            display_filter: v
+                .display_filter
+                .chosen()
+                .map(|f| f.tokens().into_iter().map(str::to_owned).collect()),
+            fold_mode: v.fold.chosen_mode().map(FoldMode::tokens),
         });
     }
     if let Some(fg) = pane.flow_graph_content() {

@@ -16,6 +16,9 @@ use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
 use std::path::{Path, PathBuf};
 
+use super::display_filter::DisplayFilter;
+use super::fold_mode::FoldMode;
+use super::rows::tail::TailWindow;
 use super::telegram_ops::DeferKind;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
 use crate::agent::launch_resolve::account_recipe_for_connect;
@@ -456,6 +459,12 @@ impl Workspace {
         let agent_name = agent_name_for(&self.agents, &agent_id);
         // The view owns its own `cwd` (for connect / persistence); the wrapper
         // caches a copy so `Pane::cwd()` stays cx-free.
+        // Seed from the resolved config; a restore overwrites it with the pane's
+        // own persisted choice (see `rebuild_layout`).
+        let tail = TailWindow::last(self.agent.tail_window);
+        let display_filter =
+            DisplayFilter::from_tokens(self.agent.display_filter.iter().map(String::as_str));
+        let fold_mode = FoldMode::from_tokens(self.agent.fold_mode.iter().map(String::as_str));
         let view = cx.new({
             let cwd = cwd.clone();
             let agent_name = agent_name.clone();
@@ -474,6 +483,9 @@ impl Workspace {
                     agent_id,
                     agent_name,
                     title,
+                    tail,
+                    display_filter,
+                    fold_mode,
                     cx,
                 )
             }

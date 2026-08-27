@@ -16,7 +16,8 @@ use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Icon, Sizable as _, button_bare, copy_button};
 use crate::window_registry::WindowRegistry;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{DiffStat, diff_editor_key};
-use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::fold_mode::TurnPosition;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -43,6 +44,7 @@ pub(super) fn diff_block(
     editor: Option<&Entity<crate::ui::InputState>>,
     diff_stats: &DiffStats,
     fold: &FoldState,
+    turn: TurnPosition,
     t: &theme::DarudaTheme,
     dim: f32,
     pane_id: PaneId,
@@ -52,8 +54,9 @@ pub(super) fn diff_block(
 ) -> AnyElement {
     let diff_key = diff_editor_key(tool_id, di);
     let key = FoldKey::Diff(diff_key.clone());
-    // Diff policy is DefaultExpanded → derivation ignores `active` either way.
-    let expanded = fold.is_expanded(&key, false);
+    // A diff is never "running", so only its turn position can move the default
+    // — which a `past.diff=` / `last.diff=` rule is free to do.
+    let expanded = fold.is_expanded(&key, FoldContext::new(turn, false));
 
     let path_string = diff.path.display().to_string();
     // The path is the block's identity, shown in both fold states, so it takes

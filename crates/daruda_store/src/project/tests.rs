@@ -183,6 +183,9 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         account_id: Some(id),
         mode_id: None,
         content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -207,6 +210,9 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         account_id: None,
         mode_id: Some("acceptEdits".to_string()),
         content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -228,6 +234,9 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
         account_id: None,
         mode_id: None,
         content_width: SerializedChatContentWidth::Reading,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -236,6 +245,198 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert_eq!(legacy.content_width, SerializedChatContentWidth::Full);
+}
+
+#[test]
+fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
+        fold_mode: None,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.display_filter,
+        Some(vec!["tools".to_string(), "tool_edit".to_string()])
+    );
+
+    let cleared = SerializedAgentChatContent {
+        display_filter: Some(Vec::new()),
+        ..content
+    };
+    let json = serde_json::to_string(&cleared).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.display_filter, Some(Vec::new()));
+
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(legacy.display_filter, None);
+
+    let newer_json = r#"{"cwd":"/repo/lane","display_filter":["tools","from_the_future"]}"#;
+    let newer: SerializedAgentChatContent = serde_json::from_str(newer_json).unwrap();
+    assert_eq!(
+        newer.display_filter,
+        Some(vec!["tools".to_string(), "from_the_future".to_string()])
+    );
+}
+
+#[test]
+fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: Some(vec![
+            "summary".to_string(),
+            "last.tool=expanded".to_string(),
+        ]),
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.fold_mode,
+        Some(vec![
+            "summary".to_string(),
+            "last.tool=expanded".to_string()
+        ])
+    );
+
+    let auto = SerializedAgentChatContent {
+        fold_mode: Some(vec!["auto".to_string()]),
+        display_filter: None,
+        ..content
+    };
+    let json = serde_json::to_string(&auto).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.fold_mode, Some(vec!["auto".to_string()]));
+
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(legacy.fold_mode, None);
+
+    let newer_json = r#"{"cwd":"/repo/lane","fold_mode":["auto","last.wormhole=expanded"]}"#;
+    let newer: SerializedAgentChatContent = serde_json::from_str(newer_json).unwrap();
+    assert_eq!(
+        newer.fold_mode,
+        Some(vec![
+            "auto".to_string(),
+            "last.wormhole=expanded".to_string()
+        ])
+    );
+}
+
+#[test]
+fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: Some(SerializedChatTailWindow::Last(5)),
+        display_filter: None,
+        fold_mode: None,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.tail_window,
+        Some(SerializedChatTailWindow::Last(5))
+    );
+
+    let all = SerializedAgentChatContent {
+        tail_window: Some(SerializedChatTailWindow::All),
+        display_filter: None,
+        fold_mode: None,
+        ..content
+    };
+    let json = serde_json::to_string(&all).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.tail_window, Some(SerializedChatTailWindow::All));
+
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(legacy.tail_window, None);
+}
+
+/// Unknown preference tokens must not invalidate the surrounding pane state.
+#[test]
+fn a_future_view_preference_degrades_instead_of_losing_the_project() {
+    let json = r#"{
+        "cwd": "/repo/lane",
+        "session_id": "sess-abc123",
+        "tail_window": "first_and_last",
+        "content_width": "half",
+        "display_filter": ["tool_read", "tool_wormhole"],
+        "fold_mode": ["auto", "last.wormhole=expanded"]
+    }"#;
+    let content: SerializedAgentChatContent =
+        serde_json::from_str(json).expect("an unknown token drops, it does not fail the pane");
+    assert_eq!(content.tail_window, None, "unreadable → treated as unset");
+    assert_eq!(content.content_width, SerializedChatContentWidth::Full);
+    assert!(content.display_filter.is_some());
+    assert!(content.fold_mode.is_some());
+    assert_eq!(
+        content.cwd,
+        Some(PaneCwd::Local(PathBuf::from("/repo/lane")))
+    );
+    assert_eq!(content.session_id.as_deref(), Some("sess-abc123"));
+
+    let leaf: SerializedLayout = serde_json::from_str(&format!(
+        r#"{{"type":"Leaf","pane_id":7,"cwd":null,"agent_chat":{json}}}"#
+    ))
+    .expect("one unreadable preference must not corrupt the pane tree");
+    match leaf {
+        SerializedLayout::Leaf {
+            pane_id,
+            content: SerializedPaneContent::AgentChat(chat),
+        } => {
+            assert_eq!(pane_id, 7);
+            assert_eq!(chat.tail_window, None);
+        }
+        other => panic!("expected an agent-chat leaf, got {other:?}"),
+    }
+}
+
+#[test]
+fn unset_view_preferences_are_left_out_of_the_json() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: None,
+        account_id: None,
+        mode_id: None,
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: None,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    for key in [
+        "tail_window",
+        "display_filter",
+        "fold_mode",
+        "content_width",
+    ] {
+        assert!(!json.contains(key), "{key} should be omitted: {json}");
+    }
 }
 
 #[test]
@@ -253,6 +454,9 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             account_id: None,
             mode_id: None,
             content_width: SerializedChatContentWidth::Full,
+            tail_window: None,
+            display_filter: None,
+            fold_mode: None,
         }),
     };
 
@@ -288,6 +492,9 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             account_id: None,
             mode_id: None,
             content_width: SerializedChatContentWidth::Full,
+            tail_window: None,
+            display_filter: None,
+            fold_mode: None,
         }),
     };
 

@@ -9,6 +9,11 @@ fn asst(text: &str) -> ChatItem {
     }
 }
 
+fn rollup(items: &[ChatItem], range: std::ops::Range<usize>) -> Rollup {
+    let live_units = LiveSubagentUnits::build(items);
+    Rollup::of_run_with_live_units(items, range, &live_units)
+}
+
 #[test]
 fn has_conversation_distinguishes_empty_error_only_and_real_transcript() {
     assert!(!has_conversation(&[]));
@@ -515,8 +520,6 @@ fn is_active_matches_streaming_and_in_progress() {
     )));
 }
 
-/// `fold_active` — the single source both `rows::project` and
-/// `toggle_fold` read — resolves the `active` flag per fold key.
 #[test]
 fn fold_active_resolves_per_key() {
     use daruda_acp::ToolStatusView::{Completed, InProgress};
@@ -547,11 +550,9 @@ fn fold_active_resolves_per_key() {
         &FoldKey::ToolGroup("t-live".to_owned()),
         &items
     ));
-    // Response at anchor 0: not the last turn, but its run streams → active.
     assert!(fold_active(&FoldKey::Response(0), &items));
-    // Response at anchor 4: the last turn (no user message after) → active
-    // even though its lone block is settled.
-    assert!(fold_active(&FoldKey::Response(4), &items));
+    // Activity is independent of whether a key belongs to the newest turn.
+    assert!(!fold_active(&FoldKey::Response(4), &items));
     // Policy-independent keys ignore `active`.
     assert!(!fold_active(&FoldKey::Diff("t-live#0".to_owned()), &items));
     assert!(!fold_active(
@@ -561,6 +562,52 @@ fn fold_active_resolves_per_key() {
     // Unknown ids / out-of-range indices are inactive, not a panic.
     assert!(!fold_active(&FoldKey::Assistant(99), &items));
     assert!(!fold_active(&FoldKey::Tool("nope".to_owned()), &items));
+}
+
+#[test]
+fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
+    use crate::workspace::main_area::agent_chat_pane::fold_mode::TurnPosition;
+    use daruda_acp::ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q1".to_owned()),
+        ChatItem::ToolCall(tool_call("t-old", Completed, 0)),
+        ChatItem::AssistantText {
+            text: "a".to_owned(),
+            streaming: false,
+            message_id: None,
+        },
+        ChatItem::UserText("q2".to_owned()),
+        ChatItem::ToolCall(tool_call("t-new", Completed, 0)),
+    ];
+    let past = |key: FoldKey| assert_eq!(fold_turn(&key, &items), TurnPosition::Past, "{key:?}");
+    let last = |key: FoldKey| assert_eq!(fold_turn(&key, &items), TurnPosition::Last, "{key:?}");
+
+    past(FoldKey::Response(0));
+    past(FoldKey::Assistant(2));
+    past(FoldKey::Step(1));
+    past(FoldKey::Tool("t-old".to_owned()));
+    past(FoldKey::ToolGroup("t-old".to_owned()));
+    past(FoldKey::Diff("t-old#0".to_owned()));
+    past(FoldKey::ToolRawInput("t-old".to_owned()));
+
+    last(FoldKey::Response(3));
+    last(FoldKey::Tail(4));
+    last(FoldKey::Filtered(4));
+    last(FoldKey::Tool("t-new".to_owned()));
+    last(FoldKey::Diff("t-new#0".to_owned()));
+
+    past(FoldKey::Tool("nope".to_owned()));
+    last(FoldKey::Assistant(99));
+
+    let leading = [ChatItem::AssistantText {
+        text: "a".to_owned(),
+        streaming: false,
+        message_id: None,
+    }];
+    assert_eq!(
+        fold_turn(&FoldKey::Assistant(0), &leading),
+        TurnPosition::Last
+    );
 }
 
 /// `chat_item_mermaid_texts` covers every markdown body that can carry a
@@ -706,15 +753,11 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
         ChatItem::Failure(daruda_acp::AcpFailure::unclassified("e")),
     ];
     let keys = collect_foldable_keys(&items);
-    // Structural header keys (the response — non-trivial run) first, then
-    // the per-block keys. The single tool call is not a group (run < 2). The
-    // assistant text (item 1) is the run's conclusion, which carries its own
-    // fold toggle, so it contributes an `Assistant` key; thinking keeps its
-    // own fold.
     assert_eq!(
         keys,
         vec![
             FoldKey::Response(0),
+            FoldKey::Step(1),
             FoldKey::Assistant(1),
             FoldKey::Thinking(2),
             FoldKey::Tool("c1".to_owned()),
@@ -905,13 +948,13 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Completed, 0)),
         asst("done"),
     ];
-    assert_eq!(Rollup::of_run(&items, 1..3), Rollup::Ok);
+    assert_eq!(rollup(&items, 1..3), Rollup::Ok);
 
     let items = [
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
         ChatItem::ToolCall(tool_call("c2", daruda_acp::ToolStatusView::InProgress, 0)),
     ];
-    assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Running);
+    assert_eq!(rollup(&items, 0..2), Rollup::Running);
 
     // Produced prose counts as success, so an answered turn that also hit a tool
     // failure warns rather than reading as a hard failure.
@@ -919,7 +962,7 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
         asst("here is what I found anyway"),
     ];
-    assert_eq!(Rollup::of_run(&items, 0..2), Rollup::Partial);
+    assert_eq!(rollup(&items, 0..2), Rollup::Partial);
 
     let items = [
         ChatItem::ToolCall(tool_call("c1", daruda_acp::ToolStatusView::Failed, 0)),
@@ -927,7 +970,7 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
         // Empty prose is not output, so it cannot lift this to Partial.
         asst("   "),
     ];
-    assert_eq!(Rollup::of_run(&items, 0..3), Rollup::Failed);
+    assert_eq!(rollup(&items, 0..3), Rollup::Failed);
 
     // Settled but neither success nor failure: the run stops pulsing without
     // turning the glyph red.
@@ -936,21 +979,21 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
         daruda_acp::ToolStatusView::Cancelled,
         0,
     ))];
-    assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Ok);
+    assert_eq!(rollup(&items, 0..1), Rollup::Ok);
 
     let items = [ChatItem::AssistantText {
         text: "thinking out loud".to_owned(),
         streaming: true,
         message_id: None,
     }];
-    assert_eq!(Rollup::of_run(&items, 0..1), Rollup::Running);
+    assert_eq!(rollup(&items, 0..1), Rollup::Running);
 
     // A single-item run is addressed as `ix..ix + 1` by the top-level assistant
     // block, and group ranges come from a projection — neither should have to
     // clamp against `items.len()`.
     let items = [asst("only")];
-    assert_eq!(Rollup::of_run(&items, 0..9), Rollup::Ok);
-    assert_eq!(Rollup::of_run(&items, 5..9), Rollup::Ok);
+    assert_eq!(rollup(&items, 0..9), Rollup::Ok);
+    assert_eq!(rollup(&items, 5..9), Rollup::Ok);
 }
 
 #[test]

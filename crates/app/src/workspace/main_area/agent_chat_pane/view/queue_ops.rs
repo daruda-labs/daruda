@@ -7,7 +7,7 @@
 use daruda_acp::ChatItem;
 use gpui::Context;
 
-use super::super::agent_chat_helpers::fold_active;
+use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
 use super::{
     AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, FirstResponseWatch,
@@ -237,7 +237,7 @@ impl AgentChatView {
             return;
         };
         let key = FoldKey::Response(anchor);
-        if self.fold.is_expanded(&key, fold_active(&key, &self.items)) {
+        if self.fold.is_expanded(&key, fold_context(&key, &self.items)) {
             self.fold.set_all([key], true);
         }
     }

@@ -1,50 +1,52 @@
-//! GPUI-free fold-state core for the agent chat pane.
-//!
-//! Stores only user overrides; untouched keys derive their open/closed state
-//! from block kind plus whether the block is active. That keeps "expand while
-//! active, collapse when settled" out of render code.
+//! Fold state with explicit user overrides over pane defaults.
 
-// INVARIANT: `FoldKey::Assistant`/`Thinking` are keyed by item index; this is
-// valid only because `items` is append-only (only the tail mutates in place; no
-// item is removed or reordered). Any future feature that removes or reorders
-// items MUST clear `FoldState` (its index-keyed overrides would otherwise
-// mis-target).
+// Item-index keys require append-only item order. Clear FoldState before
+// removing or reordering items.
 
 use std::collections::HashMap;
 
-/// Identity of a foldable block. GPUI-free: uses `std::String`.
+use super::fold_mode::{BlockRule, FoldBlock, FoldMode, TurnPosition};
+use super::pane_choice::PaneChoice;
+
+/// Stable identity of a foldable block.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(in crate::workspace) enum FoldKey {
-    /// Assistant response, keyed by item index.
     Assistant(usize),
-    /// Thinking block, keyed by item index.
     Thinking(usize),
-    /// Tool call, keyed by tool-call id (`ToolCallItem.id`).
     Tool(String),
-    /// Diff inside a tool call, keyed by `"{tool_id}#{diff_index}"`.
     Diff(String),
-    /// A tool call's raw-input (JSON args) disclosure, keyed by tool-call id.
     ToolRawInput(String),
-    /// Subagent-launch tool call; distinct so it can default collapsed.
     Subagent(String),
-    /// A consecutive tool-call group, keyed by the group's first tool-call id.
     ToolGroup(String),
-    /// An agent response (the run of agent items under a user message), keyed by
-    /// the anchoring `UserText` index.
+    Step(usize),
     Response(usize),
+    Tail(usize),
+    Filtered(usize),
 }
 
-/// Default fold behavior for a block kind.
 enum FoldPolicy {
-    /// Always expanded by default (e.g. assistant prose).
     DefaultExpanded,
-    /// Expanded only while the block is active; collapses once settled.
     ExpandedWhileActive,
-    /// Always collapsed by default (e.g. diffs).
     DefaultCollapsed,
 }
 
 impl FoldKey {
+    /// The mode-controlled block, if this key is not owned by another chip.
+    fn block(&self) -> Option<FoldBlock> {
+        match self {
+            FoldKey::Assistant(_) => Some(FoldBlock::Assistant),
+            FoldKey::Thinking(_) => Some(FoldBlock::Thinking),
+            FoldKey::Tool(_) => Some(FoldBlock::Tool),
+            FoldKey::Diff(_) => Some(FoldBlock::Diff),
+            FoldKey::ToolRawInput(_) => Some(FoldBlock::RawInput),
+            FoldKey::Subagent(_) => Some(FoldBlock::Subagent),
+            FoldKey::ToolGroup(_) => Some(FoldBlock::ToolGroup),
+            FoldKey::Step(_) => Some(FoldBlock::Step),
+            FoldKey::Response(_) => Some(FoldBlock::Response),
+            FoldKey::Tail(_) | FoldKey::Filtered(_) => None,
+        }
+    }
+
     fn policy(&self) -> FoldPolicy {
         match self {
             // Assistant prose and file-edit diffs stay visible by default.
@@ -52,15 +54,17 @@ impl FoldKey {
             FoldKey::Thinking(_)
             | FoldKey::Tool(_)
             | FoldKey::ToolGroup(_)
+            | FoldKey::Step(_)
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
-            // Raw JSON and nested subagent activity are bulky; keep them
-            // collapsed even while active unless the user expands them.
-            FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => FoldPolicy::DefaultCollapsed,
+            // Chip-owned bulk remains collapsed until explicitly revealed.
+            FoldKey::ToolRawInput(_)
+            | FoldKey::Subagent(_)
+            | FoldKey::Tail(_)
+            | FoldKey::Filtered(_) => FoldPolicy::DefaultCollapsed,
         }
     }
 }
 
-/// Override-free expanded state for a policy.
 fn natural_default(policy: FoldPolicy, active: bool) -> bool {
     match policy {
         FoldPolicy::DefaultExpanded => true,
@@ -69,32 +73,102 @@ fn natural_default(policy: FoldPolicy, active: bool) -> bool {
     }
 }
 
-/// Fold state for one conversation; stores only explicit user choices.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) struct FoldContext {
+    active: bool,
+    position: TurnPosition,
+}
+
+impl FoldContext {
+    #[cfg(test)]
+    pub(in crate::workspace) fn past(active: bool) -> Self {
+        Self {
+            active,
+            position: TurnPosition::Past,
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn last(active: bool) -> Self {
+        Self {
+            active,
+            position: TurnPosition::Last,
+        }
+    }
+
+    pub(in crate::workspace) fn new(position: TurnPosition, active: bool) -> Self {
+        Self { active, position }
+    }
+}
+
+/// Fold state for one conversation: the pane's mode plus explicit user choices.
 #[derive(Default)]
 pub(in crate::workspace) struct FoldState {
-    /// Present = explicit user choice; absent = derive the natural default.
     overrides: HashMap<FoldKey, bool>,
+    mode: PaneChoice<FoldMode>,
 }
 
 impl FoldState {
-    /// `active` = "this block is currently streaming / in progress".
-    ///
-    /// Returns the user override if set, else the natural default for the kind.
-    pub(in crate::workspace) fn is_expanded(&self, key: &FoldKey, active: bool) -> bool {
+    pub(in crate::workspace) fn with_mode(mode: FoldMode) -> Self {
+        Self {
+            overrides: HashMap::new(),
+            mode: PaneChoice::Seeded(mode),
+        }
+    }
+
+    pub(in crate::workspace) fn mode(&self) -> FoldMode {
+        self.mode.value()
+    }
+
+    pub(in crate::workspace) fn chosen_mode(&self) -> Option<FoldMode> {
+        self.mode.chosen()
+    }
+
+    pub(in crate::workspace) fn set_mode(&mut self, mode: FoldMode) {
+        self.mode = PaneChoice::Chosen(mode);
+    }
+
+    fn policy_for(&self, key: &FoldKey, position: TurnPosition) -> FoldPolicy {
+        match key
+            .block()
+            .map(|block| self.mode.value().rule(position, block))
+        {
+            Some(BlockRule::Expanded) => FoldPolicy::DefaultExpanded,
+            Some(BlockRule::Collapsed) => FoldPolicy::DefaultCollapsed,
+            Some(BlockRule::Builtin) | None => key.policy(),
+        }
+    }
+
+    pub(in crate::workspace) fn is_expanded(&self, key: &FoldKey, ctx: FoldContext) -> bool {
         self.overrides
             .get(key)
             .copied()
-            .unwrap_or_else(|| natural_default(key.policy(), active))
+            .unwrap_or_else(|| natural_default(self.policy_for(key, ctx.position), ctx.active))
     }
 
-    /// Flip the current effective state and persist it as a user override.
-    pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, active: bool) {
-        let cur = self.is_expanded(&key, active);
+    pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
+        let cur = self.is_expanded(&key, ctx);
         self.overrides.insert(key, !cur);
     }
 
-    /// Force every given key to `expanded`, overwriting any previous explicit
-    /// override. Used for expand-all / collapse-all.
+    pub(in crate::workspace) fn clear_overrides(&mut self) {
+        self.overrides.clear();
+    }
+
+    pub(in crate::workspace) fn clear_tail_reveals(&mut self) -> bool {
+        self.clear_matching_overrides(|key| matches!(key, FoldKey::Tail(_)))
+    }
+
+    pub(in crate::workspace) fn clear_filter_reveals(&mut self) -> bool {
+        self.clear_matching_overrides(|key| matches!(key, FoldKey::Filtered(_)))
+    }
+
+    fn clear_matching_overrides(&mut self, matches: impl Fn(&FoldKey) -> bool) -> bool {
+        let old_len = self.overrides.len();
+        self.overrides.retain(|key, _| !matches(key));
+        self.overrides.len() != old_len
+    }
+
     pub(in crate::workspace) fn set_all(
         &mut self,
         keys: impl IntoIterator<Item = FoldKey>,
@@ -110,63 +184,83 @@ impl FoldState {
 mod tests {
     use super::*;
 
-    // 1. natural_default / is_expanded matrix: each kind × active ∈ {true,false}
-    //    with NO override.
-
     #[test]
     fn assistant_is_always_expanded_by_default() {
         let state = FoldState::default();
-        assert!(state.is_expanded(&FoldKey::Assistant(0), true));
-        assert!(state.is_expanded(&FoldKey::Assistant(0), false));
+        assert!(state.is_expanded(&FoldKey::Assistant(0), FoldContext::past(true)));
+        assert!(state.is_expanded(&FoldKey::Assistant(0), FoldContext::past(false)));
     }
 
     #[test]
     fn thinking_tracks_active_by_default() {
         let state = FoldState::default();
-        assert!(state.is_expanded(&FoldKey::Thinking(0), true));
-        assert!(!state.is_expanded(&FoldKey::Thinking(0), false));
+        assert!(state.is_expanded(&FoldKey::Thinking(0), FoldContext::past(true)));
+        assert!(!state.is_expanded(&FoldKey::Thinking(0), FoldContext::past(false)));
     }
 
     #[test]
     fn tool_tracks_active_by_default() {
         let state = FoldState::default();
-        assert!(state.is_expanded(&FoldKey::Tool("call-1".into()), true));
-        assert!(!state.is_expanded(&FoldKey::Tool("call-1".into()), false));
+        assert!(state.is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(true)));
+        assert!(!state.is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn step_tracks_active_by_default() {
+        let state = FoldState::default();
+        assert!(state.is_expanded(&FoldKey::Step(3), FoldContext::past(true)));
+        assert!(!state.is_expanded(&FoldKey::Step(3), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn tail_keeps_the_covered_steps_folded_even_while_active() {
+        let state = FoldState::default();
+        assert!(!state.is_expanded(&FoldKey::Tail(0), FoldContext::past(true)));
+        assert!(!state.is_expanded(&FoldKey::Tail(0), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn the_filter_keeps_what_it_hides_folded_even_while_active() {
+        let state = FoldState::default();
+        assert!(!state.is_expanded(&FoldKey::Filtered(0), FoldContext::past(true)));
+        assert!(!state.is_expanded(&FoldKey::Filtered(0), FoldContext::past(false)));
     }
 
     #[test]
     fn diff_is_expanded_by_default() {
         let state = FoldState::default();
-        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), true));
-        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), false));
+        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), FoldContext::past(true)));
+        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), FoldContext::past(false)));
     }
 
     #[test]
     fn tool_raw_input_is_collapsed_by_default() {
         let state = FoldState::default();
-        assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), true));
-        assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), false));
+        assert!(!state.is_expanded(
+            &FoldKey::ToolRawInput("call-1".into()),
+            FoldContext::past(true)
+        ));
+        assert!(!state.is_expanded(
+            &FoldKey::ToolRawInput("call-1".into()),
+            FoldContext::past(false)
+        ));
     }
 
     #[test]
     fn subagent_is_collapsed_by_default_even_while_active() {
         let state = FoldState::default();
         let key = FoldKey::Subagent("task-1".into());
-        // Unlike a plain Tool (expanded while active), a subagent box is folded
-        // from the start and stays folded while it runs.
-        assert!(!state.is_expanded(&key, true));
-        assert!(!state.is_expanded(&key, false));
+        assert!(!state.is_expanded(&key, FoldContext::past(true)));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]
     fn subagent_override_expands_and_sticks_across_active() {
         let mut state = FoldState::default();
         let key = FoldKey::Subagent("task-1".into());
-        // Default collapsed → toggle expands, and the choice persists whether
-        // the subagent is still running or has settled.
-        state.toggle(key.clone(), false);
-        assert!(state.is_expanded(&key, false));
-        assert!(state.is_expanded(&key, true));
+        state.toggle(key.clone(), FoldContext::past(false));
+        assert!(state.is_expanded(&key, FoldContext::past(false)));
+        assert!(state.is_expanded(&key, FoldContext::past(true)));
     }
 
     #[test]
@@ -179,28 +273,21 @@ mod tests {
         assert!(!natural_default(FoldPolicy::DefaultCollapsed, false));
     }
 
-    // The headline consequence: a never-touched Thinking/Tool block auto-expands
-    // while active and auto-collapses once settled, with no separate logic.
     #[test]
     fn untouched_block_auto_collapses_when_done() {
         let state = FoldState::default();
         let key = FoldKey::Tool("call-1".into());
-        // Streaming → expanded.
-        assert!(state.is_expanded(&key, true));
-        // Settled → collapsed, purely from derivation.
-        assert!(!state.is_expanded(&key, false));
+        assert!(state.is_expanded(&key, FoldContext::past(true)));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
-
-    // 2. Override precedence: an explicit choice wins regardless of `active`.
 
     #[test]
     fn override_via_set_all_beats_active() {
         let mut state = FoldState::default();
         let key = FoldKey::Thinking(3);
         state.set_all([key.clone()], false);
-        // Even though active=true would naturally expand, the override holds.
-        assert!(!state.is_expanded(&key, true));
-        assert!(!state.is_expanded(&key, false));
+        assert!(!state.is_expanded(&key, FoldContext::past(true)));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]
@@ -208,61 +295,49 @@ mod tests {
         let mut state = FoldState::default();
         let key = FoldKey::ToolRawInput("call-1".into());
         state.set_all([key.clone()], true);
-        // Raw input defaults to collapsed, but the override expands it regardless.
-        assert!(state.is_expanded(&key, true));
-        assert!(state.is_expanded(&key, false));
+        assert!(state.is_expanded(&key, FoldContext::past(true)));
+        assert!(state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]
     fn user_override_persists_across_active_changes() {
         let mut state = FoldState::default();
         let key = FoldKey::Tool("call-1".into());
-        // User collapses it while it is active.
-        state.toggle(key.clone(), true); // active default true → false
-        assert!(!state.is_expanded(&key, true));
-        // Block settles; override still sticks (does not re-derive).
-        assert!(!state.is_expanded(&key, false));
+        state.toggle(key.clone(), FoldContext::past(true));
+        assert!(!state.is_expanded(&key, FoldContext::past(true)));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
-
-    // 3. toggle flips the effective state.
 
     #[test]
     fn toggle_never_touched_raw_input_flips_to_expanded_then_back() {
         let mut state = FoldState::default();
         let key = FoldKey::ToolRawInput("call-1".into());
-        // Default false → toggle → true.
-        state.toggle(key.clone(), false);
-        assert!(state.is_expanded(&key, false));
-        // Toggle again → false.
-        state.toggle(key.clone(), false);
-        assert!(!state.is_expanded(&key, false));
+        state.toggle(key.clone(), FoldContext::past(false));
+        assert!(state.is_expanded(&key, FoldContext::past(false)));
+        state.toggle(key.clone(), FoldContext::past(false));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]
     fn toggle_never_touched_assistant_flips_to_collapsed() {
         let mut state = FoldState::default();
         let key = FoldKey::Assistant(0);
-        // Default true → toggle → false.
-        state.toggle(key.clone(), false);
-        assert!(!state.is_expanded(&key, false));
+        state.toggle(key.clone(), FoldContext::past(false));
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]
     fn toggle_respects_active_for_effective_default() {
         let mut state = FoldState::default();
         let key = FoldKey::Tool("call-1".into());
-        // Active=true → effective default expanded → toggle collapses.
-        state.toggle(key.clone(), true);
-        assert!(!state.is_expanded(&key, true));
+        state.toggle(key.clone(), FoldContext::past(true));
+        assert!(!state.is_expanded(&key, FoldContext::past(true)));
 
         let mut state2 = FoldState::default();
         let key2 = FoldKey::Tool("call-2".into());
-        // Active=false → effective default collapsed → toggle expands.
-        state2.toggle(key2.clone(), false);
-        assert!(state2.is_expanded(&key2, false));
+        state2.toggle(key2.clone(), FoldContext::past(false));
+        assert!(state2.is_expanded(&key2, FoldContext::past(false)));
     }
-
-    // 4. set_all affects only the given keys.
 
     #[test]
     fn set_all_affects_only_given_keys() {
@@ -271,9 +346,141 @@ mod tests {
         let untouched = FoldKey::ToolRawInput("call-2".into());
         state.set_all([touched.clone()], true);
 
-        assert!(state.is_expanded(&touched, false));
-        // The untouched key still derives its natural default (collapsed).
-        assert!(!state.is_expanded(&untouched, false));
+        assert!(state.is_expanded(&touched, FoldContext::past(false)));
+        assert!(!state.is_expanded(&untouched, FoldContext::past(false)));
+    }
+
+    use super::super::fold_mode::FoldPreset;
+
+    fn every_key() -> Vec<FoldKey> {
+        vec![
+            FoldKey::Assistant(0),
+            FoldKey::Thinking(1),
+            FoldKey::Tool("t".into()),
+            FoldKey::Diff("t#0".into()),
+            FoldKey::ToolRawInput("t".into()),
+            FoldKey::Subagent("s".into()),
+            FoldKey::ToolGroup("t".into()),
+            FoldKey::Step(2),
+            FoldKey::Response(3),
+            FoldKey::Tail(4),
+            FoldKey::Filtered(4),
+        ]
+    }
+
+    #[test]
+    fn auto_is_the_default_and_only_pins_the_newest_response() {
+        let state = FoldState::default();
+        for key in every_key() {
+            for active in [true, false] {
+                let builtin = natural_default(key.policy(), active);
+                assert_eq!(
+                    state.is_expanded(&key, FoldContext::past(active)),
+                    builtin,
+                    "past {key:?} active={active}"
+                );
+                let expected_last = matches!(key, FoldKey::Response(_)) || builtin;
+                assert_eq!(
+                    state.is_expanded(&key, FoldContext::last(active)),
+                    expected_last,
+                    "last {key:?} active={active}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn summary_treats_the_newest_turn_like_history() {
+        let state = FoldState::with_mode(FoldPreset::Summary.mode());
+        let key = FoldKey::Response(3);
+        assert!(!state.is_expanded(&key, FoldContext::last(false)));
+        assert!(state.is_expanded(&key, FoldContext::last(true)));
+        for key in every_key() {
+            for active in [true, false] {
+                let builtin = natural_default(key.policy(), active);
+                assert_eq!(
+                    state.is_expanded(&key, FoldContext::last(active)),
+                    builtin,
+                    "{key:?} active={active}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn expanded_opens_past_responses_and_settled_newest_steps() {
+        let state = FoldState::with_mode(FoldPreset::Expanded.mode());
+        assert!(state.is_expanded(&FoldKey::Response(0), FoldContext::past(false)));
+        assert!(state.is_expanded(&FoldKey::Step(2), FoldContext::last(false)));
+        assert!(!state.is_expanded(&FoldKey::Step(2), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn the_two_turn_axes_move_independently() {
+        let state = FoldState::default();
+        let key = FoldKey::Response(3);
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
+        assert!(state.is_expanded(&key, FoldContext::last(false)));
+    }
+
+    #[test]
+    fn a_user_override_outranks_the_mode() {
+        let mut state = FoldState::with_mode(FoldPreset::Expanded.mode());
+        let key = FoldKey::Response(0);
+        state.toggle(key.clone(), FoldContext::past(false)); // expanded → collapsed
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
+        state.set_mode(FoldPreset::Auto.mode());
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
+        state.set_mode(FoldPreset::Summary.mode());
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
+    }
+
+    #[test]
+    fn the_two_chip_owned_rows_ignore_every_mode() {
+        for preset in FoldPreset::ALL {
+            let state = FoldState::with_mode(preset.mode());
+            for key in [FoldKey::Tail(0), FoldKey::Filtered(0)] {
+                for ctx in [FoldContext::past(true), FoldContext::last(true)] {
+                    assert!(!state.is_expanded(&key, ctx), "{preset:?} {key:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chip_changes_clear_only_their_own_reveals() {
+        let mut state = FoldState::default();
+        state.set_all(
+            [
+                FoldKey::Tail(1),
+                FoldKey::Tail(9),
+                FoldKey::Filtered(1),
+                FoldKey::Tool("t".into()),
+            ],
+            true,
+        );
+
+        assert!(state.clear_tail_reveals());
+        assert!(!state.is_expanded(&FoldKey::Tail(1), FoldContext::past(false)));
+        assert!(!state.is_expanded(&FoldKey::Tail(9), FoldContext::past(false)));
+        assert!(
+            state.is_expanded(&FoldKey::Filtered(1), FoldContext::past(false)),
+            "the filter chip owns a separate reveal"
+        );
+        assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
+
+        assert!(state.clear_filter_reveals());
+        assert!(!state.is_expanded(&FoldKey::Filtered(1), FoldContext::past(false)));
+        assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
+        assert!(!state.clear_filter_reveals(), "a second clear is a no-op");
+    }
+
+    #[test]
+    fn a_custom_rule_can_hold_one_block_kind_open() {
+        use super::super::fold_mode::FoldMode;
+        let state = FoldState::with_mode(FoldMode::from_tokens(["auto", "last.tool=expanded"]));
+        assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::last(false)));
+        assert!(!state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
     }
 
     #[test]
@@ -286,8 +493,7 @@ mod tests {
         ];
         state.set_all(keys.iter().cloned(), false);
         for key in &keys {
-            // Override forces collapsed regardless of active.
-            assert!(!state.is_expanded(key, true));
+            assert!(!state.is_expanded(key, FoldContext::past(true)));
         }
     }
 }

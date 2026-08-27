@@ -21,9 +21,9 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
 use super::agent_chat_helpers::{
-    DiffStat, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
+    DiffStat, TurnBoundary, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
     diff_build_fingerprint, diff_editor_key, diff_editor_language, diff_theme_fingerprint,
-    is_active, mermaid_key, mermaid_sources, tool_fold_key, tool_image_key,
+    fold_context_at, mermaid_key, mermaid_sources, tool_fold_key, tool_image_key,
 };
 use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
@@ -93,15 +93,20 @@ impl AgentChatView {
     /// stat) are built inside it. Since `FoldKey::Tool` is `ExpandedWhileActive`,
     /// every settled past card is collapsed — which is most of a long
     /// conversation. Mirrors the render's own gate exactly
-    /// (`fold.is_expanded(&tool_fold_key(tc), is_active(item))`); a nested
+    /// (`fold.is_expanded(&tool_fold_key(tc), fold_context_at(..))`); a nested
     /// subagent child is judged by its own key alone, which can only *over*-build
     /// (a child expanded under a collapsed parent), never leave a rendered body
     /// without its editor.
-    fn tool_body_on_screen(&self, item: &ChatItem) -> bool {
+    ///
+    /// `boundary` is resolved once per reconcile pass by the caller: deriving it
+    /// per item would make a pass over `items` cost a scan of `items` each time.
+    fn tool_body_on_screen(&self, ix: usize, item: &ChatItem, boundary: TurnBoundary) -> bool {
         let ChatItem::ToolCall(tc) = item else {
             return false;
         };
-        self.fold.is_expanded(&tool_fold_key(tc), is_active(item))
+        let key = tool_fold_key(tc);
+        self.fold
+            .is_expanded(&key, fold_context_at(&key, ix, &self.items, boundary))
     }
 
     /// Re-run the embed reconcilers after a fold change, which is the other way
@@ -217,11 +222,12 @@ impl AgentChatView {
         let mut pending: Vec<(String, u64, gpui::SharedString, DiffEditorModel, DiffStat)> =
             Vec::new();
         let mut live: HashSet<String> = HashSet::new();
-        for item in &self.items {
+        let boundary = TurnBoundary::of(&self.items);
+        for (ix, item) in self.items.iter().enumerate() {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
-            if !scope.covers(&tc.id) || !self.tool_body_on_screen(item) {
+            if !scope.covers(&tc.id) || !self.tool_body_on_screen(ix, item, boundary) {
                 continue;
             }
             for (di, diff) in tc.diffs.iter().enumerate() {
@@ -306,11 +312,12 @@ impl AgentChatView {
         // which can't happen while the immutable `items` borrow is live.
         let mut pending: Vec<(String, u64, String, Option<String>)> = Vec::new();
         let mut live: HashSet<String> = HashSet::new();
-        for item in &self.items {
+        let boundary = TurnBoundary::of(&self.items);
+        for (ix, item) in self.items.iter().enumerate() {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
-            if !scope.covers(&tc.id) || !self.tool_body_on_screen(item) {
+            if !scope.covers(&tc.id) || !self.tool_body_on_screen(ix, item, boundary) {
                 continue;
             }
             for (bi, block) in tc.output.iter().enumerate() {

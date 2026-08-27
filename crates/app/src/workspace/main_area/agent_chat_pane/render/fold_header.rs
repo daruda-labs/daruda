@@ -92,6 +92,13 @@ impl SummaryLine {
         self.tone = SummaryTone::Reasoning;
         self
     }
+
+    /// The flattened preview text. Test-only: the render path consumes the whole
+    /// `SummaryLine`, so nothing on the way to the screen reads it back out.
+    #[cfg(test)]
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 /// Builds a collapsed header's summary on demand.

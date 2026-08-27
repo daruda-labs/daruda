@@ -3,6 +3,7 @@
 //! with its animated pulse dots and elapsed clock.
 
 use daruda_acp::{ChatItem, ConnectPhase, UsageView};
+use daruda_config::TAIL_WINDOW_CHOICES;
 use gpui::{
     AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px,
 };
@@ -11,8 +12,12 @@ use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, Icon, Selectable as _, Sizable as _, StatusPulseClock, button_bare,
+    ButtonVariants as _, DropdownMenu as _, Icon, PopupMenu, PopupMenuItem, Selectable as _,
+    Sizable as _, StatusPulseClock, button, button_bare,
 };
+use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
+use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode;
+use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AgentSessionStatus, ChatContentWidth, RuntimePrepPhase,
 };
@@ -36,6 +41,9 @@ pub(super) struct ActivityBarProps<'a> {
     pub usage: Option<&'a UsageView>,
     pub has_items: bool,
     pub content_width: ChatContentWidth,
+    pub tail: TailWindow,
+    pub display_filter: DisplayFilter,
+    pub fold_mode: FoldMode,
     pub dim: f32,
 }
 
@@ -64,6 +72,10 @@ pub(super) fn activity_bar(
         .icon(Icon::empty().path(ICON_COMPRESS))
         .tooltip(SharedString::from(s::agent_chat_collapse_all()))
         .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
+    let tail = tail_window_chip(props.pane_id, props.tail, cx);
+    let display_filter =
+        super::filter::display_filter_chip(props.pane_id, props.display_filter, cx);
+    let fold_mode = super::fold_mode::fold_mode_chip(props.pane_id, props.fold_mode, cx);
     let reading_selected = props.content_width.is_reading();
     let reading_tooltip = if reading_selected {
         s::agent_chat_reading_width_off()
@@ -141,18 +153,74 @@ pub(super) fn activity_bar(
         })
         .child(
             div()
-                .flex_none()
+                .flex_shrink()
+                .min_w_0()
+                .max_w_full()
                 .flex()
                 .flex_row()
+                .flex_wrap()
+                .justify_end()
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
                 .text_color(theme::dim_toward_gray(
                     theme::agent_chat_fg_muted(cx),
                     props.dim,
                 ))
-                .when(props.has_items, |bar| bar.child(expand).child(collapse))
+                .when(props.has_items, |bar| {
+                    bar.child(fold_mode)
+                        .child(display_filter)
+                        .child(tail)
+                        .child(expand)
+                        .child(collapse)
+                })
                 .child(reading_width),
         )
+}
+
+/// Activity-bar chip for the tail window.
+fn tail_window_chip(
+    pane_id: PaneId,
+    tail: TailWindow,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let label = SharedString::from(s::agent_chat_tail_window_chip(&tail_window_value(tail)));
+    let view = cx.entity().downgrade();
+    button(("agent-chat-tail-window", pane_id as usize), label)
+        .ghost()
+        .xsmall()
+        .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
+        .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
+}
+
+fn tail_window_value(tail: TailWindow) -> String {
+    match tail {
+        TailWindow::All => s::agent_chat_tail_window_all(),
+        TailWindow::Last(n) => n.to_string(),
+    }
+}
+
+fn build_tail_window_menu(
+    view: &gpui::WeakEntity<AgentChatView>,
+    current: TailWindow,
+    menu: PopupMenu,
+) -> PopupMenu {
+    let choices = std::iter::once((TailWindow::All, s::agent_chat_tail_window_all())).chain(
+        TAIL_WINDOW_CHOICES
+            .into_iter()
+            .map(|n| (TailWindow::last(n), s::agent_chat_tail_window_last(n))),
+    );
+    choices.fold(menu, |m, (choice, name)| {
+        let view = view.clone();
+        m.item(
+            PopupMenuItem::new(SharedString::from(name))
+                .checked(choice == current)
+                .on_click(move |_, _window, app| {
+                    if let Some(view) = view.upgrade() {
+                        view.update(app, |v, cx| v.set_tail_window(choice, cx));
+                    }
+                }),
+        )
+    })
 }
 
 fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {

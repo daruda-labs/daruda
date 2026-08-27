@@ -14,8 +14,11 @@ use daruda_acp::DiffView;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AppContext as _, Context, Entity};
 
-use super::fold::{FoldKey, FoldState};
-use super::rows::{RowKind, SUBAGENT_NEST_DEPTH_CAP, project};
+use super::fold::{FoldContext, FoldKey, FoldState};
+use super::fold_mode::TurnPosition;
+use super::rows::{
+    LiveSubagentUnits, RowKind, SUBAGENT_NEST_DEPTH_CAP, effective_tool_status, project, step,
+};
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
@@ -59,30 +62,20 @@ pub(in crate::workspace) fn tool_fold_key(tc: &daruda_acp::ToolCallItem) -> Fold
     }
 }
 
-/// The visible foldable-key set for a conversation: each assistant / thinking
-/// item by index, each tool call by id plus one `Diff` key per diff it carries
-/// (the same `diff_editor_key` the renderer embeds with). User / permission /
-/// error items are not foldable and contribute none. Single source of truth for
-/// expand-all / collapse-all (`AgentChatView::set_all_folds`) and the coverage
-/// test.
+/// Fold keys controlled by expand-all and collapse-all. Tail and filter reveals
+/// are excluded because their chips own those states.
 pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]) -> Vec<FoldKey> {
     let mut keys: Vec<FoldKey> = Vec::new();
-    // Structural fold levels (response / tool-group) come from the same row
-    // projection the renderer uses, so expand/collapse-all covers exactly the
-    // headers on screen. Neither the fold state nor live progress changes
-    // which headers exist, so project with defaults for both.
-    // Subagent liveness only flips a row's `hidden`, never whether it exists, so
-    // an empty index is the right input here too.
+    // Defaults preserve the structural header set while avoiding pane state.
     let rows = project(
         items,
         &FoldState::default(),
         false,
         &super::rows::LiveSubagentUnits::default(),
+        super::rows::tail::TailWindow::All,
+        &super::display_filter::DisplayFilter::default(),
     );
-    // Assistant prose rendered under a response bar is inline (no per-block
-    // header/fold — the response bar owns the speaker label), so its
-    // `FoldKey::Assistant` would be a dead toggle. Such rows are `AgentItem`s at
-    // indent > 0; skip their keys so the fold set matches the on-screen headers.
+    // Inline assistant prose has no independent fold control.
     let inline_assistant: std::collections::HashSet<usize> = rows
         .iter()
         .filter_map(|row| match row.kind {
@@ -93,11 +86,9 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     for row in &rows {
         match &row.kind {
             RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
+            RowKind::StepHeader { first_ix, .. } => keys.push(FoldKey::Step(*first_ix)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
-            // The conclusion's own `FoldKey::Assistant` is added by the per-block
-            // loop below (it is not in `inline_assistant`), so nothing to do here.
-            // A `SoloResponse` is likewise a top-level block at indent 0 — its own
-            // key comes from that loop, and it is never inline.
+            RowKind::TailMore { .. } | RowKind::FilteredAway { .. } => {}
             RowKind::User(_)
             | RowKind::AgentItem(_)
             | RowKind::SoloResponse(_)
@@ -105,8 +96,6 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             | RowKind::WorkingIndicator => {}
         }
     }
-    // Per-block fold levels (assistant / thinking by index, tool + its diffs by
-    // id).
     for (ix, item) in items.iter().enumerate() {
         match item {
             daruda_acp::ChatItem::AssistantText { .. } if inline_assistant.contains(&ix) => {}
@@ -267,20 +256,26 @@ pub(in crate::workspace) enum Rollup {
 }
 
 impl Rollup {
-    /// Classify `items[range]` as one unit. `Running` wins (not settled yet);
-    /// otherwise a failure mixed with a success is `Partial`, all-failure is
-    /// `Failed`, no failure is `Ok`. Out-of-bounds parts of `range` are ignored,
-    /// so a caller need not clamp.
-    pub(in crate::workspace) fn of_run(
+    /// Classify a run, with live descendants keeping completed parents running.
+    pub(in crate::workspace) fn of_run_with_live_units(
         items: &[daruda_acp::ChatItem],
         range: std::ops::Range<usize>,
+        live_units: &LiveSubagentUnits,
+    ) -> Self {
+        Self::of_run_with_status(items, range, |tc| effective_tool_status(tc, live_units))
+    }
+
+    fn of_run_with_status(
+        items: &[daruda_acp::ChatItem],
+        range: std::ops::Range<usize>,
+        status: impl Fn(&daruda_acp::ToolCallItem) -> daruda_acp::ToolStatusView,
     ) -> Self {
         use daruda_acp::{ChatItem, ToolStatusView};
 
         let (mut running, mut any_failed, mut any_ok) = (false, false, false);
         for item in range.filter_map(|k| items.get(k)) {
             match item {
-                ChatItem::ToolCall(tc) => match tc.status {
+                ChatItem::ToolCall(tc) => match status(tc) {
                     ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                     ToolStatusView::Failed => any_failed = true,
                     ToolStatusView::Completed => any_ok = true,
@@ -683,59 +678,129 @@ pub(in crate::workspace) fn has_conversation(items: &[daruda_acp::ChatItem]) -> 
     items.iter().any(|it| !matches!(it, ChatItem::Failure(_)))
 }
 
-/// The `active` input [`FoldState::is_expanded`](super::fold::FoldState::is_expanded)
-/// reads for `key`, derived from the live conversation. A block is active while
-/// it streams / runs; a response is active while it is the last turn or its run
-/// still streams; a tool group is active while any member runs. `Diff` /
-/// `ToolRawInput` ignore `active` in their [`FoldPolicy`](super::fold), so this
-/// returns `false` for them (the value is irrelevant).
-///
-/// Single source of truth for "is this fold active", shared by projection and
-/// toggle paths so they cannot disagree on default collapse state.
+/// Cached start index of the newest turn.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(in crate::workspace) struct TurnBoundary(usize);
+
+impl TurnBoundary {
+    pub(in crate::workspace) fn of(items: &[daruda_acp::ChatItem]) -> Self {
+        use daruda_acp::ChatItem;
+        Self(
+            items
+                .iter()
+                .rposition(|item| matches!(item, ChatItem::UserText(_)))
+                .unwrap_or(0),
+        )
+    }
+
+    pub(in crate::workspace) fn at(self, ix: usize) -> TurnPosition {
+        if ix >= self.0 {
+            TurnPosition::Last
+        } else {
+            TurnPosition::Past
+        }
+    }
+}
+
+/// Resolve a key's activity and turn position from the conversation.
+pub(in crate::workspace) fn fold_context(
+    key: &FoldKey,
+    items: &[daruda_acp::ChatItem],
+) -> FoldContext {
+    match fold_key_index(key, items) {
+        Some(ix) => fold_context_at(key, ix, items, TurnBoundary::of(items)),
+        None => FoldContext::new(TurnPosition::Past, false),
+    }
+}
+
+/// Resolve fold context when the item index and turn boundary are already known.
+pub(in crate::workspace) fn fold_context_at(
+    key: &FoldKey,
+    ix: usize,
+    items: &[daruda_acp::ChatItem],
+    boundary: TurnBoundary,
+) -> FoldContext {
+    FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items))
+}
+
+fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {
+    match key {
+        FoldKey::Assistant(ix)
+        | FoldKey::Thinking(ix)
+        | FoldKey::Step(ix)
+        | FoldKey::Response(ix)
+        | FoldKey::Tail(ix)
+        | FoldKey::Filtered(ix) => Some(*ix),
+        FoldKey::Tool(id)
+        | FoldKey::Subagent(id)
+        | FoldKey::ToolRawInput(id)
+        | FoldKey::ToolGroup(id) => tool_item_index(items, id),
+        FoldKey::Diff(diff_key) => {
+            let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
+            tool_item_index(items, tool_id)
+        }
+    }
+}
+
+#[cfg(test)]
+pub(in crate::workspace) fn fold_turn(
+    key: &FoldKey,
+    items: &[daruda_acp::ChatItem],
+) -> TurnPosition {
+    match fold_key_index(key, items) {
+        Some(ix) => TurnBoundary::of(items).at(ix),
+        None => TurnPosition::Past,
+    }
+}
+
+fn tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usize> {
+    use daruda_acp::ChatItem;
+    items
+        .iter()
+        .position(|item| matches!(item, ChatItem::ToolCall(tc) if tc.id == tool_id))
+}
+
+#[cfg(test)]
 pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool {
+    match fold_key_index(key, items) {
+        Some(ix) => fold_active_at(key, ix, items),
+        None => false,
+    }
+}
+
+fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> bool {
     use daruda_acp::ChatItem;
     match key {
-        FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => {
-            items.get(*ix).map(is_active).unwrap_or(false)
+        FoldKey::Assistant(_) | FoldKey::Thinking(_) | FoldKey::Tool(_) => {
+            items.get(ix).map(is_active).unwrap_or(false)
         }
-        FoldKey::Tool(id) => items
-            .iter()
-            .find_map(|item| match item {
-                ChatItem::ToolCall(tc) if tc.id == *id => Some(is_active(item)),
-                _ => None,
-            })
-            .unwrap_or(false),
-        // A response is active while it is the last turn or its run (anchor+1 up
-        // to the next user message) still streams.
-        FoldKey::Response(anchor) => {
-            let start = anchor + 1;
+        FoldKey::Response(_) => {
+            let start = ix + 1;
             let end = items
                 .iter()
                 .skip(start)
                 .position(|it| matches!(it, ChatItem::UserText(_)))
                 .map(|off| start + off)
                 .unwrap_or(items.len());
-            let is_last = end >= items.len();
-            let streaming = items
+            items
                 .get(start..end)
-                .is_some_and(|run| run.iter().any(is_active));
-            is_last || streaming
+                .is_some_and(|run| run.iter().any(is_active))
         }
-        // The group is the consecutive tool-call run beginning at `gid`; active
-        // while any tool in it is still running.
-        FoldKey::ToolGroup(gid) => items
-            .iter()
-            .position(|item| matches!(item, ChatItem::ToolCall(tc) if tc.id == *gid))
-            .map(|s| {
-                items[s..]
-                    .iter()
-                    .take_while(|item| matches!(item, ChatItem::ToolCall(_)))
-                    .any(is_active)
-            })
-            .unwrap_or(false),
-        // Diff (DefaultExpanded), raw-input and subagent (DefaultCollapsed) all
-        // ignore `active` in their policy, so the value is irrelevant here.
-        FoldKey::Diff(_) | FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => false,
+        FoldKey::Step(_) => step::step_span_at(items, ix).is_some_and(|span| {
+            items
+                .get(span.start..span.end)
+                .is_some_and(|span| span.iter().any(is_active))
+        }),
+        FoldKey::ToolGroup(_) => items.get(ix..).is_some_and(|rest| {
+            rest.iter()
+                .take_while(|item| matches!(item, ChatItem::ToolCall(_)))
+                .any(is_active)
+        }),
+        FoldKey::Diff(_)
+        | FoldKey::ToolRawInput(_)
+        | FoldKey::Subagent(_)
+        | FoldKey::Tail(_)
+        | FoldKey::Filtered(_) => false,
     }
 }
 
@@ -793,7 +858,11 @@ pub(in crate::workspace) fn fold_key_item_index(
             let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
             top_level_tool_item_index(items, tool_id)
         }
-        FoldKey::Response(_) | FoldKey::ToolGroup(_) => None,
+        FoldKey::Response(_)
+        | FoldKey::ToolGroup(_)
+        | FoldKey::Step(_)
+        | FoldKey::Tail(_)
+        | FoldKey::Filtered(_) => None,
     }
 }
 

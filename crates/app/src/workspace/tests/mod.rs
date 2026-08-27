@@ -103,3 +103,4 @@ fn build_workspace_with(
     let workspace = workspace_for_root.borrow().clone().unwrap();
     (window_handle, workspace)
 }
+mod agent_chat_row_census;

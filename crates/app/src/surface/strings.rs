@@ -2099,6 +2099,145 @@ pub fn agent_chat_tool_group_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.tool_group_count", count = count).into_owned()
 }
 
+/// Tool count with singular handling.
+pub fn agent_chat_step_tool_count(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.step_tool_count_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.step_tool_count", count = count).into_owned()
+    }
+}
+
+/// Filtered-row count with singular handling.
+pub fn agent_chat_filtered_away(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.filtered_away_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.filtered_away", count = count).into_owned()
+    }
+}
+
+pub fn agent_chat_filter_chip(value: &str) -> String {
+    rust_i18n::t!("agent_chat.filter_chip", value = value).into_owned()
+}
+
+pub fn agent_chat_filter_tooltip() -> String {
+    rust_i18n::t!("agent_chat.filter_tooltip").into_owned()
+}
+
+pub fn agent_chat_filter_none() -> String {
+    rust_i18n::t!("agent_chat.filter_none").into_owned()
+}
+
+pub fn agent_chat_filter_clear() -> String {
+    rust_i18n::t!("agent_chat.filter_clear").into_owned()
+}
+
+pub fn agent_chat_filter_axis_kind() -> String {
+    rust_i18n::t!("agent_chat.filter_axis_kind").into_owned()
+}
+
+pub fn agent_chat_filter_axis_tool() -> String {
+    rust_i18n::t!("agent_chat.filter_axis_tool").into_owned()
+}
+
+pub fn agent_chat_filter_axis_status() -> String {
+    rust_i18n::t!("agent_chat.filter_axis_status").into_owned()
+}
+
+pub fn agent_chat_filter_thinking() -> String {
+    rust_i18n::t!("agent_chat.filter_thinking").into_owned()
+}
+
+pub fn agent_chat_filter_prose() -> String {
+    rust_i18n::t!("agent_chat.filter_prose").into_owned()
+}
+
+pub fn agent_chat_filter_tools() -> String {
+    rust_i18n::t!("agent_chat.filter_tools").into_owned()
+}
+
+pub fn agent_chat_filter_tool_read() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_read").into_owned()
+}
+
+pub fn agent_chat_filter_tool_edit() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_edit").into_owned()
+}
+
+pub fn agent_chat_filter_tool_search() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_search").into_owned()
+}
+
+pub fn agent_chat_filter_tool_run() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_run").into_owned()
+}
+
+pub fn agent_chat_filter_tool_other() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_other").into_owned()
+}
+
+pub fn agent_chat_filter_status_running() -> String {
+    rust_i18n::t!("agent_chat.filter_status_running").into_owned()
+}
+
+pub fn agent_chat_filter_status_ok() -> String {
+    rust_i18n::t!("agent_chat.filter_status_ok").into_owned()
+}
+
+pub fn agent_chat_filter_status_failed() -> String {
+    rust_i18n::t!("agent_chat.filter_status_failed").into_owned()
+}
+
+/// Earlier-step count with singular handling.
+pub fn agent_chat_tail_more(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.tail_more_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.tail_more", count = count).into_owned()
+    }
+}
+
+pub fn agent_chat_fold_mode_chip(value: &str) -> String {
+    rust_i18n::t!("agent_chat.fold_mode_chip", value = value).into_owned()
+}
+
+pub fn agent_chat_fold_mode_tooltip() -> String {
+    rust_i18n::t!("agent_chat.fold_mode_tooltip").into_owned()
+}
+
+pub fn agent_chat_fold_mode_auto() -> String {
+    rust_i18n::t!("agent_chat.fold_mode_auto").into_owned()
+}
+
+pub fn agent_chat_fold_mode_summary() -> String {
+    rust_i18n::t!("agent_chat.fold_mode_summary").into_owned()
+}
+
+pub fn agent_chat_fold_mode_expanded() -> String {
+    rust_i18n::t!("agent_chat.fold_mode_expanded").into_owned()
+}
+
+pub fn agent_chat_fold_mode_custom() -> String {
+    rust_i18n::t!("agent_chat.fold_mode_custom").into_owned()
+}
+
+pub fn agent_chat_tail_window_chip(value: &str) -> String {
+    rust_i18n::t!("agent_chat.tail_window_chip", value = value).into_owned()
+}
+
+pub fn agent_chat_tail_window_tooltip() -> String {
+    rust_i18n::t!("agent_chat.tail_window_tooltip").into_owned()
+}
+
+pub fn agent_chat_tail_window_all() -> String {
+    rust_i18n::t!("agent_chat.tail_window_all").into_owned()
+}
+
+pub fn agent_chat_tail_window_last(count: u8) -> String {
+    rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
+}
+
 /// Marker shown below a tool-output text block that was capped before
 /// reaching the render model (any text block's `truncated_from`),
 /// e.g. "… (truncated, 1.2 MB total)". `original_bytes` is the untruncated

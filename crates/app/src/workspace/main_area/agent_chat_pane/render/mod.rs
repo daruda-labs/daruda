@@ -10,13 +10,16 @@ mod diff;
 /// The height-capped editor embed. Reachable from `workspace/tests` so the
 /// layout probe measures the shipped builder rather than a copy of it.
 pub(in crate::workspace) mod embed;
+mod filter;
 mod fold_header;
+mod fold_mode;
 mod links;
 mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
 pub(in crate::workspace) mod mermaid_lightbox;
 mod plan;
+mod step_header;
 mod tool;
 
 use daruda_acp::ChatItem;
@@ -100,19 +103,23 @@ use blocks::{
     thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
+use filter::filtered_away_bar;
 use fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
+use step_header::{step_bar, tail_more_bar};
 use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{IconName, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, Rollup, agent_run, is_active, tool_fold_key,
+    DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
-use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, RenderRow, RowKind};
+use crate::workspace::main_area::agent_chat_pane::rows::{
+    FilterMatchIndex, LiveSubagentUnits, RenderRow, RowKind,
+};
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AssetCache, ChatContentWidth,
 };
@@ -152,6 +159,9 @@ pub(in crate::workspace) fn render(
             usage: content.session_usage.as_ref(),
             has_items: !content.items.is_empty(),
             content_width: content.content_width,
+            tail: content.tail.value(),
+            display_filter: content.display_filter.value(),
+            fold_mode: content.fold.mode(),
             dim,
         },
         cx,
@@ -330,11 +340,30 @@ fn render_row(
             this,
             *i,
             row.indent > 0,
-            Some(Rollup::of_run(&this.items, *i..*i + 1)),
+            Some(Rollup::of_run_with_live_units(
+                &this.items,
+                *i..*i + 1,
+                &this.live_units,
+            )),
             t,
             window,
             cx,
         ),
+        RowKind::StepHeader {
+            first_ix,
+            tool_count,
+            collapsed,
+        } => step_bar(this, *first_ix, *tool_count, *collapsed, t, cx),
+        RowKind::TailMore {
+            run_start,
+            hidden_steps,
+            collapsed,
+        } => tail_more_bar(this, *run_start, *hidden_steps, *collapsed, cx),
+        RowKind::FilteredAway {
+            run_start,
+            count,
+            collapsed,
+        } => filtered_away_bar(this, *run_start, *count, *collapsed, cx),
         RowKind::ToolGroupHeader {
             gid,
             first_ix,
@@ -342,9 +371,12 @@ fn render_row(
             collapsed,
         } => tool_group_bar(this, gid, *first_ix, *count, *collapsed, t, cx).into_any_element(),
         RowKind::ConclusionItem(i) => match this.items.get(*i) {
-            Some(item @ ChatItem::AssistantText { text, .. }) => {
+            Some(ChatItem::AssistantText { text, .. }) => {
                 let key = FoldKey::Assistant(*i);
-                let expanded = this.fold.is_expanded(&key, is_active(item));
+                let expanded = this.fold.is_expanded(
+                    &key,
+                    fold_context_at(&key, *i, &this.items, this.turn_boundary),
+                );
                 conclusion_block(
                     *i,
                     key,
@@ -449,7 +481,11 @@ fn response_bar(
     if tools > 0 {
         header = header.trailing(count_label(s::agent_chat_tool_group_count(tools), this, cx));
     }
-    let header = header.trailing(rollup_glyph(Rollup::of_run(&this.items, run), t, cx));
+    let header = header.trailing(rollup_glyph(
+        Rollup::of_run_with_live_units(&this.items, run, &this.live_units),
+        t,
+        cx,
+    ));
     // Borderless section bar, matching the block headers — section headers stay
     // light; only content cards (`tool_card`) carry box chrome.
     FoldRow::section(
@@ -493,7 +529,8 @@ fn tool_group_bar(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let rollup = Rollup::of_run(&this.items, first_ix..first_ix + count);
+    let rollup =
+        Rollup::of_run_with_live_units(&this.items, first_ix..first_ix + count, &this.live_units);
     // The count is the group's own identity, not a preview of folded content, so
     // it shows in both states — hence `plain` rather than a markdown summary.
     let label = s::agent_chat_tool_group_count(count);
@@ -569,6 +606,8 @@ fn render_agent_item(
             rollup,
             &this.items,
             &this.live_units,
+            &this.filter_matches,
+            this.turn_boundary,
             RenderAssets::of(&this.assets),
             &this.fold,
             t,
@@ -596,6 +635,8 @@ fn render_item(
     rollup: Option<Rollup>,
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
+    filter_matches: &FilterMatchIndex,
+    boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
     t: &theme::DarudaTheme,
@@ -622,7 +663,7 @@ fn render_item(
         }
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
-            let expanded = fold.is_expanded(&key, is_active(item));
+            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
             assistant_block(
                 ix,
                 key,
@@ -637,18 +678,21 @@ fn render_item(
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
-            let expanded = fold.is_expanded(&key, is_active(item));
+            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
             thinking_block(ix, key, expanded, text, markdown, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => {
             let key = tool_fold_key(tc);
-            let expanded = fold.is_expanded(&key, is_active(item));
+            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
             tool_card(
                 key,
                 expanded,
+                ix,
                 tc,
                 items,
                 live_units,
+                filter_matches,
+                boundary,
                 assets,
                 fold,
                 t,

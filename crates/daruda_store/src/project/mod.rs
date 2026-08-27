@@ -472,8 +472,36 @@ pub struct SerializedAgentChatContent {
     pub mode_id: Option<String>,
     /// Per-pane AgentChat content width mode. Missing in pre-feature state
     /// files, defaulting to `Full` so existing panes keep using the whole pane.
-    #[serde(default, skip_serializing_if = "SerializedChatContentWidth::is_full")]
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "SerializedChatContentWidth::is_full"
+    )]
     pub content_width: SerializedChatContentWidth,
+    /// Explicit pane tail choice; `None` continues following config.
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tail_window: Option<SerializedChatTailWindow>,
+    /// Explicit pane display-filter tokens; `None` continues following config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_filter: Option<Vec<String>>,
+    /// Explicit pane fold-mode tokens; `None` continues following config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fold_mode: Option<Vec<String>>,
+}
+
+/// Default an unknown preference value instead of rejecting the project state.
+/// JSON buffering is required because a failed deserializer cannot be rewound.
+fn lenient<'de, D, T>(de: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let value = serde_json::Value::deserialize(de)?;
+    Ok(T::deserialize(value).unwrap_or_default())
 }
 
 /// Serializable mirror of the app-side AgentChat content-width mode.
@@ -489,6 +517,15 @@ impl SerializedChatContentWidth {
     fn is_full(&self) -> bool {
         matches!(self, Self::Full)
     }
+}
+
+/// Serializable mirror of the AgentChat tail window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerializedChatTailWindow {
+    #[default]
+    All,
+    Last(u8),
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.
