@@ -428,6 +428,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// resolved to a launch command at connect. Persisted so restore resumes
     /// under the same agent, whose session id is then resumable.
     pub(in crate::workspace) agent_id: String,
+    /// Bare adapter command used by the current connection. Vocabulary events
+    /// are attributed to this frozen source rather than the live catalog,
+    /// which may be edited while the old process is still connected.
+    pub(in crate::workspace) agent_vocabulary_source: Option<String>,
     /// Display name for `agent_id`, refreshed on config reload. Used as the
     /// activity-bar title fallback before the session reports its own title.
     pub(in crate::workspace) agent_name: String,
@@ -643,6 +647,7 @@ impl AgentChatView {
             // the mode id above — see `Workspace::rebuild_layout`.
             last_known_model_id: None,
             agent_id,
+            agent_vocabulary_source: None,
             agent_name,
             // A restored pane connects lazily; the resume decision (and the
             // `restoring` flag that coalesces the replay) is made at connect

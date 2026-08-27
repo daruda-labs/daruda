@@ -8,6 +8,7 @@ mod account_login_ops;
 mod account_ops;
 pub(crate) mod accounts_global;
 mod actions;
+pub(crate) mod agent_vocabulary_global;
 mod annotation_dialog;
 mod annotation_ops;
 pub(crate) mod auth_status_global;
@@ -618,10 +619,13 @@ pub struct Workspace {
     /// `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
     /// Per-agent mode / model option lists, as last advertised by each
-    /// adapter. Loaded from `agent_vocabulary.json` on construction and
-    /// refreshed by `record_agent_vocabulary` off the ACP event pump —
-    /// the only writer.
+    /// adapter. Mirrored from the app-wide owner; ACP event pumps in every
+    /// Workspace can update that shared snapshot without overwriting each
+    /// other's observations.
     pub(in crate::workspace) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
+    /// Refreshes [`Self::agent_vocabulary`] after any Workspace records a new
+    /// advertisement into the app-wide cache.
+    _agent_vocabulary_global_subscription: gpui::Subscription,
     /// Managed accounts across every auth domain — the catalog a pane's
     /// `AccountSelection` resolves against, plus the per-domain default seeded
     /// onto a freshly-created pane (see
@@ -1082,6 +1086,8 @@ impl Workspace {
             daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default(),
         );
         let accounts = accounts_global::snapshot(cx);
+        agent_vocabulary_global::install_path(cx, &data_dir);
+        let agent_vocabulary = agent_vocabulary_global::snapshot(cx, &data_dir);
         // Sweep any per-account config dir left behind by a login that
         // was cancelled or crashed before being promoted to a
         // `ManagedAccount` — a shallow, one-shot readdir under
@@ -1253,9 +1259,12 @@ impl Workspace {
             git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
-            agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache::load_in(
-                &data_dir,
-            ),
+            agent_vocabulary,
+            _agent_vocabulary_global_subscription: cx
+                .observe_global::<agent_vocabulary_global::AgentVocabularyGlobal>(|ws, cx| {
+                    ws.agent_vocabulary = agent_vocabulary_global::snapshot(cx, &ws.data_dir);
+                    cx.notify();
+                }),
             accounts,
             pending_login: PendingLogin::None,
             // Managed accounts live in the app-wide `AccountsGlobal`; this

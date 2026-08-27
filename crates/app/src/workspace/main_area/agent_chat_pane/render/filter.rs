@@ -36,8 +36,8 @@ pub(super) fn display_filter_chip(
     .dropdown_menu(move |menu, _window, _cx| build_filter_menu(&view, filter, menu))
 }
 
-/// A bare count would read as "3 things are shown". The fraction says what it
-/// really is — 3 of the 11 facets are picked — in the same horizontal budget.
+/// A bare count would read as "3 things are shown". The fraction says how many
+/// available facets are picked in the same horizontal budget.
 fn filter_value(filter: DisplayFilter) -> String {
     if filter.is_empty() {
         s::agent_chat_filter_none()
@@ -89,7 +89,6 @@ fn axis_label(axis: FilterAxis) -> String {
     match axis {
         FilterAxis::Kind => s::agent_chat_filter_axis_kind(),
         FilterAxis::Tool => s::agent_chat_filter_axis_tool(),
-        FilterAxis::Status => s::agent_chat_filter_axis_status(),
     }
 }
 
@@ -103,9 +102,6 @@ fn facet_label(facet: FilterFacet) -> String {
         FilterFacet::ToolSearch => s::agent_chat_filter_tool_search(),
         FilterFacet::ToolRun => s::agent_chat_filter_tool_run(),
         FilterFacet::ToolOther => s::agent_chat_filter_tool_other(),
-        FilterFacet::StatusRunning => s::agent_chat_filter_status_running(),
-        FilterFacet::StatusOk => s::agent_chat_filter_status_ok(),
-        FilterFacet::StatusFailed => s::agent_chat_filter_status_failed(),
     }
 }
 

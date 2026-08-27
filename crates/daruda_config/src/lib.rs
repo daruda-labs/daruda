@@ -237,6 +237,7 @@ impl Config {
 
     /// Clamp all numeric fields to their valid ranges.
     fn clamp(&mut self) {
+        let legacy_default_mode = self.agent.take_legacy_default_permission_mode();
         self.font.clamp();
         self.window.clamp();
         self.left_dock.clamp();
@@ -253,6 +254,9 @@ impl Config {
         // Claude default so every load path hands the app a non-empty catalog.
         if self.agents.is_empty() {
             self.agents = agent::default_agents();
+        }
+        if let Some(mode) = legacy_default_mode {
+            migrate_legacy_default_permission_mode(&mut self.agents, &mode);
         }
     }
 
@@ -303,6 +307,53 @@ impl Config {
             self.shell = shell;
         }
         self
+    }
+}
+
+fn migrate_legacy_default_permission_mode(agents: &mut [AgentEntry], mode: &str) {
+    for entry in agents {
+        let Some(definition) = entry.resolve() else {
+            continue;
+        };
+        if definition
+            .default_mode
+            .as_deref()
+            .is_some_and(|m| !m.trim().is_empty())
+        {
+            continue;
+        }
+        if legacy_mode_can_apply_to(&definition.launch, mode) {
+            set_agent_entry_default_mode(entry, mode);
+        }
+    }
+}
+
+fn legacy_mode_can_apply_to(launch: &AgentLaunch, mode: &str) -> bool {
+    let command = match launch {
+        AgentLaunch::Raw(command) => command,
+        AgentLaunch::Ssh {
+            adapter_command, ..
+        }
+        | AgentLaunch::Docker {
+            adapter_command, ..
+        } => adapter_command,
+    };
+    match agent_vocabulary_seed(command) {
+        Some(seed) => seed.modes.iter().any(|entry| entry.id == mode),
+        // Unknown adapters previously received the global candidate too; keep
+        // that safe behavior because `daruda_acp` skips unadvertised modes.
+        None => true,
+    }
+}
+
+fn set_agent_entry_default_mode(entry: &mut AgentEntry, mode: &str) {
+    match entry {
+        AgentEntry::Preset { overrides, .. } => {
+            overrides.default_mode = Some(mode.to_string());
+        }
+        AgentEntry::Custom(definition) => {
+            definition.default_mode = Some(mode.to_string());
+        }
     }
 }
 
@@ -399,6 +450,7 @@ fn apply_settings_patch_to_inner(
         patch.apply_to(&mut config);
         config.clamp();
         patch_settings_document(&mut doc, &config, patch);
+        remove_legacy_agent_permission_mode(&mut doc, &config);
 
         let text = doc.to_string();
         let mut written: Config = toml::from_str(&text).map_err(|e| {
@@ -792,9 +844,6 @@ fn patch_settings_document(
                 "use_modifier_to_send",
                 toml_edit::value(config.agent.use_modifier_to_send),
             );
-            // Stale key from the removed global permission-mode axis — clear it
-            // so an existing config.toml doesn't keep carrying it forward.
-            t.remove("default_permission_mode");
         }),
         SettingsPatch::AgentCatalog(_) => replace_agents(doc, &config.agents),
         SettingsPatch::SessionHosts { .. } => {
@@ -1045,5 +1094,16 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             }
         }
     }
+
     table
+}
+
+fn remove_legacy_agent_permission_mode(doc: &mut toml_edit::DocumentMut, config: &Config) {
+    let removed = doc
+        .get_mut("agent")
+        .and_then(toml_edit::Item::as_table_like_mut)
+        .is_some_and(|t| t.remove("default_permission_mode").is_some());
+    if removed {
+        replace_agents(doc, &config.agents);
+    }
 }

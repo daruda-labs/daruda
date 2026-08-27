@@ -1,5 +1,5 @@
 use super::*;
-use daruda_acp::{DiffView, PermissionItem};
+use daruda_acp::{DiffView, PermissionItem, ToolStatusView};
 
 fn call(name: Option<&str>, kind: ToolKindView, status: ToolStatusView) -> ChatItem {
     ChatItem::ToolCall(ToolCallItem {
@@ -70,15 +70,6 @@ fn picking_edits_hides_thinking_and_prose() {
 }
 
 #[test]
-fn picking_failed_hides_thinking_and_prose() {
-    let f = filter(&["status_failed"]);
-    assert!(!f.matches(&think()));
-    assert!(!f.matches(&asst()));
-    assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Failed)));
-    assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-}
-
-#[test]
 fn picking_thinking_hides_every_tool() {
     let f = filter(&["thinking"]);
     assert!(f.matches(&think()));
@@ -115,10 +106,9 @@ fn a_condition_below_tools_puts_tools_in_scope() {
 
 #[test]
 fn turning_tools_off_discards_the_conditions_below_it() {
-    let f = filter(&["tools", "tool_edit", "status_failed"]);
+    let f = filter(&["tools", "tool_edit"]);
     let off = f.toggled(FilterFacet::Tools);
     assert!(!off.contains(FilterFacet::ToolEdit));
-    assert!(!off.contains(FilterFacet::StatusFailed));
     assert!(off.is_empty(), "nothing survives the parent going away");
 }
 
@@ -170,8 +160,7 @@ fn an_empty_filter_shows_everything() {
 }
 
 #[test]
-fn an_untouched_condition_under_tools_stays_unconstrained() {
-    // Kind picked, status left alone: every status of a read is kept.
+fn tool_kind_filters_ignore_tool_status() {
     let f = filter(&["tools", "tool_read"]);
     assert!(!f.matches(&asst()));
     assert!(!f.matches(&think()));
@@ -328,25 +317,8 @@ fn delete_and_move_are_edits() {
 }
 
 #[test]
-fn the_status_axis_narrows_to_the_picked_outcomes() {
-    let f = filter(&["status_failed"]);
-    assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Failed)));
-    assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Cancelled)));
-    assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-    assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::InProgress)));
-}
-
-#[test]
-fn axes_intersect_rather_than_union() {
-    let f = filter(&["tool_read", "status_failed"]);
-    assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Failed)));
-    assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-    assert!(!f.matches(&call(None, ToolKindView::Execute, ToolStatusView::Failed)));
-}
-
-#[test]
 fn a_prompt_a_permission_and_a_failure_survive_every_filter() {
-    let f = filter(&["tool_edit", "status_failed"]);
+    let f = filter(&["tool_edit"]);
     assert!(f.matches(&ChatItem::UserText("q".into())));
     assert!(f.matches(&ChatItem::Permission(PermissionItem {
         id: 0,
@@ -385,6 +357,12 @@ fn an_unknown_token_is_dropped_rather_than_failing() {
 }
 
 #[test]
+fn removed_status_tokens_are_ignored_for_persistence_compatibility() {
+    assert!(filter(&["status_running", "status_ok", "status_failed"]).is_empty());
+    assert_eq!(filter(&["tools", "status_failed"]).tokens(), vec!["tools"]);
+}
+
+#[test]
 fn toggling_a_facet_twice_returns_the_empty_filter() {
     let f = DisplayFilter::default().toggled(FilterFacet::Tools);
     assert!(f.contains(FilterFacet::Tools));
@@ -412,7 +390,6 @@ fn the_menu_sections_agree_with_where_the_facets_live() {
                 FilterAxis::Kind,
                 FacetSlot::Thinking | FacetSlot::Prose | FacetSlot::Tools
             ) | (FilterAxis::Tool, FacetSlot::ToolKind(_))
-                | (FilterAxis::Status, FacetSlot::ToolStatus(_))
         );
         assert!(ok, "{facet:?} is listed under {:?}", facet.axis());
     }

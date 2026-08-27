@@ -779,11 +779,7 @@ fn a_filtered_away_parent_takes_its_children_with_it() {
         tool("parent", Completed), // ToolKindView::Edit
         child_of("child", "parent", Completed),
     ];
-    let index = FilterMatchIndex::of(
-        &items,
-        DisplayFilter::from_tokens(["tools", "tool_search"]),
-        &LiveSubagentUnits::of(&items),
-    );
+    let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_search"]));
     assert!(!index.keeps_tool(&tool_of(&items, "parent")));
     assert!(
         !index.keeps_tool(&tool_of(&items, "child")),
@@ -815,11 +811,7 @@ fn a_matching_grandchild_keeps_the_whole_subtree() {
         child_of("leaf", "middle", Completed), // ToolKindView::Edit
         sibling,
     ];
-    let index = FilterMatchIndex::of(
-        &items,
-        DisplayFilter::from_tokens(["tools", "tool_edit"]),
-        &LiveSubagentUnits::of(&items),
-    );
+    let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_edit"]));
     for id in ["task", "middle", "leaf", "sibling"] {
         assert!(index.keeps_tool(&tool_of(&items, id)), "{id}");
     }
@@ -833,11 +825,7 @@ fn a_cyclic_parent_link_does_not_hang_the_index() {
         child_of("a", "b", Completed),
         child_of("b", "a", Completed),
     ];
-    let index = FilterMatchIndex::of(
-        &items,
-        DisplayFilter::from_tokens(["tools", "tool_edit"]),
-        &LiveSubagentUnits::of(&items),
-    );
+    let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_edit"]));
     assert!(index.keeps_tool(&tool_of(&items, "a")));
     assert!(index.keeps_tool(&tool_of(&items, "b")));
 }
@@ -2074,9 +2062,7 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
         tc.kind = ToolKindView::Read;
     }
     let items = [parent, child];
-    let live_units = LiveSubagentUnits::of(&items);
-
-    let reads = FilterMatchIndex::of(&items, only_reads(), &live_units);
+    let reads = FilterMatchIndex::of(&items, only_reads());
     let ChatItem::ToolCall(parent) = &items[0] else {
         unreachable!()
     };
@@ -2092,33 +2078,11 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     let edits = DisplayFilter::default()
         .toggled(FilterFacet::Tools)
         .toggled(FilterFacet::ToolEdit);
-    let edits = FilterMatchIndex::of(&items, edits, &live_units);
+    let edits = FilterMatchIndex::of(&items, edits);
     assert!(edits.keeps_tool(parent), "the Edit parent matches directly");
     assert!(
         edits.keeps_tool(child),
         "a nested child owns no row, so it renders with whatever card survives"
-    );
-}
-
-#[test]
-fn running_filter_uses_a_live_descendant_as_the_parent_status() {
-    use ToolStatusView::{Completed, InProgress};
-
-    let items = [
-        tool("task", Completed),
-        child_of("child", "task", InProgress),
-    ];
-    let live_units = LiveSubagentUnits::of(&items);
-    let running = DisplayFilter::default()
-        .toggled(FilterFacet::Tools)
-        .toggled(FilterFacet::StatusRunning);
-    let matches = FilterMatchIndex::of(&items, running, &live_units);
-    let ChatItem::ToolCall(parent) = &items[0] else {
-        unreachable!()
-    };
-    assert!(
-        matches.keeps_tool(parent),
-        "a completed parent with live work below it is still running"
     );
 }
 
@@ -2304,7 +2268,7 @@ fn changing_the_filter_keeps_every_row_in_its_slot() {
         vec![FilterFacet::Tools],
         vec![FilterFacet::Prose],
         vec![FilterFacet::Tools, FilterFacet::ToolEdit],
-        vec![FilterFacet::Thinking, FilterFacet::StatusFailed],
+        vec![FilterFacet::Thinking, FilterFacet::ToolSearch],
     ] {
         let filter = facets
             .iter()

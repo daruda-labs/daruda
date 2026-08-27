@@ -1,7 +1,7 @@
 //! Display filtering over what a chat pane shows: thinking, prose, and tools.
-//! Tool kinds and statuses are conditions *inside* tools, not peers of them.
+//! Tool kinds are conditions *inside* tools, not peers of them.
 
-use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+use daruda_acp::{ChatItem, ToolCallItem, ToolKindView};
 
 /// How the menu groups facets into labelled sections. Purely presentational —
 /// the nesting that decides matching is [`FacetSlot`].
@@ -9,11 +9,10 @@ use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
 pub(in crate::workspace) enum FilterAxis {
     Kind,
     Tool,
-    Status,
 }
 
 impl FilterAxis {
-    pub(in crate::workspace) const ALL: [FilterAxis; 3] = [Self::Kind, Self::Tool, Self::Status];
+    pub(in crate::workspace) const ALL: [FilterAxis; 2] = [Self::Kind, Self::Tool];
 }
 
 /// One selectable facet of the filter, as the menu and the persisted tokens
@@ -28,14 +27,11 @@ pub(in crate::workspace) enum FilterFacet {
     ToolSearch,
     ToolRun,
     ToolOther,
-    StatusRunning,
-    StatusOk,
-    StatusFailed,
 }
 
 impl FilterFacet {
     /// Every facet, grouped by axis in menu order.
-    pub(in crate::workspace) const ALL: [FilterFacet; 11] = [
+    pub(in crate::workspace) const ALL: [FilterFacet; 8] = [
         Self::Thinking,
         Self::Prose,
         Self::Tools,
@@ -44,9 +40,6 @@ impl FilterFacet {
         Self::ToolSearch,
         Self::ToolRun,
         Self::ToolOther,
-        Self::StatusRunning,
-        Self::StatusOk,
-        Self::StatusFailed,
     ];
 
     /// Which labelled menu section this facet is listed under.
@@ -58,13 +51,11 @@ impl FilterFacet {
             | Self::ToolSearch
             | Self::ToolRun
             | Self::ToolOther => FilterAxis::Tool,
-            Self::StatusRunning | Self::StatusOk | Self::StatusFailed => FilterAxis::Status,
         }
     }
 
-    /// Where this facet is stored in a [`DisplayFilter`]. The tool kinds and
-    /// statuses name a bit inside [`ToolSelector`], which only exists when
-    /// tools are in scope — that is the whole subordination rule.
+    /// Where this facet is stored in a [`DisplayFilter`]. Tool kinds name a bit
+    /// inside [`ToolSelector`], which only exists when tools are in scope.
     fn slot(self) -> FacetSlot {
         match self {
             Self::Thinking => FacetSlot::Thinking,
@@ -75,9 +66,6 @@ impl FilterFacet {
             Self::ToolSearch => FacetSlot::ToolKind(1 << 2),
             Self::ToolRun => FacetSlot::ToolKind(1 << 3),
             Self::ToolOther => FacetSlot::ToolKind(1 << 4),
-            Self::StatusRunning => FacetSlot::ToolStatus(1 << 0),
-            Self::StatusOk => FacetSlot::ToolStatus(1 << 1),
-            Self::StatusFailed => FacetSlot::ToolStatus(1 << 2),
         }
     }
 
@@ -92,9 +80,6 @@ impl FilterFacet {
             Self::ToolSearch => "tool_search",
             Self::ToolRun => "tool_run",
             Self::ToolOther => "tool_other",
-            Self::StatusRunning => "status_running",
-            Self::StatusOk => "status_ok",
-            Self::StatusFailed => "status_failed",
         }
     }
 
@@ -111,8 +96,6 @@ enum FacetSlot {
     Tools,
     /// A bit in [`ToolSelector::kinds`].
     ToolKind(u8),
-    /// A bit in [`ToolSelector::statuses`].
-    ToolStatus(u8),
 }
 
 /// Agent tool names mapped to filter facets.
@@ -153,33 +136,15 @@ fn facet_for_kind(kind: ToolKindView) -> FilterFacet {
     }
 }
 
-fn facet_for_status(status: ToolStatusView) -> FilterFacet {
-    match status {
-        ToolStatusView::Pending | ToolStatusView::InProgress => FilterFacet::StatusRunning,
-        ToolStatusView::Completed => FilterFacet::StatusOk,
-        ToolStatusView::Failed | ToolStatusView::Cancelled => FilterFacet::StatusFailed,
-    }
-}
-
-/// A dimension left empty is unconstrained: no kind picked means every tool
-/// kind, no status picked means every status.
+/// An empty kind selection is unconstrained and keeps every tool kind.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 struct ToolSelector {
     kinds: u8,
-    statuses: u8,
 }
 
 impl ToolSelector {
     fn has_kind(self, facet: FilterFacet) -> bool {
         matches!(facet.slot(), FacetSlot::ToolKind(bit) if self.kinds & bit != 0)
-    }
-
-    fn has_status(self, facet: FilterFacet) -> bool {
-        matches!(facet.slot(), FacetSlot::ToolStatus(bit) if self.statuses & bit != 0)
-    }
-
-    fn matches(self, tc: &ToolCallItem, status: ToolStatusView) -> bool {
-        self.kind_allows(tc) && self.status_allows(status)
     }
 
     /// Classify on the first signal that resolves: a *recognised* agent tool
@@ -199,21 +164,17 @@ impl ToolSelector {
         self.has_kind(facet) || (self.has_kind(FilterFacet::ToolEdit) && !tc.diffs.is_empty())
     }
 
-    fn status_allows(self, status: ToolStatusView) -> bool {
-        self.statuses == 0 || self.has_status(facet_for_status(status))
-    }
-
     fn selected_count(self) -> usize {
-        (self.kinds.count_ones() + self.statuses.count_ones()) as usize
+        self.kinds.count_ones() as usize
     }
 }
 
-/// What the pane is narrowed to. All three empty = show everything.
+/// What the pane is narrowed to. Every choice empty = show everything.
 ///
 /// Toggling `thinking` or `prose` flips that bool. Toggling `tools` flips
 /// `Some`/`None`, and turning it off **discards** the conditions below it.
-/// Toggling a tool kind or a status brings `tools` into scope if it was not,
-/// then flips that bit; clearing the last such bit leaves `Some(empty)`, which
+/// Toggling a tool kind brings `tools` into scope if it was not, then flips that
+/// bit; clearing the last such bit leaves `Some(empty)`, which
 /// reads as "all tools" — the user is still looking at tools, and the menu
 /// still shows `tools` checked. Clearing entirely goes through `tools` itself
 /// or [`DisplayFilter::default`].
@@ -245,7 +206,6 @@ impl DisplayFilter {
                 self.tools.get_or_insert_default();
             }
             FacetSlot::ToolKind(bit) => self.tools.get_or_insert_default().kinds |= bit,
-            FacetSlot::ToolStatus(bit) => self.tools.get_or_insert_default().statuses |= bit,
         }
         self
     }
@@ -265,7 +225,6 @@ impl DisplayFilter {
             FacetSlot::Prose => self.prose,
             FacetSlot::Tools => self.tools.is_some(),
             FacetSlot::ToolKind(_) => self.tools.is_some_and(|t| t.has_kind(facet)),
-            FacetSlot::ToolStatus(_) => self.tools.is_some_and(|t| t.has_status(facet)),
         }
     }
 
@@ -277,7 +236,6 @@ impl DisplayFilter {
                 self.tools = self.tools.xor(Some(ToolSelector::default()));
             }
             FacetSlot::ToolKind(bit) => self.tools.get_or_insert_default().kinds ^= bit,
-            FacetSlot::ToolStatus(bit) => self.tools.get_or_insert_default().statuses ^= bit,
         }
         self
     }
@@ -301,17 +259,12 @@ impl DisplayFilter {
             ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => true,
             ChatItem::Thinking { .. } => self.thinking,
             ChatItem::AssistantText { .. } => self.prose,
-            ChatItem::ToolCall(tc) => self.matches_tool(tc, tc.status),
+            ChatItem::ToolCall(tc) => self.matches_tool(tc),
         }
     }
 
-    /// Match a tool using its subtree-aware status.
-    pub(in crate::workspace) fn matches_tool(
-        self,
-        tc: &ToolCallItem,
-        status: ToolStatusView,
-    ) -> bool {
-        self.is_empty() || self.tools.is_some_and(|t| t.matches(tc, status))
+    pub(in crate::workspace) fn matches_tool(self, tc: &ToolCallItem) -> bool {
+        self.is_empty() || self.tools.is_some_and(|t| t.kind_allows(tc))
     }
 }
 

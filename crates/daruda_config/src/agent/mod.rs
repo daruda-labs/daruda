@@ -459,6 +459,12 @@ pub(crate) fn default_agents() -> Vec<AgentEntry> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentConfig {
+    /// Legacy global permission mode from pre per-agent-mode configs.
+    /// Deserialized only so [`crate::Config::clamp`] can migrate it into the
+    /// agent catalog; never written back.
+    #[doc(hidden)]
+    #[serde(default, rename = "default_permission_mode", skip_serializing)]
+    pub legacy_default_permission_mode: Option<String>,
     /// How the agent chat input submits a message. When `false` (the
     /// default), plain Enter sends and Shift+Enter inserts a newline —
     /// matching Zed's agent panel default. When `true`, Enter inserts a
@@ -532,6 +538,7 @@ pub const TAIL_WINDOW_DEFAULT: u8 = TAIL_WINDOW_ALL;
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            legacy_default_permission_mode: None,
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
@@ -543,6 +550,13 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
+    pub(crate) fn take_legacy_default_permission_mode(&mut self) -> Option<String> {
+        self.legacy_default_permission_mode
+            .take()
+            .map(|mode| mode.trim().to_string())
+            .filter(|mode| !mode.is_empty())
+    }
+
     /// Clamp numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
         self.input_max_rows = self

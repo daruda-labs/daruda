@@ -399,16 +399,15 @@ impl Workspace {
     /// vocabulary cache, so option pickers offer the live agent's own lists.
     /// Called from the event pump BEFORE the event folds into the view.
     ///
-    /// `Connected` carries both axes; `ConfigOptionsChanged` replaces only the
-    /// option set, so it must not touch the mode axis (mode never arrives as a
-    /// config option — `daruda_acp` strips that category before the host sees
-    /// it). Writes only when a list actually changed, so a reconnect that
-    /// advertises the same vocabulary does no I/O.
+    /// `Connected` carries both axes; later model/option changes split them:
+    /// `ModeChanged` carries the reconciled mode list and
+    /// `ConfigOptionsChanged` carries models. Writes only when a list actually
+    /// changed, so a reconnect that advertises the same vocabulary does no I/O.
     pub(in crate::workspace) fn record_agent_vocabulary(
         &mut self,
         pane_id: PaneId,
         event: &daruda_acp::AcpEvent,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let advertised = match event {
             daruda_acp::AcpEvent::Connected {
@@ -423,28 +422,43 @@ impl Workspace {
                 modes: None,
                 models: Some(model_vocabulary(options)),
             },
+            daruda_acp::AcpEvent::ModeChanged { state } => Advertised {
+                modes: Some(mode_vocabulary(Some(state))),
+                models: None,
+            },
             _ => return,
         };
-        let Some(agent_id) = self
-            .agent_chat_view(pane_id)
-            .map(|v| v.read(cx).agent_id.clone())
-        else {
+        let Some((agent_id, frozen_source)) = self.agent_chat_view(pane_id).map(|v| {
+            let view = v.read(cx);
+            (view.agent_id.clone(), view.agent_vocabulary_source.clone())
+        }) else {
+            return;
+        };
+        let source = frozen_source.or_else(|| {
+            self.agents
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .map(|agent| {
+                    crate::lane::session_host::adapter_command(&agent.launch)
+                        .trim()
+                        .to_string()
+                })
+        });
+        let Some(source) = source else {
             return;
         };
 
-        let mut changed = false;
-        if let Some(modes) = advertised.modes {
-            changed |= self.agent_vocabulary.record_modes(&agent_id, modes);
-        }
-        if let Some(models) = advertised.models {
-            changed |= self.agent_vocabulary.record_models(&agent_id, models);
-        }
-        if !changed {
-            return;
-        }
         // A background observation, not a user action: a failed write costs the
         // next launch a stale picker list, so it logs instead of toasting.
-        if let Err(e) = self.agent_vocabulary.save_in(&self.data_dir) {
+        let data_dir = self.data_dir.clone();
+        if let Err(e) = crate::workspace::agent_vocabulary_global::record(
+            cx,
+            &data_dir,
+            &agent_id,
+            &source,
+            advertised.modes,
+            advertised.models,
+        ) {
             LogWriter::log(
                 ErrorReport::new("Failed to save agent_vocabulary.json")
                     .severity(ErrorSeverity::Warning)
@@ -464,6 +478,7 @@ impl Workspace {
                     .build(),
             );
         }
+        self.agent_vocabulary = crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir);
     }
 
     /// Fire the "completed" notification. Called only from
@@ -900,25 +915,6 @@ impl Workspace {
         // so the next connect starts on it (see that field's doc).
         if view.read(cx).last_known_model_id != model_before {
             self.mutate_durable(cx, |_, _| {});
-        }
-    }
-
-    /// Apply the config option a connect resolved for this pane (today: the
-    /// agent's `default_model`). Same protocol effect as
-    /// [`Self::set_agent_config_option`] with no recording and no save — the
-    /// pane must not come away believing the user chose this value, or a later
-    /// edit to the agent's default would never reach it again.
-    pub(in crate::workspace) fn apply_agent_connect_config_option(
-        &mut self,
-        pane_id: PaneId,
-        config_id: String,
-        value: daruda_acp::ConfigValueView,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, cx| {
-                v.apply_connect_config_option(config_id, value, cx)
-            });
         }
     }
 

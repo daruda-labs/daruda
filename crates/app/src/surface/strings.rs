@@ -2122,7 +2122,12 @@ pub fn agent_chat_filtered_show(count: usize) -> String {
 /// control cannot reach — `total` names everything the filter dropped so the
 /// reachable count cannot read as the whole cut.
 pub fn agent_chat_filtered_show_partial(count: usize, total: usize) -> String {
-    rust_i18n::t!("agent_chat.filtered_show_partial", count = count, total = total).into_owned()
+    rust_i18n::t!(
+        "agent_chat.filtered_show_partial",
+        count = count,
+        total = total
+    )
+    .into_owned()
 }
 
 /// Expanded label for the same disclosure — the rows are on screen, so the
@@ -2138,7 +2143,12 @@ pub fn agent_chat_filtered_hide(count: usize) -> String {
 /// [`agent_chat_filtered_hide`] with the same `total` disclosure as
 /// [`agent_chat_filtered_show_partial`].
 pub fn agent_chat_filtered_hide_partial(count: usize, total: usize) -> String {
-    rust_i18n::t!("agent_chat.filtered_hide_partial", count = count, total = total).into_owned()
+    rust_i18n::t!(
+        "agent_chat.filtered_hide_partial",
+        count = count,
+        total = total
+    )
+    .into_owned()
 }
 
 pub fn agent_chat_filter_chip(value: &str) -> String {
@@ -2171,10 +2181,6 @@ pub fn agent_chat_filter_axis_tool() -> String {
     rust_i18n::t!("agent_chat.filter_axis_tool").into_owned()
 }
 
-pub fn agent_chat_filter_axis_status() -> String {
-    rust_i18n::t!("agent_chat.filter_axis_status").into_owned()
-}
-
 pub fn agent_chat_filter_thinking() -> String {
     rust_i18n::t!("agent_chat.filter_thinking").into_owned()
 }
@@ -2205,18 +2211,6 @@ pub fn agent_chat_filter_tool_run() -> String {
 
 pub fn agent_chat_filter_tool_other() -> String {
     rust_i18n::t!("agent_chat.filter_tool_other").into_owned()
-}
-
-pub fn agent_chat_filter_status_running() -> String {
-    rust_i18n::t!("agent_chat.filter_status_running").into_owned()
-}
-
-pub fn agent_chat_filter_status_ok() -> String {
-    rust_i18n::t!("agent_chat.filter_status_ok").into_owned()
-}
-
-pub fn agent_chat_filter_status_failed() -> String {
-    rust_i18n::t!("agent_chat.filter_status_failed").into_owned()
 }
 
 /// Earlier-step count with singular handling.

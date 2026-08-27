@@ -75,15 +75,10 @@ impl FilterMatchIndex {
         hierarchy: &ToolHierarchy<'a>,
         items: &'a [ChatItem],
         filter: DisplayFilter,
-        live_units: &LiveSubagentUnits,
     ) -> Self {
         let mut tool_ids = HashSet::new();
         for tc in items.iter().filter_map(|item| match item {
-            ChatItem::ToolCall(tc)
-                if filter.matches_tool(tc, effective_tool_status(tc, live_units)) =>
-            {
-                Some(tc)
-            }
+            ChatItem::ToolCall(tc) if filter.matches_tool(tc) => Some(tc),
             _ => None,
         }) {
             // A match drags its ancestors in so a nested hit stays reachable
@@ -101,12 +96,8 @@ impl FilterMatchIndex {
     /// Test convenience: derive the hierarchy for this one call. Production
     /// shares a single hierarchy across the whole projection pass.
     #[cfg(test)]
-    pub(in crate::workspace) fn of(
-        items: &[ChatItem],
-        filter: DisplayFilter,
-        live_units: &LiveSubagentUnits,
-    ) -> Self {
-        Self::build(&ToolHierarchy::build(items), items, filter, live_units)
+    pub(in crate::workspace) fn of(items: &[ChatItem], filter: DisplayFilter) -> Self {
+        Self::build(&ToolHierarchy::build(items), items, filter)
     }
 
     pub(in crate::workspace) fn matches(&self, item: &ChatItem) -> bool {
@@ -179,7 +170,7 @@ pub(in crate::workspace) fn project(
     filter: &DisplayFilter,
 ) -> Vec<RenderRow> {
     let hierarchy = ToolHierarchy::build(items);
-    let filter = FilterMatchIndex::build(&hierarchy, items, *filter, live_units);
+    let filter = FilterMatchIndex::build(&hierarchy, items, *filter);
     project_with_filter_index(
         items,
         &hierarchy,

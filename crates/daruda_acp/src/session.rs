@@ -68,7 +68,10 @@ use crate::connection::{AcpClientError, AdapterCommand, LaunchSpec};
 use crate::failure::AcpFailure;
 use crate::login_method::{LoginMethod, parse_login_methods};
 use crate::mode_tracker::ModeTracker;
-use crate::model::{ConfigOptionView, ConfigValueView, ModeStateView, SessionCapabilitiesView};
+use crate::model::{
+    ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView, ConfigValueView,
+    ModeStateView, SessionCapabilitiesView,
+};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -381,6 +384,26 @@ pub fn connect_session(
     resume: Option<SessionId>,
     agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
+    connect_session_inner(
+        command,
+        cwd,
+        None,
+        initial_modes,
+        restore_mode,
+        resume,
+        agent_id,
+    )
+}
+
+fn connect_session_inner(
+    command: AdapterCommand,
+    cwd: PathBuf,
+    initial_model: Option<String>,
+    initial_modes: Vec<String>,
+    restore_mode: Option<String>,
+    resume: Option<SessionId>,
+    agent_id: &str,
+) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent = AcpAgent::from_str(&command.0)
         .map_err(|e| AcpClientError::Command(format!("{e:?}")))
         .map(|agent| crate::wire_log::attach(agent, agent_id))?;
@@ -399,6 +422,7 @@ pub fn connect_session(
         if let Err(err) = run_connection(
             agent,
             cwd,
+            initial_model,
             initial_modes,
             restore_mode,
             resume,
@@ -452,6 +476,34 @@ pub fn connect_agent_session(
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
     connect_session(adapter, cwd, initial_modes, restore_mode, resume, agent_id)
+}
+
+/// [`connect_agent_session`] with one model to negotiate before the mode and
+/// before [`AcpEvent::Connected`]. The model is applied only when the agent
+/// advertises it; an unavailable or rejected value leaves the adapter's own
+/// selection standing and does not fail the otherwise-usable session.
+#[allow(clippy::too_many_arguments)] // Additive host-specific entry point; keeps the established API unchanged.
+pub fn connect_agent_session_with_model(
+    launch: LaunchSpec,
+    node_install_dir: PathBuf,
+    cwd: PathBuf,
+    initial_model: Option<String>,
+    initial_modes: Vec<String>,
+    restore_mode: Option<String>,
+    resume: Option<SessionId>,
+    agent_id: &str,
+    progress: &mut dyn FnMut(crate::node::NodeProgress),
+) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
+    let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
+    connect_session_inner(
+        adapter,
+        cwd,
+        initial_model,
+        initial_modes,
+        restore_mode,
+        resume,
+        agent_id,
+    )
 }
 
 /// What this client advertises at `initialize`.
@@ -574,6 +626,7 @@ async fn with_connect_timeout<T>(
 async fn run_connection(
     agent: impl ConnectTo<Client> + 'static,
     cwd: PathBuf,
+    initial_model: Option<String>,
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
     resume: Option<SessionId>,
@@ -741,7 +794,7 @@ async fn run_connection(
             // resolves, so the host rebuilds its items exactly as for a live
             // turn. Both paths yield the same (session_id, modes, config_options)
             // and share the set_mode + Connected tail below.
-            let (session_id, mut modes, config_options): (
+            let (session_id, mut modes, mut config_options): (
                 SessionId,
                 Option<ModeStateView>,
                 Vec<ConfigOptionView>,
@@ -783,6 +836,19 @@ async fn run_connection(
                     .await?
                 }
             };
+
+            // A model can rebuild the mode list, so settle it first. This also
+            // happens before `Connected`, which is the host's gate for draining
+            // prompts queued during the handshake.
+            apply_initial_model(
+                &connection,
+                &session_id,
+                initial_model.as_deref(),
+                &mut modes,
+                &mut config_options,
+                &event_tx,
+            )
+            .await;
 
             // Apply the configured initial mode on a *fresh* session (including a
             // resume downgraded to session/new): `initial_modes`, a
@@ -895,6 +961,66 @@ async fn run_connection(
         .map_err(|e| AcpClientError::Protocol(AcpFailure::classify(&e)))?;
 
     Ok(())
+}
+
+/// Apply a host-requested model during the handshake. Optional by design: a
+/// missing choice or a refusal leaves the adapter's current model standing,
+/// matching the AgentChat default semantics while still guaranteeing that any
+/// accepted switch completes before the first prompt can be sent.
+async fn apply_initial_model(
+    connection: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    wanted: Option<&str>,
+    modes: &mut Option<ModeStateView>,
+    config_options: &mut Vec<ConfigOptionView>,
+    event_tx: &UnboundedSender<AcpEvent>,
+) {
+    let Some(wanted) = wanted.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let Some(option) = config_options
+        .iter()
+        .find(|option| option.category == ConfigOptionCategoryView::Model)
+    else {
+        return;
+    };
+    let ConfigOptionKindView::Select {
+        current_value,
+        options,
+    } = &option.kind
+    else {
+        return;
+    };
+    if current_value == wanted || !options.iter().any(|choice| choice.value == wanted) {
+        return;
+    }
+    let config_id = option.id.clone();
+    let request = SetSessionConfigOptionRequest::new(
+        session_id.clone(),
+        config_id.clone(),
+        SessionConfigOptionValue::value_id(wanted.to_string()),
+    );
+    match with_connect_timeout(
+        "session/set_config_option(model)",
+        CONNECT_HANDSHAKE_TIMEOUT,
+        connection.send_request(request).block_task(),
+    )
+    .await
+    {
+        Ok(response) => {
+            let updated = config_options_from_protocol(&response.config_options);
+            if let Some(updated_modes) = ModeStateView::from_config_options(&updated) {
+                *modes = Some(updated_modes);
+            }
+            *config_options = updated;
+        }
+        Err(error) => {
+            let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
+                "set_config_option({config_id}={wanted}) on connect failed — the session uses \
+                 the adapter's current model: {error:?}"
+            )));
+        }
+    }
 }
 
 /// The multi-turn pump. Runs prompts strictly one turn at a time, draining a
@@ -1520,6 +1646,188 @@ mod tests {
         assert!(err.message.contains("timed out"), "{}", err.message);
     }
 
+    /// A model switch can replace the mode vocabulary. The handshake must use
+    /// that replacement before choosing the configured mode, expose only the
+    /// settled state in `Connected`, and only then drain a queued prompt.
+    #[test]
+    fn initial_model_settles_before_mode_and_connected() {
+        use agent_client_protocol::schema::v1::{
+            InitializeResponse, NewSessionResponse, PromptResponse, SessionConfigOption,
+            SessionConfigOptionCategory, SessionConfigSelectOption, SessionMode, SessionModeState,
+            SetSessionConfigOptionResponse, SetSessionModeResponse,
+        };
+
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(InitializeResponse::new(ProtocolVersion::V1))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(
+                        NewSessionResponse::new("sess-model-mode-test")
+                            .modes(SessionModeState::new(
+                                "default",
+                                vec![SessionMode::new("default", "Default")],
+                            ))
+                            .config_options(vec![
+                                SessionConfigOption::select(
+                                    "model",
+                                    "Model",
+                                    "sonnet",
+                                    vec![
+                                        SessionConfigSelectOption::new("sonnet", "Sonnet"),
+                                        SessionConfigSelectOption::new("opus", "Opus"),
+                                    ],
+                                )
+                                .category(SessionConfigOptionCategory::Model),
+                            ]),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let requests = requests.clone();
+                    async move |req: SetSessionConfigOptionRequest, responder, _conn| {
+                        let model = req
+                            .value
+                            .as_value_id()
+                            .expect("model uses a value id")
+                            .to_string();
+                        requests.lock().unwrap().push(format!("model:{model}"));
+                        responder.respond(SetSessionConfigOptionResponse::new(vec![
+                            SessionConfigOption::select(
+                                "model",
+                                "Model",
+                                model,
+                                vec![
+                                    SessionConfigSelectOption::new("sonnet", "Sonnet"),
+                                    SessionConfigSelectOption::new("opus", "Opus"),
+                                ],
+                            )
+                            .category(SessionConfigOptionCategory::Model),
+                            SessionConfigOption::select(
+                                "mode",
+                                "Mode",
+                                "review",
+                                vec![
+                                    SessionConfigSelectOption::new("review", "Review"),
+                                    SessionConfigSelectOption::new("plan", "Plan"),
+                                ],
+                            )
+                            .category(SessionConfigOptionCategory::Mode),
+                        ]))
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let requests = requests.clone();
+                    async move |req: SetSessionModeRequest, responder, _conn| {
+                        requests
+                            .lock()
+                            .unwrap()
+                            .push(format!("mode:{}", req.mode_id));
+                        responder.respond(SetSessionModeResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let requests = requests.clone();
+                    async move |_req: PromptRequest, responder, _conn| {
+                        requests.lock().unwrap().push("prompt".to_string());
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+
+        let (command_tx, command_rx) = unbounded::<Command>();
+        command_tx
+            .unbounded_send(Command::Prompt("queued during connect".to_string()))
+            .unwrap();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+
+        smol::block_on(async {
+            let connection = smol::spawn(run_connection(
+                agent,
+                PathBuf::from("."),
+                Some("opus".to_string()),
+                vec!["plan".to_string()],
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            let (modes, config_options) = loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected {
+                        modes,
+                        config_options,
+                        ..
+                    }) => {
+                        break (
+                            modes.expect("model response advertised modes"),
+                            config_options,
+                        );
+                    }
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            };
+
+            assert_eq!(modes.current, "plan");
+            assert_eq!(
+                modes
+                    .available
+                    .iter()
+                    .map(|mode| mode.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["review", "plan"]
+            );
+            assert!(
+                config_options
+                    .iter()
+                    .all(|option| option.category != ConfigOptionCategoryView::Mode),
+                "the mode option is represented only through Connected.modes"
+            );
+            let model = config_options
+                .iter()
+                .find(|option| option.category == ConfigOptionCategoryView::Model)
+                .expect("model option remains advertised");
+            assert!(matches!(
+                &model.kind,
+                ConfigOptionKindView::Select { current_value, .. } if current_value == "opus"
+            ));
+
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::TurnEnded { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("queued prompt never completed"),
+                }
+            }
+            assert_eq!(
+                requests.lock().unwrap().as_slice(),
+                ["model:opus", "mode:plan", "prompt"]
+            );
+
+            drop(command_tx);
+            let _ = connection.await;
+        });
+    }
+
     /// Ceiling for each awaited event in the dispatch-concurrency test. Big
     /// enough that a loaded machine cannot fake a "blocked" verdict — the
     /// failure mode under measurement is *never*, not *slow* (both endpoints
@@ -1626,6 +1934,7 @@ mod tests {
             let connection = smol::spawn(run_connection(
                 permission_then_update_agent(),
                 PathBuf::from("."),
+                None,
                 Vec::new(),
                 None,
                 None,
@@ -1760,6 +2069,7 @@ mod tests {
             let connection = smol::spawn(run_connection(
                 login_advertising_agent(),
                 PathBuf::from("."),
+                None,
                 Vec::new(),
                 None,
                 None,

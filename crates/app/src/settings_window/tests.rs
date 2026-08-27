@@ -1064,6 +1064,12 @@ fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppCo
         ),
     ] {
         let (wh, win) = build_window(cx);
+        set_agent_vocabulary(
+            &wh,
+            &win,
+            cx,
+            daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+        );
         win.update(cx, |w, cx| {
             w.error = Some("boom".into());
             cx.notify();
@@ -1097,6 +1103,7 @@ fn retyping_a_row_id_switches_the_pickers_to_that_agents_vocabulary(cx: &mut Tes
     let mut vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::default();
     vocabulary.record_modes(
         "beta",
+        "npx -y @agentclientprotocol/claude-agent-acp@latest",
         vec![daruda_store::agent_vocabulary::VocabEntry::new(
             "beta-mode",
             "Beta Mode",
@@ -1128,6 +1135,39 @@ fn retyping_a_row_id_switches_the_pickers_to_that_agents_vocabulary(cx: &mut Tes
     assert!(
         agent_row_select_offers(&wh, &win, cx, 0, model, "opus"),
         "the cache knows no models for this agent, so the seed still fills that axis"
+    );
+}
+
+/// An id is stable across edits, but its command is not. Vocabulary learned
+/// from the old adapter must not follow the row after that command changes.
+#[gpui::test]
+fn changing_a_rows_command_invalidates_cached_vocabulary_from_the_old_adapter(
+    cx: &mut TestAppContext,
+) {
+    const CLAUDE: &str = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+    const CODEX: &str = "npx -y @agentclientprotocol/codex-acp@latest";
+
+    let (wh, win) = build_window(cx);
+    let mut vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::default();
+    vocabulary.record_modes(
+        "claude",
+        CLAUDE,
+        vec![daruda_store::agent_vocabulary::VocabEntry::new(
+            "claude-live-only",
+            "Claude Live Only",
+        )],
+    );
+    set_agent_vocabulary(&wh, &win, cx, vocabulary);
+
+    let mode = |row: &AgentCatalogRow| row.default_mode_select.clone();
+    set_agent_row_input(&wh, &win, cx, 0, |row| row.command_input.clone(), CODEX);
+    assert!(
+        !agent_row_select_offers(&wh, &win, cx, 0, mode, "claude-live-only"),
+        "the previous adapter's live vocabulary is suppressed"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, mode, "agent"),
+        "until Codex connects, its own seed supplies the replacement vocabulary"
     );
 }
 

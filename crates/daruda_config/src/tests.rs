@@ -684,8 +684,8 @@ fn patch_config_file_writes_agent_settings() {
 #[test]
 fn patch_config_file_clears_a_stale_permission_mode_key() {
     // The global permission-mode axis was removed; a config.toml written by
-    // an older daruda build can still carry the key, and a full save must
-    // clear it rather than leave it forever ignored.
+    // an older daruda build can still carry the key. Load must migrate it into
+    // compatible catalog rows, and a full save must clear the stale key.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(
@@ -695,10 +695,61 @@ fn patch_config_file_clears_a_stale_permission_mode_key() {
     .unwrap();
 
     let cfg = Config::load_from(&path);
+    assert_eq!(
+        cfg.resolved_agents()[0].default_mode.as_deref(),
+        Some("plan"),
+        "the legacy global default still reaches the built-in Claude row"
+    );
     patch_config_file_to(&cfg, &path).unwrap();
 
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("default_permission_mode"), "{text}");
+    assert!(text.contains("default_mode = \"plan\""), "{text}");
+}
+
+#[test]
+fn legacy_permission_mode_migration_skips_known_incompatible_agents() {
+    let input = "\
+[agent]\n\
+default_permission_mode = \"plan\"\n\
+[[agents]]\n\
+id = \"claude\"\n\
+name = \"Claude Code\"\n\
+command = \"npx -y @agentclientprotocol/claude-agent-acp@latest\"\n\
+[[agents]]\n\
+preset = \"codex-acp\"\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    cfg.clamp();
+
+    let resolved = cfg.resolved_agents();
+    assert_eq!(resolved[0].default_mode.as_deref(), Some("plan"));
+    assert_eq!(
+        resolved[1].default_mode, None,
+        "Codex advertises its own mode vocabulary, so a Claude-only legacy id must not be pinned"
+    );
+}
+
+#[test]
+fn settings_patch_migrates_and_removes_a_stale_permission_mode_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[agent]\ndefault_permission_mode = \"acceptEdits\"\nuse_modifier_to_send = false\n",
+    )
+    .unwrap();
+
+    let reloaded =
+        apply_settings_patch_to(&SettingsPatch::FontSize(15.0), &path).expect("patch applies");
+    assert_eq!(reloaded.font.size, 15.0);
+    assert_eq!(
+        reloaded.resolved_agents()[0].default_mode.as_deref(),
+        Some("acceptEdits")
+    );
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("default_permission_mode"), "{text}");
+    assert!(text.contains("default_mode = \"acceptEdits\""), "{text}");
 }
 
 #[test]

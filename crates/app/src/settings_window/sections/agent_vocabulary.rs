@@ -1,7 +1,7 @@
 //! Where a catalog row's mode / model pickers get their options.
 //!
 //! Two sources, consulted **per axis independently**: what the agent last
-//! advertised ([`AgentVocabularyCache`], keyed on the row's id) and the
+//! advertised ([`AgentVocabularyCache`], keyed on the row's id and command) and the
 //! build-time seed for the adapter the row's command names
 //! ([`daruda_config::agent_vocabulary_seed`]). A live list on one axis must
 //! not erase the seed on the other.
@@ -112,12 +112,12 @@ pub(in crate::settings_window) fn agent_row_vocabulary_options(
     };
     (
         vocabulary_options(
-            known_axis(vocabulary.modes(agent_id), seed_modes),
+            known_axis(vocabulary.known_modes_for(agent_id, command), seed_modes),
             seed.as_ref().and_then(|seed| seed.default_mode.as_deref()),
             saved_mode,
         ),
         vocabulary_options(
-            known_axis(vocabulary.models(agent_id), seed_models),
+            known_axis(vocabulary.known_models_for(agent_id, command), seed_models),
             seed.as_ref().and_then(|seed| seed.default_model.as_deref()),
             saved_model,
         ),
@@ -126,8 +126,8 @@ pub(in crate::settings_window) fn agent_row_vocabulary_options(
 
 /// What the agent last advertised on one axis, or the adapter seed until it
 /// has advertised anything there.
-fn known_axis<'a>(cached: &'a [VocabEntry], seeded: &'a [VocabEntry]) -> &'a [VocabEntry] {
-    if cached.is_empty() { seeded } else { cached }
+fn known_axis<'a>(cached: Option<&'a [VocabEntry]>, seeded: &'a [VocabEntry]) -> &'a [VocabEntry] {
+    cached.unwrap_or(seeded)
 }
 
 /// The `(agent default[ — name])` entry first, then the vocabulary, then
@@ -187,7 +187,8 @@ impl SettingsWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{VocabEntry, vocabulary_options};
+    use super::{VocabEntry, agent_row_vocabulary_options, vocabulary_options};
+    use daruda_store::agent_vocabulary::AgentVocabularyCache;
 
     fn entries(pairs: &[(&str, &str)]) -> Vec<VocabEntry> {
         pairs
@@ -238,5 +239,29 @@ mod tests {
     #[test]
     fn an_empty_vocabulary_still_offers_the_agent_default() {
         assert_eq!(values(&vocabulary_options(&[], None, "")), vec![""]);
+    }
+
+    #[test]
+    fn a_known_empty_axis_does_not_fall_back_to_the_seed() {
+        let mut cache = AgentVocabularyCache::default();
+        cache.record_models(
+            "claude",
+            "npx -y @agentclientprotocol/claude-agent-acp@latest",
+            Vec::new(),
+        );
+
+        let (_modes, models) = agent_row_vocabulary_options(
+            &cache,
+            "claude",
+            "npx -y @agentclientprotocol/claude-agent-acp@latest",
+            "",
+            "",
+        );
+
+        assert_eq!(
+            values(&models),
+            vec![""],
+            "the agent connected and advertised no models, so the Claude seed must stay suppressed"
+        );
     }
 }

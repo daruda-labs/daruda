@@ -86,11 +86,10 @@ pub struct SettingsWindow {
     /// decide on its own whether "the catalog" included the non-editable half,
     /// and the two that answered "no" disagreed with the rest.
     agent_catalog: Vec<AgentCatalogItem>,
-    /// What each agent last advertised on the mode / model axes, read once at
-    /// construction — Settings holds no `data_dir`, so it loads the store file
-    /// itself the same way the accounts snapshot below does. A row's pickers
-    /// fall back to [`daruda_config::agent_vocabulary_seed`] per axis when this
-    /// has nothing for the row's id.
+    /// What each agent last advertised on the mode / model axes. Mirrored from
+    /// the app-wide vocabulary Global so rows update while Settings remains
+    /// open. A row falls back to [`daruda_config::agent_vocabulary_seed`] per
+    /// axis when this has nothing for its current id and command.
     pub(super) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
     /// The session host registry (`[[session_hosts]]`) in `config.toml`
     /// order — named, reusable SSH/Docker targets a lane's `session_host`
@@ -186,6 +185,9 @@ pub struct SettingsWindow {
     /// changes. Clean forms reload immediately; a local draft is preserved
     /// for the same-field conflict flow.
     _settings_global_subscription: Subscription,
+    /// Refreshes every agent row's pickers when a Workspace observes a new
+    /// live vocabulary, including while this Settings window stays open.
+    _agent_vocabulary_global_subscription: Subscription,
     /// Subscription that refreshes the `accounts` mirror + repaints whenever
     /// the app-wide `AccountsGlobal` changes — so an add/reauth/default/
     /// delete in any Workspace window shows here without a restart.
@@ -1239,9 +1241,12 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&agent_preset), window, cx)
         });
 
-        // Settings has no `data_dir` of its own, so it reads the store file
-        // directly — same shape as the accounts snapshot below.
-        let agent_vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::load();
+        // Settings has no `data_dir` field of its own, but vocabulary is shared
+        // app-wide so every open window sees a connection's advertisement.
+        let agent_vocabulary_data_dir = daruda_store::persistence::default_data_dir();
+        crate::workspace::agent_vocabulary_global::install_path(cx, &agent_vocabulary_data_dir);
+        let agent_vocabulary =
+            crate::workspace::agent_vocabulary_global::snapshot(cx, &agent_vocabulary_data_dir);
 
         // Entries that resolve get an editable row; entries that don't (a preset
         // id daruda no longer knows, or one that needs a manual install) have no
@@ -1375,6 +1380,16 @@ impl SettingsWindow {
                 this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
                 cx.notify();
             });
+        let _agent_vocabulary_global_subscription = cx.observe_global_in::<
+            crate::workspace::agent_vocabulary_global::AgentVocabularyGlobal,
+        >(window, |this, window, cx| {
+            let data_dir = daruda_store::persistence::default_data_dir();
+            this.agent_vocabulary =
+                crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir);
+            for index in 0..this.agent_catalog.len() {
+                this.refresh_agent_row_vocabulary(index, window, cx);
+            }
+        });
         // Same mirror shape for the sign-in readings: a Workspace produces
         // them off-thread, so they land after this window is already open.
         crate::workspace::auth_status_global::install_if_absent(cx);
@@ -1455,6 +1470,7 @@ impl SettingsWindow {
                         this.sync_external_settings(window, cx);
                     },
                 ),
+            _agent_vocabulary_global_subscription,
             _accounts_global_subscription,
             _auth_status_subscription,
             _updater_subscription,

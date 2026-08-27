@@ -17,11 +17,10 @@ use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 
 const TAIL_WINDOWS: [TailWindow; 2] = [TailWindow::All, TailWindow::Last(5)];
 
-const FILTERS: [(&str, &[&str]); 4] = [
+const FILTERS: [(&str, &[&str]); 3] = [
     ("none", &[]),
     ("tools only", &["tools"]),
     ("edits only", &["tools", "tool_edit"]),
-    ("failures only", &["tools", "status_failed"]),
 ];
 
 const SAMPLED_STEPS: usize = 3;

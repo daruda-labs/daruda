@@ -402,22 +402,6 @@ impl AgentChatView {
         self.send_config_option(config_id, value, cx);
     }
 
-    /// Same protocol effect as [`Self::set_config_option`], for the
-    /// connect-time apply of the agent's configured default.
-    ///
-    /// Deliberately does not touch `last_known_model_id`: recording it would
-    /// make the agent's own default indistinguishable from a user pick, and a
-    /// pick outranks the default on every later connect — so a Settings edit
-    /// to `default_model` would never again reach this pane.
-    pub(in crate::workspace) fn apply_connect_config_option(
-        &mut self,
-        config_id: String,
-        value: daruda_acp::ConfigValueView,
-        cx: &mut Context<Self>,
-    ) {
-        self.send_config_option(config_id, value, cx);
-    }
-
     /// The protocol half both entry points share: show the value immediately,
     /// then ask the agent over the live handle (no-op when absent).
     fn send_config_option(
