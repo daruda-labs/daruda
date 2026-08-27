@@ -11,6 +11,7 @@
 //! `.tab_stop(true).tab_index(n)` explicitly.
 
 use crate::ui::theme;
+use crate::ui::theme::PaneSurfaceTokens;
 use gpui::{App, ElementId, SharedString, Styled as _, px};
 use gpui_component::Sizable as _;
 use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
@@ -36,6 +37,49 @@ pub fn button_danger(id: impl Into<ElementId>, label: impl Into<SharedString>) -
 /// chains `.icon(...)`.
 pub fn button_bare(id: impl Into<ElementId>) -> Button {
     Button::new(id).small().tab_stop(false)
+}
+
+/// The one mapping from a pane-local surface's tokens to a button's colours.
+/// Shared by the factories below and
+/// [`button_group_on_surface`](crate::ui::button_group_on_surface), so a
+/// standalone control and a segment of a strip on the same surface cannot
+/// drift apart.
+pub(crate) fn surface_button_variant(surface: &PaneSurfaceTokens, cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .foreground(surface.foreground_muted)
+        .hover(surface.tint)
+        .active(surface.active_tint)
+}
+
+/// Labelled button for a pane-local surface — the agent-chat activity bar's
+/// chips, and anything else sitting on a terminal-mirrored surface.
+///
+/// [`ghost`](gpui_component::button::ButtonVariants::ghost) resolves its
+/// foreground from the *UI* theme (`secondary_foreground`), which has no
+/// relationship to a surface that mirrors the *terminal* palette: `ui_preset`
+/// and `terminal_preset` are independent config keys, so a light UI over a dark
+/// pane leaves such a button at roughly 1.1:1 against the bar it sits on.
+/// Colours come from the pane's own tokens instead — including the inactive-pane
+/// dim, which the caller applies by handing over
+/// [`PaneSurfaceTokens::dimmed`] tokens. Selection reads through the surface's
+/// active tint, the same axis `ghost` used.
+pub fn button_on_surface(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    surface: &PaneSurfaceTokens,
+    cx: &App,
+) -> Button {
+    button(id, label).custom(surface_button_variant(surface, cx))
+}
+
+/// [`button_on_surface`] without a label — for the icon-only controls whose
+/// glyph inherits the button's foreground.
+pub fn button_bare_on_surface(
+    id: impl Into<ElementId>,
+    surface: &PaneSurfaceTokens,
+    cx: &App,
+) -> Button {
+    button_bare(id).custom(surface_button_variant(surface, cx))
 }
 
 /// Chip-style button — outlined, compact padding, `xsmall` text,

@@ -14,7 +14,7 @@
 
 use gpui::{App, ElementId};
 use gpui_component::Sizable as _;
-use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
+use gpui_component::button::ButtonVariants as _;
 
 use crate::ui::theme::PaneSurfaceTokens;
 
@@ -41,10 +41,7 @@ pub fn button_group_on_surface(
     surface: &PaneSurfaceTokens,
     cx: &App,
 ) -> ButtonGroup {
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(surface.foreground_muted)
-        .border(surface.border_tint)
-        .hover(surface.tint)
-        .active(surface.active_tint);
+    let variant =
+        crate::ui::button::surface_button_variant(surface, cx).border(surface.border_tint);
     ButtonGroup::new(id).small().custom(variant)
 }

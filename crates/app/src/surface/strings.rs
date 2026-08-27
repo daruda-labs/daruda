@@ -2108,13 +2108,37 @@ pub fn agent_chat_step_tool_count(count: usize) -> String {
     }
 }
 
-/// Filtered-row count with singular handling.
-pub fn agent_chat_filtered_away(count: usize) -> String {
+/// Collapsed label for the filter's per-run disclosure: how many rows
+/// expanding it puts on screen. Singular handled explicitly.
+pub fn agent_chat_filtered_show(count: usize) -> String {
     if count == 1 {
-        rust_i18n::t!("agent_chat.filtered_away_one").into_owned()
+        rust_i18n::t!("agent_chat.filtered_show_one").into_owned()
     } else {
-        rust_i18n::t!("agent_chat.filtered_away", count = count).into_owned()
+        rust_i18n::t!("agent_chat.filtered_show", count = count).into_owned()
     }
+}
+
+/// [`agent_chat_filtered_show`] for a run where a fold holds filtered rows this
+/// control cannot reach — `total` names everything the filter dropped so the
+/// reachable count cannot read as the whole cut.
+pub fn agent_chat_filtered_show_partial(count: usize, total: usize) -> String {
+    rust_i18n::t!("agent_chat.filtered_show_partial", count = count, total = total).into_owned()
+}
+
+/// Expanded label for the same disclosure — the rows are on screen, so the
+/// click now takes them away again.
+pub fn agent_chat_filtered_hide(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.filtered_hide_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.filtered_hide", count = count).into_owned()
+    }
+}
+
+/// [`agent_chat_filtered_hide`] with the same `total` disclosure as
+/// [`agent_chat_filtered_show_partial`].
+pub fn agent_chat_filtered_hide_partial(count: usize, total: usize) -> String {
+    rust_i18n::t!("agent_chat.filtered_hide_partial", count = count, total = total).into_owned()
 }
 
 pub fn agent_chat_filter_chip(value: &str) -> String {

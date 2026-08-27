@@ -514,6 +514,22 @@ impl PaneSurfaceTokens {
         Self::from_background_and_foreground(agent_chat_bg(cx), agent_chat_fg(cx))
     }
 
+    /// The same surface dimmed for an inactive pane. Every token moves
+    /// together, so a control built from these dims in step with the text
+    /// beside it instead of staying at full strength.
+    pub fn dimmed(self, amount: f32) -> Self {
+        Self {
+            background: dim_toward_gray(self.background, amount),
+            foreground: dim_toward_gray(self.foreground, amount),
+            foreground_muted: dim_toward_gray(self.foreground_muted, amount),
+            foreground_subtle: dim_toward_gray(self.foreground_subtle, amount),
+            tint: dim_toward_gray(self.tint, amount),
+            active_tint: dim_toward_gray(self.active_tint, amount),
+            border_tint: dim_toward_gray(self.border_tint, amount),
+            syntax_is_light: self.syntax_is_light,
+        }
+    }
+
     fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
         let overlay = neutral_overlay_for(background);
         Self {
@@ -740,6 +756,87 @@ mod tests {
 
             set_agent_chat_bg(cx, 128, 128, 128);
             assert!(agent_chat_syntax_is_light(cx), "l=128/255 crosses to light");
+        });
+    }
+
+    /// Composite `fg` over `bg` and return the WCAG contrast ratio. The
+    /// agent-chat foreground ramp is alpha-based, so an uncomposited pair
+    /// would measure the wrong thing.
+    fn contrast_over(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
+        let (fg, bg) = (gpui::Rgba::from(fg), gpui::Rgba::from(bg));
+        let channel = |f: f32, b: f32| {
+            let v = f * fg.a + b * (1.0 - fg.a);
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let lum = |r: f32, g: f32, b: f32| 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let l_fg = lum(
+            channel(fg.r, bg.r),
+            channel(fg.g, bg.g),
+            channel(fg.b, bg.b),
+        );
+        let l_bg = lum(
+            channel(bg.r, bg.r),
+            channel(bg.g, bg.g),
+            channel(bg.b, bg.b),
+        );
+        (l_fg.max(l_bg) + 0.05) / (l_fg.min(l_bg) + 0.05)
+    }
+
+    /// Controls on the agent-chat bar take their colour from this surface, and
+    /// the surface mirrors the *terminal* palette — which the UI theme knows
+    /// nothing about. A control coloured from the UI theme instead landed at
+    /// ~1.1:1 here under a light UI over a dark pane.
+    #[gpui::test]
+    fn the_pane_surface_ramp_stays_readable_on_its_own_background(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            for (bg, fg) in [
+                ((17u8, 17u8, 17u8), (216u8, 216u8, 216u8)),
+                ((250, 250, 250), (40, 40, 40)),
+            ] {
+                set_agent_chat_bg(cx, bg.0, bg.1, bg.2);
+                set_agent_chat_fg(cx, fg.0, fg.1, fg.2);
+                let s = PaneSurfaceTokens::agent_chat(cx);
+                // Body text at AA (4.5:1); the muted tier carries chips, icon
+                // glyphs and secondary labels, so it is held to the 3:1 floor
+                // WCAG sets for UI components.
+                for (name, color, floor) in [
+                    ("foreground", s.foreground, 4.5),
+                    ("muted", s.foreground_muted, 3.0),
+                ] {
+                    let ratio = contrast_over(color, s.background);
+                    assert!(ratio >= floor, "{name} on {bg:?} measures {ratio:.2}:1");
+                }
+            }
+        });
+    }
+
+    /// A dimmed surface must move each token exactly as the bar's own text
+    /// moves, or a control built from it stays at full strength while the
+    /// title beside it fades.
+    #[gpui::test]
+    fn dimming_a_surface_matches_dimming_each_token_by_hand(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            set_agent_chat_bg(cx, 17, 17, 17);
+            set_agent_chat_fg(cx, 216, 216, 216);
+            for amount in [0.0, 0.4, 1.0] {
+                let dimmed = PaneSurfaceTokens::agent_chat(cx).dimmed(amount);
+                assert_eq!(
+                    dimmed.foreground,
+                    dim_toward_gray(agent_chat_fg(cx), amount)
+                );
+                assert_eq!(
+                    dimmed.foreground_muted,
+                    dim_toward_gray(agent_chat_fg_muted(cx), amount)
+                );
+                assert_eq!(
+                    dimmed.border_tint,
+                    dim_toward_gray(agent_chat_border_tint(cx), amount)
+                );
+            }
         });
     }
 

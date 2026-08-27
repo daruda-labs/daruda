@@ -55,9 +55,10 @@ pub use agent_icon::{agent_icon, agent_menu_icon};
 pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
 pub use badge::Badge;
 pub use button::{
-    Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
-    button_delete_glyph, button_edit_cancel_glyph, button_edit_glyph, button_header_action,
-    button_primary, button_status_pill, button_status_pill_bare, button_toggle,
+    Button, button, button_add_tile, button_bare, button_bare_on_surface, button_chip,
+    button_close, button_danger, button_delete_glyph, button_edit_cancel_glyph, button_edit_glyph,
+    button_header_action, button_on_surface, button_primary, button_status_pill,
+    button_status_pill_bare, button_toggle,
 };
 pub use button_group::{ButtonGroup, button_group, button_group_on_surface};
 pub use chart::BarChart;

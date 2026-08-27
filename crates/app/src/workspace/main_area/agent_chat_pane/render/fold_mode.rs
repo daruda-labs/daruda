@@ -3,9 +3,8 @@
 use gpui::{Context, IntoElement, SharedString};
 
 use crate::surface::strings as s;
-use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
-};
+use crate::ui::theme::PaneSurfaceTokens;
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button_on_surface};
 use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -14,15 +13,20 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(super) fn fold_mode_chip(
     pane_id: PaneId,
     mode: FoldMode,
+    surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let label = SharedString::from(s::agent_chat_fold_mode_chip(&mode_value(mode)));
     let view = cx.entity().downgrade();
-    button(("agent-chat-fold-mode", pane_id as usize), label)
-        .ghost()
-        .xsmall()
-        .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip()))
-        .dropdown_menu(move |menu, _window, _cx| build_fold_mode_menu(&view, mode, menu))
+    button_on_surface(
+        ("agent-chat-fold-mode", pane_id as usize),
+        label,
+        surface,
+        cx,
+    )
+    .xsmall()
+    .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip()))
+    .dropdown_menu(move |menu, _window, _cx| build_fold_mode_menu(&view, mode, menu))
 }
 
 fn mode_value(mode: FoldMode) -> String {

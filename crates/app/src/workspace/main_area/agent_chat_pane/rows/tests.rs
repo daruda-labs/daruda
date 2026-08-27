@@ -1207,7 +1207,8 @@ fn every_row_kind_declares_a_distinct_slot() {
         },
         RowKind::FilteredAway {
             run_start: 0,
-            count: 0,
+            revealable: 0,
+            excluded: 0,
             collapsed: false,
         },
         RowKind::ToolGroupHeader {
@@ -2036,7 +2037,7 @@ fn filter_row(rows: &[RenderRow]) -> &RenderRow {
 
 fn filtered_count(rows: &[RenderRow]) -> usize {
     match filter_row(rows).kind {
-        RowKind::FilteredAway { count, .. } => count,
+        RowKind::FilteredAway { revealable, .. } => revealable,
         _ => unreachable!(),
     }
 }
@@ -2213,9 +2214,11 @@ fn revealing_the_filter_row_shows_what_it_covers() {
     assert!(!conclusion.hidden, "revealed in place");
     match filter_row(&rows).kind {
         RowKind::FilteredAway {
-            count, collapsed, ..
+            revealable,
+            collapsed,
+            ..
         } => {
-            assert_eq!(count, 2);
+            assert_eq!(revealable, 2);
             assert!(!collapsed);
         }
         _ => unreachable!(),
@@ -2320,7 +2323,8 @@ fn filter_rows_share_a_slot_by_their_run_start() {
     let a = RenderRow {
         kind: RowKind::FilteredAway {
             run_start: 1,
-            count: 12,
+            revealable: 12,
+            excluded: 12,
             collapsed: true,
         },
         hidden: false,
@@ -2329,7 +2333,8 @@ fn filter_rows_share_a_slot_by_their_run_start() {
     let b = RenderRow {
         kind: RowKind::FilteredAway {
             run_start: 1,
-            count: 0,
+            revealable: 0,
+            excluded: 0,
             collapsed: false,
         },
         hidden: true,
@@ -2339,7 +2344,8 @@ fn filter_rows_share_a_slot_by_their_run_start() {
     assert!(!a.same_slot(&RenderRow {
         kind: RowKind::FilteredAway {
             run_start: 9,
-            count: 12,
+            revealable: 12,
+            excluded: 12,
             collapsed: true,
         },
         hidden: false,

@@ -5,9 +5,9 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
 use crate::ui::theme;
+use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Selectable as _,
-    Sizable as _, button,
+    DropdownMenu as _, PopupMenu, PopupMenuItem, Selectable as _, Sizable as _, button_on_surface,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::{
     DisplayFilter, FilterAxis, FilterFacet,
@@ -19,16 +19,21 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(super) fn display_filter_chip(
     pane_id: PaneId,
     filter: DisplayFilter,
+    surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let label = SharedString::from(s::agent_chat_filter_chip(&filter_value(filter)));
     let view = cx.entity().downgrade();
-    button(("agent-chat-display-filter", pane_id as usize), label)
-        .ghost()
-        .xsmall()
-        .selected(!filter.is_empty())
-        .tooltip(SharedString::from(s::agent_chat_filter_tooltip()))
-        .dropdown_menu(move |menu, _window, _cx| build_filter_menu(&view, filter, menu))
+    button_on_surface(
+        ("agent-chat-display-filter", pane_id as usize),
+        label,
+        surface,
+        cx,
+    )
+    .xsmall()
+    .selected(!filter.is_empty())
+    .tooltip(SharedString::from(s::agent_chat_filter_tooltip()))
+    .dropdown_menu(move |menu, _window, _cx| build_filter_menu(&view, filter, menu))
 }
 
 /// A bare count would read as "3 things are shown". The fraction says what it
@@ -104,17 +109,39 @@ fn facet_label(facet: FilterFacet) -> String {
     }
 }
 
+/// The placeholder's copy.
+///
+/// The row is a disclosure, so its number states what clicking it does:
+/// `revealable`, the rows this control puts on screen. When a collapsed step or
+/// response is holding filtered rows the reveal cannot reach, `excluded` is
+/// named too — otherwise the reachable count silently reads as the whole cut
+/// (the shipped `1 row hidden` next to a filter that had dropped nineteen).
+/// Promising the larger number instead would repeat the tail row's own bug: a
+/// label offering a reveal that folding blocks.
+fn filtered_away_label(revealable: usize, excluded: usize, collapsed: bool) -> String {
+    let held_by_a_fold = excluded > revealable;
+    match (collapsed, held_by_a_fold) {
+        (true, false) => s::agent_chat_filtered_show(revealable),
+        (true, true) => s::agent_chat_filtered_show_partial(revealable, excluded),
+        (false, false) => s::agent_chat_filtered_hide(revealable),
+        (false, true) => s::agent_chat_filtered_hide_partial(revealable, excluded),
+    }
+}
+
 pub(super) fn filtered_away_bar(
     this: &AgentChatView,
     run_start: usize,
-    count: usize,
+    revealable: usize,
+    excluded: usize,
     collapsed: bool,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let title = div()
         .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(s::agent_chat_filtered_away(count)))
+        .child(SharedString::from(filtered_away_label(
+            revealable, excluded, collapsed,
+        )))
         .into_any_element();
     FoldRow::section(
         SharedString::from(format!("agent-chat-filtered-{run_start}")),

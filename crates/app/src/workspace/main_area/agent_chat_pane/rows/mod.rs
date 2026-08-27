@@ -35,9 +35,14 @@ pub(in crate::workspace) enum RowKind {
         hidden_steps: usize,
         collapsed: bool,
     },
+    /// The filter's per-run disclosure. `revealable` is what expanding this row
+    /// puts on screen; `excluded` is everything the filter dropped in the run,
+    /// including rows a collapsed step or response still holds — those stay
+    /// hidden through the reveal, so the two numbers are not interchangeable.
     FilteredAway {
         run_start: usize,
-        count: usize,
+        revealable: usize,
+        excluded: usize,
         collapsed: bool,
     },
     ToolGroupHeader {
@@ -317,10 +322,19 @@ struct RunRows<'a> {
 impl RunRows<'_> {
     fn push(&mut self, kind: RowKind, structural: bool, filtered: bool, indent: u8) {
         if filtered
-            && !structural
-            && let RowKind::FilteredAway { count, .. } = &mut self.rows[self.placeholder].kind
+            && let RowKind::FilteredAway {
+                revealable,
+                excluded,
+                ..
+            } = &mut self.rows[self.placeholder].kind
         {
-            *count += 1;
+            *excluded += 1;
+            // A row a fold already holds does not come back when the filter
+            // placeholder expands, so it is not part of what this control
+            // offers to reveal.
+            if !structural {
+                *revealable += 1;
+            }
         }
         self.rows.push(RenderRow {
             kind,
@@ -329,12 +343,15 @@ impl RunRows<'_> {
         });
     }
 
+    /// Hide the placeholder when expanding it would change nothing — a run
+    /// whose filtered rows are all held by a fold offers no reveal, so it gets
+    /// no control.
     fn finish(self, response_collapsed: bool) {
-        let covered = match &self.rows[self.placeholder].kind {
-            RowKind::FilteredAway { count, .. } => *count,
+        let revealable = match &self.rows[self.placeholder].kind {
+            RowKind::FilteredAway { revealable, .. } => *revealable,
             _ => 0,
         };
-        self.rows[self.placeholder].hidden = response_collapsed || covered == 0;
+        self.rows[self.placeholder].hidden = response_collapsed || revealable == 0;
     }
 }
 
@@ -366,7 +383,8 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
     rows.push(RenderRow {
         kind: RowKind::FilteredAway {
             run_start: run.start,
-            count: 0,
+            revealable: 0,
+            excluded: 0,
             collapsed: !filter_revealed,
         },
         hidden: true,

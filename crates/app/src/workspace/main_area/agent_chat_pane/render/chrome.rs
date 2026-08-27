@@ -11,9 +11,10 @@ use gpui::{
 use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::ui::theme;
+use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, Icon, PopupMenu, PopupMenuItem, Selectable as _,
-    Sizable as _, StatusPulseClock, button, button_bare,
+    DropdownMenu as _, Icon, PopupMenu, PopupMenuItem, Selectable as _, Sizable as _,
+    StatusPulseClock, button_bare_on_surface, button_on_surface,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
 use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode;
@@ -59,36 +60,49 @@ pub(super) fn activity_bar(
     // width-constrained (the title ellipsizes). The agent reports it via
     // `SessionInfoUpdate`; `reconcile_activity` advances it on each settle.
     let last_active = props.last_active.map(last_active_tooltip);
+    // Every colour on this bar comes from the pane's own surface, already
+    // dimmed: the bar paints on `agent_chat_bg` (a mirror of the terminal
+    // palette), which the UI theme's control colours know nothing about.
+    let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(props.dim);
 
-    let expand = button_bare(("agent-chat-expand-all", props.pane_id as usize))
-        .ghost()
-        .xsmall()
-        .icon(Icon::empty().path(ICON_EXPAND))
-        .tooltip(SharedString::from(s::agent_chat_expand_all()))
-        .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
-    let collapse = button_bare(("agent-chat-collapse-all", props.pane_id as usize))
-        .ghost()
-        .xsmall()
-        .icon(Icon::empty().path(ICON_COMPRESS))
-        .tooltip(SharedString::from(s::agent_chat_collapse_all()))
-        .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
-    let tail = tail_window_chip(props.pane_id, props.tail, cx);
+    let expand = button_bare_on_surface(
+        ("agent-chat-expand-all", props.pane_id as usize),
+        &surface,
+        cx,
+    )
+    .xsmall()
+    .icon(Icon::empty().path(ICON_EXPAND))
+    .tooltip(SharedString::from(s::agent_chat_expand_all()))
+    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
+    let collapse = button_bare_on_surface(
+        ("agent-chat-collapse-all", props.pane_id as usize),
+        &surface,
+        cx,
+    )
+    .xsmall()
+    .icon(Icon::empty().path(ICON_COMPRESS))
+    .tooltip(SharedString::from(s::agent_chat_collapse_all()))
+    .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
+    let tail = tail_window_chip(props.pane_id, props.tail, &surface, cx);
     let display_filter =
-        super::filter::display_filter_chip(props.pane_id, props.display_filter, cx);
-    let fold_mode = super::fold_mode::fold_mode_chip(props.pane_id, props.fold_mode, cx);
+        super::filter::display_filter_chip(props.pane_id, props.display_filter, &surface, cx);
+    let fold_mode = super::fold_mode::fold_mode_chip(props.pane_id, props.fold_mode, &surface, cx);
     let reading_selected = props.content_width.is_reading();
     let reading_tooltip = if reading_selected {
         s::agent_chat_reading_width_off()
     } else {
         s::agent_chat_reading_width_on()
     };
-    let reading_width = button_bare(("agent-chat-reading-width", props.pane_id as usize))
-        .ghost()
-        .xsmall()
-        .icon(Icon::empty().path(ICON_WIDTH_WIDE))
-        .tooltip(SharedString::from(reading_tooltip))
-        .selected(reading_selected)
-        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_content_width(cx)));
+    let reading_width = button_bare_on_surface(
+        ("agent-chat-reading-width", props.pane_id as usize),
+        &surface,
+        cx,
+    )
+    .xsmall()
+    .icon(Icon::empty().path(ICON_WIDTH_WIDE))
+    .tooltip(SharedString::from(reading_tooltip))
+    .selected(reading_selected)
+    .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_content_width(cx)));
 
     div()
         .flex_none()
@@ -104,10 +118,7 @@ pub(super) fn activity_bar(
         // Background-derived hairline: the bar sits directly on the pane's
         // `agent_chat_bg` (mirrored terminal bg), where the fixed `t.border`
         // hairline is near-invisible. Matches the tool-card / code-block edges.
-        .border_color(theme::dim_toward_gray(
-            theme::agent_chat_border_tint(cx),
-            props.dim,
-        ))
+        .border_color(surface.border_tint)
         .child(
             div()
                 .id(("agent-chat-title", props.pane_id as usize))
@@ -118,7 +129,7 @@ pub(super) fn activity_bar(
                 .flex_row()
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_HEADER_ICON_GAP))
-                .child(agent_icon(props.agent_id, props.dim, cx))
+                .child(agent_icon(props.agent_id, surface.foreground_muted))
                 .child(
                     div()
                         .flex_1()
@@ -127,7 +138,7 @@ pub(super) fn activity_bar(
                         .whitespace_nowrap()
                         .text_ellipsis()
                         .text_size(px(theme::agent_chat_font_size(cx)))
-                        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), props.dim))
+                        .text_color(surface.foreground)
                         .child(title),
                 )
                 .when_some(last_active, |el, tip| {
@@ -143,10 +154,7 @@ pub(super) fn activity_bar(
                     .id(("agent-chat-context-meter", props.pane_id as usize))
                     .flex_none()
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .text_color(theme::dim_toward_gray(
-                        theme::agent_chat_fg_muted(cx),
-                        props.dim,
-                    ))
+                    .text_color(surface.foreground_muted)
                     .child(SharedString::from(meter.label))
                     .tooltip(crate::ui::tooltip::text(SharedString::from(meter.tooltip))),
             )
@@ -162,10 +170,7 @@ pub(super) fn activity_bar(
                 .justify_end()
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                .text_color(theme::dim_toward_gray(
-                    theme::agent_chat_fg_muted(cx),
-                    props.dim,
-                ))
+                .text_color(surface.foreground_muted)
                 .when(props.has_items, |bar| {
                     bar.child(fold_mode)
                         .child(display_filter)
@@ -181,15 +186,20 @@ pub(super) fn activity_bar(
 fn tail_window_chip(
     pane_id: PaneId,
     tail: TailWindow,
+    surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let label = SharedString::from(s::agent_chat_tail_window_chip(&tail_window_value(tail)));
     let view = cx.entity().downgrade();
-    button(("agent-chat-tail-window", pane_id as usize), label)
-        .ghost()
-        .xsmall()
-        .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
-        .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
+    button_on_surface(
+        ("agent-chat-tail-window", pane_id as usize),
+        label,
+        surface,
+        cx,
+    )
+    .xsmall()
+    .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
+    .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
 }
 
 /// The chip's value slot reuses the menu item's own wording, so the chip and
@@ -229,11 +239,11 @@ fn build_tail_window_menu(
     })
 }
 
-fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {
+fn agent_icon(agent_id: &str, color: Hsla) -> AnyElement {
     crate::ui::agent_icon(
         crate::agent::icons::icon_for_agent(agent_id),
         px(theme::AGENT_CHAT_HEADER_ICON_SIZE),
-        theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
+        color,
     )
 }
 

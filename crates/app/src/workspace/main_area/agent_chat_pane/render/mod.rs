@@ -380,9 +380,10 @@ fn render_row(
         } => tail_more_bar(this, *run_start, *hidden_steps, *collapsed, cx),
         RowKind::FilteredAway {
             run_start,
-            count,
+            revealable,
+            excluded,
             collapsed,
-        } => filtered_away_bar(this, *run_start, *count, *collapsed, cx),
+        } => filtered_away_bar(this, *run_start, *revealable, *excluded, *collapsed, cx),
         RowKind::ToolGroupHeader {
             gid,
             first_ix,
@@ -752,7 +753,8 @@ mod tests {
             row(
                 RowKind::FilteredAway {
                     run_start: 0,
-                    count: 0,
+                    revealable: 0,
+                    excluded: 0,
                     collapsed: true,
                 },
                 true,
