@@ -608,7 +608,6 @@ impl AgentChatView {
         agent_name: String,
         title: Option<String>,
         tail: TailWindow,
-        display_filter: DisplayFilter,
         fold_mode: FoldMode,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -650,7 +649,7 @@ impl AgentChatView {
             fold: FoldState::with_mode(fold_mode),
             content_width: ChatContentWidth::Full,
             tail: PaneChoice::Seeded(tail),
-            display_filter: PaneChoice::Seeded(display_filter),
+            display_filter: PaneChoice::default(),
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
                 // arrive. `Top` alignment + `Tail` follow = scroll history up

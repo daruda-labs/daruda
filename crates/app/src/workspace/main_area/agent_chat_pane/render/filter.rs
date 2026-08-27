@@ -31,11 +31,13 @@ pub(super) fn display_filter_chip(
         .dropdown_menu(move |menu, _window, _cx| build_filter_menu(&view, filter, menu))
 }
 
+/// A bare count would read as "3 things are shown". The fraction says what it
+/// really is — 3 of the 11 facets are picked — in the same horizontal budget.
 fn filter_value(filter: DisplayFilter) -> String {
     if filter.is_empty() {
         s::agent_chat_filter_none()
     } else {
-        filter.selected_count().to_string()
+        s::agent_chat_filter_count(filter.selected_count(), FilterFacet::ALL.len())
     }
 }
 
@@ -46,14 +48,16 @@ fn build_filter_menu(
 ) -> PopupMenu {
     let menu = {
         let view = view.clone();
+        // No `checked`: this resets the filter, it is not a twelfth facet the
+        // user can leave switched on.
         menu.item(
-            PopupMenuItem::new(SharedString::from(s::agent_chat_filter_clear()))
-                .checked(current.is_empty())
-                .on_click(move |_, _window, app| {
+            PopupMenuItem::new(SharedString::from(s::agent_chat_filter_clear())).on_click(
+                move |_, _window, app| {
                     if let Some(view) = view.upgrade() {
                         view.update(app, |v, cx| v.clear_display_filter(cx));
                     }
-                }),
+                },
+            ),
         )
     };
     FilterAxis::ALL.into_iter().fold(menu, |menu, axis| {
@@ -142,7 +146,23 @@ mod tests {
             s::agent_chat_filter_none()
         );
         let one = DisplayFilter::default().toggled(FilterFacet::Tools);
-        assert_eq!(filter_value(one), "1");
-        assert_eq!(filter_value(one.toggled(FilterFacet::ToolEdit)), "2");
+        let total = FilterFacet::ALL.len();
+        assert_eq!(filter_value(one), s::agent_chat_filter_count(1, total));
+        assert_eq!(
+            filter_value(one.toggled(FilterFacet::ToolEdit)),
+            s::agent_chat_filter_count(2, total)
+        );
+    }
+
+    #[test]
+    fn the_chip_counts_selections_not_visible_rows() {
+        let two = DisplayFilter::default()
+            .toggled(FilterFacet::Tools)
+            .toggled(FilterFacet::ToolEdit);
+        let shown = filter_value(two);
+        assert!(
+            shown.contains(&FilterFacet::ALL.len().to_string()),
+            "the total must be visible so the count cannot read as a result count: {shown}"
+        );
     }
 }

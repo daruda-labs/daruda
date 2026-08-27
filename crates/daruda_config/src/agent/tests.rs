@@ -737,25 +737,6 @@ fn input_max_rows_defaults_and_clamps() {
 }
 
 #[test]
-fn display_filter_defaults_to_showing_everything_and_round_trips() {
-    assert!(AgentConfig::default().display_filter.is_empty());
-
-    let cfg: AgentConfig =
-        toml::from_str(r#"display_filter = ["tools", "tool_edit"]"#).expect("deserialize");
-    assert_eq!(cfg.display_filter, vec!["tools", "tool_edit"]);
-    let back: AgentConfig =
-        toml::from_str(&toml::to_string(&cfg).expect("serialize")).expect("round trip");
-    assert_eq!(back.display_filter, vec!["tools", "tool_edit"]);
-
-    let odd: AgentConfig =
-        toml::from_str(r#"display_filter = ["not_a_facet"]"#).expect("deserialize");
-    assert_eq!(odd.display_filter, vec!["not_a_facet"]);
-
-    let omitted: AgentConfig = toml::from_str("").expect("deserialize");
-    assert!(omitted.display_filter.is_empty());
-}
-
-#[test]
 fn fold_mode_defaults_to_the_shipped_preset_and_round_trips() {
     assert!(AgentConfig::default().fold_mode.is_empty());
 

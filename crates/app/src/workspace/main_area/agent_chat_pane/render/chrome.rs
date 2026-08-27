@@ -192,10 +192,13 @@ fn tail_window_chip(
         .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
 }
 
+/// The chip's value slot reuses the menu item's own wording, so the chip and
+/// the item that set it read alike — and a bare count can't be mistaken for the
+/// "N earlier steps" row it sits above.
 fn tail_window_value(tail: TailWindow) -> String {
     match tail {
         TailWindow::All => s::agent_chat_tail_window_all(),
-        TailWindow::Last(n) => n.to_string(),
+        TailWindow::Last(n) => s::agent_chat_tail_window_last(n),
     }
 }
 
@@ -205,9 +208,12 @@ fn build_tail_window_menu(
     menu: PopupMenu,
 ) -> PopupMenu {
     let choices = std::iter::once((TailWindow::All, s::agent_chat_tail_window_all())).chain(
-        TAIL_WINDOW_CHOICES
-            .into_iter()
-            .map(|n| (TailWindow::last(n), s::agent_chat_tail_window_last(n))),
+        TAIL_WINDOW_CHOICES.into_iter().map(|n| {
+            (
+                TailWindow::last(n),
+                s::agent_chat_tail_window_last(usize::from(n)),
+            )
+        }),
     );
     choices.fold(menu, |m, (choice, name)| {
         let view = view.clone();

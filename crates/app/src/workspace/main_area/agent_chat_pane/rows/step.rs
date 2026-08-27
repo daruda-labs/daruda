@@ -1,12 +1,12 @@
 //! Partitions a response into tool runs plus their preceding prose. Trailing
 //! prose remains outside every step as the response conclusion.
 
-use std::collections::HashSet;
 use std::ops::Range;
 
 use daruda_acp::ChatItem;
 
-use super::{is_nested_child, is_tool_call};
+use super::super::tool_hierarchy::ToolHierarchy;
+use super::is_tool_call;
 
 /// Minimum projected row count that earns a step header.
 const STEP_MIN_ROWS: usize = 2;
@@ -25,7 +25,11 @@ pub(super) struct Step {
 }
 
 /// Partition a response into disjoint steps that earn headers.
-pub(super) fn steps(items: &[ChatItem], run: Range<usize>, tool_ids: &HashSet<&str>) -> Vec<Step> {
+pub(super) fn steps(
+    items: &[ChatItem],
+    run: Range<usize>,
+    hierarchy: &ToolHierarchy<'_>,
+) -> Vec<Step> {
     let mut out = Vec::new();
     let mut start = run.start;
     let mut k = run.start;
@@ -43,9 +47,9 @@ pub(super) fn steps(items: &[ChatItem], run: Range<usize>, tool_ids: &HashSet<&s
             tool_start,
             end: k,
         };
-        if folded_rows(items, &span, tool_ids) >= STEP_MIN_ROWS {
+        if folded_rows(items, &span, hierarchy) >= STEP_MIN_ROWS {
             let tool_count = (span.tool_start..span.end)
-                .filter(|&j| top_level_tool(items, j, tool_ids))
+                .filter(|&j| top_level_tool(items, j, hierarchy))
                 .count();
             out.push(Step { span, tool_count });
         }
@@ -78,26 +82,26 @@ pub(in crate::workspace) fn step_span_at(items: &[ChatItem], first_ix: usize) ->
 }
 
 /// Count the projected rows a step header would fold.
-fn folded_rows(items: &[ChatItem], span: &StepSpan, tool_ids: &HashSet<&str>) -> usize {
+fn folded_rows(items: &[ChatItem], span: &StepSpan, hierarchy: &ToolHierarchy<'_>) -> usize {
     let prose = span.tool_start - span.start;
     let mut chunks = 0;
     let mut k = span.tool_start;
     while k < span.end {
-        if !top_level_tool(items, k, tool_ids) {
+        if !top_level_tool(items, k, hierarchy) {
             k += 1;
             continue;
         }
         chunks += 1;
         k += 1;
-        while k < span.end && top_level_tool(items, k, tool_ids) {
+        while k < span.end && top_level_tool(items, k, hierarchy) {
             k += 1;
         }
     }
     prose + chunks
 }
 
-fn top_level_tool(items: &[ChatItem], ix: usize, tool_ids: &HashSet<&str>) -> bool {
-    matches!(&items[ix], ChatItem::ToolCall(tc) if !is_nested_child(tool_ids, tc))
+fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
+    matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
 }
 
 #[cfg(test)]
@@ -144,18 +148,8 @@ mod tests {
         }
     }
 
-    fn ids(items: &[ChatItem]) -> HashSet<&str> {
-        items
-            .iter()
-            .filter_map(|it| match it {
-                ChatItem::ToolCall(tc) => Some(tc.id.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
     fn spans(items: &[ChatItem]) -> Vec<(usize, usize, usize, usize)> {
-        steps(items, 0..items.len(), &ids(items))
+        steps(items, 0..items.len(), &ToolHierarchy::build(items))
             .into_iter()
             .map(|s| (s.span.start, s.span.tool_start, s.span.end, s.tool_count))
             .collect()

@@ -8,6 +8,8 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::display_filter::{DisplayFilter, FilterFacet};
+use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
@@ -564,6 +566,44 @@ fn codex_agent() -> daruda_config::AgentDefinition {
     }
 }
 
+/// The restore-visible slice of one agent-chat pane. A struct rather than a
+/// tuple so each persisted preference is asserted by name — the mis-wire this
+/// covers (one preference's tokens read into another's field) is invisible
+/// when the assertions read by position.
+struct RestoredChat {
+    agent_id: String,
+    session_id: Option<String>,
+    title: Option<String>,
+    restoring: bool,
+    dormant: bool,
+    content_width: ChatContentWidth,
+    tail: PaneChoice<TailWindow>,
+    display_filter: PaneChoice<DisplayFilter>,
+    fold_mode: Option<FoldMode>,
+}
+
+fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
+    ws.active_runtime()
+        .panes
+        .iter()
+        .filter_map(|p| p.agent_chat_view())
+        .map(|view| {
+            let view = view.read(cx);
+            RestoredChat {
+                agent_id: view.agent_id.clone(),
+                session_id: view.session_id.clone(),
+                title: view.session_title.clone(),
+                restoring: view.restoring,
+                dormant: view.handle.is_none(),
+                content_width: view.content_width,
+                tail: view.tail,
+                display_filter: view.display_filter,
+                fold_mode: view.fold.chosen_mode(),
+            }
+        })
+        .collect()
+}
+
 /// Persist AgentChat panes with session identity and a non-default owner, then
 /// restore both with and without that owner still in the catalog. A surviving
 /// owner keeps its session id; a removed owner falls back to the default agent
@@ -621,6 +661,12 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     v.session_title = Some("Investigate flaky test".to_string());
                     v.content_width = ChatContentWidth::Reading;
                     v.tail = PaneChoice::Chosen(TailWindow::Last(3));
+                    // Distinct token vocabularies: each preference's tokens are
+                    // unreadable to the others, so a crossed wire restores a
+                    // default rather than the wrong-but-plausible value.
+                    v.display_filter =
+                        PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose));
+                    v.fold.set_mode(FoldPreset::Summary.mode());
                     cx.notify();
                 });
 
@@ -667,58 +713,48 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
     let restored = restored_handle.root(cx).unwrap();
 
     restored.read_with(cx, |ws, cx| {
-        let views = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| p.agent_chat_view())
-            .map(|view| {
-                let view = view.read(cx);
-                (
-                    view.agent_id.clone(),
-                    view.session_id.clone(),
-                    view.session_title.clone(),
-                    view.restoring,
-                    view.handle.is_none(),
-                    view.content_width,
-                    view.tail,
-                )
-            })
-            .collect::<Vec<_>>();
+        let views = restored_chats(ws, cx);
         let titled = views
             .iter()
-            .find(|(_, session_id, _, _, _, _, _)| {
-                session_id.as_deref() == Some("sess-restore-123")
-            })
+            .find(|v| v.session_id.as_deref() == Some("sess-restore-123"))
             .expect("restored titled agent chat pane present");
         assert_eq!(
-            titled.2.as_deref(),
+            titled.title.as_deref(),
             Some("Investigate flaky test"),
             "persisted title must round-trip (seeds the tab label before load)"
         );
-        assert!(!titled.3, "a restored dormant pane is not yet loading");
-        assert!(titled.4, "no live session until first focus connects");
+        assert!(
+            !titled.restoring,
+            "a restored dormant pane is not yet loading"
+        );
+        assert!(titled.dormant, "no live session until first focus connects");
         assert_eq!(
-            titled.5,
+            titled.content_width,
             ChatContentWidth::Reading,
             "per-pane reading-width mode must round-trip"
         );
         assert_eq!(
-            titled.6,
+            titled.tail,
             PaneChoice::Chosen(TailWindow::Last(3)),
             "per-pane tail window must round-trip as the user's own choice"
+        );
+        assert_eq!(
+            titled.display_filter,
+            PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose)),
+            "per-pane display filter must round-trip as the user's own choice"
+        );
+        assert_eq!(
+            titled.fold_mode,
+            Some(FoldPreset::Summary.mode()),
+            "per-pane fold mode must round-trip as the user's own choice"
         );
 
         let codex = views
             .iter()
-            .find(|(agent_id, _, _, _, _, _, _)| agent_id == "codex")
+            .find(|v| v.agent_id == "codex")
             .expect("restored codex-owned pane present");
         assert_eq!(
-            codex.0, "codex",
-            "the owning agent is still in the catalog, so the pane relaunches under it"
-        );
-        assert_eq!(
-            codex.1.as_deref(),
+            codex.session_id.as_deref(),
             Some("sess-codex-1"),
             "session id is kept when the owning agent is present (resume valid)"
         );
@@ -742,43 +778,27 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
 
     fallback.read_with(cx, |ws, cx| {
         let default_id = daruda_config::AgentDefinition::claude_default().id;
-        let views = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| p.agent_chat_view())
-            .map(|view| {
-                let view = view.read(cx);
-                (
-                    view.agent_id.clone(),
-                    view.session_id.clone(),
-                    view.session_title.clone(),
-                    view.content_width,
-                    view.tail,
-                )
-            })
-            .collect::<Vec<_>>();
+        let views = restored_chats(ws, cx);
         assert!(
-            views
-                .iter()
-                .all(|(agent_id, _, _, _, _)| *agent_id == default_id),
+            views.iter().all(|v| v.agent_id == default_id),
             "every restored agent-chat pane falls back to or keeps the default agent"
         );
-        assert!(
-            views
-                .iter()
-                .any(|(_, session_id, title, content_width, tail)| {
-                    session_id.as_deref() == Some("sess-restore-123")
-                        && title.as_deref() == Some("Investigate flaky test")
-                        && *content_width == ChatContentWidth::Reading
-                        && *tail == PaneChoice::Chosen(TailWindow::Last(3))
-                }),
-            "a default-agent session keeps its persisted id, title, content width and tail window"
+        let kept = views
+            .iter()
+            .find(|v| v.session_id.as_deref() == Some("sess-restore-123"))
+            .expect("the default-agent session keeps its persisted id");
+        assert_eq!(kept.title.as_deref(), Some("Investigate flaky test"));
+        assert_eq!(kept.content_width, ChatContentWidth::Reading);
+        assert_eq!(kept.tail, PaneChoice::Chosen(TailWindow::Last(3)));
+        assert_eq!(
+            kept.display_filter,
+            PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose))
         );
+        assert_eq!(kept.fold_mode, Some(FoldPreset::Summary.mode()));
         assert!(
             views
                 .iter()
-                .any(|(_, session_id, title, _, _)| { session_id.is_none() && title.is_none() }),
+                .any(|v| v.session_id.is_none() && v.title.is_none()),
             "session id is dropped when its owning agent is absent (resume invalid)"
         );
     });
@@ -1291,12 +1311,120 @@ async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_
     });
 }
 
+/// A live `[agent]` edit must reach an already-open pane, not wait for the next
+/// restore: a pane the user never touched follows config, a pane they chose for
+/// keeps its own settings.
+#[gpui::test]
+async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::TabEntry;
+    use crate::workspace::main_area::pane_tree::PaneLayout;
+
+    let before = daruda_config::Config::default();
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_live_reseed_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    let (window_handle, workspace) = super::build_workspace_with(cx, &before, Some(project));
+    cx.run_until_parked();
+
+    let (untouched_id, chosen_id) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
+                let open = |ws: &mut Workspace, window: &mut gpui::Window, cx: &mut _| {
+                    let pane = ws.create_agent_chat_pane(
+                        cwd.clone(),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let pane_id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    let tab_id = ws.alloc_id();
+                    ws.active_runtime_mut().tabs.push(TabEntry {
+                        id: tab_id,
+                        layout: PaneLayout::Pane(pane_id),
+                        last_focused_pane: pane_id,
+                        user_label: None,
+                    });
+                    pane_id
+                };
+                let untouched_id = open(ws, window, cx);
+                let chosen_id = open(ws, window, cx);
+                (untouched_id, chosen_id)
+            })
+        })
+        .unwrap();
+
+    // The second pane's user makes an explicit choice on all three settings.
+    let chosen = workspace.read_with(cx, |ws, _| agent_view(ws, chosen_id));
+    chosen.update(cx, |v, cx| {
+        v.set_tail_window(TailWindow::Last(2), cx);
+        v.toggle_display_facet(FilterFacet::Prose, cx);
+        v.set_fold_mode(FoldPreset::Expanded.mode(), cx);
+    });
+    cx.run_until_parked();
+
+    let mut after = daruda_config::Config::default();
+    after.agent.tail_window = 5;
+    after.agent.fold_mode = vec!["summary".to_string()];
+    assert_ne!(FoldPreset::Summary.mode(), FoldMode::default());
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.reload_config(&after, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let untouched = workspace.read_with(cx, |ws, _| agent_view(ws, untouched_id));
+    untouched.read_with(cx, |v, _| {
+        assert_eq!(
+            v.tail,
+            PaneChoice::Seeded(TailWindow::Last(5)),
+            "a reloaded tail window must reach an untouched pane"
+        );
+        assert_eq!(
+            v.display_filter,
+            PaneChoice::Seeded(DisplayFilter::default()),
+            "the filter is a per-pane act, so no reload can narrow an untouched pane"
+        );
+        assert_eq!(
+            v.fold.mode(),
+            FoldPreset::Summary.mode(),
+            "a reloaded fold mode must reach an untouched pane"
+        );
+        assert_eq!(v.fold.chosen_mode(), None, "and it is still only a seed");
+    });
+
+    chosen.read_with(cx, |v, _| {
+        assert_eq!(
+            v.tail,
+            PaneChoice::Chosen(TailWindow::Last(2)),
+            "config must not overwrite a chosen tail window"
+        );
+        assert_eq!(
+            v.display_filter,
+            PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose)),
+            "config must not overwrite a chosen display filter"
+        );
+        assert_eq!(
+            v.fold.chosen_mode(),
+            Some(FoldPreset::Expanded.mode()),
+            "config must not overwrite a chosen fold mode"
+        );
+    });
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
 #[gpui::test]
 async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::display_filter::{
-        DisplayFilter, FilterFacet,
-    };
-    use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
     use crate::workspace::main_area::pane::TabEntry;
     use crate::workspace::main_area::pane_tree::PaneLayout;
 
@@ -1348,7 +1476,6 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
 
     let mut after = daruda_config::Config::default();
     after.agent.tail_window = 5;
-    after.agent.display_filter = vec!["tools".to_string()];
     after.agent.fold_mode = vec!["summary".to_string()];
 
     let restored_handle = cx.add_window(|window, cx| {
@@ -1379,8 +1506,8 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
         );
         assert_eq!(
             view.display_filter,
-            PaneChoice::Seeded(DisplayFilter::default().toggled(FilterFacet::Tools)),
-            "the new config display filter must reach an untouched pane"
+            PaneChoice::Seeded(DisplayFilter::default()),
+            "a restored pane opens unfiltered — no config key narrows it"
         );
         assert_eq!(
             view.fold.mode(),

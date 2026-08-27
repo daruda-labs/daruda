@@ -4,13 +4,14 @@
 pub(in crate::workspace) mod step;
 pub(in crate::workspace) mod tail;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use daruda_acp::{ChatItem, ToolCallItem, ToolStatusView};
 
 use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at};
 use super::display_filter::DisplayFilter;
 use super::fold::{FoldKey, FoldState};
+use super::tool_hierarchy::ToolHierarchy;
 use tail::TailWindow;
 
 const TOOL_GROUP_MIN: usize = 2;
@@ -56,7 +57,8 @@ pub(in crate::workspace) struct RenderRow {
     pub(in crate::workspace) indent: u8,
 }
 
-/// Filter matches plus ancestors needed to reach matching nested tools.
+/// Filter matches, the ancestors needed to reach a matching nested tool, and
+/// every descendant of a kept tool.
 #[derive(Default)]
 pub(in crate::workspace) struct FilterMatchIndex {
     filter: DisplayFilter,
@@ -64,18 +66,12 @@ pub(in crate::workspace) struct FilterMatchIndex {
 }
 
 impl FilterMatchIndex {
-    pub(in crate::workspace) fn build(
-        items: &[ChatItem],
+    pub(in crate::workspace) fn build<'a>(
+        hierarchy: &ToolHierarchy<'a>,
+        items: &'a [ChatItem],
         filter: DisplayFilter,
         live_units: &LiveSubagentUnits,
     ) -> Self {
-        let parent_of: HashMap<&str, &str> = items
-            .iter()
-            .filter_map(|item| match item {
-                ChatItem::ToolCall(tc) => Some((tc.id.as_str(), tc.parent_tool_id.as_deref()?)),
-                _ => None,
-            })
-            .collect();
         let mut tool_ids = HashSet::new();
         for tc in items.iter().filter_map(|item| match item {
             ChatItem::ToolCall(tc)
@@ -85,14 +81,27 @@ impl FilterMatchIndex {
             }
             _ => None,
         }) {
-            let mut current = Some(tc.id.as_str());
-            for _ in 0..=SUBAGENT_NEST_DEPTH_CAP {
-                let Some(id) = current else { break };
-                tool_ids.insert(id.to_owned());
-                current = parent_of.get(id).copied();
-            }
+            // A match drags its ancestors in so a nested hit stays reachable
+            // through the cards it renders inside.
+            tool_ids.extend(hierarchy.with_ancestors(tc.id.as_str()).map(str::to_owned));
         }
+        // A kept tool keeps its whole subtree: nested children render inside
+        // their parent's card and earn no row of their own, so the filter — whose
+        // unit is the row — has no placeholder to count them in and no reveal to
+        // bring them back. Dropping one would delete it silently.
+        hierarchy.extend_with_descendants(&mut tool_ids);
         Self { filter, tool_ids }
+    }
+
+    /// Test convenience: derive the hierarchy for this one call. Production
+    /// shares a single hierarchy across the whole projection pass.
+    #[cfg(test)]
+    pub(in crate::workspace) fn of(
+        items: &[ChatItem],
+        filter: DisplayFilter,
+        live_units: &LiveSubagentUnits,
+    ) -> Self {
+        Self::build(&ToolHierarchy::build(items), items, filter, live_units)
     }
 
     pub(in crate::workspace) fn matches(&self, item: &ChatItem) -> bool {
@@ -107,30 +116,49 @@ impl FilterMatchIndex {
     }
 }
 
+/// Stable identity of a projected row: the key `rebuild_rows`' diff compares to
+/// decide whether two projections put the same thing in the same list slot.
+/// Deliberately carries no payload and no `hidden` flag — those change freely
+/// within one slot.
+#[derive(PartialEq, Eq)]
+pub(in crate::workspace) enum RowSlot<'a> {
+    User(usize),
+    Response(usize),
+    AgentItem(usize),
+    SoloResponse(usize),
+    Step(usize),
+    TailMore(usize),
+    FilteredAway(usize),
+    ToolGroup(&'a str),
+    Conclusion(usize),
+    /// At most one indicator exists, so any two of them are the same slot.
+    Working,
+}
+
+impl RowKind {
+    /// This row's slot identity. The match is exhaustive on purpose: a new
+    /// [`RowKind`] cannot compile until it declares which slot it occupies,
+    /// which is what keeps the diff from splicing it on every projection.
+    fn slot(&self) -> RowSlot<'_> {
+        match self {
+            RowKind::User(ix) => RowSlot::User(*ix),
+            RowKind::ResponseHeader { anchor, .. } => RowSlot::Response(*anchor),
+            RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
+            RowKind::SoloResponse(ix) => RowSlot::SoloResponse(*ix),
+            RowKind::StepHeader { first_ix, .. } => RowSlot::Step(*first_ix),
+            RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
+            RowKind::FilteredAway { run_start, .. } => RowSlot::FilteredAway(*run_start),
+            RowKind::ToolGroupHeader { gid, .. } => RowSlot::ToolGroup(gid.as_str()),
+            RowKind::ConclusionItem(ix) => RowSlot::Conclusion(*ix),
+            RowKind::WorkingIndicator => RowSlot::Working,
+        }
+    }
+}
+
 impl RenderRow {
     /// Compare stable row identity, ignoring visibility and payload changes.
     pub(in crate::workspace) fn same_slot(&self, other: &Self) -> bool {
-        match (&self.kind, &other.kind) {
-            (RowKind::User(a), RowKind::User(b))
-            | (RowKind::AgentItem(a), RowKind::AgentItem(b))
-            | (RowKind::SoloResponse(a), RowKind::SoloResponse(b))
-            | (
-                RowKind::ResponseHeader { anchor: a, .. },
-                RowKind::ResponseHeader { anchor: b, .. },
-            )
-            | (RowKind::StepHeader { first_ix: a, .. }, RowKind::StepHeader { first_ix: b, .. })
-            | (RowKind::TailMore { run_start: a, .. }, RowKind::TailMore { run_start: b, .. })
-            | (
-                RowKind::FilteredAway { run_start: a, .. },
-                RowKind::FilteredAway { run_start: b, .. },
-            ) => a == b,
-            (RowKind::ToolGroupHeader { gid: a, .. }, RowKind::ToolGroupHeader { gid: b, .. }) => {
-                a == b
-            }
-            (RowKind::ConclusionItem(a), RowKind::ConclusionItem(b)) => a == b,
-            (RowKind::WorkingIndicator, RowKind::WorkingIndicator) => true,
-            _ => false,
-        }
+        self.kind.slot() == other.kind.slot()
     }
 }
 
@@ -145,27 +173,30 @@ pub(in crate::workspace) fn project(
     tail: TailWindow,
     filter: &DisplayFilter,
 ) -> Vec<RenderRow> {
-    let filter = FilterMatchIndex::build(items, *filter, live_units);
-    project_with_filter_index(items, fold, awaiting_response, live_units, tail, &filter)
+    let hierarchy = ToolHierarchy::build(items);
+    let filter = FilterMatchIndex::build(&hierarchy, items, *filter, live_units);
+    project_with_filter_index(
+        items,
+        &hierarchy,
+        fold,
+        awaiting_response,
+        live_units,
+        tail,
+        &filter,
+    )
 }
 
-/// [`project`] with a caller-owned filter index shared with nested cards.
-pub(in crate::workspace) fn project_with_filter_index(
-    items: &[ChatItem],
+/// [`project`] with a caller-owned hierarchy and filter index shared with
+/// nested cards.
+pub(in crate::workspace) fn project_with_filter_index<'a>(
+    items: &'a [ChatItem],
+    hierarchy: &'a ToolHierarchy<'a>,
     fold: &FoldState,
     awaiting_response: bool,
     live_units: &LiveSubagentUnits,
     tail: TailWindow,
     filter: &FilterMatchIndex,
 ) -> Vec<RenderRow> {
-    // Only children whose parent is present are nested.
-    let tool_ids: HashSet<&str> = items
-        .iter()
-        .filter_map(|it| match it {
-            ChatItem::ToolCall(tc) => Some(tc.id.as_str()),
-            _ => None,
-        })
-        .collect();
     let boundary = TurnBoundary::of(items);
     let mut rows = Vec::with_capacity(items.len() + 4);
     let mut i = 0;
@@ -219,7 +250,7 @@ pub(in crate::workspace) fn project_with_filter_index(
                     response_collapsed: collapsed,
                     conclusion_ix,
                     solo_response: false,
-                    tool_ids: &tool_ids,
+                    hierarchy,
                     live_units,
                     tail,
                     filter,
@@ -240,7 +271,7 @@ pub(in crate::workspace) fn project_with_filter_index(
                     response_collapsed: false,
                     conclusion_ix,
                     solo_response: solo,
-                    tool_ids: &tool_ids,
+                    hierarchy,
                     live_units,
                     tail,
                     filter,
@@ -270,7 +301,7 @@ struct RunContext<'a> {
     response_collapsed: bool,
     conclusion_ix: Option<usize>,
     solo_response: bool,
-    tool_ids: &'a HashSet<&'a str>,
+    hierarchy: &'a ToolHierarchy<'a>,
     live_units: &'a LiveSubagentUnits,
     tail: TailWindow,
     filter: &'a FilterMatchIndex,
@@ -317,7 +348,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         response_collapsed,
         conclusion_ix,
         solo_response,
-        tool_ids,
+        hierarchy,
         live_units,
         tail,
         filter,
@@ -347,10 +378,10 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         revealed: filter_revealed,
     };
 
-    let steps = step::steps(items, run.clone(), tool_ids);
+    let steps = step::steps(items, run.clone(), hierarchy);
     let step_kept: Vec<bool> = steps
         .iter()
-        .map(|s| (s.span.start..s.span.end).any(|j| projects_a_row(items, j, tool_ids, filter)))
+        .map(|s| (s.span.start..s.span.end).any(|j| projects_a_row(items, j, hierarchy, filter)))
         .collect();
     let step_live: Vec<bool> = steps
         .iter()
@@ -404,7 +435,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             in_step = Some((s.span.end, step_collapsed || outside_tail));
             next_step += 1;
         }
-        if matches!(&items[k], ChatItem::ToolCall(tc) if is_nested_child(tool_ids, tc)) {
+        if matches!(&items[k], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc)) {
             k += 1;
             continue;
         }
@@ -416,7 +447,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             let gstart = k;
             k += 1;
             while k < run.end
-                && matches!(&items[k], ChatItem::ToolCall(t) if !is_nested_child(tool_ids, t))
+                && matches!(&items[k], ChatItem::ToolCall(t) if !hierarchy.is_nested_child(t))
             {
                 k += 1;
             }
@@ -488,26 +519,16 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
 fn projects_a_row(
     items: &[ChatItem],
     ix: usize,
-    tool_ids: &HashSet<&str>,
+    hierarchy: &ToolHierarchy<'_>,
     filter: &FilterMatchIndex,
 ) -> bool {
-    !matches!(&items[ix], ChatItem::ToolCall(tc) if is_nested_child(tool_ids, tc))
+    !matches!(&items[ix], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc))
         && filter.matches(&items[ix])
 }
 
 fn is_tool_call(item: &ChatItem) -> bool {
     matches!(item, ChatItem::ToolCall(_))
 }
-
-/// A dangling parent id remains top-level so the tool cannot disappear.
-fn is_nested_child(tool_ids: &HashSet<&str>, tc: &ToolCallItem) -> bool {
-    tc.parent_tool_id
-        .as_deref()
-        .is_some_and(|pid| tool_ids.contains(pid))
-}
-
-/// Bounds malformed or cyclic subagent parent links.
-pub(in crate::workspace) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
 
 /// Tool ids with a live descendant, built by walking upward from live calls.
 #[derive(Default)]
@@ -516,33 +537,41 @@ pub(in crate::workspace) struct LiveSubagentUnits {
 }
 
 impl LiveSubagentUnits {
-    pub(in crate::workspace) fn build(items: &[ChatItem]) -> Self {
-        let live = || {
-            items.iter().filter_map(|it| match it {
-                ChatItem::ToolCall(tc) if tc.status.is_live() => tc.parent_tool_id.as_deref(),
-                _ => None,
-            })
-        };
-        if live().next().is_none() {
+    /// The running calls that declare a parent — the only ones with ancestors
+    /// to mark. Empty means there is nothing to walk, which is the common idle
+    /// case (every codex session, every Task-less claude session).
+    fn nested_live(items: &[ChatItem]) -> impl Iterator<Item = &str> {
+        items.iter().filter_map(|it| match it {
+            ChatItem::ToolCall(tc) if tc.status.is_live() && tc.parent_tool_id.is_some() => {
+                Some(tc.id.as_str())
+            }
+            _ => None,
+        })
+    }
+
+    pub(in crate::workspace) fn build<'a>(
+        hierarchy: &ToolHierarchy<'a>,
+        items: &'a [ChatItem],
+    ) -> Self {
+        if Self::nested_live(items).next().is_none() {
             return Self::default();
         }
-        let parent_of: HashMap<&str, &str> = items
-            .iter()
-            .filter_map(|it| match it {
-                ChatItem::ToolCall(tc) => Some((tc.id.as_str(), tc.parent_tool_id.as_deref()?)),
-                _ => None,
-            })
-            .collect();
         let mut ids = HashSet::new();
-        for parent in live() {
-            let mut cur = Some(parent);
-            for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
-                let Some(id) = cur else { break };
-                ids.insert(id.to_owned());
-                cur = parent_of.get(id).copied();
-            }
+        for id in Self::nested_live(items) {
+            ids.extend(hierarchy.ancestors(id).map(str::to_owned));
         }
         Self { ids }
+    }
+
+    /// Test convenience: derive the hierarchy for this one call. Production
+    /// shares a single hierarchy across the whole projection pass. Keeps the
+    /// idle early-out ahead of the build so the cheap case stays cheap here too.
+    #[cfg(test)]
+    pub(in crate::workspace) fn of(items: &[ChatItem]) -> Self {
+        if Self::nested_live(items).next().is_none() {
+            return Self::default();
+        }
+        Self::build(&ToolHierarchy::build(items), items)
     }
 
     pub(in crate::workspace) fn contains(&self, tool_id: &str) -> bool {

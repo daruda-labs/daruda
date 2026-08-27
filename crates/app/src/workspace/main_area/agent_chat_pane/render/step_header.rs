@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn a_step_with_no_span_shows_no_verdict() {
         let items = [asst("looking"), tool(ToolKindView::Read)];
-        let live_units = LiveSubagentUnits::build(&items);
+        let live_units = LiveSubagentUnits::of(&items);
         assert_eq!(step_rollup(&items, None, &live_units), None);
 
         let span = step_span_at(&items, 0).expect("the step starting at 0");
@@ -209,7 +209,7 @@ mod tests {
             tc.parent_tool_id = Some(parent_id);
         }
         let items = [asst("working"), parent, asst("reported"), child];
-        let live_units = LiveSubagentUnits::build(&items);
+        let live_units = LiveSubagentUnits::of(&items);
         let span = StepSpan {
             start: 0,
             tool_start: 1,

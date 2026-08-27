@@ -3,6 +3,7 @@ use crate::workspace::main_area::agent_chat_pane::display_filter::{DisplayFilter
 use crate::workspace::main_area::agent_chat_pane::fold::FoldContext;
 use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use daruda_acp::{
     PermissionItem, PermissionResolution, ToolCallItem, ToolKindView, ToolStatusView,
 };
@@ -71,7 +72,7 @@ fn turn_with_tools_nests_response_and_group() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -102,7 +103,7 @@ fn trivial_response_has_no_bar() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -129,7 +130,7 @@ fn past_turn_collapses_current_expands() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -177,7 +178,7 @@ fn project_under(items: &[ChatItem], fold: &FoldState) -> Vec<RenderRow> {
         items,
         fold,
         false,
-        &LiveSubagentUnits::build(items),
+        &LiveSubagentUnits::of(items),
         TailWindow::All,
         &DisplayFilter::default(),
     )
@@ -279,7 +280,7 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
         &items,
         &FoldState::default(),
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -321,7 +322,7 @@ fn working_indicator_present_while_streaming() {
         &items,
         &FoldState::default(),
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -345,7 +346,7 @@ fn working_indicator_only_when_awaiting_response() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -361,7 +362,7 @@ fn working_indicator_on_first_token_wait() {
         &items,
         &FoldState::default(),
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -385,7 +386,7 @@ fn working_indicator_visible_when_response_collapsed() {
         &items,
         &fold,
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -417,7 +418,7 @@ fn conclusion_stays_visible_when_response_collapsed() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -452,7 +453,7 @@ fn conclusion_under_a_response_is_a_separately_foldable_item() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -478,7 +479,7 @@ fn trivial_reply_is_not_a_conclusion_item() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -509,7 +510,7 @@ fn only_the_last_assistant_message_is_the_conclusion() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -542,7 +543,7 @@ fn conclusion_is_last_assistant_even_before_trailing_tool() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -576,7 +577,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -608,7 +609,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -640,7 +641,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -674,7 +675,7 @@ fn subagent_child_tool_calls_get_no_row() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -716,7 +717,7 @@ fn multiple_subagent_children_all_skip_and_parent_stays_single() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -750,7 +751,7 @@ fn orphan_child_keeps_its_row() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -758,6 +759,87 @@ fn orphan_child_keeps_its_row() {
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
         "an orphan child (no present parent) still renders as a row"
     );
+}
+
+fn tool_of(items: &[ChatItem], id: &str) -> ToolCallItem {
+    items
+        .iter()
+        .find_map(|it| match it {
+            ChatItem::ToolCall(tc) if tc.id == id => Some(tc.clone()),
+            _ => None,
+        })
+        .expect("tool call present")
+}
+
+#[test]
+fn a_filtered_away_parent_takes_its_children_with_it() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("parent", Completed), // ToolKindView::Edit
+        child_of("child", "parent", Completed),
+    ];
+    let index = FilterMatchIndex::of(
+        &items,
+        DisplayFilter::from_tokens(["tools", "tool_search"]),
+        &LiveSubagentUnits::of(&items),
+    );
+    assert!(!index.keeps_tool(&tool_of(&items, "parent")));
+    assert!(
+        !index.keeps_tool(&tool_of(&items, "child")),
+        "no card survives to render the child inside"
+    );
+}
+
+#[test]
+fn a_matching_grandchild_keeps_the_whole_subtree() {
+    use ToolStatusView::Completed;
+    // The match is three levels down: the ancestors come along to reach it, and
+    // the sibling branch comes along because its parent card renders.
+    let mut sibling = child_of("sibling", "task", Completed);
+    if let ChatItem::ToolCall(tc) = &mut sibling {
+        tc.kind = ToolKindView::Read;
+    }
+    let mut middle = child_of("middle", "task", Completed);
+    if let ChatItem::ToolCall(tc) = &mut middle {
+        tc.kind = ToolKindView::Read;
+    }
+    let mut task = tool("task", Completed);
+    if let ChatItem::ToolCall(tc) = &mut task {
+        tc.kind = ToolKindView::Read;
+    }
+    let items = [
+        ChatItem::UserText("q".into()),
+        task,
+        middle,
+        child_of("leaf", "middle", Completed), // ToolKindView::Edit
+        sibling,
+    ];
+    let index = FilterMatchIndex::of(
+        &items,
+        DisplayFilter::from_tokens(["tools", "tool_edit"]),
+        &LiveSubagentUnits::of(&items),
+    );
+    for id in ["task", "middle", "leaf", "sibling"] {
+        assert!(index.keeps_tool(&tool_of(&items, id)), "{id}");
+    }
+}
+
+#[test]
+fn a_cyclic_parent_link_does_not_hang_the_index() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        child_of("a", "b", Completed),
+        child_of("b", "a", Completed),
+    ];
+    let index = FilterMatchIndex::of(
+        &items,
+        DisplayFilter::from_tokens(["tools", "tool_edit"]),
+        &LiveSubagentUnits::of(&items),
+    );
+    assert!(index.keeps_tool(&tool_of(&items, "a")));
+    assert!(index.keeps_tool(&tool_of(&items, "b")));
 }
 
 fn child_of(id: &str, parent: &str, status: ToolStatusView) -> ChatItem {
@@ -778,7 +860,7 @@ fn live_subagent_units_marks_every_ancestor_of_a_live_descendant() {
         child_of("child", "task", Completed),
         child_of("grand", "child", InProgress),
     ];
-    let units = LiveSubagentUnits::build(&items);
+    let units = LiveSubagentUnits::of(&items);
     assert!(units.contains("task"));
     assert!(units.contains("child"));
     // A live node is not its own ancestor — `tool_or_subtree_live` ors in the
@@ -795,7 +877,7 @@ fn live_subagent_units_excludes_a_fully_settled_subtree() {
         child_of("b", "task", Failed),
     ];
     assert!(
-        !LiveSubagentUnits::build(&items).contains("task"),
+        !LiveSubagentUnits::of(&items).contains("task"),
         "no live descendant → the parent unit is done"
     );
 }
@@ -815,7 +897,7 @@ fn live_subagent_units_stops_at_the_nesting_depth_cap() {
         };
         items.push(child_of(&format!("n{d}"), &format!("n{}", d - 1), status));
     }
-    let units = LiveSubagentUnits::build(&items);
+    let units = LiveSubagentUnits::of(&items);
     assert!(units.contains(&format!("n{}", live_leaf - SUBAGENT_NEST_DEPTH_CAP)));
     assert!(
         !units.contains(&format!("n{}", live_leaf - SUBAGENT_NEST_DEPTH_CAP - 1)),
@@ -828,11 +910,11 @@ fn live_subagent_units_terminates_on_a_cyclic_parent_id() {
     use ToolStatusView::{Completed, InProgress};
     // A malformed self-parent must not walk without bound.
     let items = [child_of("x", "x", Completed)];
-    assert!(!LiveSubagentUnits::build(&items).contains("x"));
+    assert!(!LiveSubagentUnits::of(&items).contains("x"));
     // A live self-parent is its own ancestor here, so it marks itself — and
     // still terminates.
     let items = [child_of("y", "y", InProgress)];
-    assert!(LiveSubagentUnits::build(&items).contains("y"));
+    assert!(LiveSubagentUnits::of(&items).contains("y"));
 }
 
 #[test]
@@ -842,7 +924,7 @@ fn live_subagent_units_stays_linear_over_a_long_tool_run() {
         .map(|i| tool(&format!("t{i}"), Completed))
         .collect();
     let started = std::time::Instant::now();
-    let units = LiveSubagentUnits::build(&items);
+    let units = LiveSubagentUnits::of(&items);
     let rows = project(
         &items,
         &FoldState::default(),
@@ -883,7 +965,7 @@ fn project_all(items: &[ChatItem]) -> Vec<RenderRow> {
         items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(items),
+        &LiveSubagentUnits::of(items),
         TailWindow::All,
         &DisplayFilter::default(),
     )
@@ -935,13 +1017,13 @@ fn live_subagent_units_marks_a_running_child_of_a_completed_parent() {
         child_of("child", "task", InProgress),
     ];
     assert!(
-        LiveSubagentUnits::build(&items).contains("task"),
+        LiveSubagentUnits::of(&items).contains("task"),
         "a live child keeps the subagent parent reading as running"
     );
 
     let items = [tool("task", Completed)];
     assert!(
-        !LiveSubagentUnits::build(&items).contains("task"),
+        !LiveSubagentUnits::of(&items).contains("task"),
         "a childless settled tool is not a live unit"
     );
 }
@@ -963,7 +1045,7 @@ fn collapsed_response_surfaces_a_live_tool_group() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -997,7 +1079,7 @@ fn collapsed_response_hides_a_settled_tool_group() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1018,7 +1100,7 @@ fn lone_tool_call_is_not_grouped() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1049,7 +1131,7 @@ fn in_progress_group_defaults_expanded() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1076,7 +1158,7 @@ fn group_member_visibility_follows_fold_override() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1090,6 +1172,63 @@ fn group_member_visibility_follows_fold_override() {
         ],
         "user-expanded group shows its members"
     );
+}
+
+/// Every `RowKind` must land in its own slot family, so two different kinds
+/// carrying the same index never collapse into one slot. The "a new variant
+/// cannot forget to declare its identity" half is the compiler's job:
+/// `RowKind::slot` matches exhaustively with no wildcard arm.
+#[test]
+fn every_row_kind_declares_a_distinct_slot() {
+    let row = |kind| RenderRow {
+        kind,
+        hidden: false,
+        indent: 0,
+    };
+    // One row per `RowKind` variant, all keyed on the same index / id so only
+    // the variant itself can tell them apart.
+    let kinds = vec![
+        RowKind::User(0),
+        RowKind::ResponseHeader {
+            anchor: 0,
+            collapsed: false,
+        },
+        RowKind::AgentItem(0),
+        RowKind::SoloResponse(0),
+        RowKind::StepHeader {
+            first_ix: 0,
+            tool_count: 0,
+            collapsed: false,
+        },
+        RowKind::TailMore {
+            run_start: 0,
+            hidden_steps: 0,
+            collapsed: false,
+        },
+        RowKind::FilteredAway {
+            run_start: 0,
+            count: 0,
+            collapsed: false,
+        },
+        RowKind::ToolGroupHeader {
+            gid: "g".into(),
+            first_ix: 0,
+            count: 0,
+            collapsed: false,
+        },
+        RowKind::ConclusionItem(0),
+        RowKind::WorkingIndicator,
+    ];
+    let rows: Vec<RenderRow> = kinds.into_iter().map(row).collect();
+    for (i, a) in rows.iter().enumerate() {
+        for (j, b) in rows.iter().enumerate() {
+            assert_eq!(
+                a.same_slot(b),
+                i == j,
+                "row kind {i} vs {j} must share a slot only with itself"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1153,7 +1292,7 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
         &items,
         &fold,
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1196,7 +1335,7 @@ fn leading_run_without_a_user_anchor_gets_no_solo_response() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1238,7 +1377,7 @@ fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1278,7 +1417,7 @@ fn a_step_absorbs_the_prose_in_front_of_its_run() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1327,7 +1466,7 @@ fn consecutive_runs_split_into_one_step_each() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1352,7 +1491,7 @@ fn a_response_without_tools_gets_no_step() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1380,7 +1519,7 @@ fn a_prose_less_lone_tool_gets_no_step() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1400,7 +1539,7 @@ fn a_prose_less_lone_tool_gets_no_step() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1427,7 +1566,7 @@ fn the_running_step_expands_while_its_settled_sibling_folds() {
         &items,
         &FoldState::default(),
         true,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1466,7 +1605,7 @@ fn a_collapsed_response_surfaces_a_live_step() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1488,7 +1627,7 @@ fn a_collapsed_response_surfaces_a_live_step() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1514,7 +1653,7 @@ fn a_pending_permission_survives_a_folded_step() {
         &items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &DisplayFilter::default(),
     );
@@ -1582,7 +1721,7 @@ fn project_tail(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
         items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(items),
+        &LiveSubagentUnits::of(items),
         tail,
         &DisplayFilter::default(),
     )
@@ -1673,7 +1812,7 @@ fn revealing_the_tail_shows_every_step_again() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::Last(2),
         &DisplayFilter::default(),
     );
@@ -1700,7 +1839,7 @@ fn a_collapsed_response_hides_its_tail_row_too() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::Last(2),
         &DisplayFilter::default(),
     );
@@ -1728,7 +1867,7 @@ fn a_covered_step_with_a_running_tool_stays_surfaced() {
 fn a_run_whose_every_covered_step_is_live_keeps_its_tail_row() {
     let mut items = turn_of_cycles(2);
     items[2] = tool("t0", ToolStatusView::InProgress);
-    let live = LiveSubagentUnits::build(&items);
+    let live = LiveSubagentUnits::of(&items);
 
     let rows = project_tail(&items, TailWindow::Last(1));
     assert_eq!(
@@ -1785,7 +1924,7 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::Last(2),
         &DisplayFilter::default(),
     );
@@ -1809,7 +1948,7 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &only_reads(),
     );
@@ -1883,7 +2022,7 @@ fn project_filtered(items: &[ChatItem], filter: &DisplayFilter) -> Vec<RenderRow
         items,
         &FoldState::default(),
         false,
-        &LiveSubagentUnits::build(items),
+        &LiveSubagentUnits::of(items),
         TailWindow::All,
         filter,
     )
@@ -1934,9 +2073,9 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
         tc.kind = ToolKindView::Read;
     }
     let items = [parent, child];
-    let live_units = LiveSubagentUnits::build(&items);
+    let live_units = LiveSubagentUnits::of(&items);
 
-    let reads = FilterMatchIndex::build(&items, only_reads(), &live_units);
+    let reads = FilterMatchIndex::of(&items, only_reads(), &live_units);
     let ChatItem::ToolCall(parent) = &items[0] else {
         unreachable!()
     };
@@ -1952,11 +2091,11 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     let edits = DisplayFilter::default()
         .toggled(FilterFacet::Tools)
         .toggled(FilterFacet::ToolEdit);
-    let edits = FilterMatchIndex::build(&items, edits, &live_units);
+    let edits = FilterMatchIndex::of(&items, edits, &live_units);
     assert!(edits.keeps_tool(parent), "the Edit parent matches directly");
     assert!(
-        !edits.keeps_tool(child),
-        "the nested Read call does not leak through its matching parent"
+        edits.keeps_tool(child),
+        "a nested child owns no row, so it renders with whatever card survives"
     );
 }
 
@@ -1968,11 +2107,11 @@ fn running_filter_uses_a_live_descendant_as_the_parent_status() {
         tool("task", Completed),
         child_of("child", "task", InProgress),
     ];
-    let live_units = LiveSubagentUnits::build(&items);
+    let live_units = LiveSubagentUnits::of(&items);
     let running = DisplayFilter::default()
         .toggled(FilterFacet::Tools)
         .toggled(FilterFacet::StatusRunning);
-    let matches = FilterMatchIndex::build(&items, running, &live_units);
+    let matches = FilterMatchIndex::of(&items, running, &live_units);
     let ChatItem::ToolCall(parent) = &items[0] else {
         unreachable!()
     };
@@ -2063,7 +2202,7 @@ fn revealing_the_filter_row_shows_what_it_covers() {
         &items,
         &fold,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &only_tools,
     );
@@ -2114,7 +2253,7 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
         &items,
         &collapsed,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &only_tools,
     );
@@ -2147,7 +2286,7 @@ fn the_placeholder_counts_only_what_the_filter_alone_took() {
         &items,
         &collapsed,
         false,
-        &LiveSubagentUnits::build(&items),
+        &LiveSubagentUnits::of(&items),
         TailWindow::All,
         &only_tools,
     );

@@ -2121,6 +2121,12 @@ pub fn agent_chat_filter_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.filter_chip", value = value).into_owned()
 }
 
+/// How many of the filter's facets the user has picked, as `picked/total` —
+/// a shape a count of *shown rows* could never take.
+pub fn agent_chat_filter_count(count: usize, total: usize) -> String {
+    rust_i18n::t!("agent_chat.filter_count", count = count, total = total).into_owned()
+}
+
 pub fn agent_chat_filter_tooltip() -> String {
     rust_i18n::t!("agent_chat.filter_tooltip").into_owned()
 }
@@ -2234,7 +2240,7 @@ pub fn agent_chat_tail_window_all() -> String {
     rust_i18n::t!("agent_chat.tail_window_all").into_owned()
 }
 
-pub fn agent_chat_tail_window_last(count: u8) -> String {
+pub fn agent_chat_tail_window_last(count: usize) -> String {
     rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
 }
 

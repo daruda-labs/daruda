@@ -1,9 +1,10 @@
-//! Display filtering across independent block-kind, tool, and status axes.
-//! An axis with no selected facets is unconstrained.
+//! Display filtering over what a chat pane shows: thinking, prose, and tools.
+//! Tool kinds and statuses are conditions *inside* tools, not peers of them.
 
 use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
 
-/// Which of the three independent axes a facet belongs to.
+/// How the menu groups facets into labelled sections. Purely presentational —
+/// the nesting that decides matching is [`FacetSlot`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum FilterAxis {
     Kind,
@@ -15,8 +16,8 @@ impl FilterAxis {
     pub(in crate::workspace) const ALL: [FilterAxis; 3] = [Self::Kind, Self::Tool, Self::Status];
 }
 
-/// One selectable facet of the filter. Selecting none of an axis's facets
-/// leaves that axis unconstrained (see [`DisplayFilter::axis_allows`]).
+/// One selectable facet of the filter, as the menu and the persisted tokens
+/// name it. Where it actually lives in the filter is [`FilterFacet::slot`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum FilterFacet {
     Thinking,
@@ -48,6 +49,7 @@ impl FilterFacet {
         Self::StatusFailed,
     ];
 
+    /// Which labelled menu section this facet is listed under.
     pub(in crate::workspace) fn axis(self) -> FilterAxis {
         match self {
             Self::Thinking | Self::Prose | Self::Tools => FilterAxis::Kind,
@@ -60,8 +62,23 @@ impl FilterFacet {
         }
     }
 
-    fn bit(self) -> u16 {
-        1 << self as u16
+    /// Where this facet is stored in a [`DisplayFilter`]. The tool kinds and
+    /// statuses name a bit inside [`ToolSelector`], which only exists when
+    /// tools are in scope — that is the whole subordination rule.
+    fn slot(self) -> FacetSlot {
+        match self {
+            Self::Thinking => FacetSlot::Thinking,
+            Self::Prose => FacetSlot::Prose,
+            Self::Tools => FacetSlot::Tools,
+            Self::ToolRead => FacetSlot::ToolKind(1 << 0),
+            Self::ToolEdit => FacetSlot::ToolKind(1 << 1),
+            Self::ToolSearch => FacetSlot::ToolKind(1 << 2),
+            Self::ToolRun => FacetSlot::ToolKind(1 << 3),
+            Self::ToolOther => FacetSlot::ToolKind(1 << 4),
+            Self::StatusRunning => FacetSlot::ToolStatus(1 << 0),
+            Self::StatusOk => FacetSlot::ToolStatus(1 << 1),
+            Self::StatusFailed => FacetSlot::ToolStatus(1 << 2),
+        }
     }
 
     /// Stable config and persistence token.
@@ -86,6 +103,18 @@ impl FilterFacet {
     }
 }
 
+/// The place a [`FilterFacet`] occupies in the filter's shape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FacetSlot {
+    Thinking,
+    Prose,
+    Tools,
+    /// A bit in [`ToolSelector::kinds`].
+    ToolKind(u8),
+    /// A bit in [`ToolSelector::statuses`].
+    ToolStatus(u8),
+}
+
 /// Agent tool names mapped to filter facets.
 const TOOL_NAME_FACETS: [(&str, FilterFacet); 12] = [
     ("read", FilterFacet::ToolRead),
@@ -102,12 +131,13 @@ const TOOL_NAME_FACETS: [(&str, FilterFacet); 12] = [
     ("killshell", FilterFacet::ToolRun),
 ];
 
-fn facet_for_name(name: &str) -> FilterFacet {
+/// `None` for a name the table does not know — the caller falls back to the
+/// ACP kind rather than dumping every unlisted tool into `ToolOther`.
+fn facet_for_name(name: &str) -> Option<FilterFacet> {
     TOOL_NAME_FACETS
         .iter()
         .find(|(known, _)| known.eq_ignore_ascii_case(name))
         .map(|(_, facet)| *facet)
-        .unwrap_or(FilterFacet::ToolOther)
 }
 
 fn facet_for_kind(kind: ToolKindView) -> FilterFacet {
@@ -131,22 +161,96 @@ fn facet_for_status(status: ToolStatusView) -> FilterFacet {
     }
 }
 
-/// The set of facets a pane is currently narrowed to. Empty = show everything.
+/// A dimension left empty is unconstrained: no kind picked means every tool
+/// kind, no status picked means every status.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct ToolSelector {
+    kinds: u8,
+    statuses: u8,
+}
+
+impl ToolSelector {
+    fn has_kind(self, facet: FilterFacet) -> bool {
+        matches!(facet.slot(), FacetSlot::ToolKind(bit) if self.kinds & bit != 0)
+    }
+
+    fn has_status(self, facet: FilterFacet) -> bool {
+        matches!(facet.slot(), FacetSlot::ToolStatus(bit) if self.statuses & bit != 0)
+    }
+
+    fn matches(self, tc: &ToolCallItem, status: ToolStatusView) -> bool {
+        self.kind_allows(tc) && self.status_allows(status)
+    }
+
+    /// Classify on the first signal that resolves: a *recognised* agent tool
+    /// name (Claude reports generic ACP kinds, so the name wins where it is
+    /// known), else the kind (Codex omits names, and an unlisted name like
+    /// `WebSearch` still carries a usable kind), else diffs, which imply edits.
+    /// Shell writes without diffs cannot be classified as edits reliably.
+    fn kind_allows(self, tc: &ToolCallItem) -> bool {
+        if self.kinds == 0 {
+            return true;
+        }
+        let facet = tc
+            .tool_name
+            .as_deref()
+            .and_then(facet_for_name)
+            .unwrap_or_else(|| facet_for_kind(tc.kind));
+        self.has_kind(facet) || (self.has_kind(FilterFacet::ToolEdit) && !tc.diffs.is_empty())
+    }
+
+    fn status_allows(self, status: ToolStatusView) -> bool {
+        self.statuses == 0 || self.has_status(facet_for_status(status))
+    }
+
+    fn selected_count(self) -> usize {
+        (self.kinds.count_ones() + self.statuses.count_ones()) as usize
+    }
+}
+
+/// What the pane is narrowed to. All three empty = show everything.
+///
+/// Toggling `thinking` or `prose` flips that bool. Toggling `tools` flips
+/// `Some`/`None`, and turning it off **discards** the conditions below it.
+/// Toggling a tool kind or a status brings `tools` into scope if it was not,
+/// then flips that bit; clearing the last such bit leaves `Some(empty)`, which
+/// reads as "all tools" — the user is still looking at tools, and the menu
+/// still shows `tools` checked. Clearing entirely goes through `tools` itself
+/// or [`DisplayFilter::default`].
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct DisplayFilter {
-    facets: u16,
+    thinking: bool,
+    prose: bool,
+    /// `Some` = tools are in scope; the subordinate conditions live only inside.
+    tools: Option<ToolSelector>,
 }
 
 impl DisplayFilter {
-    /// Parse tokens, ignoring unknown facets for forward compatibility.
+    /// Parse tokens, ignoring unknown facets for forward compatibility. A bare
+    /// subordinate token pulls `tools` in, so `["tool_edit"]` and
+    /// `["tools", "tool_edit"]` parse to the same value.
     pub(in crate::workspace) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
-        let facets = tokens
+        tokens
             .into_iter()
             .filter_map(FilterFacet::from_token)
-            .fold(0u16, |acc, f| acc | f.bit());
-        Self { facets }
+            .fold(Self::default(), Self::with)
     }
 
+    /// Select `facet` regardless of its current state, unlike [`Self::toggled`].
+    fn with(mut self, facet: FilterFacet) -> Self {
+        match facet.slot() {
+            FacetSlot::Thinking => self.thinking = true,
+            FacetSlot::Prose => self.prose = true,
+            FacetSlot::Tools => {
+                self.tools.get_or_insert_default();
+            }
+            FacetSlot::ToolKind(bit) => self.tools.get_or_insert_default().kinds |= bit,
+            FacetSlot::ToolStatus(bit) => self.tools.get_or_insert_default().statuses |= bit,
+        }
+        self
+    }
+
+    /// Normalised: a selected subordinate always emits `tools` ahead of itself.
     pub(in crate::workspace) fn tokens(self) -> Vec<&'static str> {
         FilterFacet::ALL
             .into_iter()
@@ -156,41 +260,47 @@ impl DisplayFilter {
     }
 
     pub(in crate::workspace) fn contains(self, facet: FilterFacet) -> bool {
-        self.facets & facet.bit() != 0
-    }
-
-    pub(in crate::workspace) fn toggled(self, facet: FilterFacet) -> Self {
-        Self {
-            facets: self.facets ^ facet.bit(),
+        match facet.slot() {
+            FacetSlot::Thinking => self.thinking,
+            FacetSlot::Prose => self.prose,
+            FacetSlot::Tools => self.tools.is_some(),
+            FacetSlot::ToolKind(_) => self.tools.is_some_and(|t| t.has_kind(facet)),
+            FacetSlot::ToolStatus(_) => self.tools.is_some_and(|t| t.has_status(facet)),
         }
     }
 
+    pub(in crate::workspace) fn toggled(mut self, facet: FilterFacet) -> Self {
+        match facet.slot() {
+            FacetSlot::Thinking => self.thinking = !self.thinking,
+            FacetSlot::Prose => self.prose = !self.prose,
+            FacetSlot::Tools => {
+                self.tools = self.tools.xor(Some(ToolSelector::default()));
+            }
+            FacetSlot::ToolKind(bit) => self.tools.get_or_insert_default().kinds ^= bit,
+            FacetSlot::ToolStatus(bit) => self.tools.get_or_insert_default().statuses ^= bit,
+        }
+        self
+    }
+
     pub(in crate::workspace) fn is_empty(self) -> bool {
-        self.facets == 0
+        !self.thinking && !self.prose && self.tools.is_none()
     }
 
     pub(in crate::workspace) fn selected_count(self) -> usize {
-        self.facets.count_ones() as usize
-    }
-
-    fn axis_mask(axis: FilterAxis) -> u16 {
-        FilterFacet::ALL
-            .into_iter()
-            .filter(|f| f.axis() == axis)
-            .fold(0u16, |acc, f| acc | f.bit())
-    }
-
-    /// An axis with no selected facets admits every facet on that axis.
-    fn axis_allows(self, facet: FilterFacet) -> bool {
-        self.facets & Self::axis_mask(facet.axis()) == 0 || self.contains(facet)
+        usize::from(self.thinking)
+            + usize::from(self.prose)
+            + self.tools.map_or(0, |t| 1 + t.selected_count())
     }
 
     /// Prompts, permissions, and failures are never filtered.
     pub(in crate::workspace) fn matches(self, item: &ChatItem) -> bool {
+        if self.is_empty() {
+            return true;
+        }
         match item {
             ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => true,
-            ChatItem::Thinking { .. } => self.axis_allows(FilterFacet::Thinking),
-            ChatItem::AssistantText { .. } => self.axis_allows(FilterFacet::Prose),
+            ChatItem::Thinking { .. } => self.thinking,
+            ChatItem::AssistantText { .. } => self.prose,
             ChatItem::ToolCall(tc) => self.matches_tool(tc, tc.status),
         }
     }
@@ -201,298 +311,9 @@ impl DisplayFilter {
         tc: &ToolCallItem,
         status: ToolStatusView,
     ) -> bool {
-        self.axis_allows(FilterFacet::Tools)
-            && self.tool_matches(tc)
-            && self.axis_allows(facet_for_status(status))
-    }
-
-    /// Prefer the agent tool name because Claude reports generic ACP kinds;
-    /// Codex omits names, so it falls back to the kind. Diffs also imply edits.
-    /// Shell writes without diffs cannot be classified as edits reliably.
-    fn tool_matches(self, tc: &ToolCallItem) -> bool {
-        if self.facets & Self::axis_mask(FilterAxis::Tool) == 0 {
-            return true;
-        }
-        let by_signal = match tc.tool_name.as_deref() {
-            Some(name) => self.contains(facet_for_name(name)),
-            None => self.contains(facet_for_kind(tc.kind)),
-        };
-        by_signal || (self.contains(FilterFacet::ToolEdit) && !tc.diffs.is_empty())
+        self.is_empty() || self.tools.is_some_and(|t| t.matches(tc, status))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use daruda_acp::{DiffView, PermissionItem};
-
-    fn call(name: Option<&str>, kind: ToolKindView, status: ToolStatusView) -> ChatItem {
-        ChatItem::ToolCall(ToolCallItem {
-            id: "c1".into(),
-            title: "t".into(),
-            kind,
-            tool_name: name.map(str::to_owned),
-            status,
-            diffs: Vec::new(),
-            output: Vec::new(),
-            raw_input: None,
-            parent_tool_id: None,
-            exit: None,
-        })
-    }
-
-    fn with_diff(mut item: ChatItem) -> ChatItem {
-        if let ChatItem::ToolCall(tc) = &mut item {
-            tc.diffs.push(DiffView {
-                path: std::path::PathBuf::from("/tmp/x.rs"),
-                old_text: None,
-                new_text: "fn main() {}".into(),
-            });
-        }
-        item
-    }
-
-    fn asst() -> ChatItem {
-        ChatItem::AssistantText {
-            text: "hello".into(),
-            streaming: false,
-            message_id: None,
-        }
-    }
-
-    fn think() -> ChatItem {
-        ChatItem::Thinking {
-            text: "hmm".into(),
-            streaming: false,
-            message_id: None,
-        }
-    }
-
-    fn filter(tokens: &[&str]) -> DisplayFilter {
-        DisplayFilter::from_tokens(tokens.iter().copied())
-    }
-
-    #[test]
-    fn an_empty_filter_shows_everything() {
-        let f = DisplayFilter::default();
-        assert!(f.is_empty());
-        for item in [
-            asst(),
-            think(),
-            call(
-                Some("Bash"),
-                ToolKindView::Execute,
-                ToolStatusView::Completed,
-            ),
-            call(None, ToolKindView::Read, ToolStatusView::Failed),
-            ChatItem::UserText("q".into()),
-        ] {
-            assert!(f.matches(&item), "{item:?} shows with no filter");
-        }
-    }
-
-    #[test]
-    fn an_untouched_axis_stays_unconstrained() {
-        let f = filter(&["tool_read"]);
-        assert!(f.matches(&asst()));
-        assert!(f.matches(&think()));
-        assert!(f.matches(&call(
-            Some("Read"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-        assert!(!f.matches(&call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn the_kind_axis_keeps_only_what_is_picked() {
-        let f = filter(&["tools"]);
-        assert!(!f.matches(&asst()));
-        assert!(!f.matches(&think()));
-        assert!(f.matches(&call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn picking_several_kinds_unions_them() {
-        let f = filter(&["prose", "tools"]);
-        assert!(f.matches(&asst()));
-        assert!(!f.matches(&think()));
-        assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-    }
-
-    #[test]
-    fn a_named_tool_is_classified_by_its_name() {
-        let f = filter(&["tool_read"]);
-        assert!(f.matches(&call(
-            Some("Read"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-        assert!(!f.matches(&call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn a_tool_name_is_matched_case_insensitively() {
-        let f = filter(&["tool_search"]);
-        assert!(f.matches(&call(
-            Some("GREP"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn an_unnamed_tool_falls_back_to_its_kind() {
-        let f = filter(&["tool_read"]);
-        assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-        assert!(!f.matches(&call(
-            None,
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn a_name_the_build_does_not_know_lands_in_other() {
-        let f = filter(&["tool_other"]);
-        assert!(f.matches(&call(
-            Some("Skill"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-        assert!(!filter(&["tool_run"]).matches(&call(
-            Some("Skill"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn a_call_carrying_diffs_counts_as_an_edit_whatever_it_was_called() {
-        let f = filter(&["tool_edit"]);
-        let bash = call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed,
-        );
-        assert!(!f.matches(&bash));
-        assert!(f.matches(&with_diff(bash)));
-    }
-
-    #[test]
-    fn a_shell_written_file_is_invisible_to_the_edit_facet() {
-        let f = filter(&["tool_edit"]);
-        assert!(!f.matches(&call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed
-        )));
-    }
-
-    #[test]
-    fn delete_and_move_are_edits() {
-        let f = filter(&["tool_edit"]);
-        for kind in [ToolKindView::Edit, ToolKindView::Delete, ToolKindView::Move] {
-            assert!(
-                f.matches(&call(None, kind, ToolStatusView::Completed)),
-                "{kind:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_status_axis_narrows_to_the_picked_outcomes() {
-        let f = filter(&["status_failed"]);
-        assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Failed)));
-        assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Cancelled)));
-        assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-        assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::InProgress)));
-    }
-
-    #[test]
-    fn axes_intersect_rather_than_union() {
-        let f = filter(&["tool_read", "status_failed"]);
-        assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Failed)));
-        assert!(!f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-        assert!(!f.matches(&call(None, ToolKindView::Execute, ToolStatusView::Failed)));
-    }
-
-    #[test]
-    fn a_prompt_a_permission_and_a_failure_survive_every_filter() {
-        let f = filter(&["tool_edit", "status_failed"]);
-        assert!(f.matches(&ChatItem::UserText("q".into())));
-        assert!(f.matches(&ChatItem::Permission(PermissionItem {
-            id: 0,
-            tool_title: Some("Write /tmp/x".into()),
-            raw_input_summary: None,
-            options: Vec::new(),
-            resolved: None,
-        })));
-        assert!(
-            f.matches(&ChatItem::Failure(daruda_acp::AcpFailure::Unclassified {
-                message: "boom".into(),
-            }))
-        );
-    }
-
-    #[test]
-    fn every_facet_round_trips_through_its_token() {
-        for facet in FilterFacet::ALL {
-            assert_eq!(FilterFacet::from_token(facet.token()), Some(facet));
-        }
-        let all = DisplayFilter::from_tokens(FilterFacet::ALL.into_iter().map(FilterFacet::token));
-        assert_eq!(all.selected_count(), FilterFacet::ALL.len());
-        assert_eq!(
-            all.tokens(),
-            FilterFacet::ALL
-                .into_iter()
-                .map(FilterFacet::token)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn an_unknown_token_is_dropped_rather_than_failing() {
-        let f = filter(&["tools", "not_a_facet"]);
-        assert_eq!(f.tokens(), vec!["tools"]);
-    }
-
-    #[test]
-    fn toggling_a_facet_twice_returns_the_empty_filter() {
-        let f = DisplayFilter::default().toggled(FilterFacet::Tools);
-        assert!(f.contains(FilterFacet::Tools));
-        assert!(f.toggled(FilterFacet::Tools).is_empty());
-    }
-
-    #[test]
-    fn each_facet_owns_a_distinct_bit() {
-        let mut seen = 0u16;
-        for facet in FilterFacet::ALL {
-            assert_eq!(seen & facet.bit(), 0, "{facet:?} collides");
-            seen |= facet.bit();
-        }
-    }
-
-    #[test]
-    fn the_axis_masks_partition_every_facet() {
-        let union = FilterAxis::ALL
-            .into_iter()
-            .fold(0u16, |acc, a| acc | DisplayFilter::axis_mask(a));
-        let all = FilterFacet::ALL
-            .into_iter()
-            .fold(0u16, |acc, f| acc | f.bit());
-        assert_eq!(union, all, "every facet belongs to exactly one axis");
-    }
-}
+mod tests;

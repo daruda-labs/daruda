@@ -33,8 +33,9 @@ use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    FilterMatchIndex, LiveSubagentUnits, SUBAGENT_NEST_DEPTH_CAP, effective_tool_status,
+    FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
+use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -331,6 +332,10 @@ pub(super) fn tool_card(
         // via `parent_tool_id`. `rows::project` skips those children in the main
         // flow; render them nested here (recursively — a child may itself spawn one)
         // so the subagent reads as one unit that folds with its parent card.
+        //
+        // The filter's unit is a projected row, and these children have none, so
+        // `FilterMatchIndex` keeps every descendant of a kept tool: the call
+        // below drops a child only when its parent card is itself filtered away.
         //
         // `depth` bounds the recursion: real `parentToolUseId`s are unique and
         // acyclic (a parent always precedes its children), but this id comes from a

@@ -20,6 +20,15 @@ impl<T: Copy> PaneChoice<T> {
             Self::Seeded(_) => None,
         }
     }
+
+    /// Follow a new config default. A pane the user has already decided for
+    /// keeps its own value — that is what makes `Seeded` mean "still following
+    /// config" rather than "happens to equal the old config".
+    pub(in crate::workspace) fn reseed(&mut self, value: T) {
+        if matches!(self, Self::Seeded(_)) {
+            *self = Self::Seeded(value);
+        }
+    }
 }
 
 impl<T: Default> Default for PaneChoice<T> {
@@ -53,6 +62,21 @@ mod tests {
         assert_eq!(chosen.value(), seeded.value());
         assert_ne!(chosen, seeded);
         assert_eq!(chosen.chosen(), Some(7));
+    }
+
+    #[test]
+    fn reseeding_moves_a_seeded_value_and_leaves_a_chosen_one() {
+        let mut seeded = PaneChoice::Seeded(7u8);
+        seeded.reseed(9);
+        assert_eq!(seeded, PaneChoice::Seeded(9), "an untouched pane follows");
+
+        let mut chosen = PaneChoice::Chosen(7u8);
+        chosen.reseed(9);
+        assert_eq!(
+            chosen,
+            PaneChoice::Chosen(7),
+            "a user choice is not config's"
+        );
     }
 
     #[test]

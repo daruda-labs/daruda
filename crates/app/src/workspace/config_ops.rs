@@ -2,6 +2,7 @@ use gpui::{Context, Window};
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
 
 impl Workspace {
     /// Reload config from the live store. Only wired up in tests —
@@ -67,6 +68,10 @@ impl Workspace {
             .iter()
             .map(|agent| (agent.id.clone(), agent.name.clone()))
             .collect::<Vec<_>>();
+        // The transcript defaults a pane follows until the user overrides them.
+        // Applied here as well as at pane creation so an open, untouched pane
+        // tracks a `[agent]` edit live instead of waiting for the next restore.
+        let transcript_defaults = TranscriptDefaults::from_config(&self.agent);
         for view in self
             .main_area
             .runtimes
@@ -84,6 +89,7 @@ impl Workspace {
                     view.agent_name = name;
                     cx.notify();
                 }
+                view.reseed_transcript_defaults(&transcript_defaults, cx);
             });
         }
         // Keep the `InputState`'s auto-grow cap in sync with the new

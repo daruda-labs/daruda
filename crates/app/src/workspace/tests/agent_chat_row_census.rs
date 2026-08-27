@@ -42,7 +42,7 @@ impl Lens {
 }
 
 fn rows(items: &[ChatItem], lens: Lens) -> Vec<RenderRow> {
-    let live = LiveSubagentUnits::build(items);
+    let live = LiveSubagentUnits::of(items);
     project(
         items,
         &FoldState::with_mode(lens.mode),

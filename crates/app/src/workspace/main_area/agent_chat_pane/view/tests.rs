@@ -73,7 +73,6 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             "Claude".to_string(),
             None,
             super::super::rows::tail::TailWindow::All,
-            super::super::display_filter::DisplayFilter::default(),
             super::super::fold_mode::FoldMode::default(),
             cx,
         )
@@ -208,6 +207,85 @@ fn echo_prompt_respects_collapsed_tail_response(cx: &mut gpui::TestAppContext) {
                     .iter()
                     .any(|r| matches!(r.kind, RowKind::ConclusionItem(2)) && !r.hidden),
                 "the conclusion still surfaces from the collapsed response"
+            );
+        })
+        .unwrap();
+}
+
+/// The preservation hook must not accumulate: after several prompts, picking a
+/// Mode still governs every response. A machine-written *override* would outrank
+/// the mode forever and leave the whole transcript pinned open.
+#[gpui::test]
+fn switching_to_summary_collapses_the_responses_earlier_sends_held_open(
+    cx: &mut gpui::TestAppContext,
+) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
+            for turn in 0..3 {
+                view.items
+                    .push(assistant_text_item(&format!("process {turn}")));
+                view.items
+                    .push(assistant_text_item(&format!("final {turn}")));
+                view.echo_prompt(format!("q{}", turn + 2), cx);
+            }
+            view.items.push(assistant_text_item("process last"));
+            view.items.push(assistant_text_item("final last"));
+            view.rebuild_rows();
+
+            view.set_fold_mode(FoldPreset::Summary.mode(), cx);
+
+            let open: Vec<usize> = view
+                .rows
+                .iter()
+                .filter(|r| !r.hidden)
+                .filter_map(|r| match r.kind {
+                    RowKind::AgentItem(ix) => Some(ix),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                open.is_empty(),
+                "Summary collapses every response's process prose; still open: {open:?}"
+            );
+        })
+        .unwrap();
+}
+
+/// A response held open by a send is released by the next send — the hold
+/// tracks the newest response only, so history keeps folding itself away.
+#[gpui::test]
+fn the_next_send_releases_the_response_the_previous_one_held(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            // 0: q1, 1: process, 2: final, 3: q2, 4: process, 5: final, 6: q3
+            view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
+            view.items.push(assistant_text_item("process 1"));
+            view.items.push(assistant_text_item("final 1"));
+            view.echo_prompt("q2".to_string(), cx);
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && !r.hidden),
+                "the first send holds the response the user was reading"
+            );
+
+            view.items.push(assistant_text_item("process 2"));
+            view.items.push(assistant_text_item("final 2"));
+            view.echo_prompt("q3".to_string(), cx);
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && r.hidden),
+                "the older response folds once it is no longer the one being read"
+            );
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|r| matches!(r.kind, RowKind::AgentItem(4)) && !r.hidden),
+                "the newly held response stays open"
             );
         })
         .unwrap();

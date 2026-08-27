@@ -193,13 +193,14 @@ pub(in crate::workspace) fn render(
         // closure indexes the projected `rows` (see `rows::project`) and
         // `render_row` dispatches by kind with per-row padding + nesting rail.
         let t_items = t.clone();
-        // The last *visible* row gets bottom `PAD_Y` (vs `LIST_GAP` between
-        // rows); collapsed rows are zero-height so they don't count.
-        let last_visible = content.rows.iter().rposition(|r| !r.hidden).unwrap_or(0);
+        // The first and last *visible* rows carry the list's outer `PAD_Y` (vs
+        // `LIST_GAP` between rows); hidden rows are zero-height so they don't
+        // count — row 0 is often the always-emitted filter placeholder.
+        let visible = VisibleEnds::of(&content.rows);
         let list_el = list(
             content.list_state.clone(),
             cx.processor(move |this, ix, window, cx| match this.rows.get(ix) {
-                Some(row) => render_row(this, ix, row, last_visible, &t_items, window, cx),
+                Some(row) => render_row(this, ix, row, visible, &t_items, window, cx),
                 None => gpui::Empty.into_any_element(),
             }),
         )
@@ -305,15 +306,33 @@ fn agent_display_name(view: &AgentChatView) -> &str {
     }
 }
 
+/// The first and last rows that actually paint. Hidden rows are zero-height, so
+/// the list's outer padding belongs to these two rather than to index `0` and
+/// `len - 1`.
+#[derive(Clone, Copy)]
+struct VisibleEnds {
+    first: usize,
+    last: usize,
+}
+
+impl VisibleEnds {
+    fn of(rows: &[RenderRow]) -> Self {
+        Self {
+            first: rows.iter().position(|r| !r.hidden).unwrap_or(0),
+            last: rows.iter().rposition(|r| !r.hidden).unwrap_or(0),
+        }
+    }
+}
+
 /// Render one projected row: an item, a synthetic fold header, or a zero-height
 /// `Empty` when collapsed under an ancestor fold (the row stays in the sequence
-/// so the count is fold-stable). Applies per-row padding (top on the first row,
-/// `PAD_Y` on the last visible, `LIST_GAP` between) and a left indent per level.
+/// so the count is fold-stable). Applies per-row padding (`PAD_Y` on the first
+/// and last visible rows, `LIST_GAP` between) and a left indent per level.
 fn render_row(
     this: &AgentChatView,
     ix: usize,
     row: &RenderRow,
-    last_visible: usize,
+    visible: VisibleEnds,
     t: &theme::DarudaTheme,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
@@ -395,19 +414,19 @@ fn render_row(
         },
         RowKind::WorkingIndicator => working_indicator(this, cx).into_any_element(),
     };
-    let bottom = if ix == last_visible {
+    let bottom = if ix == visible.last {
         theme::AGENT_CHAT_PAD_Y
     } else {
         theme::AGENT_CHAT_LIST_GAP
     };
     // A new turn (a `User` row past the first) gets extra top space so
     // consecutive turns read as distinct exchanges.
-    let turn_break = ix != 0 && matches!(row.kind, RowKind::User(_));
+    let turn_break = ix != visible.first && matches!(row.kind, RowKind::User(_));
     let row_el = div()
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
-        .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
+        .when(ix == visible.first, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
         .when(turn_break, |d| d.mt(px(theme::AGENT_CHAT_TURN_GAP)))
         .pb(px(bottom))
         // Nest one content-pad unit per level (group members sit under the ⚙ bar).
@@ -709,5 +728,48 @@ fn render_item(
         ChatItem::Failure(failure) => {
             failure_block(ix, failure, pane_id, window_handle, t, cx).into_any_element()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(kind: RowKind, hidden: bool) -> RenderRow {
+        RenderRow {
+            kind,
+            hidden,
+            indent: 0,
+        }
+    }
+
+    /// `rows::project` always emits the filter placeholder first, and it is
+    /// hidden whenever it covers nothing — so the list's top padding has to
+    /// follow the first row that paints, not index 0.
+    #[test]
+    fn the_outer_padding_follows_the_rows_that_paint() {
+        let rows = [
+            row(
+                RowKind::FilteredAway {
+                    run_start: 0,
+                    count: 0,
+                    collapsed: true,
+                },
+                true,
+            ),
+            row(RowKind::AgentItem(0), false),
+            row(RowKind::AgentItem(1), false),
+            row(RowKind::AgentItem(2), true),
+        ];
+        let ends = VisibleEnds::of(&rows);
+        assert_eq!(ends.first, 1);
+        assert_eq!(ends.last, 2);
+    }
+
+    #[test]
+    fn an_all_hidden_list_collapses_both_ends_onto_row_zero() {
+        let rows = [row(RowKind::AgentItem(0), true)];
+        let ends = VisibleEnds::of(&rows);
+        assert_eq!((ends.first, ends.last), (0, 0));
     }
 }

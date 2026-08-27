@@ -16,9 +16,8 @@ use gpui::{AppContext as _, Context, Entity};
 
 use super::fold::{FoldContext, FoldKey, FoldState};
 use super::fold_mode::TurnPosition;
-use super::rows::{
-    LiveSubagentUnits, RowKind, SUBAGENT_NEST_DEPTH_CAP, effective_tool_status, project, step,
-};
+use super::rows::{LiveSubagentUnits, RowKind, effective_tool_status, project, step};
+use super::tool_hierarchy::ToolHierarchy;
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
@@ -804,36 +803,6 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
     }
 }
 
-/// The `items` index of the tool call that owns a `RenderRow` for `tool_id`:
-/// itself if it has no live parent in `items`, else walked up through
-/// `parent_tool_id` to the ancestor `rows::project` actually gives a row
-/// (nested subagent children render inside their parent's card and earn no
-/// row of their own — see `is_nested_child`). Depth-bounded like
-/// `LiveSubagentUnits`, for the same malformed/cyclic-id safety.
-fn top_level_tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usize> {
-    use daruda_acp::ChatItem;
-    let mut current = tool_id;
-    let mut owned: String;
-    for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
-        let (ix, parent) = items.iter().enumerate().find_map(|(ix, item)| match item {
-            ChatItem::ToolCall(tc) if tc.id == current => Some((ix, tc.parent_tool_id.clone())),
-            _ => None,
-        })?;
-        match parent {
-            Some(pid)
-                if items
-                    .iter()
-                    .any(|it| matches!(it, ChatItem::ToolCall(p) if p.id == pid)) =>
-            {
-                owned = pid;
-                current = &owned;
-            }
-            _ => return Some(ix),
-        }
-    }
-    None
-}
-
 /// The `self.rows` index a fold toggle on `key` must remeasure so its stale
 /// cached row height doesn't clip/overlap neighboring rows. `Assistant` /
 /// `Thinking` are their own row, keyed directly by item index. `Tool` /
@@ -849,15 +818,13 @@ pub(in crate::workspace) fn fold_key_item_index(
     key: &FoldKey,
     items: &[daruda_acp::ChatItem],
 ) -> Option<usize> {
+    // Built only for the keys that ask a hierarchy question; nested subagent
+    // children render inside their parent's card and earn no row of their own.
+    let owner = |id: &str| ToolHierarchy::build(items).owning_row_index(id);
     match key {
         FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
-        FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::ToolRawInput(id) => {
-            top_level_tool_item_index(items, id)
-        }
-        FoldKey::Diff(diff_key) => {
-            let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
-            top_level_tool_item_index(items, tool_id)
-        }
+        FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::ToolRawInput(id) => owner(id),
+        FoldKey::Diff(diff_key) => owner(diff_key.split('#').next().unwrap_or(diff_key.as_str())),
         FoldKey::Response(_)
         | FoldKey::ToolGroup(_)
         | FoldKey::Step(_)

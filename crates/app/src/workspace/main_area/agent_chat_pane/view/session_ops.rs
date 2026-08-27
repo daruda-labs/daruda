@@ -20,6 +20,7 @@ use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
 use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
+use super::super::transcript_defaults::TranscriptDefaults;
 use super::{AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
 impl AgentChatView {
@@ -221,14 +222,18 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Toggle this pane between pane-wide wrapping and the configured reading
-    /// column. Width changes can reflow every row, so invalidate all list
-    /// measurements and persist the pane-local preference.
-    pub(in crate::workspace) fn toggle_content_width(&mut self, cx: &mut Context<Self>) {
-        self.content_width = self.content_width.toggle();
+    /// Re-derive the row projection and reflow the list. The one sequence every
+    /// transcript-preference change ends in, since all of them feed `project`.
+    fn reproject(&mut self, cx: &mut Context<Self>) {
+        self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();
+    }
 
+    /// Get this pane's just-made choice onto disk. Deferred because the save
+    /// re-enters the workspace, which is still mid-update while the chip
+    /// handler that called this runs.
+    fn persist_pane_choice(&self, cx: &mut Context<Self>) {
         let window_handle = self.window_handle;
         cx.defer(move |cx| {
             if let Some(workspace) =
@@ -238,6 +243,37 @@ impl AgentChatView {
                 let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
             }
         });
+    }
+
+    /// Toggle this pane between pane-wide wrapping and the configured reading
+    /// column. Width changes can reflow every row, so invalidate all list
+    /// measurements and persist the pane-local preference.
+    pub(in crate::workspace) fn toggle_content_width(&mut self, cx: &mut Context<Self>) {
+        self.content_width = self.content_width.toggle();
+        self.list_state.remeasure();
+        cx.notify();
+        self.persist_pane_choice(cx);
+    }
+
+    /// Follow a reloaded `[agent]` section: every transcript preference the
+    /// user has not picked for this pane moves to the new default, and the ones
+    /// they did pick stay. The single site that applies both, so a pane open
+    /// across a config edit ends up where a freshly restored one would.
+    /// Nothing is persisted — a seed is not a choice.
+    pub(in crate::workspace) fn reseed_transcript_defaults(
+        &mut self,
+        defaults: &TranscriptDefaults,
+        cx: &mut Context<Self>,
+    ) {
+        let before = (self.tail, self.fold.mode());
+        self.tail.reseed(defaults.tail);
+        self.fold.reseed_mode(defaults.fold_mode);
+        if before == (self.tail, self.fold.mode()) {
+            return;
+        }
+        // Both feed the projection, so the transcript has to be re-derived
+        // before the pane paints again.
+        self.reproject(cx);
     }
 
     pub(in crate::workspace) fn set_tail_window(
@@ -253,20 +289,10 @@ impl AgentChatView {
             return;
         }
         self.tail = choice;
-        self.rebuild_rows();
-        self.list_state.remeasure();
-        cx.notify();
-
+        self.reproject(cx);
+        // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
-            let window_handle = self.window_handle;
-            cx.defer(move |cx| {
-                if let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                {
-                    // SILENT-OK: the window may close before the deferred save runs.
-                    let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
-                }
-            });
+            self.persist_pane_choice(cx);
         }
     }
 
@@ -275,19 +301,8 @@ impl AgentChatView {
             return;
         }
         self.fold.set_mode(mode);
-        self.rebuild_rows();
-        self.list_state.remeasure();
-        cx.notify();
-
-        let window_handle = self.window_handle;
-        cx.defer(move |cx| {
-            if let Some(workspace) =
-                crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-            {
-                // SILENT-OK: the window may close before the deferred save runs.
-                let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
-            }
-        });
+        self.reproject(cx);
+        self.persist_pane_choice(cx);
     }
 
     pub(in crate::workspace) fn toggle_display_facet(
@@ -310,20 +325,10 @@ impl AgentChatView {
             return;
         }
         self.display_filter = choice;
-        self.rebuild_rows();
-        self.list_state.remeasure();
-        cx.notify();
-
+        self.reproject(cx);
+        // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
-            let window_handle = self.window_handle;
-            cx.defer(move |cx| {
-                if let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                {
-                    // SILENT-OK: the window may close before the deferred save runs.
-                    let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
-                }
-            });
+            self.persist_pane_choice(cx);
         }
     }
 

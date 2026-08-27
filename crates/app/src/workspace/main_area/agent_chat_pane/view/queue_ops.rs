@@ -228,18 +228,19 @@ impl AgentChatView {
     /// Preserve the currently visible tail response before appending the next
     /// prompt — otherwise the new `UserText` makes it non-last and it
     /// auto-collapses, hiding agent prose right as the user submits a follow-up.
+    /// Recorded as a hold, never as an override: an override means "the user
+    /// chose this", outranks the Mode chip forever, and would leave every past
+    /// response pinned open after a few prompts.
     fn preserve_tail_response_expansion(&mut self) {
-        let Some(anchor) = self
+        let held = self
             .items
             .iter()
             .rposition(|item| matches!(item, ChatItem::UserText(_)))
-        else {
-            return;
-        };
-        let key = FoldKey::Response(anchor);
-        if self.fold.is_expanded(&key, fold_context(&key, &self.items)) {
-            self.fold.set_all([key], true);
-        }
+            .filter(|&anchor| {
+                let key = FoldKey::Response(anchor);
+                self.fold.is_expanded(&key, fold_context(&key, &self.items))
+            });
+        self.fold.hold_response(held);
     }
 
     /// Resume a parked queue: move the parked prompts back to the FRONT of the

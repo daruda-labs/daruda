@@ -29,7 +29,7 @@ const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 3, 3];
 
 /// Project through the fresh-pane defaults without a named test lens.
 fn shipped_default_per_turn(items: &[ChatItem]) -> Vec<usize> {
-    let live = LiveSubagentUnits::build(items);
+    let live = LiveSubagentUnits::of(items);
     visible_per_turn(&project(
         items,
         &FoldState::default(),

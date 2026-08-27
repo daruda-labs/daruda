@@ -412,6 +412,44 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
         }
         other => panic!("expected an agent-chat leaf, got {other:?}"),
     }
+
+    // A wrong *type*, not just an unknown token: every view preference must
+    // still cost only itself, or one bad value takes the whole project's
+    // lane/tab/pane tree down with it.
+    let mistyped = r#"{
+        "cwd": "/repo/lane",
+        "session_id": "sess-abc123",
+        "tail_window": 5,
+        "content_width": ["reading"],
+        "display_filter": "tools",
+        "fold_mode": {"preset": "summary"}
+    }"#;
+    let content: SerializedAgentChatContent =
+        serde_json::from_str(mistyped).expect("a mistyped preference drops, it does not fail");
+    assert_eq!(content.tail_window, None);
+    assert_eq!(content.content_width, SerializedChatContentWidth::Full);
+    assert_eq!(
+        content.display_filter, None,
+        "unreadable → treated as unset"
+    );
+    assert_eq!(content.fold_mode, None, "unreadable → treated as unset");
+    assert_eq!(
+        content.cwd,
+        Some(PaneCwd::Local(PathBuf::from("/repo/lane")))
+    );
+    assert_eq!(content.session_id.as_deref(), Some("sess-abc123"));
+
+    let leaf: SerializedLayout = serde_json::from_str(&format!(
+        r#"{{"type":"Leaf","pane_id":7,"cwd":null,"agent_chat":{mistyped}}}"#
+    ))
+    .expect("a mistyped preference must not corrupt the pane tree");
+    assert!(matches!(
+        leaf,
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::AgentChat(_),
+            ..
+        }
+    ));
 }
 
 #[test]

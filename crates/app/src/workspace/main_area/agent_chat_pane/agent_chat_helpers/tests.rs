@@ -10,7 +10,7 @@ fn asst(text: &str) -> ChatItem {
 }
 
 fn rollup(items: &[ChatItem], range: std::ops::Range<usize>) -> Rollup {
-    let live_units = LiveSubagentUnits::build(items);
+    let live_units = LiveSubagentUnits::of(items);
     Rollup::of_run_with_live_units(items, range, &live_units)
 }
 

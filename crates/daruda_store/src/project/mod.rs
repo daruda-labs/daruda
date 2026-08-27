@@ -485,11 +485,19 @@ pub struct SerializedAgentChatContent {
         skip_serializing_if = "Option::is_none"
     )]
     pub tail_window: Option<SerializedChatTailWindow>,
-    /// Explicit pane display-filter tokens; `None` continues following config.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Explicit pane display-filter tokens; `None` means the pane opens unfiltered.
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub display_filter: Option<Vec<String>>,
     /// Explicit pane fold-mode tokens; `None` continues following config.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub fold_mode: Option<Vec<String>>,
 }
 

@@ -104,7 +104,13 @@ impl FoldContext {
 /// Fold state for one conversation: the pane's mode plus explicit user choices.
 #[derive(Default)]
 pub(in crate::workspace) struct FoldState {
+    /// Present = an explicit user choice; absent = derive the natural default.
+    /// Nothing but a user gesture writes here.
     overrides: HashMap<FoldKey, bool>,
+    /// The one response a prompt send froze open so the prose being read is not
+    /// yanked away. Machine-written, so it stays out of `overrides` and holds
+    /// only the newest anchor — see [`Self::hold_response`].
+    held_response: Option<usize>,
     mode: PaneChoice<FoldMode>,
 }
 
@@ -112,6 +118,7 @@ impl FoldState {
     pub(in crate::workspace) fn with_mode(mode: FoldMode) -> Self {
         Self {
             overrides: HashMap::new(),
+            held_response: None,
             mode: PaneChoice::Seeded(mode),
         }
     }
@@ -124,8 +131,23 @@ impl FoldState {
         self.mode.chosen()
     }
 
+    /// Follow a reloaded config default. A mode the user picked is untouched.
+    pub(in crate::workspace) fn reseed_mode(&mut self, mode: FoldMode) {
+        self.mode.reseed(mode);
+    }
+
     pub(in crate::workspace) fn set_mode(&mut self, mode: FoldMode) {
         self.mode = PaneChoice::Chosen(mode);
+        // Picking a mode is a statement about the whole transcript, so it
+        // supersedes the transient send-time hold. User overrides survive it.
+        self.held_response = None;
+    }
+
+    /// Freeze `anchor`'s response open until the next send, or release the hold
+    /// with `None`. Ranks below a user override and above the mode default, and
+    /// replaces any previous hold — only the newest response is ever held.
+    pub(in crate::workspace) fn hold_response(&mut self, anchor: Option<usize>) {
+        self.held_response = anchor;
     }
 
     fn policy_for(&self, key: &FoldKey, position: TurnPosition) -> FoldPolicy {
@@ -140,10 +162,13 @@ impl FoldState {
     }
 
     pub(in crate::workspace) fn is_expanded(&self, key: &FoldKey, ctx: FoldContext) -> bool {
-        self.overrides
-            .get(key)
-            .copied()
-            .unwrap_or_else(|| natural_default(self.policy_for(key, ctx.position), ctx.active))
+        if let Some(expanded) = self.overrides.get(key) {
+            return *expanded;
+        }
+        if matches!(key, FoldKey::Response(anchor) if self.held_response == Some(*anchor)) {
+            return true;
+        }
+        natural_default(self.policy_for(key, ctx.position), ctx.active)
     }
 
     pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
@@ -153,6 +178,8 @@ impl FoldState {
 
     pub(in crate::workspace) fn clear_overrides(&mut self) {
         self.overrides.clear();
+        // The anchor is an item index, invalid once the conversation is dropped.
+        self.held_response = None;
     }
 
     pub(in crate::workspace) fn clear_tail_reveals(&mut self) -> bool {
@@ -424,6 +451,22 @@ mod tests {
     }
 
     #[test]
+    fn reseeding_moves_an_unchosen_mode_only() {
+        let mut state = FoldState::with_mode(FoldPreset::Auto.mode());
+        state.reseed_mode(FoldPreset::Summary.mode());
+        assert_eq!(state.mode(), FoldPreset::Summary.mode());
+        assert_eq!(state.chosen_mode(), None, "a reseed is not a choice");
+
+        state.set_mode(FoldPreset::Auto.mode());
+        state.reseed_mode(FoldPreset::Expanded.mode());
+        assert_eq!(
+            state.mode(),
+            FoldPreset::Auto.mode(),
+            "config must not overwrite the user's pick"
+        );
+    }
+
+    #[test]
     fn a_user_override_outranks_the_mode() {
         let mut state = FoldState::with_mode(FoldPreset::Expanded.mode());
         let key = FoldKey::Response(0);
@@ -481,6 +524,55 @@ mod tests {
         let state = FoldState::with_mode(FoldMode::from_tokens(["auto", "last.tool=expanded"]));
         assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::last(false)));
         assert!(!state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn a_held_response_stays_open_once_it_is_no_longer_the_newest() {
+        let mut state = FoldState::default();
+        let key = FoldKey::Response(0);
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
+        state.hold_response(Some(0));
+        assert!(state.is_expanded(&key, FoldContext::past(false)));
+        assert!(
+            !state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)),
+            "the hold covers one anchor, not every response"
+        );
+    }
+
+    #[test]
+    fn a_second_hold_releases_the_first() {
+        let mut state = FoldState::default();
+        state.hold_response(Some(0));
+        state.hold_response(Some(4));
+        assert!(!state.is_expanded(&FoldKey::Response(0), FoldContext::past(false)));
+        assert!(state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)));
+        state.hold_response(None);
+        assert!(!state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn choosing_a_mode_releases_the_hold_but_not_a_user_override() {
+        let mut state = FoldState::default();
+        state.hold_response(Some(0));
+        state.set_all([FoldKey::Response(4)], true);
+        state.set_mode(FoldPreset::Summary.mode());
+        assert!(
+            !state.is_expanded(&FoldKey::Response(0), FoldContext::past(false)),
+            "the mode chip outranks a machine-written hold"
+        );
+        assert!(
+            state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)),
+            "an explicit user choice still outranks the mode"
+        );
+    }
+
+    #[test]
+    fn a_user_collapse_outranks_the_hold() {
+        let mut state = FoldState::default();
+        state.hold_response(Some(0));
+        let key = FoldKey::Response(0);
+        state.toggle(key.clone(), FoldContext::past(false)); // expanded → collapsed
+        assert!(!state.is_expanded(&key, FoldContext::past(false)));
     }
 
     #[test]

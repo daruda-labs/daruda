@@ -119,6 +119,8 @@ impl BlockRule {
 /// Named fold-mode presets offered by the chip.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(in crate::workspace) enum FoldPreset {
+    /// Auto reproduces the shipped default behavior exactly, so a pane that
+    /// never picks a mode looks the same as one that picks this.
     #[default]
     Auto,
     Summary,

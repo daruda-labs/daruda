@@ -538,8 +538,6 @@ pub struct AgentConfig {
     pub reading_width: f32,
     /// Initial visible trailing-step count; `0` shows every step.
     pub tail_window: u8,
-    /// Initial display-filter facet tokens. Unknown tokens are ignored.
-    pub display_filter: Vec<String>,
     /// Initial fold preset and optional `"<turn>.<block>=<rule>"` overrides.
     /// Presets are `auto`, `summary`, and `expanded`; unknown tokens are ignored.
     pub fold_mode: Vec<String>,
@@ -600,7 +598,6 @@ impl Default for AgentConfig {
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
             tail_window: TAIL_WINDOW_DEFAULT,
-            display_filter: Vec::new(),
             fold_mode: Vec::new(),
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
