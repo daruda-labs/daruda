@@ -12,6 +12,7 @@ use super::super::agent_chat_helpers::{
     cancel_pending_permission, collect_foldable_keys, fold_context, fold_key_item_index,
     permission_card_mut,
 };
+use super::super::agent_chat_ops::model_select;
 use super::super::display_filter::{DisplayFilter, FilterFacet};
 use super::super::fold::FoldKey;
 use super::super::fold_mode::FoldMode;
@@ -376,10 +377,50 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Change a select config option (model / effort / …): show the pick
-    /// immediately, then ask the agent over the live handle. The reply
-    /// replaces the whole option set via `ConfigOptionsChanged`.
+    /// Change a select config option on the *user's* behalf (the config
+    /// chips): show the pick immediately, ask the agent over the live handle,
+    /// and remember a `Model`-category pick as this pane's own model. The
+    /// reply replaces the whole option set via `ConfigOptionsChanged`.
     pub(in crate::workspace) fn set_config_option(
+        &mut self,
+        config_id: String,
+        value: daruda_acp::ConfigValueView,
+        cx: &mut Context<Self>,
+    ) {
+        // Only the model axis is remembered, and only when this call names it.
+        let picked_model = match &value {
+            daruda_acp::ConfigValueView::Id(picked) => {
+                model_select(&self.session_config.config_options)
+                    .filter(|(option_id, _, _)| *option_id == config_id.as_str())
+                    .map(|_| picked.clone())
+            }
+            daruda_acp::ConfigValueView::Bool(_) => None,
+        };
+        if let Some(model) = picked_model {
+            self.last_known_model_id = Some(model);
+        }
+        self.send_config_option(config_id, value, cx);
+    }
+
+    /// Same protocol effect as [`Self::set_config_option`], for the
+    /// connect-time apply of the agent's configured default.
+    ///
+    /// Deliberately does not touch `last_known_model_id`: recording it would
+    /// make the agent's own default indistinguishable from a user pick, and a
+    /// pick outranks the default on every later connect — so a Settings edit
+    /// to `default_model` would never again reach this pane.
+    pub(in crate::workspace) fn apply_connect_config_option(
+        &mut self,
+        config_id: String,
+        value: daruda_acp::ConfigValueView,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_config_option(config_id, value, cx);
+    }
+
+    /// The protocol half both entry points share: show the value immediately,
+    /// then ask the agent over the live handle (no-op when absent).
+    fn send_config_option(
         &mut self,
         config_id: String,
         value: daruda_acp::ConfigValueView,

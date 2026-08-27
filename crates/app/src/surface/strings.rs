@@ -4049,28 +4049,6 @@ pub fn settings_telegram_unpair() -> String {
     rust_i18n::t!("settings.telegram_unpair").into_owned()
 }
 
-// Agent section — default permission mode dropdown
-pub fn settings_label_agent_mode() -> String {
-    rust_i18n::t!("settings.label_agent_mode").into_owned()
-}
-pub fn settings_agent_mode_auto() -> String {
-    rust_i18n::t!("settings.agent_mode_auto").into_owned()
-}
-pub fn settings_agent_mode_default() -> String {
-    rust_i18n::t!("settings.agent_mode_default").into_owned()
-}
-pub fn settings_agent_mode_accept_edits() -> String {
-    rust_i18n::t!("settings.agent_mode_accept_edits").into_owned()
-}
-pub fn settings_agent_mode_plan() -> String {
-    rust_i18n::t!("settings.agent_mode_plan").into_owned()
-}
-pub fn settings_agent_mode_dont_ask() -> String {
-    rust_i18n::t!("settings.agent_mode_dont_ask").into_owned()
-}
-pub fn settings_agent_mode_bypass() -> String {
-    rust_i18n::t!("settings.agent_mode_bypass").into_owned()
-}
 pub fn settings_label_agent_use_modifier_to_send() -> String {
     rust_i18n::t!("settings.label_agent_use_modifier_to_send").into_owned()
 }
@@ -4149,17 +4127,21 @@ pub fn settings_agent_field_default_mode() -> String {
     rust_i18n::t!("settings.agent_field_default_mode").into_owned()
 }
 
-/// Placeholder for that field — free text, because a mode id is whatever the
-/// agent advertises and daruda cannot enumerate it ahead of a connect.
-pub fn settings_agent_default_mode_placeholder() -> String {
-    rust_i18n::t!("settings.agent_default_mode_placeholder").into_owned()
+/// Label for an agent catalog row's optional model override.
+pub fn settings_agent_field_default_model() -> String {
+    rust_i18n::t!("settings.agent_field_default_model").into_owned()
 }
 
-/// Hint under the global permission-mode dropdown: its vocabulary is Claude
-/// Code's, and an agent that advertises different modes ignores it in favour of
-/// its own catalog-row override.
-pub fn settings_agent_mode_scope_hint() -> String {
-    rust_i18n::t!("settings.agent_mode_scope_hint").into_owned()
+/// The "no override" entry in a row's mode/model picker, for an adapter whose
+/// own default daruda has no fact about.
+pub fn settings_agent_vocabulary_agent_default() -> String {
+    rust_i18n::t!("settings.agent_vocabulary_agent_default").into_owned()
+}
+
+/// Same entry, naming the adapter's own default so the pick reads as a stated
+/// choice rather than a blank.
+pub fn settings_agent_vocabulary_agent_default_named(name: &str) -> String {
+    rust_i18n::t!("settings.agent_vocabulary_agent_default_named", name = name).into_owned()
 }
 
 /// Hint line shown under the host/container field for an `ssh`/`docker`
@@ -4227,7 +4209,7 @@ pub fn settings_agent_override_preset_value(value: &str) -> String {
 }
 
 /// Same as [`settings_agent_override_preset_value`] for a field the preset
-/// leaves unset (only `default_mode` can be).
+/// leaves unset (`default_mode` and `default_model` are the two).
 pub fn settings_agent_override_preset_value_unset() -> String {
     rust_i18n::t!("settings.agent_override_preset_value_unset").into_owned()
 }

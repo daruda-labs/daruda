@@ -1,6 +1,5 @@
 use crate::{
-    AgentEntry, Config, CursorStyle, DefaultPermissionMode, SessionHostEntry, SessionHostTombstone,
-    StatusBarItem,
+    AgentEntry, Config, CursorStyle, SessionHostEntry, SessionHostTombstone, StatusBarItem,
 };
 
 /// Stable identifier for one Settings UI persistence boundary.
@@ -17,7 +16,6 @@ pub enum SettingsFieldId {
     HorizontalSpacing,
     CursorStyle,
     CursorBlinking,
-    AgentPermissionMode,
     AgentUseModifierToSend,
     AgentCatalog,
     SessionHosts,
@@ -54,7 +52,6 @@ impl SettingsFieldId {
             Self::HorizontalSpacing => "font.horizontal_spacing",
             Self::CursorStyle => "cursor.style",
             Self::CursorBlinking => "cursor.blinking",
-            Self::AgentPermissionMode => "agent.default_permission_mode",
             Self::AgentUseModifierToSend => "agent.use_modifier_to_send",
             Self::AgentCatalog => "agents",
             Self::SessionHosts => "session_hosts",
@@ -94,7 +91,6 @@ pub enum SettingsPatch {
     HorizontalSpacing(f32),
     CursorStyle(CursorStyle),
     CursorBlinking(bool),
-    AgentPermissionMode(DefaultPermissionMode),
     AgentUseModifierToSend(bool),
     AgentCatalog(Vec<AgentEntry>),
     SessionHosts {
@@ -134,7 +130,6 @@ impl SettingsPatch {
             Self::HorizontalSpacing(_) => SettingsFieldId::HorizontalSpacing,
             Self::CursorStyle(_) => SettingsFieldId::CursorStyle,
             Self::CursorBlinking(_) => SettingsFieldId::CursorBlinking,
-            Self::AgentPermissionMode(_) => SettingsFieldId::AgentPermissionMode,
             Self::AgentUseModifierToSend(_) => SettingsFieldId::AgentUseModifierToSend,
             Self::AgentCatalog(_) => SettingsFieldId::AgentCatalog,
             Self::SessionHosts { .. } => SettingsFieldId::SessionHosts,
@@ -173,7 +168,6 @@ impl SettingsPatch {
             Self::HorizontalSpacing(value) => config.font.horizontal_spacing = *value,
             Self::CursorStyle(value) => config.cursor.style = *value,
             Self::CursorBlinking(value) => config.cursor.blinking = *value,
-            Self::AgentPermissionMode(value) => config.agent.default_permission_mode = *value,
             Self::AgentUseModifierToSend(value) => config.agent.use_modifier_to_send = *value,
             Self::AgentCatalog(value) => config.agents = value.clone(),
             Self::SessionHosts {
@@ -221,9 +215,6 @@ impl SettingsPatch {
             }
             Self::CursorStyle(_) => left.cursor.style != right.cursor.style,
             Self::CursorBlinking(_) => left.cursor.blinking != right.cursor.blinking,
-            Self::AgentPermissionMode(_) => {
-                left.agent.default_permission_mode != right.agent.default_permission_mode
-            }
             Self::AgentUseModifierToSend(_) => {
                 left.agent.use_modifier_to_send != right.agent.use_modifier_to_send
             }

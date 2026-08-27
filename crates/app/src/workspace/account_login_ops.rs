@@ -1804,6 +1804,7 @@ mod tests {
             name: id.to_string(),
             launch: daruda_config::AgentLaunch::Raw(command.to_string()),
             default_mode: None,
+            default_model: None,
         }
     }
 
@@ -1864,6 +1865,7 @@ mod tests {
                     host: "box".to_string(),
                 },
                 default_mode: None,
+                default_model: None,
             },
             daruda_config::AgentDefinition {
                 id: "remote-docker".to_string(),
@@ -1874,6 +1876,7 @@ mod tests {
                     container: "dev".to_string(),
                 },
                 default_mode: None,
+                default_model: None,
             },
             agent(
                 "remote-cwd",

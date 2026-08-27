@@ -1,138 +1,27 @@
-//! Tests for the agent config model — permission modes, launch shapes,
-//! serde round-trips and the built-in defaults.
+//! Tests for the agent config model — launch shapes, serde round-trips and
+//! the built-in defaults.
 
 use super::*;
 
 #[test]
-fn mode_id_strings_are_exact() {
-    assert_eq!(DefaultPermissionMode::Auto.mode_id(), "auto");
-    assert_eq!(DefaultPermissionMode::Default.mode_id(), "default");
-    assert_eq!(DefaultPermissionMode::AcceptEdits.mode_id(), "acceptEdits");
-    assert_eq!(DefaultPermissionMode::Plan.mode_id(), "plan");
-    assert_eq!(DefaultPermissionMode::DontAsk.mode_id(), "dontAsk");
-    assert_eq!(
-        DefaultPermissionMode::BypassPermissions.mode_id(),
-        "bypassPermissions"
-    );
+fn connect_mode_priority_is_empty_without_an_agent_default() {
+    // No per-agent override: the candidate list is empty, so the adapter's
+    // own default mode applies untouched.
+    assert_eq!(connect_mode_priority(None), Vec::<String>::new());
+    // Whitespace-only is no override either.
+    assert_eq!(connect_mode_priority(Some("   ")), Vec::<String>::new());
 }
 
 #[test]
-fn default_is_bypass_permissions() {
+fn connect_mode_priority_is_just_the_agent_default() {
     assert_eq!(
-        DefaultPermissionMode::default(),
-        DefaultPermissionMode::BypassPermissions
+        connect_mode_priority(Some("yolo")),
+        vec!["yolo".to_string()]
     );
+    // Surrounding whitespace is trimmed.
     assert_eq!(
-        AgentConfig::default().default_permission_mode.mode_id(),
-        "bypassPermissions"
-    );
-}
-
-fn with_default_mode(mode: DefaultPermissionMode) -> AgentConfig {
-    AgentConfig {
-        default_permission_mode: mode,
-        ..AgentConfig::default()
-    }
-}
-
-#[test]
-fn connect_mode_priority_appends_the_auto_fallback() {
-    let config = with_default_mode(DefaultPermissionMode::BypassPermissions);
-    assert_eq!(
-        config.connect_mode_priority(None),
-        ["bypassPermissions", "auto"]
-    );
-
-    let config = with_default_mode(DefaultPermissionMode::Auto);
-    assert_eq!(
-        config.connect_mode_priority(None),
-        ["auto"],
-        "the fallback is not repeated when it is already the default"
-    );
-}
-
-#[test]
-fn a_per_agent_mode_outranks_the_global_default() {
-    let config = with_default_mode(DefaultPermissionMode::BypassPermissions);
-    assert_eq!(
-        config.connect_mode_priority(Some("yolo")),
-        ["yolo", "bypassPermissions", "auto"],
-        "an agent's own vocabulary is tried first, the global default backs it up"
-    );
-}
-
-#[test]
-fn connect_mode_priority_drops_blank_and_duplicate_candidates() {
-    let config = with_default_mode(DefaultPermissionMode::Plan);
-    assert_eq!(
-        config.connect_mode_priority(Some("  ")),
-        ["plan", "auto"],
-        "a whitespace-only override is no override"
-    );
-    assert_eq!(
-        config.connect_mode_priority(Some("plan")),
-        ["plan", "auto"],
-        "an override equal to the global default is not tried twice"
-    );
-}
-
-#[test]
-fn from_mode_id_round_trips_all_variants() {
-    for m in DefaultPermissionMode::ALL {
-        assert_eq!(
-            DefaultPermissionMode::from_mode_id(m.mode_id()),
-            Some(m),
-            "from_mode_id({}) should return the original variant",
-            m.mode_id()
-        );
-    }
-}
-
-#[test]
-fn from_mode_id_returns_none_for_unknown_id() {
-    assert_eq!(DefaultPermissionMode::from_mode_id("bogus"), None);
-    assert_eq!(DefaultPermissionMode::from_mode_id(""), None);
-    assert_eq!(
-        DefaultPermissionMode::from_mode_id("BypassPermissions"),
-        None
-    );
-}
-
-#[test]
-fn toml_round_trip_all_variants() {
-    // Verify serde(rename_all = "camelCase") produces the right TOML keys.
-    let cases = [
-        (DefaultPermissionMode::Auto, "auto"),
-        (DefaultPermissionMode::Default, "default"),
-        (DefaultPermissionMode::AcceptEdits, "acceptEdits"),
-        (DefaultPermissionMode::Plan, "plan"),
-        (DefaultPermissionMode::DontAsk, "dontAsk"),
-        (
-            DefaultPermissionMode::BypassPermissions,
-            "bypassPermissions",
-        ),
-    ];
-    for (variant, expected_str) in cases {
-        let cfg = AgentConfig {
-            default_permission_mode: variant,
-            ..AgentConfig::default()
-        };
-        let toml_str = toml::to_string(&cfg).expect("serialize");
-        assert!(
-            toml_str.contains(expected_str),
-            "expected TOML to contain \"{expected_str}\", got: {toml_str}"
-        );
-        let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
-        assert_eq!(back.default_permission_mode, variant);
-    }
-}
-
-#[test]
-fn missing_agent_section_deserializes_to_default() {
-    let cfg: AgentConfig = toml::from_str("").expect("empty TOML should produce defaults");
-    assert_eq!(
-        cfg.default_permission_mode,
-        DefaultPermissionMode::BypassPermissions
+        connect_mode_priority(Some("  plan  ")),
+        vec!["plan".to_string()]
     );
 }
 
@@ -150,8 +39,7 @@ fn use_modifier_to_send_defaults_false_and_round_trips() {
     assert!(back.use_modifier_to_send);
 
     // A config that omits the key keeps the default.
-    let omitted: AgentConfig =
-        toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
+    let omitted: AgentConfig = toml::from_str("input_max_rows = 5").expect("deserialize");
     assert!(!omitted.use_modifier_to_send);
 }
 
@@ -166,8 +54,7 @@ fn hidden_config_option_descriptions_defaults_to_fast_mode_and_is_clearable() {
     );
 
     // Omitting the key keeps the default…
-    let omitted: AgentConfig =
-        toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
+    let omitted: AgentConfig = toml::from_str("input_max_rows = 5").expect("deserialize");
     assert_eq!(
         omitted.hidden_config_option_descriptions,
         vec![FAST_MODE_PLAIN_DESCRIPTION.to_string()]
@@ -249,6 +136,7 @@ fn agent_definition_field_round_trip() {
         name: "Codex".to_string(),
         launch: AgentLaunch::Raw("codex acp".to_string()),
         default_mode: Some("yolo".to_string()),
+        default_model: Some("gpt-5-codex".to_string()),
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -265,6 +153,38 @@ fn a_definition_without_a_default_mode_round_trips_and_stays_absent() {
     assert_eq!(d.default_mode, None);
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(!toml_str.contains("default_mode"), "{toml_str}");
+}
+
+#[test]
+fn a_definition_without_a_default_model_round_trips_and_stays_absent() {
+    // Pre-`default_model` configs must keep loading, and daruda must not
+    // start writing an empty key back into them.
+    let d: AgentDefinition =
+        toml::from_str("id = \"codex\"\nname = \"Codex\"\ncommand = \"codex acp\"\n")
+            .expect("deserialize");
+    assert_eq!(d.default_model, None);
+    let toml_str = toml::to_string(&d).expect("serialize");
+    assert!(!toml_str.contains("default_model"), "{toml_str}");
+}
+
+#[test]
+fn default_model_round_trips_alongside_a_launch_sub_table() {
+    // Guards the TOML ordering constraint noted on `AgentDefinitionRepr`:
+    // `default_model` is a scalar key and `ssh` is a sub-table, and TOML
+    // forbids a value after a table within the same entry.
+    let d = AgentDefinition {
+        id: "remote-agent".to_string(),
+        name: "Remote Agent".to_string(),
+        launch: AgentLaunch::Ssh {
+            adapter_command: "npx -y some-acp".to_string(),
+            host: "vm-work".to_string(),
+        },
+        default_mode: None,
+        default_model: Some("claude-opus-4".to_string()),
+    };
+    let toml_str = toml::to_string(&d).expect("serialize");
+    let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back, d, "{toml_str}");
 }
 
 #[test]
@@ -298,6 +218,7 @@ fn ssh_launch_toml_round_trips() {
             host: "vm-work".to_string(),
         },
         default_mode: None,
+        default_model: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[ssh]"));
@@ -318,6 +239,7 @@ fn docker_launch_toml_round_trips() {
             container: "ubuntu-dev".to_string(),
         },
         default_mode: None,
+        default_model: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[docker]"));

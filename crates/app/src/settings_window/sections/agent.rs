@@ -1,5 +1,5 @@
-//! Agent page: permission mode, send-key policy, the `[[agents]]` catalog, and
-//! the Claude status hook toggle.
+//! Agent page: send-key policy, the `[[agents]]` catalog, and the Claude
+//! status hook toggle.
 //!
 //! The catalog editor reads the **persisted** layer (`Config.agents`, split at
 //! window-open time into [`SettingsWindow::agent_rows`] plus
@@ -30,47 +30,13 @@ impl SettingsWindow {
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        use daruda_config::DefaultPermissionMode as M;
         let description_color = theme::current(cx).text_muted;
         let use_modifier_to_send = self.agent_use_modifier_to_send;
-        // The dropdown shows the bare mode id; this blurb explains the
-        // currently selected mode and updates on each pick (the window
-        // re-renders via the select's Confirm subscription).
-        let selected_mode = self
-            .default_permission_mode_select
-            .read(cx)
-            .selected_value()
-            .and_then(|v| M::from_mode_id(v.as_ref()))
-            .unwrap_or_default();
-        let mode_description = match selected_mode {
-            M::Auto => s::settings_agent_mode_auto(),
-            M::Default => s::settings_agent_mode_default(),
-            M::AcceptEdits => s::settings_agent_mode_accept_edits(),
-            M::Plan => s::settings_agent_mode_plan(),
-            M::DontAsk => s::settings_agent_mode_dont_ask(),
-            M::BypassPermissions => s::settings_agent_mode_bypass(),
-        };
         let mut body = div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_agent(), cx))
-            .child(field_row(
-                s::settings_label_agent_mode(),
-                crate::ui::select::select(&self.default_permission_mode_select, cx, 0),
-            ))
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(description_color)
-                    .child(mode_description),
-            )
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(description_color)
-                    .child(s::settings_agent_mode_scope_hint()),
-            )
             .child(checkbox_row(
                 checkbox(
                     "settings-agent-use-modifier-to-send",
@@ -384,9 +350,16 @@ impl SettingsWindow {
             )
             .child(field_row(
                 s::settings_agent_field_default_mode(),
-                crate::ui::input(&row.default_mode_input, cx, 0),
+                crate::ui::select::select(&row.default_mode_select, cx, 0),
             ))
             .when_some(provenance.default_mode_base.clone(), |body, base| {
+                body.child(Self::preset_base_value(base, cx))
+            })
+            .child(field_row(
+                s::settings_agent_field_default_model(),
+                crate::ui::select::select(&row.default_model_select, cx, 0),
+            ))
+            .when_some(provenance.default_model_base.clone(), |body, base| {
                 body.child(Self::preset_base_value(base, cx))
             });
 
@@ -496,6 +469,7 @@ impl SettingsWindow {
                 name: String::new(),
                 launch: daruda_config::AgentLaunch::Raw(String::new()),
                 default_mode: None,
+                default_model: None,
             },
             None,
             window,
@@ -514,6 +488,7 @@ pub(in crate::settings_window) struct RowProvenance {
     pub(in crate::settings_window) name_base: Option<String>,
     pub(in crate::settings_window) command_base: Option<String>,
     pub(in crate::settings_window) default_mode_base: Option<String>,
+    pub(in crate::settings_window) default_model_base: Option<String>,
 }
 
 impl RowProvenance {
@@ -522,7 +497,10 @@ impl RowProvenance {
     }
 
     pub(in crate::settings_window) fn is_overridden(&self) -> bool {
-        self.name_base.is_some() || self.command_base.is_some() || self.default_mode_base.is_some()
+        self.name_base.is_some()
+            || self.command_base.is_some()
+            || self.default_mode_base.is_some()
+            || self.default_model_base.is_some()
     }
 
     fn source_label(&self) -> String {
@@ -542,6 +520,7 @@ impl AgentCatalogRow {
                 name_base: None,
                 command_base: None,
                 default_mode_base: None,
+                default_model_base: None,
             };
         };
         // A row only carries a preset id it resolved from, so the lookup holds.
@@ -551,17 +530,21 @@ impl AgentCatalogRow {
             _ => String::new(),
         };
         let base_name = base.map(|b| b.name).unwrap_or_default();
-        // Presets never carry a session mode, so any value here is an override —
-        // labelled "not set" rather than shown as an empty preset value.
-        let default_mode = self.default_mode_input.read(cx).value().trim().to_string();
+        // Presets carry neither a session mode nor a model, so any value on
+        // either axis is an override — labelled "not set" rather than shown as
+        // an empty preset value.
         RowProvenance {
             preset: Some(preset),
             name_base: overridden_base(&self.name_input.read(cx).value(), &base_name)
                 .map(s::settings_agent_override_preset_value),
             command_base: overridden_base(&self.command_input.read(cx).value(), &base_command)
                 .map(s::settings_agent_override_preset_value),
-            default_mode_base: (!default_mode.is_empty())
-                .then(s::settings_agent_override_preset_value_unset),
+            default_mode_base: self
+                .default_mode(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
+            default_model_base: self
+                .default_model(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
         }
     }
 }

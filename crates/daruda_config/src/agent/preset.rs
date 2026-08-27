@@ -43,6 +43,10 @@ impl AgentPreset {
             // registry adapter advertises, so the global default applies until
             // the user sets one.
             default_mode: None,
+            // Presets carry no model either: the advertised list is
+            // account/plan dependent, so there is nothing to pin ahead of a
+            // real connection.
+            default_model: None,
         })
     }
 }

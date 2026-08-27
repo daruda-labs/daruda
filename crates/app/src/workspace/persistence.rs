@@ -684,6 +684,9 @@ impl Workspace {
                             // id was dropped above (fresh session applies
                             // `initial_modes` instead).
                             let mode_id = ac.mode_id.clone();
+                            // Same for the model: the lazy connect reapplies it
+                            // over whatever the adapter picks for itself.
+                            let model_id = ac.model_id.clone();
                             let content_width = deserialize_chat_content_width(ac.content_width);
                             // Missing pane choices retain the constructor's config seeds.
                             let tail = ac.tail_window.map(deserialize_chat_tail_window);
@@ -699,6 +702,7 @@ impl Workspace {
                             });
                             content.view.update(cx, |v, _| {
                                 v.last_known_mode_id = mode_id;
+                                v.last_known_model_id = model_id;
                                 v.content_width = content_width;
                                 if let Some(tail) = tail {
                                     v.tail = PaneChoice::Chosen(tail);
@@ -998,6 +1002,7 @@ fn serialize_pane_content(
             agent_id: Some(v.agent_id.clone()),
             account_id: ac.account.to_persisted(),
             mode_id: v.last_known_mode_id.clone(),
+            model_id: v.last_known_model_id.clone(),
             content_width: serialize_chat_content_width(v.content_width),
             // Persist only explicit choices so untouched panes keep following config.
             tail_window: v.tail.chosen().map(serialize_chat_tail_window),

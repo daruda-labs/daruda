@@ -2,6 +2,7 @@ pub mod entry;
 pub mod preset;
 #[cfg(test)]
 mod tests;
+pub mod vocabulary;
 
 use daruda_store::accounts::AccountRecipeId;
 use serde::{Deserialize, Serialize};
@@ -11,77 +12,7 @@ pub use preset::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, PresetLaunchability,
     preset as agent_preset, presets as agent_presets,
 };
-
-/// Permission mode the agent chat session starts in. Mirrors Claude Code's
-/// permission modes; applied on connect via ACP session/set_mode when the
-/// adapter advertises it. Variants and ids track the adapter's advertised
-/// `availableModes` set. `BypassPermissions` (everything runs without asking)
-/// is the default here; when the adapter no longer advertises it or refuses
-/// the switch, the connect falls back to [`Self::CONNECT_FALLBACK`] (`Auto`) —
-/// see `daruda_acp`'s set_mode application.
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub enum DefaultPermissionMode {
-    /// A model classifier approves/denies each permission prompt.
-    #[serde(rename = "auto")]
-    Auto,
-    /// Only reads run without asking; edits/commands prompt each time.
-    #[serde(rename = "default")]
-    Default,
-    /// Reads + file edits + common filesystem commands in the working dir run
-    /// without asking; other commands prompt.
-    #[serde(rename = "acceptEdits")]
-    AcceptEdits,
-    /// Reads only; Claude analyzes/proposes but does not edit.
-    #[serde(rename = "plan")]
-    Plan,
-    /// Never prompts; denies anything not already pre-approved.
-    #[serde(rename = "dontAsk")]
-    DontAsk,
-    /// Everything runs without asking, no safety checks. Intended for isolated
-    /// containers/VMs; refused under root/sudo.
-    #[default]
-    #[serde(rename = "bypassPermissions")]
-    BypassPermissions,
-}
-
-impl DefaultPermissionMode {
-    /// All variants in declaration order (matches the adapter's advertised
-    /// order) — used to enumerate options without hardcoding strings at call
-    /// sites.
-    pub const ALL: [DefaultPermissionMode; 6] = [
-        Self::Auto,
-        Self::Default,
-        Self::AcceptEdits,
-        Self::Plan,
-        Self::DontAsk,
-        Self::BypassPermissions,
-    ];
-
-    /// The ACP/Claude-Code mode id string (matches advertised SessionMode ids).
-    pub fn mode_id(self) -> &'static str {
-        match self {
-            DefaultPermissionMode::Auto => "auto",
-            DefaultPermissionMode::Default => "default",
-            DefaultPermissionMode::AcceptEdits => "acceptEdits",
-            DefaultPermissionMode::Plan => "plan",
-            DefaultPermissionMode::DontAsk => "dontAsk",
-            DefaultPermissionMode::BypassPermissions => "bypassPermissions",
-        }
-    }
-
-    /// Look up a variant by its ACP mode id string. Returns `None` if `id`
-    /// does not match any known variant.
-    pub fn from_mode_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|m| m.mode_id() == id)
-    }
-
-    /// The mode a connect falls back to when the configured mode is not
-    /// advertised by the adapter or its `set_mode` is rejected. `Auto` (a model
-    /// classifier that approves/denies each prompt) is a safe, always-current
-    /// choice — it is the adapter's own default and the least likely mode to be
-    /// removed.
-    pub const CONNECT_FALLBACK: DefaultPermissionMode = DefaultPermissionMode::Auto;
-}
+pub use vocabulary::{AgentVocabularySeed, seed_for_command as agent_vocabulary_seed};
 
 /// A selectable ACP agent: an id, a display name, and how its ACP adapter is
 /// launched.
@@ -91,15 +22,22 @@ pub struct AgentDefinition {
     pub id: String,
     pub name: String,
     pub launch: AgentLaunch,
-    /// Session mode to request when a fresh session with this agent connects,
-    /// overriding [`AgentConfig::default_permission_mode`].
+    /// Session mode to request when a fresh session with this agent connects.
     ///
-    /// A free-form id rather than [`DefaultPermissionMode`] because modes are
-    /// agent-advertised: this catalog holds Cline, Codex and a dozen other
-    /// adapters whose vocabularies daruda cannot enumerate, and even one
-    /// agent's list varies per model. An id the agent doesn't advertise is
-    /// skipped at connect, falling through to the global default.
+    /// A free-form id rather than an enum because modes are agent-advertised:
+    /// this catalog holds Cline, Codex and a dozen other adapters whose
+    /// vocabularies daruda cannot enumerate, and even one agent's list varies
+    /// per model. An id the agent doesn't advertise is skipped at connect,
+    /// falling through to the adapter's own default.
     pub default_mode: Option<String>,
+    /// Model id to request when a fresh session with this agent connects.
+    ///
+    /// A free-form id rather than an enum because model ids are
+    /// runtime/account/plan dependent: Claude resolves its list from the SDK
+    /// plus a settings allowlist, Codex fetches its list from its backend,
+    /// and neither is knowable ahead of time from this catalog alone. An id
+    /// the agent doesn't advertise is simply skipped at connect.
+    pub default_model: Option<String>,
 }
 
 /// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
@@ -383,11 +321,13 @@ struct AgentDefinitionRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    default_mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -433,9 +373,10 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             id: v.id,
             name: v.name,
             command,
+            default_mode: v.default_mode,
+            default_model: v.default_model,
             ssh,
             docker,
-            default_mode: v.default_mode,
         }
     }
 }
@@ -465,6 +406,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             name: v.name,
             launch,
             default_mode: v.default_mode,
+            default_model: v.default_model,
         }
     }
 }
@@ -482,9 +424,8 @@ impl AgentDefinition {
             launch: AgentLaunch::Raw(
                 "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
             ),
-            // The global default is written in Claude's own mode vocabulary,
-            // so it needs no per-agent override here.
             default_mode: None,
+            default_model: None,
         }
     }
 
@@ -518,8 +459,6 @@ pub(crate) fn default_agents() -> Vec<AgentEntry> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentConfig {
-    /// Permission mode applied when an agent chat session connects.
-    pub default_permission_mode: DefaultPermissionMode,
     /// How the agent chat input submits a message. When `false` (the
     /// default), plain Enter sends and Shift+Enter inserts a newline —
     /// matching Zed's agent panel default. When `true`, Enter inserts a
@@ -593,7 +532,6 @@ pub const TAIL_WINDOW_DEFAULT: u8 = TAIL_WINDOW_ALL;
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            default_permission_mode: DefaultPermissionMode::default(),
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
@@ -605,33 +543,6 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
-    /// Priority-ordered mode ids to try when a fresh session connects, most
-    /// preferred first: the agent's own `default_mode` (when its catalog entry
-    /// sets one), then this global default, then [`CONNECT_FALLBACK`].
-    ///
-    /// `daruda_acp` applies the first candidate the adapter both advertises and
-    /// accepts, so an agent whose vocabulary doesn't include a candidate simply
-    /// falls through to the next. That is what makes a per-agent override safe
-    /// to state as free-form text, and what keeps the Claude-flavored global
-    /// default harmless for an agent that never heard of it.
-    ///
-    /// [`CONNECT_FALLBACK`]: DefaultPermissionMode::CONNECT_FALLBACK
-    pub fn connect_mode_priority(&self, agent_default_mode: Option<&str>) -> Vec<String> {
-        let mut priority: Vec<String> = Vec::with_capacity(3);
-        let mut push = |id: &str| {
-            let id = id.trim();
-            if !id.is_empty() && !priority.iter().any(|p| p == id) {
-                priority.push(id.to_string());
-            }
-        };
-        if let Some(id) = agent_default_mode {
-            push(id);
-        }
-        push(self.default_permission_mode.mode_id());
-        push(DefaultPermissionMode::CONNECT_FALLBACK.mode_id());
-        priority
-    }
-
     /// Clamp numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
         self.input_max_rows = self
@@ -641,4 +552,20 @@ impl AgentConfig {
             .reading_width
             .clamp(READING_WIDTH_MIN, READING_WIDTH_MAX);
     }
+}
+
+/// Mode candidate to try when a fresh session connects: the agent's own
+/// `default_mode`, when its catalog entry sets one. Empty when it doesn't —
+/// the adapter's own default mode applies.
+///
+/// `daruda_acp` applies the first candidate the adapter both advertises and
+/// accepts, so an agent whose vocabulary doesn't include this candidate falls
+/// through to its own default. That is what makes a per-agent override safe
+/// to state as free-form text.
+pub fn connect_mode_priority(agent_default_mode: Option<&str>) -> Vec<String> {
+    agent_default_mode
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| vec![id.to_string()])
+        .unwrap_or_default()
 }

@@ -617,6 +617,11 @@ pub struct Workspace {
     /// through `main_area::bottom_dock::macro_ops` and persist via
     /// `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
+    /// Per-agent mode / model option lists, as last advertised by each
+    /// adapter. Loaded from `agent_vocabulary.json` on construction and
+    /// refreshed by `record_agent_vocabulary` off the ACP event pump —
+    /// the only writer.
+    pub(in crate::workspace) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
     /// Managed accounts across every auth domain — the catalog a pane's
     /// `AccountSelection` resolves against, plus the per-domain default seeded
     /// onto a freshly-created pane (see
@@ -1248,6 +1253,9 @@ impl Workspace {
             git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
+            agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache::load_in(
+                &data_dir,
+            ),
             accounts,
             pending_login: PendingLogin::None,
             // Managed accounts live in the app-wide `AccountsGlobal`; this

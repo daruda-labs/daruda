@@ -499,6 +499,63 @@ fn select_agent_transport(
     .expect("settings window should still be open during the test");
 }
 
+/// Test-only — pick `value` in one catalog row's mode/model picker, including
+/// the confirm event a real click emits (`set_selected_value` alone is silent).
+fn confirm_agent_row_select(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<SelectState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    let value = SharedString::from(value.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| {
+            s.set_selected_value(&value, window, cx);
+            cx.emit(crate::ui::select::SelectEvent::Confirm(Some(value.clone())));
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — whether one catalog row's picker offers `value` at all.
+/// `set_selected_value` clears the selection for a value the option list does
+/// not carry, which is the only public read of what a `SelectState` holds.
+fn agent_row_select_offers(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<SelectState>,
+    value: &str,
+) -> bool {
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    let value = SharedString::from(value.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+    win.read_with(cx, |_w, cx| state.read(cx).selected_value() == Some(&value))
+}
+
+/// Test-only — install a known vocabulary cache into the open Settings window.
+fn set_agent_vocabulary(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsWindow>,
+    cx: &mut TestAppContext,
+    vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| {
+            w.set_agent_vocabulary_for_test(vocabulary, window, cx)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
 /// Test-only — write `value` into one catalog row's input.
 fn set_agent_row_input(
     wh: &WindowHandle<gpui_component::Root>,
@@ -589,6 +646,7 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                     name: Some("My Gemini".to_string()),
                     command: None,
                     default_mode: None,
+                    default_model: None,
                 },
             }
         );
@@ -630,6 +688,7 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
                     host: "vm-work".to_string(),
                 },
                 default_mode: None,
+                default_model: None,
             })
         );
     });
@@ -649,6 +708,7 @@ fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContex
             host: "vm-work".to_string(),
         },
         default_mode: None,
+        default_model: None,
     });
     let config = daruda_config::Config {
         agents: vec![ssh_entry.clone()],
@@ -672,6 +732,7 @@ fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppCon
             container: "dev-1".to_string(),
         },
         default_mode: None,
+        default_model: None,
     });
     let config = daruda_config::Config {
         agents: vec![docker_entry.clone()],
@@ -735,6 +796,7 @@ fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppCon
                         "daruda-settings-path-warning-test-missing-binary acp".to_string(),
                     ),
                     default_mode: None,
+                    default_model: None,
                 },
                 None,
                 window,
@@ -985,28 +1047,122 @@ fn validate_rejects_agent_catalog_errors(cx: &mut TestAppContext) {
 }
 
 /// Regression: constructor-seeded agent rows (loaded from config, unlike
-/// rows added at runtime via `add_agent_row`) must wire up every input's
-/// submit/clear-error subscription through `subscribe_agent_row`, including
-/// `default_mode_input` — a hand-copied duplicate of that wiring in the
-/// constructor once dropped it silently.
+/// rows added at runtime via `add_agent_row`) must wire up every field's
+/// subscription through `subscribe_agent_row`, including the mode and model
+/// pickers — a hand-copied duplicate of that wiring in the constructor once
+/// dropped the mode field's silently.
 #[gpui::test]
-fn default_mode_input_change_clears_error_for_constructor_seeded_row(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    win.update(cx, |w, cx| {
-        w.error = Some("boom".into());
-        cx.notify();
-    });
-    let default_mode_input = win.read_with(cx, |w, _| {
-        w.agent_editable_row(0).unwrap().default_mode_input.clone()
-    });
-    wh.update(cx, |_root, window, cx| {
-        default_mode_input.update(cx, |i, cx_state| {
-            i.set_value("plan".to_owned(), window, cx_state)
+fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppContext) {
+    for (field, expected) in [
+        (
+            (|r: &AgentCatalogRow| r.default_mode_select.clone()) as fn(&AgentCatalogRow) -> _,
+            ("plan", None),
+        ),
+        (
+            (|r: &AgentCatalogRow| r.default_model_select.clone()) as fn(&AgentCatalogRow) -> _,
+            ("opus", Some("opus")),
+        ),
+    ] {
+        let (wh, win) = build_window(cx);
+        win.update(cx, |w, cx| {
+            w.error = Some("boom".into());
+            cx.notify();
         });
-    })
-    .unwrap();
-    win.read_with(cx, |w, _| {
-        assert!(w.error.is_none());
+        confirm_agent_row_select(&wh, &win, cx, 0, field, expected.0);
+        win.read_with(cx, |w, cx| {
+            assert!(w.error.is_none(), "a successful persist clears the error");
+            let agents = &crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .agents;
+            let daruda_config::AgentEntry::Custom(definition) = &agents[0] else {
+                panic!("the built-in default is a custom entry");
+            };
+            let (mode, model) = match expected.1 {
+                Some(model) => (None, Some(model.to_string())),
+                None => (Some(expected.0.to_string()), None),
+            };
+            assert_eq!(definition.default_mode, mode);
+            assert_eq!(definition.default_model, model);
+        });
+    }
+}
+
+/// The cached vocabulary is keyed on the row's **id**, which stays editable
+/// after the row was built — retyping it has to re-source both pickers. The
+/// two axes are sourced independently: a cache that only knows this agent's
+/// modes must not erase the models the adapter seed supplies.
+#[gpui::test]
+fn retyping_a_row_id_switches_the_pickers_to_that_agents_vocabulary(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let mut vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::default();
+    vocabulary.record_modes(
+        "beta",
+        vec![daruda_store::agent_vocabulary::VocabEntry::new(
+            "beta-mode",
+            "Beta Mode",
+        )],
+    );
+    set_agent_vocabulary(&wh, &win, cx, vocabulary);
+
+    let mode = |r: &AgentCatalogRow| r.default_mode_select.clone();
+    let model = |r: &AgentCatalogRow| r.default_model_select.clone();
+    // The built-in row's id is "claude", which the cache knows nothing about,
+    // so both axes come from the Claude adapter seed its command names.
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, mode, "plan"));
+    assert!(!agent_row_select_offers(
+        &wh,
+        &win,
+        cx,
+        0,
+        mode,
+        "beta-mode"
+    ));
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, model, "opus"));
+
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.id_input.clone(), "beta");
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, mode, "beta-mode"));
+    assert!(
+        !agent_row_select_offers(&wh, &win, cx, 0, mode, "plan"),
+        "a live mode list replaces the seed rather than joining it"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, model, "opus"),
+        "the cache knows no models for this agent, so the seed still fills that axis"
+    );
+}
+
+/// A mode pinned before the agent was ever connected — and for an adapter
+/// daruda has no seed for — must survive as a selectable entry, or opening
+/// Settings would silently drop it on the next save.
+#[gpui::test]
+fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
+    let entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        // Not a preset id: `AgentEntry::for_definition` promotes a definition
+        // whose id names a known preset, which would make this a Preset entry.
+        id: "hand-written".to_string(),
+        name: "Hand Written".to_string(),
+        launch: daruda_config::AgentLaunch::Raw(
+            "npx -y @google/gemini-cli@latest --acp".to_string(),
+        ),
+        default_mode: Some("legacy-mode".to_string()),
+        default_model: Some("legacy-model".to_string()),
+    });
+    let config = daruda_config::Config {
+        agents: vec![entry.clone()],
+        ..Default::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config.clone());
+    set_agent_vocabulary(
+        &wh,
+        &win,
+        cx,
+        daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+    );
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.default_mode(cx).as_deref(), Some("legacy-mode"));
+        assert_eq!(row.default_model(cx).as_deref(), Some("legacy-model"));
+        assert_eq!(w.validate(cx).expect("must validate").agents, config.agents);
     });
 }
 

@@ -45,10 +45,10 @@ use std::{io::Write as _, path::PathBuf};
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
-    AgentPreset, DefaultPermissionMode, PresetLaunchability, PresetOverrides,
-    READING_WIDTH_DEFAULT, READING_WIDTH_MAX, READING_WIDTH_MIN, TAIL_WINDOW_ALL,
-    TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset,
-    agent_presets,
+    AgentPreset, AgentVocabularySeed, PresetLaunchability, PresetOverrides, READING_WIDTH_DEFAULT,
+    READING_WIDTH_MAX, READING_WIDTH_MIN, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
+    TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset, agent_presets,
+    agent_vocabulary_seed,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -589,10 +589,6 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
     patch_section(&mut doc, "agent", |t| {
         t.insert(
-            "default_permission_mode",
-            toml_edit::value(config.agent.default_permission_mode.mode_id()),
-        );
-        t.insert(
             "use_modifier_to_send",
             toml_edit::value(config.agent.use_modifier_to_send),
         );
@@ -600,6 +596,9 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "input_max_rows",
             toml_edit::value(i64::from(config.agent.input_max_rows)),
         );
+        // Stale key from the removed global permission-mode axis — clear it
+        // so an existing config.toml doesn't keep carrying it forward.
+        t.remove("default_permission_mode");
     });
 
     patch_section(&mut doc, "telegram", |t| {
@@ -788,17 +787,14 @@ fn patch_settings_document(
         SettingsPatch::CursorBlinking(_) => patch_section(doc, "cursor", |t| {
             t.insert("blinking", toml_edit::value(config.cursor.blinking));
         }),
-        SettingsPatch::AgentPermissionMode(_) => patch_section(doc, "agent", |t| {
-            t.insert(
-                "default_permission_mode",
-                toml_edit::value(config.agent.default_permission_mode.mode_id()),
-            );
-        }),
         SettingsPatch::AgentUseModifierToSend(_) => patch_section(doc, "agent", |t| {
             t.insert(
                 "use_modifier_to_send",
                 toml_edit::value(config.agent.use_modifier_to_send),
             );
+            // Stale key from the removed global permission-mode axis — clear it
+            // so an existing config.toml doesn't keep carrying it forward.
+            t.remove("default_permission_mode");
         }),
         SettingsPatch::AgentCatalog(_) => replace_agents(doc, &config.agents),
         SettingsPatch::SessionHosts { .. } => {
@@ -1005,6 +1001,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             if let Some(default_mode) = &overrides.default_mode {
                 table["default_mode"] = toml_edit::value(default_mode.clone());
             }
+            if let Some(default_model) = &overrides.default_model {
+                table["default_model"] = toml_edit::value(default_model.clone());
+            }
         }
         AgentEntry::Custom(agent) => {
             table["id"] = toml_edit::value(agent.id.clone());
@@ -1037,6 +1036,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             };
             if let Some(default_mode) = &agent.default_mode {
                 table["default_mode"] = toml_edit::value(default_mode.clone());
+            }
+            if let Some(default_model) = &agent.default_model {
+                table["default_model"] = toml_edit::value(default_model.clone());
             }
             if let Some((key, sub_table)) = remote {
                 table[key] = toml_edit::Item::Table(sub_table);

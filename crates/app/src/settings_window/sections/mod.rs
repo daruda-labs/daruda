@@ -9,10 +9,13 @@
 //! The Agent, Plugin, and Session Hosts sections live in the [`agent`] /
 //! [`plugin`] / [`session_hosts`] submodules; their `impl SettingsWindow`
 //! blocks extend the same type through the standard sibling-module pattern.
+//! [`agent_vocabulary`] is the Agent section's option-sourcing half — where a
+//! catalog row's mode / model pickers get their choices.
 
 mod about;
 mod accounts;
 mod agent;
+pub(super) mod agent_vocabulary;
 pub(super) mod plugin;
 mod session_hosts;
 

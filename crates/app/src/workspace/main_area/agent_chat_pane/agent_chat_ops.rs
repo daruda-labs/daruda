@@ -11,7 +11,9 @@
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 
 use daruda_config::AgentLaunch;
+use daruda_store::agent_vocabulary::VocabEntry;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
 use std::path::{Path, PathBuf};
@@ -48,6 +50,57 @@ pub(super) fn agent_name_for(agents: &[daruda_config::AgentDefinition], agent_id
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| agent_id.to_string())
+}
+
+/// Which vocabulary axes one ACP event carries. `None` means "this event says
+/// nothing about that axis", which is distinct from an empty list ("the agent
+/// advertised none") — only the latter clears the stored vocabulary.
+struct Advertised {
+    modes: Option<Vec<VocabEntry>>,
+    models: Option<Vec<VocabEntry>>,
+}
+
+/// The mode axis as advertised at connect. Empty for an agent without modes.
+fn mode_vocabulary(modes: Option<&daruda_acp::ModeStateView>) -> Vec<VocabEntry> {
+    modes
+        .map(|m| {
+            m.available
+                .iter()
+                .map(|mode| VocabEntry::new(mode.id.clone(), mode.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The model axis of an advertised option set: the `Model`-category select's
+/// option id, its current value, and its choices. `None` when the agent
+/// advertises no model select — a boolean in that category is not a model list.
+/// The one place that decides which option *is* the model.
+pub(super) fn model_select(
+    options: &[daruda_acp::ConfigOptionView],
+) -> Option<(&str, &str, &[daruda_acp::ConfigChoiceView])> {
+    options
+        .iter()
+        .filter(|o| o.category == daruda_acp::ConfigOptionCategoryView::Model)
+        .find_map(|o| match &o.kind {
+            daruda_acp::ConfigOptionKindView::Select {
+                current_value,
+                options,
+            } => Some((o.id.as_str(), current_value.as_str(), options.as_slice())),
+            daruda_acp::ConfigOptionKindView::Boolean { .. } => None,
+        })
+}
+
+/// The model axis as a vocabulary list. Empty for an agent with no model select.
+fn model_vocabulary(options: &[daruda_acp::ConfigOptionView]) -> Vec<VocabEntry> {
+    model_select(options)
+        .map(|(_, _, choices)| {
+            choices
+                .iter()
+                .map(|c| VocabEntry::new(c.value.clone(), c.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Pure core of [`Workspace::resolve_restored_agent`] — decide the effective
@@ -340,6 +393,77 @@ impl Workspace {
             card.raw_input_summary.as_deref(),
             cx,
         );
+    }
+
+    /// Record what this pane's agent just advertised into the persisted
+    /// vocabulary cache, so option pickers offer the live agent's own lists.
+    /// Called from the event pump BEFORE the event folds into the view.
+    ///
+    /// `Connected` carries both axes; `ConfigOptionsChanged` replaces only the
+    /// option set, so it must not touch the mode axis (mode never arrives as a
+    /// config option — `daruda_acp` strips that category before the host sees
+    /// it). Writes only when a list actually changed, so a reconnect that
+    /// advertises the same vocabulary does no I/O.
+    pub(in crate::workspace) fn record_agent_vocabulary(
+        &mut self,
+        pane_id: PaneId,
+        event: &daruda_acp::AcpEvent,
+        cx: &Context<Self>,
+    ) {
+        let advertised = match event {
+            daruda_acp::AcpEvent::Connected {
+                modes,
+                config_options,
+                ..
+            } => Advertised {
+                modes: Some(mode_vocabulary(modes.as_ref())),
+                models: Some(model_vocabulary(config_options)),
+            },
+            daruda_acp::AcpEvent::ConfigOptionsChanged(options) => Advertised {
+                modes: None,
+                models: Some(model_vocabulary(options)),
+            },
+            _ => return,
+        };
+        let Some(agent_id) = self
+            .agent_chat_view(pane_id)
+            .map(|v| v.read(cx).agent_id.clone())
+        else {
+            return;
+        };
+
+        let mut changed = false;
+        if let Some(modes) = advertised.modes {
+            changed |= self.agent_vocabulary.record_modes(&agent_id, modes);
+        }
+        if let Some(models) = advertised.models {
+            changed |= self.agent_vocabulary.record_models(&agent_id, models);
+        }
+        if !changed {
+            return;
+        }
+        // A background observation, not a user action: a failed write costs the
+        // next launch a stale picker list, so it logs instead of toasting.
+        if let Err(e) = self.agent_vocabulary.save_in(&self.data_dir) {
+            LogWriter::log(
+                ErrorReport::new("Failed to save agent_vocabulary.json")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context(
+                        "path",
+                        daruda_store::observability::system_info::redact_home(
+                            daruda_store::agent_vocabulary::agent_vocabulary_path_in(
+                                &self.data_dir,
+                            ),
+                        ),
+                    )
+                    .with_context("agent_id", agent_id)
+                    .with_context("phase", "agent.connect")
+                    .dedup("agent_vocabulary.save")
+                    .build(),
+            );
+        }
     }
 
     /// Fire the "completed" notification. Called only from
@@ -755,9 +879,11 @@ impl Workspace {
         self.mutate_durable(cx, |_, _| {});
     }
 
-    /// Change a config option (model / effort / a boolean toggle / …). Shim
-    /// for the config chips: routes `(config_id, value)` into the view, which
-    /// optimistically updates and sends `session/set_config_option`.
+    /// Change a config option (model / effort / a boolean toggle / …) because
+    /// the *user* asked for it. Shim for the config chips: routes
+    /// `(config_id, value)` into the view, which optimistically updates and
+    /// sends `session/set_config_option`. The only path that can move
+    /// `last_known_model_id`, so it is also the only place that saves it.
     pub(in crate::workspace) fn set_agent_config_option(
         &mut self,
         pane_id: PaneId,
@@ -765,8 +891,34 @@ impl Workspace {
         value: daruda_acp::ConfigValueView,
         cx: &mut Context<Self>,
     ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let model_before = view.read(cx).last_known_model_id.clone();
+        view.update(cx, |v, cx| v.set_config_option(config_id, value, cx));
+        // Only a `Model`-category pick moves `last_known_model_id`; persist it
+        // so the next connect starts on it (see that field's doc).
+        if view.read(cx).last_known_model_id != model_before {
+            self.mutate_durable(cx, |_, _| {});
+        }
+    }
+
+    /// Apply the config option a connect resolved for this pane (today: the
+    /// agent's `default_model`). Same protocol effect as
+    /// [`Self::set_agent_config_option`] with no recording and no save — the
+    /// pane must not come away believing the user chose this value, or a later
+    /// edit to the agent's default would never reach it again.
+    pub(in crate::workspace) fn apply_agent_connect_config_option(
+        &mut self,
+        pane_id: PaneId,
+        config_id: String,
+        value: daruda_acp::ConfigValueView,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, cx| v.set_config_option(config_id, value, cx));
+            view.update(cx, |v, cx| {
+                v.apply_connect_config_option(config_id, value, cx)
+            });
         }
     }
 
@@ -1275,6 +1427,7 @@ mod tests {
                 name: "Other".to_string(),
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: None,
+                default_model: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1297,6 +1450,7 @@ mod tests {
                 name: "Other".to_string(),
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: None,
+                default_model: None,
             },
             AgentDefinition::claude_default(),
         ]

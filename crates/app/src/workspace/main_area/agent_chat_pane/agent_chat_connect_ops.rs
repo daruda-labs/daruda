@@ -48,6 +48,38 @@ fn agent_default_mode<'a>(
         .as_deref()
 }
 
+/// The model this agent's catalog entry asks its panes to start on. `None` for
+/// an agent that pins no model, or an id no longer in the catalog — the
+/// adapter's own choice then stands.
+fn agent_default_model<'a>(
+    agents: &'a [daruda_config::AgentDefinition],
+    agent_id: &str,
+) -> Option<&'a str> {
+    agents
+        .iter()
+        .find(|a| a.id == agent_id)?
+        .default_model
+        .as_deref()
+}
+
+/// The `set_config_option` call that puts a connecting pane on its own model:
+/// `(option id, model value)`. The pane's own remembered pick wins over the
+/// agent's `default_model`. `None` — leaving the adapter's pick standing —
+/// when neither names a model, the agent advertises no model select, the
+/// wanted value is not among the advertised choices, or it is already current.
+fn connect_model_choice(
+    options: &[daruda_acp::ConfigOptionView],
+    remembered: Option<&str>,
+    agent_default: Option<&str>,
+) -> Option<(String, String)> {
+    let wanted = remembered.or(agent_default)?;
+    let (option_id, current, choices) = super::agent_chat_ops::model_select(options)?;
+    if current == wanted || !choices.iter().any(|c| c.value == wanted) {
+        return None;
+    }
+    Some((option_id.to_string(), wanted.to_string()))
+}
+
 /// Abort a connect whose selected account's config dir could not be
 /// prepared: park the pane in `Error` and toast. Never falls back to the
 /// system account — the user picked this one, and connecting as another
@@ -285,6 +317,29 @@ impl Workspace {
         )
     }
 
+    /// The `(option id, model value)` this pane wants set now that `event` has
+    /// arrived, or `None` for nothing to do. Answers `Some` only for
+    /// `Connected`, which `daruda_acp` emits exactly once per connection —
+    /// that is what bounds the apply to once per connect, so a later
+    /// `ConfigOptionsChanged` (including the echo of the user's own chip pick)
+    /// can never re-assert the agent default over it.
+    pub(in crate::workspace) fn agent_connect_model(
+        &self,
+        pane_id: PaneId,
+        event: &daruda_acp::AcpEvent,
+        cx: &Context<Self>,
+    ) -> Option<(String, String)> {
+        let daruda_acp::AcpEvent::Connected { config_options, .. } = event else {
+            return None;
+        };
+        let view = self.agent_chat_view(pane_id)?.read(cx);
+        connect_model_choice(
+            config_options,
+            view.last_known_model_id.as_deref(),
+            agent_default_model(&self.agents, &view.agent_id),
+        )
+    }
+
     /// Open the live ACP session for an already-pushed pane and store the
     /// event-pump task on its view; closing the pane drops both. `resume`
     /// carries the persisted session id: `Some` branches `session/load`,
@@ -313,14 +368,16 @@ impl Workspace {
             .map(|v| v.read(cx).agent_id.clone())
             .unwrap_or_default();
         // Priority-ordered modes to try on a *fresh* session: this agent's own
-        // `default_mode`, then the global default, then `auto`. Resolved after
-        // the reconcile above so a pane whose agent_id was stale gets the mode
-        // of the agent it actually launches. `run_connection` uses this only on
+        // `default_mode`, when its catalog entry sets one — otherwise empty,
+        // so the adapter's own default mode applies. Resolved after the
+        // reconcile above so a pane whose agent_id was stale gets the mode of
+        // the agent it actually launches. `run_connection` uses this only on
         // a fresh `session/new`; a real `session/load` uses `restore_mode`
         // below instead.
-        let initial_modes = self
-            .agent
-            .connect_mode_priority(agent_default_mode(&self.agents, &agent_id));
+        let initial_modes = daruda_config::agent::connect_mode_priority(agent_default_mode(
+            &self.agents,
+            &agent_id,
+        ));
         // The mode this pane's session was last known to be in — reapplied
         // after a resume (`session/load`) via `session/set_mode`.
         //
@@ -684,6 +741,14 @@ impl Workspace {
                             // at the activity-settle edge (see the reconcile below).
                             ws.maybe_notify_agent_event(pane_id, &event, cx);
                             ws.report_agent_notice(pane_id, &event, cx);
+                            // Refresh the persisted option vocabularies from
+                            // what this agent just advertised. Also borrows
+                            // `&event` before the move below.
+                            ws.record_agent_vocabulary(pane_id, &event, cx);
+                            // Decided from `&event` here, applied after the
+                            // fold below so the optimistic chip write lands on
+                            // the option set this event just advertised.
+                            let connect_model = ws.agent_connect_model(pane_id, &event, cx);
                             let telegram_first_response = view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
@@ -706,6 +771,19 @@ impl Workspace {
                                 .update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
                             if let Some(outcome) = edge {
                                 ws.fire_activity_completion(pane_id, outcome, cx);
+                            }
+                            // Put the freshly connected session on this pane's
+                            // model. Routed through the non-recording entry
+                            // point: when the value came from the agent's
+                            // `default_model`, remembering it as a user pick
+                            // would outrank every later edit to that setting.
+                            if let Some((config_id, model)) = connect_model {
+                                ws.apply_agent_connect_config_option(
+                                    pane_id,
+                                    config_id,
+                                    daruda_acp::ConfigValueView::Id(model),
+                                    cx,
+                                );
                             }
                             if view.read(cx).to_session_status() != before {
                                 ws.notify_status_docks(cx);
@@ -958,7 +1036,10 @@ fn login_revives_pane(
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_default_mode, login_revives_pane, notice_dedup_key};
+    use super::{
+        agent_default_mode, agent_default_model, connect_model_choice, login_revives_pane,
+        notice_dedup_key,
+    };
     use crate::workspace::account_login_ops::LoginTarget;
     use daruda_acp::Remedy;
     use daruda_config::{AgentDefinition, AgentLaunch};
@@ -1070,6 +1151,7 @@ mod tests {
                 name: "Other".to_string(),
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: Some("yolo".to_string()),
+                default_model: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1083,6 +1165,119 @@ mod tests {
             agent_default_mode(&agents, "gone"),
             None,
             "an id no longer in the catalog is not an override"
+        );
+    }
+
+    #[test]
+    fn agent_default_model_reads_the_matching_catalog_entry() {
+        let agents = vec![
+            AgentDefinition {
+                id: "other".to_string(),
+                name: "Other".to_string(),
+                launch: AgentLaunch::Raw("run-other".to_string()),
+                default_mode: None,
+                default_model: Some("opus".to_string()),
+            },
+            AgentDefinition::claude_default(),
+        ];
+        assert_eq!(agent_default_model(&agents, "other"), Some("opus"));
+        assert_eq!(
+            agent_default_model(&agents, &AgentDefinition::claude_default().id),
+            None,
+            "an entry without a model leaves the adapter's own pick standing"
+        );
+        assert_eq!(
+            agent_default_model(&agents, "gone"),
+            None,
+            "an id no longer in the catalog pins nothing"
+        );
+    }
+
+    /// A `Model`-category select whose first choice is what the adapter
+    /// currently has selected, plus a `ThoughtLevel` select that must never be
+    /// mistaken for the model axis.
+    fn model_options(choices: &[&str]) -> Vec<daruda_acp::ConfigOptionView> {
+        use daruda_acp::{
+            ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
+        };
+        vec![
+            ConfigOptionView {
+                id: "effort".to_string(),
+                name: "Effort".to_string(),
+                description: None,
+                category: ConfigOptionCategoryView::ThoughtLevel,
+                kind: ConfigOptionKindView::Select {
+                    current_value: "high".to_string(),
+                    options: vec![ConfigChoiceView {
+                        value: "high".to_string(),
+                        name: "High".to_string(),
+                        description: None,
+                    }],
+                },
+            },
+            ConfigOptionView {
+                id: "model".to_string(),
+                name: "Model".to_string(),
+                description: None,
+                category: ConfigOptionCategoryView::Model,
+                kind: ConfigOptionKindView::Select {
+                    current_value: choices[0].to_string(),
+                    options: choices
+                        .iter()
+                        .map(|value| ConfigChoiceView {
+                            value: (*value).to_string(),
+                            name: value.to_uppercase(),
+                            description: None,
+                        })
+                        .collect(),
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn a_remembered_model_outranks_the_agent_default() {
+        let options = model_options(&["opus", "sonnet", "haiku"]);
+        assert_eq!(
+            connect_model_choice(&options, Some("haiku"), Some("sonnet")),
+            Some(("model".to_string(), "haiku".to_string())),
+            "the pane's own pick wins, and it names the Model option — not Effort"
+        );
+        assert_eq!(
+            connect_model_choice(&options, None, Some("sonnet")),
+            Some(("model".to_string(), "sonnet".to_string())),
+            "a pane that never picked starts on the agent's default"
+        );
+        assert_eq!(
+            connect_model_choice(&options, None, None),
+            None,
+            "neither axis names a model — nothing to apply"
+        );
+    }
+
+    #[test]
+    fn a_model_the_adapter_does_not_offer_leaves_its_own_pick() {
+        let options = model_options(&["opus", "sonnet"]);
+        assert_eq!(
+            connect_model_choice(&options, Some("gpt-9"), Some("sonnet")),
+            None,
+            "an unadvertised remembered value is skipped rather than falling \
+             back to the agent default"
+        );
+        assert_eq!(
+            connect_model_choice(&options, None, Some("gpt-9")),
+            None,
+            "same for an unadvertised agent default"
+        );
+        assert_eq!(
+            connect_model_choice(&options, Some("opus"), None),
+            None,
+            "already current — no request worth sending"
+        );
+        assert_eq!(
+            connect_model_choice(&[], Some("opus"), Some("sonnet")),
+            None,
+            "an agent advertising no model select has nothing to set"
         );
     }
 }

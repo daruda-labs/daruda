@@ -105,6 +105,7 @@ fn agents_round_trip_through_toml() {
                 name: "Codex".to_string(),
                 launch: AgentLaunch::Raw("codex acp".to_string()),
                 default_mode: None,
+                default_model: None,
             }),
             AgentEntry::Preset {
                 preset: "codex-acp".to_string(),
@@ -669,7 +670,6 @@ fn patch_config_file_writes_agent_settings() {
 
     let cfg = Config {
         agent: AgentConfig {
-            default_permission_mode: DefaultPermissionMode::Plan,
             use_modifier_to_send: true,
             ..AgentConfig::default()
         },
@@ -678,11 +678,27 @@ fn patch_config_file_writes_agent_settings() {
     patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
-    assert_eq!(
-        reloaded.agent.default_permission_mode,
-        DefaultPermissionMode::Plan
-    );
     assert!(reloaded.agent.use_modifier_to_send);
+}
+
+#[test]
+fn patch_config_file_clears_a_stale_permission_mode_key() {
+    // The global permission-mode axis was removed; a config.toml written by
+    // an older daruda build can still carry the key, and a full save must
+    // clear it rather than leave it forever ignored.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[agent]\ndefault_permission_mode = \"plan\"\nuse_modifier_to_send = true\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("default_permission_mode"), "{text}");
 }
 
 #[test]
@@ -739,6 +755,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
+                    default_model: Some("gemini-2.5-pro".to_string()),
                 },
             },
             AgentEntry::Preset {
@@ -750,6 +767,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 name: "Hermes Agent".to_string(),
                 launch: AgentLaunch::Raw("hermes acp".to_string()),
                 default_mode: Some("yolo".to_string()),
+                default_model: None,
             }),
             AgentEntry::Custom(AgentDefinition {
                 id: "remote".to_string(),
@@ -759,6 +777,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     host: "vm-work".to_string(),
                 },
                 default_mode: None,
+                default_model: Some("claude-opus-4".to_string()),
             }),
         ],
         ..Config::default()

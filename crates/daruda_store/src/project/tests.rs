@@ -182,6 +182,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         agent_id: Some("claude".to_string()),
         account_id: Some(id),
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
@@ -209,6 +210,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: Some("acceptEdits".to_string()),
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
@@ -225,6 +227,38 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
 }
 
 #[test]
+fn agent_chat_content_round_trip_preserves_model_id() {
+    // Every connect reapplies this pane's model, so the pick has to survive
+    // the restart that ends the session it was made in.
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: Some("sess-abc123".to_string()),
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        model_id: Some("opus".to_string()),
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        fold_mode: None,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    assert!(
+        !json.contains("mode_id"),
+        "an unset mode/model must stay out of the payload: {json}"
+    );
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.model_id, Some("opus".to_string()));
+
+    // Legacy payload (pre-model_id) still loads, defaulting to None.
+    let legacy_json = r#"{"cwd":"/repo/lane","mode_id":"acceptEdits"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert!(legacy.model_id.is_none());
+    assert_eq!(legacy.mode_id, Some("acceptEdits".to_string()));
+}
+
+#[test]
 fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
     let content = SerializedAgentChatContent {
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
@@ -233,6 +267,7 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Reading,
         tail_window: None,
         display_filter: None,
@@ -256,6 +291,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
@@ -297,6 +333,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
@@ -348,6 +385,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
         display_filter: None,
@@ -461,6 +499,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         agent_id: None,
         account_id: None,
         mode_id: None,
+        model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
@@ -491,6 +530,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             agent_id: Some("claude".to_string()),
             account_id: None,
             mode_id: None,
+            model_id: None,
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
             display_filter: None,
@@ -529,6 +569,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             agent_id: None,
             account_id: None,
             mode_id: None,
+            model_id: None,
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
             display_filter: None,

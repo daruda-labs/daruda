@@ -37,6 +37,7 @@ pub struct PresetOverrides {
     /// override of this one — that is a [`AgentEntry::Custom`] entry.
     pub command: Option<String>,
     pub default_mode: Option<String>,
+    pub default_model: Option<String>,
 }
 
 impl AgentEntry {
@@ -56,6 +57,9 @@ impl AgentEntry {
                 }
                 if let Some(default_mode) = &overrides.default_mode {
                     definition.default_mode = Some(default_mode.clone());
+                }
+                if let Some(default_model) = &overrides.default_model {
+                    definition.default_model = Some(default_model.clone());
                 }
                 Some(definition)
             }
@@ -120,6 +124,7 @@ impl AgentEntry {
                     _ => return None,
                 },
                 default_mode: definition.default_mode.clone(),
+                default_model: definition.default_model.clone(),
             },
         };
         // The reference stands in for `definition` only if it resolves back to
@@ -154,6 +159,8 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
@@ -170,6 +177,7 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
                     name: v.name,
                     command: v.command,
                     default_mode: v.default_mode,
+                    default_model: v.default_model,
                 },
             });
         }
@@ -185,6 +193,7 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
             ssh: v.ssh,
             docker: v.docker,
             default_mode: v.default_mode,
+            default_model: v.default_model,
         });
         Ok(Self::for_definition(definition, None))
     }
@@ -199,6 +208,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                 name: overrides.name,
                 command: overrides.command,
                 default_mode: overrides.default_mode,
+                default_model: overrides.default_model,
                 ssh: None,
                 docker: None,
             },
@@ -210,6 +220,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                     name: Some(repr.name),
                     command: repr.command,
                     default_mode: repr.default_mode,
+                    default_model: repr.default_model,
                     ssh: repr.ssh,
                     docker: repr.docker,
                 }
@@ -233,6 +244,7 @@ mod tests {
             name: id.to_string(),
             launch: AgentLaunch::Raw(command.to_string()),
             default_mode: None,
+            default_model: None,
         }
     }
 
@@ -254,7 +266,8 @@ mod tests {
         let entry: AgentEntry = toml::from_str(
             "preset = \"gemini\"\n\
              command = \"npx -y @google/gemini-cli@0.9.0 --acp\"\n\
-             default_mode = \"plan\"\n",
+             default_mode = \"plan\"\n\
+             default_model = \"gemini-2.5-pro\"\n",
         )
         .expect("deserialize");
         let resolved = entry.resolve().expect("gemini is a known preset");
@@ -264,6 +277,7 @@ mod tests {
             AgentLaunch::Raw("npx -y @google/gemini-cli@0.9.0 --acp".to_string())
         );
         assert_eq!(resolved.default_mode.as_deref(), Some("plan"));
+        assert_eq!(resolved.default_model.as_deref(), Some("gemini-2.5-pro"));
         // Untouched fields still come from the preset.
         assert_eq!(resolved.id, preset.id);
         assert_eq!(resolved.name, preset.name);
@@ -282,6 +296,7 @@ mod tests {
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
+                    default_model: Some("gemini-2.5-pro".to_string()),
                 },
             },
             AgentEntry::Custom(custom("hermes", "hermes acp")),
@@ -293,6 +308,7 @@ mod tests {
                     host: "vm-work".to_string(),
                 },
                 default_mode: Some("plan".to_string()),
+                default_model: Some("claude-opus-4".to_string()),
             }),
         ] {
             let toml_str = toml::to_string(&entry).expect("serialize");
@@ -369,9 +385,38 @@ mod tests {
                     name: Some("My Codex".to_string()),
                     command: None,
                     default_mode: Some("plan".to_string()),
+                    default_model: None,
                 },
             }
         );
+    }
+
+    #[test]
+    fn a_default_model_override_is_promoted_and_resolves_back() {
+        let preset = codex_preset();
+        let AgentLaunch::Raw(command) = &preset.launch else {
+            panic!("presets launch Raw");
+        };
+        let toml_str = format!(
+            "id = \"{}\"\nname = \"{}\"\ncommand = \"{}\"\ndefault_model = \"gpt-5-codex\"\n",
+            preset.id, preset.name, command
+        );
+        let entry: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(
+            entry,
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides {
+                    name: None,
+                    command: None,
+                    default_mode: None,
+                    default_model: Some("gpt-5-codex".to_string()),
+                },
+            }
+        );
+        let resolved = entry.resolve().expect("codex-acp is runnable");
+        assert_eq!(resolved.default_model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(resolved.id, preset.id);
     }
 
     #[test]
@@ -432,6 +477,7 @@ mod tests {
                     name: None,
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: None,
+                    default_model: None,
                 },
             }
         );

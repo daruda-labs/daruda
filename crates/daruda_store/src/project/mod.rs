@@ -470,6 +470,13 @@ pub struct SerializedAgentChatContent {
     /// `restore_mode` parameter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode_id: Option<String>,
+    /// Model id this pane was explicitly put on (its own pick, or the agent's
+    /// `default_model` applied at connect). Persisted because every connect
+    /// reapplies it, so the pick has to outlive the session it was made in.
+    /// `None` when the agent advertises no model select, or nothing ever
+    /// overrode the adapter's own choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
     /// Per-pane AgentChat content width mode. Missing in pre-feature state
     /// files, defaulting to `Full` so existing panes keep using the whole pane.
     #[serde(

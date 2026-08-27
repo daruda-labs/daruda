@@ -447,6 +447,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// `session/load`'s response alone can't be trusted. The host tracks and
     /// reapplies this itself until that's fixed upstream.
     pub(in crate::workspace) last_known_mode_id: Option<String>,
+    /// Model id the *user* picked for this pane — set only by the model chip,
+    /// never mirrored from what the adapter reports and never written by the
+    /// connect-time apply of the agent's `default_model` (that would make the
+    /// setting unchangeable, since a pick outranks it). Persisted, and
+    /// reapplied on every connect, so the pick outlives both the session it
+    /// was made in and the app run.
+    pub(in crate::workspace) last_known_model_id: Option<String>,
     /// True while a resume (`session/load`) is replaying its history. While
     /// set, `apply_event` accumulates items but skips the per-event rebuild +
     /// notify (O(n²) over the replay) until `Connected` clears it.
@@ -632,6 +639,9 @@ impl AgentChatView {
             status,
             session_id,
             last_known_mode_id: mode_id,
+            // Patched in by session restore right after construction, same as
+            // the mode id above — see `Workspace::rebuild_layout`.
+            last_known_model_id: None,
             agent_id,
             agent_name,
             // A restored pane connects lazily; the resume decision (and the

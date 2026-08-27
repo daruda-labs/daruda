@@ -182,6 +182,7 @@ fn legacy_ssh_claude_agent() -> daruda_config::AgentDefinition {
             host: "old-box".to_string(),
         },
         default_mode: None,
+        default_model: None,
     }
 }
 
@@ -559,6 +560,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             agent_id: Some(agent_id),
             account_id: Some(claude_account),
             mode_id: None,
+            model_id: None,
             content_width: daruda_store::project::SerializedChatContentWidth::Full,
             tail_window: None,
             display_filter: None,

@@ -563,6 +563,7 @@ fn codex_agent() -> daruda_config::AgentDefinition {
         name: "Codex".to_string(),
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
         default_mode: None,
+        default_model: None,
     }
 }
 
@@ -815,6 +816,7 @@ fn codex() -> daruda_config::AgentDefinition {
         name: "Codex".to_string(),
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
         default_mode: None,
+        default_model: None,
     }
 }
 
@@ -1523,4 +1525,484 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
     });
 
     let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// A `Model`-category select advertising `choices`, plus a `ThoughtLevel`
+/// select that must never be mistaken for the model axis.
+fn model_options(choices: &[(&str, &str)]) -> Vec<daruda_acp::ConfigOptionView> {
+    use daruda_acp::{
+        ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
+    };
+    vec![
+        ConfigOptionView {
+            id: "model".into(),
+            name: "Model".into(),
+            description: None,
+            category: ConfigOptionCategoryView::Model,
+            kind: ConfigOptionKindView::Select {
+                current_value: choices[0].0.to_string(),
+                options: choices
+                    .iter()
+                    .map(|(value, name)| ConfigChoiceView {
+                        value: (*value).to_string(),
+                        name: (*name).to_string(),
+                        description: None,
+                    })
+                    .collect(),
+            },
+        },
+        ConfigOptionView {
+            id: "effort".into(),
+            name: "Effort".into(),
+            description: None,
+            category: ConfigOptionCategoryView::ThoughtLevel,
+            kind: ConfigOptionKindView::Select {
+                current_value: "high".into(),
+                options: vec![ConfigChoiceView {
+                    value: "high".into(),
+                    name: "High".into(),
+                    description: None,
+                }],
+            },
+        },
+    ]
+}
+
+#[gpui::test]
+async fn connect_records_both_vocabulary_axes_and_config_change_only_models(
+    cx: &mut TestAppContext,
+) {
+    use daruda_acp::{AcpEvent, ModeStateView, SessionCapabilitiesView, SessionModeView};
+    use daruda_store::agent_vocabulary::{AgentVocabularyCache, VocabEntry};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let agent_id = daruda_config::AgentDefinition::claude_default().id;
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    agent_id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // What the adapter advertises at connect: both axes at once.
+    let connected = AcpEvent::Connected {
+        session_id: "s1".into(),
+        modes: Some(ModeStateView {
+            available: vec![
+                SessionModeView {
+                    id: "default".into(),
+                    name: "Default".into(),
+                    description: None,
+                },
+                SessionModeView {
+                    id: "plan".into(),
+                    name: "Plan".into(),
+                    description: None,
+                },
+            ],
+            current: "default".into(),
+        }),
+        config_options: model_options(&[("opus", "Opus"), ("sonnet", "Sonnet")]),
+        capabilities: SessionCapabilitiesView::default(),
+        login_methods: Vec::new(),
+    };
+
+    let data_dir = workspace.update(cx, |ws, cx| {
+        ws.record_agent_vocabulary(pane_id, &connected, cx);
+        ws.data_dir.clone()
+    });
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.agent_vocabulary.modes(&agent_id),
+            vec![
+                VocabEntry::new("default", "Default"),
+                VocabEntry::new("plan", "Plan"),
+            ]
+        );
+        assert_eq!(
+            ws.agent_vocabulary.models(&agent_id),
+            vec![
+                VocabEntry::new("opus", "Opus"),
+                VocabEntry::new("sonnet", "Sonnet"),
+            ],
+            "only the Model-category select feeds the model axis"
+        );
+    });
+    assert_eq!(
+        AgentVocabularyCache::load_in(&data_dir).models(&agent_id),
+        vec![
+            VocabEntry::new("opus", "Opus"),
+            VocabEntry::new("sonnet", "Sonnet"),
+        ],
+        "a changed vocabulary is persisted, not just cached in memory"
+    );
+
+    // A later option replacement must leave the mode axis alone.
+    let changed = AcpEvent::ConfigOptionsChanged(model_options(&[("haiku", "Haiku")]));
+    workspace.update(cx, |ws, cx| {
+        ws.record_agent_vocabulary(pane_id, &changed, cx);
+    });
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.agent_vocabulary.models(&agent_id),
+            vec![VocabEntry::new("haiku", "Haiku")]
+        );
+        assert_eq!(
+            ws.agent_vocabulary.modes(&agent_id),
+            vec![
+                VocabEntry::new("default", "Default"),
+                VocabEntry::new("plan", "Plan"),
+            ],
+            "ConfigOptionsChanged replaces options only — modes are untouched"
+        );
+    });
+}
+
+#[gpui::test]
+async fn a_connect_applies_the_panes_model_and_nothing_later_does(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, SessionCapabilitiesView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let agent_id = daruda_config::AgentDefinition::claude_default().id;
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                // This agent's catalog entry pins a model the adapter below
+                // does not connect on.
+                for agent in &mut ws.agents {
+                    if agent.id == agent_id {
+                        agent.default_model = Some("sonnet".to_string());
+                    }
+                }
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    agent_id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let choices = [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")];
+    let connected = AcpEvent::Connected {
+        session_id: "s1".into(),
+        modes: None,
+        config_options: model_options(&choices),
+        capabilities: SessionCapabilitiesView::default(),
+        login_methods: Vec::new(),
+    };
+    // A later wholesale replacement of the same option set — the shape the
+    // user's own chip pick echoes back in.
+    let changed = AcpEvent::ConfigOptionsChanged(model_options(&choices));
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+
+    workspace.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &connected, cx),
+            Some(("model".to_string(), "sonnet".to_string())),
+            "a pane that never picked starts on its agent's default model"
+        );
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &changed, cx),
+            None,
+            "only a connect applies a model — a later option replacement must not re-assert the agent default over the user's pick"
+        );
+    });
+
+    view.update(cx, |v, _| {
+        v.last_known_model_id = Some("haiku".to_string());
+    });
+    workspace.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &connected, cx),
+            Some(("model".to_string(), "haiku".to_string())),
+            "the pane's remembered pick outranks the agent default"
+        );
+    });
+
+    view.update(cx, |v, _| {
+        v.last_known_model_id = Some("gpt-9".to_string());
+    });
+    workspace.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &connected, cx),
+            None,
+            "a model this adapter does not advertise is skipped, leaving its own pick standing"
+        );
+    });
+}
+
+#[gpui::test]
+async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::TabEntry;
+    use crate::workspace::main_area::pane_tree::PaneLayout;
+
+    let config = daruda_config::Config::default();
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_model_restore_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    let (window_handle, workspace) = super::build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    let (workspace_state, project_states) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
+                let pane = ws.create_agent_chat_pane(
+                    cwd,
+                    Some("sess-model-1".to_string()),
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let tab_id = ws.alloc_id();
+                ws.active_runtime_mut().tabs.push(TabEntry {
+                    id: tab_id,
+                    layout: PaneLayout::Pane(pane_id),
+                    last_focused_pane: pane_id,
+                    user_label: None,
+                });
+                // Stand in for what `Connected` folds in before a chip can be
+                // clicked: the advertised option set the pick lands on.
+                let view = agent_view(ws, pane_id);
+                view.update(cx, |v, _| {
+                    v.session_config.config_options =
+                        model_options(&[("opus", "Opus"), ("sonnet", "Sonnet")]);
+                });
+
+                // A non-model option must not be mistaken for the model axis.
+                ws.set_agent_config_option(
+                    pane_id,
+                    "effort".to_string(),
+                    daruda_acp::ConfigValueView::Id("high".to_string()),
+                    cx,
+                );
+                assert_eq!(view.read(cx).last_known_model_id, None);
+
+                ws.set_agent_config_option(
+                    pane_id,
+                    "model".to_string(),
+                    daruda_acp::ConfigValueView::Id("sonnet".to_string()),
+                    cx,
+                );
+                assert_eq!(
+                    view.read(cx).last_known_model_id.as_deref(),
+                    Some("sonnet"),
+                    "the chip pick is remembered so the next connect reapplies it"
+                );
+
+                ws.snapshot_for_disk(cx).expect("snapshot")
+            })
+        })
+        .unwrap();
+
+    let persisted = project_states
+        .iter()
+        .flat_map(|p| p.lanes.iter())
+        .flat_map(|l| l.tabs.iter())
+        .find_map(|t| match &t.layout {
+            daruda_store::project::SerializedLayout::Leaf {
+                content: daruda_store::project::SerializedPaneContent::AgentChat(ac),
+                ..
+            } => ac.model_id.clone(),
+            _ => None,
+        });
+    assert_eq!(
+        persisted.as_deref(),
+        Some("sonnet"),
+        "the pick reaches the persisted pane record"
+    );
+
+    let restored_handle = cx.add_window(|window, cx| {
+        let mut ws = Workspace::new_with_project_for_test(
+            &config,
+            None,
+            super::fresh_test_data_dir(),
+            window,
+            cx,
+        );
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    });
+    let restored = restored_handle.root(cx).unwrap();
+    restored.read_with(cx, |ws, cx| {
+        let view = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| p.agent_chat_view())
+            .expect("restored agent chat pane present")
+            .read(cx);
+        assert_eq!(
+            view.last_known_model_id.as_deref(),
+            Some("sonnet"),
+            "a restored pane still knows its model, so its lazy connect reapplies it"
+        );
+    });
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// The model option's current value as the pane's session sees it.
+fn current_model(v: &AgentChatView) -> Option<&str> {
+    let opt = v
+        .session_config
+        .config_options
+        .iter()
+        .find(|o| o.id == "model")?;
+    match &opt.kind {
+        daruda_acp::ConfigOptionKindView::Select { current_value, .. } => Some(current_value),
+        daruda_acp::ConfigOptionKindView::Boolean { .. } => None,
+    }
+}
+
+/// The agent's configured `default_model` is applied at connect but must never
+/// be recorded as the user's own pick — a pick outranks the default on every
+/// later connect, so recording it would leave a Settings edit to
+/// `default_model` unable to ever reach this pane again. Only the chip records.
+#[gpui::test]
+async fn a_connect_applied_agent_default_never_poses_as_the_users_pick(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ConfigValueView, SessionCapabilitiesView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let agent_id = daruda_config::AgentDefinition::claude_default().id;
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                // The agent pins "opus"; the pane itself has picked nothing.
+                for agent in &mut ws.agents {
+                    if agent.id == agent_id {
+                        agent.default_model = Some("opus".to_string());
+                    }
+                }
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    agent_id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // A `Connected` whose adapter reports `current` as its own selection.
+    let advertised = |current: &str| {
+        let mut choices = [("sonnet", "Sonnet"), ("opus", "Opus"), ("haiku", "Haiku")];
+        let at = choices.iter().position(|(v, _)| *v == current);
+        choices.swap(0, at.expect("current is one of the choices"));
+        AcpEvent::Connected {
+            session_id: "s1".into(),
+            modes: None,
+            config_options: model_options(&choices),
+            capabilities: SessionCapabilitiesView::default(),
+            login_methods: Vec::new(),
+        }
+    };
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    // Stand in for what `Connected` folds into the view before the apply runs.
+    view.update(cx, |v, _| {
+        v.session_config.config_options = model_options(&[("sonnet", "Sonnet")]);
+    });
+
+    // The adapter connects on "sonnet"; the agent default "opus" is applied.
+    workspace.update(cx, |ws, cx| {
+        let choice = ws.agent_connect_model(pane_id, &advertised("sonnet"), cx);
+        assert_eq!(
+            choice,
+            Some(("model".to_string(), "opus".to_string())),
+            "a pane that never picked starts on its agent's default model"
+        );
+        let (config_id, model) = choice.expect("a model to apply");
+        ws.apply_agent_connect_config_option(pane_id, config_id, ConfigValueView::Id(model), cx);
+        assert_eq!(
+            current_model(view.read(cx)),
+            Some("opus"),
+            "the agent's default reached the session"
+        );
+        assert_eq!(
+            view.read(cx).last_known_model_id,
+            None,
+            "but applying the agent's default is not the user picking it"
+        );
+    });
+
+    // The user edits the agent's `default_model` in Settings. The next connect
+    // must follow the new value instead of the one the last connect applied.
+    workspace.update(cx, |ws, cx| {
+        for agent in &mut ws.agents {
+            if agent.id == agent_id {
+                agent.default_model = Some("sonnet".to_string());
+            }
+        }
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &advertised("opus"), cx),
+            Some(("model".to_string(), "sonnet".to_string())),
+            "the edited agent default reaches the pane — the earlier apply did not pin it to opus"
+        );
+    });
+
+    // A real chip pick, on the other hand, is recorded and outranks the default.
+    workspace.update(cx, |ws, cx| {
+        ws.set_agent_config_option(
+            pane_id,
+            "model".to_string(),
+            ConfigValueView::Id("haiku".to_string()),
+            cx,
+        );
+        assert_eq!(
+            view.read(cx).last_known_model_id.as_deref(),
+            Some("haiku"),
+            "the chip records the pick"
+        );
+        assert_eq!(
+            ws.agent_connect_model(pane_id, &advertised("opus"), cx),
+            Some(("model".to_string(), "haiku".to_string())),
+            "and it outranks the agent default on the next connect"
+        );
+    });
 }

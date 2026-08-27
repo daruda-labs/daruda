@@ -77,7 +77,6 @@ pub struct SettingsWindow {
     cursor_style_select: Entity<SelectState>,
     cursor_blinking: bool,
     // Agent
-    default_permission_mode_select: Entity<SelectState>,
     agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
     /// The agent catalog in `config.toml` order, editable and non-editable
@@ -87,6 +86,12 @@ pub struct SettingsWindow {
     /// decide on its own whether "the catalog" included the non-editable half,
     /// and the two that answered "no" disagreed with the rest.
     agent_catalog: Vec<AgentCatalogItem>,
+    /// What each agent last advertised on the mode / model axes, read once at
+    /// construction — Settings holds no `data_dir`, so it loads the store file
+    /// itself the same way the accounts snapshot below does. A row's pickers
+    /// fall back to [`daruda_config::agent_vocabulary_seed`] per axis when this
+    /// has nothing for the row's id.
+    pub(super) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
     /// The session host registry (`[[session_hosts]]`) in `config.toml`
     /// order — named, reusable SSH/Docker targets a lane's `session_host`
     /// can reference by id instead of repeating the same target/container
@@ -226,7 +231,12 @@ pub(super) enum PluginSkillBodyState {
 /// edit and is carried verbatim, so both kinds live in a single ordered list —
 /// position survives a save, and no operation can see one kind without the
 /// other being in reach.
+///
+/// `large_enum_variant` is allowed for the same reason as `PaneContent`'s: the
+/// list holds one item per configured agent, so Box-ing the row only adds a
+/// heap hop to every render read for negligible savings.
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub(super) enum AgentCatalogItem {
     Editable(AgentCatalogRow),
     Unresolved(daruda_config::AgentEntry),
@@ -254,7 +264,6 @@ enum SelectSetting {
     UiPreset,
     FontFamily,
     CursorStyle,
-    AgentPermissionMode,
     RenderMaxFps,
     SyntaxTheme,
     PreferredEditor,
@@ -292,10 +301,15 @@ pub(super) struct AgentCatalogRow {
     /// Docker container name — only meaningful (and only rendered) when
     /// `transport_select` is `"docker"`.
     pub(super) container_input: Entity<InputState>,
-    /// Optional session mode to request when this agent connects, overriding
-    /// the global default. Free text: a mode id is whatever the agent
-    /// advertises, which varies by agent and by model. Empty = no override.
-    pub(super) default_mode_input: Entity<InputState>,
+    /// Optional session mode to request when this agent connects. Options are
+    /// the agent's cached vocabulary, falling back to the adapter seed the
+    /// command names; the empty value is the "agent default" sentinel that
+    /// means no override. Rebuilt whenever the row's id or command changes —
+    /// see [`SettingsWindow::refresh_agent_row_vocabulary`].
+    pub(super) default_mode_select: Entity<SelectState>,
+    /// Optional model to request when this agent connects. Same option
+    /// sourcing and same empty sentinel as `default_mode_select`.
+    pub(super) default_model_select: Entity<SelectState>,
     /// The command's executable name, when [`agent_command_path_warning`]
     /// determined it names a local binary not found on `PATH` — `None` when
     /// no check applies (`npx`/`uvx`/JSON stdio) or the binary was found.
@@ -494,6 +508,7 @@ impl SettingsWindow {
 
     fn agent_row_from_definition(
         definition: &daruda_config::AgentDefinition,
+        vocabulary: &daruda_store::agent_vocabulary::AgentVocabularyCache,
         preset: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -520,7 +535,17 @@ impl SettingsWindow {
         };
         let path_warning = agent_command_path_warning(&command);
         let transport_kind = SharedString::from(transport_kind);
-        let default_mode = definition.default_mode.clone().unwrap_or_default();
+        let default_mode = SharedString::from(definition.default_mode.clone().unwrap_or_default());
+        let default_model =
+            SharedString::from(definition.default_model.clone().unwrap_or_default());
+        let (mode_options, model_options) =
+            sections::agent_vocabulary::agent_row_vocabulary_options(
+                vocabulary,
+                &id,
+                &command,
+                &default_mode,
+                &default_model,
+            );
         AgentCatalogRow {
             preset,
             id_input: cx.new(|cx_state| {
@@ -556,10 +581,11 @@ impl SettingsWindow {
                     .placeholder("container-name")
                     .default_value(container)
             }),
-            default_mode_input: cx.new(|cx_state| {
-                InputState::new(window, cx_state)
-                    .placeholder(s::settings_agent_default_mode_placeholder())
-                    .default_value(default_mode)
+            default_mode_select: cx.new(|cx| {
+                select::state_with_options(mode_options, Some(&default_mode), window, cx)
+            }),
+            default_model_select: cx.new(|cx| {
+                select::state_with_options(model_options, Some(&default_model), window, cx)
             }),
             path_warning,
         }
@@ -569,9 +595,9 @@ impl SettingsWindow {
     /// clear-error subscription plus the transport-pick repaint, pushing
     /// each into `subs`. An associated fn (not `&mut self`) so both the
     /// constructor's initial rows (loaded from config) and rows added at
-    /// runtime via [`Self::add_agent_row`] go through the same wiring —
-    /// keeping them separate previously let the constructor's copy drift
-    /// out of sync and silently drop `default_mode_input`'s subscription.
+    /// runtime via [`Self::add_agent_row`] go through one wiring site — two
+    /// copies would let a row's inputs drift out of sync over which ones are
+    /// actually subscribed.
     fn subscribe_agent_row(
         row: &AgentCatalogRow,
         window: &mut Window,
@@ -587,10 +613,32 @@ impl SettingsWindow {
             window,
             cx,
         ));
-        subs.push(Self::subscribe_agent_input(
-            &row.default_mode_input,
+        // Both pickers persist on pick, like the transport one below. Their
+        // option lists are rebuilt in place by the id/command handlers further
+        // down, which reuse these same entities so this wiring stays valid.
+        for state in [&row.default_mode_select, &row.default_model_select] {
+            subs.push(cx.subscribe_in(
+                state,
+                window,
+                |this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        this.persist_agent_catalog(cx);
+                    }
+                },
+            ));
+        }
+        // The row's id keys the cached vocabulary, so retyping it switches
+        // both pickers to that agent's option lists.
+        subs.push(cx.subscribe_in(
+            &row.id_input,
             window,
-            cx,
+            |this, state, ev: &InputEvent, window, cx| {
+                if matches!(ev, InputEvent::Change)
+                    && let Some(index) = this.agent_row_index_by_id(state)
+                {
+                    this.refresh_agent_row_vocabulary(index, window, cx);
+                }
+            },
         ));
         // Re-render on transport pick so the row immediately shows/hides the
         // matching host/container field (rows are added/removed at runtime,
@@ -608,18 +656,20 @@ impl SettingsWindow {
                 }
             },
         ));
-        // Recompute the local-PATH warning whenever the command text changes.
-        // Separate from the standard submit/clear-error subscription above,
-        // which is shared by every input field and doesn't know which row's
-        // command changed.
+        // Recompute the local-PATH warning whenever the command text changes,
+        // and re-source the pickers: the command names the adapter whose seed
+        // fills them before any connect recorded a real vocabulary. Separate
+        // from the standard submit/clear-error subscription above, which is
+        // shared by every input field and doesn't know which row changed.
         subs.push(cx.subscribe_in(
             &row.command_input,
             window,
-            |this, state, ev: &InputEvent, _window, cx| {
+            |this, state, ev: &InputEvent, window, cx| {
                 if matches!(ev, InputEvent::Change)
                     && let Some(index) = this.agent_row_index_by_command(state)
                 {
                     this.recompute_agent_row_path_warning(index, cx);
+                    this.refresh_agent_row_vocabulary(index, window, cx);
                 }
             },
         ));
@@ -679,6 +729,15 @@ impl SettingsWindow {
             .map(|(index, _)| index)
     }
 
+    /// Catalog index of the row whose `id_input` is `entity` — same
+    /// entity-identity lookup, and same reason, as
+    /// [`Self::agent_row_index_by_command`].
+    fn agent_row_index_by_id(&self, entity: &Entity<InputState>) -> Option<usize> {
+        self.agent_editable_rows()
+            .find(|(_, row)| row.id_input == *entity)
+            .map(|(index, _)| index)
+    }
+
     /// Re-run the local-PATH check for one row and store the result. The
     /// `which` lookup is I/O, so this runs from the command-change handler
     /// and construction only — never from `render`, which just reads
@@ -707,7 +766,13 @@ impl SettingsWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let row = Self::agent_row_from_definition(&definition, preset, window, cx);
+        let row = Self::agent_row_from_definition(
+            &definition,
+            &self.agent_vocabulary,
+            preset,
+            window,
+            cx,
+        );
         Self::subscribe_agent_row(&row, window, cx, &mut self._input_subscriptions);
         self.agent_catalog.push(AgentCatalogItem::Editable(row));
         self.error = None;
@@ -1152,20 +1217,6 @@ impl SettingsWindow {
             )
         });
 
-        let permission_mode_str: SharedString =
-            config.agent.default_permission_mode.mode_id().into();
-        let default_permission_mode_select = cx.new(|cx| {
-            use daruda_config::DefaultPermissionMode as M;
-            // The dropdown shows just the bare mode id; the human-readable
-            // explanation for the selected mode is rendered below the field
-            // (see `render_agent`).
-            let opts = M::ALL
-                .into_iter()
-                .map(|m| SelectOption::new(m.mode_id(), m.mode_id()))
-                .collect();
-            select::state_with_options(opts, Some(&permission_mode_str), window, cx)
-        });
-
         let agent_preset = SharedString::from("codex-acp");
         let agent_preset_select = cx.new(|cx| {
             // Every built-in preset, launchable or not. A preset that needs a
@@ -1188,6 +1239,10 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&agent_preset), window, cx)
         });
 
+        // Settings has no `data_dir` of its own, so it reads the store file
+        // directly — same shape as the accounts snapshot below.
+        let agent_vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::load();
+
         // Entries that resolve get an editable row; entries that don't (a preset
         // id daruda no longer knows, or one that needs a manual install) have no
         // fields to edit and are kept verbatim — a config the editor cannot
@@ -1199,6 +1254,7 @@ impl SettingsWindow {
             .map(|entry| match entry.resolve() {
                 Some(definition) => AgentCatalogItem::Editable(Self::agent_row_from_definition(
                     &definition,
+                    &agent_vocabulary,
                     entry.preset_id().map(str::to_string),
                     window,
                     cx,
@@ -1248,10 +1304,6 @@ impl SettingsWindow {
             (&ui_preset_select, SelectSetting::UiPreset),
             (&font_family_select, SelectSetting::FontFamily),
             (&cursor_style_select, SelectSetting::CursorStyle),
-            (
-                &default_permission_mode_select,
-                SelectSetting::AgentPermissionMode,
-            ),
             (&max_fps_select, SelectSetting::RenderMaxFps),
             (&syntax_theme_select, SelectSetting::SyntaxTheme),
             (&editor_select, SelectSetting::PreferredEditor),
@@ -1353,10 +1405,10 @@ impl SettingsWindow {
             horizontal_spacing_input,
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
-            default_permission_mode_select,
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_catalog,
+            agent_vocabulary,
             session_host_rows,
             accounts,
             account_login_busy,
@@ -1665,16 +1717,11 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::CursorBlinking(_) => {
                 self.cursor_blinking = live.cursor.blinking;
             }
-            daruda_config::SettingsPatch::AgentPermissionMode(_) => Self::set_select_value(
-                &self.default_permission_mode_select,
-                live.agent.default_permission_mode.mode_id(),
-                window,
-                cx,
-            ),
             daruda_config::SettingsPatch::AgentUseModifierToSend(_) => {
                 self.agent_use_modifier_to_send = live.agent.use_modifier_to_send;
             }
             daruda_config::SettingsPatch::AgentCatalog(_) => {
+                let vocabulary = &self.agent_vocabulary;
                 let catalog = live
                     .agents
                     .iter()
@@ -1682,6 +1729,7 @@ impl SettingsWindow {
                         Some(definition) => {
                             AgentCatalogItem::Editable(Self::agent_row_from_definition(
                                 &definition,
+                                vocabulary,
                                 entry.preset_id().map(str::to_string),
                                 window,
                                 cx,
@@ -1833,7 +1881,6 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::HorizontalSpacing(config.font.horizontal_spacing),
             daruda_config::SettingsPatch::CursorStyle(config.cursor.style),
             daruda_config::SettingsPatch::CursorBlinking(config.cursor.blinking),
-            daruda_config::SettingsPatch::AgentPermissionMode(config.agent.default_permission_mode),
             daruda_config::SettingsPatch::AgentUseModifierToSend(config.agent.use_modifier_to_send),
             daruda_config::SettingsPatch::AgentCatalog(config.agents.clone()),
             daruda_config::SettingsPatch::SessionHosts {
@@ -1922,12 +1969,6 @@ impl SettingsWindow {
                     _ => daruda_config::CursorStyle::Block,
                 };
                 daruda_config::SettingsPatch::CursorStyle(style)
-            }
-            SelectSetting::AgentPermissionMode => {
-                let Some(mode) = daruda_config::DefaultPermissionMode::from_mode_id(&value) else {
-                    return;
-                };
-                daruda_config::SettingsPatch::AgentPermissionMode(mode)
             }
             SelectSetting::RenderMaxFps => {
                 let Some(fps) = value.parse::<u32>().ok() else {
@@ -2124,13 +2165,13 @@ impl SettingsWindow {
                 },
                 _ => daruda_config::AgentLaunch::Raw(command),
             };
-            let default_mode = row.default_mode_input.read(cx).value().trim().to_string();
             agents.push(daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
                     id,
                     name,
                     launch,
-                    default_mode: (!default_mode.is_empty()).then_some(default_mode),
+                    default_mode: row.default_mode(cx),
+                    default_model: row.default_model(cx),
                 },
                 row.preset.as_deref(),
             ));
@@ -2306,12 +2347,6 @@ impl SettingsWindow {
         };
         config.cursor.blinking = self.cursor_blinking;
 
-        config.agent.default_permission_mode = self
-            .default_permission_mode_select
-            .read(cx)
-            .selected_value()
-            .and_then(|s| daruda_config::DefaultPermissionMode::from_mode_id(s.as_ref()))
-            .unwrap_or_default();
         config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
 
         // One pass over the whole catalog, so a non-editable entry keeps its
@@ -2377,13 +2412,13 @@ impl SettingsWindow {
                 },
                 _ => daruda_config::AgentLaunch::Raw(command),
             };
-            let default_mode = row.default_mode_input.read(cx).value().trim().to_string();
             let definition = daruda_config::AgentDefinition {
                 id,
                 name,
                 launch,
-                // Empty field = no override; the global default applies.
-                default_mode: (!default_mode.is_empty()).then_some(default_mode),
+                // The empty pick is the "agent default" sentinel = no override.
+                default_mode: row.default_mode(cx),
+                default_model: row.default_model(cx),
             };
             // A row that came from a preset stays a reference to it, so the
             // fields the user left alone keep following the preset.
