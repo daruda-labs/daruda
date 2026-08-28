@@ -6,7 +6,7 @@ use gpui::{Point, TestAppContext, px};
 
 use crate::ui::PopupMenu;
 
-use super::build_workspace;
+use super::{build_workspace, build_workspace_with};
 
 #[gpui::test]
 fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppContext) {
@@ -60,7 +60,26 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
 /// was wrong before.
 #[gpui::test]
 async fn a_dock_row_right_click_deploys_at_the_workspace_root(cx: &mut TestAppContext) {
-    let (window_handle, workspace) = build_workspace(cx);
+    let root = std::path::PathBuf::from("/tmp/context_menu_ops_lane");
+    let _ = std::fs::create_dir_all(&root);
+    let config = daruda_config::Config::default();
+    let (window_handle, workspace) = build_workspace_with(
+        cx,
+        &config,
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    // The press has to land on a real row, and the fixture supplies neither
+    // half of that: it boots with the left dock closed, and a lane only exists
+    // once one is pushed.
+    workspace.update(cx, |ws, cx| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root.clone()));
+        }
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        cx.notify();
+    });
+
     let vcx = &mut gpui::VisualTestContext::from_window(window_handle.into(), cx);
     vcx.run_until_parked();
 
