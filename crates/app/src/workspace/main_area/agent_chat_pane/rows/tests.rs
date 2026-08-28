@@ -2454,3 +2454,66 @@ fn each_run_gets_its_own_filter_row() {
         .collect();
     assert_eq!(starts, vec![1, 4], "one per run, keyed by the run's start");
 }
+
+fn kinded_tool(id: &str, kind: ToolKindView, status: ToolStatusView) -> ChatItem {
+    ChatItem::ToolCall(ToolCallItem {
+        id: id.to_owned(),
+        title: format!("Tool {id}"),
+        kind,
+        tool_name: None,
+        status,
+        diffs: Vec::new(),
+        output: Vec::new(),
+        raw_input: None,
+        parent_tool_id: None,
+        exit: None,
+    })
+}
+
+/// A step header is a disclosure, so its count must say what expanding it puts
+/// on screen. The shipped bug: a step of one edit and two reads read `3 tools`
+/// under an Edits filter that lets exactly one card through.
+#[test]
+fn a_step_header_counts_only_the_tools_the_filter_keeps() {
+    use ToolKindView::{Edit, Read};
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("looking at the failure"),
+        kinded_tool("a", Edit, Completed),
+        kinded_tool("b", Read, Completed),
+        kinded_tool("c", Read, Completed),
+        asst("done"),
+    ];
+    let step_count = |filter: &DisplayFilter| {
+        project(
+            &items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(&items),
+            TailWindow::All,
+            filter,
+        )
+        .iter()
+        .find_map(|r| match r.kind {
+            RowKind::StepHeader { tool_count, .. } => Some(tool_count),
+            _ => None,
+        })
+        .expect("step header")
+    };
+    assert_eq!(
+        step_count(&DisplayFilter::default()),
+        3,
+        "an unfiltered pane still counts the whole step"
+    );
+    assert_eq!(
+        step_count(&DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
+        1,
+        "only the edit survives the filter, so only the edit is offered"
+    );
+    assert_eq!(
+        step_count(&DisplayFilter::default().toggled(FilterFacet::Thinking)),
+        0,
+        "a step kept for its prose alone offers no tools at all"
+    );
+}

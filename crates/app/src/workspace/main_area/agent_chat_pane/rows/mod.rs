@@ -490,7 +490,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
                 out.push(
                     RowKind::StepHeader {
                         first_ix: k,
-                        tool_count: s.tool_count,
+                        tool_count: s.kept_tool_count(items, hierarchy, |it| filter.matches(it)),
                         collapsed: step_collapsed,
                     },
                     (response_collapsed || outside_tail) && !step_live[next_step],

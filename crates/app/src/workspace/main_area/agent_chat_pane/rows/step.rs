@@ -20,10 +20,27 @@ pub(in crate::workspace) struct StepSpan {
 
 pub(super) struct WorkStep {
     pub(super) span: StepSpan,
-    /// Nested subagent tools do not count toward the header.
-    pub(super) tool_count: usize,
     /// Whether this step gets a header; tail counting still includes it.
     pub(super) renders_header: bool,
+}
+
+impl WorkStep {
+    /// Top-level tools in this step that `keep` admits. Nested subagent tools
+    /// render inside their parent's card, so they never count.
+    ///
+    /// The header is a disclosure, so this is what expanding it puts on screen
+    /// — under a display filter that is fewer calls than the step made, and
+    /// the count has to say so.
+    pub(super) fn kept_tool_count(
+        &self,
+        items: &[ChatItem],
+        hierarchy: &ToolHierarchy<'_>,
+        keep: impl Fn(&ChatItem) -> bool,
+    ) -> usize {
+        (self.span.tool_start..self.span.end)
+            .filter(|&j| top_level_tool(items, j, hierarchy) && keep(&items[j]))
+            .count()
+    }
 }
 
 /// Partition a response into disjoint work steps.
@@ -49,13 +66,9 @@ pub(super) fn steps(
             tool_start,
             end: k,
         };
-        let tool_count = (span.tool_start..span.end)
-            .filter(|&j| top_level_tool(items, j, hierarchy))
-            .count();
         let renders_header = folded_rows(items, &span, hierarchy) >= STEP_MIN_ROWS;
         out.push(WorkStep {
             span,
-            tool_count,
             renders_header,
         });
         start = k;
@@ -154,14 +167,15 @@ mod tests {
     }
 
     fn spans(items: &[ChatItem]) -> Vec<(usize, usize, usize, usize, bool)> {
-        steps(items, 0..items.len(), &ToolHierarchy::build(items))
+        let hierarchy = ToolHierarchy::build(items);
+        steps(items, 0..items.len(), &hierarchy)
             .into_iter()
             .map(|s| {
                 (
                     s.span.start,
                     s.span.tool_start,
                     s.span.end,
-                    s.tool_count,
+                    s.kept_tool_count(items, &hierarchy, |_| true),
                     s.renders_header,
                 )
             })

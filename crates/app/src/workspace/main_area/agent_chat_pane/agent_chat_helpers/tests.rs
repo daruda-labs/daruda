@@ -1029,3 +1029,96 @@ fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
     let items = [asst("only")];
     assert_eq!(agent_run(&items, 9), 1..1);
 }
+
+/// A header glyph sits on a disclosure, so it must summarize what expanding
+/// the row shows. The shipped bug: an Edits filter hid a failed shell command
+/// but its ✗ stayed on the header, marking a run whose every visible card
+/// succeeded.
+#[test]
+fn a_rollup_ignores_the_calls_the_display_filter_removed() {
+    use crate::workspace::main_area::agent_chat_pane::display_filter::{
+        DisplayFilter, FilterFacet,
+    };
+    use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
+    use daruda_acp::{ToolKindView, ToolStatusView};
+
+    let call = |id: &str, kind, status| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_owned(),
+            title: format!("Tool {id}"),
+            kind,
+            tool_name: None,
+            status,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: None,
+            exit: None,
+        })
+    };
+    let items = [
+        call("edit", ToolKindView::Edit, ToolStatusView::Completed),
+        call("shell", ToolKindView::Execute, ToolStatusView::Failed),
+    ];
+    let live_units = LiveSubagentUnits::of(&items);
+    let rollup_under = |filter: DisplayFilter| {
+        let index = FilterMatchIndex::of(&items, filter);
+        Rollup::of_kept_run(&items, 0..items.len(), &live_units, |item| {
+            index.matches(item)
+        })
+    };
+
+    assert_eq!(
+        rollup_under(DisplayFilter::default()),
+        Rollup::Partial,
+        "unfiltered, the failed command is on screen and the glyph says so"
+    );
+    assert_eq!(
+        rollup_under(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
+        Rollup::Ok,
+        "the failure has no visible row left to explain a warning glyph"
+    );
+}
+
+/// Progress is why a row survives an enclosing fold at all, and the projection
+/// decides that without consulting the filter. So a run still working reads as
+/// working even when the only live call is one the filter took off screen —
+/// otherwise the glyph denies the reason its own row is on screen.
+#[test]
+fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
+    use crate::workspace::main_area::agent_chat_pane::display_filter::{
+        DisplayFilter, FilterFacet,
+    };
+    use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
+    use daruda_acp::{ToolKindView, ToolStatusView};
+
+    let call = |id: &str, kind, status| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_owned(),
+            title: format!("Tool {id}"),
+            kind,
+            tool_name: None,
+            status,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: None,
+            exit: None,
+        })
+    };
+    let items = [
+        call("edit", ToolKindView::Edit, ToolStatusView::Completed),
+        call("shell", ToolKindView::Execute, ToolStatusView::InProgress),
+    ];
+    let live_units = LiveSubagentUnits::of(&items);
+    let index = FilterMatchIndex::of(
+        &items,
+        DisplayFilter::default().toggled(FilterFacet::ToolEdit),
+    );
+    assert_eq!(
+        Rollup::of_kept_run(&items, 0..items.len(), &live_units, |item| index
+            .matches(item)),
+        Rollup::Running,
+        "the hidden command is still running, and the row is on screen because of it"
+    );
+}

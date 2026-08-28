@@ -32,7 +32,11 @@ pub(super) fn step_bar(
     };
 
     let fg = this.dim(theme::agent_chat_fg(cx));
-    let icon = tool_category_icon(dominant_category(items, run));
+    // The icon names the work the header offers, so it reads the same kept
+    // rows the count and the glyph do.
+    let icon = tool_category_icon(dominant_category(items, run, |item| {
+        this.filter_matches.matches(item)
+    }));
     // Prefer reasoning, then fall back to assistant prose.
     let title_items = items;
     let mut header = FoldHeader::with_summary(move || {
@@ -60,7 +64,9 @@ pub(super) fn step_bar(
                 .into_any_element(),
         );
     }
-    if let Some(rollup) = step_rollup(items, span.as_ref(), &this.live_units) {
+    if let Some(rollup) = step_rollup(items, span.as_ref(), &this.live_units, |item| {
+        this.filter_matches.matches(item)
+    }) {
         header = header.trailing(rollup_glyph(rollup, t, cx));
     }
     FoldRow::section(
@@ -76,8 +82,9 @@ fn step_rollup(
     items: &[ChatItem],
     span: Option<&StepSpan>,
     live_units: &LiveSubagentUnits,
+    keep: impl Fn(&ChatItem) -> bool,
 ) -> Option<Rollup> {
-    span.map(|s| Rollup::of_run_with_live_units(items, s.tool_start..s.end, live_units))
+    span.map(|s| Rollup::of_kept_run(items, s.tool_start..s.end, live_units, keep))
 }
 
 /// The boundary row's copy. Each state names an action, and the open one names
@@ -136,9 +143,13 @@ fn step_title(
 }
 
 /// Most frequent shared tool category, with ties resolved by first occurrence.
-fn dominant_category(items: &[ChatItem], run: std::ops::Range<usize>) -> ToolCategory {
+fn dominant_category(
+    items: &[ChatItem],
+    run: std::ops::Range<usize>,
+    keep: impl Fn(&ChatItem) -> bool,
+) -> ToolCategory {
     let mut tally: Vec<(ToolCategory, usize)> = Vec::new();
-    for item in run.filter_map(|k| items.get(k)) {
+    for item in run.filter_map(|k| items.get(k)).filter(|it| keep(it)) {
         let ChatItem::ToolCall(tc) = item else {
             continue;
         };
@@ -201,11 +212,11 @@ mod tests {
     fn a_step_with_no_span_shows_no_verdict() {
         let items = [asst("looking"), tool(ToolKindView::Read)];
         let live_units = LiveSubagentUnits::of(&items);
-        assert_eq!(step_rollup(&items, None, &live_units), None);
+        assert_eq!(step_rollup(&items, None, &live_units, |_| true), None);
 
         let span = step_span_at(&items, 0).expect("the step starting at 0");
         assert_eq!(
-            step_rollup(&items, Some(&span), &live_units),
+            step_rollup(&items, Some(&span), &live_units, |_| true),
             Some(Rollup::Ok)
         );
     }
@@ -232,7 +243,7 @@ mod tests {
         };
 
         assert_eq!(
-            step_rollup(&items, Some(&span), &live_units),
+            step_rollup(&items, Some(&span), &live_units, |_| true),
             Some(Rollup::Running)
         );
     }
@@ -244,18 +255,24 @@ mod tests {
             tool(ToolKindView::Read),
             tool(ToolKindView::Read),
         ];
-        assert_eq!(dominant_category(&items, 0..3), ToolCategory::Read);
+        assert_eq!(
+            dominant_category(&items, 0..3, |_| true),
+            ToolCategory::Read
+        );
     }
 
     #[test]
     fn dominant_category_breaks_a_tie_on_first_occurrence() {
         let items = [tool(ToolKindView::Search), tool(ToolKindView::Edit)];
-        assert_eq!(dominant_category(&items, 0..2), ToolCategory::Search);
+        assert_eq!(
+            dominant_category(&items, 0..2, |_| true),
+            ToolCategory::Search
+        );
     }
 
     #[test]
     fn dominant_category_of_an_empty_run_is_other() {
-        assert_eq!(dominant_category(&[], 0..0), ToolCategory::Other);
+        assert_eq!(dominant_category(&[], 0..0, |_| true), ToolCategory::Other);
     }
 
     #[test]
@@ -264,7 +281,10 @@ mod tests {
         if let ChatItem::ToolCall(tc) = &mut read {
             tc.tool_name = Some("Read".into());
         }
-        assert_eq!(dominant_category(&[read], 0..1), ToolCategory::Read);
+        assert_eq!(
+            dominant_category(&[read], 0..1, |_| true),
+            ToolCategory::Read
+        );
     }
 
     #[test]

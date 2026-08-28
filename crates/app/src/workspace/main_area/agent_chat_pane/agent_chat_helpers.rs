@@ -261,23 +261,47 @@ impl Rollup {
         range: std::ops::Range<usize>,
         live_units: &LiveSubagentUnits,
     ) -> Self {
-        Self::of_run_with_status(items, range, |tc| effective_tool_status(tc, live_units))
+        Self::of_kept_run(items, range, live_units, |_| true)
     }
 
-    fn of_run_with_status(
+    /// The same classification, with the verdict scoped to the rows `keep`
+    /// admits.
+    ///
+    /// The glyph sits on a disclosure, so ✓/⚠/✗ has to describe what expanding
+    /// that row puts on screen — a failure the display filter removed leaves no
+    /// visible row to explain the mark. Progress is the exception and stays
+    /// filter-blind: a live descendant is what holds the row on screen at all
+    /// (`step_live` / `group_live` in the projection ignore the filter too), so
+    /// a glyph that settled while the work continued would deny its own row's
+    /// reason for being there.
+    pub(in crate::workspace) fn of_kept_run(
         items: &[daruda_acp::ChatItem],
         range: std::ops::Range<usize>,
+        live_units: &LiveSubagentUnits,
+        keep: impl Fn(&daruda_acp::ChatItem) -> bool,
+    ) -> Self {
+        Self::of_items(
+            range.filter_map(|k| items.get(k)),
+            |tc| effective_tool_status(tc, live_units),
+            keep,
+        )
+    }
+
+    fn of_items<'a>(
+        items: impl Iterator<Item = &'a daruda_acp::ChatItem>,
         status: impl Fn(&daruda_acp::ToolCallItem) -> daruda_acp::ToolStatusView,
+        keep: impl Fn(&daruda_acp::ChatItem) -> bool,
     ) -> Self {
         use daruda_acp::{ChatItem, ToolStatusView};
 
         let (mut running, mut any_failed, mut any_ok) = (false, false, false);
-        for item in range.filter_map(|k| items.get(k)) {
+        for item in items {
+            let counts = keep(item);
             match item {
                 ChatItem::ToolCall(tc) => match status(tc) {
                     ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
-                    ToolStatusView::Failed => any_failed = true,
-                    ToolStatusView::Completed => any_ok = true,
+                    ToolStatusView::Failed => any_failed |= counts,
+                    ToolStatusView::Completed => any_ok |= counts,
                     // Settled, neither success nor failure — sets no flag, so the
                     // run stops pulsing without turning the glyph red.
                     ToolStatusView::Cancelled => {}
@@ -291,12 +315,12 @@ impl Rollup {
                     // Produced output counts as success, so a response that
                     // answered *and* hit a tool failure reads partial (⚠), not a
                     // hard failure (✗).
-                    if !text.trim().is_empty() {
+                    if counts && !text.trim().is_empty() {
                         any_ok = true;
                     }
                     running |= *streaming;
                 }
-                ChatItem::Failure(_) => any_failed = true,
+                ChatItem::Failure(_) => any_failed |= counts,
                 // A user message never belongs to a run; a permission card is
                 // neither an outcome nor progress.
                 ChatItem::UserText(_) | ChatItem::Permission(_) => {}

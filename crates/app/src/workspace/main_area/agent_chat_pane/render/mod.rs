@@ -521,10 +521,7 @@ fn response_bar(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let run = agent_run(&this.items, anchor + 1);
-    let tools = run
-        .clone()
-        .filter(|&k| matches!(this.items.get(k), Some(ChatItem::ToolCall(_))))
-        .count();
+    let tools = kept_tools(this, run.clone());
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
     // leading block (a streaming placeholder that has not filled yet) falls
@@ -548,7 +545,9 @@ fn response_bar(
         header = header.trailing(count_label(s::agent_chat_tool_group_count(tools), this, cx));
     }
     let header = header.trailing(rollup_glyph(
-        Rollup::of_run_with_live_units(&this.items, run, &this.live_units),
+        Rollup::of_kept_run(&this.items, run, &this.live_units, |item| {
+            this.filter_matches.matches(item)
+        }),
         t,
         cx,
     ));
@@ -573,6 +572,16 @@ fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoEl
         .child(SharedString::from(agent_display_name(this).to_string()))
 }
 
+/// Tool calls in `run` the display filter keeps. Every header that prints a
+/// count sits on a disclosure, so the number has to be what expanding it puts
+/// on screen rather than what the agent originally ran.
+fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>) -> usize {
+    run.filter(|&k| {
+        matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if this.filter_matches.keeps_tool(tc))
+    })
+    .count()
+}
+
 /// A right-anchored count in a fold header's trailing slot.
 fn count_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>) -> AnyElement {
     div()
@@ -595,11 +604,15 @@ fn tool_group_bar(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let rollup =
-        Rollup::of_run_with_live_units(&this.items, first_ix..first_ix + count, &this.live_units);
+    let run = first_ix..first_ix + count;
+    let rollup = Rollup::of_kept_run(&this.items, run.clone(), &this.live_units, |item| {
+        this.filter_matches.matches(item)
+    });
     // The count is the group's own identity, not a preview of folded content, so
     // it shows in both states — hence `plain` rather than a markdown summary.
-    let label = s::agent_chat_tool_group_count(count);
+    // `count` is the group's structural span; what the row offers is the part of
+    // it the display filter keeps.
+    let label = s::agent_chat_tool_group_count(kept_tools(this, run));
     let header = FoldHeader::with_title(
         div()
             .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
