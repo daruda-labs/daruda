@@ -20,13 +20,14 @@ use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuExt as _, Icon, IconName, PopupMenuItem, SectionHeader,
-    Sizable as _, button, button_bare, menu_builder,
+    ButtonVariants as _, Icon, IconName, PopupMenuItem, SectionHeader, Sizable as _, button,
+    button_bare,
 };
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::path_drag::PathDrag;
+use crate::workspace::root_menu::RootContextMenuExt as _;
 use unified_list::{
     DirStageState, GitChangesRow, GitDirHeaderRow, UnifiedEntry, count_conflicts, discard_disabled,
     tracking_indicator_text,
@@ -779,7 +780,7 @@ fn unified_file_row(
                 })
             },
         )
-        .context_menu(menu_builder(move |menu, _window, _cx| {
+        .root_context_menu(workspace_for_ctx.clone(), move |menu, _window, _cx| {
             let ws_stage = workspace_for_ctx.clone();
             let ws_discard = workspace_for_ctx.clone();
             let ws_diff = workspace_for_ctx.clone();
@@ -845,7 +846,7 @@ fn unified_file_row(
                     // For `MM` (staged + unstaged) and untracked, leave it enabled.
                     .disabled(discard_disabled(is_staged, has_unstaged)),
             )
-        }))
+        })
         .into_any_element()
 }
 

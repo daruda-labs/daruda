@@ -5,7 +5,7 @@
 //! lanes. Drag state (`DividerDrag`, `DockDrag`) lives here
 //! because it is exclusively read by these methods plus `render.rs`.
 
-use gpui::{Context, DismissEvent, Entity, Pixels, Point, Subscription, Window};
+use gpui::{Context, DismissEvent, Entity, Focusable as _, Pixels, Point, Subscription, Window};
 
 use crate::ui::PopupMenu;
 use crate::workspace::Workspace;
@@ -25,10 +25,9 @@ pub(in crate::workspace) struct DividerDrag {
     pub(in crate::workspace) start_left_ratio: f32,
 }
 
-/// Active imperatively-opened PopupMenu (System B) — the terminal
-/// annotation menu and the bottom-dock macro-tab menu, both driven by
-/// an event handler rather than a declarative `.context_menu()`
-/// attachment (see `crate::ui::popup_menu_deferred`). `None` = closed.
+/// The open right-click menu, if any. Every menu in the app deploys here
+/// and is painted at the workspace root by `crate::ui::popup_menu_deferred`
+/// — see `workspace::root_menu`. `None` = closed.
 pub(in crate::workspace) struct PopupMenuDeploy {
     pub(in crate::workspace) menu: Entity<PopupMenu>,
     pub(in crate::workspace) position: Point<Pixels>,
@@ -362,21 +361,32 @@ impl Workspace {
         self.set_bottom_dock_row_preset(desired, window, cx);
     }
 
-    // ---- Context menu (System B — imperative PopupMenu deploy) ----
+    // ---- Context menu (root-deployed PopupMenu) ----
 
-    /// Open an imperatively-built `PopupMenu` at `position`. Used by call
-    /// sites that can't attach a declarative `.context_menu(...)` (the
-    /// terminal annotation menu's event bridge, the macro-tab right-click
-    /// blocked on `TabBar::children`'s concrete `Tab` type — see
-    /// `crate::ui::popup_menu_deferred`). The dismiss subscription routes
-    /// Escape / outside-click / confirmed-item-click back through
+    /// Open a `PopupMenu` at `position`, rendered at the workspace root by
+    /// `crate::ui::popup_menu_deferred`. Every right-click menu in the app
+    /// arrives here — see `workspace::root_menu` for why none of them may
+    /// attach the menu inside their own subtree. The dismiss subscription
+    /// routes Escape / outside-click / confirmed-item-click back through
     /// `close_context_menu` uniformly.
+    ///
+    /// Focus moves to the menu: `PopupMenu` binds its arrow / confirm /
+    /// dismiss actions under its own `key_context`, and those only receive
+    /// dispatch along the focus path, so without this the menu is
+    /// mouse-only. The vendored declarative attachment focuses on every
+    /// frame it is open; doing it once on open is enough here because the
+    /// deploy slot is the only thing that opens one.
     pub(in crate::workspace) fn open_context_menu(
         &mut self,
         position: Point<Pixels>,
         menu: Entity<PopupMenu>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let handle = menu.focus_handle(cx);
+        if !handle.contains_focused(window, cx) {
+            handle.focus(window, cx);
+        }
         let _dismiss_sub = cx.subscribe(&menu, |this, _menu, _event: &DismissEvent, cx| {
             this.close_context_menu(cx);
         });

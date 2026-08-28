@@ -1,5 +1,5 @@
 //! Context menu items for a Group header — a flat `Vec<PopupMenuItem>`
-//! attached declaratively via `.context_menu(...)`.
+//! deployed at the workspace root via `root_context_menu`.
 //!
 //! Items: Rename · color presets (6 + Clear) · Collapse/Expand · Delete.
 //! Sub-menus are absent because the menu is built flat, so colour choices

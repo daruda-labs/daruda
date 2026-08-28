@@ -43,25 +43,48 @@ pub(in crate::workspace) fn render(
         })
     };
 
-    let context_menu = {
+    // Deployed at the workspace root rather than attached declaratively: the
+    // bottom dock clips its content, and a menu rendered inside the tile's own
+    // subtree would be cut at the dock edge (see `workspace::root_menu`).
+    let on_right_click = {
         let tab_id = tab_id.clone();
         let widget_id = widget_id.clone();
         let btn_clone = btn.clone();
         let ws = workspace.clone();
-        menu_builder(move |menu, _window, _cx| {
-            let items = build_widget_context_menu(
-                tab_id.clone(),
-                widget_id.clone(),
-                btn_clone.clone(),
-                ws.clone(),
-            );
-            items.into_iter().fold(menu, |m, item| m.item(item))
-        })
+        move |position, window: &mut gpui::Window, cx: &mut gpui::App| {
+            let Some(workspace) = ws.upgrade() else {
+                return;
+            };
+            let build = {
+                let tab_id = tab_id.clone();
+                let widget_id = widget_id.clone();
+                let btn_clone = btn_clone.clone();
+                let ws = ws.clone();
+                menu_builder(move |menu, _window, _cx| {
+                    let items = build_widget_context_menu(
+                        tab_id.clone(),
+                        widget_id.clone(),
+                        btn_clone.clone(),
+                        ws.clone(),
+                    );
+                    items.into_iter().fold(menu, |m, item| m.item(item))
+                })
+            };
+            // Build before leasing — `PopupMenu::build` runs the closure
+            // synchronously, and a builder that reads the workspace would
+            // double-lease-panic inside `update` (CLAUDE.md Pitfall 5).
+            let menu = crate::ui::PopupMenu::build(window, cx, move |menu, window, cx| {
+                build(menu, window, cx)
+            });
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_context_menu(position, menu, window, cx);
+            });
+        }
     };
 
     let mut button = crate::ui::MacroKey::new(element_id, btn.label.clone())
         .on_click(on_click)
-        .context_menu(context_menu)
+        .on_right_click(on_right_click)
         .tooltip(crate::ui::tooltip::text(build_tooltip(btn)));
 
     button = match btn.display {

@@ -160,6 +160,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | New pane content kind | `main_area/pane.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/mod.rs` constructor |
 | New modal / text input in modal | See G9. |
 | Reusable widget | `crate::ui`. Never inline `div().flex().hover(...).on_mouse_down(...)` at call site. |
+| Right-click menu on any element | `workspace/root_menu.rs::root_context_menu`. Never the vendored `.context_menu(...)` — it renders inside the caller's subtree, where an ancestor clip cuts the menu *and* its hit-testing. |
 | Save/restore logic | `workspace/persistence.rs` |
 | App-global action | `main.rs` (`on_action`) |
 | Window lifecycle | `windows.rs` |

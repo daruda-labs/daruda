@@ -11,11 +11,12 @@ use crate::lane::Lane;
 use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, Icon, IconName, PopupMenuItem,
-    SectionHeader, Sizable as _, button_bare, menu_builder,
+    ButtonVariants as _, DropdownMenu as _, Icon, IconName, PopupMenuItem, SectionHeader,
+    Sizable as _, button_bare, menu_builder,
 };
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
+use crate::workspace::root_menu::RootContextMenuExt as _;
 
 use super::agent_badges::{agent_badges_row, agent_status_cell};
 use super::context_menu::build_context_menu_items;
@@ -291,10 +292,7 @@ pub(in crate::workspace) fn group_header_row(
                 }
             }),
         )
-        // `.context_menu()` returns a wrapper type that only implements
-        // `ParentElement`/`Styled` — it must be the last modifier before
-        // `.child(...)`, after every `Stateful`/`InteractiveElement` call.
-        .context_menu(menu_builder(move |menu, _window, _cx| {
+        .root_context_menu(ws_for_menu.clone(), move |menu, _window, _cx| {
             let items = super::group_menu::build_group_menu_items(
                 group_id,
                 group_name_for_menu.clone(),
@@ -302,7 +300,7 @@ pub(in crate::workspace) fn group_header_row(
                 ws_for_menu.clone(),
             );
             items.into_iter().fold(menu, |m, item| m.item(item))
-        }))
+        })
         .child(label_row)
 }
 
@@ -561,17 +559,14 @@ pub(in crate::workspace) fn project_header_row(
                     })),
             )
         })
-        // `.context_menu()` returns a wrapper type that only implements
-        // `ParentElement`/`Styled` — it must be the last modifier, after
-        // every `Stateful`/`InteractiveElement`/`FluentBuilder` call above.
-        .context_menu(menu_builder(move |menu, _window, _cx| {
+        .root_context_menu(ws_for_menu.clone(), move |menu, _window, _cx| {
             let items = super::project_menu::build_project_menu_items(
                 project_id,
                 last_active_lane_id,
                 ws_for_menu.clone(),
             );
             items.into_iter().fold(menu, |m, item| m.item(item))
-        }))
+        })
 }
 
 pub(in crate::workspace) fn section_header(
@@ -916,10 +911,7 @@ pub(in crate::workspace) fn worktree_row(
                 }
             }),
         )
-        // Right-click opens the context menu, built declaratively at hover
-        // time from the same per-row inputs the old imperative handler
-        // captured.
-        .context_menu(menu_builder(move |menu, _window, _cx| {
+        .root_context_menu(ws_for_rclick.clone(), move |menu, _window, _cx| {
             let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
             let items = build_context_menu_items(super::context_menu::CtxMenuArgs {
                 project_id,
@@ -939,7 +931,7 @@ pub(in crate::workspace) fn worktree_row(
                 removable,
             });
             items.into_iter().fold(menu, |m, item| m.item(item))
-        }))
+        })
         .child(agent_status_cell(
             snap.agent_status_per_lane
                 .get(&daruda_store::project::LaneRef {

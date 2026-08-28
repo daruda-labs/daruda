@@ -1,5 +1,5 @@
 //! Context menu items for a Project header — a flat `Vec<PopupMenuItem>`
-//! attached declaratively via `.context_menu(...)`.
+//! deployed at the workspace root via `root_context_menu`.
 //!
 //! Items: Rename · Move to Group · Delete · Open in New Window. The first
 //! three reuse active-project–scoped handlers by first snapping focus to
