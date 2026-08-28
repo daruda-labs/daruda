@@ -49,6 +49,10 @@ const NAME_AGENT_CHAT: &str = "agent-chat";
 const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
+/// CLI token for the tail window's boundary row, closed.
+const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
+/// CLI token for the same boundary row, open.
+const NAME_AGENT_CHAT_TAIL_OPEN: &str = "agent-chat-tail-open";
 /// CLI token prefix for the compact bar's combined options popover, suffixed
 /// with an [`ActivityOptionsTab`] token (`agent-chat-options:filter`). Bare
 /// `agent-chat-options` opens the Fold tab.
@@ -151,11 +155,21 @@ pub(crate) enum ScreenshotScenario {
     /// whether a Step header's glyph says anything about what it folded.
     AgentChat,
     /// The same transcript with the display filter and the tail window
-    /// engaged, so both placeholder rows render together. The only way to see
-    /// whether the filtered-away and tail-more rows read as siblings.
+    /// engaged, so both reveal rows render together — the only way to check
+    /// that the filter's disclosure and the tail window's boundary read as the
+    /// *different* controls they are, rather than as two spellings of one.
     AgentChatNarrowed,
     /// The same transcript with a custom fold matrix and its editor open.
     AgentChatFold,
+    /// The tail window's boundary row with nothing floating over it. The pair
+    /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
+    /// the row exists to say — whether its two states are distinguishable —
+    /// since `agent-chat-narrowed` covers it with the filter popover and no
+    /// state test can look at a rule, an inset label, or a rail.
+    AgentChatTail,
+    /// The boundary open: the label anchors left and the steps it revealed carry
+    /// the rail.
+    AgentChatTailOpen,
     /// The compact Activity Bar's combined options popover, open on one tab
     /// with every axis off its default — the only way to see the gear's own
     /// selected state, whether the tab strip reads as three choices, and
@@ -209,6 +223,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT => Some(Self::AgentChat),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
+            NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
+            NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
             NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
@@ -363,6 +379,16 @@ pub(crate) fn drive(
                 ws.open_agent_chat_fold_editor_for_shot(window, cx)
             });
         }
+        ScreenshotScenario::AgentChatTail => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_tail_boundary_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatTailOpen => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_tail_boundary_for_shot(true, window, cx)
+            });
+        }
         ScreenshotScenario::AgentChatOptions(tab) => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_options_for_shot(tab, window, cx)
@@ -477,6 +503,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-fold"),
             Some(ScreenshotScenario::AgentChatFold)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-tail"),
+            Some(ScreenshotScenario::AgentChatTail)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-tail-open"),
+            Some(ScreenshotScenario::AgentChatTailOpen)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-failure"),

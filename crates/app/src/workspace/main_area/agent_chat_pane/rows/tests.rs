@@ -1171,11 +1171,7 @@ fn group_member_visibility_follows_fold_override() {
 /// `RowKind::slot` matches exhaustively with no wildcard arm.
 #[test]
 fn every_row_kind_declares_a_distinct_slot() {
-    let row = |kind| RenderRow {
-        kind,
-        hidden: false,
-        indent: 0,
-    };
+    let row = |kind| RenderRow::at(kind, false, 0);
     // One row per `RowKind` variant, all keyed on the same index / id so only
     // the variant itself can tell them apart.
     let kinds = vec![
@@ -1194,6 +1190,7 @@ fn every_row_kind_declares_a_distinct_slot() {
         RowKind::TailMore {
             run_start: 0,
             hidden_steps: 0,
+            kept_steps: 0,
             collapsed: false,
         },
         RowKind::FilteredAway {
@@ -1225,47 +1222,35 @@ fn every_row_kind_declares_a_distinct_slot() {
 
 #[test]
 fn same_slot_compares_key_not_hidden_or_payload() {
-    let a = RenderRow {
-        kind: RowKind::ToolGroupHeader {
+    let a = RenderRow::at(
+        RowKind::ToolGroupHeader {
             gid: "g".into(),
             first_ix: 1,
             count: 2,
             collapsed: false,
         },
-        hidden: false,
-        indent: 0,
-    };
-    let b = RenderRow {
-        kind: RowKind::ToolGroupHeader {
+        false,
+        0,
+    );
+    let b = RenderRow::at(
+        RowKind::ToolGroupHeader {
             gid: "g".into(),
             first_ix: 5,
             count: 3,
             collapsed: true,
         },
-        hidden: true,
-        indent: 0,
-    };
+        true,
+        0,
+    );
     assert!(
         a.same_slot(&b),
         "same gid → same slot regardless of count/hidden"
     );
 
-    let u0 = RenderRow {
-        kind: RowKind::User(0),
-        hidden: false,
-        indent: 0,
-    };
-    let u1 = RenderRow {
-        kind: RowKind::User(1),
-        hidden: false,
-        indent: 0,
-    };
+    let u0 = RenderRow::at(RowKind::User(0), false, 0);
+    let u1 = RenderRow::at(RowKind::User(1), false, 0);
     assert!(!u0.same_slot(&u1));
-    assert!(!u0.same_slot(&RenderRow {
-        kind: RowKind::AgentItem(0),
-        hidden: false,
-        indent: 0
-    }));
+    assert!(!u0.same_slot(&RenderRow::at(RowKind::AgentItem(0), false, 0)));
 }
 
 #[test]
@@ -1661,39 +1646,35 @@ fn a_pending_permission_survives_a_folded_step() {
 
 #[test]
 fn step_headers_share_a_slot_by_their_first_index() {
-    let a = RenderRow {
-        kind: RowKind::StepHeader {
+    let a = RenderRow::at(
+        RowKind::StepHeader {
             first_ix: 3,
             tool_count: 2,
             collapsed: false,
         },
-        hidden: false,
-        indent: 1,
-    };
-    let b = RenderRow {
-        kind: RowKind::StepHeader {
+        false,
+        1,
+    );
+    let b = RenderRow::at(
+        RowKind::StepHeader {
             first_ix: 3,
             tool_count: 5,
             collapsed: true,
         },
-        hidden: true,
-        indent: 1,
-    };
+        true,
+        1,
+    );
     assert!(a.same_slot(&b), "same first_ix → same slot");
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::StepHeader {
+    assert!(!a.same_slot(&RenderRow::at(
+        RowKind::StepHeader {
             first_ix: 4,
             tool_count: 2,
             collapsed: false,
         },
-        hidden: false,
-        indent: 1,
-    }));
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::AgentItem(3),
-        hidden: false,
-        indent: 1,
-    }));
+        false,
+        1
+    )));
+    assert!(!a.same_slot(&RenderRow::at(RowKind::AgentItem(3), false, 1)));
 }
 
 // ── Tail window ────────────────────────────────────────────────────────────
@@ -1765,6 +1746,121 @@ fn a_window_at_or_above_the_step_count_hides_nothing() {
             _ => unreachable!(),
         }
     }
+}
+
+/// The boundary row states the window it collapses back to, so the count it
+/// names has to be the kept one — derived from the projection that produced the
+/// row, not read off the pane's `TailWindow` after the fact.
+#[test]
+fn the_boundary_row_carries_the_kept_count_beside_the_hidden_one() {
+    let items = turn_of_cycles(8);
+    for n in [1usize, 3, 5] {
+        let rows = project_tail(&items, TailWindow::Last(n));
+        match tail_row(&rows).kind {
+            RowKind::TailMore {
+                hidden_steps,
+                kept_steps,
+                ..
+            } => {
+                assert_eq!(kept_steps, n, "n={n}");
+                assert_eq!(hidden_steps + kept_steps, 8, "n={n}");
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// The rail marks exactly the steps the window covers, and only those — a row
+/// inside the kept range never carries it, or the mark would say nothing. With
+/// the boundary shut the marked rows are all hidden, so the mark costs nothing
+/// until something surfaces one.
+#[test]
+fn only_rows_outside_the_window_carry_the_rail() {
+    let items = turn_of_cycles(6);
+    let tail = TailWindow::Last(2);
+
+    let shut = project_tail(&items, tail);
+    assert!(
+        shut.iter()
+            .filter(|r| matches!(r.kind, RowKind::StepHeader { .. }))
+            .all(|r| r.outside_window == r.hidden),
+        "with the boundary shut, a covered step is marked and hidden while a \
+         kept one is neither"
+    );
+
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Tail(1), FoldContext::past(false));
+    let open = project(
+        &items,
+        &fold,
+        false,
+        &LiveSubagentUnits::of(&items),
+        tail,
+        &DisplayFilter::default(),
+    );
+    let marked: Vec<bool> = open
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::StepHeader { .. }))
+        .map(|r| r.outside_window)
+        .collect();
+    assert_eq!(
+        marked,
+        vec![true, true, true, true, false, false],
+        "the four steps the window covers are marked; the two it keeps are not"
+    );
+    assert!(
+        !tail_row(&open).outside_window,
+        "the boundary itself is never one of the rows it brackets"
+    );
+    assert!(
+        open.iter().any(|r| r.outside_window && !r.hidden),
+        "the marked rows are the ones the reveal put on screen"
+    );
+}
+
+/// A live step the window covers stays surfaced whether or not the boundary is
+/// open — so the rail has to mark it in *both* states. Keying the mark on the
+/// boundary being open instead made the same row gain and lose its rail as the
+/// boundary flipped, leaving a visible row from outside the range unexplained in
+/// exactly the state where nothing else accounts for it.
+#[test]
+fn a_live_covered_step_carries_the_rail_with_the_boundary_shut() {
+    let mut items = turn_of_cycles(4);
+    items[2] = tool("t0", ToolStatusView::InProgress);
+    let tail = TailWindow::Last(1);
+
+    let shut = project_tail(&items, tail);
+    let surfaced: Vec<(bool, bool)> = shut
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::StepHeader { .. }))
+        .map(|r| (!r.hidden, r.outside_window))
+        .collect();
+    assert_eq!(
+        surfaced,
+        vec![(true, true), (false, true), (false, true), (true, false)],
+        "the live covered step is on screen and marked; the kept step is neither"
+    );
+
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Tail(1), FoldContext::past(false));
+    let open = project(
+        &items,
+        &fold,
+        false,
+        &LiveSubagentUnits::of(&items),
+        tail,
+        &DisplayFilter::default(),
+    );
+    let marked: Vec<bool> = open
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::StepHeader { .. }))
+        .map(|r| r.outside_window)
+        .collect();
+    assert_eq!(
+        marked,
+        vec![true, true, true, false],
+        "opening the boundary changes which covered rows are visible, not which are outside"
+    );
 }
 
 #[test]
@@ -1873,6 +1969,7 @@ fn a_run_whose_every_covered_step_is_live_keeps_its_tail_row() {
         run_start,
         hidden_steps,
         collapsed,
+        ..
     } = row.kind
     else {
         unreachable!()
@@ -1968,43 +2065,46 @@ fn changing_the_window_keeps_every_row_in_its_slot() {
 
 #[test]
 fn tail_rows_share_a_slot_by_their_run_start() {
-    let a = RenderRow {
-        kind: RowKind::TailMore {
+    let a = RenderRow::at(
+        RowKind::TailMore {
             run_start: 1,
             hidden_steps: 12,
+            kept_steps: 2,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    };
-    let b = RenderRow {
-        kind: RowKind::TailMore {
+        false,
+        1,
+    );
+    let b = RenderRow::at(
+        RowKind::TailMore {
             run_start: 1,
             hidden_steps: 0,
+            kept_steps: 2,
             collapsed: false,
         },
-        hidden: true,
-        indent: 1,
-    };
+        true,
+        1,
+    );
     assert!(a.same_slot(&b), "same run_start → same slot");
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::TailMore {
+    assert!(!a.same_slot(&RenderRow::at(
+        RowKind::TailMore {
             run_start: 9,
             hidden_steps: 12,
+            kept_steps: 2,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    }));
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::StepHeader {
+        false,
+        1
+    )));
+    assert!(!a.same_slot(&RenderRow::at(
+        RowKind::StepHeader {
             first_ix: 1,
             tool_count: 2,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    }));
+        false,
+        1
+    )));
 }
 
 // ── Display filter ─────────────────────────────────────────────────────────
@@ -2281,46 +2381,47 @@ fn changing_the_filter_keeps_every_row_in_its_slot() {
 
 #[test]
 fn filter_rows_share_a_slot_by_their_run_start() {
-    let a = RenderRow {
-        kind: RowKind::FilteredAway {
+    let a = RenderRow::at(
+        RowKind::FilteredAway {
             run_start: 1,
             revealable: 12,
             excluded: 12,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    };
-    let b = RenderRow {
-        kind: RowKind::FilteredAway {
+        false,
+        1,
+    );
+    let b = RenderRow::at(
+        RowKind::FilteredAway {
             run_start: 1,
             revealable: 0,
             excluded: 0,
             collapsed: false,
         },
-        hidden: true,
-        indent: 1,
-    };
+        true,
+        1,
+    );
     assert!(a.same_slot(&b), "same run_start → same slot");
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::FilteredAway {
+    assert!(!a.same_slot(&RenderRow::at(
+        RowKind::FilteredAway {
             run_start: 9,
             revealable: 12,
             excluded: 12,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    }));
-    assert!(!a.same_slot(&RenderRow {
-        kind: RowKind::TailMore {
+        false,
+        1
+    )));
+    assert!(!a.same_slot(&RenderRow::at(
+        RowKind::TailMore {
             run_start: 1,
             hidden_steps: 3,
+            kept_steps: 2,
             collapsed: true,
         },
-        hidden: false,
-        indent: 1,
-    }));
+        false,
+        1
+    )));
 }
 
 #[test]

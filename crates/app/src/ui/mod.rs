@@ -68,7 +68,7 @@ pub use code_editor::{
     LineDecoration, embedded_code_viewer, file_viewer_editor, make_markdown_prose_state,
     make_markdown_state, markdown_editor,
 };
-pub use disclosure::{Disclosure, disclosure};
+pub use disclosure::{Disclosure, DisclosureAxis, disclosure};
 pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_column, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};

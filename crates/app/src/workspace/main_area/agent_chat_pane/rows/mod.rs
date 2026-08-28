@@ -33,6 +33,11 @@ pub(in crate::workspace) enum RowKind {
     TailMore {
         run_start: usize,
         hidden_steps: usize,
+        /// Steps the window keeps. The open label names this number, not
+        /// `hidden_steps` — it states the state clicking returns to. Carried on
+        /// the row rather than read off the pane's `TailWindow` so the label
+        /// cannot outlive the projection it describes.
+        kept_steps: usize,
         collapsed: bool,
     },
     /// The filter's per-run disclosure. `revealable` is what expanding this row
@@ -60,6 +65,28 @@ pub(in crate::workspace) struct RenderRow {
     /// Hidden rows stay in the sequence to preserve slot stability.
     pub(in crate::workspace) hidden: bool,
     pub(in crate::workspace) indent: u8,
+    /// The row sits outside the tail window's kept range. Distinct from
+    /// `indent`, which is structural nesting: this says the row does not belong
+    /// to the range the pane is showing, and the renderer answers it with the
+    /// rail tying the row back to the boundary above it.
+    ///
+    /// Deliberately *not* "the boundary revealed it": a live covered step stays
+    /// surfaced through a shut boundary, and keying the mark on the boundary
+    /// made that row gain and lose its rail as the boundary flipped.
+    pub(in crate::workspace) outside_window: bool,
+}
+
+impl RenderRow {
+    /// A row inside the tail window — the common case. The one default for
+    /// `outside_window` lives here so no construction site restates it.
+    pub(in crate::workspace) fn at(kind: RowKind, hidden: bool, indent: u8) -> Self {
+        Self {
+            kind,
+            hidden,
+            indent,
+            outside_window: false,
+        }
+    }
 }
 
 /// Filter matches, the ancestors needed to reach a matching nested tool, and
@@ -199,11 +226,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
     while i < items.len() {
         let anchor = match &items[i] {
             ChatItem::UserText(_) => {
-                rows.push(RenderRow {
-                    kind: RowKind::User(i),
-                    hidden: false,
-                    indent: 0,
-                });
+                rows.push(RenderRow::at(RowKind::User(i), false, 0));
                 let a = i;
                 i += 1;
                 Some(a)
@@ -228,14 +251,14 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
         let run_indent = if let (true, Some(a)) = (non_trivial, anchor) {
             let key = FoldKey::Response(a);
             let collapsed = !fold.is_expanded(&key, fold_context_at(&key, a, items, boundary));
-            rows.push(RenderRow {
-                kind: RowKind::ResponseHeader {
+            rows.push(RenderRow::at(
+                RowKind::ResponseHeader {
                     anchor: a,
                     collapsed,
                 },
-                hidden: false,
-                indent: 0,
-            });
+                false,
+                0,
+            ));
             project_run(
                 RunContext {
                     items,
@@ -278,11 +301,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
         };
 
         if awaiting_response && is_last_turn {
-            rows.push(RenderRow {
-                kind: RowKind::WorkingIndicator,
-                hidden: false,
-                indent: run_indent,
-            });
+            rows.push(RenderRow::at(RowKind::WorkingIndicator, false, run_indent));
         }
     }
     rows
@@ -308,6 +327,11 @@ struct RunRows<'a> {
     /// Index of the `FilteredAway` row to back-patch.
     placeholder: usize,
     revealed: bool,
+    /// Applied to every row pushed while the walk is inside a step the tail
+    /// window covers. Pusher state rather than a `push` parameter: it changes
+    /// once per step, not once per row, and the eight call sites below would
+    /// each have to restate it.
+    outside_window: bool,
 }
 
 impl RunRows<'_> {
@@ -331,6 +355,7 @@ impl RunRows<'_> {
             kind,
             hidden: structural || (filtered && !self.revealed),
             indent,
+            outside_window: self.outside_window,
         });
     }
 
@@ -344,6 +369,20 @@ impl RunRows<'_> {
         };
         self.rows[self.placeholder].hidden = response_collapsed || revealable == 0;
     }
+}
+
+/// The step the run walk is currently inside. A struct rather than the tuple it
+/// replaced: the fourth field made the positions unreadable, and `collapsed`
+/// already folds two causes — the step's own fold and the tail window — into one
+/// answer, which a bare `bool` in position two did not say.
+#[derive(Clone, Copy)]
+struct InStep {
+    end: usize,
+    collapsed: bool,
+    renders_header: bool,
+    /// The tail window covers this step, so its rows sit outside the range the
+    /// pane is showing — whether or not the boundary is currently open.
+    outside_window: bool,
 }
 
 fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
@@ -371,20 +410,21 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         fold_context_at(&filter_key, run.start, items, boundary),
     );
     let placeholder = rows.len();
-    rows.push(RenderRow {
-        kind: RowKind::FilteredAway {
+    rows.push(RenderRow::at(
+        RowKind::FilteredAway {
             run_start: run.start,
             revealable: 0,
             excluded: 0,
             collapsed: !filter_revealed,
         },
-        hidden: true,
-        indent: base_indent,
-    });
+        true,
+        base_indent,
+    ));
     let mut out = RunRows {
         rows,
         placeholder,
         revealed: filter_revealed,
+        outside_window: false,
     };
 
     let steps = step::steps(items, run.clone(), hierarchy);
@@ -412,6 +452,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             RowKind::TailMore {
                 run_start: run.start,
                 hidden_steps,
+                kept_steps: steps.len() - hidden_steps,
                 collapsed: !tail_revealed,
             },
             response_collapsed || hidden_steps == 0,
@@ -420,16 +461,31 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         );
     }
     let mut next_step = 0usize;
-    let mut in_step: Option<(usize, bool, bool)> = None;
+    let mut in_step: Option<InStep> = None;
     let mut k = run.start;
     while k < run.end {
-        if in_step.is_some_and(|(end, _, _)| k >= end) {
+        if in_step.is_some_and(|s| k >= s.end) {
             in_step = None;
         }
         if let Some(s) = steps.get(next_step).filter(|s| s.span.start == k) {
             let key = FoldKey::Step(k);
             let step_collapsed = !fold.is_expanded(&key, fold_context_at(&key, k, items, boundary));
-            let outside_tail = !tail_revealed && tail.hides(next_step, steps.len());
+            let covered = tail.hides(next_step, steps.len());
+            let outside_tail = !tail_revealed && covered;
+            in_step = Some(InStep {
+                end: s.span.end,
+                // A headerless step has no chevron, so its own fold state is
+                // unreachable and only the window decides.
+                collapsed: if s.renders_header {
+                    step_collapsed || outside_tail
+                } else {
+                    outside_tail
+                },
+                renders_header: s.renders_header,
+                outside_window: covered,
+            });
+            // Set before the header push so the header carries the rail as well.
+            out.outside_window = covered;
             if s.renders_header {
                 out.push(
                     RowKind::StepHeader {
@@ -441,20 +497,20 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
                     !step_kept[next_step],
                     base_indent,
                 );
-                in_step = Some((s.span.end, step_collapsed || outside_tail, true));
-            } else {
-                in_step = Some((s.span.end, outside_tail, false));
             }
             next_step += 1;
         }
+        // Every row pushed for the rest of this iteration belongs to whichever
+        // step the walk is in — one assignment point, so the flag cannot drift.
+        out.outside_window = in_step.is_some_and(|s| s.outside_window);
         if matches!(&items[k], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc)) {
             k += 1;
             continue;
         }
         let (indent, folded) = match in_step {
-            Some((_, step_collapsed, renders_header)) => (
-                base_indent + u8::from(renders_header),
-                response_collapsed || step_collapsed,
+            Some(s) => (
+                base_indent + u8::from(s.renders_header),
+                response_collapsed || s.collapsed,
             ),
             None => (base_indent, response_collapsed),
         };

@@ -24,7 +24,7 @@ use gpui::{
 
 use super::pulse_opacity;
 use crate::ui::theme;
-use crate::ui::{Disclosure, disclosure};
+use crate::ui::{Disclosure, DisclosureAxis, disclosure};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     Rollup, summary_preview_line,
 };
@@ -457,6 +457,88 @@ fn disclosure_row(
             chevron.on_toggle(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx))),
         ),
     }
+}
+
+/// The tail window's boundary row: a rule with the label inset, rather than a
+/// [`FoldRow`]. Deliberately a second shape in this module, not a third
+/// `FoldRow` constructor — the row is not a content fold. Nothing collapses
+/// *into* it; it marks the edge of the range the pane is showing, and its
+/// content is the steps the window covers.
+///
+/// The two states differ in **layout**, not only in a glyph: closed centres the
+/// label between two rules, open anchors it left after a short stub. That is the
+/// fix for the row this replaces, which wore the same chevron and the same muted
+/// text as every step bar beside it, so its own open/closed flip was the least
+/// distinguishable thing on the row. The chevron takes
+/// [`DisclosureAxis::Vertical`] for the same reason — `▶`/`▼` is the tree glyph
+/// the step bars already own.
+pub(super) fn window_boundary_row(
+    base: impl Into<ElementId>,
+    toggle: impl Into<FoldToggle>,
+    expanded: bool,
+    label: SharedString,
+    dim: f32,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let base = base.into();
+    let rule_color = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
+    let rule = move || div().flex_1().border_t_1().border_color(rule_color);
+    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
+        .axis(DisclosureAxis::Vertical)
+        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
+    let toggle = toggle.into().into_fn();
+    let label = div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(label)
+        .child(chevron);
+    div()
+        .id((base, "row"))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_BOUNDARY_GAP))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
+        // Open: a stub on the left pulls the label to the row's start. Closed:
+        // two equal rules centre it.
+        .child(if expanded {
+            rule().flex_none().w(px(theme::AGENT_CHAT_BOUNDARY_STUB_W))
+        } else {
+            rule()
+        })
+        .child(label)
+        .child(rule())
+        .into_any_element()
+}
+
+/// The rail marking a row that is on screen only because a boundary above it is
+/// open. Ties the revealed rows back to the boundary they came from — without
+/// it, opening the boundary just appends rows that look native to the window.
+/// No dimming: the user asked to read these.
+pub(super) fn outside_window_rail(
+    inner: AnyElement,
+    dim: f32,
+    cx: &Context<AgentChatView>,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .border_l_1()
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
+        .pl(px(theme::AGENT_CHAT_OUTSIDE_RAIL_GAP))
+        .child(inner)
+        .into_any_element()
 }
 
 /// The standard trailing-slot glyph summarizing a run's outcome. Every header

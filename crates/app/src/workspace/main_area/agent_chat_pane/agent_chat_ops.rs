@@ -845,6 +845,42 @@ impl Workspace {
         });
     }
 
+    /// Open the seeded transcript with the tail window engaged and nothing
+    /// floating over the transcript, so the boundary row itself is what the
+    /// capture shows. `reveal` opens it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_tail_boundary_for_shot(
+        &mut self,
+        reveal: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold::FoldKey;
+        use super::rows::RowKind;
+        use super::rows::tail::TailWindow;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
+            if !reveal {
+                return;
+            }
+            // The boundary's own key, taken from the projection that just ran —
+            // the run start is a property of the seed, not a constant.
+            let run_start = v.rows.iter().find_map(|r| match r.kind {
+                RowKind::TailMore { run_start, .. } => Some(run_start),
+                _ => None,
+            });
+            if let Some(run_start) = run_start {
+                v.toggle_fold(FoldKey::Tail(run_start), window, cx);
+            }
+        });
+    }
+
     /// Open the seeded transcript with a custom fold matrix and editor.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_fold_editor_for_shot(

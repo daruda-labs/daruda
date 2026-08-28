@@ -106,7 +106,7 @@ use blocks::{
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use filter::filtered_away_bar;
-use fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
+use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use step_header::{step_bar, tail_more_bar};
@@ -415,8 +415,9 @@ fn render_row(
         RowKind::TailMore {
             run_start,
             hidden_steps,
+            kept_steps,
             collapsed,
-        } => tail_more_bar(this, *run_start, *hidden_steps, *collapsed, cx),
+        } => tail_more_bar(this, *run_start, *hidden_steps, *kept_steps, *collapsed, cx),
         RowKind::FilteredAway {
             run_start,
             revealable,
@@ -453,6 +454,12 @@ fn render_row(
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::WorkingIndicator => working_indicator(this, cx).into_any_element(),
+    };
+    // Rows outside the tail window's kept range, whatever surfaced them.
+    let inner = if row.outside_window {
+        outside_window_rail(inner, this.dim_amount, cx)
+    } else {
+        inner
     };
     let bottom = if ix == visible.last {
         theme::AGENT_CHAT_PAD_Y
@@ -776,11 +783,7 @@ mod tests {
     use super::*;
 
     fn row(kind: RowKind, hidden: bool) -> RenderRow {
-        RenderRow {
-            kind,
-            hidden,
-            indent: 0,
-        }
+        RenderRow::at(kind, hidden, 0)
     }
 
     /// `rows::project` always emits the filter placeholder first, and it is

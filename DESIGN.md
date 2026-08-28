@@ -648,13 +648,52 @@ user-set size can leave in either direction.
 
 **Disclosure rows inside the transcript**
 
-Rows that reveal hidden content (`Show 12 filtered rows`, `Show 6 earlier
-steps`) state **what clicking them does**, and flip to `Hide …` once open. A
-count alone reads as "still hidden" after the reveal.
+Rows that reveal hidden content state **what clicking them does**, never a bare
+count — a count alone reads as "still hidden" after the reveal.
 
 ```
 text:  agent-chat size, pane-fg-muted
 ```
+
+**A content fold and a window boundary are different controls.** The filter's
+placeholder (`Show 12 filtered rows` / `Hide 12 filtered rows`) is a disclosure
+like every other row in the transcript: the chevron carries its state and the
+`▶ / ▼` glyph is right, because what it holds is *rows*.
+
+The tail window's row is not that. Nothing collapses into it; it marks the edge
+of the step range the pane is showing, and it used to wear the same chevron and
+the same muted text as the step bars beside it — so the least distinguishable
+thing on the row was its own open/closed state, and `Hide 6 earlier steps` reads
+as a *description* ("6 earlier steps, hidden") exactly when those steps are on
+screen. It therefore takes its own shape:
+
+```
+closed:   ─────────  N earlier steps ⌄  ─────────    (label centred between two rules)
+open:     ──  last N steps only ⌃  ───────────────    (stub left, label anchored)
+
+rule:     1px pane-border-tint
+chevron:  DisclosureAxis::Vertical (⌄ / ⌃) — ▶ / ▼ is the step bars' glyph
+label:    agent-chat size, pane-fg-muted
+```
+
+Three rules follow from it:
+
+- **The states differ in layout, not only in a glyph.** Centred-between-rules vs
+  left-anchored-after-a-stub is legible at a glance; a 12 px chevron flip in a
+  dense transcript is not.
+- **The open label names the window it returns to, not the steps it re-hides.**
+  `Collapse to the last 5 steps` can only be read as an action, and it surfaces
+  the number the Activity Bar's `Recent steps` chip is set to — the anchor the
+  word "earlier" is relative to and which the row never used to state.
+- **Rows outside the kept range carry a `1px pane-border-tint` left rail**,
+  tying them back to the boundary above them. The rail says "outside the range",
+  not "the boundary revealed me" — a step with a running tool stays surfaced
+  through a *shut* boundary, and that is exactly the row that needs explaining.
+  No dimming: the reader just asked to see these.
+
+The boundary is the one row in the transcript that is not a `FoldRow`; both
+shapes live in `render/fold_header.rs` so the chevron stays in one file
+(`scripts/lint-fold-header.sh`).
 
 **BottomDock chip row (session controls, for reference)**
 

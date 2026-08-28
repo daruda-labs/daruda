@@ -802,6 +802,18 @@ pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;
 pub const AGENT_CHAT_SUMMARY_GAP: f32 = GAP_STANDARD;
 /// Agent chat message list gap (px).
 pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
+/// Gap (px) between the tail window's boundary rule and the label it frames.
+/// Wider than `AGENT_CHAT_MSG_GAP`: a label that nearly touches the rule reads
+/// as a broken line rather than as an inset word.
+pub const AGENT_CHAT_BOUNDARY_GAP: f32 = GAP_STANDARD;
+/// Length (px) of the stub rule left of the boundary label once the boundary is
+/// open. The label moves from centred-between-two-rules to left-anchored, which
+/// is the boundary's primary open/closed cue — a chevron alone is what the row
+/// used to rely on, and it reads identically to every step bar around it.
+pub const AGENT_CHAT_BOUNDARY_STUB_W: f32 = 12.0;
+/// Left gap (px) between the rail marking a boundary-revealed row and the row's
+/// own content.
+pub const AGENT_CHAT_OUTSIDE_RAIL_GAP: f32 = GAP_STANDARD;
 /// Agent chat turn-boundary gap (px) — extra space above a new user message,
 /// paired with a hairline, so consecutive turns read as distinct exchanges.
 pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;

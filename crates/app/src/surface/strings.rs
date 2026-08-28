@@ -2219,9 +2219,8 @@ pub fn agent_chat_filter_tool_other() -> String {
     rust_i18n::t!("agent_chat.filter_tool_other").into_owned()
 }
 
-/// Earlier-step disclosure, with singular handling. Mirrors the filtered-row
-/// placeholder: the row is a toggle, so the copy states what clicking it does
-/// rather than restating a count that is already on screen once revealed.
+/// The tail window's boundary row while it is closed: `count` is how many
+/// earlier steps opening it brings back.
 pub fn agent_chat_tail_more_show(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.tail_more_show_one").into_owned()
@@ -2230,12 +2229,16 @@ pub fn agent_chat_tail_more_show(count: usize) -> String {
     }
 }
 
-/// The revealed counterpart of [`agent_chat_tail_more_show`].
-pub fn agent_chat_tail_more_hide(count: usize) -> String {
+/// The same row while it is open. Names the window it collapses *back to* —
+/// `count` is the steps kept, not the ones hidden — because a label built from
+/// the hidden count reads as a description of the current state ("6 earlier
+/// steps, hidden") exactly when the steps are on screen, which is the misread
+/// that made the row's two states indistinguishable.
+pub fn agent_chat_tail_more_collapse(count: usize) -> String {
     if count == 1 {
-        rust_i18n::t!("agent_chat.tail_more_hide_one").into_owned()
+        rust_i18n::t!("agent_chat.tail_more_collapse_one").into_owned()
     } else {
-        rust_i18n::t!("agent_chat.tail_more_hide", count = count).into_owned()
+        rust_i18n::t!("agent_chat.tail_more_collapse", count = count).into_owned()
     }
 }
 
