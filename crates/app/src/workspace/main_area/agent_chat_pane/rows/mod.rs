@@ -65,6 +65,10 @@ pub(in crate::workspace) struct RenderRow {
     /// Hidden rows stay in the sequence to preserve slot stability.
     pub(in crate::workspace) hidden: bool,
     pub(in crate::workspace) indent: u8,
+    /// The per-run filter disclosure is open, so rows rejected by the active
+    /// display filter are visible again. Header counts, rollups, and nested tool
+    /// cards must all use this same answer as the row projection.
+    pub(in crate::workspace) filter_revealed: bool,
     /// The row sits outside the tail window's kept range. Distinct from
     /// `indent`, which is structural nesting: this says the row does not belong
     /// to the range the pane is showing, and the renderer answers it with the
@@ -84,8 +88,14 @@ impl RenderRow {
             kind,
             hidden,
             indent,
+            filter_revealed: false,
             outside_window: false,
         }
+    }
+
+    fn with_filter_revealed(mut self, revealed: bool) -> Self {
+        self.filter_revealed = revealed;
+        self
     }
 }
 
@@ -247,18 +257,26 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
             .clone()
             .rev()
             .find(|&k| matches!(items[k], ChatItem::AssistantText { .. }));
+        let filter_key = FoldKey::Filtered(run.start);
+        let filter_revealed = fold.is_expanded(
+            &filter_key,
+            fold_context_at(&filter_key, run.start, items, boundary),
+        );
 
         let run_indent = if let (true, Some(a)) = (non_trivial, anchor) {
             let key = FoldKey::Response(a);
             let collapsed = !fold.is_expanded(&key, fold_context_at(&key, a, items, boundary));
-            rows.push(RenderRow::at(
-                RowKind::ResponseHeader {
-                    anchor: a,
-                    collapsed,
-                },
-                false,
-                0,
-            ));
+            rows.push(
+                RenderRow::at(
+                    RowKind::ResponseHeader {
+                        anchor: a,
+                        collapsed,
+                    },
+                    false,
+                    0,
+                )
+                .with_filter_revealed(filter_revealed),
+            );
             project_run(
                 RunContext {
                     items,
@@ -273,6 +291,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     live_units,
                     tail,
                     filter,
+                    filter_revealed,
                 },
                 &mut rows,
             );
@@ -294,6 +313,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     live_units,
                     tail,
                     filter,
+                    filter_revealed,
                 },
                 &mut rows,
             );
@@ -320,6 +340,7 @@ struct RunContext<'a> {
     live_units: &'a LiveSubagentUnits,
     tail: TailWindow,
     filter: &'a FilterMatchIndex,
+    filter_revealed: bool,
 }
 
 struct RunRows<'a> {
@@ -355,6 +376,7 @@ impl RunRows<'_> {
             kind,
             hidden: structural || (filtered && !self.revealed),
             indent,
+            filter_revealed: self.revealed,
             outside_window: self.outside_window,
         });
     }
@@ -399,16 +421,12 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         live_units,
         tail,
         filter,
+        filter_revealed,
     } = ctx;
     if run.is_empty() {
         return;
     }
     // Keep one filter slot per run so filter changes do not splice the list.
-    let filter_key = FoldKey::Filtered(run.start);
-    let filter_revealed = fold.is_expanded(
-        &filter_key,
-        fold_context_at(&filter_key, run.start, items, boundary),
-    );
     let placeholder = rows.len();
     rows.push(RenderRow::at(
         RowKind::FilteredAway {
@@ -490,7 +508,9 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
                 out.push(
                     RowKind::StepHeader {
                         first_ix: k,
-                        tool_count: s.kept_tool_count(items, hierarchy, |it| filter.matches(it)),
+                        tool_count: s.kept_tool_count(items, hierarchy, |it| {
+                            filter_revealed || filter.matches(it)
+                        }),
                         collapsed: step_collapsed,
                     },
                     (response_collapsed || outside_tail) && !step_live[next_step],

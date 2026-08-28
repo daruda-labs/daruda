@@ -387,17 +387,17 @@ fn render_row(
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::ResponseHeader { anchor, collapsed } => {
-            response_bar(this, *anchor, *collapsed, t, cx).into_any_element()
+            response_bar(this, *anchor, *collapsed, row.filter_revealed, t, cx).into_any_element()
         }
         // One block among siblings — it reports nothing about the run, so no
         // rollup glyph (see `RowKind::SoloResponse`).
-        RowKind::AgentItem(i) => render_agent_item(this, *i, row.indent > 0, None, t, window, cx),
+        RowKind::AgentItem(i) => render_agent_item(this, *i, row, None, t, window, cx),
         // The whole response in one block: it owns the rollup a response bar would
         // otherwise carry. The run is this single item, so classify over it.
         RowKind::SoloResponse(i) => render_agent_item(
             this,
             *i,
-            row.indent > 0,
+            row,
             Some(Rollup::of_run_with_live_units(
                 &this.items,
                 *i..*i + 1,
@@ -411,7 +411,15 @@ fn render_row(
             first_ix,
             tool_count,
             collapsed,
-        } => step_bar(this, *first_ix, *tool_count, *collapsed, t, cx),
+        } => step_bar(
+            this,
+            *first_ix,
+            *tool_count,
+            *collapsed,
+            row.filter_revealed,
+            t,
+            cx,
+        ),
         RowKind::TailMore {
             run_start,
             hidden_steps,
@@ -429,7 +437,16 @@ fn render_row(
             first_ix,
             count,
             collapsed,
-        } => tool_group_bar(this, gid, *first_ix, *count, *collapsed, t, cx).into_any_element(),
+        } => tool_group_bar(
+            this,
+            gid,
+            *first_ix..*first_ix + *count,
+            *collapsed,
+            row.filter_revealed,
+            t,
+            cx,
+        )
+        .into_any_element(),
         RowKind::ConclusionItem(i) => match this.items.get(*i) {
             Some(ChatItem::AssistantText { text, .. }) => {
                 let key = FoldKey::Assistant(*i);
@@ -517,11 +534,12 @@ fn response_bar(
     this: &AgentChatView,
     anchor: usize,
     collapsed: bool,
+    filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let run = agent_run(&this.items, anchor + 1);
-    let tools = kept_tools(this, run.clone());
+    let tools = kept_tools(this, run.clone(), filter_revealed);
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
     // leading block (a streaming placeholder that has not filled yet) falls
@@ -546,7 +564,7 @@ fn response_bar(
     }
     let header = header.trailing(rollup_glyph(
         Rollup::of_kept_run(&this.items, run, &this.live_units, |item| {
-            this.filter_matches.matches(item)
+            filter_revealed || this.filter_matches.matches(item)
         }),
         t,
         cx,
@@ -572,12 +590,13 @@ fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoEl
         .child(SharedString::from(agent_display_name(this).to_string()))
 }
 
-/// Tool calls in `run` the display filter keeps. Every header that prints a
-/// count sits on a disclosure, so the number has to be what expanding it puts
-/// on screen rather than what the agent originally ran.
-fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>) -> usize {
+/// Tool calls in `run` that the current projection displays. Every header that
+/// prints a count sits on a disclosure, so the number has to be what expanding
+/// it puts on screen: filter matches normally, or the whole run while the
+/// filtered-row disclosure is open.
+fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>, filter_revealed: bool) -> usize {
     run.filter(|&k| {
-        matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if this.filter_matches.keeps_tool(tc))
+        matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc))
     })
     .count()
 }
@@ -598,21 +617,20 @@ fn count_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>)
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
-    first_ix: usize,
-    count: usize,
+    run: std::ops::Range<usize>,
     collapsed: bool,
+    filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let run = first_ix..first_ix + count;
     let rollup = Rollup::of_kept_run(&this.items, run.clone(), &this.live_units, |item| {
-        this.filter_matches.matches(item)
+        filter_revealed || this.filter_matches.matches(item)
     });
     // The count is the group's own identity, not a preview of folded content, so
     // it shows in both states — hence `plain` rather than a markdown summary.
     // `count` is the group's structural span; what the row offers is the part of
     // it the display filter keeps.
-    let label = s::agent_chat_tool_group_count(kept_tools(this, run));
+    let label = s::agent_chat_tool_group_count(kept_tools(this, run, filter_revealed));
     let header = FoldHeader::with_title(
         div()
             .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
@@ -671,7 +689,7 @@ fn scroll_to_bottom_button(
 fn render_agent_item(
     this: &AgentChatView,
     ix: usize,
-    under_response: bool,
+    row: &RenderRow,
     rollup: Option<Rollup>,
     t: &theme::DarudaTheme,
     window: &mut Window,
@@ -681,11 +699,12 @@ fn render_agent_item(
         Some(item) => render_item(
             ix,
             item,
-            under_response,
+            row.indent > 0,
             rollup,
             &this.items,
             &this.live_units,
             &this.filter_matches,
+            row.filter_revealed,
             this.turn_boundary,
             RenderAssets::of(&this.assets),
             &this.fold,
@@ -715,6 +734,7 @@ fn render_item(
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
     filter_matches: &FilterMatchIndex,
+    filter_revealed: bool,
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
@@ -771,6 +791,7 @@ fn render_item(
                 items,
                 live_units,
                 filter_matches,
+                filter_revealed,
                 boundary,
                 assets,
                 fold,

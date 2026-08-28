@@ -20,6 +20,7 @@ pub(super) fn step_bar(
     first_ix: usize,
     tool_count: usize,
     collapsed: bool,
+    filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -35,7 +36,7 @@ pub(super) fn step_bar(
     // The icon names the work the header offers, so it reads the same kept
     // rows the count and the glyph do.
     let icon = tool_category_icon(dominant_category(items, run, |item| {
-        this.filter_matches.matches(item)
+        filter_revealed || this.filter_matches.matches(item)
     }));
     // Prefer reasoning, then fall back to assistant prose.
     let title_items = items;
@@ -65,7 +66,7 @@ pub(super) fn step_bar(
         );
     }
     if let Some(rollup) = step_rollup(items, span.as_ref(), &this.live_units, |item| {
-        this.filter_matches.matches(item)
+        filter_revealed || this.filter_matches.matches(item)
     }) {
         header = header.trailing(rollup_glyph(rollup, t, cx));
     }

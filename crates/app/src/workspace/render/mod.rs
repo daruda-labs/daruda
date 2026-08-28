@@ -1536,9 +1536,9 @@ impl Render for Workspace {
                     el.child(crate::ui::popup_menu_deferred(
                         &menu,
                         position,
-                        move |_window, cx| {
+                        move |window, cx| {
                             if let Some(ws) = weak.upgrade() {
-                                ws.update(cx, |ws, cx| ws.close_context_menu(cx));
+                                ws.update(cx, |ws, cx| ws.close_context_menu(window, cx));
                             }
                         },
                     ))

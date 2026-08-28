@@ -332,7 +332,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_context_menu(cx);
+        self.close_context_menu(window, cx);
         if self.git_stage_in_flight {
             return;
         }

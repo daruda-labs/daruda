@@ -64,6 +64,7 @@ pub(super) fn tool_card(
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
     filter_matches: &FilterMatchIndex,
+    filter_revealed: bool,
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
@@ -334,8 +335,9 @@ pub(super) fn tool_card(
         // so the subagent reads as one unit that folds with its parent card.
         //
         // The filter's unit is a projected row, and these children have none, so
-        // `FilterMatchIndex` keeps every descendant of a kept tool: the call
-        // below drops a child only when its parent card is itself filtered away.
+        // `FilterMatchIndex` keeps every descendant of a kept tool. Opening the
+        // per-run filter disclosure admits the whole card again, including the
+        // nested children that own no projected row of their own.
         //
         // `depth` bounds the recursion: real `parentToolUseId`s are unique and
         // acyclic (a parent always precedes its children), but this id comes from a
@@ -351,7 +353,7 @@ pub(super) fn tool_card(
                     ChatItem::ToolCall(c)
                         if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) =>
                     {
-                        filter_matches.keeps_tool(c).then_some((cix, c))
+                        (filter_revealed || filter_matches.keeps_tool(c)).then_some((cix, c))
                     }
                     _ => None,
                 })
@@ -390,6 +392,7 @@ pub(super) fn tool_card(
                         items,
                         live_units,
                         filter_matches,
+                        filter_revealed,
                         boundary,
                         assets,
                         fold,

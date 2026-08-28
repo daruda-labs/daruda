@@ -5,7 +5,9 @@
 //! lanes. Drag state (`DividerDrag`, `DockDrag`) lives here
 //! because it is exclusively read by these methods plus `render.rs`.
 
-use gpui::{Context, DismissEvent, Entity, Focusable as _, Pixels, Point, Subscription, Window};
+use gpui::{
+    Context, DismissEvent, Entity, FocusHandle, Focusable as _, Pixels, Point, Subscription, Window,
+};
 
 use crate::ui::PopupMenu;
 use crate::workspace::Workspace;
@@ -31,6 +33,7 @@ pub(in crate::workspace) struct DividerDrag {
 pub(in crate::workspace) struct PopupMenuDeploy {
     pub(in crate::workspace) menu: Entity<PopupMenu>,
     pub(in crate::workspace) position: Point<Pixels>,
+    previous_focus: Option<FocusHandle>,
     _dismiss_sub: Subscription,
 }
 
@@ -383,25 +386,49 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Preserve the focus that existed before the first menu in this deploy
+        // slot. Replacing an already-open menu must not remember the old menu's
+        // transient handle as the place to return to.
+        let previous_focus = match self.main_area.popup_menu_deploy.as_ref() {
+            Some(deploy) => deploy.previous_focus.clone(),
+            None => window.focused(cx),
+        };
         let handle = menu.focus_handle(cx);
         if !handle.contains_focused(window, cx) {
             handle.focus(window, cx);
         }
-        let _dismiss_sub = cx.subscribe(&menu, |this, _menu, _event: &DismissEvent, cx| {
-            this.close_context_menu(cx);
-        });
+        let _dismiss_sub = cx.subscribe_in(
+            &menu,
+            window,
+            |this, _menu, _event: &DismissEvent, window, cx| {
+                this.close_context_menu(window, cx);
+            },
+        );
         self.main_area.popup_menu_deploy = Some(PopupMenuDeploy {
             menu,
             position,
+            previous_focus,
             _dismiss_sub,
         });
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_context_menu(&mut self, cx: &mut Context<Self>) {
-        if self.main_area.popup_menu_deploy.take().is_some() {
-            cx.notify();
+    pub(in crate::workspace) fn close_context_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(deploy) = self.main_area.popup_menu_deploy.take() else {
+            return;
+        };
+        // A menu action may have opened a dialog or focused another control.
+        // Restore only while the disappearing menu still owns keyboard focus.
+        if deploy.menu.focus_handle(cx).contains_focused(window, cx)
+            && let Some(previous_focus) = deploy.previous_focus
+        {
+            previous_focus.focus(window, cx);
         }
+        cx.notify();
     }
 }
 

@@ -2,7 +2,7 @@
 //! (`Workspace::open_context_menu` / `close_context_menu` +
 //! `PopupMenuDeploy`, `crates/app/src/workspace/layout/ops.rs`).
 
-use gpui::{Point, TestAppContext, px};
+use gpui::{Focusable as _, Point, TestAppContext, px};
 
 use crate::ui::PopupMenu;
 
@@ -18,6 +18,8 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
             let menu = PopupMenu::build(window, cx, |menu, _window, _cx| menu);
 
             workspace.update(cx, |ws, cx| {
+                let previous_focus = ws.focus_handle.clone();
+                previous_focus.focus(window, cx);
                 assert!(
                     ws.main_area.popup_menu_deploy.is_none(),
                     "no menu open before the call"
@@ -29,16 +31,24 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
                     .as_ref()
                     .expect("open_context_menu should populate popup_menu_deploy");
                 assert_eq!(deploy.position, position);
+                assert!(
+                    deploy.menu.focus_handle(cx).contains_focused(window, cx),
+                    "the open menu owns keyboard focus"
+                );
 
-                ws.close_context_menu(cx);
+                ws.close_context_menu(window, cx);
                 assert!(
                     ws.main_area.popup_menu_deploy.is_none(),
                     "close_context_menu should clear the deploy"
                 );
+                assert!(
+                    previous_focus.is_focused(window),
+                    "closing the menu restores the focus it replaced"
+                );
 
-                // Guarded by `.take().is_some()` — calling close on an
-                // already-closed menu must not panic and must stay `None`.
-                ws.close_context_menu(cx);
+                // Calling close on an already-closed menu must return without
+                // changing focus or recreating the deploy.
+                ws.close_context_menu(window, cx);
                 assert!(ws.main_area.popup_menu_deploy.is_none());
             });
         })

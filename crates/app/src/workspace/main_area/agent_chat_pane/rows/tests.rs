@@ -2485,10 +2485,10 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
         kinded_tool("c", Read, Completed),
         asst("done"),
     ];
-    let step_count = |filter: &DisplayFilter| {
+    let step_count = |fold: &FoldState, filter: &DisplayFilter| {
         project(
             &items,
-            &FoldState::default(),
+            fold,
             false,
             &LiveSubagentUnits::of(&items),
             TailWindow::All,
@@ -2502,18 +2502,35 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
         .expect("step header")
     };
     assert_eq!(
-        step_count(&DisplayFilter::default()),
+        step_count(&FoldState::default(), &DisplayFilter::default()),
         3,
         "an unfiltered pane still counts the whole step"
     );
     assert_eq!(
-        step_count(&DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
+        step_count(
+            &FoldState::default(),
+            &DisplayFilter::default().toggled(FilterFacet::ToolEdit),
+        ),
         1,
         "only the edit survives the filter, so only the edit is offered"
     );
     assert_eq!(
-        step_count(&DisplayFilter::default().toggled(FilterFacet::Thinking)),
+        step_count(
+            &FoldState::default(),
+            &DisplayFilter::default().toggled(FilterFacet::Thinking),
+        ),
         0,
         "a step kept for its prose alone offers no tools at all"
+    );
+
+    let mut revealed = FoldState::default();
+    revealed.toggle(FoldKey::Filtered(1), FoldContext::past(false));
+    assert_eq!(
+        step_count(
+            &revealed,
+            &DisplayFilter::default().toggled(FilterFacet::ToolEdit),
+        ),
+        3,
+        "revealing filtered rows restores the count of the rows now on screen"
     );
 }
