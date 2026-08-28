@@ -216,6 +216,19 @@ Copy the fresh upstream `highlighter/` in, then re-apply the split by hand.
 
 ---
 
+## `crates/gpui_component/src/checkbox.rs` / `radio.rs` - vendored, **mixed-state checkbox**
+
+Adds `Checkbox::indeterminate(bool)` for partial selections. The checkbox draws
+`IconName::Minus`, treats checked and indeterminate as visible marks for
+border/fill/animation, and resolves a mixed-state click to checked.
+`radio.rs` passes `false` to the new internal helper argument.
+
+Re-vendor by copying upstream `checkbox.rs` and `radio.rs`, then re-applying
+the indeterminate flag plus the `mark_shown`, `next_checked`, and helper
+argument changes. Inline tests cover the click and mark behavior.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **six source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.

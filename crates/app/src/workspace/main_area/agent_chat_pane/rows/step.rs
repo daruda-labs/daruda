@@ -18,18 +18,20 @@ pub(in crate::workspace) struct StepSpan {
     pub(in crate::workspace) end: usize,
 }
 
-pub(super) struct Step {
+pub(super) struct WorkStep {
     pub(super) span: StepSpan,
     /// Nested subagent tools do not count toward the header.
     pub(super) tool_count: usize,
+    /// Whether this step gets a header; tail counting still includes it.
+    pub(super) renders_header: bool,
 }
 
-/// Partition a response into disjoint steps that earn headers.
+/// Partition a response into disjoint work steps.
 pub(super) fn steps(
     items: &[ChatItem],
     run: Range<usize>,
     hierarchy: &ToolHierarchy<'_>,
-) -> Vec<Step> {
+) -> Vec<WorkStep> {
     let mut out = Vec::new();
     let mut start = run.start;
     let mut k = run.start;
@@ -47,12 +49,15 @@ pub(super) fn steps(
             tool_start,
             end: k,
         };
-        if folded_rows(items, &span, hierarchy) >= STEP_MIN_ROWS {
-            let tool_count = (span.tool_start..span.end)
-                .filter(|&j| top_level_tool(items, j, hierarchy))
-                .count();
-            out.push(Step { span, tool_count });
-        }
+        let tool_count = (span.tool_start..span.end)
+            .filter(|&j| top_level_tool(items, j, hierarchy))
+            .count();
+        let renders_header = folded_rows(items, &span, hierarchy) >= STEP_MIN_ROWS;
+        out.push(WorkStep {
+            span,
+            tool_count,
+            renders_header,
+        });
         start = k;
     }
     out
@@ -148,17 +153,25 @@ mod tests {
         }
     }
 
-    fn spans(items: &[ChatItem]) -> Vec<(usize, usize, usize, usize)> {
+    fn spans(items: &[ChatItem]) -> Vec<(usize, usize, usize, usize, bool)> {
         steps(items, 0..items.len(), &ToolHierarchy::build(items))
             .into_iter()
-            .map(|s| (s.span.start, s.span.tool_start, s.span.end, s.tool_count))
+            .map(|s| {
+                (
+                    s.span.start,
+                    s.span.tool_start,
+                    s.span.end,
+                    s.tool_count,
+                    s.renders_header,
+                )
+            })
             .collect()
     }
 
     #[test]
     fn a_step_absorbs_the_prose_in_front_of_its_tool_run() {
         let items = [think("why"), asst("here goes"), tool("a"), tool("b")];
-        assert_eq!(spans(&items), vec![(0, 2, 4, 2)]);
+        assert_eq!(spans(&items), vec![(0, 2, 4, 2, true)]);
     }
 
     #[test]
@@ -170,7 +183,7 @@ mod tests {
             asst("second"),
             tool("c"),
         ];
-        assert_eq!(spans(&items), vec![(0, 1, 3, 2), (3, 4, 5, 1)]);
+        assert_eq!(spans(&items), vec![(0, 1, 3, 2, true), (3, 4, 5, 1, true)]);
     }
 
     #[test]
@@ -182,25 +195,28 @@ mod tests {
     #[test]
     fn trailing_prose_belongs_to_no_step() {
         let items = [asst("looking"), tool("a"), asst("done")];
-        assert_eq!(spans(&items), vec![(0, 1, 2, 1)]);
+        assert_eq!(spans(&items), vec![(0, 1, 2, 1, true)]);
     }
 
     #[test]
-    fn a_prose_less_single_tool_run_earns_no_header() {
-        assert!(spans(&[tool("a")]).is_empty());
-        assert!(spans(&[tool("a"), tool("b"), tool("c")]).is_empty());
+    fn a_prose_less_tool_run_counts_without_earning_a_header() {
+        assert_eq!(spans(&[tool("a")]), vec![(0, 0, 1, 1, false)]);
+        assert_eq!(
+            spans(&[tool("a"), tool("b"), tool("c")]),
+            vec![(0, 0, 3, 3, false)]
+        );
     }
 
     #[test]
     fn one_prose_block_plus_one_tool_reaches_the_threshold() {
         let items = [asst("check this"), tool("a")];
-        assert_eq!(spans(&items), vec![(0, 1, 2, 1)]);
+        assert_eq!(spans(&items), vec![(0, 1, 2, 1, true)]);
     }
 
     #[test]
     fn a_nested_child_is_not_counted_as_the_steps_own_tool() {
         let items = [asst("delegate"), tool("parent"), child("kid", "parent")];
-        assert_eq!(spans(&items), vec![(0, 1, 3, 1)]);
+        assert_eq!(spans(&items), vec![(0, 1, 3, 1, true)]);
     }
 
     #[test]

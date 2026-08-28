@@ -191,7 +191,7 @@ impl RenderOnce for Radio {
                             _ => this.bg(bg),
                         })
                         .child(checkbox_check_icon(
-                            self.id, self.size, checked, disabled, window, cx,
+                            self.id, self.size, checked, false, disabled, window, cx,
                         )),
                 )
                 .when(!self.children.is_empty() || self.label.is_some(), |this| {

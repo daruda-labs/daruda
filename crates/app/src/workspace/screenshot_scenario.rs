@@ -40,10 +40,14 @@ const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
 /// issue count, a failure policy, a dropped pin's reason, inherited defaults.
 const NAME_FLOW_GRAPH_AUTHORING: &str = "flow-graph-authoring";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
+/// CLI token for an empty agent-chat pane with its view options open.
+const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
 const NAME_AGENT_CHAT: &str = "agent-chat";
 /// CLI token for the same transcript with the filter and tail chips engaged.
 const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
+/// CLI token for the transcript with the custom fold editor open.
+const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 /// CLI token for the flow delete confirmation, on the repository's copy.
 const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
 /// The name the delete dialog is asked about. Nothing is deleted — a capture
@@ -134,6 +138,8 @@ pub(crate) enum ScreenshotScenario {
     /// An agent-chat pane parked on an expired login: the connect banner with
     /// its remedy buttons, and the failure card the conversation ends on.
     AgentChatFailure,
+    /// A fresh agent-chat pane before the first prompt, with view options open.
+    AgentChatEmpty,
     /// A settled transcript in the default state. The only way to look at the
     /// Step layer and the three activity-bar chips at once — whether the chips
     /// fit beside the pane title, whether they read as three controls, and
@@ -143,6 +149,8 @@ pub(crate) enum ScreenshotScenario {
     /// engaged, so both placeholder rows render together. The only way to see
     /// whether the filtered-away and tail-more rows read as siblings.
     AgentChatNarrowed,
+    /// The same transcript with a custom fold matrix and its editor open.
+    AgentChatFold,
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -183,8 +191,10 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
             NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
+            NAME_AGENT_CHAT_EMPTY => Some(Self::AgentChatEmpty),
             NAME_AGENT_CHAT => Some(Self::AgentChat),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
+            NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
@@ -312,6 +322,9 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatFailure => {
             workspace.update(cx, |ws, cx| ws.open_agent_chat_failure_for_shot(window, cx));
         }
+        ScreenshotScenario::AgentChatEmpty => {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_empty_for_shot(window, cx));
+        }
         ScreenshotScenario::AgentChat => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_transcript_for_shot(window, cx)
@@ -320,6 +333,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatNarrowed => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_narrowed_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatFold => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_fold_editor_for_shot(window, cx)
             });
         }
     }
@@ -417,12 +435,20 @@ mod tests {
     #[test]
     fn agent_chat_names_map_to_their_scenarios() {
         assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-empty"),
+            Some(ScreenshotScenario::AgentChatEmpty)
+        );
+        assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat"),
             Some(ScreenshotScenario::AgentChat)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-narrowed"),
             Some(ScreenshotScenario::AgentChatNarrowed)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-fold"),
+            Some(ScreenshotScenario::AgentChatFold)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-failure"),

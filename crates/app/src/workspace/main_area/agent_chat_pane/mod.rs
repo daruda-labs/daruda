@@ -39,6 +39,7 @@ pub(in crate::workspace) mod session_config;
 pub(in crate::workspace) mod shot_transcript;
 pub(in crate::workspace) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
+pub(in crate::workspace) mod tool_category;
 /// Parent/child structure of a conversation's tool calls — the one place the
 /// nesting rules live.
 pub(in crate::workspace) mod tool_hierarchy;

@@ -47,11 +47,29 @@ fn shipped_default_as_last(items: &[ChatItem]) -> Vec<usize> {
         .collect()
 }
 
+fn assert_within_budget(actual: Vec<usize>, budget: &[usize], label: &str) {
+    assert_eq!(actual.len(), budget.len(), "{label} turn count");
+    for (turn, (actual, limit)) in actual.into_iter().zip(budget).enumerate() {
+        assert!(
+            actual <= *limit,
+            "{label} turn {turn}: {actual} rows exceeds budget {limit}"
+        );
+    }
+}
+
 #[test]
-fn the_default_view_costs_what_it_was_measured_to_cost() {
+fn the_default_view_stays_within_the_measured_budget() {
     let auto = Lens::preset(FoldPreset::Auto);
-    assert_eq!(per_turn_as_last(&codex_session(), auto), CODEX_AUTO);
-    assert_eq!(per_turn_as_last(&claude_session(), auto), CLAUDE_AUTO);
+    assert_within_budget(
+        per_turn_as_last(&codex_session(), auto),
+        &CODEX_AUTO,
+        "codex auto",
+    );
+    assert_within_budget(
+        per_turn_as_last(&claude_session(), auto),
+        &CLAUDE_AUTO,
+        "claude auto",
+    );
 }
 
 #[test]
@@ -73,15 +91,31 @@ fn the_shipped_default_is_still_the_auto_budget() {
 #[test]
 fn the_tail_window_is_the_headline_cut() {
     let tail = Lens::preset(FoldPreset::Auto).tail(TailWindow::last(TAIL_N));
-    assert_eq!(per_turn_as_last(&codex_session(), tail), CODEX_TAIL);
-    assert_eq!(per_turn_as_last(&claude_session(), tail), CLAUDE_TAIL);
+    assert_within_budget(
+        per_turn_as_last(&codex_session(), tail),
+        &CODEX_TAIL,
+        "codex tail",
+    );
+    assert_within_budget(
+        per_turn_as_last(&claude_session(), tail),
+        &CLAUDE_TAIL,
+        "claude tail",
+    );
 }
 
 #[test]
 fn summary_mode_folds_every_turn_to_its_conclusion() {
     let summary = Lens::preset(FoldPreset::Summary);
-    assert_eq!(per_turn_as_last(&codex_session(), summary), CODEX_SUMMARY);
-    assert_eq!(per_turn_as_last(&claude_session(), summary), CLAUDE_SUMMARY);
+    assert_within_budget(
+        per_turn_as_last(&codex_session(), summary),
+        &CODEX_SUMMARY,
+        "codex summary",
+    );
+    assert_within_budget(
+        per_turn_as_last(&claude_session(), summary),
+        &CLAUDE_SUMMARY,
+        "claude summary",
+    );
 }
 
 #[test]

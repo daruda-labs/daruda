@@ -19,6 +19,7 @@ pub struct Checkbox {
     label: Option<Text>,
     children: Vec<AnyElement>,
     checked: bool,
+    indeterminate: bool,
     disabled: bool,
     size: Size,
     tab_stop: bool,
@@ -36,6 +37,7 @@ impl Checkbox {
             label: None,
             children: Vec::new(),
             checked: false,
+            indeterminate: false,
             disabled: false,
             size: Size::default(),
             on_click: None,
@@ -53,6 +55,12 @@ impl Checkbox {
     /// Set the checked state for the checkbox.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
+        self
+    }
+
+    /// Show a mixed-state mark.
+    pub fn indeterminate(mut self, indeterminate: bool) -> Self {
+        self.indeterminate = indeterminate;
         self
     }
 
@@ -79,14 +87,23 @@ impl Checkbox {
     fn handle_click(
         on_click: &Option<Rc<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
         checked: bool,
+        indeterminate: bool,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let new_checked = !checked;
+        let new_checked = next_checked(checked, indeterminate);
         if let Some(f) = on_click {
             (f)(&new_checked, window, cx);
         }
     }
+}
+
+fn next_checked(checked: bool, indeterminate: bool) -> bool {
+    indeterminate || !checked
+}
+
+fn mark_shown(checked: bool, indeterminate: bool) -> bool {
+    checked || indeterminate
 }
 
 impl InteractiveElement for Checkbox {
@@ -136,11 +153,13 @@ pub(crate) fn checkbox_check_icon(
     id: ElementId,
     size: Size,
     checked: bool,
+    indeterminate: bool,
     disabled: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
-    let toggle_state = window.use_keyed_state(id, cx, |_, _| checked);
+    let marked = mark_shown(checked, indeterminate);
+    let toggle_state = window.use_keyed_state(id, cx, |_, _| marked);
     let color = if disabled {
         cx.theme().primary_foreground.opacity(0.5)
     } else {
@@ -159,28 +178,27 @@ pub(crate) fn checkbox_check_icon(
             _ => this.size_3(),
         })
         .text_color(color)
-        .map(|this| match checked {
-            true => this.path(IconName::Check.path()),
-            _ => this,
+        .map(|this| match (checked, indeterminate) {
+            (_, true) => this.path(IconName::Minus.path()),
+            (true, false) => this.path(IconName::Check.path()),
+            (false, false) => this,
         })
         .map(|this| {
-            if !disabled && checked != *toggle_state.read(cx) {
+            if !disabled && marked != *toggle_state.read(cx) {
                 let duration = Duration::from_secs_f64(0.25);
                 cx.spawn({
                     let toggle_state = toggle_state.clone();
                     async move |cx| {
                         cx.background_executor().timer(duration).await;
-                        _ = toggle_state.update(cx, |this, _| *this = checked);
+                        _ = toggle_state.update(cx, |this, _| *this = marked);
                     }
                 })
                 .detach();
 
                 this.with_animation(
-                    ElementId::NamedInteger("toggle".into(), checked as u64),
+                    ElementId::NamedInteger("toggle".into(), marked as u64),
                     Animation::new(Duration::from_secs_f64(0.25)),
-                    move |this, delta| {
-                        this.opacity(if checked { 1.0 * delta } else { 1.0 - delta })
-                    },
+                    move |this, delta| this.opacity(if marked { 1.0 * delta } else { 1.0 - delta }),
                 )
                 .into_any_element()
             } else {
@@ -192,6 +210,8 @@ pub(crate) fn checkbox_check_icon(
 impl RenderOnce for Checkbox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
+        let indeterminate = self.indeterminate;
+        let marked = mark_shown(checked, indeterminate);
 
         let focus_handle = window
             .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
@@ -199,7 +219,7 @@ impl RenderOnce for Checkbox {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let border_color = if checked {
+        let border_color = if marked {
             cx.theme().primary
         } else {
             cx.theme().input
@@ -254,7 +274,7 @@ impl RenderOnce for Checkbox {
                         .border_color(color)
                         .rounded(radius)
                         .when(cx.theme().shadow && !self.disabled, |this| this.shadow_xs())
-                        .map(|this| match checked {
+                        .map(|this| match marked {
                             false => this.bg(cx.theme().background),
                             _ => this.bg(color),
                         })
@@ -262,6 +282,7 @@ impl RenderOnce for Checkbox {
                             self.id,
                             self.size,
                             checked,
+                            indeterminate,
                             self.disabled,
                             window,
                             cx,
@@ -301,10 +322,35 @@ impl RenderOnce for Checkbox {
                         let on_click = self.on_click.clone();
                         move |_, window, cx| {
                             window.prevent_default();
-                            Self::handle_click(&on_click, checked, window, cx);
+                            Self::handle_click(&on_click, checked, indeterminate, window, cx);
                         }
                     })
                 }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_checked;
+
+    #[test]
+    fn an_indeterminate_click_resolves_to_checked() {
+        assert!(next_checked(false, true));
+        assert!(next_checked(true, true));
+    }
+
+    #[test]
+    fn a_regular_click_toggles_the_checked_state() {
+        assert!(next_checked(false, false));
+        assert!(!next_checked(true, false));
+    }
+
+    #[test]
+    fn a_mixed_box_counts_as_marked_so_its_minus_does_not_fade_out() {
+        use super::mark_shown;
+        assert!(mark_shown(true, false), "all selected");
+        assert!(mark_shown(false, true), "mixed");
+        assert!(!mark_shown(false, false), "none selected");
     }
 }

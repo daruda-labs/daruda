@@ -839,6 +839,18 @@ pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
 /// Max height (px) of the bottom plan region's expanded checklist before it
 /// scrolls internally, so a long plan can't crowd out the conversation above.
 pub const AGENT_CHAT_PLAN_MAX_H: f32 = 168.0;
+/// Pane width (px) at or below which transcript controls collapse.
+pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 = 800.0;
+/// Width (px) of single-column Activity Bar popovers.
+pub const AGENT_CHAT_OPTIONS_PANEL_W: f32 = 240.0;
+/// Width (px) of fold-rule and combined options popovers.
+pub const AGENT_CHAT_RULES_PANEL_W: f32 = 430.0;
+/// Max height (px) of the fold-rule editor popover.
+pub const AGENT_CHAT_RULES_PANEL_MAX_H: f32 = 520.0;
+/// Largest fraction of the window height an Activity Bar popover may claim.
+pub const AGENT_CHAT_PANEL_VIEWPORT_FRACTION: f32 = 0.8;
+/// Indent (px) for nested Activity Bar options.
+pub const AGENT_CHAT_OPTION_NEST_INDENT: f32 = 20.0;
 /// Left dock default width (px).
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 /// Left dock minimum width (px).

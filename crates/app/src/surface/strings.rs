@@ -1794,6 +1794,14 @@ pub fn agent_chat_config_boolean_off() -> String {
     rust_i18n::t!("agent_chat.config_boolean_off").into_owned()
 }
 
+pub fn agent_chat_session_mode_chip(value: &str) -> String {
+    rust_i18n::t!("agent_chat.session_mode_chip", value = value).into_owned()
+}
+
+pub fn agent_chat_config_chip(name: &str, value: &str) -> String {
+    rust_i18n::t!("agent_chat.config_chip", name = name, value = value).into_owned()
+}
+
 /// Banner copy for a dormant (restored, not-yet-connected) Agent chat pane.
 /// The session starts on first focus, so this shows only for a visible but
 /// unfocused pane.
@@ -2155,10 +2163,8 @@ pub fn agent_chat_filter_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.filter_chip", value = value).into_owned()
 }
 
-/// How many of the filter's facets the user has picked, as `picked/total` —
-/// a shape a count of *shown rows* could never take.
-pub fn agent_chat_filter_count(count: usize, total: usize) -> String {
-    rust_i18n::t!("agent_chat.filter_count", count = count, total = total).into_owned()
+pub fn agent_chat_filter_selected_count(count: usize) -> String {
+    rust_i18n::t!("agent_chat.filter_selected_count", count = count).into_owned()
 }
 
 pub fn agent_chat_filter_tooltip() -> String {
@@ -2246,6 +2252,70 @@ pub fn agent_chat_fold_mode_custom() -> String {
     rust_i18n::t!("agent_chat.fold_mode_custom").into_owned()
 }
 
+pub fn agent_chat_fold_editor_presets() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_presets").into_owned()
+}
+
+pub fn agent_chat_fold_editor_recent_turn() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_recent_turn").into_owned()
+}
+
+pub fn agent_chat_fold_editor_earlier_turns() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_earlier_turns").into_owned()
+}
+
+pub fn agent_chat_fold_editor_rule_builtin() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_rule_builtin").into_owned()
+}
+
+pub fn agent_chat_fold_editor_rule_expanded() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_rule_expanded").into_owned()
+}
+
+pub fn agent_chat_fold_editor_rule_collapsed() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_rule_collapsed").into_owned()
+}
+
+pub fn agent_chat_fold_editor_reset_auto() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_reset_auto").into_owned()
+}
+
+pub fn agent_chat_fold_block_response() -> String {
+    rust_i18n::t!("agent_chat.fold_block_response").into_owned()
+}
+
+pub fn agent_chat_fold_block_step() -> String {
+    rust_i18n::t!("agent_chat.fold_block_step").into_owned()
+}
+
+pub fn agent_chat_fold_block_tool_group() -> String {
+    rust_i18n::t!("agent_chat.fold_block_tool_group").into_owned()
+}
+
+pub fn agent_chat_fold_block_tool() -> String {
+    rust_i18n::t!("agent_chat.fold_block_tool").into_owned()
+}
+
+pub fn agent_chat_fold_block_subagent() -> String {
+    rust_i18n::t!("agent_chat.fold_block_subagent").into_owned()
+}
+
+pub fn agent_chat_fold_block_thinking() -> String {
+    rust_i18n::t!("agent_chat.fold_block_thinking").into_owned()
+}
+
+pub fn agent_chat_fold_block_assistant() -> String {
+    rust_i18n::t!("agent_chat.fold_block_assistant").into_owned()
+}
+
+pub fn agent_chat_fold_block_diff() -> String {
+    rust_i18n::t!("agent_chat.fold_block_diff").into_owned()
+}
+
+pub fn agent_chat_fold_block_raw_input() -> String {
+    rust_i18n::t!("agent_chat.fold_block_raw_input").into_owned()
+}
+
 pub fn agent_chat_tail_window_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.tail_window_chip", value = value).into_owned()
 }
@@ -2260,6 +2330,22 @@ pub fn agent_chat_tail_window_all() -> String {
 
 pub fn agent_chat_tail_window_last(count: usize) -> String {
     rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
+}
+
+pub fn agent_chat_view_options() -> String {
+    rust_i18n::t!("agent_chat.view_options").into_owned()
+}
+
+pub fn agent_chat_view_options_fold() -> String {
+    rust_i18n::t!("agent_chat.view_options_fold").into_owned()
+}
+
+pub fn agent_chat_view_options_filter() -> String {
+    rust_i18n::t!("agent_chat.view_options_filter").into_owned()
+}
+
+pub fn agent_chat_recent_steps_label() -> String {
+    rust_i18n::t!("agent_chat.recent_steps_label").into_owned()
 }
 
 /// Marker shown below a tool-output text block that was capped before

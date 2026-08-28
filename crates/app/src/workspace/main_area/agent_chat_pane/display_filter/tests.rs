@@ -1,5 +1,5 @@
 use super::*;
-use daruda_acp::{DiffView, PermissionItem, ToolStatusView};
+use daruda_acp::{DiffView, PermissionItem, ToolKindView, ToolStatusView};
 
 fn call(name: Option<&str>, kind: ToolKindView, status: ToolStatusView) -> ChatItem {
     ChatItem::ToolCall(ToolCallItem {
@@ -113,17 +113,11 @@ fn turning_tools_off_discards_the_conditions_below_it() {
 }
 
 #[test]
-fn clearing_every_condition_still_means_all_tools() {
+fn clearing_the_last_tool_category_excludes_tools() {
     let f = filter(&["tools", "tool_edit"]).toggled(FilterFacet::ToolEdit);
-    assert!(f.contains(FilterFacet::Tools), "tools stays checked");
-    assert!(!f.is_empty());
-    assert_eq!(f.tokens(), vec!["tools"]);
-    assert!(f.matches(&call(
-        Some("Read"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed
-    )));
-    assert!(!f.matches(&asst()));
+    assert!(!f.contains(FilterFacet::Tools));
+    assert!(f.is_empty());
+    assert!(f.tokens().is_empty());
 }
 
 #[test]
@@ -338,16 +332,9 @@ fn a_prompt_a_permission_and_a_failure_survive_every_filter() {
 fn every_facet_round_trips_through_its_token() {
     for facet in FilterFacet::ALL {
         assert_eq!(FilterFacet::from_token(facet.token()), Some(facet));
+        let selected = DisplayFilter::from_tokens([facet.token()]);
+        assert!(selected.contains(facet));
     }
-    let all = DisplayFilter::from_tokens(FilterFacet::ALL.into_iter().map(FilterFacet::token));
-    assert_eq!(all.selected_count(), FilterFacet::ALL.len());
-    assert_eq!(
-        all.tokens(),
-        FilterFacet::ALL
-            .into_iter()
-            .map(FilterFacet::token)
-            .collect::<Vec<_>>()
-    );
 }
 
 #[test]
@@ -370,27 +357,35 @@ fn toggling_a_facet_twice_returns_the_empty_filter() {
 }
 
 #[test]
-fn each_facet_owns_a_distinct_slot() {
-    let mut seen: Vec<FacetSlot> = Vec::new();
-    for facet in FilterFacet::ALL {
-        let slot = facet.slot();
-        assert!(!seen.contains(&slot), "{facet:?} collides");
-        seen.push(slot);
-    }
+fn one_tool_category_is_one_visible_selection() {
+    let f = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+    assert_eq!(f.selections().len(), 1);
+    assert_eq!(f.selections(), vec![FilterFacet::ToolEdit]);
+    assert_eq!(f.tokens(), vec!["tools", "tool_edit"]);
 }
 
 #[test]
-fn the_menu_sections_agree_with_where_the_facets_live() {
-    // The menu's grouping is only a label, so it can drift from the real
-    // nesting without failing to compile. Pin the two together.
+fn all_tools_and_partial_tools_are_distinct_states() {
+    let all = filter(&["tools"]);
+    assert_eq!(all.tool_selection(), ToolSelection::All);
+    assert_eq!(all.selections(), vec![FilterFacet::Tools]);
+
+    let without_edit = all.toggled(FilterFacet::ToolEdit);
+    assert!(matches!(
+        without_edit.tool_selection(),
+        ToolSelection::Some(_)
+    ));
+    assert!(!without_edit.contains(FilterFacet::ToolEdit));
+    assert_eq!(without_edit.selections().len(), ToolCategory::ALL.len() - 1);
+}
+
+#[test]
+fn the_panel_sections_agree_with_tool_categories() {
     for facet in FilterFacet::ALL {
-        let ok = matches!(
-            (facet.axis(), facet.slot()),
-            (
-                FilterAxis::Kind,
-                FacetSlot::Thinking | FacetSlot::Prose | FacetSlot::Tools
-            ) | (FilterAxis::Tool, FacetSlot::ToolKind(_))
-        );
+        let ok = match facet.axis() {
+            FilterAxis::Kind => facet.category().is_none(),
+            FilterAxis::Tool => facet.category().is_some(),
+        };
         assert!(ok, "{facet:?} is listed under {:?}", facet.axis());
     }
 }

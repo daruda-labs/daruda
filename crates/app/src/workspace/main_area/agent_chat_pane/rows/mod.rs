@@ -420,28 +420,31 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         );
     }
     let mut next_step = 0usize;
-    let mut in_step: Option<(usize, bool)> = None;
+    let mut in_step: Option<(usize, bool, bool)> = None;
     let mut k = run.start;
     while k < run.end {
-        if in_step.is_some_and(|(end, _)| k >= end) {
+        if in_step.is_some_and(|(end, _, _)| k >= end) {
             in_step = None;
         }
         if let Some(s) = steps.get(next_step).filter(|s| s.span.start == k) {
             let key = FoldKey::Step(k);
             let step_collapsed = !fold.is_expanded(&key, fold_context_at(&key, k, items, boundary));
             let outside_tail = !tail_revealed && tail.hides(next_step, steps.len());
-            // Live step headers stay visible through enclosing folds.
-            out.push(
-                RowKind::StepHeader {
-                    first_ix: k,
-                    tool_count: s.tool_count,
-                    collapsed: step_collapsed,
-                },
-                (response_collapsed || outside_tail) && !step_live[next_step],
-                !step_kept[next_step],
-                base_indent,
-            );
-            in_step = Some((s.span.end, step_collapsed || outside_tail));
+            if s.renders_header {
+                out.push(
+                    RowKind::StepHeader {
+                        first_ix: k,
+                        tool_count: s.tool_count,
+                        collapsed: step_collapsed,
+                    },
+                    (response_collapsed || outside_tail) && !step_live[next_step],
+                    !step_kept[next_step],
+                    base_indent,
+                );
+                in_step = Some((s.span.end, step_collapsed || outside_tail, true));
+            } else {
+                in_step = Some((s.span.end, outside_tail, false));
+            }
             next_step += 1;
         }
         if matches!(&items[k], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc)) {
@@ -449,7 +452,10 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             continue;
         }
         let (indent, folded) = match in_step {
-            Some((_, step_collapsed)) => (base_indent + 1, response_collapsed || step_collapsed),
+            Some((_, step_collapsed, renders_header)) => (
+                base_indent + u8::from(renders_header),
+                response_collapsed || step_collapsed,
+            ),
             None => (base_indent, response_collapsed),
         };
         if matches!(items[k], ChatItem::ToolCall(_)) {

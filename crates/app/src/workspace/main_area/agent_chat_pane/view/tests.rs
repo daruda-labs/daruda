@@ -1446,3 +1446,70 @@ fn post_turn_delta_ignores_whitespace_only_delta() {
     let items = vec![assistant_text_item("x"), assistant_text_item("   ")];
     assert_eq!(super::post_turn_delta(&items, 1), None);
 }
+
+#[gpui::test]
+fn the_compact_split_is_measured_on_the_pane_not_the_list(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            assert!(
+                !view.activity_bar_is_compact(),
+                "before the first paint measures anything, the three chips are assumed to fit"
+            );
+
+            let narrow = gpui::px(crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W - 1.0);
+            view.set_pane_width(narrow, cx);
+            assert!(view.activity_bar_is_compact());
+            assert!(view.items.is_empty());
+            assert!(view.list_bounds.is_none());
+
+            view.items.push(assistant_text_item("now there is a list"));
+            assert!(
+                view.activity_bar_is_compact(),
+                "gaining a transcript must not change which bar the pane shows"
+            );
+
+            let wide = gpui::px(crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W + 1.0);
+            view.set_pane_width(wide, cx);
+            assert!(!view.activity_bar_is_compact());
+        })
+        .expect("view update");
+}
+
+#[gpui::test]
+fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    let wide = crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W + 1.0;
+    let set = |cx: &mut gpui::TestAppContext, w: f32| {
+        window
+            .update(cx, |view, _window, cx| view.set_pane_width(gpui::px(w), cx))
+            .expect("view update");
+        cx.run_until_parked();
+    };
+    let count = |cx: &mut gpui::TestAppContext| {
+        window
+            .update(cx, |view, _window, _cx| view.render_count.get())
+            .expect("view update")
+    };
+
+    set(cx, wide);
+    let settled = count(cx);
+    assert!(
+        settled >= 1,
+        "the pane painted at least once, got {settled}"
+    );
+
+    set(cx, wide + 40.0);
+    set(cx, wide + 80.0);
+    assert_eq!(
+        count(cx),
+        settled,
+        "a resize that stays on the wide side is not a layout change"
+    );
+
+    set(cx, crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W - 1.0);
+    assert!(
+        count(cx) > settled,
+        "crossing into the compact bar has to repaint, or the chips stay stale"
+    );
+}

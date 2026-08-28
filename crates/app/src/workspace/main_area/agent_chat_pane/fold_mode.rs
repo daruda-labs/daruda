@@ -1,6 +1,8 @@
 //! Fold defaults by turn position and block kind. Explicit user choices still
 //! override these rules; tail and filter rows remain owned by their chips.
 
+use super::tool_category::ToolCategory;
+
 /// Whether a block belongs to the newest turn or history.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum TurnPosition {
@@ -18,7 +20,7 @@ impl TurnPosition {
         }
     }
 
-    fn token(self) -> &'static str {
+    pub(in crate::workspace) fn token(self) -> &'static str {
         match self {
             Self::Past => "past",
             Self::Last => "last",
@@ -72,7 +74,7 @@ impl FoldBlock {
         }
     }
 
-    fn token(self) -> &'static str {
+    pub(in crate::workspace) fn token(self) -> &'static str {
         match self {
             Self::Response => "response",
             Self::Step => "step",
@@ -101,7 +103,7 @@ pub(in crate::workspace) enum BlockRule {
 }
 
 impl BlockRule {
-    fn token(self) -> Option<&'static str> {
+    pub(in crate::workspace) fn token(self) -> Option<&'static str> {
         match self {
             Self::Builtin => None,
             Self::Expanded => Some("expanded"),
@@ -162,6 +164,7 @@ impl FoldPreset {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct FoldMode {
     rules: [[BlockRule; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
+    tool_rules: [[BlockRule; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
 }
 
 impl Default for FoldMode {
@@ -174,6 +177,7 @@ impl FoldMode {
     fn neutral() -> Self {
         Self {
             rules: [[BlockRule::Builtin; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
+            tool_rules: [[BlockRule::Builtin; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
         }
     }
 
@@ -183,6 +187,34 @@ impl FoldMode {
 
     fn set(&mut self, turn: TurnPosition, block: FoldBlock, rule: BlockRule) {
         self.rules[turn.index()][block.index()] = rule;
+    }
+
+    pub(in crate::workspace) fn with_rule(
+        mut self,
+        turn: TurnPosition,
+        block: FoldBlock,
+        rule: BlockRule,
+    ) -> Self {
+        self.set(turn, block, rule);
+        self
+    }
+
+    pub(in crate::workspace) fn tool_rule(
+        self,
+        turn: TurnPosition,
+        category: ToolCategory,
+    ) -> BlockRule {
+        self.tool_rules[turn.index()][category.index()]
+    }
+
+    pub(in crate::workspace) fn with_tool_rule(
+        mut self,
+        turn: TurnPosition,
+        category: ToolCategory,
+        rule: BlockRule,
+    ) -> Self {
+        self.tool_rules[turn.index()][category.index()] = rule;
+        self
     }
 
     /// The matching preset, or `None` for a custom matrix.
@@ -197,6 +229,8 @@ impl FoldMode {
         for token in tokens {
             if let Some(preset) = FoldPreset::from_token(token) {
                 mode = preset.mode();
+            } else if let Some((turn, category, rule)) = parse_tool_cell(token) {
+                mode.tool_rules[turn.index()][category.index()] = rule;
             } else if let Some((turn, block, rule)) = parse_cell(token) {
                 mode.set(turn, block, rule);
             }
@@ -216,9 +250,28 @@ impl FoldMode {
                     out.push(format!("{}.{}={rule}", turn.token(), block.token()));
                 }
             }
+            for category in ToolCategory::ALL {
+                if let Some(rule) = self.tool_rule(turn, category).token() {
+                    out.push(format!("{}.tool.{}={rule}", turn.token(), category.token()));
+                }
+            }
         }
         out
     }
+}
+
+fn parse_tool_cell(token: &str) -> Option<(TurnPosition, ToolCategory, BlockRule)> {
+    let (cell, rule) = token.split_once('=')?;
+    let mut parts = cell.split('.');
+    let turn = TurnPosition::from_token(parts.next()?)?;
+    if parts.next()? != FoldBlock::Tool.token() {
+        return None;
+    }
+    let category = ToolCategory::from_token(parts.next()?)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((turn, category, BlockRule::from_token(rule)?))
 }
 
 fn parse_cell(token: &str) -> Option<(TurnPosition, FoldBlock, BlockRule)> {
@@ -338,6 +391,28 @@ mod tests {
                 "summary".to_owned(),
                 "past.diff=collapsed".to_owned(),
                 "last.tool=expanded".to_owned(),
+            ]
+        );
+        assert_eq!(
+            FoldMode::from_tokens(mode.tokens().iter().map(String::as_str)),
+            mode
+        );
+    }
+
+    #[test]
+    fn tool_category_rules_round_trip_without_changing_other_cells() {
+        let mode = FoldPreset::Auto
+            .mode()
+            .with_tool_rule(TurnPosition::Last, ToolCategory::Edit, BlockRule::Expanded)
+            .with_tool_rule(TurnPosition::Past, ToolCategory::Run, BlockRule::Collapsed);
+        assert_eq!(mode.preset(), None);
+        assert_eq!(
+            mode.tokens(),
+            vec![
+                "summary".to_owned(),
+                "past.tool.run=collapsed".to_owned(),
+                "last.response=expanded".to_owned(),
+                "last.tool.edit=expanded".to_owned(),
             ]
         );
         assert_eq!(

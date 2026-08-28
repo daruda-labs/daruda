@@ -41,7 +41,11 @@ pub(in crate::workspace) fn mode_chip(
         .unwrap_or(modes.current.as_str())
         .to_string();
 
-    let label = SharedString::from(format!("{}{}", display_name, strings::TASK_PILL_CHEVRON));
+    let label = SharedString::from(format!(
+        "{}{}",
+        strings::agent_chat_session_mode_chip(&display_name),
+        strings::TASK_PILL_CHEVRON
+    ));
 
     // Owned data for the `'static` dropdown closure.
     let available: Vec<(String, String)> = modes

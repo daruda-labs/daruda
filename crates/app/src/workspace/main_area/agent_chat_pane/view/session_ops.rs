@@ -15,14 +15,14 @@ use super::super::agent_chat_helpers::{
 use super::super::agent_chat_ops::model_select;
 use super::super::display_filter::{DisplayFilter, FilterFacet};
 use super::super::fold::FoldKey;
-use super::super::fold_mode::FoldMode;
+use super::super::fold_mode::{FoldMode, TurnPosition};
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
 use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
-use super::{AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
+use super::{ActivityOptionsTab, AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
 impl AgentChatView {
     /// Stop the active turn: send `session/cancel` *and* end the turn locally
@@ -320,6 +320,47 @@ impl AgentChatView {
         self.persist_pane_choice(cx);
     }
 
+    /// Record the pane width measured during the last paint.
+    pub(in crate::workspace) fn set_pane_width(
+        &mut self,
+        width: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        let was_compact = self.activity_bar_is_compact();
+        self.pane_width = Some(width);
+        if self.activity_bar_is_compact() != was_compact {
+            cx.notify();
+        }
+    }
+
+    /// Whether transcript controls should collapse into one popover.
+    pub(in crate::workspace) fn activity_bar_is_compact(&self) -> bool {
+        self.pane_width
+            .is_some_and(|w| f32::from(w) <= crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W)
+    }
+
+    pub(in crate::workspace) fn set_fold_editor_turn(
+        &mut self,
+        turn: TurnPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if self.fold_editor_turn != turn {
+            self.fold_editor_turn = turn;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn set_activity_options_tab(
+        &mut self,
+        tab: ActivityOptionsTab,
+        cx: &mut Context<Self>,
+    ) {
+        if self.activity_options_tab != tab {
+            self.activity_options_tab = tab;
+            cx.notify();
+        }
+    }
+
     pub(in crate::workspace) fn toggle_display_facet(
         &mut self,
         facet: FilterFacet,
@@ -330,6 +371,14 @@ impl AgentChatView {
 
     pub(in crate::workspace) fn clear_display_filter(&mut self, cx: &mut Context<Self>) {
         self.set_display_filter(DisplayFilter::default(), cx);
+    }
+
+    pub(in crate::workspace) fn set_all_tools_filter(
+        &mut self,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_display_filter(self.display_filter.value().with_all_tools(selected), cx);
     }
 
     fn set_display_filter(&mut self, filter: DisplayFilter, cx: &mut Context<Self>) {

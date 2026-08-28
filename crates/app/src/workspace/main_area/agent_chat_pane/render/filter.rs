@@ -1,16 +1,18 @@
-//! Display-filter chip, menu, and filtered-row placeholder.
+//! Display-filter chip, persistent popover, and filtered-row placeholder.
 
-use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use super::fold_header::{FoldHeader, FoldRow};
+use super::options_panel::{fixed_region, panel_max_h, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
-    DropdownMenu as _, PopupMenu, PopupMenuItem, Selectable as _, Sizable as _, button_on_surface,
+    ButtonVariants as _, Disableable as _, Popover, Selectable as _, Sizable as _, button,
+    button_on_surface, checkbox,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::{
-    DisplayFilter, FilterAxis, FilterFacet,
+    DisplayFilter, FilterAxis, FilterFacet, ToolSelection,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -19,70 +21,143 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(super) fn display_filter_chip(
     pane_id: PaneId,
     filter: DisplayFilter,
+    default_open: bool,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let label = SharedString::from(s::agent_chat_filter_chip(&filter_value(filter)));
     let view = cx.entity().downgrade();
-    button_on_surface(
-        ("agent-chat-display-filter", pane_id as usize),
-        label,
-        surface,
-        cx,
+    Popover::new(SharedString::from(format!(
+        "agent-chat-display-filter-popover-{pane_id}"
+    )))
+    .default_open(default_open)
+    .anchor(Anchor::TopRight)
+    .trigger(
+        button_on_surface(
+            ("agent-chat-display-filter", pane_id as usize),
+            label,
+            surface,
+            cx,
+        )
+        .xsmall()
+        .selected(!filter.is_empty())
+        .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
     )
-    .xsmall()
-    .selected(!filter.is_empty())
-    .tooltip(SharedString::from(s::agent_chat_filter_tooltip()))
-    .dropdown_menu(move |menu, _window, _cx| build_filter_menu(&view, filter, menu))
+    .content(move |_, window, cx| {
+        panel_root(theme::AGENT_CHAT_OPTIONS_PANEL_W, panel_max_h(window))
+            .child(filter_panel(&view, filter, pane_id, cx))
+            .into_any_element()
+    })
 }
 
-/// A bare count would read as "3 things are shown". The fraction says how many
-/// available facets are picked in the same horizontal budget.
 fn filter_value(filter: DisplayFilter) -> String {
-    if filter.is_empty() {
-        s::agent_chat_filter_none()
-    } else {
-        s::agent_chat_filter_count(filter.selected_count(), FilterFacet::ALL.len())
+    let selections = filter.selections();
+    match selections.as_slice() {
+        [] => s::agent_chat_filter_none(),
+        [one] => facet_label(*one),
+        [first, second] => format!("{} + {}", facet_label(*first), facet_label(*second)),
+        _ => s::agent_chat_filter_selected_count(selections.len()),
     }
 }
 
-fn build_filter_menu(
+pub(super) fn filter_panel(
     view: &gpui::WeakEntity<AgentChatView>,
     current: DisplayFilter,
-    menu: PopupMenu,
-) -> PopupMenu {
-    let menu = {
-        let view = view.clone();
-        // No `checked`: this resets the filter, it is not a twelfth facet the
-        // user can leave switched on.
-        menu.item(
-            PopupMenuItem::new(SharedString::from(s::agent_chat_filter_clear())).on_click(
-                move |_, _window, app| {
-                    if let Some(view) = view.upgrade() {
-                        view.update(app, |v, cx| v.clear_display_filter(cx));
+    pane_id: PaneId,
+    cx: &mut Context<crate::ui::PopoverState>,
+) -> AnyElement {
+    let kind_rows = [FilterFacet::Thinking, FilterFacet::Prose]
+        .into_iter()
+        .map(|facet| filter_checkbox(view, current, facet, pane_id));
+    let tool_rows = FilterFacet::ALL
+        .into_iter()
+        .filter(|facet| facet.axis() == FilterAxis::Tool)
+        .map(|facet| filter_checkbox(view, current, facet, pane_id));
+
+    let tools = current.tool_selection();
+    let tools_view = view.clone();
+    let clear_view = view.clone();
+    div()
+        .flex_1()
+        .min_h(px(0.))
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(
+            scroll_region(SharedString::from(format!(
+                "agent-chat-filter-facets-scroll-{pane_id}"
+            )))
+            .child(panel_heading(axis_label(FilterAxis::Kind), cx))
+            .children(kind_rows)
+            .child(panel_heading(axis_label(FilterAxis::Tool), cx))
+            .child(
+                checkbox(
+                    SharedString::from(format!("agent-chat-filter-tools-{pane_id}")),
+                    facet_label(FilterFacet::Tools),
+                    (),
+                )
+                .checked(matches!(tools, ToolSelection::All))
+                .indeterminate(matches!(tools, ToolSelection::Some(_)))
+                .on_click(move |selected, _window, app| {
+                    if let Some(view) = tools_view.upgrade() {
+                        view.update(app, |v, cx| v.set_all_tools_filter(*selected, cx));
                     }
-                },
+                }),
+            )
+            .child(
+                div()
+                    .ml(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::GAP_SM))
+                    .children(tool_rows),
             ),
         )
-    };
-    FilterAxis::ALL.into_iter().fold(menu, |menu, axis| {
-        let menu = menu.separator().label(SharedString::from(axis_label(axis)));
-        FilterFacet::ALL
-            .into_iter()
-            .filter(|f| f.axis() == axis)
-            .fold(menu, |menu, facet| {
-                let view = view.clone();
-                menu.item(
-                    PopupMenuItem::new(SharedString::from(facet_label(facet)))
-                        .checked(current.contains(facet))
-                        .on_click(move |_, _window, app| {
-                            if let Some(view) = view.upgrade() {
-                                view.update(app, |v, cx| v.toggle_display_facet(facet, cx));
-                            }
-                        }),
+        .child(
+            fixed_region().child(
+                button(
+                    SharedString::from(format!("agent-chat-filter-clear-{pane_id}")),
+                    s::agent_chat_filter_clear(),
                 )
-            })
+                .ghost()
+                .xsmall()
+                .disabled(current.is_empty())
+                .on_click(move |_, _window, app| {
+                    if let Some(view) = clear_view.upgrade() {
+                        view.update(app, |v, cx| v.clear_display_filter(cx));
+                    }
+                }),
+            ),
+        )
+        .into_any_element()
+}
+
+fn filter_checkbox(
+    view: &gpui::WeakEntity<AgentChatView>,
+    current: DisplayFilter,
+    facet: FilterFacet,
+    pane_id: PaneId,
+) -> impl IntoElement + use<> {
+    let view = view.clone();
+    checkbox(
+        SharedString::from(format!("agent-chat-filter-{}-{pane_id}", facet.token())),
+        facet_label(facet),
+        (),
+    )
+    .checked(current.contains(facet))
+    .on_click(move |_, _window, app| {
+        if let Some(view) = view.upgrade() {
+            view.update(app, |v, cx| v.toggle_display_facet(facet, cx));
+        }
     })
+}
+
+fn panel_heading(label: String, cx: &App) -> impl IntoElement {
+    div()
+        .text_color(theme::current(cx).text_subtle)
+        .child(SharedString::from(label))
 }
 
 fn axis_label(axis: FilterAxis) -> String {
@@ -168,24 +243,24 @@ mod tests {
             filter_value(DisplayFilter::default()),
             s::agent_chat_filter_none()
         );
-        let one = DisplayFilter::default().toggled(FilterFacet::Tools);
-        let total = FilterFacet::ALL.len();
-        assert_eq!(filter_value(one), s::agent_chat_filter_count(1, total));
+        let one = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+        assert_eq!(filter_value(one), facet_label(FilterFacet::ToolEdit));
         assert_eq!(
-            filter_value(one.toggled(FilterFacet::ToolEdit)),
-            s::agent_chat_filter_count(2, total)
+            filter_value(one.toggled(FilterFacet::Thinking)),
+            format!(
+                "{} + {}",
+                facet_label(FilterFacet::Thinking),
+                facet_label(FilterFacet::ToolEdit)
+            )
         );
     }
 
     #[test]
-    fn the_chip_counts_selections_not_visible_rows() {
-        let two = DisplayFilter::default()
-            .toggled(FilterFacet::Tools)
+    fn three_or_more_conditions_use_a_semantic_count() {
+        let three = DisplayFilter::default()
+            .toggled(FilterFacet::Thinking)
+            .toggled(FilterFacet::Prose)
             .toggled(FilterFacet::ToolEdit);
-        let shown = filter_value(two);
-        assert!(
-            shown.contains(&FilterFacet::ALL.len().to_string()),
-            "the total must be visible so the count cannot read as a result count: {shown}"
-        );
+        assert_eq!(filter_value(three), s::agent_chat_filter_selected_count(3));
     }
 }

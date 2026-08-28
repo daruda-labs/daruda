@@ -28,7 +28,7 @@ use gpui::{
 
 use super::display_filter::DisplayFilter;
 use super::fold::FoldState;
-use super::fold_mode::FoldMode;
+use super::fold_mode::{FoldMode, TurnPosition};
 use super::pane_choice::PaneChoice;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 use super::rows::tail::TailWindow;
@@ -405,6 +405,17 @@ pub(in crate::workspace) struct ActivityTracker {
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
 /// Owns the live [`daruda_acp::AcpSessionHandle`]; dropping the view (pane
 /// close) drops the handle and the event-pump task — no explicit teardown.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum ActivityOptionsTab {
+    Fold,
+    Filter,
+    RecentSteps,
+}
+
+impl ActivityOptionsTab {
+    pub(in crate::workspace) const ALL: [Self; 3] = [Self::Fold, Self::Filter, Self::RecentSteps];
+}
+
 pub(in crate::workspace) struct AgentChatView {
     /// The owning pane's id — keys element ids, log dedup tags, and pane lookup.
     pub(in crate::workspace) pane_id: PaneId,
@@ -498,6 +509,16 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) activity: ActivityTracker,
     /// Persisted pane mode plus session-only block overrides.
     pub(in crate::workspace) fold: FoldState,
+    /// Transient tab selected in the fold-rule editor.
+    pub(in crate::workspace) fold_editor_turn: TurnPosition,
+    /// Active section in the compact Activity Bar's combined options popover.
+    pub(in crate::workspace) activity_options_tab: ActivityOptionsTab,
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) screenshot_filter_open: bool,
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) screenshot_fold_open: bool,
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) screenshot_options_open: bool,
     /// Per-pane content-column width mode. Persisted by the workspace snapshot;
     /// default `Full` keeps existing pane-wide wrapping.
     pub(in crate::workspace) content_width: ChatContentWidth,
@@ -574,6 +595,8 @@ pub(in crate::workspace) struct AgentChatView {
     /// paint. Read by the drag-selection autoscroll poll to detect the cursor
     /// leaving the viewport. `None` until the first paint.
     pub(in crate::workspace) list_bounds: Option<Bounds<Pixels>>,
+    /// Width of the pane root, captured each paint.
+    pub(in crate::workspace) pane_width: Option<Pixels>,
     /// Drag-selection autoscroll poll task (mirrors
     /// `TerminalView::autoscroll_task`). Replace-and-cancel on each new drag;
     /// `None` when idle.
@@ -662,6 +685,14 @@ impl AgentChatView {
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
             fold: FoldState::with_mode(fold_mode),
+            fold_editor_turn: TurnPosition::Last,
+            activity_options_tab: ActivityOptionsTab::Fold,
+            #[cfg(feature = "screenshot")]
+            screenshot_filter_open: false,
+            #[cfg(feature = "screenshot")]
+            screenshot_fold_open: false,
+            #[cfg(feature = "screenshot")]
+            screenshot_options_open: false,
             content_width: ChatContentWidth::Full,
             tail: PaneChoice::Seeded(tail),
             display_filter: PaneChoice::default(),
@@ -696,6 +727,7 @@ impl AgentChatView {
             warned_dropped_terminal_output: false,
             plan_scroll: ScrollHandle::new(),
             list_bounds: None,
+            pane_width: None,
             autoscroll_task: None,
             selection_drag_active: false,
             dim_amount: 0.0,

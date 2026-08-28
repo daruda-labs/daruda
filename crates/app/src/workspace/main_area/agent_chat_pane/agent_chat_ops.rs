@@ -757,12 +757,25 @@ impl Workspace {
         });
     }
 
-    /// Park an agent-chat pane on a settled transcript — the
-    /// `--screenshot-scenario agent-chat` entry point.
-    ///
-    /// Everything the Step layer, the activity-bar chips and the status rollup
-    /// need is in the seed, so the pane lands in its default state (`Mode: Auto`
-    /// / `Filter: All` / `Steps: All`) with real work to fold.
+    /// Open an empty agent-chat pane with view options open.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_empty_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_activity_options_tab(super::view::ActivityOptionsTab::Fold, cx);
+            v.screenshot_options_open = true;
+        });
+    }
+
+    /// Open a seeded agent-chat transcript for screenshots.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_transcript_for_shot(
         &mut self,
@@ -779,12 +792,7 @@ impl Workspace {
         });
     }
 
-    /// The same transcript with both narrowing controls engaged, so the
-    /// filtered-away and tail-more placeholder rows render side by side — the
-    /// only way to see whether the two read as siblings.
-    ///
-    /// Driven through the ops the chips call rather than by writing the fields,
-    /// so the capture shows what a user's clicks actually produce.
+    /// Open the seeded transcript with filtering, tail, and filter panel active.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_narrowed_transcript_for_shot(
         &mut self,
@@ -800,10 +808,39 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            // Tools only: the reasoning and prose rows drop out, which is what
-            // the filtered-away row counts.
-            v.toggle_display_facet(FilterFacet::Tools, cx);
+            // One category selected leaves the Tool parent mixed.
+            v.toggle_display_facet(FilterFacet::ToolEdit, cx);
             v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
+            v.set_activity_options_tab(super::view::ActivityOptionsTab::Filter, cx);
+            v.screenshot_filter_open = true;
+        });
+    }
+
+    /// Open the seeded transcript with a custom fold matrix and editor.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_fold_editor_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold_mode::FoldMode;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_fold_mode(
+                FoldMode::from_tokens([
+                    "auto",
+                    "last.tool.edit=expanded",
+                    "past.thinking=collapsed",
+                ]),
+                cx,
+            );
+            v.set_activity_options_tab(super::view::ActivityOptionsTab::Fold, cx);
+            v.screenshot_fold_open = true;
         });
     }
 

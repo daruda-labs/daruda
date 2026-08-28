@@ -714,6 +714,19 @@ pub(super) fn tool_kind_icon(kind: ToolKindView) -> IconName {
     }
 }
 
+pub(super) fn tool_category_icon(
+    category: crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory,
+) -> IconName {
+    use crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory;
+    match category {
+        ToolCategory::Read => IconName::Eye,
+        ToolCategory::Edit => IconName::File,
+        ToolCategory::Search => IconName::Search,
+        ToolCategory::Run => IconName::SquareTerminal,
+        ToolCategory::Other => IconName::Settings2,
+    }
+}
+
 /// The exit-status badge text for a shell tool call, if abnormal. `None` for a
 /// clean exit (code 0, no signal), an unreported exit, or a reported-but-empty
 /// one (`code: None, signal: None` — a side channel that had nothing usable).

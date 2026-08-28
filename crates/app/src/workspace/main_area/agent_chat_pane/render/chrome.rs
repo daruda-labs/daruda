@@ -5,22 +5,25 @@
 use daruda_acp::{ChatItem, ConnectPhase, UsageView};
 use daruda_config::TAIL_WINDOW_CHOICES;
 use gpui::{
-    AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px,
+    Anchor, AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*,
+    px,
 };
 
+use super::options_panel::{fixed_region, panel_max_h, panel_root};
 use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
-    DropdownMenu as _, Icon, PopupMenu, PopupMenuItem, Selectable as _, Sizable as _,
-    StatusPulseClock, button_bare_on_surface, button_on_surface,
+    Disableable as _, DropdownMenu as _, Icon, IconName, Popover, PopupMenu, PopupMenuItem,
+    Selectable as _, Sizable as _, StatusPulseClock, button, button_bare_on_surface, button_group,
+    button_on_surface, radio,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode;
+use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, TurnPosition};
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, ChatContentWidth, RuntimePrepPhase,
+    ActivityOptionsTab, AgentChatView, AgentSessionStatus, ChatContentWidth, RuntimePrepPhase,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -45,6 +48,12 @@ pub(super) struct ActivityBarProps<'a> {
     pub tail: TailWindow,
     pub display_filter: DisplayFilter,
     pub fold_mode: FoldMode,
+    pub fold_editor_turn: TurnPosition,
+    pub activity_options_tab: ActivityOptionsTab,
+    pub compact_options: bool,
+    pub filter_popover_open: bool,
+    pub fold_popover_open: bool,
+    pub options_popover_open: bool,
     pub dim: f32,
 }
 
@@ -73,6 +82,7 @@ pub(super) fn activity_bar(
     .xsmall()
     .icon(Icon::empty().path(ICON_EXPAND))
     .tooltip(SharedString::from(s::agent_chat_expand_all()))
+    .disabled(!props.has_items)
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
     let collapse = button_bare_on_surface(
         ("agent-chat-collapse-all", props.pane_id as usize),
@@ -82,11 +92,32 @@ pub(super) fn activity_bar(
     .xsmall()
     .icon(Icon::empty().path(ICON_COMPRESS))
     .tooltip(SharedString::from(s::agent_chat_collapse_all()))
+    .disabled(!props.has_items)
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
-    let tail = tail_window_chip(props.pane_id, props.tail, &surface, cx);
-    let display_filter =
-        super::filter::display_filter_chip(props.pane_id, props.display_filter, &surface, cx);
-    let fold_mode = super::fold_mode::fold_mode_chip(props.pane_id, props.fold_mode, &surface, cx);
+    let transcript_controls: Vec<AnyElement> = if props.compact_options {
+        vec![view_options_chip(&props, &surface, cx).into_any_element()]
+    } else {
+        vec![
+            super::fold_mode::fold_mode_chip(
+                props.pane_id,
+                props.fold_mode,
+                props.fold_editor_turn,
+                props.fold_popover_open,
+                &surface,
+                cx,
+            )
+            .into_any_element(),
+            super::filter::display_filter_chip(
+                props.pane_id,
+                props.display_filter,
+                props.filter_popover_open,
+                &surface,
+                cx,
+            )
+            .into_any_element(),
+            tail_window_chip(props.pane_id, props.tail, &surface, cx).into_any_element(),
+        ]
+    };
     let reading_selected = props.content_width.is_reading();
     let reading_tooltip = if reading_selected {
         s::agent_chat_reading_width_off()
@@ -166,20 +197,125 @@ pub(super) fn activity_bar(
                 .max_w_full()
                 .flex()
                 .flex_row()
-                .flex_wrap()
                 .justify_end()
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
                 .text_color(surface.foreground_muted)
-                .when(props.has_items, |bar| {
-                    bar.child(fold_mode)
-                        .child(display_filter)
-                        .child(tail)
-                        .child(expand)
-                        .child(collapse)
-                })
+                .children(transcript_controls)
+                .child(expand)
+                .child(collapse)
                 .child(reading_width),
         )
+}
+
+fn view_options_chip(
+    props: &ActivityBarProps<'_>,
+    surface: &PaneSurfaceTokens,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let pane_id = props.pane_id;
+    let mode = props.fold_mode;
+    let editor_turn = props.fold_editor_turn;
+    let filter = props.display_filter;
+    let tail = props.tail;
+    let active_tab = props.activity_options_tab;
+    let view = cx.entity().downgrade();
+    Popover::new(SharedString::from(format!(
+        "agent-chat-view-options-popover-{pane_id}"
+    )))
+    .default_open(props.options_popover_open)
+    .anchor(Anchor::TopRight)
+    .trigger(
+        button_bare_on_surface(("agent-chat-view-options", pane_id as usize), surface, cx)
+            .xsmall()
+            .icon(Icon::new(IconName::Settings2))
+            .tooltip(SharedString::from(s::agent_chat_view_options())),
+    )
+    .content(move |_, window, cx| {
+        activity_options_panel(
+            &view,
+            pane_id,
+            mode,
+            editor_turn,
+            filter,
+            tail,
+            active_tab,
+            panel_max_h(window),
+            cx,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn activity_options_panel(
+    view: &gpui::WeakEntity<AgentChatView>,
+    pane_id: PaneId,
+    mode: FoldMode,
+    editor_turn: TurnPosition,
+    filter: DisplayFilter,
+    tail: TailWindow,
+    active_tab: ActivityOptionsTab,
+    max_h: gpui::Pixels,
+    cx: &mut Context<crate::ui::PopoverState>,
+) -> AnyElement {
+    let panel = match active_tab {
+        ActivityOptionsTab::Fold => {
+            super::fold_mode::fold_mode_panel(view, mode, editor_turn, pane_id, cx)
+        }
+        ActivityOptionsTab::Filter => super::filter::filter_panel(view, filter, pane_id, cx),
+        ActivityOptionsTab::RecentSteps => tail_window_panel(view, tail, pane_id, cx),
+    };
+    panel_root(theme::AGENT_CHAT_RULES_PANEL_W, max_h)
+        .child(fixed_region().child(activity_options_tabs(view, active_tab, pane_id)))
+        .child(panel)
+        .into_any_element()
+}
+
+fn activity_options_tabs(
+    view: &gpui::WeakEntity<AgentChatView>,
+    active: ActivityOptionsTab,
+    pane_id: PaneId,
+) -> impl IntoElement + use<> {
+    let view = view.clone();
+    button_group(SharedString::from(format!(
+        "agent-chat-view-options-tabs-{pane_id}"
+    )))
+    .children(ActivityOptionsTab::ALL.into_iter().map(|tab| {
+        button(
+            SharedString::from(format!(
+                "agent-chat-view-options-{}-{pane_id}",
+                activity_options_token(tab)
+            )),
+            activity_options_label(tab),
+        )
+        .selected(tab == active)
+    }))
+    .on_click(move |indices, _window, app| {
+        let Some(&ix) = indices.first() else {
+            return;
+        };
+        if let Some(view) = view.upgrade() {
+            view.update(app, |v, cx| {
+                v.set_activity_options_tab(ActivityOptionsTab::ALL[ix], cx)
+            });
+        }
+    })
+}
+
+fn activity_options_token(tab: ActivityOptionsTab) -> &'static str {
+    match tab {
+        ActivityOptionsTab::Fold => "fold",
+        ActivityOptionsTab::Filter => "filter",
+        ActivityOptionsTab::RecentSteps => "recent-steps",
+    }
+}
+
+fn activity_options_label(tab: ActivityOptionsTab) -> String {
+    match tab {
+        ActivityOptionsTab::Fold => s::agent_chat_view_options_fold(),
+        ActivityOptionsTab::Filter => s::agent_chat_view_options_filter(),
+        ActivityOptionsTab::RecentSteps => s::agent_chat_recent_steps_label(),
+    }
 }
 
 /// Activity-bar chip for the tail window.
@@ -200,6 +336,50 @@ fn tail_window_chip(
     .xsmall()
     .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
     .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
+}
+
+fn tail_window_panel(
+    view: &gpui::WeakEntity<AgentChatView>,
+    current: TailWindow,
+    pane_id: PaneId,
+    cx: &mut Context<crate::ui::PopoverState>,
+) -> AnyElement {
+    let choices = std::iter::once((TailWindow::All, s::agent_chat_tail_window_all())).chain(
+        TAIL_WINDOW_CHOICES.into_iter().map(|n| {
+            (
+                TailWindow::last(n),
+                s::agent_chat_tail_window_last(usize::from(n)),
+            )
+        }),
+    );
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(
+            div()
+                .text_color(theme::current(cx).text_subtle)
+                .child(SharedString::from(s::agent_chat_recent_steps_label())),
+        )
+        .children(choices.map(|(choice, label)| {
+            let view = view.clone();
+            radio(
+                SharedString::from(format!(
+                    "agent-chat-tail-option-{}-{pane_id}",
+                    choice.size()
+                )),
+                label,
+                (),
+            )
+            .checked(choice == current)
+            .on_click(move |_, _window, app| {
+                if let Some(view) = view.upgrade() {
+                    view.update(app, |v, cx| v.set_tail_window(choice, cx));
+                }
+            })
+        }))
+        .into_any_element()
 }
 
 /// The chip's value slot reuses the menu item's own wording, so the chip and

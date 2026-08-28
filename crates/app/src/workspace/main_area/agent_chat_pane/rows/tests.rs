@@ -587,6 +587,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
             ("user", false),
             ("response", false),
             ("filtered", true),
+            ("tail", true),
             ("group", true), // no assistant text → nothing stays visible
             ("item", true),
             ("item", true),
@@ -924,8 +925,8 @@ fn live_subagent_units_stays_linear_over_a_long_tool_run() {
     let elapsed = started.elapsed();
     assert_eq!(
         rows.len(),
-        items.len() + 2,
-        "the run's filter row + one group header + every member"
+        items.len() + 3,
+        "the run's filter row + tail row + one group header + every member"
     );
     assert!(
         elapsed < std::time::Duration::from_secs(2),
@@ -1128,6 +1129,7 @@ fn in_progress_group_defaults_expanded() {
         kinds(&rows),
         vec![
             ("filtered", true),
+            ("tail", true),
             ("group", false),
             ("item", false),
             ("item", false)
@@ -1154,6 +1156,7 @@ fn group_member_visibility_follows_fold_override() {
         kinds(&rows),
         vec![
             ("filtered", true),
+            ("tail", true),
             ("group", false),
             ("item", false),
             ("item", false)
@@ -2047,9 +2050,7 @@ fn live_step_turn() -> Vec<ChatItem> {
 }
 
 fn only_reads() -> DisplayFilter {
-    DisplayFilter::default()
-        .toggled(FilterFacet::Tools)
-        .toggled(FilterFacet::ToolRead)
+    DisplayFilter::default().toggled(FilterFacet::ToolRead)
 }
 
 #[test]
@@ -2075,9 +2076,7 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     );
     assert!(reads.keeps_tool(child), "the matching nested child renders");
 
-    let edits = DisplayFilter::default()
-        .toggled(FilterFacet::Tools)
-        .toggled(FilterFacet::ToolEdit);
+    let edits = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
     let edits = FilterMatchIndex::of(&items, edits);
     assert!(edits.keeps_tool(parent), "the Edit parent matches directly");
     assert!(
@@ -2197,9 +2196,7 @@ fn a_prompt_and_a_pending_permission_survive_every_filter() {
         perm(false),
         tool("a", ToolStatusView::Completed),
     ];
-    let only_edits = DisplayFilter::default()
-        .toggled(FilterFacet::Tools)
-        .toggled(FilterFacet::ToolEdit);
+    let only_edits = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
     let rows = project_filtered(&items, &only_edits);
     for row in &rows {
         match row.kind {

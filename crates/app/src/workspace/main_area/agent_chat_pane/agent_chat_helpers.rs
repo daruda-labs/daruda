@@ -719,7 +719,13 @@ pub(in crate::workspace) fn fold_context_at(
     items: &[daruda_acp::ChatItem],
     boundary: TurnBoundary,
 ) -> FoldContext {
-    FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items))
+    let context = FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items));
+    match (key, items.get(ix)) {
+        (FoldKey::Tool(_), Some(daruda_acp::ChatItem::ToolCall(tc))) => {
+            context.with_tool_category(super::tool_category::classify_tool(tc))
+        }
+        _ => context,
+    }
 }
 
 fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {

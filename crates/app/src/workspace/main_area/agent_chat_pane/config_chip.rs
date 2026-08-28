@@ -44,7 +44,12 @@ pub(in crate::workspace) fn config_chip(
         .map(|(_, name)| name.clone())
         .unwrap_or_else(|| current_fallback_label(&current));
 
-    let label = SharedString::from(format!("{}{}", display_name, strings::TASK_PILL_CHEVRON));
+    let chip_value = if option.name.is_empty() {
+        display_name
+    } else {
+        strings::agent_chat_config_chip(&option.name, &display_name)
+    };
+    let label = SharedString::from(format!("{}{}", chip_value, strings::TASK_PILL_CHEVRON));
 
     let config_id = option.id.clone();
     let option_name = option.name.clone();

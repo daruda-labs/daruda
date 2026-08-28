@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use super::fold_mode::{BlockRule, FoldBlock, FoldMode, TurnPosition};
 use super::pane_choice::PaneChoice;
+use super::tool_category::ToolCategory;
 
 /// Stable identity of a foldable block.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -77,6 +78,7 @@ fn natural_default(policy: FoldPolicy, active: bool) -> bool {
 pub(in crate::workspace) struct FoldContext {
     active: bool,
     position: TurnPosition,
+    tool_category: Option<ToolCategory>,
 }
 
 impl FoldContext {
@@ -85,6 +87,7 @@ impl FoldContext {
         Self {
             active,
             position: TurnPosition::Past,
+            tool_category: None,
         }
     }
 
@@ -93,11 +96,21 @@ impl FoldContext {
         Self {
             active,
             position: TurnPosition::Last,
+            tool_category: None,
         }
     }
 
     pub(in crate::workspace) fn new(position: TurnPosition, active: bool) -> Self {
-        Self { active, position }
+        Self {
+            active,
+            position,
+            tool_category: None,
+        }
+    }
+
+    pub(in crate::workspace) fn with_tool_category(mut self, category: ToolCategory) -> Self {
+        self.tool_category = Some(category);
+        self
     }
 }
 
@@ -150,14 +163,23 @@ impl FoldState {
         self.held_response = anchor;
     }
 
-    fn policy_for(&self, key: &FoldKey, position: TurnPosition) -> FoldPolicy {
-        match key
-            .block()
-            .map(|block| self.mode.value().rule(position, block))
-        {
-            Some(BlockRule::Expanded) => FoldPolicy::DefaultExpanded,
-            Some(BlockRule::Collapsed) => FoldPolicy::DefaultCollapsed,
-            Some(BlockRule::Builtin) | None => key.policy(),
+    fn policy_for(&self, key: &FoldKey, ctx: FoldContext) -> FoldPolicy {
+        let mode = self.mode.value();
+        let category_rule = match (key, ctx.tool_category) {
+            (FoldKey::Tool(_), Some(category)) => mode.tool_rule(ctx.position, category),
+            _ => BlockRule::Builtin,
+        };
+        let rule = if category_rule != BlockRule::Builtin {
+            category_rule
+        } else {
+            key.block()
+                .map(|block| mode.rule(ctx.position, block))
+                .unwrap_or(BlockRule::Builtin)
+        };
+        match rule {
+            BlockRule::Expanded => FoldPolicy::DefaultExpanded,
+            BlockRule::Collapsed => FoldPolicy::DefaultCollapsed,
+            BlockRule::Builtin => key.policy(),
         }
     }
 
@@ -168,7 +190,7 @@ impl FoldState {
         if matches!(key, FoldKey::Response(anchor) if self.held_response == Some(*anchor)) {
             return true;
         }
-        natural_default(self.policy_for(key, ctx.position), ctx.active)
+        natural_default(self.policy_for(key, ctx), ctx.active)
     }
 
     pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
@@ -524,6 +546,25 @@ mod tests {
         let state = FoldState::with_mode(FoldMode::from_tokens(["auto", "last.tool=expanded"]));
         assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::last(false)));
         assert!(!state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
+    }
+
+    #[test]
+    fn a_tool_category_rule_outranks_the_generic_tool_rule() {
+        use super::super::tool_category::ToolCategory;
+        let mode = FoldPreset::Summary
+            .mode()
+            .with_rule(TurnPosition::Last, FoldBlock::Tool, BlockRule::Collapsed)
+            .with_tool_rule(TurnPosition::Last, ToolCategory::Edit, BlockRule::Expanded);
+        let state = FoldState::with_mode(mode);
+        let key = FoldKey::Tool("edit".into());
+        assert!(state.is_expanded(
+            &key,
+            FoldContext::last(false).with_tool_category(ToolCategory::Edit)
+        ));
+        assert!(!state.is_expanded(
+            &key,
+            FoldContext::last(false).with_tool_category(ToolCategory::Read)
+        ));
     }
 
     #[test]

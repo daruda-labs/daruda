@@ -18,6 +18,7 @@ mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
 pub(in crate::workspace) mod mermaid_lightbox;
+mod options_panel;
 mod plan;
 mod step_header;
 mod tool;
@@ -136,6 +137,23 @@ pub(in crate::workspace) fn render(
     // binding) while reading theme colours — `current` borrows `cx`.
     let dim = content.dim_amount;
     let t = theme::current(cx).dimmed(dim);
+    #[cfg(feature = "screenshot")]
+    let (filter_popover_open, fold_popover_open, options_popover_open) = (
+        content.screenshot_filter_open,
+        content.screenshot_fold_open,
+        content.screenshot_options_open,
+    );
+    #[cfg(not(feature = "screenshot"))]
+    let (filter_popover_open, fold_popover_open, options_popover_open) = (false, false, false);
+    // Screenshot scenarios force the layout that owns the requested popover.
+    let compact_options = match (
+        options_popover_open,
+        filter_popover_open || fold_popover_open,
+    ) {
+        (true, _) => true,
+        (false, true) => false,
+        (false, false) => content.activity_bar_is_compact(),
+    };
 
     let status_banner = status_banner(
         &content.status,
@@ -162,6 +180,12 @@ pub(in crate::workspace) fn render(
             tail: content.tail.value(),
             display_filter: content.display_filter.value(),
             fold_mode: content.fold.mode(),
+            fold_editor_turn: content.fold_editor_turn,
+            activity_options_tab: content.activity_options_tab,
+            compact_options,
+            filter_popover_open,
+            fold_popover_open,
+            options_popover_open,
             dim,
         },
         cx,
@@ -262,11 +286,25 @@ pub(in crate::workspace) fn render(
             .into_any_element()
     };
 
+    // Capture pane-root width even when the transcript list is absent.
+    let width_capture = {
+        let view = cx.entity();
+        canvas(
+            move |bounds, _window, cx| {
+                view.update(cx, |v, cx| v.set_pane_width(bounds.size.width, cx));
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full()
+    };
+
     div()
         .size_full()
         .relative()
         .flex()
         .flex_col()
+        .child(width_capture)
         // The view owns its focus handle and tracks it here (like
         // `TerminalView`), so the pane walker embeds it as a plain cached
         // `AnyView` and `wrapper_focus_handle` returns `None` for this kind.

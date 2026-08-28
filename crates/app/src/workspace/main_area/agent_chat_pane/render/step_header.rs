@@ -1,10 +1,10 @@
 //! Step headers and the row that reveals steps hidden by the tail window.
 
-use daruda_acp::{ChatItem, ToolKindView};
+use daruda_acp::ChatItem;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
-use super::tool::tool_kind_icon;
+use super::tool::tool_category_icon;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, Sizable as _};
@@ -12,6 +12,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::rows::LiveSubagentUnits;
 use crate::workspace::main_area::agent_chat_pane::rows::step::{StepSpan, step_span_at};
+use crate::workspace::main_area::agent_chat_pane::tool_category::{ToolCategory, classify_tool};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
 pub(super) fn step_bar(
@@ -31,7 +32,7 @@ pub(super) fn step_bar(
     };
 
     let fg = this.dim(theme::agent_chat_fg(cx));
-    let icon = tool_kind_icon(dominant_kind(items, run));
+    let icon = tool_category_icon(dominant_category(items, run));
     // Prefer reasoning, then fall back to assistant prose.
     let title_items = items;
     let mut header = FoldHeader::with_summary(move || {
@@ -124,16 +125,20 @@ fn step_title(
         .next()
 }
 
-/// Most frequent tool kind, with ties resolved by first occurrence.
-fn dominant_kind(items: &[ChatItem], run: std::ops::Range<usize>) -> ToolKindView {
-    let mut tally: Vec<(ToolKindView, usize)> = Vec::new();
+/// Most frequent shared tool category, with ties resolved by first occurrence.
+fn dominant_category(items: &[ChatItem], run: std::ops::Range<usize>) -> ToolCategory {
+    let mut tally: Vec<(ToolCategory, usize)> = Vec::new();
     for item in run.filter_map(|k| items.get(k)) {
         let ChatItem::ToolCall(tc) = item else {
             continue;
         };
-        match tally.iter_mut().find(|(kind, _)| *kind == tc.kind) {
+        let category = classify_tool(tc);
+        match tally
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == category)
+        {
             Some((_, n)) => *n += 1,
-            None => tally.push((tc.kind, 1)),
+            None => tally.push((category, 1)),
         }
     }
     // `max_by_key` keeps the *last* maximum; iterate reversed so a tie resolves
@@ -142,14 +147,14 @@ fn dominant_kind(items: &[ChatItem], run: std::ops::Range<usize>) -> ToolKindVie
         .iter()
         .rev()
         .max_by_key(|(_, n)| *n)
-        .map(|(kind, _)| *kind)
-        .unwrap_or(ToolKindView::Other)
+        .map(|(category, _)| *category)
+        .unwrap_or(ToolCategory::Other)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_acp::{ToolCallItem, ToolStatusView};
+    use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
 
     fn tool(kind: ToolKindView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
@@ -223,24 +228,33 @@ mod tests {
     }
 
     #[test]
-    fn dominant_kind_reports_the_most_frequent_call() {
+    fn dominant_category_reports_the_most_frequent_call() {
         let items = [
             tool(ToolKindView::Execute),
             tool(ToolKindView::Read),
             tool(ToolKindView::Read),
         ];
-        assert_eq!(dominant_kind(&items, 0..3), ToolKindView::Read);
+        assert_eq!(dominant_category(&items, 0..3), ToolCategory::Read);
     }
 
     #[test]
-    fn dominant_kind_breaks_a_tie_on_first_occurrence() {
+    fn dominant_category_breaks_a_tie_on_first_occurrence() {
         let items = [tool(ToolKindView::Search), tool(ToolKindView::Edit)];
-        assert_eq!(dominant_kind(&items, 0..2), ToolKindView::Search);
+        assert_eq!(dominant_category(&items, 0..2), ToolCategory::Search);
     }
 
     #[test]
-    fn dominant_kind_of_an_empty_run_is_other() {
-        assert_eq!(dominant_kind(&[], 0..0), ToolKindView::Other);
+    fn dominant_category_of_an_empty_run_is_other() {
+        assert_eq!(dominant_category(&[], 0..0), ToolCategory::Other);
+    }
+
+    #[test]
+    fn dominant_category_uses_the_same_name_override_as_the_filter() {
+        let mut read = tool(ToolKindView::Execute);
+        if let ChatItem::ToolCall(tc) = &mut read {
+            tc.tool_name = Some("Read".into());
+        }
+        assert_eq!(dominant_category(&[read], 0..1), ToolCategory::Read);
     }
 
     #[test]
