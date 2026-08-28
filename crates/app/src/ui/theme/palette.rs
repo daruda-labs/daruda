@@ -68,6 +68,24 @@ pub const AGENT_CHAT_CARD_TINT_ALPHA: f32 = 0.05;
 /// step stronger than the fill tint, drawn from the same neutral overlay so
 /// the edge tracks the background instead of a fixed line color.
 pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
+/// Alpha for the resting edge of an *interactive* control on a pane-local
+/// surface (the Activity Bar's chips), white over a dark background.
+///
+/// Deliberately far heavier than [`AGENT_CHAT_CARD_BORDER_ALPHA`], and the
+/// split is the point: a tool card's edge is decoration, while a chip's edge is
+/// the thing that identifies it as a control, which DESIGN.md §Readability
+/// holds to 3:1. At the card's 0.12 the chip edge measures 1.44:1 on the
+/// default `#1e1e1e` preset; 0.34 puts it at 3.11:1.
+pub const AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_DARK: f32 = 0.34;
+/// The same edge, black over a light background. Higher than its dark
+/// counterpart because darkening a near-white surface buys less contrast than
+/// lightening a near-black one: over `#f9fafb`, 0.34 lands at 2.36:1 and 0.42 at
+/// 3.02:1.
+///
+/// No shipped terminal preset reaches this branch — all eight are dark — so it
+/// serves a user-supplied light `[colors] background`. A single shared alpha
+/// would fail one direction or the other.
+pub const AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_LIGHT: f32 = 0.42;
 /// Alpha for the code/diff editor's current-line band. Same neutral-overlay
 /// technique as [`AGENT_CHAT_CARD_TINT_ALPHA`] (white lift on dark, black
 /// recess on light) rather than a fixed solid colour, so the band reads
@@ -839,18 +857,59 @@ pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
 /// Max height (px) of the bottom plan region's expanded checklist before it
 /// scrolls internally, so a long plan can't crowd out the conversation above.
 pub const AGENT_CHAT_PLAN_MAX_H: f32 = 168.0;
-/// Pane width (px) at or below which transcript controls collapse.
-pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 = 800.0;
+/// Width (px) the Activity Bar's right-hand control cluster needs when the
+/// three transcript chips are spelled out — the widest realistic values
+/// (`Fold: Custom`, `Filter: Reasoning + Replies`, `Recent steps: 20`) plus the
+/// three icon buttons and their gaps, at [`AGENT_CHAT_MSG_FONT_SIZE`].
+///
+/// Text-derived, so it is a width *per unit font size*, not an absolute one:
+/// [`theme::agent_chat_compact_options_w`](crate::ui::theme::agent_chat_compact_options_w)
+/// scales it by the pane's configured size before comparing.
+pub const AGENT_CHAT_OPTIONS_CLUSTER_W: f32 = 400.0;
+/// Width (px) the Activity Bar keeps for the session title before the chips are
+/// worth showing. Below this the title ellipsizes to a few words and stops
+/// identifying the session, which is the bar's primary job. Text-derived and
+/// font-scaled on the same terms as [`AGENT_CHAT_OPTIONS_CLUSTER_W`].
+pub const AGENT_CHAT_TITLE_MIN_W: f32 = 180.0;
+/// Pane width (px) at or below which transcript controls collapse into the
+/// single view-options popover, at the default font size.
+///
+/// Derived rather than dialled in: the split is "does the spelled-out cluster
+/// still leave a usable title", so it moves when either part does. A hand-set
+/// number drifts away from the parts it is supposed to describe.
+///
+/// Both parts are text widths, so the live threshold is font-dependent; read it
+/// through
+/// [`theme::agent_chat_compact_options_w`](crate::ui::theme::agent_chat_compact_options_w)
+/// rather than using this constant directly. It is the value at
+/// [`AGENT_CHAT_MSG_FONT_SIZE`] and exists so the derivation has one home.
+pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 =
+    AGENT_CHAT_TITLE_MIN_W + AGENT_CHAT_OPTIONS_CLUSTER_W + 2.0 * AGENT_CHAT_PAD_X;
 /// Width (px) of single-column Activity Bar popovers.
 pub const AGENT_CHAT_OPTIONS_PANEL_W: f32 = 240.0;
 /// Width (px) of fold-rule and combined options popovers.
 pub const AGENT_CHAT_RULES_PANEL_W: f32 = 430.0;
 /// Max height (px) of the fold-rule editor popover.
 pub const AGENT_CHAT_RULES_PANEL_MAX_H: f32 = 520.0;
-/// Largest fraction of the window height an Activity Bar popover may claim.
+/// Largest fraction of the window an Activity Bar popover may claim, on either
+/// axis. Width is capped as well as height because the fold editor is 430px and
+/// the window can be narrower than that leaves room for — not to keep the panel
+/// off the docks beside its pane, which it does not do and is not meant to.
 pub const AGENT_CHAT_PANEL_VIEWPORT_FRACTION: f32 = 0.8;
 /// Indent (px) for nested Activity Bar options.
 pub const AGENT_CHAT_OPTION_NEST_INDENT: f32 = 20.0;
+/// Corner radius (px) of an Activity Bar chip. `RADIUS_SM`, not the 2px
+/// `radius.xs` DESIGN.md reserves for inline chips: these are toolbar controls,
+/// and every button-shaped constant in the app already sits at `RADIUS_SM`
+/// (`MODAL_BUTTON_RADIUS`, `BUTTON_WIDGET_RADIUS`, `DOCK_ICON_BUTTON_RADIUS`, …)
+/// as do the pane's own tool cards and code blocks via
+/// [`AGENT_CHAT_INPUT_RADIUS`]. Matching the neighbours beats matching
+/// DESIGN.md's radius table, whose `md` row for buttons no shipped button obeys.
+pub const AGENT_CHAT_CHIP_RADIUS: f32 = RADIUS_SM;
+/// Gap (px) between Activity Bar controls. Wider than `AGENT_CHAT_MSG_GAP`
+/// (which spaces text runs): the chips carry a hairline, and adjacent boxes two
+/// pixels apart read as one segmented strip rather than three controls.
+pub const AGENT_CHAT_BAR_CONTROL_GAP: f32 = GAP_SM;
 /// Left dock default width (px).
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 /// Left dock minimum width (px).

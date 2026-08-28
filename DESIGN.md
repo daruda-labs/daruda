@@ -164,8 +164,9 @@ output, and syntax-highlighted code.
 - High-chroma colors *vibrate* against dark backgrounds. Soften toward pastel —
   this is why the `daruda` syntax palette pulls `function`/`string_special` out of
   the near-gray band rather than using raw, fully-saturated source-theme values.
-- `accent` (`#5e6ad2`) clears 3:1 as a UI element but only ~4.1:1 as text — **do not
-  use `accent` for small body text** (links, inline labels). Use it for fills, focus
+- `accent` (`#5e6ad2`) clears 3:1 as a UI element but only ~4.05:1 as text on
+  `surface-1`, and 3.89:1 on the `surface-2` that popovers actually paint —
+  **do not use `accent` for small body text** (links, inline labels). Use it for fills, focus
   rings, icons, and ≥14px-bold emphasis only. Clickable text takes the `link` token
   (`#809ff9`, 7.4:1) instead.
 
@@ -437,6 +438,231 @@ padding:     lg (16px)
 text:        ui-md, ink / body
 toolbar:     surface-2, border-bottom 1px hairline, height 32px
 ```
+
+---
+
+### AgentChatPane
+
+Unlike every other component above, this pane does **not** paint on the surface
+ladder. Its background mirrors the resolved *terminal* palette
+(`theme::agent_chat_bg`, from `[colors]` + `[theme].terminal_preset`), so a chat
+pane and a terminal pane split side by side read as one surface. `ui_preset` and
+`terminal_preset` are independent config keys, so nothing inside the pane may
+take a colour from the UI theme without checking it against a background the UI
+theme has never seen — a fixed `hairline` is invisible on it, and `accent` has
+no verified contrast on it at all.
+
+Everything on the pane therefore derives from the pane's own background
+(`PaneSurfaceTokens`), and those derived tokens are what the rest of this entry
+names:
+
+```yaml
+pane-bg:           terminal background, verbatim
+pane-fg:           terminal foreground, lifted toward white by 0.24·(1 − bg.l)
+pane-fg-muted:     pane-fg at 62% over pane-bg   # secondary labels, chip text
+pane-fg-subtle:    pane-fg at 50% over pane-bg   # metadata, working indicator
+pane-tint:         neutral overlay at 5%         # hover fill
+pane-active-tint:  neutral overlay at 12%        # selected fill
+pane-border-tint:  neutral overlay at 12%        # card edges — tool cards, code blocks
+pane-control-edge: neutral overlay at 34% / 42%  # resting edge of an interactive control
+```
+
+`neutral overlay` is white over a dark background and black over a light one, so
+the ladder inverts with the user's terminal preset instead of breaking on it.
+
+`pane-control-edge` is deliberately far heavier than `pane-border-tint`, and the
+split is the whole point: **a card's edge is decoration, a control's edge is what
+identifies it as a control**, which §Readability holds to 3:1. At the card's 12%
+a chip edge measures 1.44:1 on the default `#1e1e1e` preset. It carries two
+alphas because darkening a near-white surface buys less contrast than lightening
+a near-black one — 34% reaches 3.11:1 over `#1e1e1e`, 42% reaches 3.02:1 over
+`#f9fafb`. Every shipped terminal preset is dark (`#002b36` through `#2e3440`),
+so the light alpha exists for a user-supplied `[colors] background`, not for a
+preset. A custom background at mid lightness can still fall under the floor —
+a standing limit of deriving chrome from a user-supplied colour, not a bug in
+these numbers.
+
+**Activity Bar (pane toolbar, always present)**
+
+```
+background:    pane-bg (inherited — the bar is not a card)
+height:        28px at the default chrome size (content 20px + xs padding, top
+               and bottom), + the 1px border. Not fixed like TitleBar/TabBar —
+               it grows with `font.agent_chat_size`.
+border-bottom: 1px pane-border-tint    ← not hairline; see above
+padding:       xs md (4px 8px)
+gap:           xxs (2px) between the bar's three zones;
+               xs (4px) between controls inside the right zone — bordered chips
+               two pixels apart read as one segmented strip, not three controls
+text:          agent-chat size (config `font.agent_chat_size`, default 13px = ui-lg)
+```
+
+| Zone | Content | Style |
+|------|---------|-------|
+| Left | Agent icon (16px) + session title, ellipsized | icon `pane-fg-muted`, title `pane-fg` |
+| Centre | Context-window meter (`53k / 200k`) | `pane-fg-muted`, detail + cost in tooltip |
+| Right | Transcript controls | see below |
+
+- The bar renders even while the conversation is empty or still connecting, so
+  the reading-width toggle is never unreachable.
+- A press inside the right zone stops there. These controls say how the pane is
+  *displayed*, not that the user is engaging with what is in it, so they must
+  not reach the pane wrapper's "activate this pane" handler.
+
+**Activity Bar — control vocabulary**
+
+Two classes, and the split is by whether the control carries a word:
+
+```
+chip (carries a value — Fold / Filter / Recent steps)
+  background:    transparent
+  border:        1px pane-control-edge    ← always on, at rest; ≥3:1
+  border-radius: sm (4px)
+  height:        20px
+  padding:       0 xs (0 4px)
+  text:          agent-chat size, pane-fg-muted
+
+  hover:     background pane-tint
+  selected:  background pane-active-tint   (axis is off its default)
+  disabled:  no chip is ever disabled
+
+icon button (carries a glyph — expand all / collapse all / reading width / view options)
+  background:    transparent
+  border:        none
+  size:          20px square
+
+  hover:     background pane-tint
+  selected:  background pane-active-tint
+  disabled:  no hover, no press; glyph drops to `mute` at 50% (the vendored
+             button's own disabled tone — a UI-theme colour on a pane-mirrored
+             surface, see Known Gaps)
+```
+
+- **A chip gets a border and a glyph does not.** The chips sit next to the
+  context meter, which is static text in `pane-fg-muted` at the same size — a
+  borderless word is indistinguishable from a readout. A glyph needs no frame to
+  read as a control, and boxing three of them adds frames without information.
+  (Same reasoning, same fix as StatusBar's pill buttons.)
+- **Selected means "off its default" — or "my popover is open".** The two share
+  one fill, because the vendored `Popover` forces `selected` on its trigger
+  while open (`popover.rs`, `selected || is_open`). So `Fold: Auto` marks itself
+  while its panel is up and unmarks on close. Harmless in practice — the panel
+  you are looking at states the value — but it means the fill is only a
+  reliable "off default" signal when the popover is *shut*, which is when it
+  matters. The Recent-steps chip is the odd one out: it opens a menu, not a
+  popover, so it never marks itself for being open.
+- Chip copy is `Label: Value`. The label is constant and the value is the state;
+  keeping both means a chip still reads on its own, out of the row.
+
+**Activity Bar — responsive behaviour**
+
+The one breakpoint in the pane, measured on the **pane root** (not the
+transcript list, so an empty conversation lands in the same layout as a full
+one):
+
+Both parts are *text* widths, so the threshold scales with
+`font.agent_chat_size`; 596px is its value at the 13px default. Widths below are
+quoted at that size.
+
+| Pane width | Right zone | Where the values are |
+|------------|-----------|----------------------|
+| > 596px | three chips + three icon buttons | in the chip labels |
+| ≤ 596px | one `View options` gear + three icon buttons | in the gear's tooltip; the gear is `selected` when any axis is off its default (and, like the chips, while its popover is open) |
+
+596px is **derived, not chosen**: `title floor (180) + control cluster (400) +
+2 × md padding (16)`. The cluster budget is what the three chips measure at
+their widest realistic values; the title floor is the point below which the
+title ellipsizes to a few words and stops identifying the session, which is the
+bar's primary job. Move either part and the breakpoint moves with it — a
+hand-set number drifts away from the thing it is supposed to describe. The two
+parts are text measurements, so they are also scaled by
+`font.agent_chat_size / 13` before the comparison: a fixed pixel breakpoint
+reads as derived while silently assuming one font size, and at 20px chrome the
+spelled-out chips would outgrow the budget while the bar stayed wide.
+
+Collapsing costs the chips their labels, so the gear must repay both of their
+jobs: `selected` for the at-a-glance signal, and a tooltip that spells out all
+three values verbatim (not just the adjusted ones — a reader asking "what is
+this pane showing me" wants the whole answer).
+
+**Options panel (the Fold and Filter chips, and the gear)**
+
+Two of the three chips open a panel; the **Recent-steps chip opens a dropdown
+menu** of checked items instead, because that axis is a single choice from a
+short list and a menu is the right control for it. Its panel body exists only as
+the combined popover's third tab.
+
+The panel is app chrome, not pane surface — it floats above the window. Its
+chrome comes from the shared `Popover`, so these are the values it actually
+paints, which are **not** the float rung §Elevation nominally assigns popovers:
+
+```
+background:    surface-2  (t.popover ← modal_panel_bg; NOT surface-4)
+border:        1px hairline, opaque  (t.border; NOT hairline-soft — 1.19:1)
+border-radius: sm (4px)  (t.radius; NOT lg)
+shadow:        shadow_lg — contradicts §Don'ts "no drop shadows"
+width:         240px single-axis · 430px fold-rule editor and combined panel
+max-height:    520px
+section-heading: agent-chat size, subtle
+row-gap:       xs (4px); nested rows indent 20px
+footer:        Fold and Filter only — one ghost reset ("Reset to Auto preset" /
+               "Show everything"), disabled when that axis is already default.
+               Recent steps needs none: picking `All` in its radio list *is* the
+               reset.
+```
+
+Four of those lines are the shared `Popover`'s behaviour, not this component's
+choice, and every popover in the app inherits them — see Known Gaps. They are
+recorded here rather than restated from §Elevation because a spec that describes
+a surface the code does not paint is worse than no spec.
+
+The panel body scales with `font.agent_chat_size`, not the UI type ladder, even
+though it is app chrome — it is read alongside the pane it configures. That is a
+deliberate exception to §Typography's 10–13px band, which the pane's own
+user-set size can leave in either direction.
+
+- **Both dimensions cap at 80% of the window**, so the panel can never grow past
+  the frame it opens in. Width is capped as well as height because the editor is
+  430px and daruda's minimum window is not much wider. Overlapping the docks
+  beside the pane is *not* what the cap is for — a popover anchored in a narrow
+  pane covers its neighbours the way a context menu does, and that is fine.
+- The combined panel adds a segmented tab strip (`Fold` / `Filter` /
+  `Recent steps`) above the body. The Fold and Filter tabs show exactly what
+  their chips open on a wide bar; the Recent-steps tab is the only place its
+  radio panel appears at all.
+- **The segmented strip keeps the `hairline` frame (1.19:1), not the chip's 3:1
+  control edge.** The 3:1 floor applies where the edge is the *only* thing
+  separating a control from adjacent non-interactive text — the Activity Bar
+  chip's case. Inside the strip the ≥4.5:1 label and the accent-filled selected
+  segment identify both the control and its state, so the frame is refinement.
+  Replacing the old accent outline did lower this edge from 3.89:1; that was
+  traded against accent-as-text at 3.89:1 (under the 4.5 floor) and up to 36
+  accent elements on screen at once.
+- **A filter with nothing checked is the unfiltered state**, not a selection of
+  nothing: the chip reads `All`, "Show everything" greys out, and clearing the
+  last box restores the whole transcript. A pane showing only prompts and
+  permissions is not a state worth being able to reach.
+
+**Disclosure rows inside the transcript**
+
+Rows that reveal hidden content (`Show 12 filtered rows`, `Show 6 earlier
+steps`) state **what clicking them does**, and flip to `Hide …` once open. A
+count alone reads as "still hidden" after the reveal.
+
+```
+text:  agent-chat size, pane-fg-muted
+```
+
+**BottomDock chip row (session controls, for reference)**
+
+The mode / model / effort chips under an agent pane live in the BottomDock, not
+this bar, but they share the `Label: Value` vocabulary. One rule differs and is
+deliberate: **the host localizes what the host owns and passes through what the
+agent owns.** A boolean option's `On` / `Off` comes from i18n; a select option's
+name and choice labels arrive from the ACP adapter and render verbatim, so a
+Korean UI still shows `Model: Sonnet`. Translating them would mean a per-agent
+table of protocol ids in the host, which is exactly what keeps a new agent's
+unfamiliar option from needing UI code.
 
 ---
 
@@ -935,7 +1161,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 ## Do's
 
 - Keep terminal pane background at `canvas` — the terminal is not a card.
-- Use `accent` for at most 3–4 visible elements simultaneously.
+- Use `accent` for at most 3–4 visible elements simultaneously. The budget counts *emphasis*; a selected segment's fill inside a segmented control is state, not emphasis, and is exempt — the doc already blesses accent as the selection signal. **Bound the exemption by the worst case actually shipped:** the agent-chat fold editor shows 12 at once (12 three-way strips, one fill each). That is the licensed ceiling, not an open door. Unselected siblings are never exempt — no accent label, no accent border (accent as text measures 4.05:1 on `surface-1` and 3.89:1 on the `surface-2` popovers actually paint, both under the 4.5:1 floor).
 - Build depth with the surface ladder; the step between levels is the signal, not a shadow.
 - Keep all UI text in the 10–13px range. Dense chrome is appropriate here.
 - Use `label` (ALL-CAPS, positive tracking) only for dock section headers and group names.
@@ -972,12 +1198,17 @@ How to apply this doc when changing daruda's UI:
 3. **State colors are off-limits for decoration.** `error`/`warning`/`success`/`claude-*`/`agent-*` mean a genuine state. If you want "a nice color," you don't — use a surface step.
 4. **Syntax ≠ chrome.** Touch the syntax palette only for code legibility, through `palette::syntax_theme_of` + `bucket_for_capture`; never reuse the brand accent there or vice versa.
 5. **Both appearances or none.** Any new chrome surface needs a light-theme value in `daruda_light.json`, cool-tinted (faint blue), not neutral gray. Any new syntax family needs a light variant or a documented fallback.
-6. **Stay in the type ladder** (Inter 400 / 500 / 600 at 10–13px for chrome; `label` is 600 uppercase). No UI label below 10px or above 13px.
+6. **Stay in the type ladder** (Inter 400 / 500 / 600 at 10–13px for chrome; `label` is 600 uppercase). No UI label below 10px or above 13px. The agent-chat pane and its option panels are the sanctioned exception — they follow the user's `font.agent_chat_size`.
+7. **A breakpoint names its parts or doesn't exist.** Responsive thresholds are derived from the widths they arbitrate (see AgentChatPane), and a text-derived part scales with its font. A bare pixel constant reads as a decision and behaves as a guess.
 
 ## Known Gaps
 
-- **No hover-state spec for most components.** daruda documents resting / active / focused / selected; hover is "one step up the surface ladder" generically and not enumerated per component.
+- **No hover-state spec for most components.** daruda documents resting / active / focused / selected; hover is "one step up the surface ladder" generically and not enumerated per component. AgentChatPane's Activity Bar is the exception — its two control classes enumerate resting / hover / selected / disabled — because that pane's colours come from the terminal palette rather than the ladder, so "one step up" names nothing there.
 - **Light theme is documentation-light.** The surface ladder is defined (Elevation & Depth → Light theme), but per-component light values live only in `daruda_light.json`, not re-tabulated here.
 - **Motion is barely specified.** Only the badge pulse cadences (slow/fast) and the absence of hover transitions are stated; there is no easing/duration token system.
-- **Responsive/window-resize behavior is implicit.** daruda is a single-window desktop app; dock collapse and min-width behavior are driven by code, not a breakpoint table.
+- **Responsive/window-resize behavior is mostly implicit.** daruda is a single-window desktop app; dock collapse and min-width behavior are driven by code, not a breakpoint table. AgentChatPane's Activity Bar is the one documented breakpoint, and it is documented because it is *derived* (title floor + control-cluster budget, both font-scaled) rather than dialled in.
+- **The shared `Popover` does not sit where §Elevation says it does.** `t.popover` resolves to `surface-2`, its border to the opaque `hairline` (1.19:1), its radius to `sm`, and it paints a `shadow_lg` against §Don'ts. This predates the AgentChatPane entry and affects every popover, dropdown and menu in the app; that entry records the real values rather than restating the table. Fixing it means moving the theme bridge, not the doc.
+- **The 3:1 component-edge floor is enforced on pane-local surfaces only.** App-chrome control edges ride the global `hairline` at ~1.2:1. AgentChatPane argues the distinction (an edge must clear 3:1 when it is the *only* thing marking a control apart from neighbouring text), but the distinction is applied by hand at each site, not by a token that makes the wrong choice hard.
+- **§Border Radius's `md` row is aspirational.** It assigns 6px to "Buttons, text inputs, tab pills"; every shipped button constant is `RADIUS_SM` (4px). New controls should match their neighbours at 4px until the table is reconciled.
+- **Disabled controls on pane-local surfaces take a UI-theme colour.** The vendored button's disabled tone is `mute` at 50% regardless of the surface, so a light terminal preset under a dark UI theme (or the reverse) gets an unverified pair. Every other state on those controls derives from the pane.
 - **Custom user palettes are out of scope.** The syntax palette is a curated set; there is no user-defined-palette format documented.

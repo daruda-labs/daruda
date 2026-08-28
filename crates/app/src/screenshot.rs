@@ -547,7 +547,8 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::AgentChatEmpty
         | ScreenshotScenario::AgentChat
         | ScreenshotScenario::AgentChatNarrowed
-        | ScreenshotScenario::AgentChatFold => None,
+        | ScreenshotScenario::AgentChatFold
+        | ScreenshotScenario::AgentChatOptions(_) => None,
     }
 }
 

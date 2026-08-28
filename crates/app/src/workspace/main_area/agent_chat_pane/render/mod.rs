@@ -21,6 +21,7 @@ pub(in crate::workspace) mod mermaid_lightbox;
 mod options_panel;
 mod plan;
 mod step_header;
+mod tail_window;
 mod tool;
 
 use daruda_acp::ChatItem;
@@ -152,7 +153,7 @@ pub(in crate::workspace) fn render(
     ) {
         (true, _) => true,
         (false, true) => false,
-        (false, false) => content.activity_bar_is_compact(),
+        (false, false) => content.activity_bar_is_compact(cx),
     };
 
     let status_banner = status_banner(

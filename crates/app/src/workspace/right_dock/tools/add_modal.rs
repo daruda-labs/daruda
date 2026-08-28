@@ -339,7 +339,7 @@ impl Render for AddMcpServerModal {
             .filter(|(scope, _)| self.scope_options.contains(scope))
             .collect();
         let scope_values: Vec<McpScope> = scope_pairs.iter().map(|(scope, _)| *scope).collect();
-        let scope_chip = button_group("scope-group")
+        let scope_chip = button_group("scope-group", cx)
             .children(scope_pairs.into_iter().map(|(scope, label)| {
                 button(SharedString::from(format!("scope-{}", scope.slug())), label)
                     .selected(self.scope == scope)
@@ -354,7 +354,7 @@ impl Render for AddMcpServerModal {
         // Transport segmented selector — same index→value mapping.
         let transport_values: Vec<McpTransport> =
             transport_options().iter().map(|(tp, _)| *tp).collect();
-        let transport_chip = button_group("transport-group")
+        let transport_chip = button_group("transport-group", cx)
             .children(transport_options().into_iter().map(|(tp, label)| {
                 button(
                     SharedString::from(format!("transport-{}", tp.slug())),

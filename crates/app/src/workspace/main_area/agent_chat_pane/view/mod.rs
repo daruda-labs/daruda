@@ -406,14 +406,33 @@ pub(in crate::workspace) struct ActivityTracker {
 /// Owns the live [`daruda_acp::AcpSessionHandle`]; dropping the view (pane
 /// close) drops the handle and the event-pump task — no explicit teardown.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum ActivityOptionsTab {
+// `pub(crate)`, unlike its siblings: `--screenshot-scenario` addresses a tab by
+// token from `crate::screenshot`, outside the workspace fence. A pure value
+// enum with no workspace coupling, so nothing leaks with it.
+pub(crate) enum ActivityOptionsTab {
     Fold,
     Filter,
     RecentSteps,
 }
 
 impl ActivityOptionsTab {
-    pub(in crate::workspace) const ALL: [Self; 3] = [Self::Fold, Self::Filter, Self::RecentSteps];
+    pub(crate) const ALL: [Self; 3] = [Self::Fold, Self::Filter, Self::RecentSteps];
+
+    /// Stable token — element ids and the `--screenshot-scenario` suffix. One
+    /// source, so a capture cannot name a tab the panel spells differently.
+    pub(crate) fn token(self) -> &'static str {
+        match self {
+            Self::Fold => "fold",
+            Self::Filter => "filter",
+            Self::RecentSteps => "recent-steps",
+        }
+    }
+
+    /// Only the `--screenshot-scenario` parser reads a tab back from its token.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn from_token(token: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tab| tab.token() == token)
+    }
 }
 
 pub(in crate::workspace) struct AgentChatView {

@@ -31,6 +31,7 @@ impl From<Pixels> for ButtonRounded {
 pub struct ButtonCustomVariant {
     color: Hsla,
     foreground: Hsla,
+    selected_foreground: Option<Hsla>,
     border: Hsla,
     shadow: bool,
     hover: Hsla,
@@ -91,6 +92,7 @@ impl ButtonCustomVariant {
         Self {
             color: cx.theme().transparent,
             foreground: cx.theme().foreground,
+            selected_foreground: None,
             border: cx.theme().transparent,
             hover: cx.theme().transparent,
             active: cx.theme().transparent,
@@ -107,6 +109,16 @@ impl ButtonCustomVariant {
     /// Set foreground color, default is theme foreground.
     pub fn foreground(mut self, color: Hsla) -> Self {
         self.foreground = color;
+        self
+    }
+
+    /// Set the foreground color used while the button is selected, default is
+    /// [`Self::foreground`]. A segmented strip whose selected segment fills with
+    /// a strong colour needs a different label colour on it than the one that
+    /// reads against the resting surface; one shared foreground cannot satisfy
+    /// both contrast pairs.
+    pub fn selected_foreground(mut self, color: Hsla) -> Self {
+        self.selected_foreground = Some(color);
         self
     }
 
@@ -941,6 +953,9 @@ impl ButtonVariant {
         let fg = match self {
             ButtonVariant::Link => cx.theme().link_active,
             ButtonVariant::Text => cx.theme().foreground.opacity(0.7),
+            ButtonVariant::Custom(colors) => {
+                colors.selected_foreground.unwrap_or(colors.foreground)
+            }
             _ => self.text_color(false, cx),
         };
         let underline = self.underline(cx);

@@ -1452,26 +1452,25 @@ fn the_compact_split_is_measured_on_the_pane_not_the_list(cx: &mut gpui::TestApp
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
+            let split = crate::ui::theme::agent_chat_compact_options_w(cx);
             assert!(
-                !view.activity_bar_is_compact(),
+                !view.activity_bar_is_compact(cx),
                 "before the first paint measures anything, the three chips are assumed to fit"
             );
 
-            let narrow = gpui::px(crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W - 1.0);
-            view.set_pane_width(narrow, cx);
-            assert!(view.activity_bar_is_compact());
+            view.set_pane_width(gpui::px(split - 1.0), cx);
+            assert!(view.activity_bar_is_compact(cx));
             assert!(view.items.is_empty());
             assert!(view.list_bounds.is_none());
 
             view.items.push(assistant_text_item("now there is a list"));
             assert!(
-                view.activity_bar_is_compact(),
+                view.activity_bar_is_compact(cx),
                 "gaining a transcript must not change which bar the pane shows"
             );
 
-            let wide = gpui::px(crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W + 1.0);
-            view.set_pane_width(wide, cx);
-            assert!(!view.activity_bar_is_compact());
+            view.set_pane_width(gpui::px(split + 1.0), cx);
+            assert!(!view.activity_bar_is_compact(cx));
         })
         .expect("view update");
 }
@@ -1479,7 +1478,13 @@ fn the_compact_split_is_measured_on_the_pane_not_the_list(cx: &mut gpui::TestApp
 #[gpui::test]
 fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
-    let wide = crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W + 1.0;
+    // The split is font-dependent; read it the way the pane does.
+    let split = window
+        .update(cx, |_view, _window, cx| {
+            crate::ui::theme::agent_chat_compact_options_w(cx)
+        })
+        .expect("view update");
+    let wide = split + 1.0;
     let set = |cx: &mut gpui::TestAppContext, w: f32| {
         window
             .update(cx, |view, _window, cx| view.set_pane_width(gpui::px(w), cx))
@@ -1507,7 +1512,7 @@ fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContex
         "a resize that stays on the wide side is not a layout change"
     );
 
-    set(cx, crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W - 1.0);
+    set(cx, split - 1.0);
     assert!(
         count(cx) > settled,
         "crossing into the compact bar has to repaint, or the chips stay stale"

@@ -3,13 +3,13 @@
 use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use super::fold_header::{FoldHeader, FoldRow};
-use super::options_panel::{fixed_region, panel_max_h, panel_root, scroll_region};
+use super::options_panel::{fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, Popover, Selectable as _, Sizable as _, button,
-    button_on_surface, checkbox,
+    button_chip_on_surface, checkbox,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::{
     DisplayFilter, FilterAxis, FilterFacet, ToolSelection,
@@ -25,7 +25,6 @@ pub(super) fn display_filter_chip(
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let label = SharedString::from(s::agent_chat_filter_chip(&filter_value(filter)));
     let view = cx.entity().downgrade();
     Popover::new(SharedString::from(format!(
         "agent-chat-display-filter-popover-{pane_id}"
@@ -33,21 +32,26 @@ pub(super) fn display_filter_chip(
     .default_open(default_open)
     .anchor(Anchor::TopRight)
     .trigger(
-        button_on_surface(
+        button_chip_on_surface(
             ("agent-chat-display-filter", pane_id as usize),
-            label,
+            SharedString::from(display_filter_chip_label(filter)),
             surface,
             cx,
         )
-        .xsmall()
         .selected(!filter.is_empty())
         .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
     )
     .content(move |_, window, cx| {
-        panel_root(theme::AGENT_CHAT_OPTIONS_PANEL_W, panel_max_h(window))
+        panel_root(theme::AGENT_CHAT_OPTIONS_PANEL_W, window)
             .child(filter_panel(&view, filter, pane_id, cx))
             .into_any_element()
     })
+}
+
+/// The chip's full text. Also the filter axis's slot in the compact bar's
+/// tooltip, so the two readings of the same setting cannot diverge.
+pub(super) fn display_filter_chip_label(filter: DisplayFilter) -> String {
+    s::agent_chat_filter_chip(&filter_value(filter))
 }
 
 fn filter_value(filter: DisplayFilter) -> String {
@@ -66,17 +70,33 @@ pub(super) fn filter_panel(
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
-    let kind_rows = [FilterFacet::Thinking, FilterFacet::Prose]
-        .into_iter()
-        .map(|facet| filter_checkbox(view, current, facet, pane_id));
-    let tool_rows = FilterFacet::ALL
-        .into_iter()
-        .filter(|facet| facet.axis() == FilterAxis::Tool)
-        .map(|facet| filter_checkbox(view, current, facet, pane_id));
-
-    let tools = current.tool_selection();
-    let tools_view = view.clone();
     let clear_view = view.clone();
+    let mut facets = scroll_region(SharedString::from(format!(
+        "agent-chat-filter-facets-scroll-{pane_id}"
+    )));
+    for axis in FilterAxis::ALL {
+        facets = facets.child(panel_heading(axis_label(axis), cx));
+        let rows = axis
+            .rows()
+            .into_iter()
+            .map(|facet| filter_checkbox(view, current, facet, pane_id));
+        match axis.parent() {
+            // A parent toggle owns its rows, so they nest under it.
+            Some(parent) => {
+                facets = facets
+                    .child(tools_parent_checkbox(view, current, parent, pane_id))
+                    .child(
+                        div()
+                            .ml(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
+                            .flex()
+                            .flex_col()
+                            .gap(px(theme::GAP_SM))
+                            .children(rows),
+                    );
+            }
+            None => facets = facets.children(rows),
+        }
+    }
     div()
         .flex_1()
         .min_h(px(0.))
@@ -85,36 +105,7 @@ pub(super) fn filter_panel(
         .flex_col()
         .gap(px(theme::GAP_SM))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(
-            scroll_region(SharedString::from(format!(
-                "agent-chat-filter-facets-scroll-{pane_id}"
-            )))
-            .child(panel_heading(axis_label(FilterAxis::Kind), cx))
-            .children(kind_rows)
-            .child(panel_heading(axis_label(FilterAxis::Tool), cx))
-            .child(
-                checkbox(
-                    SharedString::from(format!("agent-chat-filter-tools-{pane_id}")),
-                    facet_label(FilterFacet::Tools),
-                    (),
-                )
-                .checked(matches!(tools, ToolSelection::All))
-                .indeterminate(matches!(tools, ToolSelection::Some(_)))
-                .on_click(move |selected, _window, app| {
-                    if let Some(view) = tools_view.upgrade() {
-                        view.update(app, |v, cx| v.set_all_tools_filter(*selected, cx));
-                    }
-                }),
-            )
-            .child(
-                div()
-                    .ml(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::GAP_SM))
-                    .children(tool_rows),
-            ),
-        )
+        .child(facets)
         .child(
             fixed_region().child(
                 button(
@@ -132,6 +123,36 @@ pub(super) fn filter_panel(
             ),
         )
         .into_any_element()
+}
+
+/// The Tool section's parent toggle. Tri-state: checked when every category
+/// under it is on, indeterminate on a partial set — clicking it sets the whole
+/// section.
+///
+/// Named for the one axis that has a parent rather than generalised: the
+/// tri-state reads `tool_selection()`, so a second parented axis would silently
+/// drive the tool filter. `parent` still comes from the axis table, so the id
+/// and label cannot drift from the section that holds them.
+fn tools_parent_checkbox(
+    view: &gpui::WeakEntity<AgentChatView>,
+    current: DisplayFilter,
+    parent: FilterFacet,
+    pane_id: PaneId,
+) -> impl IntoElement + use<> {
+    let tools = current.tool_selection();
+    let view = view.clone();
+    checkbox(
+        SharedString::from(format!("agent-chat-filter-{}-{pane_id}", parent.token())),
+        facet_label(parent),
+        (),
+    )
+    .checked(matches!(tools, ToolSelection::All))
+    .indeterminate(matches!(tools, ToolSelection::Some(_)))
+    .on_click(move |selected, _window, app| {
+        if let Some(view) = view.upgrade() {
+            view.update(app, |v, cx| v.set_all_tools_filter(*selected, cx));
+        }
+    })
 }
 
 fn filter_checkbox(

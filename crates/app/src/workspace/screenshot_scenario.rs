@@ -10,6 +10,7 @@
 
 use gpui::{App, Entity, Point, Window, px};
 
+use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
 use daruda_config::BuiltinSection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -48,6 +49,10 @@ const NAME_AGENT_CHAT: &str = "agent-chat";
 const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
+/// CLI token prefix for the compact bar's combined options popover, suffixed
+/// with an [`ActivityOptionsTab`] token (`agent-chat-options:filter`). Bare
+/// `agent-chat-options` opens the Fold tab.
+const NAME_AGENT_CHAT_OPTIONS: &str = "agent-chat-options";
 /// CLI token for the flow delete confirmation, on the repository's copy.
 const NAME_FLOW_DELETE_CONFIRM: &str = "flow-delete-confirm";
 /// The name the delete dialog is asked about. Nothing is deleted — a capture
@@ -151,6 +156,15 @@ pub(crate) enum ScreenshotScenario {
     AgentChatNarrowed,
     /// The same transcript with a custom fold matrix and its editor open.
     AgentChatFold,
+    /// The compact Activity Bar's combined options popover, open on one tab
+    /// with every axis off its default — the only way to see the gear's own
+    /// selected state, whether the tab strip reads as three choices, and
+    /// whether a tab's panel matches the chip that opens it on a wide bar.
+    ///
+    /// Forces the compact layout rather than narrowing the pane, so it captures
+    /// that bar's chrome at full width and does *not* exercise the breakpoint
+    /// itself.
+    AgentChatOptions(ActivityOptionsTab),
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -195,6 +209,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT => Some(Self::AgentChat),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
+            NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
@@ -202,10 +217,18 @@ impl ScreenshotScenario {
             NAME_FLOW_ASKING => Some(Self::FlowAsking),
             NAME_FLOW_DELETE_CONFIRM => Some(Self::FlowDeleteConfirm),
             _ => name
-                .strip_prefix(concat!("settings", ":"))
-                .and_then(BuiltinSection::from_slug)
-                .map(Self::Settings),
+                .strip_prefix(NAME_AGENT_CHAT_OPTIONS)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .and_then(ActivityOptionsTab::from_token)
+                .map(Self::AgentChatOptions)
+                .or_else(|| Self::settings_section_from_cli_name(name)),
         }
+    }
+
+    fn settings_section_from_cli_name(name: &str) -> Option<Self> {
+        name.strip_prefix(concat!("settings", ":"))
+            .and_then(BuiltinSection::from_slug)
+            .map(Self::Settings)
     }
 }
 
@@ -340,6 +363,11 @@ pub(crate) fn drive(
                 ws.open_agent_chat_fold_editor_for_shot(window, cx)
             });
         }
+        ScreenshotScenario::AgentChatOptions(tab) => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_options_for_shot(tab, window, cx)
+            });
+        }
     }
 }
 
@@ -453,6 +481,29 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-failure"),
             Some(ScreenshotScenario::AgentChatFailure)
+        );
+    }
+
+    /// Every tab the panel offers has to be reachable from the CLI, or a tab
+    /// silently loses its permanent capture coverage.
+    #[test]
+    fn every_options_tab_is_addressable_by_its_own_token() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-options"),
+            Some(ScreenshotScenario::AgentChatOptions(
+                ActivityOptionsTab::Fold
+            ))
+        );
+        for tab in ActivityOptionsTab::ALL {
+            assert_eq!(
+                ScreenshotScenario::from_cli_name(&format!("agent-chat-options:{}", tab.token())),
+                Some(ScreenshotScenario::AgentChatOptions(tab)),
+                "{tab:?}"
+            );
+        }
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-options:nope"),
+            None
         );
     }
 

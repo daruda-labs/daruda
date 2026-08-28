@@ -775,6 +775,35 @@ impl Workspace {
         });
     }
 
+    /// Open the compact bar's combined options popover on `tab`, with every
+    /// transcript axis off its default so the gear's own selected state is
+    /// visible alongside the panel.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_options_for_shot(
+        &mut self,
+        tab: super::view::ActivityOptionsTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::display_filter::FilterFacet;
+        use super::fold_mode::FoldPreset;
+        use super::rows::tail::TailWindow;
+        use daruda_config::TAIL_WINDOW_CHOICES;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_fold_mode(FoldPreset::Summary.mode(), cx);
+            v.toggle_display_facet(FilterFacet::ToolEdit, cx);
+            v.set_tail_window(TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
+            v.set_activity_options_tab(tab, cx);
+            v.screenshot_options_open = true;
+        });
+    }
+
     /// Open a seeded agent-chat transcript for screenshots.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_transcript_for_shot(

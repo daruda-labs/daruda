@@ -2219,12 +2219,23 @@ pub fn agent_chat_filter_tool_other() -> String {
     rust_i18n::t!("agent_chat.filter_tool_other").into_owned()
 }
 
-/// Earlier-step count with singular handling.
-pub fn agent_chat_tail_more(count: usize) -> String {
+/// Earlier-step disclosure, with singular handling. Mirrors the filtered-row
+/// placeholder: the row is a toggle, so the copy states what clicking it does
+/// rather than restating a count that is already on screen once revealed.
+pub fn agent_chat_tail_more_show(count: usize) -> String {
     if count == 1 {
-        rust_i18n::t!("agent_chat.tail_more_one").into_owned()
+        rust_i18n::t!("agent_chat.tail_more_show_one").into_owned()
     } else {
-        rust_i18n::t!("agent_chat.tail_more", count = count).into_owned()
+        rust_i18n::t!("agent_chat.tail_more_show", count = count).into_owned()
+    }
+}
+
+/// The revealed counterpart of [`agent_chat_tail_more_show`].
+pub fn agent_chat_tail_more_hide(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.tail_more_hide_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.tail_more_hide", count = count).into_owned()
     }
 }
 
@@ -2332,8 +2343,16 @@ pub fn agent_chat_tail_window_last(count: usize) -> String {
     rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
 }
 
-pub fn agent_chat_view_options() -> String {
-    rust_i18n::t!("agent_chat.view_options").into_owned()
+/// The compact bar's gear tooltip: the wide bar's three chip labels verbatim,
+/// so a narrowed pane still states what the transcript is showing.
+pub fn agent_chat_view_options_tooltip(fold: &str, filter: &str, tail: &str) -> String {
+    rust_i18n::t!(
+        "agent_chat.view_options_tooltip",
+        fold = fold,
+        filter = filter,
+        tail = tail
+    )
+    .into_owned()
 }
 
 pub fn agent_chat_view_options_fold() -> String {

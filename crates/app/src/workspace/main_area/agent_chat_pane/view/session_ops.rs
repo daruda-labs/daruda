@@ -339,17 +339,19 @@ impl AgentChatView {
         width: gpui::Pixels,
         cx: &mut Context<Self>,
     ) {
-        let was_compact = self.activity_bar_is_compact();
+        let was_compact = self.activity_bar_is_compact(cx);
         self.pane_width = Some(width);
-        if self.activity_bar_is_compact() != was_compact {
+        if self.activity_bar_is_compact(cx) != was_compact {
             cx.notify();
         }
     }
 
-    /// Whether transcript controls should collapse into one popover.
-    pub(in crate::workspace) fn activity_bar_is_compact(&self) -> bool {
+    /// Whether transcript controls should collapse into one popover. The
+    /// threshold is font-dependent (the chips it has to fit are text), so it
+    /// comes from `theme` rather than a bare constant.
+    pub(in crate::workspace) fn activity_bar_is_compact(&self, cx: &gpui::App) -> bool {
         self.pane_width
-            .is_some_and(|w| f32::from(w) <= crate::ui::theme::AGENT_CHAT_COMPACT_OPTIONS_W)
+            .is_some_and(|w| f32::from(w) <= crate::ui::theme::agent_chat_compact_options_w(cx))
     }
 
     pub(in crate::workspace) fn set_fold_editor_turn(

@@ -422,6 +422,24 @@ pub fn set_agent_chat_font_size(cx: &mut App, size: f32) {
     cx.set_global(AgentChatFontSize(size));
 }
 
+/// Pane width at or below which the Activity Bar's three transcript chips
+/// collapse into one view-options gear.
+///
+/// The two parts are text widths measured at
+/// [`AGENT_CHAT_MSG_FONT_SIZE`](p::AGENT_CHAT_MSG_FONT_SIZE), and the pane's
+/// size is user-configurable (`font.agent_chat_size`, clamped 6–72), so the
+/// threshold has to scale with it. A fixed breakpoint reads as derived while
+/// silently assuming one font: at 20px the spelled-out chips outgrow the budget,
+/// the bar stays wide, and the cluster ellipsizes them instead of collapsing —
+/// exactly the state the split exists to avoid.
+///
+/// Padding is a fixed metric and does not scale.
+pub fn agent_chat_compact_options_w(cx: &App) -> f32 {
+    let scale = agent_chat_font_size(cx) / p::AGENT_CHAT_MSG_FONT_SIZE;
+    (p::AGENT_CHAT_TITLE_MIN_W + p::AGENT_CHAT_OPTIONS_CLUSTER_W) * scale
+        + 2.0 * p::AGENT_CHAT_PAD_X
+}
+
 /// Agent-chat reading-mode content width in pixels, mirrored from config
 /// `agent.reading_width`. Single update site:
 /// [`set_agent_chat_reading_width`], called from startup and config reload.
@@ -495,6 +513,10 @@ pub struct PaneSurfaceTokens {
     pub tint: gpui::Hsla,
     pub active_tint: gpui::Hsla,
     pub border_tint: gpui::Hsla,
+    /// Resting edge for an interactive control on this surface — heavier than
+    /// [`Self::border_tint`], which edges cards. See
+    /// [`AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_DARK`](p::AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_DARK).
+    pub control_border: gpui::Hsla,
     pub syntax_is_light: bool,
 }
 
@@ -526,12 +548,20 @@ impl PaneSurfaceTokens {
             tint: dim_toward_gray(self.tint, amount),
             active_tint: dim_toward_gray(self.active_tint, amount),
             border_tint: dim_toward_gray(self.border_tint, amount),
+            control_border: dim_toward_gray(self.control_border, amount),
             syntax_is_light: self.syntax_is_light,
         }
     }
 
     fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
         let overlay = neutral_overlay_for(background);
+        // Darkening a near-white surface buys less contrast than lightening a
+        // near-black one, so the control edge takes its alpha per direction.
+        let control_alpha = if background.l < 0.5 {
+            p::AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_DARK
+        } else {
+            p::AGENT_CHAT_CONTROL_BORDER_ALPHA_ON_LIGHT
+        };
         Self {
             background,
             foreground,
@@ -540,6 +570,7 @@ impl PaneSurfaceTokens {
             tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_TINT_ALPHA),
             active_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
             border_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
+            control_border: p::with_alpha(overlay, control_alpha),
             syntax_is_light: background.l >= 0.5,
         }
     }
@@ -814,6 +845,104 @@ mod tests {
         });
     }
 
+    /// The vendored `selected_foreground` slot exists *only* because no single
+    /// foreground clears both of a segmented strip's contrast pairs. Assert both,
+    /// or a palette move silently invalidates the patch's whole justification.
+    #[gpui::test]
+    fn a_segmented_strip_clears_both_of_its_contrast_pairs(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            // Read the popover fill through the *bridged* theme, so this tracks
+            // whatever `apply_daruda_palette` actually assigns rather than a
+            // second guess at it. Today that is `surface-2`, not the `surface-4`
+            // DESIGN.md's elevation table nominally gives popovers.
+            let popover = Theme::global(cx).popover;
+            let t = current(cx);
+            let resting = contrast_over(t.text_muted, popover);
+            assert!(resting >= 4.5, "resting label measures {resting:.2}:1");
+            // Selected label on the accent fill.
+            let selected = contrast_over(p::ACCENT_FG, p::PRIMARY);
+            assert!(selected >= 4.5, "selected label measures {selected:.2}:1");
+            // The pair the patch rules out: one shared foreground cannot do both.
+            let shared = contrast_over(t.text_muted, p::PRIMARY);
+            assert!(
+                shared < 4.5,
+                "if the resting tone also worked on the fill ({shared:.2}:1) the \
+                 patch would be unnecessary"
+            );
+            // And the reason accent is not the resting label colour.
+            let accent_as_text = contrast_over(p::PRIMARY, popover);
+            assert!(
+                accent_as_text < 4.5,
+                "accent as a segment label measures {accent_as_text:.2}:1"
+            );
+        });
+    }
+
+    /// The two parts of the breakpoint are text widths, so the threshold has to
+    /// track the pane's configured font size. A fixed number would read as
+    /// derived while assuming one font.
+    #[gpui::test]
+    fn the_compact_breakpoint_scales_with_the_pane_font(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            // Unset: the compile-time default, so the documented value holds.
+            let default = agent_chat_compact_options_w(cx);
+            assert!(
+                (default - p::AGENT_CHAT_COMPACT_OPTIONS_W).abs() < 0.01,
+                "at the default size the constant is the threshold, got {default}"
+            );
+
+            set_agent_chat_font_size(cx, p::AGENT_CHAT_MSG_FONT_SIZE * 2.0);
+            let doubled = agent_chat_compact_options_w(cx);
+            assert!(
+                doubled > default,
+                "a larger pane font needs a wider pane before the chips fit"
+            );
+            // Only the text parts scale; the fixed padding stays put.
+            let text_part = default - 2.0 * p::AGENT_CHAT_PAD_X;
+            assert!(
+                (doubled - (text_part * 2.0 + 2.0 * p::AGENT_CHAT_PAD_X)).abs() < 0.01,
+                "padding must not scale with the font, got {doubled}"
+            );
+
+            set_agent_chat_font_size(cx, 6.0);
+            assert!(
+                agent_chat_compact_options_w(cx) < default,
+                "the smallest configurable font lets a narrower pane keep the chips"
+            );
+        });
+    }
+
+    /// A chip's resting edge is the only thing that says it is a control
+    /// rather than one of the static readouts beside it on the Activity Bar,
+    /// so it is held to DESIGN.md's 3:1 component-edge floor. The card tint
+    /// that edges tool cards measures 1.44:1 here and is *not* enough — the
+    /// two are separate tokens for exactly this reason.
+    #[gpui::test]
+    fn a_control_edge_on_the_pane_surface_clears_the_component_floor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            // Both sanctioned directions: the default terminal preset's
+            // background and a light one.
+            for bg in [(30u8, 30u8, 30u8), (249u8, 250u8, 251u8)] {
+                set_agent_chat_bg(cx, bg.0, bg.1, bg.2);
+                let s = PaneSurfaceTokens::agent_chat(cx);
+                let control = contrast_over(s.control_border, s.background);
+                assert!(
+                    control >= 3.0,
+                    "control edge on {bg:?} measures {control:.2}:1"
+                );
+                let card = contrast_over(s.border_tint, s.background);
+                assert!(
+                    card < control,
+                    "the card edge must stay the lighter of the two, got \
+                     card {card:.2}:1 vs control {control:.2}:1"
+                );
+            }
+        });
+    }
+
     /// A dimmed surface must move each token exactly as the bar's own text
     /// moves, or a control built from it stays at full strength while the
     /// title beside it fades.
@@ -835,6 +964,10 @@ mod tests {
                 assert_eq!(
                     dimmed.border_tint,
                     dim_toward_gray(agent_chat_border_tint(cx), amount)
+                );
+                assert_eq!(
+                    dimmed.control_border,
+                    dim_toward_gray(PaneSurfaceTokens::agent_chat(cx).control_border, amount)
                 );
             }
         });

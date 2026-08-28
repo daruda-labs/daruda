@@ -80,6 +80,18 @@ fn step_rollup(
     span.map(|s| Rollup::of_run_with_live_units(items, s.tool_start..s.end, live_units))
 }
 
+/// The tail row's copy. The row is a disclosure like the filtered-row
+/// placeholder, so it names the action rather than the count: once revealed,
+/// "N earlier steps" restates what is already on screen and reads as if the
+/// steps were still hidden.
+fn tail_more_label(hidden_steps: usize, collapsed: bool) -> String {
+    if collapsed {
+        s::agent_chat_tail_more_show(hidden_steps)
+    } else {
+        s::agent_chat_tail_more_hide(hidden_steps)
+    }
+}
+
 pub(super) fn tail_more_bar(
     this: &AgentChatView,
     run_start: usize,
@@ -90,7 +102,7 @@ pub(super) fn tail_more_bar(
     let title = div()
         .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(s::agent_chat_tail_more(hidden_steps)))
+        .child(SharedString::from(tail_more_label(hidden_steps, collapsed)))
         .into_any_element();
     FoldRow::section(
         SharedString::from(format!("agent-chat-tail-{run_start}")),
@@ -281,6 +293,20 @@ mod tests {
         let title =
             step_title(&items, 0..2, TitleSource::Assistant).expect("the next block yields one");
         assert_eq!(title.text(), "Running the build.");
+    }
+
+    #[test]
+    fn the_tail_row_names_the_action_in_both_directions() {
+        let collapsed = tail_more_label(6, true);
+        let revealed = tail_more_label(6, false);
+        assert_ne!(
+            collapsed, revealed,
+            "an expanded tail row must not repeat the collapsed promise"
+        );
+        assert!(collapsed.contains('6') && revealed.contains('6'));
+        // Singular is handled on both sides, like the filtered-row placeholder.
+        assert_ne!(tail_more_label(1, true), tail_more_label(2, true));
+        assert_ne!(tail_more_label(1, false), tail_more_label(2, false));
     }
 
     #[test]

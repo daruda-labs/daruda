@@ -2,13 +2,13 @@
 
 use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use super::options_panel::{fixed_region, panel_max_h, panel_root, scroll_region};
+use super::options_panel::{fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, Popover, Selectable as _, Sizable as _, button,
-    button_group, button_on_surface,
+    button_chip_on_surface, button_group,
 };
 use crate::workspace::main_area::agent_chat_pane::fold_mode::{
     BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition,
@@ -32,7 +32,6 @@ pub(super) fn fold_mode_chip(
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let label = SharedString::from(s::agent_chat_fold_mode_chip(&mode_value(mode)));
     let view = cx.entity().downgrade();
     Popover::new(SharedString::from(format!(
         "agent-chat-fold-mode-popover-{pane_id}"
@@ -40,20 +39,33 @@ pub(super) fn fold_mode_chip(
     .default_open(default_open)
     .anchor(Anchor::TopRight)
     .trigger(
-        button_on_surface(
+        button_chip_on_surface(
             ("agent-chat-fold-mode", pane_id as usize),
-            label,
+            SharedString::from(fold_mode_chip_label(mode)),
             surface,
             cx,
         )
-        .xsmall()
+        .selected(!fold_is_default(mode))
         .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip())),
     )
     .content(move |_, window, cx| {
-        panel_root(theme::AGENT_CHAT_RULES_PANEL_W, panel_max_h(window))
+        panel_root(theme::AGENT_CHAT_RULES_PANEL_W, window)
             .child(fold_mode_panel(&view, mode, editor_turn, pane_id, cx))
             .into_any_element()
     })
+}
+
+/// The chip's full text. Also the fold axis's slot in the compact bar's
+/// tooltip, so the two readings of the same setting cannot diverge.
+pub(super) fn fold_mode_chip_label(mode: FoldMode) -> String {
+    s::agent_chat_fold_mode_chip(&mode_value(mode))
+}
+
+/// Whether the axis is at the value a fresh pane starts on. The compact bar
+/// shows one control for three axes, so it needs this to say that something
+/// behind the gear is set — `Custom` in particular has no other tell there.
+pub(super) fn fold_is_default(mode: FoldMode) -> bool {
+    mode == FoldPreset::Auto.mode()
 }
 
 fn mode_value(mode: FoldMode) -> String {
@@ -72,12 +84,12 @@ pub(super) fn fold_mode_panel(
 ) -> AnyElement {
     let mut rows = Vec::new();
     for block in FoldBlock::ALL {
-        rows.push(block_rule_row(view, mode, editor_turn, block, pane_id));
+        rows.push(block_rule_row(view, mode, editor_turn, block, pane_id, cx));
         if block == FoldBlock::Tool {
             rows.extend(
                 ToolCategory::ALL
                     .into_iter()
-                    .map(|category| tool_rule_row(view, mode, editor_turn, category, pane_id)),
+                    .map(|category| tool_rule_row(view, mode, editor_turn, category, pane_id, cx)),
             );
         }
     }
@@ -95,8 +107,8 @@ pub(super) fn fold_mode_panel(
             fixed_region()
                 .gap(px(theme::GAP_LG))
                 .child(panel_heading(s::agent_chat_fold_editor_presets(), cx))
-                .child(preset_group(view, mode, pane_id))
-                .child(turn_group(view, editor_turn, pane_id)),
+                .child(preset_group(view, mode, pane_id, cx))
+                .child(turn_group(view, editor_turn, pane_id, cx)),
         )
         .child(
             scroll_region(SharedString::from(format!(
@@ -112,7 +124,7 @@ pub(super) fn fold_mode_panel(
                 )
                 .ghost()
                 .xsmall()
-                .disabled(mode == FoldPreset::Auto.mode())
+                .disabled(fold_is_default(mode))
                 .on_click(move |_, _window, app| {
                     if let Some(view) = reset_view.upgrade() {
                         view.update(app, |v, cx| v.set_fold_mode(FoldPreset::Auto.mode(), cx));
@@ -127,11 +139,13 @@ fn preset_group(
     view: &gpui::WeakEntity<AgentChatView>,
     mode: FoldMode,
     pane_id: PaneId,
+    cx: &App,
 ) -> impl IntoElement + use<> {
     let view = view.clone();
-    button_group(SharedString::from(format!(
-        "agent-chat-fold-presets-{pane_id}"
-    )))
+    button_group(
+        SharedString::from(format!("agent-chat-fold-presets-{pane_id}")),
+        cx,
+    )
     .children(FoldPreset::ALL.into_iter().map(|preset| {
         button(
             SharedString::from(format!(
@@ -156,11 +170,13 @@ fn turn_group(
     view: &gpui::WeakEntity<AgentChatView>,
     current: TurnPosition,
     pane_id: PaneId,
+    cx: &App,
 ) -> impl IntoElement + use<> {
     let view = view.clone();
-    button_group(SharedString::from(format!(
-        "agent-chat-fold-turns-{pane_id}"
-    )))
+    button_group(
+        SharedString::from(format!("agent-chat-fold-turns-{pane_id}")),
+        cx,
+    )
     .children(TurnPosition::ALL.into_iter().map(|turn| {
         button(
             SharedString::from(format!("agent-chat-fold-turn-{}-{pane_id}", turn.token())),
@@ -186,6 +202,7 @@ fn block_rule_row(
     turn: TurnPosition,
     block: FoldBlock,
     pane_id: PaneId,
+    cx: &App,
 ) -> AnyElement {
     let current = mode.rule(turn, block);
     let view = view.clone();
@@ -198,6 +215,7 @@ fn block_rule_row(
             block.token()
         )),
         current,
+        cx,
         move |rule, app| {
             if let Some(view) = view.upgrade() {
                 view.update(app, |v, cx| {
@@ -214,6 +232,7 @@ fn tool_rule_row(
     turn: TurnPosition,
     category: ToolCategory,
     pane_id: PaneId,
+    cx: &App,
 ) -> AnyElement {
     let current = mode.tool_rule(turn, category);
     let view = view.clone();
@@ -226,6 +245,7 @@ fn tool_rule_row(
             category.token()
         )),
         current,
+        cx,
         move |rule, app| {
             if let Some(view) = view.upgrade() {
                 view.update(app, |v, cx| {
@@ -241,6 +261,7 @@ fn rule_row(
     nested: bool,
     id: SharedString,
     current: BlockRule,
+    cx: &App,
     on_change: impl Fn(BlockRule, &mut App) + 'static,
 ) -> AnyElement {
     let button_id_prefix = id.clone();
@@ -263,7 +284,7 @@ fn rule_row(
                 .child(SharedString::from(label)),
         )
         .child(
-            button_group(id)
+            button_group(id, cx)
                 .children(RULES.into_iter().map(|rule| {
                     button(
                         SharedString::from(format!("{button_id_prefix}-{}", rule_token(rule))),
@@ -363,6 +384,23 @@ mod tests {
         for rule in RULES {
             assert!(!rule_label(rule).is_empty(), "{rule:?}");
         }
+    }
+
+    #[test]
+    fn only_the_auto_preset_counts_as_default() {
+        assert!(fold_is_default(FoldMode::default()));
+        assert!(fold_is_default(FoldPreset::Auto.mode()));
+        assert!(!fold_is_default(FoldPreset::Summary.mode()));
+        assert!(!fold_is_default(FoldMode::from_tokens([
+            "auto",
+            "last.tool=expanded"
+        ])));
+    }
+
+    #[test]
+    fn the_chip_label_carries_the_value_the_tooltip_shows() {
+        let custom = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
+        assert!(fold_mode_chip_label(custom).contains(&s::agent_chat_fold_mode_custom()));
     }
 
     #[test]

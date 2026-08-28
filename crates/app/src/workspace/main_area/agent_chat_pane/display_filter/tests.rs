@@ -380,12 +380,76 @@ fn all_tools_and_partial_tools_are_distinct_states() {
 }
 
 #[test]
-fn the_panel_sections_agree_with_tool_categories() {
-    for facet in FilterFacet::ALL {
-        let ok = match facet.axis() {
-            FilterAxis::Kind => facet.category().is_none(),
-            FilterAxis::Tool => facet.category().is_some(),
-        };
-        assert!(ok, "{facet:?} is listed under {:?}", facet.axis());
+fn every_facet_lands_in_exactly_one_section() {
+    let mut placed: Vec<FilterFacet> = Vec::new();
+    for axis in FilterAxis::ALL {
+        placed.extend(axis.parent());
+        placed.extend(axis.rows());
     }
+    for facet in FilterFacet::ALL {
+        let hits = placed.iter().filter(|f| **f == facet).count();
+        assert_eq!(hits, 1, "{facet:?} appears {hits} times in the panel");
+    }
+    assert_eq!(placed.len(), FilterFacet::ALL.len());
+}
+
+#[test]
+fn a_section_only_lists_facets_that_claim_its_axis() {
+    for axis in FilterAxis::ALL {
+        for facet in axis.parent().into_iter().chain(axis.rows()) {
+            assert_eq!(
+                facet.axis(),
+                axis,
+                "{facet:?} is drawn under {axis:?} but claims {:?}",
+                facet.axis()
+            );
+        }
+    }
+}
+
+#[test]
+fn only_the_tool_section_nests_under_a_parent_toggle() {
+    assert_eq!(FilterAxis::Kind.parent(), None);
+    assert_eq!(FilterAxis::Tool.parent(), Some(FilterFacet::Tools));
+    // The parent stands for the whole section, so it must not also be a row.
+    assert!(!FilterAxis::Tool.rows().contains(&FilterFacet::Tools));
+    // Every nested row names one category; the parent names none.
+    assert!(
+        FilterAxis::Tool
+            .rows()
+            .iter()
+            .all(|f| f.category().is_some())
+    );
+    assert!(
+        FilterAxis::Kind
+            .rows()
+            .iter()
+            .all(|f| f.category().is_none())
+    );
+}
+
+#[test]
+fn clearing_the_last_facet_widens_rather_than_empties() {
+    let search_only = DisplayFilter::default().toggled(FilterFacet::ToolSearch);
+    assert!(!search_only.is_empty());
+    let cleared = search_only.toggled(FilterFacet::ToolSearch);
+    assert!(
+        cleared.is_empty(),
+        "unchecking the last facet is the unfiltered state, not a selection of nothing"
+    );
+    // The half the name promises: the transcript widens rather than emptying.
+    let reasoning = ChatItem::Thinking {
+        text: "t".into(),
+        streaming: false,
+        message_id: None,
+    };
+    assert!(!search_only.matches(&reasoning), "narrowed to searches");
+    assert!(
+        cleared.matches(&reasoning),
+        "cleared shows everything again"
+    );
+    // An axis still held keeps the narrowing, so the widening is confined to
+    // the degenerate all-off case.
+    let with_reasoning = search_only.toggled(FilterFacet::Thinking);
+    assert!(!with_reasoning.toggled(FilterFacet::ToolSearch).is_empty());
 }

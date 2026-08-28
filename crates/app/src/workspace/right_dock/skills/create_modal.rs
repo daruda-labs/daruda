@@ -328,7 +328,7 @@ impl Render for CreateSkillModal {
             })
             .collect();
         let scope_values: Vec<SkillScope> = scope_pairs.iter().map(|(scope, _)| *scope).collect();
-        let scope_chip = button_group("skill-scope-group")
+        let scope_chip = button_group("skill-scope-group", cx)
             .children(scope_pairs.into_iter().map(|(scope, label)| {
                 button(SharedString::from(format!("scope-{}", scope.slug())), label)
                     .selected(self.scope == scope)

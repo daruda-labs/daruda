@@ -4,6 +4,10 @@ use daruda_acp::{ChatItem, ToolCallItem};
 
 use super::tool_category::{ToolCategory, ToolCategorySet, classify_tool};
 
+/// How the panel groups facets into labelled sections. Each axis renders one
+/// heading, an optional parent toggle standing for the whole section, and the
+/// rows [`FilterAxis::rows`] derives from [`FilterFacet::axis`] — so a facet
+/// cannot be listed under a heading its own axis disagrees with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum FilterAxis {
     Kind,
@@ -11,8 +15,27 @@ pub(in crate::workspace) enum FilterAxis {
 }
 
 impl FilterAxis {
-    #[cfg(test)]
+    /// Render order of the panel's sections.
     pub(in crate::workspace) const ALL: [FilterAxis; 2] = [Self::Kind, Self::Tool];
+
+    /// The section-wide toggle drawn above this axis's own rows, if it has one.
+    /// Only Tool does: `Tools` gates every category at once, so its rows nest
+    /// under it. Kind's facets are independent and sit flat under the heading.
+    pub(in crate::workspace) fn parent(self) -> Option<FilterFacet> {
+        match self {
+            Self::Kind => None,
+            Self::Tool => Some(FilterFacet::Tools),
+        }
+    }
+
+    /// The rows listed under this heading, in [`FilterFacet::ALL`] order —
+    /// every facet on the axis except the section's own parent toggle.
+    pub(in crate::workspace) fn rows(self) -> Vec<FilterFacet> {
+        FilterFacet::ALL
+            .into_iter()
+            .filter(|facet| facet.axis() == self && Some(*facet) != self.parent())
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -39,10 +62,14 @@ impl FilterFacet {
         Self::ToolOther,
     ];
 
+    /// Which panel section lists this facet. `Tools` is on the Tool axis even
+    /// though it names no single [`ToolCategory`]: it is that section's parent
+    /// toggle, not a Kind row.
     pub(in crate::workspace) fn axis(self) -> FilterAxis {
         match self {
-            Self::Thinking | Self::Prose | Self::Tools => FilterAxis::Kind,
-            Self::ToolRead
+            Self::Thinking | Self::Prose => FilterAxis::Kind,
+            Self::Tools
+            | Self::ToolRead
             | Self::ToolEdit
             | Self::ToolSearch
             | Self::ToolRun
@@ -201,6 +228,13 @@ impl DisplayFilter {
         self
     }
 
+    /// No facet picked — the pane is not narrowed at all.
+    ///
+    /// This is why clearing the last checked box widens the transcript instead
+    /// of emptying it: "nothing selected" is the *unfiltered* state (the chip
+    /// reads `All`, and "Show everything" greys out), not a selection of
+    /// nothing. A pane showing only prompts and permissions is not a state
+    /// worth being able to reach.
     pub(in crate::workspace) fn is_empty(self) -> bool {
         !self.thinking && !self.prose && matches!(self.tools, ToolSelection::Excluded)
     }

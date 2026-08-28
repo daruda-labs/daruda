@@ -333,7 +333,7 @@ impl Render for EditMcpServerModal {
         // selected index back to its `McpTransport`.
         let transport_values: Vec<McpTransport> =
             transport_options().iter().map(|(tp, _)| *tp).collect();
-        let transport_chip = button_group("transport-group")
+        let transport_chip = button_group("transport-group", cx)
             .children(transport_options().into_iter().map(|(tp, label)| {
                 button(
                     SharedString::from(format!("transport-{}", tp.slug())),

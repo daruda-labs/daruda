@@ -229,6 +229,50 @@ argument changes. Inline tests cover the click and mark behavior.
 
 ---
 
+## `crates/gpui_component/src/button/button.rs` — vendored, **a selected segment can pick its own label colour**
+
+Applied in place, on the same terms as the sections above.
+
+### Why
+
+`ButtonCustomVariant` carried a single `foreground` used in every state. A
+segmented strip therefore had to paint its selected segment's label in the same
+colour as the resting ones — and on daruda's palette every single choice breaks
+a stated DESIGN.md rule. Measured against the accent fill (`#5e6ad2`):
+`text_muted` 1.45:1, `text_body` 3.26:1, `text_primary` 4.40:1 — all under the
+4.5:1 body-text floor — while `accent_fg` (`#ffffff`) clears it at 4.70:1 but is
+banned as text on the near-black resting surface (§Readability, "never pure-white
+text").
+
+Rather than pick a losing option, `crate::ui::button_group` had been using
+upstream's Primary-**outline** chrome, which sidesteps the question by painting
+every *unselected* segment's label and border in accent. That trades one
+violation for two: accent as small text (3.89:1 on `t.popover`, i.e.
+`surface-2` — not the `surface-4` DESIGN.md's elevation table nominally assigns
+popovers) and one accent element per segment, against DESIGN.md's 3–4 budget —
+the agent-chat fold editor puts twelve three-way strips on screen at once.
+
+### What diverges
+
+An optional `selected_foreground: Option<Hsla>` field plus its builder, and one
+arm in `ButtonVariant::selected` reading
+`colors.selected_foreground.unwrap_or(colors.foreground)`. `None` is upstream
+behaviour, so no call site that does not opt in changes.
+
+Consumers: `crate::ui::button_group` (`text_muted` resting at 5.65:1,
+`accent_fg` selected at 4.70:1) and `crate::ui::button_group_on_surface`, which
+brightens to the pane surface's own full foreground because a terminal-mirrored
+pane has no verified contrast against the UI accent.
+
+### Re-vendor procedure
+
+Copy upstream `button/button.rs` in, then re-add the field, its `new()`
+initialiser, the builder, and the `Custom` arm in `selected`. Re-check the
+contrast pairs above if the palette moved in the meantime — DESIGN.md §Iteration
+Guide requires computing the ratio for the actual fg/bg pair, not eyeballing it.
+
+---
+
 ## `crates/gpui_component/src/popover.rs` — vendored, **the trigger consumes its press**
 
 Applied in place, on the same terms as the sections above.

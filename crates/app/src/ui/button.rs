@@ -72,6 +72,38 @@ pub fn button_on_surface(
     button(id, label).custom(surface_button_variant(surface, cx))
 }
 
+/// A labelled chip for a pane-local surface, with an always-on hairline.
+///
+/// [`button_on_surface`] paints no border and no resting fill, which is right
+/// for a glyph — a `⌄` or a `⇥` is self-evidently a control — but wrong for a
+/// word. On the agent-chat Activity Bar the chips sit beside the context
+/// meter, which is static text in the same muted tone at the same size, so a
+/// borderless chip is indistinguishable from a readout. Same fix, same reason
+/// as [`button_status_pill`], which the status bar needed for the same
+/// collision.
+///
+/// The border comes from the pane's own surface rather than the UI theme's
+/// hairline: on a terminal-mirrored surface a fixed `t.border` is near
+/// invisible (see [`button_on_surface`]). It uses `control_border`, not the
+/// `border_tint` that edges cards — a card's edge is decoration, a control's
+/// edge is what identifies it, and DESIGN.md holds that to 3:1.
+pub fn button_chip_on_surface(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    surface: &PaneSurfaceTokens,
+    cx: &App,
+) -> Button {
+    // The border has to come from the variant, not a `Styled` call: the render
+    // registers per-state closures (hover / active / selected) that repaint
+    // `border_color` on top of the resolved style, so a caller's border would
+    // survive at rest and vanish the moment the pointer touched the chip.
+    let variant = surface_button_variant(surface, cx).border(surface.control_border);
+    button(id, label)
+        .xsmall()
+        .custom(variant)
+        .rounded(px(theme::AGENT_CHAT_CHIP_RADIUS))
+}
+
 /// [`button_on_surface`] without a label — for the icon-only controls whose
 /// glyph inherits the button's foreground.
 pub fn button_bare_on_surface(
