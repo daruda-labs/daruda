@@ -13,9 +13,9 @@ mod usage_chip;
 
 pub(in crate::workspace) use account_slot::{AccountSlot, account_label};
 
-use crate::ui::ContextMenuExt as _;
 use crate::ui::theme;
 use crate::workspace::Workspace;
+use crate::workspace::root_menu::RootContextMenuExt as _;
 use crate::workspace::sync::ports::{PortEntry, PortScanStatus};
 use daruda_config::StatusBarItem;
 use daruda_store::accounts::AccountRecipeId;
@@ -153,6 +153,7 @@ impl RenderOnce for StatusBar {
         let show_project_branch = data.visible.is_visible(StatusBarItem::ProjectBranch);
         let show_account = data.visible.is_visible(StatusBarItem::AccountSlot);
         let toggle_menu = context_menu::build(data.visible.clone(), data.workspace.clone());
+        let toggle_menu_workspace = data.workspace.clone();
 
         // Detached chip is meaningful only when there's a
         // project/branch slot to anchor next to; in Welcome state
@@ -314,7 +315,7 @@ impl RenderOnce for StatusBar {
             .border_color(border)
             .child(left)
             .child(right)
-            .context_menu(toggle_menu)
+            .root_context_menu(toggle_menu_workspace, toggle_menu)
     }
 }
 

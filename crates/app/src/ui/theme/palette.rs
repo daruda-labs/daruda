@@ -424,8 +424,8 @@ pub const FORM_MODAL_SECTION_GAP: f32 = 12.0;
 /// Horizontal gap between the left/right columns of a split-form
 /// modal body (px).
 pub const FORM_MODAL_SPLIT_GAP: f32 = 16.0;
-/// Minimum gap kept between an imperatively-opened `PopupMenu` (System
-/// B — `crate::ui::popup_menu_deferred`) and the window edge when
+/// Minimum gap kept between a root-deployed `PopupMenu`
+/// (`crate::ui::popup_menu_deferred`) and the window edge when
 /// `snap_to_window_with_margin` repositions it away from a clipping
 /// anchor.
 pub const POPUP_MENU_DEPLOY_EDGE_MARGIN: f32 = 8.0;

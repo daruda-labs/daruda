@@ -4,11 +4,10 @@
 //! external hover styling, right-click handlers, and closure-built tooltips.
 //! Use `crate::ui::button*` for modal/footer actions.
 
-use crate::ui::menu::{ContextMenuExt as _, PopupMenu};
 use crate::ui::theme;
 use gpui::{
-    AnyView, App, ClickEvent, Context, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
-    Window, div, prelude::*, px,
+    AnyView, App, ClickEvent, ElementId, IntoElement, MouseButton, Pixels, Point, RenderOnce,
+    SharedString, Window, div, prelude::*, px,
 };
 
 /// Content display mode for a [`MacroKey`].
@@ -31,8 +30,7 @@ pub struct MacroKey {
     #[allow(clippy::type_complexity)]
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     #[allow(clippy::type_complexity)]
-    context_menu:
-        Option<Box<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static>>,
+    on_right_click: Option<Box<dyn Fn(Point<Pixels>, &mut Window, &mut App) + 'static>>,
     #[allow(clippy::type_complexity)]
     tooltip_fn: Option<Box<dyn Fn(&mut Window, &mut App) -> AnyView + 'static>>,
 }
@@ -47,7 +45,7 @@ impl MacroKey {
             disabled: false,
             fixed_width: None,
             on_click: None,
-            context_menu: None,
+            on_right_click: None,
             tooltip_fn: None,
         }
     }
@@ -86,14 +84,19 @@ impl MacroKey {
         self
     }
 
-    /// Right-click context menu, same builder shape as every other
-    /// `.context_menu(...)` / `.dropdown_menu(...)` call site (see
-    /// `crate::ui::menu_builder`).
-    pub fn context_menu(
+    /// Right-click handler, given the press position in window coordinates.
+    ///
+    /// The tile takes a callback rather than a menu builder because `ui/` may
+    /// not know about `Workspace`, and a menu here has to be deployed at the
+    /// workspace root: the bottom dock clips its content, and the vendored
+    /// `.context_menu(...)` renders inside the caller's subtree, where the
+    /// dock's clip would cut the menu and make the overflow unclickable
+    /// (see `workspace::root_menu`).
+    pub fn on_right_click(
         mut self,
-        builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+        handler: impl Fn(Point<Pixels>, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.context_menu = Some(Box::new(builder));
+        self.on_right_click = Some(Box::new(handler));
         self
     }
 
@@ -114,7 +117,7 @@ impl RenderOnce for MacroKey {
             disabled,
             fixed_width,
             on_click,
-            context_menu,
+            on_right_click,
             tooltip_fn,
         } = self;
 
@@ -167,16 +170,17 @@ impl RenderOnce for MacroKey {
             (Some(h), false) => el.on_click(h),
             _ => el,
         };
-        // `.context_menu(...)` returns a type that only implements
-        // ParentElement/Styled/IntoElement, so it must be the last modifier
-        // in the chain — `.tooltip()` runs first, then both branches settle
-        // to `AnyElement` so the match arms unify.
         let el = match tooltip_fn {
             Some(f) => el.tooltip(f),
             None => el,
         };
-        match (context_menu, disabled) {
-            (Some(builder), false) => el.context_menu(builder).into_any_element(),
+        match (on_right_click, disabled) {
+            (Some(handler), false) => el
+                .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                    cx.stop_propagation();
+                    handler(event.position, window, cx);
+                })
+                .into_any_element(),
             _ => el.into_any_element(),
         }
     }

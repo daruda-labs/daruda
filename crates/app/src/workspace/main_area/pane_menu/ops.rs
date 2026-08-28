@@ -27,7 +27,7 @@ impl Workspace {
         let action_context = self.pane_menu_action_context(pane_id, cx);
         let entries = compose(&context);
         let menu = build_popup_menu(entries, action_context, cx.entity().downgrade(), window, cx);
-        self.open_context_menu(position, menu, cx);
+        self.open_context_menu(position, menu, window, cx);
     }
 
     /// Snapshot the menu's inputs, then point the model's focused pane at

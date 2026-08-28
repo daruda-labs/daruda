@@ -33,7 +33,7 @@ pub(in crate::workspace) struct MainAreaContext {
     pub last_viewport: Option<(f32, f32)>,
     /// Active pane-divider drag. `None` = no drag in progress.
     pub drag_state: Option<DividerDrag>,
-    /// Active imperatively-opened PopupMenu (System B) — see `PopupMenuDeploy`.
+    /// The open right-click menu, if any (root-deployed) — see `PopupMenuDeploy`.
     pub popup_menu_deploy: Option<PopupMenuDeploy>,
     /// When `Some(id)`, that pane is rendered full-size; all others hidden.
     pub zoomed_pane_id: Option<PaneId>,

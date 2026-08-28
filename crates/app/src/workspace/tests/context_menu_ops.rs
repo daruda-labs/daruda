@@ -1,4 +1,4 @@
-//! Tests for the System-B imperative PopupMenu deploy path
+//! Tests for the root-deployed PopupMenu path
 //! (`Workspace::open_context_menu` / `close_context_menu` +
 //! `PopupMenuDeploy`, `crates/app/src/workspace/layout/ops.rs`).
 
@@ -22,7 +22,7 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
                     ws.main_area.popup_menu_deploy.is_none(),
                     "no menu open before the call"
                 );
-                ws.open_context_menu(position, menu, cx);
+                ws.open_context_menu(position, menu, window, cx);
                 let deploy = ws
                     .main_area
                     .popup_menu_deploy
@@ -43,4 +43,51 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
             });
         })
         .unwrap();
+}
+
+/// A dock row's right-click must reach `Workspace`, not a menu element inside
+/// the row's own subtree.
+///
+/// That is the whole point of `workspace::root_menu`: the left dock clips
+/// (`left_panel_body`'s `overflow_hidden`, and the project list scrolls), and
+/// a menu deferred from inside that subtree inherits the clip — gpui re-applies
+/// the captured `content_mask` when the deferred draw paints, and `hit_test`
+/// intersects every hitbox with it, so the overflowing part of the menu is
+/// invisible *and* unclickable.
+///
+/// The press is simulated rather than calling the opener, because calling the
+/// opener directly would pass with the wiring absent — which is exactly what
+/// was wrong before.
+#[gpui::test]
+async fn a_dock_row_right_click_deploys_at_the_workspace_root(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let vcx = &mut gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    vcx.run_until_parked();
+
+    let project_id = workspace.read_with(vcx, |ws, _| ws.active_ref().project);
+    let selector: &'static str = Box::leak(format!("lane-row-{project_id}-1").into_boxed_str());
+    let row = vcx
+        .debug_bounds(selector)
+        .expect("the lane row renders in the left dock");
+
+    assert!(
+        workspace.read_with(vcx, |ws, _| ws.main_area.popup_menu_deploy.is_none()),
+        "nothing deployed before the press"
+    );
+
+    vcx.simulate_mouse_down(row.center(), gpui::MouseButton::Right, Default::default());
+    vcx.run_until_parked();
+
+    let deployed = workspace.read_with(vcx, |ws, _| {
+        ws.main_area
+            .popup_menu_deploy
+            .as_ref()
+            .map(|deploy| deploy.position)
+    });
+    assert_eq!(
+        deployed,
+        Some(row.center()),
+        "the row's menu must deploy at the workspace root, anchored at the press \
+         in window coordinates — a subtree-local menu cannot satisfy this"
+    );
 }

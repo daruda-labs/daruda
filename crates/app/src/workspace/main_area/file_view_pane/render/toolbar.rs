@@ -11,15 +11,13 @@ use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, p
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
-use crate::ui::{
-    ContextMenuExt as _, Icon, Selectable as _, Sizable as _, button_bare, button_group_on_surface,
-    menu_builder,
-};
+use crate::ui::{Icon, Selectable as _, Sizable as _, button_bare, button_group_on_surface};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileView};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::render::ws_popup_clipboard_item;
+use crate::workspace::root_menu::RootContextMenuExt as _;
 
 const ICON_CODE: &str = "icons/ui/code.svg";
 const ICON_PREVIEW: &str = "icons/ui/preview.svg";
@@ -228,12 +226,13 @@ pub(super) fn render_file_viewer_toolbar(
                 .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
                 .text_color(header_text)
                 .child(label)
-                // Blocks the pane's own right-click underneath: this label has a
-                // menu of its own (the file, its worktree), and `.context_menu()`
-                // is a raw window listener that no propagation rule reaches — so
-                // the hitbox is what has to say "handled here".
+                // The label carries its own menu, so it must not also open the
+                // pane's. `root_context_menu` stops the right press, which is
+                // enough for that — bubble runs innermost-first. `occlude` is
+                // still load-bearing for the *left* press: without it, clicking
+                // the path would additionally focus the pane.
                 .occlude()
-                .context_menu(menu_builder(move |menu, _window, cx| {
+                .root_context_menu(ws_for_menu.clone(), move |menu, _window, cx| {
                     let Some(ws) = ws_for_menu.upgrade() else {
                         return menu;
                     };
@@ -269,7 +268,7 @@ pub(super) fn render_file_viewer_toolbar(
                         strings::file_viewer_copy_rel_path(),
                         rel_path,
                     ))
-                })),
+                }),
         )
         .child(
             div()

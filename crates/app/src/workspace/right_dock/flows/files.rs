@@ -7,10 +7,10 @@
 use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings;
-use crate::ui::ContextMenuExt as _;
 use crate::ui::Disableable as _;
 use crate::ui::theme;
 use crate::workspace::layout::RightDockSnapshot;
+use crate::workspace::root_menu::RootContextMenuExt as _;
 
 /// Same glyph the graph pane's toolbar runs from — one affordance, two places
 /// it is reachable. `IconName` has no play arrow (see `flow_graph_pane`).
@@ -252,10 +252,7 @@ pub(super) fn flow_row(
                 ),
             }
         })
-        // `.context_menu()` returns a wrapper that only implements
-        // `ParentElement`/`Styled`, so it has to come after every
-        // `Stateful`/`InteractiveElement` call above.
-        .context_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
+        .root_context_menu(ws_for_menu.clone(), move |menu, _window, _cx| {
             flow_row_menu(
                 menu_path.clone(),
                 menu_name.clone(),
@@ -264,5 +261,5 @@ pub(super) fn flow_row(
             )
             .into_iter()
             .fold(menu, |m, item| m.item(item))
-        }))
+        })
 }

@@ -9,8 +9,7 @@
 use crate::ui::cursor::{CursorReach, CursorReachExt as _};
 use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button,
-    menu_builder,
+    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, menu_builder,
 };
 use gpui::{
     ClickEvent, ClipboardItem, Context, CursorStyle, DragMoveEvent, Focusable as _, IntoElement,
@@ -37,6 +36,7 @@ use super::{
 };
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
+use crate::workspace::root_menu::RootContextMenuExt as _;
 
 mod center;
 mod snapshots;
@@ -638,7 +638,7 @@ impl Render for Workspace {
                         .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
                             this.drop_tab_onto_bar(d.tab_id, window, cx);
                         }))
-                        .context_menu(menu_builder(move |menu, _window, _cx| {
+                        .root_context_menu(ws.clone(), move |menu, _window, _cx| {
                             use crate::surface::strings as s;
 
                             let mut items: Vec<PopupMenuItem> = vec![
@@ -802,7 +802,7 @@ impl Render for Workspace {
                             }
 
                             items.into_iter().fold(menu, |m, item| m.item(item))
-                        }))
+                        })
                         .child({
                             div()
                                 .flex_1()

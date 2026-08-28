@@ -3,19 +3,20 @@
 //! Toggling dispatches to `Workspace::toggle_status_bar_item`
 //! (`status_bar_ops.rs`), which owns the persistence chain.
 
-use crate::ui::{PopupMenu, PopupMenuItem, menu_builder};
+use crate::ui::{PopupMenu, PopupMenuItem};
 use crate::workspace::Workspace;
 use daruda_config::{StatusBarConfig, StatusBarItem};
 use gpui::{Context, SharedString, WeakEntity, Window};
 
-/// Build the `.context_menu(...)` closure for the status bar's outer
-/// container: a checkbox per [`StatusBarItem`], in `StatusBarItem::ALL`
-/// order, checked against `visible`.
+/// Build the right-click menu closure for the status bar's outer container:
+/// a checkbox per [`StatusBarItem`], in `StatusBarItem::ALL` order, checked
+/// against `visible`. Sizing is not applied here — `root_context_menu` owns
+/// it for every menu that goes through it.
 pub(super) fn build(
     visible: StatusBarConfig,
     workspace: WeakEntity<Workspace>,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
-    menu_builder(move |menu, _window, _cx| {
+    move |menu, _window, _cx| {
         StatusBarItem::ALL.iter().fold(menu, |menu, &item| {
             let workspace = workspace.clone();
             menu.item(
@@ -28,7 +29,7 @@ pub(super) fn build(
                     }),
             )
         })
-    })
+    }
 }
 
 fn toggle_label(item: StatusBarItem) -> SharedString {

@@ -5,14 +5,23 @@ use gpui::{
     Point, Styled, Window, anchored, deferred, div, px,
 };
 
-pub use gpui_component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
+// `ContextMenuExt` is deliberately NOT re-exported. Its `.context_menu(..)`
+// renders the menu inside the caller's own subtree, where an ancestor's clip
+// cuts it — visually and for hit-testing. Right-click menus go through
+// `crate::workspace::root_menu::RootContextMenuExt`; leaving the trait
+// unexported makes the broken form a compile error rather than a convention,
+// since `scripts/lint-direct-gpui-component.sh` already blocks importing it
+// straight from the vendored crate.
+pub use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 
 /// Wrap a menu builder closure with the daruda compact-size default
-/// (`PopupMenu::small()`). Use for both `.context_menu(...)` and
-/// `.dropdown_menu(...)` so call sites never manage sizing manually.
+/// (`PopupMenu::small()`), so call sites never manage sizing manually.
+///
+/// Needed at `.dropdown_menu(...)` call sites; right-click menus get it for
+/// free because `RootContextMenuExt::root_context_menu` applies it.
 ///
 /// ```ignore
-/// .context_menu(crate::ui::menu_builder(move |menu, _, _| {
+/// .dropdown_menu(crate::ui::menu_builder(move |menu, _, _| {
 ///     menu.item(PopupMenuItem::new("Action").on_click(...))
 /// }))
 /// ```
@@ -25,10 +34,10 @@ where
     move |menu, window, cx| f(menu.small(), window, cx)
 }
 
-/// Render an imperatively-opened `PopupMenu` (System B) at a fixed
-/// window position — the counterpart to `.context_menu(...)` for call
-/// sites that build the menu at click time rather than declaratively
-/// (see `Workspace::open_context_menu`). Reproduces the same
+/// Render a `PopupMenu` at a fixed window position — the one way a
+/// right-click menu is painted, from the workspace root so no ancestor clip
+/// can reach it (see `Workspace::open_context_menu` and
+/// `crate::workspace::root_menu`). Reproduces the same
 /// full-window occluding-backdrop + anchored-menu shape as upstream's
 /// own declarative `ContextMenu<E>` element
 /// (`gpui_component::menu::context_menu`), so outside clicks are

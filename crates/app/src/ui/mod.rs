@@ -82,9 +82,7 @@ pub use input_panel::{
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
 pub use markdown::{Markdown, markdown};
-pub use menu::{
-    ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred,
-};
+pub use menu::{DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred};
 pub use placeholder::placeholder_text;
 pub use popover::{Popover, PopoverState};
 pub use progress::{Progress, progress};

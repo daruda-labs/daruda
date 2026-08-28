@@ -14,11 +14,11 @@
 //! Input tab carries no such handlers — click-to-activate is handled
 //! at the TabBar level through `on_click(ix)`.
 //!
-//! The macro tab's right-click menu builds a `PopupMenu` imperatively
-//! and opens it via `Workspace::open_context_menu` — `TabBar::children`
-//! requires the concrete `Tab` type, and `PopupMenu`'s `ContextMenuExt`
-//! (`.context_menu()`) returns a distinct wrapper element with no
-//! `Into<Tab>`, so the declarative form can't attach here.
+//! The macro tab's right-click menu builds a `PopupMenu` and opens it via
+//! `Workspace::open_context_menu`, like every other right-click menu (see
+//! `workspace::root_menu`). It cannot use `root_context_menu` either:
+//! `TabBar::children` requires the concrete `Tab` type, and the extension
+//! trait is on `InteractiveElement`, so the deploy is spelled out here.
 
 use crate::ui::theme;
 use crate::ui::{Tab, tab, tab_bar};
@@ -287,7 +287,9 @@ fn macro_tab(
                 let menu = PopupMenu::build(window, cx, move |menu, _window, _cx| {
                     items.into_iter().fold(menu.small(), |m, item| m.item(item))
                 });
-                w.update(cx, |ws, cx| ws.open_context_menu(position, menu, cx));
+                w.update(cx, |ws, cx| {
+                    ws.open_context_menu(position, menu, window, cx)
+                });
             }
         })
     };
