@@ -158,7 +158,10 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // Surfaces
     // ---------------------------------------------------------------
     t.background = s_surface_1;
-    t.popover = d.modal_panel_bg;
+    // `Theme::popover` is the vendor's one float slot: `popover_style` (the
+    // Popover panel, every PopupMenu, the input completion and hover popovers),
+    // the tooltip, and — via a patch — the dialog all read it.
+    t.popover = d.float_panel_bg;
     t.popover_foreground = d.text_primary;
     t.list = s_surface_1;
     t.list_head = d.tab_inactive_bg;

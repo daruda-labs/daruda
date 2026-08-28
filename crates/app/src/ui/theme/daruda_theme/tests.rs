@@ -68,8 +68,8 @@ fn default_clones_compile_time_palette() {
         palette::SCROLLBAR_THUMB_HOVER
     );
     assert_eq!(t.settings_sidebar_bg, palette::SETTINGS_SIDEBAR_BG);
-    assert_eq!(t.palette_bg, palette::BG_RAISED);
-    assert_eq!(t.border, palette::BORDER);
+    assert_eq!(t.palette_bg, palette::BG_FLOAT);
+    assert_eq!(t.float_panel_bg, palette::BG_FLOAT);
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.palette_focused_bg, palette::BG_ACTIVE);
     assert_eq!(t.text_body, palette::TEXT_BODY);

@@ -173,6 +173,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
     },
+    "float_panel_bg": {
+      "description": "Maps to `palette::BG_FLOAT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1f2122ff"
+    },
     "modal_input_bg": {
       "description": "Maps to `palette::BG_ACTIVE`.",
       "$ref": "#/$defs/Rgba",
@@ -244,9 +249,9 @@
       "default": "#0708092e"
     },
     "palette_bg": {
-      "description": "Maps to `palette::BG_RAISED`.",
+      "description": "Maps to `palette::BG_FLOAT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#141516ff"
+      "default": "#1f2122ff"
     },
     "palette_focused_bg": {
       "description": "Maps to `palette::BG_ACTIVE`.",

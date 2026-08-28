@@ -1,6 +1,6 @@
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Context, IntoElement, ParentElement, Render,
-    SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use crate::{ActiveTheme, StyledExt, h_flex, kbd::Kbd, text::Text};
@@ -97,7 +97,7 @@ impl Render for Tooltip {
                 .border_1()
                 .border_color(cx.theme().border)
                 .shadow_md()
-                .rounded(px(6.))
+                .rounded(cx.theme().radius)
                 .justify_between()
                 .py_0p5()
                 .px_2()

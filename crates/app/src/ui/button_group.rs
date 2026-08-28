@@ -24,17 +24,17 @@ pub use gpui_component::button::ButtonGroup;
 ///
 /// Not the upstream Primary-**outline** chrome, which paints every *unselected*
 /// segment's label and border in `accent`. Two DESIGN.md rules land on that at
-/// once: accent as small text misses the readability band (3.89:1 on the
-/// popover surface this strip actually sits on — `t.popover`, i.e. `surface-2`
-/// — against a 4.5:1 floor), and the accent budget is 3–4 visible elements,
-/// while the fold-rule editor puts twelve strips on screen at once.
+/// once: accent as small text misses the readability band (3.45:1 on the
+/// `surface-4` float rung this strip sits on, against a 4.5:1 floor), and the
+/// accent budget is 3–4 visible elements, while the fold-rule editor puts
+/// twelve strips on screen at once.
 ///
-/// Tones are picked against their own backgrounds: `text_muted` on the popover
-/// (5.65:1) and `accent_fg` on the accent fill (4.70:1). `text_primary` on the
-/// fill measures 4.40:1 and would sit under the floor, which is why the selected
-/// tone is a separate slot rather than one shared foreground.
+/// Tones are picked against their own backgrounds: `text_muted` on the float
+/// surface (5.00:1) and `accent_fg` on the accent fill (4.70:1). `text_primary`
+/// on the fill measures 4.40:1 and would sit under the floor, which is why the
+/// selected tone is a separate slot rather than one shared foreground.
 ///
-/// The frame stays on the global `hairline` (1.19:1) rather than the 3:1 edge
+/// The frame stays on the global `hairline` (1.06:1) rather than the 3:1 edge
 /// an Activity Bar chip carries. That floor applies where the edge is the
 /// *only* thing separating a control from adjacent non-interactive text; here
 /// the ≥4.5:1 label and the accent-filled selected segment identify both the

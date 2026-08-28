@@ -94,7 +94,7 @@ fn toast_pill(
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let pill_bg = theme::SURFACE_4;
+    let pill_bg = t.float_panel_bg;
     let pill_border = t.border;
     let pill_text = t.text_body;
     let pill_text_dim = t.text_body;

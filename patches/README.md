@@ -247,10 +247,9 @@ text").
 Rather than pick a losing option, `crate::ui::button_group` had been using
 upstream's Primary-**outline** chrome, which sidesteps the question by painting
 every *unselected* segment's label and border in accent. That trades one
-violation for two: accent as small text (3.89:1 on `t.popover`, i.e.
-`surface-2` — not the `surface-4` DESIGN.md's elevation table nominally assigns
-popovers) and one accent element per segment, against DESIGN.md's 3–4 budget —
-the agent-chat fold editor puts twelve three-way strips on screen at once.
+violation for two: accent as small text (3.45:1 on the `surface-4` float rung)
+and one accent element per segment, against DESIGN.md's 3–4 budget — the
+agent-chat fold editor puts twelve three-way strips on screen at once.
 
 ### What diverges
 
@@ -259,7 +258,7 @@ arm in `ButtonVariant::selected` reading
 `colors.selected_foreground.unwrap_or(colors.foreground)`. `None` is upstream
 behaviour, so no call site that does not opt in changes.
 
-Consumers: `crate::ui::button_group` (`text_muted` resting at 5.65:1,
+Consumers: `crate::ui::button_group` (`text_muted` resting at 5.00:1,
 `accent_fg` selected at 4.70:1) and `crate::ui::button_group_on_surface`, which
 brightens to the pane surface's own full foreground because a terminal-mirrored
 pane has no verified contrast against the UI accent.
@@ -270,6 +269,40 @@ Copy upstream `button/button.rs` in, then re-add the field, its `new()`
 initialiser, the builder, and the `Custom` arm in `selected`. Re-check the
 contrast pairs above if the palette moved in the meantime — DESIGN.md §Iteration
 Guide requires computing the ratio for the actual fg/bg pair, not eyeballing it.
+
+---
+
+## `crates/gpui_component/src/{dialog,tooltip}.rs` — vendored, **every float reads one slot**
+
+Applied in place, on the same terms as the sections above.
+
+### Why
+
+`Theme::popover` is upstream's single float-surface slot, and `popover_style`
+routes the Popover panel, every `PopupMenu` (so every dropdown and context
+menu), the input completion popover and the hover popover through it. Two
+surfaces opted out:
+
+- **`dialog.rs`** filled with `theme().background`, the app canvas. On daruda's
+  palette that is `surface-1` — the same rung as the docks a dialog covers, one
+  step *below* the popovers floating over it. daruda's own `modal_panel_bg`
+  token exists for this and went unread, so the intent was already recorded.
+- **`tooltip.rs`** hard-coded `rounded(px(6.))`, ignoring `theme().radius`, so a
+  tooltip and the popover beside it disagreed on their corners (6px vs 4px) for
+  no stated reason.
+
+### What diverges
+
+Two lines. `dialog.rs`: `theme().background` → `theme().popover`.
+`tooltip.rs`: `rounded(px(6.))` → `rounded(cx.theme().radius)` (and `px` drops
+out of the import). With these, the eight floating surfaces daruda ships all
+resolve their background from `float_panel_bg`.
+
+### Re-vendor procedure
+
+Copy upstream `dialog.rs` / `tooltip.rs` in, then re-apply the two swaps. Verify
+with `--screenshot-scenario error-modal --screenshot-theme dark,light`: the
+dialog must read as lighter than the docks behind it in both appearances.
 
 ---
 

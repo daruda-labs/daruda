@@ -165,8 +165,8 @@ output, and syntax-highlighted code.
   this is why the `daruda` syntax palette pulls `function`/`string_special` out of
   the near-gray band rather than using raw, fully-saturated source-theme values.
 - `accent` (`#5e6ad2`) clears 3:1 as a UI element but only ~4.05:1 as text on
-  `surface-1`, and 3.89:1 on the `surface-2` that popovers actually paint —
-  **do not use `accent` for small body text** (links, inline labels). Use it for fills, focus
+  `surface-1`, and 3.45:1 on the `surface-4` float rung — **do not use `accent`
+  for small body text** (links, inline labels). Use it for fills, focus
   rings, icons, and ≥14px-bold emphasis only. Clickable text takes the `link` token
   (`#809ff9`, 7.4:1) instead.
 
@@ -240,9 +240,17 @@ No drop shadows. Depth = surface color ladder + 1px hairline borders.
 | 1 — Panel | `surface-1` | `#0f1011` | `1px hairline` | LeftDock, RightDock, BottomDock chrome |
 | 2 — Card | `surface-2` | `#141516` | `1px hairline` | Hovered row, MacroKey resting, active tab |
 | 3 — Raised | `surface-3` | `#18191a` | `1px hairline` | Active/pressed row, input field background |
-| 4 — Float | `surface-4` | `#1f2022` | `1px hairline-soft` | Popover, context menu, tooltip |
+| 4 — Float | `surface-4` | `#1f2022` | `1px hairline` + drop shadow | Everything that floats: popover, dropdown + context menu, tooltip, autocomplete, dialog, command palette, toast |
 
 **Active indicator:** selected lane / focused pane uses a `2px solid accent` left border, not a background fill change alone.
+
+**Level 4 is the one rung that also carries a shadow**, and it is the sole
+exception to the no-shadow rule below. One surface step (`surface-4` over a
+`surface-1` panel is 1.17:1) cannot on its own say "this is detached and
+dismissable", and in light mode the float surface is nearer its base still.
+Every floating surface reads a single token (`float_panel_bg`), so they cannot
+drift apart: `Theme::popover` is the vendor's only float slot and the dialog,
+the tooltip and every menu are wired to it.
 
 ### Light theme (`daruda_light`)
 
@@ -592,15 +600,15 @@ menu** of checked items instead, because that axis is a single choice from a
 short list and a menu is the right control for it. Its panel body exists only as
 the combined popover's third tab.
 
-The panel is app chrome, not pane surface — it floats above the window. Its
-chrome comes from the shared `Popover`, so these are the values it actually
-paints, which are **not** the float rung §Elevation nominally assigns popovers:
+The panel is app chrome, not pane surface — it floats, so it takes the level-4
+rung and its chrome comes from the shared `Popover`:
 
 ```
-background:    surface-2  (t.popover ← modal_panel_bg; NOT surface-4)
-border:        1px hairline, opaque  (t.border; NOT hairline-soft — 1.19:1)
-border-radius: sm (4px)  (t.radius; NOT lg)
-shadow:        shadow_lg — contradicts §Don'ts "no drop shadows"
+background:    surface-4  (float_panel_bg)
+border:        1px hairline, opaque (1.06:1 — see Known Gaps)
+border-radius: sm (4px) — small attached overlays; large floating surfaces
+               (dialog, palette, toast) take lg (8px)
+shadow:        yes (level-4 exception)
 width:         240px single-axis · 430px fold-rule editor and combined panel
 max-height:    520px
 section-heading: agent-chat size, subtle
@@ -610,11 +618,6 @@ footer:        Fold and Filter only — one ghost reset ("Reset to Auto preset" 
                Recent steps needs none: picking `All` in its radio list *is* the
                reset.
 ```
-
-Four of those lines are the shared `Popover`'s behaviour, not this component's
-choice, and every popover in the app inherits them — see Known Gaps. They are
-recorded here rather than restated from §Elevation because a spec that describes
-a surface the code does not paint is worse than no spec.
 
 The panel body scales with `font.agent_chat_size`, not the UI type ladder, even
 though it is app chrome — it is read alongside the pane it configures. That is a
@@ -635,9 +638,9 @@ user-set size can leave in either direction.
   separating a control from adjacent non-interactive text — the Activity Bar
   chip's case. Inside the strip the ≥4.5:1 label and the accent-filled selected
   segment identify both the control and its state, so the frame is refinement.
-  Replacing the old accent outline did lower this edge from 3.89:1; that was
-  traded against accent-as-text at 3.89:1 (under the 4.5 floor) and up to 36
-  accent elements on screen at once.
+  The old accent outline cleared 3:1 as an edge, but only by spending accent as
+  a 3.45:1 label on every unselected segment — under the 4.5 floor — across up
+  to 36 elements at once.
 - **A filter with nothing checked is the unfiltered state**, not a selection of
   nothing: the chip reads `All`, "Show everything" greys out, and clearing the
   last box restores the whole transcript. A pane showing only prompts and
@@ -771,8 +774,8 @@ padding:       0 sm (0 8px)
 ### ToastView
 
 ```
-background:    surface-4
-border:        1px hairline-soft
+background:    surface-4  (float_panel_bg)
+border:        1px hairline
 border-radius: lg (8px)
 padding:       sm md (8px 12px)
 max-width:     360px
@@ -815,9 +818,10 @@ padding:    0 sm
 ```
 overlay:       canvas at 50% opacity (scrim)
 card:
-  background:    surface-2
+  background:    surface-4  (float_panel_bg — the same rung as popovers)
   border:        1px hairline
   border-radius: lg (8px)
+  shadow:        yes (level-4 exception)
   padding:       xl (24px)
   max-width:     480px
 ```
@@ -1161,7 +1165,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 ## Do's
 
 - Keep terminal pane background at `canvas` — the terminal is not a card.
-- Use `accent` for at most 3–4 visible elements simultaneously. The budget counts *emphasis*; a selected segment's fill inside a segmented control is state, not emphasis, and is exempt — the doc already blesses accent as the selection signal. **Bound the exemption by the worst case actually shipped:** the agent-chat fold editor shows 12 at once (12 three-way strips, one fill each). That is the licensed ceiling, not an open door. Unselected siblings are never exempt — no accent label, no accent border (accent as text measures 4.05:1 on `surface-1` and 3.89:1 on the `surface-2` popovers actually paint, both under the 4.5:1 floor).
+- Use `accent` for at most 3–4 visible elements simultaneously. The budget counts *emphasis*; a selected segment's fill inside a segmented control is state, not emphasis, and is exempt — the doc already blesses accent as the selection signal. **Bound the exemption by the worst case actually shipped:** the agent-chat fold editor shows 12 at once (12 three-way strips, one fill each). That is the licensed ceiling, not an open door. Unselected siblings are never exempt — no accent label, no accent border (accent as text measures 4.05:1 on `surface-1` and 3.45:1 on the `surface-4` float rung, both under the 4.5:1 floor).
 - Build depth with the surface ladder; the step between levels is the signal, not a shadow.
 - Keep all UI text in the 10–13px range. Dense chrome is appropriate here.
 - Use `label` (ALL-CAPS, positive tracking) only for dock section headers and group names.
@@ -1173,7 +1177,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 ## Don'ts
 
 - Don't ship a neutral-gray light theme. The `daruda_light` preset is the only sanctioned light mode and its surfaces stay faint-blue cool-tinted (see Elevation & Depth → Light theme) — the cool identity holds in both appearances.
-- Don't add drop shadows to any application chrome element.
+- Don't add drop shadows to any application chrome element — **except** level-4 floating surfaces (popover, menu, tooltip, dialog, palette, toast), where the ladder alone cannot carry detachment. Nothing anchored in the layout gets one.
 - Don't use `accent` as a panel or large-surface background fill.
 - Don't use border radius > `lg` (8px) on any in-app element.
 - Don't add chromatic colors outside the defined semantic palette.
@@ -1207,7 +1211,8 @@ How to apply this doc when changing daruda's UI:
 - **Light theme is documentation-light.** The surface ladder is defined (Elevation & Depth → Light theme), but per-component light values live only in `daruda_light.json`, not re-tabulated here.
 - **Motion is barely specified.** Only the badge pulse cadences (slow/fast) and the absence of hover transitions are stated; there is no easing/duration token system.
 - **Responsive/window-resize behavior is mostly implicit.** daruda is a single-window desktop app; dock collapse and min-width behavior are driven by code, not a breakpoint table. AgentChatPane's Activity Bar is the one documented breakpoint, and it is documented because it is *derived* (title floor + control-cluster budget, both font-scaled) rather than dialled in.
-- **The shared `Popover` does not sit where §Elevation says it does.** `t.popover` resolves to `surface-2`, its border to the opaque `hairline` (1.19:1), its radius to `sm`, and it paints a `shadow_lg` against §Don'ts. This predates the AgentChatPane entry and affects every popover, dropdown and menu in the app; that entry records the real values rather than restating the table. Fixing it means moving the theme bridge, not the doc.
+- **`hairline-soft` is documented but not implemented.** §Colors lists it for faint overlay borders; no code token exists, so every floating surface edges in the opaque `hairline` — 1.06:1 on `surface-4`. The shadow, not the edge, is what separates a float from what it covers. Either add the token or drop it from §Colors.
+- **Radius on floating surfaces splits by size, not by a stated rule.** Small attached overlays (popover, menu, tooltip, autocomplete) take `t.radius` = 4px; large ones (dialog, palette, toast) take `t.radius_lg` = 8px. Both come from global slots shared with non-floating widgets, so neither can move independently.
 - **The 3:1 component-edge floor is enforced on pane-local surfaces only.** App-chrome control edges ride the global `hairline` at ~1.2:1. AgentChatPane argues the distinction (an edge must clear 3:1 when it is the *only* thing marking a control apart from neighbouring text), but the distinction is applied by hand at each site, not by a token that makes the wrong choice hard.
 - **§Border Radius's `md` row is aspirational.** It assigns 6px to "Buttons, text inputs, tab pills"; every shipped button constant is `RADIUS_SM` (4px). New controls should match their neighbours at 4px until the table is reconciled.
 - **Disabled controls on pane-local surfaces take a UI-theme colour.** The vendored button's disabled tone is `mute` at 50% regardless of the surface, so a light terminal preset under a dark UI theme (or the reverse) gets an unverified pair. Every other state on those controls derives from the pane.

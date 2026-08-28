@@ -219,6 +219,11 @@ pub const BG_BASE: Hsla = CANVAS;
 pub const BG_EDITOR: Hsla = EDITOR_SURFACE;
 pub const BG_PANEL: Hsla = SURFACE_1;
 pub const BG_RAISED: Hsla = SURFACE_2;
+/// Background for anything that floats above the workspace — popovers, menus,
+/// tooltips, dialogs, the command palette, toasts. One rung above every panel
+/// they can cover, so "floating" is carried by the surface ladder and not by
+/// the drop shadow alone (DESIGN.md §Elevation level 4).
+pub const BG_FLOAT: Hsla = SURFACE_4;
 pub const BG_HOVER: Hsla = SURFACE_2;
 pub const BG_ACTIVE: Hsla = SURFACE_3;
 pub const BORDER: Hsla = HAIRLINE;
