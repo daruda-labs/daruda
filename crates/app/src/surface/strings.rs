@@ -2138,25 +2138,14 @@ pub fn agent_chat_filtered_show_partial(count: usize, total: usize) -> String {
     .into_owned()
 }
 
-/// Expanded label for the same disclosure — the rows are on screen, so the
-/// click now takes them away again.
-pub fn agent_chat_filtered_hide(count: usize) -> String {
-    if count == 1 {
-        rust_i18n::t!("agent_chat.filtered_hide_one").into_owned()
-    } else {
-        rust_i18n::t!("agent_chat.filtered_hide", count = count).into_owned()
-    }
-}
-
-/// [`agent_chat_filtered_hide`] with the same `total` disclosure as
-/// [`agent_chat_filtered_show_partial`].
-pub fn agent_chat_filtered_hide_partial(count: usize, total: usize) -> String {
-    rust_i18n::t!(
-        "agent_chat.filtered_hide_partial",
-        count = count,
-        total = total
-    )
-    .into_owned()
+/// Expanded label for the same disclosure. Takes no count, and there is one
+/// string rather than a singular / plural / partial set: the rows are on screen,
+/// so a number here restates them and reads as a description of the current
+/// state ("12 filtered rows, hidden") in exactly the state where they are not.
+/// The reveal's own extent is the *collapsed* label's job — see
+/// [`agent_chat_filtered_show_partial`], which the reader saw a click ago.
+pub fn agent_chat_filtered_hide_again() -> String {
+    rust_i18n::t!("agent_chat.filtered_hide_again").into_owned()
 }
 
 pub fn agent_chat_filter_chip(value: &str) -> String {

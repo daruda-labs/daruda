@@ -656,9 +656,14 @@ text:  agent-chat size, pane-fg-muted
 ```
 
 **A content fold and a window boundary are different controls.** The filter's
-placeholder (`Show 12 filtered rows` / `Hide 12 filtered rows`) is a disclosure
-like every other row in the transcript: the chevron carries its state and the
-`▶ / ▼` glyph is right, because what it holds is *rows*.
+placeholder (`Show 12 filtered rows` → `Hide them again`) is a disclosure like
+every other row in the transcript: the chevron carries its state and the
+`▶ / ▼` glyph is right, because what it holds is *rows*. Only the shape differs
+from the boundary below — the copy rule is the same one, and for the same
+reason: **an expanded reveal row names no count.** The rows are on screen, so a
+number restates them, and `Hide 12 filtered rows` parses as a description of the
+current state in exactly the state where it is false. The extent of the cut is
+the *collapsed* label's job, which the reader saw one click ago.
 
 The tail window's row is not that. Nothing collapses into it; it marks the edge
 of the step range the pane is showing, and it used to wear the same chevron and

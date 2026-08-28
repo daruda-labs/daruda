@@ -203,20 +203,26 @@ fn facet_label(facet: FilterFacet) -> String {
 
 /// The placeholder's copy.
 ///
-/// The row is a disclosure, so its number states what clicking it does:
-/// `revealable`, the rows this control puts on screen. When a collapsed step or
-/// response is holding filtered rows the reveal cannot reach, `excluded` is
-/// named too — otherwise the reachable count silently reads as the whole cut
-/// (the shipped `1 row hidden` next to a filter that had dropped nineteen).
-/// Promising the larger number instead would repeat the tail row's own bug: a
-/// label offering a reveal that folding blocks.
+/// Collapsed, the number states what clicking does: `revealable`, the rows this
+/// control puts on screen. When a collapsed step or response is holding filtered
+/// rows the reveal cannot reach, `excluded` is named too — otherwise the
+/// reachable count silently reads as the whole cut (the shipped `1 row hidden`
+/// next to a filter that had dropped nineteen). Promising the larger number
+/// instead would repeat the tail row's own bug: a label offering a reveal that
+/// folding blocks.
+///
+/// Expanded, there is no number at all. Those rows are on screen, so a count
+/// restates them, and `Hide 12 filtered rows` is readable as a description of
+/// the current state precisely when the state is the opposite — the same misread
+/// the tail boundary's `Hide N earlier steps` had.
 fn filtered_away_label(revealable: usize, excluded: usize, collapsed: bool) -> String {
-    let held_by_a_fold = excluded > revealable;
-    match (collapsed, held_by_a_fold) {
-        (true, false) => s::agent_chat_filtered_show(revealable),
-        (true, true) => s::agent_chat_filtered_show_partial(revealable, excluded),
-        (false, false) => s::agent_chat_filtered_hide(revealable),
-        (false, true) => s::agent_chat_filtered_hide_partial(revealable, excluded),
+    if !collapsed {
+        return s::agent_chat_filtered_hide_again();
+    }
+    if excluded > revealable {
+        s::agent_chat_filtered_show_partial(revealable, excluded)
+    } else {
+        s::agent_chat_filtered_show(revealable)
     }
 }
 
@@ -274,6 +280,41 @@ mod tests {
                 facet_label(FilterFacet::ToolEdit)
             )
         );
+    }
+
+    /// Collapsed the label promises a count; expanded it promises none, and the
+    /// expanded string does not vary with either number. That invariance is the
+    /// point: a count beside `Hide` reads as "still hidden" exactly when the
+    /// rows are on screen.
+    #[test]
+    fn the_expanded_label_carries_no_count_at_all() {
+        let expanded: Vec<String> = [(12, 12), (1, 1), (12, 30)]
+            .into_iter()
+            .map(|(revealable, excluded)| filtered_away_label(revealable, excluded, false))
+            .collect();
+        assert!(
+            expanded.iter().all(|l| l == &expanded[0]),
+            "one string for every count: {expanded:?}"
+        );
+        assert!(
+            !expanded[0].chars().any(char::is_numeric),
+            "no digits in the expanded label: {}",
+            expanded[0]
+        );
+    }
+
+    /// The collapsed half is untouched: it still names what clicking reveals,
+    /// and still names the whole cut when a fold holds part of it back.
+    #[test]
+    fn the_collapsed_label_still_names_the_reveal_and_the_whole_cut() {
+        let whole = filtered_away_label(12, 12, true);
+        assert!(whole.contains("12"), "{whole}");
+        let partial = filtered_away_label(12, 30, true);
+        assert!(
+            partial.contains("12") && partial.contains("30"),
+            "a fold holding part of the cut is named: {partial}"
+        );
+        assert_ne!(whole, partial);
     }
 
     #[test]
