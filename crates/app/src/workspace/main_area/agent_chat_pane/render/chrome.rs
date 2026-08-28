@@ -83,6 +83,7 @@ pub(super) fn activity_bar(
     .icon(Icon::empty().path(ICON_EXPAND))
     .tooltip(SharedString::from(s::agent_chat_expand_all()))
     .disabled(!props.has_items)
+    .debug_selector(|| "agent-chat-expand-all".into())
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
     let collapse = button_bare_on_surface(
         ("agent-chat-collapse-all", props.pane_id as usize),
@@ -201,6 +202,12 @@ pub(super) fn activity_bar(
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
                 .text_color(surface.foreground_muted)
+                // These controls say how the pane is displayed, not that the user
+                // is engaging with what is in it — so the press stops short of the
+                // pane wrapper, which reads one as `focus_pane_on_click`.
+                .on_mouse_down(gpui::MouseButton::Left, |_, _window, cx| {
+                    cx.stop_propagation();
+                })
                 .children(transcript_controls)
                 .child(expand)
                 .child(collapse)

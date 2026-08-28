@@ -158,10 +158,14 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
 #[cfg(test)]
 mod tests {
     use gpui::{
-        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-        Pixels, Render, SharedString, Styled as _, TestAppContext, VisualTestContext, Window,
-        WindowBounds, WindowOptions, div, point, px, size,
+        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers,
+        MouseButton, MouseDownEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _,
+        TestAppContext, VisualTestContext, Window, WindowBounds, WindowOptions, deferred, div,
+        point, prelude::FluentBuilder as _, px, size,
     };
+
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     use crate::test_support::init_gpui_component;
 
@@ -290,6 +294,254 @@ mod tests {
         assert_eq!(
             short_lead, long_lead,
             "the continuation's wrap depends on the lead line's length — they share a row"
+        );
+    }
+
+    /// A selectable markdown block, optionally with a panel painted over it
+    /// that declares itself modal to the mouse the way `Popover` does.
+    struct SelectionProbe {
+        occluded: bool,
+    }
+
+    const PROBE_TEXT: &str = "Selectable prose the panel is sitting on top of.";
+    /// A link at the very start of the line, so one press position lands on
+    /// both it and the panel above.
+    const PROBE_LINK: &str = "[link](https://example.invalid/opened) trailing prose.";
+
+    impl Render for SelectionProbe {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .relative()
+                .size_full()
+                .child(super::markdown("probe", SharedString::from(PROBE_TEXT)))
+                .when(self.occluded, |this| {
+                    // `deferred` is what puts the panel's hitbox in front of the
+                    // block's, mirroring how `Popover` paints its content.
+                    this.child(deferred(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .occlude()
+                            .child("panel"),
+                    ))
+                })
+        }
+    }
+
+    /// Press (no release) over the prose and report whether a text block took
+    /// the grab. Mouse-down only on purpose: a click that never drags selects
+    /// nothing, and the release deregisters the empty selection — so the press
+    /// is the only moment the grab is observable.
+    fn press_grabs_the_prose(cx: &mut TestAppContext, occluded: bool) -> bool {
+        init_gpui_component(cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let window = cx
+            .update(|cx| {
+                cx.open_window(opts, |_window, cx| {
+                    cx.new(|_cx| SelectionProbe { occluded })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+
+        vcx.simulate_event(MouseDownEvent {
+            position: point(px(40.), px(10.)),
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.run_until_parked();
+
+        vcx.update(|_window, cx| crate::ui::active_text_selection(cx).is_some())
+    }
+
+    /// The control for the pair below: with nothing over it, a press on
+    /// selectable prose must still start a drag-selection. Without this, a fix
+    /// that simply stopped selecting altogether would satisfy the other test.
+    #[gpui::test]
+    fn a_press_on_selectable_prose_grabs_it(cx: &mut TestAppContext) {
+        assert!(
+            press_grabs_the_prose(cx, false),
+            "a plain press no longer starts a selection at all"
+        );
+    }
+
+    /// Pressing inside an `occlude()`d panel must not grab the text underneath.
+    /// `occlude()` only suppresses `Hitbox::is_hovered`, so a listener that never
+    /// asks a hitbox is immune to it.
+    #[gpui::test]
+    fn a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it(cx: &mut TestAppContext) {
+        assert!(
+            !press_grabs_the_prose(cx, true),
+            "the press reached the text under the occluding panel and grabbed it"
+        );
+    }
+
+    /// A markdown block whose first characters are a link, optionally covered by
+    /// the same `occlude()`d panel. Owns the "was it opened" flag rather than
+    /// sharing a `static`: `#[gpui::test]` expands to `#[test]`, and cargo runs
+    /// those across threads, so a shared flag would let the pair clobber
+    /// each other.
+    struct LinkProbe {
+        occluded: bool,
+        opened: Rc<Cell<bool>>,
+    }
+
+    /// Height the link block is confined to, so the space under it is genuinely
+    /// outside the text element and a press there starts no selection.
+    const LINK_BLOCK_H: f32 = 30.;
+
+    impl Render for LinkProbe {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .relative()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(
+                    div().h(px(LINK_BLOCK_H)).child(
+                        super::markdown("link-probe", SharedString::from(PROBE_LINK))
+                            .link_click_handler({
+                                let opened = self.opened.clone();
+                                move |_url, _window, _cx| {
+                                    opened.set(true);
+                                    true
+                                }
+                            }),
+                    ),
+                )
+                .child(div().flex_1())
+                .when(self.occluded, |this| {
+                    this.child(deferred(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .occlude()
+                            .child("panel"),
+                    ))
+                })
+        }
+    }
+
+    /// Release over the link and report whether it was opened. The link fires on
+    /// mouse-*up*, so this is a full click.
+    fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool) -> bool {
+        init_gpui_component(cx);
+        let opened = Rc::new(Cell::new(false));
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let window = cx
+            .update(|cx| {
+                let opened = opened.clone();
+                cx.open_window(opts, |_window, cx| {
+                    cx.new(|_cx| LinkProbe { occluded, opened })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+
+        vcx.simulate_click(point(px(8.), px(8.)), Modifiers::default());
+        vcx.run_until_parked();
+
+        opened.get()
+    }
+
+    /// Press somewhere that is not the link, drag onto it, release. Reports
+    /// whether the link opened.
+    fn drag_onto_link_opens_it(cx: &mut TestAppContext, from: gpui::Point<gpui::Pixels>) -> bool {
+        init_gpui_component(cx);
+        let opened = Rc::new(Cell::new(false));
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let window = cx
+            .update(|cx| {
+                let opened = opened.clone();
+                cx.open_window(opts, |_window, cx| {
+                    cx.new(|_cx| LinkProbe {
+                        occluded: false,
+                        opened,
+                    })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+
+        let onto = point(px(8.), px(8.));
+        vcx.simulate_event(MouseDownEvent {
+            position: from,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.simulate_event(gpui::MouseMoveEvent {
+            position: onto,
+            modifiers: Modifiers::default(),
+            pressed_button: Some(MouseButton::Left),
+        });
+        vcx.simulate_event(gpui::MouseUpEvent {
+            position: onto,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+        });
+        vcx.run_until_parked();
+
+        opened.get()
+    }
+
+    /// A release is not a click: navigation needs a press that agreed with it.
+    /// A drag begun off the block — the pane behind, or a popover's padding —
+    /// must not open the link it happens to end on.
+    #[gpui::test]
+    fn a_drag_that_merely_ends_on_a_link_does_not_open_it(cx: &mut TestAppContext) {
+        // Below the block's own height, so the press misses the text element.
+        assert!(
+            !drag_onto_link_opens_it(cx, point(px(300.), px(LINK_BLOCK_H + 100.))),
+            "a drag that started off the block still opened the link it ended on"
+        );
+    }
+
+    /// Control for the pair below: an uncovered link must still open.
+    #[gpui::test]
+    fn a_click_on_a_link_opens_it(cx: &mut TestAppContext) {
+        assert!(
+            click_opens_the_link(cx, false),
+            "a plain click no longer opens a link at all"
+        );
+    }
+
+    /// Same gate as the selection pair, worse consequence: a click inside an
+    /// options popover sitting over a link handed that URL to the browser.
+    #[gpui::test]
+    fn a_click_inside_an_occluding_panel_does_not_open_the_link_under_it(cx: &mut TestAppContext) {
+        assert!(
+            !click_opens_the_link(cx, true),
+            "the click reached the link under the occluding panel and opened it"
         );
     }
 }

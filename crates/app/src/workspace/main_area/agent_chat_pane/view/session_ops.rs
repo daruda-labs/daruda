@@ -223,6 +223,19 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Test-only hook: append items and reproject, so a test outside this module
+    /// can stand a transcript up without a session. Mirrors what an `AcpEvent`
+    /// arrival ends in.
+    #[cfg(test)]
+    pub(in crate::workspace) fn seed_items_for_test(
+        &mut self,
+        items: impl IntoIterator<Item = daruda_acp::ChatItem>,
+        cx: &mut Context<Self>,
+    ) {
+        self.items.extend(items);
+        self.reproject(cx);
+    }
+
     /// Re-derive the row projection and reflow the list. The one sequence every
     /// transcript-preference change ends in, since all of them feed `project`.
     fn reproject(&mut self, cx: &mut Context<Self>) {

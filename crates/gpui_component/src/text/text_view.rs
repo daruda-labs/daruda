@@ -7,10 +7,10 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId, Entity,
-    EntityId, FocusHandle, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
-    KeyBinding, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, RenderOnce, SharedString, Size, StyleRefinement, Styled, Window,
-    div, px,
+    EntityId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
+    InteractiveElement, IntoElement, KeyBinding, LayoutId, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString, Size,
+    StyleRefinement, Styled, Window, div, px,
 };
 use smol::Timer;
 use smol::stream::StreamExt;
@@ -704,7 +704,9 @@ impl IntoElement for TextView {
 
 impl Element for TextView {
     type RequestLayoutState = AnyElement;
-    type PrepaintState = ();
+    /// The block's own hitbox — what lets a press ask whether this block is
+    /// under the pointer or under an overlay. Guard is in [`Self::paint`].
+    type PrepaintState = Hitbox;
 
     fn id(&self) -> Option<ElementId> {
         Some(self.id.clone())
@@ -842,12 +844,16 @@ impl Element for TextView {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Before the children, so the inner `Inline`'s hitbox stays in front of
+        // this one. Both are `Normal`, so neither suppresses the other.
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         request_layout.prepaint(window, cx);
+        hitbox
     }
 
     fn paint(
@@ -856,7 +862,7 @@ impl Element for TextView {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         request_layout: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
+        hitbox: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -881,14 +887,20 @@ impl Element for TextView {
 
             window.on_mouse_event({
                 let state = self.state.clone();
-                move |event: &MouseDownEvent, phase, _, cx| {
+                let hitbox = hitbox.clone();
+                move |event: &MouseDownEvent, phase, window, cx| {
                     // Only the left button starts/resets a drag selection. A
                     // right/middle click must leave an existing selection intact
                     // (e.g. so it survives long enough to act on) — matching
                     // editor behavior in zed.
+                    //
+                    // `is_hovered` answers what `bounds.contains` cannot: this
+                    // block, or an `occlude()`d overlay covering it. Safe on a
+                    // press — `MouseDown` sets Mouse modality before dispatch.
                     if event.button != MouseButton::Left
                         || !bounds.contains(&event.position)
                         || !phase.bubble()
+                        || !hitbox.is_hovered(window)
                     {
                         return;
                     }

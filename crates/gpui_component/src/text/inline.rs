@@ -7,8 +7,8 @@ use std::{
 use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText, TextLayout, Window,
-    point, px, quad,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
+    TextLayout, Window, point, px, quad,
 };
 
 use crate::{
@@ -38,6 +38,10 @@ pub(super) struct Inline {
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct InlineState {
     hovered_index: Option<usize>,
+    /// The link the last press landed on. A release navigates only when it
+    /// resolves to this same link, so a drag that merely *ends* over a link — one
+    /// begun on the pane behind, or inside an options popover — cannot open it.
+    pressed_link: Option<LinkMark>,
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
@@ -456,29 +460,57 @@ impl Element for Inline {
         });
 
         if !is_selection {
-            // click to open link
+            // Hitbox-gated, so a press an `occlude()`d overlay covers records
+            // nothing. The only place that gate is needed: the release below
+            // trusts this record instead of re-testing the geometry.
+            window.on_mouse_event({
+                let links = self.links.clone();
+                let text_layout = text_layout.clone();
+                let hitbox = hitbox.clone();
+                let state = self.state.clone();
+
+                move |event: &MouseDownEvent, phase, window, _cx| {
+                    if !phase.bubble() {
+                        return;
+                    }
+                    let pressed = (hitbox.is_hovered(window) && bounds.contains(&event.position))
+                        .then(|| Self::link_for_position(&text_layout, &links, event.position))
+                        .flatten();
+                    if let Ok(mut state) = state.lock() {
+                        state.pressed_link = pressed;
+                    }
+                }
+            });
+
+            // Release navigates only when it lands on the same link the press did.
             window.on_mouse_event({
                 let links = self.links.clone();
                 let link_click_handler = self.link_click_handler.clone();
                 let text_layout = text_layout.clone();
+                let state = self.state.clone();
 
                 move |event: &MouseUpEvent, phase, window, cx| {
-                    if !bounds.contains(&event.position) || !phase.bubble() {
+                    if !phase.bubble() {
+                        return;
+                    }
+                    let Some(pressed) = state.lock().ok().and_then(|mut s| s.pressed_link.take())
+                    else {
+                        return;
+                    };
+                    if Self::link_for_position(&text_layout, &links, event.position)
+                        != Some(pressed.clone())
+                    {
                         return;
                     }
 
-                    if let Some(link) =
-                        Self::link_for_position(&text_layout, &links, event.position)
+                    cx.stop_propagation();
+                    if link_click_handler
+                        .as_ref()
+                        .is_some_and(|handler| handler(pressed.url.as_ref(), window, cx))
                     {
-                        cx.stop_propagation();
-                        if link_click_handler
-                            .as_ref()
-                            .is_some_and(|handler| handler(link.url.as_ref(), window, cx))
-                        {
-                            return;
-                        }
-                        cx.open_url(&link.url);
+                        return;
                     }
+                    cx.open_url(&pressed.url);
                 }
             });
         }

@@ -322,6 +322,10 @@ impl RenderOnce for Popover {
                         state.open = open;
                         state.toggle_open(window, cx);
                     });
+                    // Opening takes keyboard focus, so the press must not also
+                    // read as "activate me" to the surface under the trigger —
+                    // that surface would take the focus straight back.
+                    cx.stop_propagation();
                     cx.notify(parent_view_id);
                 }
             })

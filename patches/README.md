@@ -229,6 +229,97 @@ argument changes. Inline tests cover the click and mark behavior.
 
 ---
 
+## `crates/gpui_component/src/popover.rs` — vendored, **the trigger consumes its press**
+
+Applied in place, on the same terms as the sections above.
+
+### Why
+
+`PopoverState::toggle_open` moves keyboard focus to the panel it opens. The
+trigger's own `on_mouse_down` did not consume the press, so it went on bubbling —
+and daruda's pane wrapper reads a left press anywhere in a pane as "activate this
+pane" (`focus_pane_on_click` → `focus_pane`, which surfaces the bottom dock, moves
+keyboard focus to it, and **lazily connects an idle agent-chat session**).
+
+Bubble runs innermost-first, so the order was: panel takes focus → pane takes it
+back. The panel stayed open but deaf to `Escape` and its `tab_group` unreachable,
+and adjusting a view setting on a dormant agent chat started an agent process.
+
+The codebase already draws this distinction for the right-click path —
+`set_menu_target_pane`'s doc says `focus_pane` is "deliberately excluded … opening
+a menu is not activating the pane, and the menu takes keyboard focus anyway."
+Opening a popover is the same case.
+
+### What diverges
+
+One line: `cx.stop_propagation()` after `toggle_open` in the trigger's
+`on_mouse_down`. It reaches every `Popover` **and** every `.dropdown_menu()`, since
+`DropdownMenuPopover` is built on `Popover` — so the agent chat's three Activity Bar
+chips, the bottom-dock session/model chips, the status-bar chips, the left-dock row
+menus and the macro-tile menu all get it from one place. Every call site is a
+dedicated trigger control, so nothing depended on the press also reaching the
+surface behind it.
+
+### Re-vendor procedure
+
+Copy upstream `popover.rs` in and re-add the `stop_propagation`. Paired tests in
+`crates/app/src/ui/popover.rs`
+(`pressing_a_panel_trigger_does_not_activate_the_surface_under_it`,
+`pressing_a_dropdown_trigger_does_not_activate_the_surface_under_it`) fail loudly if
+you forget — the second is what pins the dropdown's inheritance.
+
+---
+
+## `crates/gpui_component/src/text/` — vendored, **an overlay's clicks stop at it**
+
+Applied in place, on the same terms as the sections above.
+
+### Why
+
+`Popover` declares its panel modal to the mouse with `InteractiveElement::occlude()`.
+That works **only** by making `Hitbox::is_hovered()` return `false` for hitboxes
+inserted behind it (gpui `window.rs`, `HitboxBehavior::BlockMouse` — "for mouse
+handlers **that check those hitboxes**"). It does not stop propagation. So a raw
+`window.on_mouse_event` listener that never asks a hitbox is immune to it, and two
+of this module's listeners were exactly that — gated on `bounds.contains(position)`
+alone:
+
+- **`text_view.rs`, selection start.** Every left press inside an agent-chat
+  options popover also started a drag-selection in the transcript block the panel
+  was covering, registered it as the global active selection, and then extended it
+  as the pointer moved across the panel's own controls.
+- **`inline.rs`, link click.** Worse: a release inside the popover, over a link in
+  the text underneath, reached `cx.open_url`.
+
+The module already had the right pattern one layer down — `inline.rs`'s
+hovered-link handler gates on `phase.bubble() && hitbox.is_hovered(window)`. The
+outer element simply had no hitbox to ask (`type PrepaintState = ()`), and the link
+handler had one in scope and did not use it.
+
+### What diverges
+
+| Delta | Detail |
+|---|---|
+| `TextView::PrepaintState` = `Hitbox` | was `()`. `prepaint` now inserts a `HitboxBehavior::Normal` hitbox for the block's bounds **before** prepainting its children, so the inner `Inline`'s own hitbox stays in front of it (both `Normal`, so neither suppresses the other — the ordering only preserves upstream's layering). |
+| Selection start gates on `is_hovered` | `text_view.rs`. Only the press that *starts* a drag. The move/up handlers are deliberately left un-gated: they are reachable only through a drag this gate already approved, and gating them would break dragging a selection outside the block (the agent-chat autoscroll extends it past the viewport) and could strand `is_selecting` if the modality flipped to keyboard mid-drag — the failure class of `gpui-held-key-keeps-modality.patch` and `ferrum_flow`'s "A drag hears its own release". |
+| Link click gates on `is_hovered` | `inline.rs`. The `hitbox` was already in scope. |
+| Keyboard-modality safety | `is_hovered` also returns `false` during keyboard modality. Safe here because `Window::dispatch_event` sets the modality to `Mouse` **from a `MouseDown`, before dispatching it** — so a press never arrives under keyboard modality. A `MouseUp` does not set it, which is why the link gate is the only up-handler gated and why the selection *release* is not. |
+
+### Re-vendor procedure
+
+Copy the fresh upstream `text_view.rs` / `inline.rs` in, then re-apply the table
+above by hand. Four paired tests in `crates/app/src/ui/markdown.rs`
+(`a_press_on_selectable_prose_grabs_it` /
+`a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it`,
+`a_click_on_a_link_opens_it` /
+`a_click_inside_an_occluding_panel_does_not_open_the_link_under_it` /
+`a_drag_that_merely_ends_on_a_link_does_not_open_it`) fail loudly if you forget —
+and the control in each group fails if a gate is applied too widely. The two link
+gates are independently covered: dropping the press-side hitbox check fails the
+overlay case, dropping the press/release match fails both link cases.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **six source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.
