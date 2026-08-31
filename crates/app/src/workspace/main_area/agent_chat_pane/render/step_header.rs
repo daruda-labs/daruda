@@ -52,12 +52,14 @@ pub(super) fn step_bar(
             move || {
                 summary_of(title_items, text.collapsed)
                     .or_else(|| step_title(title_items, title_run.clone(), TitleSource::Thinking))
+                    .map(SummaryLine::primary)
             },
             move || text.expanded.and_then(|ix| summary_of(title_items, ix)),
         ),
         None => FoldHeader::with_summary(move || {
             step_title(title_items, title_run.clone(), TitleSource::Thinking)
                 .or_else(|| step_title(title_items, title_run, TitleSource::Assistant))
+                .map(SummaryLine::primary)
         }),
     }
     .leading(

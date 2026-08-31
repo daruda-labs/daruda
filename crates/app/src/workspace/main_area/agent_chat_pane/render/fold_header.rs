@@ -55,6 +55,16 @@ enum SummaryTone {
     Reasoning,
 }
 
+/// How strongly a summary should read in the header row.
+#[derive(Clone, Copy)]
+enum SummaryEmphasis {
+    /// Tertiary text for folded previews that are helpful but secondary.
+    Subtle,
+    /// Primary text for a folded row's own label, where the line is the row's
+    /// main visible content rather than a hint beside one.
+    Primary,
+}
+
 /// The one-line preview shown in a collapsed header's `stretch` slot.
 ///
 /// There is no constructor taking a bare `String`: a summary is either derived
@@ -65,6 +75,7 @@ enum SummaryTone {
 pub(super) struct SummaryLine {
     text: String,
     tone: SummaryTone,
+    emphasis: SummaryEmphasis,
 }
 
 impl SummaryLine {
@@ -74,6 +85,7 @@ impl SummaryLine {
         Some(Self {
             text: summary_preview_line(text)?,
             tone: SummaryTone::Prose,
+            emphasis: SummaryEmphasis::Subtle,
         })
     }
 
@@ -84,12 +96,19 @@ impl SummaryLine {
         Self {
             text: text.into(),
             tone: SummaryTone::Prose,
+            emphasis: SummaryEmphasis::Subtle,
         }
     }
 
     /// Mark this summary as agent reasoning (italic).
     pub(super) fn reasoning(mut self) -> Self {
         self.tone = SummaryTone::Reasoning;
+        self
+    }
+
+    /// Render this summary as the header row's primary text.
+    pub(super) fn primary(mut self) -> Self {
+        self.emphasis = SummaryEmphasis::Primary;
         self
     }
 
@@ -462,11 +481,15 @@ fn summary_element(
     dim: f32,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
+    let color = match line.emphasis {
+        SummaryEmphasis::Subtle => theme::agent_chat_fg_subtle(cx),
+        SummaryEmphasis::Primary => theme::agent_chat_fg(cx),
+    };
     stretch_container(has_leading)
         .when(matches!(line.tone, SummaryTone::Reasoning), |el| {
             el.italic()
         })
-        .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
+        .text_color(theme::dim_toward_gray(color, dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(line.text))
         .into_any_element()
@@ -630,7 +653,7 @@ mod tests {
 
     use std::cell::Cell;
 
-    use super::{StretchSlot, SummaryTone};
+    use super::{StretchSlot, SummaryEmphasis, SummaryTone};
 
     /// Records which builders ran, so laziness is observable: a slot that shows
     /// one side must not pay for parsing the other's markdown body.
@@ -706,6 +729,13 @@ mod tests {
         };
         let head = slot.builder_for(true).and_then(|b| b()).expect("head");
         assert!(matches!(head.tone, SummaryTone::Reasoning));
+    }
+
+    #[test]
+    fn primary_summary_keeps_the_line_tone() {
+        let line = SummaryLine::plain("head").reasoning().primary();
+        assert!(matches!(line.tone, SummaryTone::Reasoning));
+        assert!(matches!(line.emphasis, SummaryEmphasis::Primary));
     }
 
     #[test]
