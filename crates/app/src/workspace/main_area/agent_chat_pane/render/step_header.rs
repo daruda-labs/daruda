@@ -10,29 +10,28 @@ use crate::ui::theme;
 use crate::ui::{Icon, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-use crate::workspace::main_area::agent_chat_pane::rows::LiveSubagentUnits;
+#[cfg(test)]
+use crate::workspace::main_area::agent_chat_pane::rows::step::step_span_at;
 use crate::workspace::main_area::agent_chat_pane::rows::step::{
-    StepSpan, step_header_text, step_span_at,
+    StepHeaderText, StepSpan, step_header_text,
 };
+use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, StepHeaderRow};
 use crate::workspace::main_area::agent_chat_pane::tool_category::{ToolCategory, classify_tool};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
+/// Render one projection-owned step header without rediscovering its bounds.
 pub(super) fn step_bar(
     this: &AgentChatView,
-    first_ix: usize,
-    tool_count: usize,
-    collapsed: bool,
+    row: &StepHeaderRow,
     filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let items = &this.items;
-    // A stale key renders without a title or verdict instead of disappearing.
-    let span = step_span_at(items, first_ix);
-    let (title_run, run) = match &span {
-        Some(span) => (span.start..span.tool_start, span.tool_start..span.end),
-        None => (first_ix..first_ix, first_ix..first_ix),
-    };
+    let span = &row.span;
+    let first_ix = span.start;
+    let title_run = span.start..span.tool_start;
+    let run = span.tool_start..span.end;
 
     let fg = this.dim(theme::agent_chat_fg(cx));
     // The icon names the work the header offers, so it reads the same kept
@@ -46,20 +45,42 @@ pub(super) fn step_bar(
     // preamble while the fold hides it, the thought summary once the preamble
     // is on screen. Without one, the header keeps its collapsed-only summary —
     // reasoning first, assistant prose as the fallback.
-    let header_text = span.as_ref().and_then(|s| step_header_text(items, s));
-    let mut header = match header_text {
+    //
+    // `visible_body_prose` names an item the fold failed to hide, so it is already
+    // on screen in full: every path below skips it rather than print the same
+    // line one row above the body saying it.
+    let mut header = match labelled_text(items, Some(span), row.visible_body_prose) {
         Some(text) => FoldHeader::with_alternate(
             move || {
                 summary_of(title_items, text.collapsed)
-                    .or_else(|| step_title(title_items, title_run.clone(), TitleSource::Thinking))
+                    .or_else(|| {
+                        step_title(
+                            title_items,
+                            title_run.clone(),
+                            TitleSource::Thinking,
+                            row.visible_body_prose,
+                        )
+                    })
                     .map(SummaryLine::primary)
             },
             move || text.expanded.and_then(|ix| summary_of(title_items, ix)),
         ),
         None => FoldHeader::with_summary(move || {
-            step_title(title_items, title_run.clone(), TitleSource::Thinking)
-                .or_else(|| step_title(title_items, title_run, TitleSource::Assistant))
-                .map(SummaryLine::primary)
+            step_title(
+                title_items,
+                title_run.clone(),
+                TitleSource::Thinking,
+                row.visible_body_prose,
+            )
+            .or_else(|| {
+                step_title(
+                    title_items,
+                    title_run,
+                    TitleSource::Assistant,
+                    row.visible_body_prose,
+                )
+            })
+            .map(SummaryLine::primary)
         }),
     }
     .leading(
@@ -71,19 +92,19 @@ pub(super) fn step_bar(
             .child(Icon::new(icon).xsmall().text_color(fg))
             .into_any_element(),
     );
-    if tool_count > 0 {
+    if row.tool_count > 0 {
         header = header.trailing(
             div()
                 .flex_none()
                 .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::agent_chat_step_tool_count(
-                    tool_count,
+                    row.tool_count,
                 )))
                 .into_any_element(),
         );
     }
-    if let Some(rollup) = step_rollup(items, span.as_ref(), &this.live_units, |item| {
+    if let Some(rollup) = step_rollup(items, Some(span), &this.live_units, |item| {
         filter_revealed || this.filter_matches.matches(item)
     }) {
         header = header.trailing(rollup_glyph(rollup, t, cx));
@@ -91,7 +112,7 @@ pub(super) fn step_bar(
     FoldRow::section(
         SharedString::from(format!("agent-chat-step-{first_ix}")),
         FoldKey::Step(first_ix),
-        !collapsed,
+        !row.collapsed,
         header,
     )
     .render(this.dim_amount, cx)
@@ -143,6 +164,19 @@ enum TitleSource {
     Assistant,
 }
 
+/// The labelled preamble this header alternates on, or `None` to fall back to
+/// the collapsed-only summary. A preamble the reader is already looking at is
+/// not one the header may show, so it drops the header to the fallback rather
+/// than restating the line the body below is spelling out in full.
+fn labelled_text(
+    items: &[ChatItem],
+    span: Option<&StepSpan>,
+    visible_body_prose: Option<usize>,
+) -> Option<StepHeaderText> {
+    span.and_then(|s| step_header_text(items, s))
+        .filter(|text| Some(text.collapsed) != visible_body_prose)
+}
+
 /// The one-line summary of a single item, in the tone its kind calls for.
 fn summary_of(items: &[ChatItem], ix: usize) -> Option<SummaryLine> {
     match items.get(ix)? {
@@ -154,12 +188,17 @@ fn summary_of(items: &[ChatItem], ix: usize) -> Option<SummaryLine> {
     }
 }
 
+/// The step's first prose item of `source`, as a one-line title. `on_screen`
+/// names an item the reader can already read in full, which is therefore not a
+/// candidate however early it sits.
 fn step_title(
     items: &[ChatItem],
     prose: std::ops::Range<usize>,
     source: TitleSource,
+    on_screen: Option<usize>,
 ) -> Option<SummaryLine> {
     prose
+        .filter(|k| Some(*k) != on_screen)
         .filter_map(|k| match (items.get(k), source) {
             (Some(ChatItem::Thinking { text, .. }), TitleSource::Thinking) => {
                 SummaryLine::from_markdown(text).map(SummaryLine::reasoning)
@@ -321,8 +360,8 @@ mod tests {
     #[test]
     fn the_title_prefers_reasoning_over_the_reply() {
         let items = [think("**Preparing the review**"), asst("Let me check.")];
-        let title = step_title(&items, 0..2, TitleSource::Thinking)
-            .or_else(|| step_title(&items, 0..2, TitleSource::Assistant))
+        let title = step_title(&items, 0..2, TitleSource::Thinking, None)
+            .or_else(|| step_title(&items, 0..2, TitleSource::Assistant, None))
             .expect("a thinking block yields a title");
         assert_eq!(title.text(), "Preparing the review");
     }
@@ -330,8 +369,8 @@ mod tests {
     #[test]
     fn the_title_falls_back_to_the_reply_when_there_is_no_reasoning() {
         let items = [asst("실제로 실행해서 검증하겠습니다.")];
-        let title = step_title(&items, 0..1, TitleSource::Thinking)
-            .or_else(|| step_title(&items, 0..1, TitleSource::Assistant))
+        let title = step_title(&items, 0..1, TitleSource::Thinking, None)
+            .or_else(|| step_title(&items, 0..1, TitleSource::Assistant, None))
             .expect("an assistant block yields a title");
         assert_eq!(title.text(), "실제로 실행해서 검증하겠습니다.");
     }
@@ -339,8 +378,8 @@ mod tests {
     #[test]
     fn an_empty_leading_block_falls_through_to_the_next() {
         let items = [asst("   "), asst("Running the build.")];
-        let title =
-            step_title(&items, 0..2, TitleSource::Assistant).expect("the next block yields one");
+        let title = step_title(&items, 0..2, TitleSource::Assistant, None)
+            .expect("the next block yields one");
         assert_eq!(title.text(), "Running the build.");
     }
 
@@ -369,10 +408,58 @@ mod tests {
         assert_ne!(tail_more_label(6, 1, false), tail_more_label(6, 2, false));
     }
 
+    /// The duplicate this exists to prevent: prose the fold could not hide is
+    /// on screen in full, so the header stops summarizing it. Both title paths
+    /// are exercised — the plain fallback here, the labelled preamble below.
+    #[test]
+    fn a_header_does_not_restate_prose_that_is_already_on_screen() {
+        let items = [asst("classifying the work")];
+        assert!(
+            step_title(&items, 0..1, TitleSource::Assistant, Some(0)).is_none(),
+            "the only candidate is the line the reader is already looking at"
+        );
+    }
+
+    /// Yielding the title costs nothing when the step has a thought to fall
+    /// back on: the header says that instead, and neither line reads twice.
+    #[test]
+    fn a_yielded_title_falls_through_to_the_thought() {
+        let items = [think("**Weighing the render paths**"), asst("on screen")];
+        let title = step_title(&items, 0..2, TitleSource::Thinking, Some(1))
+            .or_else(|| step_title(&items, 0..2, TitleSource::Assistant, Some(1)))
+            .expect("the thought is still a candidate");
+        assert_eq!(title.text(), "Weighing the render paths");
+    }
+
+    /// The labelled preamble reaches the header by a second path, so it needs
+    /// the same exclusion — an agent that labels its messages duplicated too.
+    #[test]
+    fn a_labelled_preamble_on_screen_also_yields_the_header() {
+        let items = [
+            ChatItem::AssistantText {
+                text: "walking the structure".into(),
+                streaming: false,
+                message_id: None,
+                phase: daruda_acp::MessagePhase::Commentary,
+            },
+            tool(ToolKindView::Read),
+        ];
+        let span = step_span_at(&items, 0).expect("a step");
+        assert_eq!(
+            labelled_text(&items, Some(&span), None).map(|t| t.collapsed),
+            Some(0),
+            "off screen, the header is what shows the preamble"
+        );
+        assert!(
+            labelled_text(&items, Some(&span), Some(0)).is_none(),
+            "on screen, the header yields it to the body"
+        );
+    }
+
     #[test]
     fn a_step_without_prose_has_no_title() {
         let items = [tool(ToolKindView::Read)];
-        assert!(step_title(&items, 0..0, TitleSource::Thinking).is_none());
-        assert!(step_title(&items, 0..0, TitleSource::Assistant).is_none());
+        assert!(step_title(&items, 0..0, TitleSource::Thinking, None).is_none());
+        assert!(step_title(&items, 0..0, TitleSource::Assistant, None).is_none());
     }
 }

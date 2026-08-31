@@ -19,13 +19,15 @@ const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
 const CODEX_EXPANDED: [usize; 3] = [242, 3, 44];
 const CODEX_SETTLED: [usize; 3] = [3, 2, 14];
 
-/// Claude rows per turn under each projection mode.
-const CLAUDE_AUTO: [usize; 3] = [2, 6, 25];
-const CLAUDE_TAIL: [usize; 3] = [2, 6, 9];
-const CLAUDE_SUMMARY: [usize; 3] = [2, 3, 3];
-const CLAUDE_EXPANDED: [usize; 3] = [2, 12, 69];
-const CLAUDE_SETTLED: [usize; 3] = [2, 3, 25];
-const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 3, 3];
+/// Claude rows per turn under each projection mode. Turn 0 is the one turn
+/// with no tools and a single block; it costs one row for the response bar
+/// that carries the filter's reveal chip.
+const CLAUDE_AUTO: [usize; 3] = [3, 6, 25];
+const CLAUDE_TAIL: [usize; 3] = [3, 6, 9];
+const CLAUDE_SUMMARY: [usize; 3] = [3, 3, 3];
+const CLAUDE_EXPANDED: [usize; 3] = [3, 12, 69];
+const CLAUDE_SETTLED: [usize; 3] = [3, 3, 25];
+const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 2, 2];
 
 /// Project through the fresh-pane defaults without a named test lens.
 fn shipped_default_per_turn(items: &[ChatItem]) -> Vec<usize> {

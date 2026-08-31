@@ -2,7 +2,6 @@
 
 use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use super::fold_header::{FoldHeader, FoldRow};
 use super::options_panel::{fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -15,6 +14,7 @@ use crate::workspace::main_area::agent_chat_pane::display_filter::{
     DisplayFilter, FilterAxis, FilterFacet, ToolSelection,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -208,53 +208,57 @@ fn facet_label(facet: FilterFacet) -> String {
     }
 }
 
-/// The placeholder's copy.
+/// The reveal control's copy.
 ///
 /// Collapsed, the number states what clicking does: `revealable`, the rows this
 /// control puts on screen. When a collapsed step or response is holding filtered
 /// rows the reveal cannot reach, `excluded` is named too — otherwise the
-/// reachable count silently reads as the whole cut (the shipped `1 row hidden`
-/// next to a filter that had dropped nineteen). Promising the larger number
-/// instead would repeat the tail row's own bug: a label offering a reveal that
-/// folding blocks.
+/// reachable count silently reads as the whole cut.
 ///
-/// Expanded, there is no number at all. Those rows are on screen, so a count
+/// Revealed, there is no number at all. Those rows are on screen, so a count
 /// restates them, and `Hide 12 filtered rows` is readable as a description of
-/// the current state precisely when the state is the opposite — the same misread
-/// the tail boundary's `Hide N earlier steps` had.
-fn filtered_away_label(revealable: usize, excluded: usize, collapsed: bool) -> String {
-    if !collapsed {
+/// the current state precisely when the state is the opposite.
+fn filtered_chip_label(filtered: FilteredAway, revealed: bool) -> String {
+    if revealed {
         return s::agent_chat_filtered_hide_again();
     }
-    if excluded > revealable {
-        s::agent_chat_filtered_show_partial(revealable, excluded)
+    if filtered.excluded > filtered.revealable {
+        s::agent_chat_filtered_show_partial(filtered.revealable, filtered.excluded)
     } else {
-        s::agent_chat_filtered_show(revealable)
+        s::agent_chat_filtered_show(filtered.revealable)
     }
 }
 
-pub(super) fn filtered_away_bar(
-    this: &AgentChatView,
+/// The filter's reveal control, riding the response bar's trailing slot.
+///
+/// The tally is one per run and the bar is the run's one header, so this is
+/// where it belongs. As a row of its own it sat at the step bars' indent, wore
+/// their chevron, and carried neither their icon nor their count — it read as a
+/// step that had lost its icon.
+pub(super) fn filtered_chip(
     run_start: usize,
-    revealable: usize,
-    excluded: usize,
-    collapsed: bool,
+    filtered: FilteredAway,
+    revealed: bool,
+    surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let title = div()
-        .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(filtered_away_label(
-            revealable, excluded, collapsed,
-        )))
-        .into_any_element();
-    FoldRow::section(
-        SharedString::from(format!("agent-chat-filtered-{run_start}")),
-        FoldKey::Filtered(run_start),
-        !collapsed,
-        FoldHeader::with_title(title),
+    button_chip_on_surface(
+        ("agent-chat-filtered", run_start),
+        SharedString::from(filtered_chip_label(filtered, revealed)),
+        surface,
+        cx,
     )
-    .render(this.dim_amount, cx)
+    // The row's own gap is tuned for text meeting text; a bordered chip needs
+    // its own breathing room or it reads as fused to the count beside it.
+    .mr(px(theme::GAP_STANDARD))
+    .selected(revealed)
+    .on_click(cx.listener(move |this, _ev, window, cx| {
+        // The bar itself toggles the response fold, so the chip has to keep its
+        // own click from reaching it.
+        cx.stop_propagation();
+        this.toggle_fold(FoldKey::Filtered(run_start), window, cx);
+    }))
+    .into_any_element()
 }
 
 #[cfg(test)]
@@ -294,34 +298,41 @@ mod tests {
         );
     }
 
-    /// Collapsed the label promises a count; expanded it promises none, and the
-    /// expanded string does not vary with either number. That invariance is the
+    fn cut(revealable: usize, excluded: usize) -> FilteredAway {
+        FilteredAway {
+            revealable,
+            excluded,
+        }
+    }
+
+    /// Unrevealed the chip promises a count; revealed it promises none, and the
+    /// revealed string does not vary with either number. That invariance is the
     /// point: a count beside `Hide` reads as "still hidden" exactly when the
     /// rows are on screen.
     #[test]
-    fn the_expanded_label_carries_no_count_at_all() {
-        let expanded: Vec<String> = [(12, 12), (1, 1), (12, 30)]
+    fn the_revealed_label_carries_no_count_at_all() {
+        let revealed: Vec<String> = [(12, 12), (1, 1), (12, 30)]
             .into_iter()
-            .map(|(revealable, excluded)| filtered_away_label(revealable, excluded, false))
+            .map(|(r, e)| filtered_chip_label(cut(r, e), true))
             .collect();
         assert!(
-            expanded.iter().all(|l| l == &expanded[0]),
-            "one string for every count: {expanded:?}"
+            revealed.iter().all(|l| l == &revealed[0]),
+            "one string for every count: {revealed:?}"
         );
         assert!(
-            !expanded[0].chars().any(char::is_numeric),
-            "no digits in the expanded label: {}",
-            expanded[0]
+            !revealed[0].chars().any(char::is_numeric),
+            "no digits in the revealed label: {}",
+            revealed[0]
         );
     }
 
-    /// The collapsed half is untouched: it still names what clicking reveals,
-    /// and still names the whole cut when a fold holds part of it back.
+    /// The unrevealed half names what clicking reveals, and names the whole cut
+    /// when a fold holds part of it back.
     #[test]
-    fn the_collapsed_label_still_names_the_reveal_and_the_whole_cut() {
-        let whole = filtered_away_label(12, 12, true);
+    fn the_unrevealed_label_names_the_reveal_and_the_whole_cut() {
+        let whole = filtered_chip_label(cut(12, 12), false);
         assert!(whole.contains("12"), "{whole}");
-        let partial = filtered_away_label(12, 30, true);
+        let partial = filtered_chip_label(cut(12, 30), false);
         assert!(
             partial.contains("12") && partial.contains("30"),
             "a fold holding part of the cut is named: {partial}"

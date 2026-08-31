@@ -85,12 +85,11 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     for row in &rows {
         match &row.kind {
             RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
-            RowKind::StepHeader { first_ix, .. } => keys.push(FoldKey::Step(*first_ix)),
+            RowKind::StepHeader(header) => keys.push(FoldKey::Step(header.span.start)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
-            RowKind::TailMore { .. } | RowKind::FilteredAway { .. } => {}
+            RowKind::TailMore { .. } => {}
             RowKind::User(_)
             | RowKind::AgentItem(_)
-            | RowKind::SoloResponse(_)
             | RowKind::ConclusionItem(_)
             | RowKind::WorkingIndicator => {}
         }
@@ -255,15 +254,6 @@ pub(in crate::workspace) enum Rollup {
 }
 
 impl Rollup {
-    /// Classify a run, with live descendants keeping completed parents running.
-    pub(in crate::workspace) fn of_run_with_live_units(
-        items: &[daruda_acp::ChatItem],
-        range: std::ops::Range<usize>,
-        live_units: &LiveSubagentUnits,
-    ) -> Self {
-        Self::of_kept_run(items, range, live_units, |_| true)
-    }
-
     /// The same classification, with the verdict scoped to the rows `keep`
     /// admits.
     ///
@@ -271,7 +261,7 @@ impl Rollup {
     /// that row puts on screen — a failure the display filter removed leaves no
     /// visible row to explain the mark. Progress is the exception and stays
     /// filter-blind: a live descendant is what holds the row on screen at all
-    /// (`step_live` / `group_live` in the projection ignore the filter too), so
+    /// (`ProjectedStep::live` / `group_live` ignore the filter too), so
     /// a glyph that settled while the work continued would deny its own row's
     /// reason for being there.
     pub(in crate::workspace) fn of_kept_run(

@@ -12,6 +12,7 @@ use super::{is_bodyless, is_tool_call};
 const STEP_MIN_ROWS: usize = 2;
 
 /// Half-open item span for one step.
+#[derive(Clone, Copy)]
 pub(in crate::workspace) struct StepSpan {
     pub(in crate::workspace) start: usize,
     pub(in crate::workspace) tool_start: usize,

@@ -304,6 +304,19 @@ impl AgentChatView {
         self.reproject(cx);
     }
 
+    /// Seed a transcript captured while the foreground turn is still active.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_working_transcript_for_shot(
+        &mut self,
+        items: Vec<daruda_acp::ChatItem>,
+        cx: &mut Context<Self>,
+    ) {
+        let now = std::time::Instant::now();
+        self.queue.turn = Turn::InFlight { started_at: now };
+        let _ = self.reconcile_activity(now);
+        self.seed_transcript_for_shot(items, cx);
+    }
+
     pub(in crate::workspace) fn set_tail_window(
         &mut self,
         tail: TailWindow,

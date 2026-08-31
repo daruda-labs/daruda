@@ -6,13 +6,12 @@
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
 use super::MermaidImages;
-use super::fold_header::{FoldHeader, FoldRow, SummaryLine, rollup_glyph};
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::mermaid_code_block_render;
 use crate::surface::strings as s;
 use crate::ui::ButtonVariants as _;
 use crate::ui::theme;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
@@ -104,11 +103,6 @@ pub(super) fn assistant_markdown(
 /// its partial markdown fine (no per-message caret — the streaming signal lives
 /// on the input dock). Collapsed, the header shows the first non-empty line of
 /// `text`, dimmed and single-line ellipsized.
-///
-/// `rollup` is `Some` only when this block *is* the whole response — a bar-less
-/// anchored run of one block (`RowKind::SoloResponse`), where no response bar
-/// exists to carry the verdict. `None` for a block among siblings, so a run never
-/// shows a rollup computed over one of its items.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assistant_block(
     ix: usize,
@@ -116,12 +110,10 @@ pub(super) fn assistant_block(
     expanded: bool,
     text: &str,
     agent_label: &str,
-    rollup: Option<Rollup>,
-    t: &theme::DarudaTheme,
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
+    let header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
         div()
             .flex_none()
             .text_color(theme::dim_toward_gray(
@@ -133,9 +125,6 @@ pub(super) fn assistant_block(
             .child(SharedString::from(agent_label.to_string()))
             .into_any_element(),
     );
-    if let Some(rollup) = rollup {
-        header = header.trailing(rollup_glyph(rollup, t, cx));
-    }
     FoldRow::block(("agent-chat-assistant", ix), key, expanded, header, |cx| {
         assistant_markdown(ix, text, markdown, cx)
     })

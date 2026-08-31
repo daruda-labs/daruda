@@ -821,6 +821,24 @@ impl Workspace {
         });
     }
 
+    /// Open the seeded transcript mid-turn — the agent's answer not yet
+    /// written, so its last prose is a step's preamble.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_working_transcript_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.seed_working_transcript_for_shot(super::shot_transcript::working_transcript(), cx);
+        });
+    }
+
     /// Open the seeded transcript with filtering, tail, and filter panel active.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_narrowed_transcript_for_shot(
@@ -837,10 +855,19 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
+            // Expanded so the filter's cut is reachable: rows a fold still holds
+            // are not part of what the chip offers, so a folded transcript
+            // leaves it with nothing to show and no chip at all.
             v.set_fold_mode(super::fold_mode::FoldPreset::Expanded.mode(), cx);
+            // One category unchecked leaves the Tool parent mixed.
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
+            // No tail: the window's own boundary has `agent-chat-tail`, and with
+            // it engaged this transcript's remaining steps hold no filtered row,
+            // so the chip would have nothing to offer and would not render.
             v.set_tail_window(TailWindow::All, cx);
             v.set_activity_options_tab(super::view::ActivityOptionsTab::Filter, cx);
+            // The chip rides the response bar, which the filter popover would
+            // cover — the popover has its own scenario (`agent-chat-options`).
             v.screenshot_filter_open = false;
         });
     }
