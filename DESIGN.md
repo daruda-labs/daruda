@@ -655,15 +655,31 @@ count — a count alone reads as "still hidden" after the reveal.
 text:  agent-chat size, pane-fg-muted
 ```
 
-**A content fold and a window boundary are different controls.** The filter's
-placeholder (`Show 12 filtered rows` → `Hide them again`) is a disclosure like
-every other row in the transcript: the chevron carries its state and the
-`▶ / ▼` glyph is right, because what it holds is *rows*. Only the shape differs
-from the boundary below — the copy rule is the same one, and for the same
-reason: **an expanded reveal row names no count.** The rows are on screen, so a
-number restates them, and `Hide 12 filtered rows` parses as a description of the
-current state in exactly the state where it is false. The extent of the cut is
-the *collapsed* label's job, which the reader saw one click ago.
+**The filter's reveal is not a row.** It is one per run, and the response bar is
+that run's one header, so the control rides the bar's trailing slot as a chip
+(`Show 1 of 5 filtered rows` → `Hide them again`) rather than sitting in the
+transcript. As a row it took the step bars' indent and their `▶ / ▼`, carried
+neither their icon nor their count, and read as a step that had lost its icon —
+and it was *brighter* than the step titles it sat among (`fg_muted` over
+`fg_subtle`), putting a view control above the conversation in the visual
+hierarchy. The vocabulary now splits cleanly: **a full-width bar is conversation
+structure; a chip is a view setting.**
+
+The chip sits left of the run's own counts so the numbers that are always there
+keep the right edge, and a collapsed bar carries no chip at all — it would
+promise a reveal its own fold swallows. The copy rule is unchanged and holds for
+the same reason: **a revealed control names no count.** The rows are on screen,
+so a number restates them, and `Hide 12 filtered rows` parses as a description of
+the current state in exactly the state where it is false. The extent of the cut
+is the *unrevealed* label's job, which the reader saw one click ago.
+
+Because the chip needs a bar to ride, **every response that renders anything gets
+one** — the old `tools >= 1 || blocks >= 2` threshold left short replies bar-less
+and so had nowhere to put the control. A lone block still renders as plain prose
+under its bar rather than earning the conclusion's bare-chevron fold: folding it
+would leave the turn showing nothing. Measured cost of the change, from the row
+census: one row on the one turn in the fixtures that has no tools and a single
+block; zero on every other turn and on the whole Codex session.
 
 The tail window's row is not that. Nothing collapses into it; it marks the edge
 of the step range the pane is showing, and it used to wear the same chevron and

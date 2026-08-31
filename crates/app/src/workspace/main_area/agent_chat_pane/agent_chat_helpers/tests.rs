@@ -12,7 +12,7 @@ fn asst(text: &str) -> ChatItem {
 
 fn rollup(items: &[ChatItem], range: std::ops::Range<usize>) -> Rollup {
     let live_units = LiveSubagentUnits::of(items);
-    Rollup::of_run_with_live_units(items, range, &live_units)
+    Rollup::of_kept_run(items, range, &live_units, |_| true)
 }
 
 #[test]
@@ -761,12 +761,14 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
         ChatItem::Failure(daruda_acp::AcpFailure::unclassified("e")),
     ];
     let keys = collect_foldable_keys(&items);
+    // No `Assistant(1)`: a tool call follows that prose, so it is the step's
+    // preamble rather than the response's conclusion, and under a response bar
+    // a preamble renders inline — the same branch `render_item` takes.
     assert_eq!(
         keys,
         vec![
             FoldKey::Response(0),
             FoldKey::Step(1),
-            FoldKey::Assistant(1),
             FoldKey::Thinking(2),
             FoldKey::Tool("c1".to_owned()),
             FoldKey::Diff("c1#0".to_owned()),
@@ -775,11 +777,11 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
     );
 }
 
-/// A trivial single-block reply has no response bar, so its assistant prose
-/// keeps the labeled, foldable block — its `Assistant` key is still
-/// collected. Guards the inline-vs-block split in `collect_foldable_keys`.
+/// A lone reply renders inline under its response bar, so it has no fold of
+/// its own — the bar is the only thing to collapse. Guards the
+/// inline-vs-block split in `collect_foldable_keys`.
 #[test]
-fn trivial_reply_keeps_assistant_fold_key() {
+fn a_lone_reply_folds_only_at_its_bar() {
     let items = [
         ChatItem::UserText("u".to_owned()),
         ChatItem::AssistantText {
@@ -789,7 +791,7 @@ fn trivial_reply_keeps_assistant_fold_key() {
             phase: Default::default(),
         },
     ];
-    assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Assistant(1)]);
+    assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Response(0)]);
 }
 
 /// A consecutive tool-call run (≥ 2) contributes a `ToolGroup` key on top

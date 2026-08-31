@@ -191,6 +191,19 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// [`sample_transcript`] as it stands mid-turn: the agent has not written its
+/// answer yet, so the run's last prose is the final step's preamble rather than
+/// a conclusion. Derived from the settled seed rather than assembled again, so
+/// the two cannot drift apart.
+///
+/// No other scenario covers this shape, which is why a step header and the
+/// prose row under it could both show the same line unnoticed.
+pub(in crate::workspace) fn working_transcript() -> Vec<ChatItem> {
+    let mut items = sample_transcript();
+    items.pop();
+    items
+}
+
 fn thinking(text: &str) -> ChatItem {
     ChatItem::Thinking {
         text: text.to_string(),
@@ -275,6 +288,30 @@ mod tests {
         assert!(calls.iter().any(|c| c.tool_name.is_none()));
         assert!(calls.iter().any(|c| c.status == ToolStatusView::Failed));
         assert!(calls.iter().any(|c| !c.diffs.is_empty()));
+    }
+
+    /// The working seed must actually be the mid-turn shape: prose last, with
+    /// a tool run after it. Asserted here because the scenario it feeds exists
+    /// only to put that shape on screen.
+    #[test]
+    fn the_working_seed_ends_inside_a_step_rather_than_on_an_answer() {
+        let settled = sample_transcript();
+        let working = working_transcript();
+        assert_eq!(working.len() + 1, settled.len());
+        assert!(
+            matches!(settled.last(), Some(ChatItem::AssistantText { phase, .. }) if *phase == MessagePhase::Answer),
+            "the settled seed ends on the answer this one drops"
+        );
+        let last_prose = working
+            .iter()
+            .rposition(|i| matches!(i, ChatItem::AssistantText { .. }))
+            .expect("the seed has prose");
+        assert!(
+            working[last_prose + 1..]
+                .iter()
+                .any(|i| matches!(i, ChatItem::ToolCall(_))),
+            "a tool run follows it, so it reads as a preamble and not a conclusion"
+        );
     }
 
     #[test]

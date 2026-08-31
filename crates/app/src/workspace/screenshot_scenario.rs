@@ -45,6 +45,8 @@ const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
 const NAME_AGENT_CHAT: &str = "agent-chat";
+/// CLI token for the mid-turn transcript, before the agent writes its answer.
+const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
 /// CLI token for the same transcript with the filter and tail chips engaged.
 const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
@@ -154,10 +156,16 @@ pub(crate) enum ScreenshotScenario {
     /// fit beside the pane title, whether they read as three controls, and
     /// whether a Step header's glyph says anything about what it folded.
     AgentChat,
-    /// The same transcript with the display filter and the tail window
-    /// engaged, so both reveal rows render together — the only way to check
-    /// that the filter's disclosure and the tail window's boundary read as the
-    /// *different* controls they are, rather than as two spellings of one.
+    /// The transcript mid-turn: the agent has run tools and written the
+    /// preamble in front of them, but not yet the answer. The run's last prose
+    /// therefore sits *inside* a step, which is the only shape where a step
+    /// header and the prose row beneath it can end up saying the same line —
+    /// and the shape [`Self::AgentChat`]'s settled seed cannot reach.
+    AgentChatWorking,
+    /// The same transcript with the display filter engaged and the folds open,
+    /// so the filter's reveal chip renders on the response bar — the only way
+    /// to check that it reads as a view control beside the run's counts rather
+    /// than as one more step in the list below it.
     AgentChatNarrowed,
     /// The same transcript with a custom fold matrix and its editor open.
     AgentChatFold,
@@ -221,6 +229,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_AGENT_CHAT_EMPTY => Some(Self::AgentChatEmpty),
             NAME_AGENT_CHAT => Some(Self::AgentChat),
+            NAME_AGENT_CHAT_WORKING => Some(Self::AgentChatWorking),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
@@ -369,6 +378,11 @@ pub(crate) fn drive(
                 ws.open_agent_chat_transcript_for_shot(window, cx)
             });
         }
+        ScreenshotScenario::AgentChatWorking => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_working_transcript_for_shot(window, cx)
+            });
+        }
         ScreenshotScenario::AgentChatNarrowed => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_narrowed_transcript_for_shot(window, cx)
@@ -495,6 +509,10 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat"),
             Some(ScreenshotScenario::AgentChat)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-working"),
+            Some(ScreenshotScenario::AgentChatWorking)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-narrowed"),

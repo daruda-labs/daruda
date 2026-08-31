@@ -105,7 +105,6 @@ use blocks::{
     thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
-use filter::filtered_away_bar;
 use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
@@ -114,13 +113,14 @@ use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
+use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{IconName, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    FilterMatchIndex, LiveSubagentUnits, RenderRow, RowKind,
+    FilterMatchIndex, FilteredAway, LiveSubagentUnits, RenderRow, RowKind,
 };
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AssetCache, ChatContentWidth,
@@ -386,52 +386,30 @@ fn render_row(
             }
             _ => gpui::Empty.into_any_element(),
         },
-        RowKind::ResponseHeader { anchor, collapsed } => {
-            response_bar(this, *anchor, *collapsed, row.filter_revealed, t, cx).into_any_element()
-        }
-        // One block among siblings — it reports nothing about the run, so no
-        // rollup glyph (see `RowKind::SoloResponse`).
-        RowKind::AgentItem(i) => render_agent_item(this, *i, row, None, t, window, cx),
-        // The whole response in one block: it owns the rollup a response bar would
-        // otherwise carry. The run is this single item, so classify over it.
-        RowKind::SoloResponse(i) => render_agent_item(
-            this,
-            *i,
-            row,
-            Some(Rollup::of_run_with_live_units(
-                &this.items,
-                *i..*i + 1,
-                &this.live_units,
-            )),
-            t,
-            window,
-            cx,
-        ),
-        RowKind::StepHeader {
-            first_ix,
-            tool_count,
+        RowKind::ResponseHeader {
+            anchor,
             collapsed,
-        } => step_bar(
+            filtered,
+        } => response_bar(
             this,
-            *first_ix,
-            *tool_count,
+            *anchor,
             *collapsed,
+            *filtered,
             row.filter_revealed,
             t,
             cx,
-        ),
+        )
+        .into_any_element(),
+        // One block among siblings — it reports nothing about the run, so no
+        // rollup glyph; the response bar above it carries the run's.
+        RowKind::AgentItem(i) => render_agent_item(this, *i, row, t, window, cx),
+        RowKind::StepHeader(header) => step_bar(this, header, row.filter_revealed, t, cx),
         RowKind::TailMore {
             run_start,
             hidden_steps,
             kept_steps,
             collapsed,
         } => tail_more_bar(this, *run_start, *hidden_steps, *kept_steps, *collapsed, cx),
-        RowKind::FilteredAway {
-            run_start,
-            revealable,
-            excluded,
-            collapsed,
-        } => filtered_away_bar(this, *run_start, *revealable, *excluded, *collapsed, cx),
         RowKind::ToolGroupHeader {
             gid,
             first_ix,
@@ -534,6 +512,7 @@ fn response_bar(
     this: &AgentChatView,
     anchor: usize,
     collapsed: bool,
+    filtered: FilteredAway,
     filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
@@ -557,6 +536,19 @@ fn response_bar(
             .next()
     })
     .leading(agent_label(this, cx).into_any_element());
+    // The filter's reveal sits left of the run's own counts, so the numbers that
+    // are always there keep the right edge and do not shift when it appears.
+    // A collapsed bar reveals nothing, so it offers no chip.
+    if !collapsed && filtered.revealable > 0 {
+        let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(this.dim_amount);
+        header = header.trailing(filter::filtered_chip(
+            run.start,
+            filtered,
+            filter_revealed,
+            &surface,
+            cx,
+        ));
+    }
     // Trailing content is fold-state-independent (see `FoldHeader::trailing`), so
     // the count reads the same expanded or collapsed.
     if tools > 0 {
@@ -683,14 +675,12 @@ fn scroll_to_bottom_button(
         )
 }
 
-/// Look up an item row's `ChatItem` and render it. `rollup`, when present, is the
-/// verdict this block reports for the response it stands for — `Some` only for a
-/// [`RowKind::SoloResponse`], so exactly one row per response shows a glyph.
+/// Look up an item row's `ChatItem` and render it. The run's verdict glyph is the
+/// response bar's — a block never reports one for the response it sits in.
 fn render_agent_item(
     this: &AgentChatView,
     ix: usize,
     row: &RenderRow,
-    rollup: Option<Rollup>,
     t: &theme::DarudaTheme,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
@@ -700,7 +690,6 @@ fn render_agent_item(
             ix,
             item,
             row.indent > 0,
-            rollup,
             &this.items,
             &this.live_units,
             &this.filter_matches,
@@ -730,7 +719,6 @@ fn render_item(
     ix: usize,
     item: &ChatItem,
     under_response: bool,
-    rollup: Option<Rollup>,
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
     filter_matches: &FilterMatchIndex,
@@ -763,17 +751,7 @@ fn render_item(
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
-            assistant_block(
-                ix,
-                key,
-                expanded,
-                text,
-                agent_label,
-                rollup,
-                t,
-                markdown,
-                cx,
-            )
+            assistant_block(ix, key, expanded, text, agent_label, markdown, cx)
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
@@ -820,17 +798,17 @@ mod tests {
         RenderRow::at(kind, hidden, 0)
     }
 
-    /// `rows::project` always emits the filter placeholder first, and it is
-    /// hidden whenever it covers nothing — so the list's top padding has to
-    /// follow the first row that paints, not index 0.
+    /// A run can open with a hidden row — a tail boundary covering nothing, a
+    /// folded block — so the list's top padding has to follow the first row
+    /// that paints, not index 0.
     #[test]
     fn the_outer_padding_follows_the_rows_that_paint() {
         let rows = [
             row(
-                RowKind::FilteredAway {
+                RowKind::TailMore {
                     run_start: 0,
-                    revealable: 0,
-                    excluded: 0,
+                    hidden_steps: 0,
+                    kept_steps: 0,
                     collapsed: true,
                 },
                 true,
