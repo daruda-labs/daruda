@@ -15,11 +15,24 @@ name = "daruda"
 path = "src/main.rs"
 
 [features]
+# Machinery shared by the visual-verification front-ends below: seeding a
+# transcript into an agent-chat pane without an ACP session. Not useful alone —
+# `screenshot` and `replay` each turn it on. It exists so the shared seeding path
+# carries one `cfg` instead of an `any(...)` that grows a term per front-end.
+devtools = []
+
 # `daruda --screenshot <path>` — render the live window to a PNG via gpui's
 # render_to_image (upstream-gated behind test-support). Off by default to keep
 # the shipping binary clean; enable for visual-verification builds:
 #   cargo build -p daruda --features screenshot
-screenshot = ["gpui/test-support", "gpui_macos/test-support"]
+screenshot = ["devtools", "gpui/test-support", "gpui_macos/test-support"]
+
+# `daruda --replay-acp-log <path>` — replay a captured ACP wire log into a live
+# agent-chat pane for hands-on inspection. Deliberately does NOT pull in
+# test-support: replay drives the ordinary running app, so it needs none of the
+# offscreen-render machinery `screenshot` does.
+#   cargo build -p daruda --features replay
+replay = ["devtools"]
 
 [dependencies]
 daruda_core = { path = "../daruda_core" }

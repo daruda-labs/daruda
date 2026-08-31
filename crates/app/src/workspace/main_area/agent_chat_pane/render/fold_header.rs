@@ -538,13 +538,10 @@ fn disclosure_row(
 /// *into* it; it marks the edge of the range the pane is showing, and its
 /// content is the steps the window covers.
 ///
-/// The two states differ in **layout**, not only in a glyph: closed centres the
-/// label between two rules, open anchors it left after a short stub. That is the
-/// fix for the row this replaces, which wore the same chevron and the same muted
-/// text as every step bar beside it, so its own open/closed flip was the least
-/// distinguishable thing on the row. The chevron takes
-/// [`DisclosureAxis::Vertical`] for the same reason — `▶`/`▼` is the tree glyph
-/// the step bars already own.
+/// The label is centred between two equal rules in **both** states, so the row
+/// does not move as it opens. What marks the flip is the chevron, which takes
+/// [`DisclosureAxis::Vertical`] to stay distinct from the `▶`/`▼` tree glyph the
+/// step bars own, plus the label itself naming the state it goes to.
 pub(super) fn window_boundary_row(
     base: impl Into<ElementId>,
     toggle: impl Into<FoldToggle>,
@@ -580,13 +577,7 @@ pub(super) fn window_boundary_row(
         .gap(px(theme::AGENT_CHAT_BOUNDARY_GAP))
         .cursor_pointer()
         .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
-        // Open: a stub on the left pulls the label to the row's start. Closed:
-        // two equal rules centre it.
-        .child(if expanded {
-            rule().flex_none().w(px(theme::AGENT_CHAT_BOUNDARY_STUB_W))
-        } else {
-            rule()
-        })
+        .child(rule())
         .child(label)
         .child(rule())
         .into_any_element()

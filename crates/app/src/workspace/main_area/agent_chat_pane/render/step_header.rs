@@ -34,11 +34,11 @@ pub(super) fn step_bar(
     let run = span.tool_start..span.end;
 
     let fg = this.dim(theme::agent_chat_fg(cx));
-    // The icon names the work the header offers, so it reads the same kept
-    // rows the count and the glyph do.
-    let icon = tool_category_icon(dominant_category(items, run, |item| {
-        filter_revealed || this.filter_matches.matches(item)
-    }));
+    // The icon and the label beside it name the work the step *did*, matching
+    // the tool count — all three describe the step, not the current filter, so
+    // a header stays legible when the filter has taken its cards away.
+    let category = dominant_category(items, run, |_| true);
+    let icon = tool_category_icon(category);
     let title_items = items;
     // An agent that wrote a preamble before this step gave the header two
     // things to say, so it says the one the current state does not: the
@@ -89,7 +89,18 @@ pub(super) fn step_bar(
             .flex()
             .flex_row()
             .items_center()
+            .gap(px(theme::AGENT_CHAT_MSG_GAP))
             .child(Icon::new(icon).xsmall().text_color(fg))
+            // The identifier the glyph replaced. On its own the glyph left a
+            // header with no fitting summary showing nothing but an icon and a
+            // count; naming the kind gives every state something to read.
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(super::filter::category_label(category))),
+            )
             .into_any_element(),
     );
     if row.tool_count > 0 {

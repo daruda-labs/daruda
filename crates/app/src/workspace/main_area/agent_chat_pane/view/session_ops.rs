@@ -290,23 +290,29 @@ impl AgentChatView {
         self.reproject(cx);
     }
 
-    /// Replace the conversation with a fixed transcript for a `--screenshot`
-    /// capture, then re-derive the projection exactly as a live event would.
-    /// The one seeding entry point, so a scenario cannot leave `rows` and the
-    /// virtualized list out of step with `items`.
-    #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn seed_transcript_for_shot(
+    /// Replace the conversation with a fixed transcript — a `--screenshot`
+    /// scenario or a `--replay-acp-log` capture — then re-derive the projection
+    /// exactly as a live event would. The one seeding entry point, so no caller
+    /// can leave `rows` and the virtualized list out of step with `items`.
+    #[cfg(feature = "devtools")]
+    pub(in crate::workspace) fn seed_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
         cx: &mut Context<Self>,
     ) {
         self.items = items;
+        // A seeded pane stands in for a session it does not have. Parking it out
+        // of `Idle` here is what keeps `maybe_connect_agent_chat` from spawning
+        // a real adapter behind it on first focus. `handle` stays `None`, which
+        // is what the send path already checks, so the pane reads as connected
+        // and behaves as inert rather than half-live.
+        self.status = AgentSessionStatus::Connected;
         self.reproject(cx);
     }
 
     /// Seed a transcript captured while the foreground turn is still active.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn seed_working_transcript_for_shot(
+    pub(in crate::workspace) fn seed_working_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
         cx: &mut Context<Self>,
@@ -314,7 +320,7 @@ impl AgentChatView {
         let now = std::time::Instant::now();
         self.queue.turn = Turn::InFlight { started_at: now };
         let _ = self.reconcile_activity(now);
-        self.seed_transcript_for_shot(items, cx);
+        self.seed_transcript(items, cx);
     }
 
     pub(in crate::workspace) fn set_tail_window(
@@ -401,12 +407,16 @@ impl AgentChatView {
         self.set_display_filter(DisplayFilter::default(), cx);
     }
 
-    pub(in crate::workspace) fn set_all_tools_filter(
+    /// Turn a whole parented filter section (`Prose`, `Tools`) on or off — what
+    /// its tri-state parent checkbox does.
+    pub(in crate::workspace) fn set_filter_section(
         &mut self,
+        parent: FilterFacet,
         selected: bool,
         cx: &mut Context<Self>,
     ) {
-        self.set_display_filter(self.display_filter.value().with_all_tools(selected), cx);
+        let next = self.display_filter.value().with_section(parent, selected);
+        self.set_display_filter(next, cx);
     }
 
     fn set_display_filter(&mut self, filter: DisplayFilter, cx: &mut Context<Self>) {

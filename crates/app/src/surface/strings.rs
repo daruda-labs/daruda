@@ -2116,8 +2116,10 @@ pub fn agent_chat_step_tool_count(count: usize) -> String {
     }
 }
 
-/// Collapsed label for the filter's per-run disclosure: how many rows
-/// expanding it puts on screen. Singular handled explicitly.
+/// Collapsed label for the filter's per-run disclosure: how many rows expanding
+/// it puts on screen, and nothing else. Singular handled explicitly. Rows the
+/// filter took from inside a fold are not named here — the step headers keep a
+/// tool count the filter cannot shrink, which is what marks those.
 pub fn agent_chat_filtered_show(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.filtered_show_one").into_owned()
@@ -2126,24 +2128,12 @@ pub fn agent_chat_filtered_show(count: usize) -> String {
     }
 }
 
-/// [`agent_chat_filtered_show`] for a run where a fold holds filtered rows this
-/// control cannot reach — `total` names everything the filter dropped so the
-/// reachable count cannot read as the whole cut.
-pub fn agent_chat_filtered_show_partial(count: usize, total: usize) -> String {
-    rust_i18n::t!(
-        "agent_chat.filtered_show_partial",
-        count = count,
-        total = total
-    )
-    .into_owned()
-}
-
 /// Expanded label for the same disclosure. Takes no count, and there is one
 /// string rather than a singular / plural / partial set: the rows are on screen,
 /// so a number here restates them and reads as a description of the current
 /// state ("12 filtered rows, hidden") in exactly the state where they are not.
 /// The reveal's own extent is the *collapsed* label's job — see
-/// [`agent_chat_filtered_show_partial`], which the reader saw a click ago.
+/// [`agent_chat_filtered_show`], which the reader saw a click ago.
 pub fn agent_chat_filtered_hide_again() -> String {
     rust_i18n::t!("agent_chat.filtered_hide_again").into_owned()
 }
@@ -2186,6 +2176,22 @@ pub fn agent_chat_filter_thinking() -> String {
 
 pub fn agent_chat_filter_prose() -> String {
     rust_i18n::t!("agent_chat.filter_prose").into_owned()
+}
+
+/// The `Reply` section heading — the prose kinds nest under it.
+pub fn agent_chat_filter_axis_reply() -> String {
+    rust_i18n::t!("agent_chat.filter_axis_reply").into_owned()
+}
+
+/// The reply itself, as opposed to a preamble.
+pub fn agent_chat_filter_prose_answer() -> String {
+    rust_i18n::t!("agent_chat.filter_prose_answer").into_owned()
+}
+
+/// Prose the agent wrote ahead of a step's work. Only an agent that labels its
+/// message phases produces any, so hiding these is inert for the others.
+pub fn agent_chat_filter_prose_preamble() -> String {
+    rust_i18n::t!("agent_chat.filter_prose_preamble").into_owned()
 }
 
 pub fn agent_chat_filter_tools() -> String {

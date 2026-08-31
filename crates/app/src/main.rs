@@ -21,6 +21,8 @@ mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;
 pub mod project;
+#[cfg(feature = "replay")]
+mod replay;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 pub mod settings_store;
@@ -217,7 +219,21 @@ fn main() {
             daruda_store::accounts::load_accounts().unwrap_or_default(),
         );
 
+        // `--replay-acp-log <path>`: fill an agent-chat pane with a captured
+        // conversation and leave the app running, for hands-on inspection. The
+        // read happens here, before any window exists — a restored pane that
+        // connects would otherwise let this build's own wire tap truncate the
+        // capture out from under us.
+        #[cfg(feature = "replay")]
+        let replay_loaded = replay::parse_replay_arg()
+            .and_then(|path| replay::load(&path, replay::parse_replay_agent_arg()));
+
         window_startup::open_first_window(config, window_opts, cx);
+
+        #[cfg(feature = "replay")]
+        if let Some(loaded) = replay_loaded {
+            replay::schedule_seed(loaded, cx);
+        }
 
         watchers_lifecycle::spawn_all(cx);
         crate::telegram::global::install(cx);

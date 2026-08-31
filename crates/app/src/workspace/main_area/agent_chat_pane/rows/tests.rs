@@ -1711,6 +1711,70 @@ fn tail_row(rows: &[RenderRow]) -> &RenderRow {
         .expect("a run with steps gets a tail row")
 }
 
+/// A step the filter empties must not spend a slot in the tail window. The
+/// window is what the reader asked to see, so counting steps that render
+/// nothing makes `Recent steps: 3` put one step on screen and silently drop the
+/// other two.
+#[test]
+fn the_window_counts_steps_the_filter_leaves_something_to_show() {
+    use ToolStatusView::Completed;
+    // Alternating steps: prose-led ones keep their prose under the filter below,
+    // reasoning-led ones are emptied by it entirely.
+    let mut items = vec![ChatItem::UserText("q".into())];
+    for i in 0..6 {
+        if i % 2 == 0 {
+            items.push(asst(&format!("step {i}")));
+        } else {
+            items.push(think(&format!("step {i}")));
+        }
+        items.push(tool(&format!("t{i}"), Completed));
+    }
+    items.push(asst("done"));
+
+    // Hides reasoning and every tool, so steps 1, 3 and 5 project no row at all.
+    let filter = DisplayFilter::default()
+        .toggled(FilterFacet::Thinking)
+        .toggled(FilterFacet::Tools);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::Last(2),
+        &filter,
+    );
+
+    let shown: Vec<usize> = rows
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter_map(|r| match r.kind {
+            RowKind::StepHeader(header) => Some(header.span.start),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown.len(),
+        2,
+        "a window of 2 puts two steps on screen, not however many of the last \
+         two raw steps happened to survive the filter: {shown:?}"
+    );
+
+    match tail_row(&rows).kind {
+        RowKind::TailMore {
+            hidden_steps,
+            kept_steps,
+            ..
+        } => {
+            assert_eq!(kept_steps, 2, "the label counts the same steps");
+            assert_eq!(
+                hidden_steps, 1,
+                "three steps have content and two are kept, so one is behind the boundary"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
 #[test]
 fn a_window_keeps_only_the_last_steps_visible() {
     let items = turn_of_cycles(8);
@@ -2185,7 +2249,7 @@ fn an_empty_filter_hides_nothing_and_its_row_covers_nothing() {
     let rows = project_filtered(&items, &DisplayFilter::default());
     assert_eq!(filtered_count(&rows), 0);
     assert!(
-        filtered_away(&rows).excluded == 0,
+        !filtered_away(&rows).offers_reveal(),
         "nothing was taken, so the bar carries no chip"
     );
 }
@@ -2374,26 +2438,47 @@ fn the_placeholder_counts_only_what_the_filter_alone_took() {
     assert_eq!(filtered_count(&rows), 1);
 }
 
-/// The bar is the run's one header, so it is what carries the filter's tally.
-/// A row of its own sat at the same indent as the step bars, wore the same
-/// chevron, and read as a step that had lost its icon.
+/// When a collapsed step holds everything the filter took, the bar has nothing
+/// to offer and says so by carrying no chip — the reveal only ever names rows it
+/// can itself put on screen. The step header is what marks the cut here: it
+/// keeps the count of tools the step made, so `2 tools` above no tool cards is
+/// the tell. This is the pair that replaced the old `Show 1 of 7` label.
 #[test]
-fn the_bar_carries_what_the_filter_took() {
+fn a_cut_a_fold_holds_shows_on_the_step_header_not_the_bar() {
     let items = one_step_turn();
     let rows = project_filtered(
         &items,
         &DisplayFilter::default().toggled(FilterFacet::Tools),
     );
-    let filtered = rows
+
+    assert!(
+        !filtered_away(&rows).offers_reveal(),
+        "the fold holds all of it, so there is nothing the chip could reveal"
+    );
+
+    let header = rows
         .iter()
         .find_map(|r| match r.kind {
-            RowKind::ResponseHeader { filtered, .. } => Some(filtered),
+            RowKind::StepHeader(header) if !r.hidden => Some(header),
             _ => None,
         })
-        .expect("the run has a bar");
+        .expect("the step keeps its header");
     assert_eq!(
-        filtered.excluded, 3,
-        "both tool calls and the group header that held them"
+        header.tool_count, 2,
+        "the header still counts what the step did"
+    );
+    let on_screen_tools = rows
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter_map(|r| match r.kind {
+            RowKind::AgentItem(ix) => Some(ix),
+            _ => None,
+        })
+        .filter(|&ix| matches!(items[ix], ChatItem::ToolCall(_)))
+        .count();
+    assert_eq!(
+        on_screen_tools, 0,
+        "and no tool card is on screen to match that count"
     );
 }
 
@@ -2435,10 +2520,7 @@ fn the_bar_keeps_its_slot_as_its_tally_changes() {
             0,
         )
     };
-    let full = FilteredAway {
-        revealable: 12,
-        excluded: 12,
-    };
+    let full = FilteredAway { revealable: 12 };
     let a = bar(1, full, true);
     assert!(
         a.same_slot(&bar(1, FilteredAway::default(), false)),
@@ -2510,11 +2592,12 @@ fn kinded_tool(id: &str, kind: ToolKindView, status: ToolStatusView) -> ChatItem
     })
 }
 
-/// A step header is a disclosure, so its count must say what expanding it puts
-/// on screen. The shipped bug: a step of one edit and two reads read `3 tools`
-/// under an Edits filter that lets exactly one card through.
+/// The count states what the step *did*, not what survives the filter. A header
+/// reading `3 tools` above fewer cards is the intended tell that the filter is
+/// holding something back — the reveal chip only ever names rows it can itself
+/// put on screen, so without this the cut inside a fold had no marker at all.
 #[test]
-fn a_step_header_counts_only_the_tools_the_filter_keeps() {
+fn a_step_header_counts_every_tool_the_step_made() {
     use ToolKindView::{Edit, Read};
     use ToolStatusView::Completed;
     let items = [
@@ -2544,23 +2627,24 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
     assert_eq!(
         step_count(&FoldState::default(), &DisplayFilter::default()),
         3,
-        "an unfiltered pane still counts the whole step"
+        "an unfiltered pane counts the whole step"
     );
     assert_eq!(
         step_count(
             &FoldState::default(),
             &DisplayFilter::from_tokens(["tool_edit"]),
         ),
-        1,
-        "only the edit survives the filter, so only the edit is offered"
+        3,
+        "hiding the edits leaves the count at what the step did, so the two \
+         reads on screen under `3 tools` say an edit was cut"
     );
     assert_eq!(
         step_count(
             &FoldState::default(),
             &DisplayFilter::from_tokens(["thinking"]),
         ),
-        0,
-        "a step kept for its prose alone offers no tools at all"
+        3,
+        "a filter aimed at prose does not touch the tool count either"
     );
 
     let mut revealed = FoldState::default();
@@ -2568,7 +2652,7 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
     assert_eq!(
         step_count(&revealed, &DisplayFilter::from_tokens(["tool_edit"]),),
         3,
-        "revealing filtered rows restores the count of the rows now on screen"
+        "and the reveal cannot move it either — there is one count in every state"
     );
 }
 
@@ -2843,5 +2927,62 @@ fn a_filtered_away_conclusion_does_not_free_the_header() {
         }),
         Some(None),
         "no visible row for the prose → the header keeps its title"
+    );
+}
+
+fn preamble(text: &str) -> ChatItem {
+    ChatItem::AssistantText {
+        text: text.to_owned(),
+        streaming: false,
+        message_id: None,
+        phase: daruda_acp::MessagePhase::Commentary,
+    }
+}
+
+/// The captured-codex case: every tool in the step is a kind the filter hides,
+/// and the only survivor is the preamble the agent wrote ahead of them. The step
+/// then renders for that one row while its header names work none of which is on
+/// screen. Hiding preambles as their own kind is what empties it out.
+#[test]
+fn hiding_preambles_empties_a_step_whose_tools_are_all_filtered() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        preamble("worktree는 제거됐습니다. 이제"),
+        kinded_tool("a", ToolKindView::Execute, Completed),
+        kinded_tool("b", ToolKindView::Execute, Completed),
+        asst("done"),
+    ];
+    let visible_steps = |filter: &DisplayFilter| -> usize {
+        project(
+            &items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(&items),
+            TailWindow::All,
+            filter,
+        )
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+        .count()
+    };
+
+    // Replies + Edits: the preamble is prose, so it survives and holds the step
+    // on screen even though both of its commands are hidden.
+    let with_preambles = DisplayFilter::from_tokens(["prose", "tool_edit"]);
+    assert_eq!(
+        visible_steps(&with_preambles),
+        1,
+        "the preamble alone keeps the step"
+    );
+
+    // The same, with preambles their own hidden kind: nothing in the step is
+    // left, so it stops taking a row.
+    let without = DisplayFilter::from_tokens(["prose", "prose_answer", "tool_edit"]);
+    assert_eq!(
+        visible_steps(&without),
+        0,
+        "no survivors, so the step is gone"
     );
 }

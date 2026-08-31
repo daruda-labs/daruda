@@ -16,16 +16,17 @@ use tail::TailWindow;
 
 const TOOL_GROUP_MIN: usize = 2;
 
-/// What the display filter dropped from one run. The two numbers are not
-/// interchangeable: a row a fold already holds does not come back when the
-/// reveal opens, so only `revealable` states what clicking does.
+/// What the display filter dropped from one run and the reveal can put back.
+///
+/// Only reachable rows are counted: a row a fold already holds does not come
+/// back when the reveal opens, so counting it would make the chip promise more
+/// than clicking it delivers. What the filter took from *inside* a fold is not
+/// tallied here at all — the step headers carry that, by keeping a tool count
+/// the filter cannot shrink.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct FilteredAway {
     /// Rows the reveal puts on screen.
     pub(in crate::workspace) revealable: usize,
-    /// Everything the filter dropped, including rows a collapsed step or
-    /// response still holds.
-    pub(in crate::workspace) excluded: usize,
 }
 
 impl FilteredAway {
@@ -410,13 +411,10 @@ impl<'a> RunRows<'a> {
     }
 
     fn push(&mut self, kind: RowKind, structural: bool, filtered: bool, indent: u8) {
-        if filtered {
-            self.filtered.excluded += 1;
-            // A row a fold already holds does not come back when the reveal
-            // opens, so it is not part of what the chip offers to show.
-            if !structural {
-                self.filtered.revealable += 1;
-            }
+        // A row a fold already holds does not come back when the reveal opens,
+        // so it is not part of what the chip offers to show.
+        if filtered && !structural {
+            self.filtered.revealable += 1;
         }
         self.rows.push(RenderRow {
             kind,
@@ -548,12 +546,26 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             filter,
         } = self.context;
         let raw_steps = step::steps(items, self.spec.run.clone(), hierarchy);
-        let step_count = raw_steps.len();
+        // The window counts steps the filter leaves something to show. Counting
+        // raw steps let an emptied one spend a slot, so `Recent steps: 3` put
+        // however many of the last three happened to survive on screen.
+        let renders: Vec<bool> = raw_steps
+            .iter()
+            .map(|step| {
+                (step.span.start..step.span.end)
+                    .any(|ix| projects_a_row(items, ix, hierarchy, filter))
+            })
+            .collect();
+        let step_count = renders.iter().filter(|&&r| r).count();
+        // Position within that sequence. An emptied step takes the position of
+        // the next rendering one rather than a slot of its own, so it shares
+        // that neighbourhood's coverage and cannot shift the window.
+        let mut step_ix = 0;
 
         raw_steps
             .into_iter()
-            .enumerate()
-            .map(|(step_ix, step)| {
+            .zip(renders)
+            .map(|(step, kept)| {
                 let span = step.span;
                 let key = FoldKey::Step(span.start);
                 let step_collapsed = !fold.is_expanded(
@@ -561,6 +573,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     fold_context_at(&key, span.start, items, boundary),
                 );
                 let covered = tail.hides(step_ix, step_count);
+                step_ix += usize::from(kept);
                 let outside_tail = !tail_revealed && covered;
                 let header_owned_prose = step
                     .renders_header
@@ -576,16 +589,12 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     }
                     _ => None,
                 };
-                let kept = (span.start..span.end)
-                    .any(|ix| projects_a_row(items, ix, hierarchy, filter));
                 let live = (span.tool_start..span.end).any(|ix| {
                     matches!(&items[ix], ChatItem::ToolCall(tool) if tool_or_subtree_live(tool, live_units))
                 });
                 let header = step.renders_header.then(|| StepHeaderRow {
                     span,
-                    tool_count: step.kept_tool_count(items, hierarchy, |item| {
-                        self.spec.filter_revealed || filter.matches(item)
-                    }),
+                    tool_count: step.tool_count(items, hierarchy),
                     collapsed: step_collapsed,
                     visible_body_prose,
                 });
@@ -631,7 +640,10 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             fold_context_at(&tail_key, run.start, items, boundary),
         );
         let steps = self.projected_steps(tail_revealed);
-        let hidden_steps = tail.hidden_steps(steps.len());
+        // Same population the window was computed over, so the boundary's
+        // numbers and what is on screen cannot disagree.
+        let rendering_steps = steps.iter().filter(|step| step.kept).count();
+        let hidden_steps = tail.hidden_steps(rendering_steps);
         let mut out = RunRows::new(
             self.output,
             self.spec.bar_ix,
@@ -643,7 +655,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 RowKind::TailMore {
                     run_start: run.start,
                     hidden_steps,
-                    kept_steps: steps.len() - hidden_steps,
+                    kept_steps: rendering_steps - hidden_steps,
                     collapsed: !tail_revealed,
                 },
                 response_collapsed || hidden_steps == 0,

@@ -8,7 +8,7 @@
 //!   -- --nocapture
 //! ```
 
-use daruda_acp::{ChatItem, SessionUpdate, adapter::adapter_for, mapping};
+use daruda_acp::ChatItem;
 
 use super::{Lens, per_turn_as_last, per_turn_settled, turn_bounds};
 use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
@@ -24,55 +24,6 @@ const FILTERS: [(&str, &[&str]); 3] = [
 ];
 
 const SAMPLED_STEPS: usize = 3;
-
-/// The `agent_info.name` from the capture's `initialize` response, if it has
-/// one. `None` for a capture whose handshake was not recorded.
-fn reported_program(log: &str) -> Option<String> {
-    log.lines().find_map(|line| {
-        let brace = line.find('{')?;
-        let v = serde_json::from_str::<serde_json::Value>(&line[brace..]).ok()?;
-        v.get("result")?
-            .get("agentInfo")?
-            .get("name")?
-            .as_str()
-            .map(str::to_owned)
-    })
-}
-
-/// Replay prompts and updates into the item list a live pane would hold.
-///
-/// The strategy is selected the way production selects it — from the program
-/// the log's own `initialize` reports — so a capture exercises the same dialect
-/// a live pane would read it with, not just the catalog-id fallback.
-fn replay(log: &str, agent_id: &str) -> Vec<ChatItem> {
-    let adapter = adapter_for(reported_program(log).as_deref(), agent_id);
-    let mut items: Vec<ChatItem> = Vec::new();
-    for line in log.lines() {
-        let Some(brace) = line.find('{') else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line[brace..]) else {
-            continue;
-        };
-        match v.get("method").and_then(|m| m.as_str()) {
-            Some("session/prompt") => {
-                mapping::finalize_streaming(&mut items);
-                items.push(ChatItem::UserText("<prompt>".into()));
-            }
-            Some("session/update") => {
-                let Some(update) = v.pointer("/params/update") else {
-                    continue;
-                };
-                if let Ok(su) = serde_json::from_value::<SessionUpdate>(update.clone()) {
-                    mapping::apply_update_with(&mut items, &su, adapter.as_ref());
-                }
-            }
-            _ => {}
-        }
-    }
-    mapping::finalize_streaming(&mut items);
-    items
-}
 
 fn item_label(it: &ChatItem) -> &'static str {
     match it {
@@ -107,10 +58,14 @@ fn census() {
     };
     let path = std::path::PathBuf::from(path);
     let agent_id = std::env::var("DARUDA_CENSUS_AGENT").unwrap_or_else(|_| "claude".into());
-    let log = std::fs::read_to_string(&path).expect("census log readable");
-    let items = replay(&log, &agent_id);
+    let replay = daruda_acp::replay_log(&path, &agent_id).expect("census log replayable");
+    let items = replay.items;
 
     println!("\n=== {} (adapter: {agent_id}) ===", path.display());
+    println!(
+        "sessions: {} | payloads restored {}, unresolved {}",
+        replay.sessions, replay.rehydrated, replay.unresolved
+    );
     let mut icounts: std::collections::BTreeMap<&str, usize> = Default::default();
     for it in &items {
         *icounts.entry(item_label(it)).or_default() += 1;

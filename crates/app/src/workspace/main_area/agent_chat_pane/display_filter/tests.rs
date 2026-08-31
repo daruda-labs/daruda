@@ -98,7 +98,7 @@ fn thinking_and_edits_show_exactly_those_two() {
 #[test]
 fn a_condition_below_tools_puts_tools_in_scope() {
     let f = DisplayFilter::default()
-        .with_all_tools(false)
+        .with_section(FilterFacet::Tools, false)
         .toggled(FilterFacet::ToolEdit);
     assert!(
         f.contains(FilterFacet::Tools),
@@ -409,13 +409,13 @@ fn one_tool_category_is_one_hidden_facet() {
 #[test]
 fn all_tools_and_partial_tools_are_distinct_states() {
     let all = filter(&["tools"]);
-    assert_eq!(all.tool_selection(), ToolSelection::All);
+    assert_eq!(all.section_state(FilterFacet::Tools), SectionState::On);
 
     let without_edit = all.toggled(FilterFacet::ToolEdit);
-    assert!(matches!(
-        without_edit.tool_selection(),
-        ToolSelection::Some(_)
-    ));
+    assert_eq!(
+        without_edit.section_state(FilterFacet::Tools),
+        SectionState::Partial
+    );
     assert!(!without_edit.contains(FilterFacet::ToolEdit));
     // Exact, not `contains`: a `toggled` that dropped a second category would
     // pass the looser check while quietly widening what the chip reports.
@@ -565,7 +565,7 @@ fn the_visible_set_round_trips_including_the_empty_one() {
     for f in [
         DisplayFilter::default(),
         DisplayFilter::default().toggled(FilterFacet::Thinking),
-        DisplayFilter::default().with_all_tools(false),
+        DisplayFilter::default().with_section(FilterFacet::Tools, false),
     ] {
         assert_eq!(DisplayFilter::from_tokens(f.tokens()), f);
     }
@@ -595,4 +595,115 @@ fn a_legacy_empty_list_meant_unfiltered_not_blank() {
         DisplayFilter::from_tokens(["prose"]),
         "a non-empty legacy list already said exactly what to show"
     );
+}
+
+/// A pane stored before the prose kinds existed named only the parent. Reading
+/// that as "every kind" is what keeps such a pane showing all of its prose
+/// instead of silently losing its preambles.
+#[test]
+fn a_list_naming_only_the_parent_shows_every_prose_kind() {
+    let old = DisplayFilter::from_tokens(["thinking", "prose", "tools"]);
+    assert_eq!(
+        old,
+        DisplayFilter::default(),
+        "an old full list is unfiltered"
+    );
+    assert!(old.contains(FilterFacet::ProseAnswer));
+    assert!(old.contains(FilterFacet::ProsePreamble));
+}
+
+#[test]
+fn a_single_prose_kind_round_trips_through_storage() {
+    for facet in [FilterFacet::ProseAnswer, FilterFacet::ProsePreamble] {
+        let one = DisplayFilter::default().toggled(other_prose_facet(facet));
+        assert!(one.contains(facet), "{facet:?} stayed on");
+        assert!(!one.contains(other_prose_facet(facet)));
+        let stored: Vec<String> = one.tokens().into_iter().map(str::to_owned).collect();
+        assert_eq!(
+            DisplayFilter::from_stored(&stored),
+            one,
+            "{facet:?} survived {stored:?}"
+        );
+    }
+}
+
+fn other_prose_facet(facet: FilterFacet) -> FilterFacet {
+    match facet {
+        FilterFacet::ProseAnswer => FilterFacet::ProsePreamble,
+        _ => FilterFacet::ProseAnswer,
+    }
+}
+
+#[test]
+fn unchecking_both_prose_kinds_is_the_parent_being_off() {
+    let none = DisplayFilter::default()
+        .toggled(FilterFacet::ProseAnswer)
+        .toggled(FilterFacet::ProsePreamble);
+    assert!(!none.contains(FilterFacet::Prose), "the parent reads off");
+    assert_eq!(none.section_state(FilterFacet::Prose), SectionState::Off);
+    // And the chip names the parent rather than both rows under it.
+    assert_eq!(none.hidden(), vec![FilterFacet::Prose]);
+}
+
+#[test]
+fn the_prose_filter_routes_an_assistant_message_by_its_phase() {
+    let answer = ChatItem::AssistantText {
+        text: "done".into(),
+        streaming: false,
+        message_id: None,
+        phase: MessagePhase::Answer,
+    };
+    let preamble = ChatItem::AssistantText {
+        text: "now I will".into(),
+        streaming: false,
+        message_id: None,
+        phase: MessagePhase::Commentary,
+    };
+
+    let answers_only = DisplayFilter::default().toggled(FilterFacet::ProsePreamble);
+    assert!(answers_only.matches(&answer));
+    assert!(!answers_only.matches(&preamble));
+
+    let preambles_only = DisplayFilter::default().toggled(FilterFacet::ProseAnswer);
+    assert!(!preambles_only.matches(&answer));
+    assert!(preambles_only.matches(&preamble));
+
+    // An agent that does not label phases emits only `Answer`, so a pane hiding
+    // preambles there loses nothing.
+    assert!(answers_only.matches(&answer));
+}
+
+/// The parent toggle sets the whole section in one move, and each parented axis
+/// drives its own filter — the hazard the old tools-only helper warned about.
+#[test]
+fn a_parent_toggle_sets_only_its_own_section() {
+    let off_prose = DisplayFilter::default().with_section(FilterFacet::Prose, false);
+    assert_eq!(
+        off_prose.section_state(FilterFacet::Prose),
+        SectionState::Off
+    );
+    assert_eq!(
+        off_prose.section_state(FilterFacet::Tools),
+        SectionState::On
+    );
+
+    let off_tools = DisplayFilter::default().with_section(FilterFacet::Tools, false);
+    assert_eq!(
+        off_tools.section_state(FilterFacet::Prose),
+        SectionState::On
+    );
+    assert_eq!(
+        off_tools.section_state(FilterFacet::Tools),
+        SectionState::Off
+    );
+}
+
+#[test]
+fn a_partly_on_section_reads_indeterminate() {
+    let partial = DisplayFilter::default().toggled(FilterFacet::ProsePreamble);
+    assert_eq!(
+        partial.section_state(FilterFacet::Prose),
+        SectionState::Partial
+    );
+    assert_eq!(partial.hidden(), vec![FilterFacet::ProsePreamble]);
 }

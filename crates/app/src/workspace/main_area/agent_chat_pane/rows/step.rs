@@ -26,20 +26,17 @@ pub(super) struct WorkStep {
 }
 
 impl WorkStep {
-    /// Top-level tools in this step that `keep` admits. Nested subagent tools
-    /// render inside their parent's card, so they never count.
+    /// Top-level tools this step made. Nested subagent tools render inside their
+    /// parent's card, so they never count.
     ///
-    /// The header is a disclosure, so this is what expanding it puts on screen
-    /// — under a display filter that is fewer calls than the step made, and
-    /// the count has to say so.
-    pub(super) fn kept_tool_count(
-        &self,
-        items: &[ChatItem],
-        hierarchy: &ToolHierarchy<'_>,
-        keep: impl Fn(&ChatItem) -> bool,
-    ) -> usize {
+    /// Deliberately blind to the display filter: the count states what the step
+    /// *did*, not what is currently on screen. A header reading `3 tools` above
+    /// fewer cards than that is how a reader notices the filter is holding
+    /// something back — a count that shrank with the filter left no trace of the
+    /// cut, and a step whose every tool was filtered simply lost its count.
+    pub(super) fn tool_count(&self, items: &[ChatItem], hierarchy: &ToolHierarchy<'_>) -> usize {
         (self.span.tool_start..self.span.end)
-            .filter(|&j| top_level_tool(items, j, hierarchy) && keep(&items[j]))
+            .filter(|&j| top_level_tool(items, j, hierarchy))
             .count()
     }
 }
@@ -365,7 +362,7 @@ mod tests {
                     s.span.start,
                     s.span.tool_start,
                     s.span.end,
-                    s.kept_tool_count(items, &hierarchy, |_| true),
+                    s.tool_count(items, &hierarchy),
                     s.renders_header,
                 )
             })

@@ -811,14 +811,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_agent_chat_pane(window, cx);
-        let pane_id = self.active_runtime().focused_pane_id;
-        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
-            return;
-        };
-        view.update(cx, |v, cx| {
-            v.seed_transcript_for_shot(super::shot_transcript::sample_transcript(), cx);
-        });
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, cx| v.seed_transcript(super::shot_transcript::sample_transcript(), cx),
+            window,
+            cx,
+        );
     }
 
     /// Open the seeded transcript mid-turn — the agent's answer not yet
@@ -829,14 +827,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_agent_chat_pane(window, cx);
-        let pane_id = self.active_runtime().focused_pane_id;
-        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
-            return;
-        };
-        view.update(cx, |v, cx| {
-            v.seed_working_transcript_for_shot(super::shot_transcript::working_transcript(), cx);
-        });
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, cx| v.seed_working_transcript(super::shot_transcript::working_transcript(), cx),
+            window,
+            cx,
+        );
     }
 
     /// Open the seeded transcript with filtering, tail, and filter panel active.
@@ -956,11 +952,29 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(pane_id) = self.insert_agent_chat_pane(agent_id, window, cx) {
+            self.reveal_new_agent_chat_pane(pane_id, window, cx);
+        }
+    }
+
+    /// Create the pane and register it in the active runtime's panes and tabs,
+    /// stopping short of focusing it. Split from [`Self::reveal_new_agent_chat_pane`]
+    /// because focusing is what triggers lazy connect, so anything that has to be
+    /// true before a session could start goes between the two — that gap is the
+    /// seam `open_agent_chat_pane_seeded` seeds through.
+    ///
+    /// `None` when the active lane cannot host a pane.
+    fn insert_agent_chat_pane(
+        &mut self,
+        agent_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneId> {
         // An inaccessible active lane renders the empty-state; opening a pane
         // there would escape that state (mirrors `add_tab`). Guard first, before
         // recording the choice, so a rejected open does not mutate last_agent_id.
         if self.active_lane_is_inaccessible() {
-            return;
+            return None;
         }
         self.last_agent_id = Some(agent_id.clone());
         let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
@@ -996,11 +1010,67 @@ impl Workspace {
             });
             self.main_area.pending_resize = true;
         }
+        Some(pane_id)
+    }
+
+    /// Focus a freshly inserted Agent chat pane and settle the layout around
+    /// it. Focusing runs `maybe_connect_agent_chat`, so this is always the last
+    /// step of an open.
+    fn reveal_new_agent_chat_pane(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
+    }
+
+    /// Open a pane whose transcript comes from `seed` rather than from a
+    /// session — the single seeding entry point for `--screenshot` scenarios
+    /// and `--replay-acp-log` alike.
+    ///
+    /// `seed` runs between insert and reveal, which is the whole point of the
+    /// split: it parks the pane out of `Idle` before focus would otherwise send
+    /// `maybe_connect_agent_chat` off to spawn a real adapter behind it.
+    #[cfg(feature = "devtools")]
+    pub(in crate::workspace) fn open_agent_chat_pane_seeded(
+        &mut self,
+        agent_id: Option<&str>,
+        seed: impl FnOnce(&mut AgentChatView, &mut Context<AgentChatView>),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneId> {
+        // The pane's agent decides its chrome — name, tool-group label, usage
+        // panel — so a caller replaying a capture wants the agent the capture
+        // came from, not whatever was last opened. A requested id the catalog
+        // does not have falls back exactly as a stale `last_agent_id` would.
+        let agent_id =
+            resolve_open_agent_id(&self.agents, agent_id.or(self.last_agent_id.as_deref()));
+        let pane_id = self.insert_agent_chat_pane(agent_id, window, cx)?;
+        let view = self.agent_chat_view(pane_id).cloned()?;
+        view.update(cx, seed);
+        self.reveal_new_agent_chat_pane(pane_id, window, cx);
+        Some(pane_id)
+    }
+
+    /// Open a pane holding `items` with no session behind it. The crate-root
+    /// entry point (`--replay-acp-log`) reaches seeding through this, so the
+    /// closure seam above stays inside `workspace`. `false` when there was no
+    /// accessible lane to open a pane in.
+    #[cfg(feature = "devtools")]
+    pub(crate) fn open_agent_chat_pane_with_transcript(
+        &mut self,
+        agent_id: Option<&str>,
+        items: Vec<daruda_acp::ChatItem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.open_agent_chat_pane_seeded(agent_id, |v, cx| v.seed_transcript(items, cx), window, cx)
+            .is_some()
     }
 
     /// Switch the active session mode. Shim for the mode chip: routes the

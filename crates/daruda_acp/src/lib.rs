@@ -20,7 +20,7 @@ pub mod model;
 pub mod node;
 pub(crate) mod output_highlight;
 pub mod session;
-pub(crate) mod wire_log;
+pub mod wire_log;
 
 pub use agent_client_protocol::schema::v1::SessionId;
 // `AcpEvent::PermissionRequested` already hands a protocol
@@ -52,3 +52,4 @@ pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision,
     connect_agent_session, connect_agent_session_with_model, connect_session,
 };
+pub use wire_log::{Replay, ReplayError, agent_id_from_path, replay_log};

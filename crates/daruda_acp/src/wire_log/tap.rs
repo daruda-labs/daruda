@@ -1,17 +1,6 @@
-//! Dev-build ACP wire tap — raw JSON-RPC traffic written to a file for
-//! off-line inspection.
-//!
-//! Payload text (tool output, diff bodies, terminal dumps) is ~93% of a raw
-//! capture and drowns the protocol skeleton, so a string over
-//! [`DEFAULT_MAX_FIELD`] bytes becomes a preview plus an
-//! `@@acp-payload:<id>:<bytes>@@` marker and its full text moves to a sidecar
-//! NDJSON file keyed by that id. The slim log stays valid JSON per line.
-//!
-//! | Variable | Default | Effect |
-//! |---|---|---|
-//! | `DARUDA_ACP_WIRE_LOG` | unset (tap off) | slim log path; the app sets it in debug builds |
-//! | `DARUDA_ACP_WIRE_LOG_MAX_FIELD` | `512` | spill threshold in bytes; `0` disables elision |
-//! | `DARUDA_ACP_WIRE_LOG_PAYLOADS` | on | `0`/`off`/`false` drops payloads instead of writing the sidecar |
+//! The writer half of the wire tap — raw JSON-RPC traffic appended to a file
+//! for off-line inspection. The on-disk format (marker syntax, sidecar naming)
+//! is defined by the parent module and shared with the reader.
 
 use std::ffi::OsStr;
 use std::fmt::Write as _;
@@ -27,6 +16,8 @@ use std::sync::atomic::Ordering;
 use agent_client_protocol::{AcpAgent, LineDirection};
 use serde_json::Value;
 
+use super::{DEFAULT_BASE_STEM, UNRECORDED_ID, payload_marker, payload_sidecar_path};
+
 /// Spill threshold. Chosen from a real capture: keeps every protocol field
 /// (ids, statuses, titles, message chunks) inline while catching the fat
 /// payload fields.
@@ -35,8 +26,6 @@ const DEFAULT_MAX_FIELD: usize = 512;
 /// How much of a spilled string stays inline, so the slim log still shows what
 /// the payload was.
 const PREVIEW_BYTES: usize = 96;
-
-const SIDECAR_EXTENSION: &str = "payload.jsonl";
 
 /// `Spill::path` for a non-JSON line (adapter stderr) spilled whole.
 const WHOLE_LINE_PATH: &str = "$line";
@@ -191,10 +180,10 @@ impl Elider {
             });
             id.to_string()
         } else {
-            "-".to_string()
+            UNRECORDED_ID.to_string()
         };
         let preview = &text[..floor_char_boundary(text, PREVIEW_BYTES.min(self.cap))];
-        format!("{preview}…@@acp-payload:{id}:{bytes}@@")
+        format!("{preview}…{}", payload_marker(&id, bytes))
     }
 }
 
@@ -230,10 +219,6 @@ fn sidecar_enabled(var: Option<&OsStr>) -> bool {
         ),
         None => true,
     }
-}
-
-fn payload_sidecar_path(slim: &Path) -> PathBuf {
-    slim.with_extension(SIDECAR_EXTENSION)
 }
 
 fn open_log(path: &Path) -> Option<Mutex<File>> {
@@ -273,7 +258,7 @@ fn first_open(path: &Path) -> bool {
 /// `acp-wire.log` + `"claude"` → `acp-wire-claude.log`). Empty leaves `base`
 /// untouched. Non-alphanumeric bytes in `agent_id` (a user-editable catalog
 /// field) map to `_` so it can never escape `base`'s directory.
-fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
+pub(super) fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
     if agent_id.is_empty() {
         return base.to_path_buf();
     }
@@ -290,7 +275,7 @@ fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
     let stem = base
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("acp-wire");
+        .unwrap_or(DEFAULT_BASE_STEM);
     let file_name = match base.extension().and_then(|s| s.to_str()) {
         Some(ext) => format!("{stem}-{safe_id}.{ext}"),
         None => format!("{stem}-{safe_id}"),

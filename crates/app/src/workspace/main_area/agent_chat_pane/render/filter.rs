@@ -11,10 +11,11 @@ use crate::ui::{
     button_chip_on_surface, checkbox,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::{
-    DisplayFilter, FilterAxis, FilterFacet, ToolSelection,
+    DisplayFilter, FilterAxis, FilterFacet, SectionState,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
+use crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -91,7 +92,7 @@ pub(super) fn filter_panel(
             // A parent toggle owns its rows, so they nest under it.
             Some(parent) => {
                 facets = facets
-                    .child(tools_parent_checkbox(view, current, parent, pane_id))
+                    .child(parent_checkbox(view, current, parent, pane_id))
                     .child(
                         div()
                             .ml(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
@@ -132,32 +133,31 @@ pub(super) fn filter_panel(
         .into_any_element()
 }
 
-/// The Tool section's parent toggle. Tri-state: checked when every category
-/// under it is on, indeterminate on a partial set — clicking it sets the whole
-/// section.
+/// A parented section's own toggle. Tri-state: checked when every row under it
+/// is on, indeterminate on a partial set — clicking it sets the whole section.
 ///
-/// Named for the one axis that has a parent rather than generalised: the
-/// tri-state reads `tool_selection()`, so a second parented axis would silently
-/// drive the tool filter. `parent` still comes from the axis table, so the id
-/// and label cannot drift from the section that holds them.
-fn tools_parent_checkbox(
+/// Reads the state through `section_state(parent)` rather than one axis's
+/// selection, so each parented axis drives its own filter. `parent` comes from
+/// the axis table, so the id and label cannot drift from the section that holds
+/// them.
+fn parent_checkbox(
     view: &gpui::WeakEntity<AgentChatView>,
     current: DisplayFilter,
     parent: FilterFacet,
     pane_id: PaneId,
 ) -> impl IntoElement + use<> {
-    let tools = current.tool_selection();
+    let state = current.section_state(parent);
     let view = view.clone();
     checkbox(
         SharedString::from(format!("agent-chat-filter-{}-{pane_id}", parent.token())),
         facet_label(parent),
         (),
     )
-    .checked(matches!(tools, ToolSelection::All))
-    .indeterminate(matches!(tools, ToolSelection::Some(_)))
+    .checked(state == SectionState::On)
+    .indeterminate(state == SectionState::Partial)
     .on_click(move |selected, _window, app| {
         if let Some(view) = view.upgrade() {
-            view.update(app, |v, cx| v.set_all_tools_filter(*selected, cx));
+            view.update(app, |v, cx| v.set_filter_section(parent, *selected, cx));
         }
     })
 }
@@ -191,6 +191,7 @@ fn panel_heading(label: String, cx: &App) -> impl IntoElement {
 fn axis_label(axis: FilterAxis) -> String {
     match axis {
         FilterAxis::Kind => s::agent_chat_filter_axis_kind(),
+        FilterAxis::Reply => s::agent_chat_filter_axis_reply(),
         FilterAxis::Tool => s::agent_chat_filter_axis_tool(),
     }
 }
@@ -199,6 +200,8 @@ fn facet_label(facet: FilterFacet) -> String {
     match facet {
         FilterFacet::Thinking => s::agent_chat_filter_thinking(),
         FilterFacet::Prose => s::agent_chat_filter_prose(),
+        FilterFacet::ProseAnswer => s::agent_chat_filter_prose_answer(),
+        FilterFacet::ProsePreamble => s::agent_chat_filter_prose_preamble(),
         FilterFacet::Tools => s::agent_chat_filter_tools(),
         FilterFacet::ToolRead => s::agent_chat_filter_tool_read(),
         FilterFacet::ToolEdit => s::agent_chat_filter_tool_edit(),
@@ -208,12 +211,30 @@ fn facet_label(facet: FilterFacet) -> String {
     }
 }
 
+/// The filter panel's own word for a tool category.
+///
+/// Taken from [`facet_label`] rather than a second set of strings so a step
+/// header and the checkbox that hides it can never disagree about what a kind is
+/// called. Total on purpose: every category has exactly one facet, so a new one
+/// has to be named here.
+pub(super) fn category_label(category: ToolCategory) -> String {
+    facet_label(match category {
+        ToolCategory::Read => FilterFacet::ToolRead,
+        ToolCategory::Edit => FilterFacet::ToolEdit,
+        ToolCategory::Search => FilterFacet::ToolSearch,
+        ToolCategory::Run => FilterFacet::ToolRun,
+        ToolCategory::Other => FilterFacet::ToolOther,
+    })
+}
+
 /// The reveal control's copy.
 ///
-/// Collapsed, the number states what clicking does: `revealable`, the rows this
-/// control puts on screen. When a collapsed step or response is holding filtered
-/// rows the reveal cannot reach, `excluded` is named too — otherwise the
-/// reachable count silently reads as the whole cut.
+/// Collapsed, the number states exactly what clicking does — nothing more. It
+/// used to also name the whole cut when a fold held part of it back, which read
+/// as "1 now, 6 on the next click" when the other six were somewhere else
+/// entirely and this control could not reach them. What the filter took from
+/// inside a fold is the step headers' job now: they keep a tool count the filter
+/// cannot shrink, so a count above fewer cards is the tell.
 ///
 /// Revealed, there is no number at all. Those rows are on screen, so a count
 /// restates them, and `Hide 12 filtered rows` is readable as a description of
@@ -222,11 +243,7 @@ fn filtered_chip_label(filtered: FilteredAway, revealed: bool) -> String {
     if revealed {
         return s::agent_chat_filtered_hide_again();
     }
-    if filtered.excluded > filtered.revealable {
-        s::agent_chat_filtered_show_partial(filtered.revealable, filtered.excluded)
-    } else {
-        s::agent_chat_filtered_show(filtered.revealable)
-    }
+    s::agent_chat_filtered_show(filtered.revealable)
 }
 
 /// The filter's reveal control, riding the response bar's trailing slot.
@@ -298,11 +315,8 @@ mod tests {
         );
     }
 
-    fn cut(revealable: usize, excluded: usize) -> FilteredAway {
-        FilteredAway {
-            revealable,
-            excluded,
-        }
+    fn cut(revealable: usize) -> FilteredAway {
+        FilteredAway { revealable }
     }
 
     /// Unrevealed the chip promises a count; revealed it promises none, and the
@@ -311,9 +325,9 @@ mod tests {
     /// rows are on screen.
     #[test]
     fn the_revealed_label_carries_no_count_at_all() {
-        let revealed: Vec<String> = [(12, 12), (1, 1), (12, 30)]
+        let revealed: Vec<String> = [12, 1, 30]
             .into_iter()
-            .map(|(r, e)| filtered_chip_label(cut(r, e), true))
+            .map(|r| filtered_chip_label(cut(r), true))
             .collect();
         assert!(
             revealed.iter().all(|l| l == &revealed[0]),
@@ -326,18 +340,22 @@ mod tests {
         );
     }
 
-    /// The unrevealed half names what clicking reveals, and names the whole cut
-    /// when a fold holds part of it back.
+    /// The unrevealed half names what clicking reveals, and nothing else. The
+    /// number is the reachable count, so the same count reads the same way no
+    /// matter how much the filter took from inside a fold.
     #[test]
-    fn the_unrevealed_label_names_the_reveal_and_the_whole_cut() {
-        let whole = filtered_chip_label(cut(12, 12), false);
-        assert!(whole.contains("12"), "{whole}");
-        let partial = filtered_chip_label(cut(12, 30), false);
-        assert!(
-            partial.contains("12") && partial.contains("30"),
-            "a fold holding part of the cut is named: {partial}"
+    fn the_unrevealed_label_names_only_what_clicking_reveals() {
+        let one = filtered_chip_label(cut(1), false);
+        assert!(one.contains('1'), "{one}");
+        let many = filtered_chip_label(cut(12), false);
+        assert!(many.contains("12"), "{many}");
+        assert_ne!(one, many, "singular and plural differ");
+        // No second number to disagree with the first.
+        assert_eq!(
+            many.matches(char::is_numeric).count(),
+            2,
+            "only the reachable count appears: {many}"
         );
-        assert_ne!(whole, partial);
     }
 
     #[test]
