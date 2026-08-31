@@ -555,7 +555,7 @@ fn fold_active_resolves_per_key() {
         &FoldKey::ToolGroup("t-live".to_owned()),
         &items
     ));
-    assert!(fold_active(&FoldKey::Response(0), &items));
+    assert!(fold_active(&FoldKey::Response(1), &items));
     // Activity is independent of whether a key belongs to the newest turn.
     assert!(!fold_active(&FoldKey::Response(4), &items));
     // Policy-independent keys ignore `active`.
@@ -588,7 +588,7 @@ fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
     let past = |key: FoldKey| assert_eq!(fold_turn(&key, &items), TurnPosition::Past, "{key:?}");
     let last = |key: FoldKey| assert_eq!(fold_turn(&key, &items), TurnPosition::Last, "{key:?}");
 
-    past(FoldKey::Response(0));
+    past(FoldKey::Response(1));
     past(FoldKey::Assistant(2));
     past(FoldKey::Step(1));
     past(FoldKey::Tool("t-old".to_owned()));
@@ -767,7 +767,7 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
     assert_eq!(
         keys,
         vec![
-            FoldKey::Response(0),
+            FoldKey::Response(1),
             FoldKey::Step(1),
             FoldKey::Thinking(2),
             FoldKey::Tool("c1".to_owned()),
@@ -791,7 +791,7 @@ fn a_lone_reply_folds_only_at_its_bar() {
             phase: Default::default(),
         },
     ];
-    assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Response(0)]);
+    assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Response(1)]);
 }
 
 /// A consecutive tool-call run (≥ 2) contributes a `ToolGroup` key on top
@@ -808,7 +808,7 @@ fn fold_keys_include_response_and_tool_group() {
     assert_eq!(
         keys,
         vec![
-            FoldKey::Response(0),
+            FoldKey::Response(1),
             FoldKey::ToolGroup("c1".to_owned()),
             FoldKey::Tool("c1".to_owned()),
             FoldKey::Tool("c2".to_owned()),

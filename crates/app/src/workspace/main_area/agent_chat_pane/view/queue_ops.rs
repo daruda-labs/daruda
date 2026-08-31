@@ -236,8 +236,11 @@ impl AgentChatView {
             .items
             .iter()
             .rposition(|item| matches!(item, ChatItem::UserText(_)))
-            .filter(|&anchor| {
-                let key = FoldKey::Response(anchor);
+            // The bar is keyed by the response's first item, not the user turn
+            // it answers — a hold recorded against the anchor would never match.
+            .map(|anchor| anchor + 1)
+            .filter(|&run_start| {
+                let key = FoldKey::Response(run_start);
                 self.fold.is_expanded(&key, fold_context(&key, &self.items))
             });
         self.fold.hold_response(held);

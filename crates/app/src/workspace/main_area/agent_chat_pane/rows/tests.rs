@@ -272,7 +272,7 @@ fn expanded_mode_opens_past_responses_and_keeps_settled_newest_steps_open() {
 fn a_user_fold_survives_a_mode_switch() {
     let items = two_settled_turns();
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(4), FoldContext::last(false)); // newest turn → collapsed
+    fold.toggle(FoldKey::Response(5), FoldContext::last(false)); // newest turn → collapsed
     for preset in FoldPreset::ALL {
         fold.set_mode(preset.mode());
         let rows = project_under(&items, &fold);
@@ -395,7 +395,7 @@ fn working_indicator_visible_when_response_collapsed() {
     ];
     let mut fold = FoldState::default();
     // User manually collapses the (last, in-flight) response.
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -427,7 +427,7 @@ fn conclusion_stays_visible_when_response_collapsed() {
         asst("done: fixed it"),
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true)); // collapse the response
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true)); // collapse the response
     let rows = project(
         &items,
         &fold,
@@ -516,7 +516,7 @@ fn only_the_last_assistant_message_is_the_conclusion() {
         asst("second message"),
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -549,7 +549,7 @@ fn prose_before_a_trailing_tool_run_stays_visible_without_being_a_conclusion() {
         tool("b", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -628,7 +628,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
         tool("b", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -660,7 +660,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         perm(false), // pending → actionable
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true)); // collapse the response
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true)); // collapse the response
     let rows = project(
         &items,
         &fold,
@@ -692,7 +692,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         perm(true), // resolved → no longer actionable
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -980,8 +980,8 @@ fn live_subagent_units_stays_linear_over_a_long_tool_run() {
     let elapsed = started.elapsed();
     assert_eq!(
         rows.len(),
-        items.len() + 2,
-        "the run's tail row + one group header + every member"
+        items.len() + 3,
+        "the run's bar + tail row + one group header + every member"
     );
     assert!(
         elapsed < std::time::Duration::from_secs(2),
@@ -1084,7 +1084,7 @@ fn collapsed_response_surfaces_a_live_tool_group() {
         tool("t2", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(0)], false); // force the response collapsed
+    fold.set_all([FoldKey::Response(1)], false); // force the response collapsed
     let rows = project(
         &items,
         &fold,
@@ -1118,7 +1118,7 @@ fn collapsed_response_hides_a_settled_tool_group() {
         tool("t2", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(0)], false);
+    fold.set_all([FoldKey::Response(1)], false);
     let rows = project(
         &items,
         &fold,
@@ -1151,6 +1151,7 @@ fn lone_tool_call_is_not_grouped() {
     assert_eq!(
         kinds(&rows),
         vec![
+            ("response", false),
             ("tail", true),
             ("step", false), // the prose + the lone call are one settled cycle
             ("item", true),  // "x"
@@ -1182,6 +1183,7 @@ fn in_progress_group_defaults_expanded() {
     assert_eq!(
         kinds(&rows),
         vec![
+            ("response", false),
             ("tail", true),
             ("group", false),
             ("item", false),
@@ -1208,6 +1210,7 @@ fn group_member_visibility_follows_fold_override() {
     assert_eq!(
         kinds(&rows),
         vec![
+            ("response", false),
             ("tail", true),
             ("group", false),
             ("item", false),
@@ -1229,7 +1232,7 @@ fn every_row_kind_declares_a_distinct_slot() {
     let kinds = vec![
         RowKind::User(0),
         RowKind::ResponseHeader {
-            anchor: 0,
+            run_start: 1,
             collapsed: false,
             filtered: FilteredAway::default(),
         },
@@ -1306,7 +1309,7 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
         asst("here is the result"),
     ];
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -1341,13 +1344,13 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
 }
 
 #[test]
-fn leading_run_without_a_user_anchor_gets_no_bar() {
+fn leading_run_without_a_user_anchor_still_gets_a_bar() {
     use ToolStatusView::Failed;
     // Reachable on session restore: `append_user_chunk` drops a replayed
     // `<task-notification>` user turn (see daruda_acp::mapping), so a restored
-    // pane can open with agent items and no `UserText` anchor. The bar is
-    // anchored on the user turn, so such a run gets none — and its blocks stay
-    // plain `AgentItem`s carrying no verdict of their own.
+    // pane can open with agent items and no `UserText` anchor. It is still a
+    // response, and the filter's reveal rides the bar — a run without one has
+    // nowhere to put it, so the bar keys off the run rather than the user turn.
     let items = [asst("here is what I found"), tool("c1", Failed)];
     let rows = project(
         &items,
@@ -1362,15 +1365,10 @@ fn leading_run_without_a_user_anchor_gets_no_bar() {
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(0))),
         "its prose stays a plain block"
     );
-    assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ResponseHeader { .. })),
-        "and no bar is emitted for it either"
-    );
     assert_eq!(
         kinds(&rows),
         vec![
+            ("response", false),
             ("tail", true),
             ("step", false),
             ("item", false),
@@ -1601,7 +1599,7 @@ fn a_collapsed_response_surfaces_a_live_step() {
         tool("b", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(0)], false);
+    fold.set_all([FoldKey::Response(1)], false);
     let rows = project(
         &items,
         &fold,
@@ -1623,7 +1621,7 @@ fn a_collapsed_response_surfaces_a_live_step() {
         tool("b", Completed),
     ];
     let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(0)], false);
+    fold.set_all([FoldKey::Response(1)], false);
     let rows = project(
         &items,
         &fold,
@@ -1922,7 +1920,7 @@ fn revealing_the_tail_shows_every_step_again() {
 fn a_collapsed_response_hides_its_tail_row_too() {
     let items = turn_of_cycles(6);
     let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Response(0), FoldContext::past(true));
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &fold,
@@ -2300,7 +2298,7 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
     let items = one_step_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
-    collapsed.toggle(FoldKey::Response(0), FoldContext::past(true));
+    collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &collapsed,
@@ -2334,7 +2332,7 @@ fn the_placeholder_counts_only_what_the_filter_alone_took() {
     let items = one_step_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
-    collapsed.toggle(FoldKey::Response(0), FoldContext::past(true));
+    collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
         &items,
         &collapsed,
@@ -2396,10 +2394,10 @@ fn changing_the_filter_keeps_every_row_in_its_slot() {
 /// scroll.
 #[test]
 fn the_bar_keeps_its_slot_as_its_tally_changes() {
-    let bar = |anchor: usize, filtered: FilteredAway, collapsed: bool| {
+    let bar = |run_start: usize, filtered: FilteredAway, collapsed: bool| {
         RenderRow::at(
             RowKind::ResponseHeader {
-                anchor,
+                run_start,
                 collapsed,
                 filtered,
             },
@@ -2414,7 +2412,7 @@ fn the_bar_keeps_its_slot_as_its_tally_changes() {
     let a = bar(1, full, true);
     assert!(
         a.same_slot(&bar(1, FilteredAway::default(), false)),
-        "same anchor → same slot"
+        "same run start → same slot"
     );
     assert!(!a.same_slot(&bar(9, full, true)));
     assert!(!a.same_slot(&RenderRow::at(
@@ -2453,17 +2451,17 @@ fn each_run_carries_its_own_tally() {
         asst("a2"),
         tool("t2", ToolStatusView::Completed),
     ];
-    let anchors: Vec<usize> = project_filtered(&items, &DisplayFilter::default())
+    let starts: Vec<usize> = project_filtered(&items, &DisplayFilter::default())
         .iter()
         .filter_map(|r| match r.kind {
-            RowKind::ResponseHeader { anchor, .. } => Some(anchor),
+            RowKind::ResponseHeader { run_start, .. } => Some(run_start),
             _ => None,
         })
         .collect();
     assert_eq!(
-        anchors,
-        vec![0, 3],
-        "one bar per run, keyed by its user turn"
+        starts,
+        vec![1, 4],
+        "one bar per run, keyed by the run's first item"
     );
 }
 

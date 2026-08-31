@@ -32,7 +32,10 @@ pub(in crate::workspace) struct FilteredAway {
 pub(in crate::workspace) enum RowKind {
     User(usize),
     ResponseHeader {
-        anchor: usize,
+        /// First item of the response this bar heads. Keyed off the run rather
+        /// than the user turn: a restored pane can open with a run whose user
+        /// turn was dropped on replay, and that run needs a bar too.
+        run_start: usize,
         collapsed: bool,
         /// What the display filter took out of this response. The bar is the
         /// run's one header, so the reveal control rides here rather than on a
@@ -188,7 +191,7 @@ impl RowKind {
     fn slot(&self) -> RowSlot<'_> {
         match self {
             RowKind::User(ix) => RowSlot::User(*ix),
-            RowKind::ResponseHeader { anchor, .. } => RowSlot::Response(*anchor),
+            RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
             RowKind::StepHeader(header) => RowSlot::Step(header.span.start),
             RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
@@ -252,15 +255,10 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
     let mut rows = Vec::with_capacity(items.len() + 4);
     let mut i = 0;
     while i < items.len() {
-        let anchor = match &items[i] {
-            ChatItem::UserText(_) => {
-                rows.push(RenderRow::at(RowKind::User(i), false, 0));
-                let a = i;
-                i += 1;
-                Some(a)
-            }
-            _ => None,
-        };
+        if matches!(&items[i], ChatItem::UserText(_)) {
+            rows.push(RenderRow::at(RowKind::User(i), false, 0));
+            i += 1;
+        }
 
         let run = agent_run(items, i);
         i = run.end;
@@ -282,14 +280,15 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
         // filter's reveal control lives, and a turn without one has nowhere to
         // put it. Only a run with nothing on screen (an empty reply) is skipped.
         let renders_something = tools >= 1 || blocks >= 1;
-        let run_indent = if let (true, Some(a)) = (renders_something, anchor) {
-            let key = FoldKey::Response(a);
-            let collapsed = !fold.is_expanded(&key, fold_context_at(&key, a, items, boundary));
+        let run_indent = if renders_something {
+            let key = FoldKey::Response(run.start);
+            let collapsed =
+                !fold.is_expanded(&key, fold_context_at(&key, run.start, items, boundary));
             let bar_ix = rows.len();
             rows.push(
                 RenderRow::at(
                     RowKind::ResponseHeader {
-                        anchor: a,
+                        run_start: run.start,
                         collapsed,
                         // Back-patched once the run walk knows what it dropped.
                         filtered: FilteredAway::default(),

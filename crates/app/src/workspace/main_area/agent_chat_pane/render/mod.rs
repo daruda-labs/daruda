@@ -387,12 +387,12 @@ fn render_row(
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::ResponseHeader {
-            anchor,
+            run_start,
             collapsed,
             filtered,
         } => response_bar(
             this,
-            *anchor,
+            *run_start,
             *collapsed,
             *filtered,
             row.filter_revealed,
@@ -510,14 +510,14 @@ pub(super) fn pulse_opacity(cx: &gpui::App) -> f32 {
 /// the status-rollup glyph sit at the right edge.
 fn response_bar(
     this: &AgentChatView,
-    anchor: usize,
+    run_start: usize,
     collapsed: bool,
     filtered: FilteredAway,
     filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let run = agent_run(&this.items, anchor + 1);
+    let run = agent_run(&this.items, run_start);
     let tools = kept_tools(this, run.clone(), filter_revealed);
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
@@ -564,8 +564,8 @@ fn response_bar(
     // Borderless section bar, matching the block headers — section headers stay
     // light; only content cards (`tool_card`) carry box chrome.
     FoldRow::section(
-        SharedString::from(format!("agent-chat-response-{anchor}")),
-        FoldKey::Response(anchor),
+        SharedString::from(format!("agent-chat-response-{run_start}")),
+        FoldKey::Response(run_start),
         !collapsed,
         header,
     )

@@ -122,7 +122,7 @@ pub(in crate::workspace) struct FoldState {
     overrides: HashMap<FoldKey, bool>,
     /// The one response a prompt send froze open so the prose being read is not
     /// yanked away. Machine-written, so it stays out of `overrides` and holds
-    /// only the newest anchor — see [`Self::hold_response`].
+    /// only the newest run start — see [`Self::hold_response`].
     held_response: Option<usize>,
     mode: PaneChoice<FoldMode>,
 }
@@ -156,11 +156,12 @@ impl FoldState {
         self.held_response = None;
     }
 
-    /// Freeze `anchor`'s response open until the next send, or release the hold
-    /// with `None`. Ranks below a user override and above the mode default, and
-    /// replaces any previous hold — only the newest response is ever held.
-    pub(in crate::workspace) fn hold_response(&mut self, anchor: Option<usize>) {
-        self.held_response = anchor;
+    /// Freeze the response starting at `run_start` open until the next send, or
+    /// release the hold with `None`. Ranks below a user override and above the
+    /// mode default, and replaces any previous hold — only the newest response
+    /// is ever held.
+    pub(in crate::workspace) fn hold_response(&mut self, run_start: Option<usize>) {
+        self.held_response = run_start;
     }
 
     fn policy_for(&self, key: &FoldKey, ctx: FoldContext) -> FoldPolicy {
@@ -187,7 +188,7 @@ impl FoldState {
         if let Some(expanded) = self.overrides.get(key) {
             return *expanded;
         }
-        if matches!(key, FoldKey::Response(anchor) if self.held_response == Some(*anchor)) {
+        if matches!(key, FoldKey::Response(run_start) if self.held_response == Some(*run_start)) {
             return true;
         }
         natural_default(self.policy_for(key, ctx), ctx.active)

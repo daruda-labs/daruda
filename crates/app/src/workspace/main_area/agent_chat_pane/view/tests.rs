@@ -193,7 +193,7 @@ fn echo_prompt_respects_collapsed_tail_response(cx: &mut gpui::TestAppContext) {
             view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
             view.items.push(assistant_text_item("process"));
             view.items.push(assistant_text_item("final"));
-            view.toggle_fold(FoldKey::Response(0), live_window, cx);
+            view.toggle_fold(FoldKey::Response(1), live_window, cx);
 
             view.echo_prompt("q2".to_string(), cx);
 

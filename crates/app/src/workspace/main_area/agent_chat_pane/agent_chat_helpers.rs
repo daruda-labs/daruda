@@ -84,7 +84,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         .collect();
     for row in &rows {
         match &row.kind {
-            RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
+            RowKind::ResponseHeader { run_start, .. } => keys.push(FoldKey::Response(*run_start)),
             RowKind::StepHeader(header) => keys.push(FoldKey::Step(header.span.start)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
             RowKind::TailMore { .. } => {}
