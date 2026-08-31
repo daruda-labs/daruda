@@ -252,11 +252,11 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
             .clone()
             .filter(|&k| matches!(items[k], ChatItem::ToolCall(_)))
             .count();
-        let non_trivial = anchor.is_some() && (tools >= 1 || run.len() >= RESPONSE_MIN_BLOCKS);
-        let conclusion_ix = run
-            .clone()
-            .rev()
-            .find(|&k| matches!(items[k], ChatItem::AssistantText { .. }));
+        let blocks = run.clone().filter(|&k| !is_bodyless(&items[k])).count();
+        let non_trivial = anchor.is_some() && (tools >= 1 || blocks >= RESPONSE_MIN_BLOCKS);
+        let conclusion_ix = run.clone().rev().find(|&k| {
+            matches!(items[k], ChatItem::AssistantText { .. }) && !is_bodyless(&items[k])
+        });
         let filter_key = FoldKey::Filtered(run.start);
         let filter_revealed = fold.is_expanded(
             &filter_key,
@@ -298,7 +298,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
             1u8
         } else {
             // Only an anchored single-block run represents a whole response.
-            let solo = anchor.is_some() && run.len() == 1;
+            let solo = anchor.is_some() && blocks == 1;
             project_run(
                 RunContext {
                     items,
@@ -523,7 +523,9 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
         // Every row pushed for the rest of this iteration belongs to whichever
         // step the walk is in — one assignment point, so the flag cannot drift.
         out.outside_window = in_step.is_some_and(|s| s.outside_window);
-        if matches!(&items[k], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc)) {
+        if is_bodyless(&items[k])
+            || matches!(&items[k], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc))
+        {
             k += 1;
             continue;
         }
@@ -614,11 +616,25 @@ fn projects_a_row(
     filter: &FilterMatchIndex,
 ) -> bool {
     !matches!(&items[ix], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc))
+        && !is_bodyless(&items[ix])
         && filter.matches(&items[ix])
 }
 
 fn is_tool_call(item: &ChatItem) -> bool {
     matches!(item, ChatItem::ToolCall(_))
+}
+
+/// A message carrying no renderable text. Two sources feed it: a message's
+/// leading chunk arrives empty, and `daruda_acp` collapses a content block it
+/// cannot render (image, audio, resource) to an empty string. Neither earns a
+/// row, a block slot in the step / response thresholds, or the conclusion —
+/// which escapes its enclosing fold and would pin a blank row over it.
+pub(super) fn is_bodyless(item: &ChatItem) -> bool {
+    matches!(
+        item,
+        ChatItem::AssistantText { text, .. } | ChatItem::Thinking { text, .. }
+            if text.trim().is_empty()
+    )
 }
 
 /// Tool ids with a live descendant, built by walking upward from live calls.

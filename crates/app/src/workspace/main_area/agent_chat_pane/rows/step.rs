@@ -6,7 +6,7 @@ use std::ops::Range;
 use daruda_acp::ChatItem;
 
 use super::super::tool_hierarchy::ToolHierarchy;
-use super::is_tool_call;
+use super::{is_bodyless, is_tool_call};
 
 /// Minimum projected row count that earns a step header.
 const STEP_MIN_ROWS: usize = 2;
@@ -101,7 +101,9 @@ pub(in crate::workspace) fn step_span_at(items: &[ChatItem], first_ix: usize) ->
 
 /// Count the projected rows a step header would fold.
 fn folded_rows(items: &[ChatItem], span: &StepSpan, hierarchy: &ToolHierarchy<'_>) -> usize {
-    let prose = span.tool_start - span.start;
+    let prose = (span.start..span.tool_start)
+        .filter(|&k| !is_bodyless(&items[k]))
+        .count();
     let mut chunks = 0;
     let mut k = span.tool_start;
     while k < span.end {

@@ -2534,3 +2534,95 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
         "revealing filtered rows restores the count of the rows now on screen"
     );
 }
+
+/// `text_of` collapses a content block it cannot render to an empty string, so
+/// an assistant message can arrive with no text at all. It has nothing to show.
+#[test]
+fn an_empty_assistant_reply_projects_no_row() {
+    let items = [ChatItem::UserText("hi".into()), asst("")];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    assert_eq!(kinds(&rows), vec![("user", false), ("filtered", true)]);
+}
+
+/// A bodyless message must not occupy the row slot that tips a step into
+/// earning a header, or an invisible item grows visible chrome.
+#[test]
+fn an_empty_message_earns_no_step_header() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst(""),
+        tool("a", Completed),
+    ];
+    let bare = [ChatItem::UserText("q".into()), tool("a", Completed)];
+    let project_all = |items: &[ChatItem]| {
+        project(
+            items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(items),
+            TailWindow::All,
+            &DisplayFilter::default(),
+        )
+    };
+    assert_eq!(kinds(&project_all(&items)), kinds(&project_all(&bare)));
+}
+
+/// The conclusion escapes its enclosing fold, so an empty message taking that
+/// slot leaves a blank row pinned over a collapsed step — and buries the real
+/// reply that should have held it.
+#[test]
+fn an_empty_message_is_never_the_conclusion() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("real"),
+        tool("a", Completed),
+        asst(""),
+    ];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    let visible_items: Vec<usize> = rows
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter_map(|r| match r.kind {
+            RowKind::AgentItem(i) | RowKind::ConclusionItem(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        visible_items,
+        vec![1],
+        "the real reply holds the conclusion"
+    );
+}
+
+#[test]
+fn an_empty_thinking_block_projects_no_row() {
+    let items = [ChatItem::UserText("hi".into()), think(""), asst("done")];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    assert_eq!(
+        kinds(&rows),
+        vec![("user", false), ("filtered", true), ("solo", false)]
+    );
+}
