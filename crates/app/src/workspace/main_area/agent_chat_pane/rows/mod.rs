@@ -28,6 +28,20 @@ pub(in crate::workspace) struct FilteredAway {
     pub(in crate::workspace) excluded: usize,
 }
 
+impl FilteredAway {
+    /// Whether the bar carries a reveal chip.
+    ///
+    /// `revealable` already accounts for folds — a row a fold holds is not
+    /// counted — so the bar's own collapse must not be checked again on top of
+    /// it. The conclusion's `force_visible` escape is exactly the row that
+    /// survives a collapsed response and can still be filtered out of it,
+    /// leaving the turn showing nothing but its bar; a second collapse check
+    /// erased the one control that leads back.
+    pub(in crate::workspace) fn offers_reveal(self) -> bool {
+        self.revealable > 0
+    }
+}
+
 /// Projected row kinds keyed by stable item or group identity.
 pub(in crate::workspace) enum RowKind {
     User(usize),

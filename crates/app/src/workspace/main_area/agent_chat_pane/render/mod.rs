@@ -538,8 +538,7 @@ fn response_bar(
     .leading(agent_label(this, cx).into_any_element());
     // The filter's reveal sits left of the run's own counts, so the numbers that
     // are always there keep the right edge and do not shift when it appears.
-    // A collapsed bar reveals nothing, so it offers no chip.
-    if !collapsed && filtered.revealable > 0 {
+    if filtered.offers_reveal() {
         let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(this.dim_amount);
         header = header.trailing(filter::filtered_chip(
             run.start,

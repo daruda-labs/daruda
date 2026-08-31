@@ -2327,6 +2327,36 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
     );
 }
 
+/// A collapsed response still shows its conclusion — that is what
+/// `force_visible` buys. When the filter takes that one row too, the turn is
+/// left with nothing but its bar, so the bar has to keep offering the way back.
+/// The fold is already accounted for inside `revealable`, and re-checking the
+/// collapse at the render site is what erased this exact case.
+#[test]
+fn a_collapsed_response_emptied_by_the_filter_still_offers_the_reveal() {
+    let items = one_step_turn();
+    let mut collapsed = FoldState::default();
+    collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
+    let rows = project(
+        &items,
+        &collapsed,
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::from_tokens(["tools"]),
+    );
+    assert!(
+        rows.iter()
+            .filter(|r| !matches!(r.kind, RowKind::User(_) | RowKind::ResponseHeader { .. }))
+            .all(|r| r.hidden),
+        "nothing but the bar is left on screen"
+    );
+    assert!(
+        filtered_away(&rows).offers_reveal(),
+        "so the bar still carries the chip"
+    );
+}
+
 #[test]
 fn the_placeholder_counts_only_what_the_filter_alone_took() {
     let items = one_step_turn();
