@@ -317,6 +317,10 @@ impl Workspace {
             view.update(cx, |v, _| {
                 v.agent_id = id;
                 v.agent_name = name;
+                // The program belongs to the agent that reported it. Leaving it
+                // would read the incoming agent's traffic in the outgoing one's
+                // dialect until the next connect restates it.
+                v.agent_program = None;
             });
             self.mutate_durable(cx, |_, _| {});
         }

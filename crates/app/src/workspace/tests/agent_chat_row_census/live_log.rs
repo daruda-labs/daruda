@@ -25,9 +25,27 @@ const FILTERS: [(&str, &[&str]); 3] = [
 
 const SAMPLED_STEPS: usize = 3;
 
+/// The `agent_info.name` from the capture's `initialize` response, if it has
+/// one. `None` for a capture whose handshake was not recorded.
+fn reported_program(log: &str) -> Option<String> {
+    log.lines().find_map(|line| {
+        let brace = line.find('{')?;
+        let v = serde_json::from_str::<serde_json::Value>(&line[brace..]).ok()?;
+        v.get("result")?
+            .get("agentInfo")?
+            .get("name")?
+            .as_str()
+            .map(str::to_owned)
+    })
+}
+
 /// Replay prompts and updates into the item list a live pane would hold.
+///
+/// The strategy is selected the way production selects it — from the program
+/// the log's own `initialize` reports — so a capture exercises the same dialect
+/// a live pane would read it with, not just the catalog-id fallback.
 fn replay(log: &str, agent_id: &str) -> Vec<ChatItem> {
-    let adapter = adapter_for(None, agent_id);
+    let adapter = adapter_for(reported_program(log).as_deref(), agent_id);
     let mut items: Vec<ChatItem> = Vec::new();
     for line in log.lines() {
         let Some(brace) = line.find('{') else {

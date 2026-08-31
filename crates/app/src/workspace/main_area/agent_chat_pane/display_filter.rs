@@ -145,10 +145,19 @@ impl DisplayFilter {
     }
 
     /// Read the superseded `display_filter` field, whose list named the same
-    /// visible set — except that it wrote an empty list for "unfiltered", the
-    /// one value the current reading gives the opposite meaning.
+    /// visible set — except for the lists it could parse no facet out of.
+    ///
+    /// Those meant "unfiltered", and not only when the list was empty: the old
+    /// reader produced an all-off filter for a list of tokens it did not know,
+    /// then short-circuited to "show everything" on seeing it was all off. The
+    /// current reading has no such short-circuit, so a pane storing a facet this
+    /// build has since removed would come back showing nothing. The condition is
+    /// "no facet parsed", not "no token present".
     pub(in crate::workspace) fn from_legacy_tokens(tokens: &[String]) -> Self {
-        if tokens.is_empty() {
+        if !tokens
+            .iter()
+            .any(|token| FilterFacet::from_token(token).is_some())
+        {
             return Self::default();
         }
         Self::from_stored(tokens)

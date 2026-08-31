@@ -850,3 +850,23 @@ fn test_data_dir() -> std::path::PathBuf {
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!("daruda_telegram_ops_test_{id}"))
 }
+
+/// A message can carry no text at all — `daruda_acp` collapses a content block
+/// it cannot render to an empty string. Such a message must not become the
+/// reply the watch reports, or a notification arrives with nothing in it.
+#[test]
+fn a_reply_with_no_text_does_not_resolve_the_watch() {
+    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+    let items = [assistant_text("", false)];
+    assert!(watch.resolve(&items).is_none());
+
+    let items = [
+        assistant_text("", false),
+        assistant_text("real answer", false),
+    ];
+    assert_eq!(
+        watch.resolve(&items),
+        Some(super::FirstResponseOutcome::Text("real answer".to_string())),
+        "the watch waits for a message that has something to say"
+    );
+}

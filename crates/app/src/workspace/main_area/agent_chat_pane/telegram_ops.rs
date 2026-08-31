@@ -264,7 +264,10 @@ impl FirstResponseWatch {
     /// any — `None` means keep watching. A still-streaming `AssistantText`
     /// and any `Thinking` item are skipped: reasoning isn't the visible
     /// reply, and a text reply must be complete before it's worth sending
-    /// (see `daruda_acp::ChatItem::AssistantText`'s `streaming` field).
+    /// (see `daruda_acp::ChatItem::AssistantText`'s `streaming` field). A
+    /// settled message with no text is skipped too — `daruda_acp` collapses a
+    /// content block it cannot render to an empty string, and an empty
+    /// notification is worse than a late one.
     pub(in crate::workspace) fn resolve(
         &self,
         items: &[daruda_acp::ChatItem],
@@ -277,7 +280,7 @@ impl FirstResponseWatch {
                     text,
                     streaming: false,
                     ..
-                } => Some(FirstResponseOutcome::Text(text.clone())),
+                } if !text.trim().is_empty() => Some(FirstResponseOutcome::Text(text.clone())),
                 daruda_acp::ChatItem::ToolCall(tool) => Some(FirstResponseOutcome::Tool {
                     tool_title: Some(tool.title.clone()).filter(|t| !t.is_empty()),
                 }),
@@ -341,8 +344,12 @@ impl Workspace {
             );
         };
         let view = view.read(cx);
+        // Skips a message with no text for the same reason `resolve` does: it
+        // would put an empty preview under the notification header.
         let last_response = view.items.iter().rev().find_map(|item| match item {
-            daruda_acp::ChatItem::AssistantText { text, .. } => Some(text.as_str()),
+            daruda_acp::ChatItem::AssistantText { text, .. } if !text.trim().is_empty() => {
+                Some(text.as_str())
+            }
             _ => None,
         });
         match last_response {

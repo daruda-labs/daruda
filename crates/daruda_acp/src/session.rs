@@ -187,8 +187,21 @@ pub enum AcpEvent {
         /// speaks, so the host feeds it to
         /// [`crate::adapter::adapter_for`]: the catalog id is only daruda's
         /// label and a user may register the same program under any id.
+        ///
+        /// An idempotent restatement of [`AcpEvent::AgentIdentified`], which
+        /// carried it early enough for a resume's replayed updates.
         program: Option<String>,
     },
+    /// The agent said what program it is (`initialize`'s `agent_info.name`).
+    ///
+    /// Emitted as soon as `initialize` answers — **before** any `session/update`
+    /// can arrive. That timing is the point: a `session/load` replays the whole
+    /// prior conversation as updates before [`AcpEvent::Connected`] resolves, so
+    /// a host that learned the program from `Connected` would map every restored
+    /// item with the wrong strategy and the live ones with the right one, giving
+    /// a single transcript two dialects. `None` for an agent that reports no
+    /// identity, which leaves the host's catalog id to decide.
+    AgentIdentified { program: Option<String> },
     /// The agent replaced its session config option state (the protocol carries
     /// the full option set), from either source: the reply to our
     /// `set_config_option` request, or an agent-pushed `ConfigOptionUpdate`
@@ -796,6 +809,11 @@ async fn run_connection(
                     Ok((capabilities, login_methods, program, resume, fresh))
                 })
                 .await?;
+            // Before the branch below: a `session/load` inside it replays the
+            // conversation as updates, and those must map under this program.
+            let _ = event_tx.unbounded_send(AcpEvent::AgentIdentified {
+                program: program.clone(),
+            });
 
             // New session, or resume an existing one via session/load. A load
             // replays the prior conversation as session/update notifications
@@ -2128,6 +2146,65 @@ mod tests {
                 program.as_deref(),
                 Some("@agentclientprotocol/claude-agent-acp"),
                 "the reported program reaches the host verbatim"
+            );
+
+            drop(handle);
+            connection.await.expect("connection task ends cleanly");
+        });
+    }
+
+    /// The ordering this event exists for: a resume replays the conversation as
+    /// updates before `Connected` resolves, so the program has to arrive first
+    /// or the restored half of a transcript is mapped under the wrong dialect.
+    #[test]
+    fn the_program_arrives_before_any_update() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+        let handle = AcpSessionHandle {
+            commands: command_tx,
+            permission_parks: permission_parks.clone(),
+        };
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                self_identifying_agent(),
+                PathBuf::from("."),
+                None,
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            let mut identified_at: Option<usize> = None;
+            let connected_at: usize;
+            let mut seen = 0usize;
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::AgentIdentified { program }) => {
+                        assert_eq!(
+                            program.as_deref(),
+                            Some("@agentclientprotocol/claude-agent-acp")
+                        );
+                        identified_at.get_or_insert(seen);
+                    }
+                    Some(AcpEvent::Connected { .. }) => {
+                        connected_at = seen;
+                        break;
+                    }
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+                seen += 1;
+            }
+
+            assert!(
+                identified_at.is_some_and(|at| at < connected_at),
+                "the program must be known before Connected, since a resume's \
+                 replayed updates land in between"
             );
 
             drop(handle);

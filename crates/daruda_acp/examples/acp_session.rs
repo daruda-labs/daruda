@@ -48,6 +48,9 @@ fn main() {
                 AcpEvent::ConfigOptionRejected { config_id, reason } => {
                     eprintln!("[config-rejected] {config_id}: {reason}");
                 }
+                AcpEvent::AgentIdentified { program } => {
+                    eprintln!("[identified] {program:?}");
+                }
                 AcpEvent::Connected {
                     session_id,
                     modes,

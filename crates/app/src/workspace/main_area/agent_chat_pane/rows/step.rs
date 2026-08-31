@@ -119,11 +119,16 @@ pub(in crate::workspace) struct StepHeaderText {
 /// Reading the preamble label rather than the agent id is what keeps this
 /// agent-neutral: only an adapter that labels its messages produces one, so the
 /// renderer never asks who is speaking.
+///
+/// Both halves skip a [`is_bodyless`] item. One renders nothing, so letting it
+/// take a slot would have an invisible item change the layout of the visible
+/// ones — the header would enter its two-state mode and take the thought's row
+/// while showing the same line in both states.
 pub(in crate::workspace) fn step_header_text(
     items: &[ChatItem],
     span: &StepSpan,
 ) -> Option<StepHeaderText> {
-    let mut prose = span.start..span.tool_start;
+    let mut prose = (span.start..span.tool_start).filter(|&k| !is_bodyless(&items[k]));
     let collapsed = prose.clone().find(|&k| {
         matches!(&items[k], ChatItem::AssistantText { phase, .. }
             if *phase == daruda_acp::MessagePhase::Commentary)
@@ -136,9 +141,10 @@ pub(in crate::workspace) fn step_header_text(
     })
 }
 
-/// Whether a header showing this body's first line would be showing all of it.
-/// The header is one ellipsized row, so anything longer would be a promise the
-/// reader cannot collect on.
+/// Whether this body is a single line, so a header showing its first line shows
+/// all of it. Guards multi-line bodies only — a long single line still fits by
+/// this test and is ellipsized on screen, which costs the reader nothing, since
+/// expanding would show them that same one line.
 fn fits_a_header(text: &str) -> bool {
     text.lines().filter(|l| !l.trim().is_empty()).count() <= 1
 }
@@ -221,6 +227,34 @@ mod header_text_tests {
         let text = step_header_text(&items, &span_of(&items)).expect("both halves present");
         assert_eq!(text.collapsed, 1, "the preamble is what the fold hides");
         assert_eq!(text.expanded, Some(0), "the header takes over the thought");
+    }
+
+    /// An item that renders nothing must not change the layout of items that do.
+    /// An empty preamble would otherwise flip the header into its two-state mode
+    /// and take the thought's row, leaving the header showing the same line in
+    /// both states for no gain.
+    #[test]
+    fn a_preamble_with_no_text_is_not_a_preamble() {
+        let items = [
+            think("**Inspecting Workspace struct and operations**"),
+            asst("", MessagePhase::Commentary),
+            tool(),
+        ];
+        assert!(step_header_text(&items, &span_of(&items)).is_none());
+    }
+
+    /// A thought with no text cannot be shown whole by a header that shows
+    /// nothing, so it must not be taken over either.
+    #[test]
+    fn a_thought_with_no_text_is_not_taken_over() {
+        let items = [
+            think(""),
+            asst("walking the structure", MessagePhase::Commentary),
+            tool(),
+        ];
+        let text = step_header_text(&items, &span_of(&items)).expect("a real preamble");
+        assert_eq!(text.collapsed, 1);
+        assert_eq!(text.expanded, None, "nothing to take over");
     }
 
     /// Without a labelled preamble there is nothing to alternate with, so the

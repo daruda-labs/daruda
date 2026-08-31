@@ -353,14 +353,32 @@ fn an_unknown_token_is_dropped_rather_than_failing() {
     assert_eq!(f.tokens(), vec!["tools"]);
 }
 
+/// A facet this build no longer knows must not decide what the pane shows. The
+/// old field's reader treated a list it could parse nothing out of as
+/// unfiltered — the short-circuit that made it so is gone, so the reader has to
+/// say it.
 #[test]
-fn removed_status_tokens_are_ignored_for_persistence_compatibility() {
-    assert!(
-        filter(&["status_running", "status_ok", "status_failed"])
-            .tokens()
-            .is_empty()
+fn a_legacy_list_of_only_removed_tokens_still_means_unfiltered() {
+    let stored: Vec<String> = ["status_running", "status_ok", "status_failed"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        DisplayFilter::from_legacy_tokens(&stored),
+        DisplayFilter::default(),
+        "a pane whose stored facets no longer exist opens showing everything"
     );
+}
+
+/// A removed token beside a live one drops only itself — the live one still
+/// says what to show.
+#[test]
+fn a_removed_token_beside_a_live_one_drops_only_itself() {
     assert_eq!(filter(&["tools", "status_failed"]).tokens(), vec!["tools"]);
+    assert_eq!(
+        DisplayFilter::from_legacy_tokens(&["tools".to_owned(), "status_failed".to_owned()]),
+        filter(&["tools"])
+    );
 }
 
 #[test]
@@ -399,7 +417,17 @@ fn all_tools_and_partial_tools_are_distinct_states() {
         ToolSelection::Some(_)
     ));
     assert!(!without_edit.contains(FilterFacet::ToolEdit));
-    assert!(without_edit.hidden().contains(&FilterFacet::ToolEdit));
+    // Exact, not `contains`: a `toggled` that dropped a second category would
+    // pass the looser check while quietly widening what the chip reports.
+    assert_eq!(
+        without_edit.hidden(),
+        vec![
+            FilterFacet::Thinking,
+            FilterFacet::Prose,
+            FilterFacet::ToolEdit
+        ],
+        "this filter starts from tools-only, so the two Kind facets are hidden too"
+    );
 }
 
 #[test]

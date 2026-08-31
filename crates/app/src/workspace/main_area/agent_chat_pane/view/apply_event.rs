@@ -88,6 +88,9 @@ impl AgentChatView {
                     self.set_handshaking(phase, cx);
                 }
             }
+            // Arrives before any update, so a resume's replayed conversation is
+            // already mapped under the right dialect. `Connected` restates it.
+            AcpEvent::AgentIdentified { program } => self.agent_program = program,
             AcpEvent::Connected {
                 session_id,
                 modes,
