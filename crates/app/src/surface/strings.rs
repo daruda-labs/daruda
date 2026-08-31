@@ -2152,8 +2152,12 @@ pub fn agent_chat_filter_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.filter_chip", value = value).into_owned()
 }
 
-pub fn agent_chat_filter_selected_count(count: usize) -> String {
-    rust_i18n::t!("agent_chat.filter_selected_count", count = count).into_owned()
+pub fn agent_chat_filter_hidden(value: &str) -> String {
+    rust_i18n::t!("agent_chat.filter_hidden", value = value).into_owned()
+}
+
+pub fn agent_chat_filter_hidden_count(count: usize) -> String {
+    rust_i18n::t!("agent_chat.filter_hidden_count", count = count).into_owned()
 }
 
 pub fn agent_chat_filter_tooltip() -> String {

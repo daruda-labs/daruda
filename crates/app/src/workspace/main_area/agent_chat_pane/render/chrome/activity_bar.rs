@@ -233,7 +233,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
 /// no other tell there. Marking the gear selected restores the signal the
 /// chips carried for free.
 fn options_are_default(fold: FoldMode, filter: DisplayFilter, tail: TailWindow) -> bool {
-    fold_is_default(fold) && filter.is_empty() && tail_is_default(tail)
+    fold_is_default(fold) && filter.shows_everything() && tail_is_default(tail)
 }
 
 /// The gear's tooltip: the wide bar's three chip labels, verbatim. Always all

@@ -115,19 +115,54 @@ pub(in crate::workspace) enum ToolSelection {
     Some(ToolCategorySet),
 }
 
-/// What the pane is narrowed to. Empty means show everything.
+/// Which kinds of work the pane shows. Each field is a visibility, so a checked
+/// box means "this is on screen" — the way a checkbox list reads.
 ///
 /// Tool selection distinguishes no tools, all tools, and a partial category set.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct DisplayFilter {
     thinking: bool,
     prose: bool,
     tools: ToolSelection,
 }
 
+impl Default for DisplayFilter {
+    /// A pane opens showing its whole transcript, so every kind starts visible.
+    fn default() -> Self {
+        Self {
+            thinking: true,
+            prose: true,
+            tools: ToolSelection::All,
+        }
+    }
+}
+
 impl DisplayFilter {
+    /// Read the pane's stored visible set. Unlike [`Self::default`], an empty
+    /// list is a real value here — the pane the user unchecked entirely.
+    pub(in crate::workspace) fn from_stored(tokens: &[String]) -> Self {
+        Self::from_tokens(tokens.iter().map(String::as_str))
+    }
+
+    /// Read the superseded `display_filter` field, whose list named the same
+    /// visible set — except that it wrote an empty list for "unfiltered", the
+    /// one value the current reading gives the opposite meaning.
+    pub(in crate::workspace) fn from_legacy_tokens(tokens: &[String]) -> Self {
+        if tokens.is_empty() {
+            return Self::default();
+        }
+        Self::from_stored(tokens)
+    }
+
+    /// Build from a stored visible set. Starts from nothing visible and adds
+    /// what the list names, so the empty list is "nothing on screen" — the
+    /// state [`Self::default`] is the opposite of.
     pub(in crate::workspace) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut filter = Self::default();
+        let mut filter = Self {
+            thinking: false,
+            prose: false,
+            tools: ToolSelection::Excluded,
+        };
         let mut tools = false;
         let mut categories = ToolCategorySet::default();
         for facet in tokens.into_iter().filter_map(FilterFacet::from_token) {
@@ -228,35 +263,21 @@ impl DisplayFilter {
         self
     }
 
-    /// No facet picked — the pane is not narrowed at all.
-    ///
-    /// This is why clearing the last checked box widens the transcript instead
-    /// of emptying it: "nothing selected" is the *unfiltered* state (the chip
-    /// reads `All`, and "Show everything" greys out), not a selection of
-    /// nothing. A pane showing only prompts and permissions is not a state
-    /// worth being able to reach.
-    pub(in crate::workspace) fn is_empty(self) -> bool {
-        !self.thinking && !self.prose && matches!(self.tools, ToolSelection::Excluded)
+    /// Nothing is hidden — the pane is not narrowed at all.
+    pub(in crate::workspace) fn shows_everything(self) -> bool {
+        self == Self::default()
     }
 
-    pub(in crate::workspace) fn selections(self) -> Vec<FilterFacet> {
-        let mut out = Vec::new();
-        if self.thinking {
-            out.push(FilterFacet::Thinking);
-        }
-        if self.prose {
-            out.push(FilterFacet::Prose);
-        }
-        match self.tools {
-            ToolSelection::Excluded => {}
-            ToolSelection::All => out.push(FilterFacet::Tools),
-            ToolSelection::Some(categories) => out.extend(
-                FilterFacet::ALL
-                    .into_iter()
-                    .filter(|facet| facet.category().is_some_and(|c| categories.contains(c))),
-            ),
-        }
-        out
+    /// The facets the user unchecked, in panel order. What the chip names: it
+    /// is the shorter list, and it is what the user did.
+    pub(in crate::workspace) fn hidden(self) -> Vec<FilterFacet> {
+        FilterFacet::ALL
+            .into_iter()
+            .filter(|facet| !self.contains(*facet))
+            // `Tools` stands for its whole section, so it would restate the
+            // categories under it that are already listed.
+            .filter(|facet| *facet != FilterFacet::Tools)
+            .collect()
     }
 
     pub(in crate::workspace) fn tool_selection(self) -> ToolSelection {
@@ -265,9 +286,6 @@ impl DisplayFilter {
 
     /// Prompts, permissions, and failures are never filtered.
     pub(in crate::workspace) fn matches(self, item: &ChatItem) -> bool {
-        if self.is_empty() {
-            return true;
-        }
         match item {
             ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => true,
             ChatItem::Thinking { .. } => self.thinking,
@@ -277,12 +295,11 @@ impl DisplayFilter {
     }
 
     pub(in crate::workspace) fn matches_tool(self, tc: &ToolCallItem) -> bool {
-        self.is_empty()
-            || match self.tools {
-                ToolSelection::Excluded => false,
-                ToolSelection::All => true,
-                ToolSelection::Some(categories) => categories.contains(classify_tool(tc)),
-            }
+        match self.tools {
+            ToolSelection::Excluded => false,
+            ToolSelection::All => true,
+            ToolSelection::Some(categories) => categories.contains(classify_tool(tc)),
+        }
     }
 }
 

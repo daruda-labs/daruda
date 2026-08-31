@@ -97,7 +97,9 @@ fn thinking_and_edits_show_exactly_those_two() {
 
 #[test]
 fn a_condition_below_tools_puts_tools_in_scope() {
-    let f = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+    let f = DisplayFilter::default()
+        .with_all_tools(false)
+        .toggled(FilterFacet::ToolEdit);
     assert!(
         f.contains(FilterFacet::Tools),
         "the parent comes on with it"
@@ -110,14 +112,21 @@ fn turning_tools_off_discards_the_conditions_below_it() {
     let f = filter(&["tools", "tool_edit"]);
     let off = f.toggled(FilterFacet::Tools);
     assert!(!off.contains(FilterFacet::ToolEdit));
-    assert!(off.is_empty(), "nothing survives the parent going away");
+    assert!(
+        off.tokens().is_empty(),
+        "nothing survives the parent going away"
+    );
+    assert!(!off.matches(&call(
+        Some("Edit"),
+        ToolKindView::Edit,
+        ToolStatusView::Completed
+    )));
 }
 
 #[test]
 fn clearing_the_last_tool_category_excludes_tools() {
     let f = filter(&["tools", "tool_edit"]).toggled(FilterFacet::ToolEdit);
     assert!(!f.contains(FilterFacet::Tools));
-    assert!(f.is_empty());
     assert!(f.tokens().is_empty());
 }
 
@@ -136,9 +145,9 @@ fn an_unknown_token_beside_a_known_one_drops_only_itself() {
 }
 
 #[test]
-fn an_empty_filter_shows_everything() {
+fn the_default_filter_shows_every_kind() {
     let f = DisplayFilter::default();
-    assert!(f.is_empty());
+    assert!(f.shows_everything());
     for item in [
         asst(),
         think(),
@@ -346,30 +355,43 @@ fn an_unknown_token_is_dropped_rather_than_failing() {
 
 #[test]
 fn removed_status_tokens_are_ignored_for_persistence_compatibility() {
-    assert!(filter(&["status_running", "status_ok", "status_failed"]).is_empty());
+    assert!(
+        filter(&["status_running", "status_ok", "status_failed"])
+            .tokens()
+            .is_empty()
+    );
     assert_eq!(filter(&["tools", "status_failed"]).tokens(), vec!["tools"]);
 }
 
 #[test]
-fn toggling_a_facet_twice_returns_the_empty_filter() {
+fn toggling_a_facet_twice_returns_the_default() {
     let f = DisplayFilter::default().toggled(FilterFacet::Tools);
-    assert!(f.contains(FilterFacet::Tools));
-    assert!(f.toggled(FilterFacet::Tools).is_empty());
+    assert!(!f.contains(FilterFacet::Tools), "the first click hides it");
+    assert_eq!(f.toggled(FilterFacet::Tools), DisplayFilter::default());
 }
 
 #[test]
-fn one_tool_category_is_one_visible_selection() {
+fn one_tool_category_is_one_hidden_facet() {
     let f = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
-    assert_eq!(f.selections().len(), 1);
-    assert_eq!(f.selections(), vec![FilterFacet::ToolEdit]);
-    assert_eq!(f.tokens(), vec!["tools", "tool_edit"]);
+    assert_eq!(f.hidden(), vec![FilterFacet::ToolEdit]);
+    assert_eq!(
+        f.tokens(),
+        vec![
+            "thinking",
+            "prose",
+            "tools",
+            "tool_read",
+            "tool_search",
+            "tool_run",
+            "tool_other"
+        ]
+    );
 }
 
 #[test]
 fn all_tools_and_partial_tools_are_distinct_states() {
     let all = filter(&["tools"]);
     assert_eq!(all.tool_selection(), ToolSelection::All);
-    assert_eq!(all.selections(), vec![FilterFacet::Tools]);
 
     let without_edit = all.toggled(FilterFacet::ToolEdit);
     assert!(matches!(
@@ -377,7 +399,7 @@ fn all_tools_and_partial_tools_are_distinct_states() {
         ToolSelection::Some(_)
     ));
     assert!(!without_edit.contains(FilterFacet::ToolEdit));
-    assert_eq!(without_edit.selections().len(), ToolCategory::ALL.len() - 1);
+    assert!(without_edit.hidden().contains(&FilterFacet::ToolEdit));
 }
 
 #[test]
@@ -430,27 +452,119 @@ fn only_the_tool_section_nests_under_a_parent_toggle() {
 }
 
 #[test]
-fn clearing_the_last_facet_widens_rather_than_empties() {
-    let search_only = DisplayFilter::default().toggled(FilterFacet::ToolSearch);
-    assert!(!search_only.is_empty());
-    let cleared = search_only.toggled(FilterFacet::ToolSearch);
+fn a_fresh_filter_shows_everything_with_every_box_checked() {
+    let f = DisplayFilter::default();
+    for facet in FilterFacet::ALL {
+        assert!(f.contains(facet), "{facet:?} starts checked");
+    }
+    assert!(f.matches(&think()));
+    assert!(f.matches(&asst()));
+    assert!(f.matches(&call(
+        Some("Edit"),
+        ToolKindView::Edit,
+        ToolStatusView::Completed
+    )));
+    assert!(f.shows_everything());
+}
+
+/// The point of the change: unchecking one kind hides that kind and nothing
+/// else. Before, checking one kind hid every *other* kind.
+#[test]
+fn unchecking_a_kind_hides_that_kind_alone() {
+    let f = DisplayFilter::default().toggled(FilterFacet::Thinking);
+    assert!(!f.matches(&think()), "the unchecked kind is hidden");
+    assert!(f.matches(&asst()), "replies are untouched");
     assert!(
-        cleared.is_empty(),
-        "unchecking the last facet is the unfiltered state, not a selection of nothing"
+        f.matches(&call(
+            Some("Edit"),
+            ToolKindView::Edit,
+            ToolStatusView::Completed
+        )),
+        "tools are untouched"
     );
-    // The half the name promises: the transcript widens rather than emptying.
-    let reasoning = ChatItem::Thinking {
-        text: "t".into(),
-        streaming: false,
-        message_id: None,
-    };
-    assert!(!search_only.matches(&reasoning), "narrowed to searches");
-    assert!(
-        cleared.matches(&reasoning),
-        "cleared shows everything again"
+    assert!(!f.shows_everything());
+}
+
+#[test]
+fn unchecking_a_tool_kind_leaves_the_other_tool_kinds_visible() {
+    let f = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+    assert!(!f.matches(&call(
+        Some("Edit"),
+        ToolKindView::Edit,
+        ToolStatusView::Completed
+    )));
+    assert!(f.matches(&call(
+        Some("Read"),
+        ToolKindView::Read,
+        ToolStatusView::Completed
+    )));
+    assert!(f.matches(&asst()));
+}
+
+/// Reachable, and worth reaching by mistake only once — the user can put every
+/// box back. Prompts and permissions are never filtered, so the pane is not blank.
+#[test]
+fn unchecking_everything_leaves_prompts_and_permissions() {
+    let mut f = DisplayFilter::default();
+    for facet in FilterFacet::ALL {
+        if f.contains(facet) {
+            f = f.toggled(facet);
+        }
+    }
+    assert!(!f.matches(&think()));
+    assert!(!f.matches(&asst()));
+    assert!(!f.matches(&call(
+        Some("Edit"),
+        ToolKindView::Edit,
+        ToolStatusView::Completed
+    )));
+    assert!(f.matches(&ChatItem::UserText("q".into())));
+}
+
+/// The chip names what is missing, because that is what the user did and it is
+/// the shorter list.
+#[test]
+fn the_chip_names_what_is_hidden() {
+    assert!(DisplayFilter::default().hidden().is_empty());
+    let f = DisplayFilter::default().toggled(FilterFacet::Thinking);
+    assert_eq!(f.hidden(), vec![FilterFacet::Thinking]);
+}
+
+/// New storage records what the pane shows, so an all-unchecked pane restores
+/// as one — the state the old format could not tell from "unfiltered".
+#[test]
+fn the_visible_set_round_trips_including_the_empty_one() {
+    for f in [
+        DisplayFilter::default(),
+        DisplayFilter::default().toggled(FilterFacet::Thinking),
+        DisplayFilter::default().with_all_tools(false),
+    ] {
+        assert_eq!(DisplayFilter::from_tokens(f.tokens()), f);
+    }
+    let nothing = FilterFacet::ALL
+        .into_iter()
+        .fold(DisplayFilter::default(), |f, facet| {
+            if f.contains(facet) {
+                f.toggled(facet)
+            } else {
+                f
+            }
+        });
+    assert!(nothing.tokens().is_empty());
+    assert_eq!(DisplayFilter::from_tokens(Vec::new()), nothing);
+}
+
+/// The old field listed what a pane showed, but wrote an empty list for
+/// "unfiltered" — the one value whose meaning the new reading inverts.
+#[test]
+fn a_legacy_empty_list_meant_unfiltered_not_blank() {
+    assert_eq!(
+        DisplayFilter::from_legacy_tokens(&[]),
+        DisplayFilter::default()
     );
-    // An axis still held keeps the narrowing, so the widening is confined to
-    // the degenerate all-off case.
-    let with_reasoning = search_only.toggled(FilterFacet::Thinking);
-    assert!(!with_reasoning.toggled(FilterFacet::ToolSearch).is_empty());
+    assert_eq!(
+        DisplayFilter::from_legacy_tokens(&["prose".to_string()]),
+        DisplayFilter::from_tokens(["prose"]),
+        "a non-empty legacy list already said exactly what to show"
+    );
 }

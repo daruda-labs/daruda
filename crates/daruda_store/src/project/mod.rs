@@ -492,13 +492,28 @@ pub struct SerializedAgentChatContent {
         skip_serializing_if = "Option::is_none"
     )]
     pub tail_window: Option<SerializedChatTailWindow>,
-    /// Explicit pane display-filter tokens; `None` means the pane opens unfiltered.
+    /// Superseded by [`Self::visible_kinds`]; read, never written.
+    ///
+    /// It listed the same visible set, but wrote an empty list to mean
+    /// "unfiltered" — the one value the current reading gives the opposite
+    /// meaning (a pane the user unchecked entirely). A separate field keeps the
+    /// two apart without a version marker, and `skip_serializing_if` drops this
+    /// one on the next save, so a file heals itself once.
     #[serde(
         default,
         deserialize_with = "lenient",
         skip_serializing_if = "Option::is_none"
     )]
     pub display_filter: Option<Vec<String>>,
+    /// Kinds of work this pane shows, named by facet token. `None` means the
+    /// pane never chose and shows everything; `Some(vec![])` is a real value —
+    /// the pane whose every box the user unchecked.
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub visible_kinds: Option<Vec<String>>,
     /// Explicit pane fold-mode tokens; `None` continues following config.
     #[serde(
         default,

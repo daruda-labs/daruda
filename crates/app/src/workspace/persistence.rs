@@ -690,11 +690,19 @@ impl Workspace {
                             let content_width = deserialize_chat_content_width(ac.content_width);
                             // Missing pane choices retain the constructor's config seeds.
                             let tail = ac.tail_window.map(deserialize_chat_tail_window);
-                            let display_filter = ac.display_filter.as_ref().map(|tokens| {
-                                crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter::from_tokens(
-                                    tokens.iter().map(String::as_str),
-                                )
-                            });
+                            // The current field wins; the superseded one is read
+                            // only for a file written before the split, where an
+                            // empty list meant "unfiltered" rather than "nothing".
+                            use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
+                            let display_filter = ac
+                                .visible_kinds
+                                .as_ref()
+                                .map(|tokens| DisplayFilter::from_stored(tokens))
+                                .or_else(|| {
+                                    ac.display_filter
+                                        .as_ref()
+                                        .map(|tokens| DisplayFilter::from_legacy_tokens(tokens))
+                                });
                             let fold_mode = ac.fold_mode.as_ref().map(|tokens| {
                                 crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode::from_tokens(
                                     tokens.iter().map(String::as_str),
@@ -1006,7 +1014,10 @@ fn serialize_pane_content(
             content_width: serialize_chat_content_width(v.content_width),
             // Persist only explicit choices so untouched panes keep following config.
             tail_window: v.tail.chosen().map(serialize_chat_tail_window),
-            display_filter: v
+            // Superseded field: never written, so a file carrying it sheds it
+            // on the first save after the split.
+            display_filter: None,
+            visible_kinds: v
                 .display_filter
                 .chosen()
                 .map(|f| f.tokens().into_iter().map(str::to_owned).collect()),

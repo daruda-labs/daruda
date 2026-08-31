@@ -837,11 +837,11 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            // One category selected leaves the Tool parent mixed.
+            v.set_fold_mode(super::fold_mode::FoldPreset::Expanded.mode(), cx);
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
-            v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
+            v.set_tail_window(TailWindow::All, cx);
             v.set_activity_options_tab(super::view::ActivityOptionsTab::Filter, cx);
-            v.screenshot_filter_open = true;
+            v.screenshot_filter_open = false;
         });
     }
 

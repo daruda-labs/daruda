@@ -1084,9 +1084,9 @@ fn a_rollup_ignores_the_calls_the_display_filter_removed() {
         "unfiltered, the failed command is on screen and the glyph says so"
     );
     assert_eq!(
-        rollup_under(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
+        rollup_under(DisplayFilter::default().toggled(FilterFacet::ToolRun)),
         Rollup::Ok,
-        "the failure has no visible row left to explain a warning glyph"
+        "hiding commands takes the failure off screen, and the glyph with it"
     );
 }
 

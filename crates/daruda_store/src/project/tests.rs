@@ -186,6 +186,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -214,6 +215,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -241,6 +243,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -271,6 +274,7 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
         content_width: SerializedChatContentWidth::Reading,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -295,6 +299,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -306,6 +311,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
 
     let cleared = SerializedAgentChatContent {
         display_filter: Some(Vec::new()),
+        visible_kinds: None,
         ..content
     };
     let json = serde_json::to_string(&cleared).unwrap();
@@ -337,6 +343,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: Some(vec![
             "summary".to_string(),
             "last.tool=expanded".to_string(),
@@ -355,6 +362,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
     let auto = SerializedAgentChatContent {
         fold_mode: Some(vec!["auto".to_string()]),
         display_filter: None,
+        visible_kinds: None,
         ..content
     };
     let json = serde_json::to_string(&auto).unwrap();
@@ -389,6 +397,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -401,6 +410,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
     let all = SerializedAgentChatContent {
         tail_window: Some(SerializedChatTailWindow::All),
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
         ..content
     };
@@ -503,6 +513,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
         display_filter: None,
+        visible_kinds: None,
         fold_mode: None,
     };
     let json = serde_json::to_string(&content).unwrap();
@@ -534,6 +545,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
             display_filter: None,
+            visible_kinds: None,
             fold_mode: None,
         }),
     };
@@ -573,6 +585,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
             display_filter: None,
+            visible_kinds: None,
             fold_mode: None,
         }),
     };
@@ -1364,4 +1377,50 @@ fn a_leaf_naming_two_kinds_takes_the_first() {
         } => assert_eq!(fc.path, PathBuf::from("a.rs")),
         other => panic!("expected the file leaf, got {other:?}"),
     }
+}
+
+/// The superseded `display_filter` listed the same visible set but wrote an
+/// empty list for "unfiltered" — the one value the new field reads as its
+/// opposite. A separate field keeps the two apart, and `skip_serializing_if`
+/// drops the old one on the next save, so files heal themselves.
+#[test]
+fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: None,
+        model_id: None,
+        content_width: SerializedChatContentWidth::Full,
+        tail_window: None,
+        display_filter: None,
+        visible_kinds: Some(Vec::new()),
+        fold_mode: None,
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    assert!(
+        !json.contains("display_filter"),
+        "the superseded field is not written: {json}"
+    );
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.visible_kinds,
+        Some(Vec::new()),
+        "an all-unchecked pane survives the round trip as itself"
+    );
+}
+
+/// A file written before the split carries only the old field, and it has to
+/// keep restoring — reading it is the whole reason it stays in the struct.
+#[test]
+fn a_pre_split_file_still_carries_its_legacy_filter_through() {
+    let json = r#"{"display_filter":["tools","tool_edit"]}"#;
+    let restored: SerializedAgentChatContent = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        restored.display_filter,
+        Some(vec!["tools".to_string(), "tool_edit".to_string()])
+    );
+    assert_eq!(restored.visible_kinds, None);
 }

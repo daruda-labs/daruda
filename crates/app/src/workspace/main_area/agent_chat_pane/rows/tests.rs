@@ -2152,7 +2152,7 @@ fn live_step_turn() -> Vec<ChatItem> {
 }
 
 fn only_reads() -> DisplayFilter {
-    DisplayFilter::default().toggled(FilterFacet::ToolRead)
+    DisplayFilter::from_tokens(["tool_read"])
 }
 
 #[test]
@@ -2178,7 +2178,7 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     );
     assert!(reads.keeps_tool(child), "the matching nested child renders");
 
-    let edits = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+    let edits = DisplayFilter::from_tokens(["tool_edit"]);
     let edits = FilterMatchIndex::of(&items, edits);
     assert!(edits.keeps_tool(parent), "the Edit parent matches directly");
     assert!(
@@ -2201,7 +2201,7 @@ fn an_empty_filter_hides_nothing_and_its_row_covers_nothing() {
 #[test]
 fn a_filter_hides_the_rows_it_rejects_and_counts_them() {
     let items = live_step_turn();
-    let only_tools = DisplayFilter::default().toggled(FilterFacet::Tools);
+    let only_tools = DisplayFilter::from_tokens(["tools"]);
     let rows = project_filtered(&items, &only_tools);
     for row in &rows {
         match row.kind {
@@ -2249,7 +2249,7 @@ fn a_step_whose_every_row_is_filtered_goes_with_them() {
 #[test]
 fn a_group_bar_summarizing_only_filtered_calls_goes_with_them() {
     let items = live_step_turn();
-    let only_prose = DisplayFilter::default().toggled(FilterFacet::Prose);
+    let only_prose = DisplayFilter::from_tokens(["prose"]);
     let rows = project_filtered(&items, &only_prose);
     assert!(
         rows.iter()
@@ -2263,7 +2263,7 @@ fn revealing_the_filter_row_shows_what_it_covers() {
     let items = live_step_turn();
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Filtered(1), FoldContext::past(false));
-    let only_tools = DisplayFilter::default().toggled(FilterFacet::Tools);
+    let only_tools = DisplayFilter::from_tokens(["tools"]);
     let rows = project(
         &items,
         &fold,
@@ -2298,7 +2298,7 @@ fn a_prompt_and_a_pending_permission_survive_every_filter() {
         perm(false),
         tool("a", ToolStatusView::Completed),
     ];
-    let only_edits = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
+    let only_edits = DisplayFilter::from_tokens(["tool_edit"]);
     let rows = project_filtered(&items, &only_edits);
     for row in &rows {
         match row.kind {
@@ -2312,7 +2312,7 @@ fn a_prompt_and_a_pending_permission_survive_every_filter() {
 #[test]
 fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
     let items = one_step_turn();
-    let only_tools = DisplayFilter::default().toggled(FilterFacet::Tools);
+    let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(0), FoldContext::past(true));
     let rows = project(
@@ -2345,7 +2345,7 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
 #[test]
 fn the_placeholder_counts_only_what_the_filter_alone_took() {
     let items = one_step_turn();
-    let only_tools = DisplayFilter::default().toggled(FilterFacet::Tools);
+    let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(0), FoldContext::past(true));
     let rows = project(
@@ -2511,7 +2511,7 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
     assert_eq!(
         step_count(
             &FoldState::default(),
-            &DisplayFilter::default().toggled(FilterFacet::ToolEdit),
+            &DisplayFilter::from_tokens(["tool_edit"]),
         ),
         1,
         "only the edit survives the filter, so only the edit is offered"
@@ -2519,7 +2519,7 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
     assert_eq!(
         step_count(
             &FoldState::default(),
-            &DisplayFilter::default().toggled(FilterFacet::Thinking),
+            &DisplayFilter::from_tokens(["thinking"]),
         ),
         0,
         "a step kept for its prose alone offers no tools at all"
@@ -2528,10 +2528,7 @@ fn a_step_header_counts_only_the_tools_the_filter_keeps() {
     let mut revealed = FoldState::default();
     revealed.toggle(FoldKey::Filtered(1), FoldContext::past(false));
     assert_eq!(
-        step_count(
-            &revealed,
-            &DisplayFilter::default().toggled(FilterFacet::ToolEdit),
-        ),
+        step_count(&revealed, &DisplayFilter::from_tokens(["tool_edit"]),),
         3,
         "revealing filtered rows restores the count of the rows now on screen"
     );

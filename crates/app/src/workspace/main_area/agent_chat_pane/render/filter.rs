@@ -38,7 +38,7 @@ pub(super) fn display_filter_chip(
             surface,
             cx,
         )
-        .selected(!filter.is_empty())
+        .selected(!filter.shows_everything())
         .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
     )
     .content(move |_, window, cx| {
@@ -54,13 +54,20 @@ pub(super) fn display_filter_chip_label(filter: DisplayFilter) -> String {
     s::agent_chat_filter_chip(&filter_value(filter))
 }
 
+/// The chip names what is **missing**, not what is left: it is the shorter
+/// list, and it is what the user did — every box starts checked, so a filtered
+/// pane is one the user took something out of.
 fn filter_value(filter: DisplayFilter) -> String {
-    let selections = filter.selections();
-    match selections.as_slice() {
+    let hidden = filter.hidden();
+    match hidden.as_slice() {
         [] => s::agent_chat_filter_none(),
-        [one] => facet_label(*one),
-        [first, second] => format!("{} + {}", facet_label(*first), facet_label(*second)),
-        _ => s::agent_chat_filter_selected_count(selections.len()),
+        [one] => s::agent_chat_filter_hidden(&facet_label(*one)),
+        [first, second] => s::agent_chat_filter_hidden(&format!(
+            "{} + {}",
+            facet_label(*first),
+            facet_label(*second)
+        )),
+        _ => s::agent_chat_filter_hidden_count(hidden.len()),
     }
 }
 
@@ -114,7 +121,7 @@ pub(super) fn filter_panel(
                 )
                 .ghost()
                 .xsmall()
-                .disabled(current.is_empty())
+                .disabled(current.shows_everything())
                 .on_click(move |_, _window, app| {
                     if let Some(view) = clear_view.upgrade() {
                         view.update(app, |v, cx| v.clear_display_filter(cx));
@@ -264,21 +271,26 @@ mod tests {
         }
     }
 
+    /// Nothing hidden reads `All`; from there the chip names what the user took
+    /// out, in panel order rather than click order.
     #[test]
-    fn the_chip_reads_all_until_a_facet_is_picked() {
+    fn the_chip_reads_all_until_a_kind_is_hidden() {
         assert_eq!(
             filter_value(DisplayFilter::default()),
             s::agent_chat_filter_none()
         );
         let one = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
-        assert_eq!(filter_value(one), facet_label(FilterFacet::ToolEdit));
+        assert_eq!(
+            filter_value(one),
+            s::agent_chat_filter_hidden(&facet_label(FilterFacet::ToolEdit))
+        );
         assert_eq!(
             filter_value(one.toggled(FilterFacet::Thinking)),
-            format!(
+            s::agent_chat_filter_hidden(&format!(
                 "{} + {}",
                 facet_label(FilterFacet::Thinking),
                 facet_label(FilterFacet::ToolEdit)
-            )
+            ))
         );
     }
 
@@ -318,11 +330,11 @@ mod tests {
     }
 
     #[test]
-    fn three_or_more_conditions_use_a_semantic_count() {
+    fn three_or_more_hidden_kinds_use_a_semantic_count() {
         let three = DisplayFilter::default()
             .toggled(FilterFacet::Thinking)
             .toggled(FilterFacet::Prose)
             .toggled(FilterFacet::ToolEdit);
-        assert_eq!(filter_value(three), s::agent_chat_filter_selected_count(3));
+        assert_eq!(filter_value(three), s::agent_chat_filter_hidden_count(3));
     }
 }
