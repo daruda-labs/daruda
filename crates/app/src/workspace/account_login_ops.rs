@@ -549,59 +549,48 @@ impl Workspace {
         let identity = recipe.read_identity(&config_dir);
         let now = now_unix();
 
-        // Re-read the on-disk state and apply this login's change to it,
-        // rather than overwriting accounts.json with a possibly-stale
-        // in-memory snapshot: another window (Settings, or a second
-        // Workspace) may have written the file since this login started,
-        // and a full-overwrite from `self.accounts` would silently destroy
-        // whatever it added. This load-mutate-save narrows the cross-window
-        // race to the load→save gap below (vs. the prior full-snapshot
-        // overwrite, which clobbered unconditionally) — it is not fully
-        // atomic: `save_accounts_in` renames into place but takes no file
-        // lock, so two windows racing this exact window can still each
-        // read the same pre-write state and one's delta can still overwrite
-        // the other's. A real fix needs a file lock (fs4 is already a
-        // dependency but unused here) — tracked as a follow-up, not done
-        // in this pass.
-        let mut state =
-            daruda_store::accounts::load_accounts_in(&self.data_dir).unwrap_or_default();
-
-        let is_duplicate = match find_duplicate(
-            &state,
-            recipe_id,
-            identity.email.as_deref(),
-            identity.organization.as_deref(),
-        ) {
-            Some(_existing_id) => {
-                // The freshly logged-in config dir duplicates an account
-                // already tracked under a different dir — nothing new to
-                // keep, and the existing account's credentials are not
-                // refreshed by this (see this method's doc for why
-                // `last_authenticated_at` is deliberately left untouched).
-                cleanup_account_dir(recipe_id, &config_dir);
-                true
-            }
-            None => {
-                state.accounts.push(ManagedAccount {
-                    id: account_id,
-                    recipe: recipe_id,
-                    email: identity.email,
-                    organization: identity.organization,
-                    config_dir: config_dir.clone(),
-                    created_at: now,
-                    last_authenticated_at: now,
-                });
-                false
-            }
-        };
-
-        if let Err(e) = daruda_store::accounts::save_accounts_in(&self.data_dir, &state) {
-            log_io_error(
-                "Failed to save accounts.json after add-account login",
-                "account.add.save_failed",
-                &e,
-            );
-        }
+        let (state, is_duplicate) =
+            match daruda_store::accounts::mutate_accounts_in(&self.data_dir, |state| {
+                let duplicate = find_duplicate(
+                    state,
+                    recipe_id,
+                    identity.email.as_deref(),
+                    identity.organization.as_deref(),
+                );
+                match duplicate {
+                    Some(_existing_id) => {
+                        // The freshly logged-in config dir duplicates an account
+                        // already tracked under a different dir — nothing new to
+                        // keep, and the existing account's credentials are not
+                        // refreshed by this (see this method's doc for why
+                        // `last_authenticated_at` is deliberately left untouched).
+                        cleanup_account_dir(recipe_id, &config_dir);
+                        true
+                    }
+                    None => {
+                        state.accounts.push(ManagedAccount {
+                            id: account_id,
+                            recipe: recipe_id,
+                            email: identity.email,
+                            organization: identity.organization,
+                            config_dir: config_dir.clone(),
+                            created_at: now,
+                            last_authenticated_at: now,
+                        });
+                        false
+                    }
+                }
+            }) {
+                Ok((state, is_duplicate)) => (state, is_duplicate),
+                Err(e) => {
+                    log_io_error(
+                        "Failed to save accounts.json after add-account login",
+                        "account.add.save_failed",
+                        &e,
+                    );
+                    return;
+                }
+            };
         // Publish to the app-wide Global (fires `observe_global` on every
         // window, including this one, refreshing each `accounts` mirror);
         // set this window's mirror eagerly too so the code right below sees
@@ -1183,14 +1172,33 @@ impl Workspace {
         let identity = recipe.read_identity(&config_dir);
         let now = now_unix();
 
-        // Apply the reauth to freshly-loaded disk state (see
-        // `finish_login_success`'s comment for the same load-mutate-save
-        // shape and why it narrows, but does not close, the cross-window
-        // race).
-        let mut state =
-            daruda_store::accounts::load_accounts_in(&self.data_dir).unwrap_or_default();
-
-        let Some(existing) = state.accounts.iter_mut().find(|a| a.id == account_id) else {
+        let (state, updated) =
+            match daruda_store::accounts::mutate_accounts_in(&self.data_dir, |state| {
+                let Some(existing) = state.accounts.iter_mut().find(|a| a.id == account_id) else {
+                    return false;
+                };
+                existing.last_authenticated_at = now;
+                // Only overwrite identity when the reparse actually yielded a value —
+                // a flaky post-success read must not blank a previously-good row.
+                if identity.email.is_some() {
+                    existing.email = identity.email;
+                }
+                if identity.organization.is_some() {
+                    existing.organization = identity.organization;
+                }
+                true
+            }) {
+                Ok((state, updated)) => (state, updated),
+                Err(e) => {
+                    log_io_error(
+                        "Failed to save accounts.json after reauthenticate-account login",
+                        "account.reauth.save_failed",
+                        &e,
+                    );
+                    return;
+                }
+            };
+        if !updated {
             // The account was removed (Settings-window delete) while
             // this reauth was in flight — nothing left to update; the
             // delete flow already removed `config_dir` itself. Still
@@ -1200,23 +1208,6 @@ impl Workspace {
             accounts_global::replace(cx, state);
             cx.notify();
             return;
-        };
-        existing.last_authenticated_at = now;
-        // Only overwrite identity when the reparse actually yielded a value —
-        // a flaky post-success read must not blank a previously-good row.
-        if identity.email.is_some() {
-            existing.email = identity.email;
-        }
-        if identity.organization.is_some() {
-            existing.organization = identity.organization;
-        }
-
-        if let Err(e) = daruda_store::accounts::save_accounts_in(&self.data_dir, &state) {
-            log_io_error(
-                "Failed to save accounts.json after reauthenticate-account login",
-                "account.reauth.save_failed",
-                &e,
-            );
         }
         // Publish to the app-wide Global (fires `observe_global` on every
         // window, including this one, refreshing each `accounts` mirror);

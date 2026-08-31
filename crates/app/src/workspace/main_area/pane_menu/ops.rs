@@ -189,14 +189,9 @@ impl Workspace {
             .panes
             .iter()
             .find(|pane| pane.id == pane_id)
-            .and_then(|pane| match &pane.content {
-                PaneContent::Terminal(content) => {
-                    Some(content.view.read(cx).focus_handle().clone())
-                }
-                PaneContent::File(_)
-                | PaneContent::TaskEditPane(_)
-                | PaneContent::AgentChat(_)
-                | PaneContent::FlowGraph(_) => None,
+            .and_then(|pane| {
+                pane.terminal_view()
+                    .map(|view| view.read(cx).focus_handle().clone())
             })
     }
 
@@ -211,12 +206,8 @@ impl Workspace {
         self.active_runtime()
             .panes
             .iter()
-            .filter(|pane| match &pane.content {
-                PaneContent::AgentChat(_) => wants_agent,
-                PaneContent::Terminal(_) => wants_terminal,
-                PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::FlowGraph(_) => {
-                    false
-                }
+            .filter(|pane| {
+                (wants_agent && pane.is_agent_chat()) || (wants_terminal && pane.is_terminal())
             })
             .filter_map(|pane| {
                 let tab_index = self.tab_index_for_pane(pane.id)?;

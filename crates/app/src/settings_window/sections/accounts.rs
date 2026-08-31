@@ -534,26 +534,19 @@ impl SettingsWindow {
         account: Option<AccountId>,
         cx: &mut gpui::Context<Self>,
     ) {
-        // Apply the change to freshly-loaded disk state, not to this
-        // window's possibly-stale snapshot: a Workspace may have added an
-        // account since this Settings window was built, and a full
-        // overwrite from `self.accounts` would silently destroy it. This
-        // load-mutate-save narrows the cross-window race to the load→save
-        // gap below rather than closing it — `save_accounts` renames into
-        // place but takes no file lock, so two windows racing this exact
-        // sequence can still each read the same state and one's write can
-        // still overwrite the other's delta. A real fix needs a file lock
-        // (fs4 is already a dependency but unused here) — tracked as a
-        // follow-up, not done in this pass.
-        let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
-        apply_default_choice(&mut state, recipe, account);
-        if let Err(e) = daruda_store::accounts::save_accounts(&state) {
-            log_io_error(
-                "Failed to save accounts.json after set-default",
-                "settings.accounts.save_default_failed",
-                &e,
-            );
-        }
+        let state = match daruda_store::accounts::mutate_accounts(|state| {
+            apply_default_choice(state, recipe, account);
+        }) {
+            Ok((state, ())) => state,
+            Err(e) => {
+                log_io_error(
+                    "Failed to save accounts.json after set-default",
+                    "settings.accounts.save_default_failed",
+                    &e,
+                );
+                return;
+            }
+        };
         // Publish to the app-wide Global — `observe_global` refreshes every
         // window's mirror (including this one). Set this section's mirror
         // eagerly so its own render below is immediate.
@@ -605,27 +598,32 @@ impl SettingsWindow {
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
-        // Operate on freshly-loaded disk state (see `set_default_account`'s
-        // comment for the same load-mutate-save shape and why it narrows,
-        // but does not close, the cross-window race).
-        let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
-        let Some(account) = state.find(account_id).cloned() else {
+        let (state, removed) = match daruda_store::accounts::mutate_accounts(|state| {
+            let Some(account) = state.find(account_id).cloned() else {
+                return false;
+            };
+            // The account's own auth domain owns the removal — its config dir plus
+            // whatever OS credential entry is scoped to it.
+            daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
+            state.accounts.retain(|a| a.id != account_id);
+            state.default_by_recipe.retain(|_, id| *id != account_id);
+            true
+        }) {
+            Ok((state, removed)) => (state, removed),
+            Err(e) => {
+                log_io_error(
+                    "Failed to save accounts.json after delete",
+                    "settings.accounts.save_delete_failed",
+                    &e,
+                );
+                return;
+            }
+        };
+        if !removed {
             self.accounts = state.clone();
             accounts_global::replace(cx, state);
             cx.notify();
             return;
-        };
-        // The account's own auth domain owns the removal — its config dir plus
-        // whatever OS credential entry is scoped to it.
-        daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
-        state.accounts.retain(|a| a.id != account_id);
-        state.default_by_recipe.retain(|_, id| *id != account_id);
-        if let Err(e) = daruda_store::accounts::save_accounts(&state) {
-            log_io_error(
-                "Failed to save accounts.json after delete",
-                "settings.accounts.save_delete_failed",
-                &e,
-            );
         }
         // Reset every pane pinned to this account back to the system
         // default (+ prune its per-account usage cache) in every open

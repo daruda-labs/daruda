@@ -10,7 +10,6 @@
 
 use gpui::{Context, SharedString, Window};
 
-use super::pane::PaneContent;
 use super::pane_tree::PaneId;
 use crate::workspace::Workspace;
 
@@ -71,66 +70,61 @@ impl Workspace {
         let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return false;
         };
-        match &pane.content {
-            PaneContent::Terminal(_) => {
-                let Some(view) = pane.terminal_view().cloned() else {
-                    return false;
-                };
-                // `view` is now owned, so the immutable `pane` borrow can end
-                // before the `&mut self` calls below.
-                match input.intent {
-                    PaneTextIntent::Command { submit } => {
-                        let bytes = to_terminal_bytes(&input.body, submit);
-                        view.update(cx, |v, _| v.send_input(&bytes));
-                    }
-                    PaneTextIntent::Literal => {
-                        view.update(cx, |v, cx| v.paste_literal(&input.body, cx));
-                    }
+        if let Some(view) = pane.terminal_view().cloned() {
+            // `view` is now owned, so the immutable `pane` borrow can end
+            // before the `&mut self` calls below.
+            match input.intent {
+                PaneTextIntent::Command { submit } => {
+                    let bytes = to_terminal_bytes(&input.body, submit);
+                    view.update(cx, |v, _| v.send_input(&bytes));
                 }
+                PaneTextIntent::Literal => {
+                    view.update(cx, |v, cx| v.paste_literal(&input.body, cx));
+                }
+            }
+            self.bump_activity(pane_id);
+            cx.notify();
+            return true;
+        }
+
+        if pane.is_agent_chat() {
+            if matches!(input.intent, PaneTextIntent::Command { submit: true }) {
+                // Trim at the single dispatch point: an empty / whitespace-
+                // only submit (e.g. an "Enter-only" macro — empty `send` +
+                // `auto_enter`) must NOT fire a blank ACP turn on the focused
+                // agent chat. An accepted no-op returns `true` (the funnel
+                // handled it) without touching the session. A terminal, by
+                // contrast, may legitimately receive whitespace, so that arm
+                // is left untrimmed.
+                let trimmed = input.body.trim();
+                if trimmed.is_empty() {
+                    // A whitespace-only submit while a queued prompt is being
+                    // edited would strand the "Editing…" strip row (the flag
+                    // stays set against an empty body). Cancel the edit so the
+                    // row reverts and the composer clears.
+                    let editing = self
+                        .agent_chat_view(pane_id)
+                        .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
+                    if editing {
+                        self.cancel_edit_queued_prompt(pane_id, window, cx);
+                    }
+                    return true;
+                }
+                self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);
                 self.bump_activity(pane_id);
-                cx.notify();
+                true
+            } else {
+                // Non-submit: place the text in the shared bottom-dock
+                // input (where an agent-chat pane routes typing) without
+                // running a turn, so the user can review/edit then press
+                // Enter — the agent-pane analog of typing at a shell
+                // prompt.
+                self.insert_into_focused_input(&input.body, window, cx);
+                self.bump_activity(pane_id);
                 true
             }
-            PaneContent::AgentChat(_) => {
-                if matches!(input.intent, PaneTextIntent::Command { submit: true }) {
-                    // Trim at the single dispatch point: an empty / whitespace-
-                    // only submit (e.g. an "Enter-only" macro — empty `send` +
-                    // `auto_enter`) must NOT fire a blank ACP turn on the focused
-                    // agent chat. An accepted no-op returns `true` (the funnel
-                    // handled it) without touching the session. A terminal, by
-                    // contrast, may legitimately receive whitespace, so that arm
-                    // is left untrimmed.
-                    let trimmed = input.body.trim();
-                    if trimmed.is_empty() {
-                        // A whitespace-only submit while a queued prompt is being
-                        // edited would strand the "Editing…" strip row (the flag
-                        // stays set against an empty body). Cancel the edit so the
-                        // row reverts and the composer clears.
-                        let editing = self
-                            .agent_chat_view(pane_id)
-                            .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
-                        if editing {
-                            self.cancel_edit_queued_prompt(pane_id, window, cx);
-                        }
-                        return true;
-                    }
-                    self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);
-                    self.bump_activity(pane_id);
-                    true
-                } else {
-                    // Non-submit: place the text in the shared bottom-dock
-                    // input (where an agent-chat pane routes typing) without
-                    // running a turn, so the user can review/edit then press
-                    // Enter — the agent-pane analog of typing at a shell
-                    // prompt.
-                    self.insert_into_focused_input(&input.body, window, cx);
-                    self.bump_activity(pane_id);
-                    true
-                }
-            }
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::FlowGraph(_) => {
-                false
-            }
+        } else {
+            false
         }
     }
 

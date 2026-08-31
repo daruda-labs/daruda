@@ -338,11 +338,10 @@ impl Render for Workspace {
                     .user_label
                     .clone()
                     .or_else(|| {
-                        pane.and_then(|p| match &p.content {
+                        pane.and_then(|p| {
                             // File panes: filename is the tab identity; the parent
                             // directory is shown in the toolbar, not the tab.
-                            PaneContent::File(_) => None,
-                            _ => p.display_cwd(),
+                            (!p.is_file()).then(|| p.display_cwd()).flatten()
                         })
                     })
                     .or_else(|| pane.map(|p| p.title(cx)))
@@ -359,13 +358,7 @@ impl Render for Workspace {
                 } else {
                     base_label
                 };
-                let (file_path, worktree_root) = match pane.and_then(|p| match &p.content {
-                    PaneContent::File(f) => Some((f.view.path.clone(), f.view.lane_id)),
-                    PaneContent::Terminal(_)
-                    | PaneContent::TaskEditPane(_)
-                    | PaneContent::AgentChat(_)
-                    | PaneContent::FlowGraph(_) => None,
-                }) {
+                let (file_path, worktree_root) = match pane.and_then(|p| p.file_identity()) {
                     Some((path, wt_id)) => {
                         let root = self
                             .active_lanes()

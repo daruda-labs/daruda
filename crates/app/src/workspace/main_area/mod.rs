@@ -244,17 +244,14 @@ pub(in crate::workspace) fn render_layout(
                 // between the host menu and the program holding mouse capture
                 // (`TerminalViewEvent::ContextMenuRequested`), and a second
                 // handler here would open a menu it had ruled out.
-                .when(
-                    !matches!(pane.content, self::pane::PaneContent::Terminal(_)),
-                    |d| {
-                        d.on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| {
-                                this.open_pane_context_menu_at(id, ev.position, window, cx)
-                            }),
-                        )
-                    },
-                )
+                .when(!pane.is_terminal(), |d| {
+                    d.on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| {
+                            this.open_pane_context_menu_at(id, ev.position, window, cx)
+                        }),
+                    )
+                })
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {

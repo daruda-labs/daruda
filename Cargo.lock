@@ -1755,6 +1755,7 @@ dependencies = [
  "daruda_core",
  "dirs",
  "enum-iterator",
+ "fs4",
  "insta",
  "serde",
  "serde_json",

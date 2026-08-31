@@ -5,6 +5,8 @@
 //! construction, mode/config, and misc accessors) because the connect flow
 //! is one large, self-contained concern with its own failure/retry paths.
 
+use std::path::PathBuf;
+
 use daruda_acp::{NodeProgress, connect_agent_session_with_model};
 use daruda_config::AgentLaunch;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -13,14 +15,25 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::Context;
 
-use super::agent_chat_ops::{agent_name_for, catalog_default_id, resolve_open_agent_id};
+use super::agent_chat_ops::{agent_name_for, resolve_open_agent_id};
 use super::view::{AgentSessionStatus, RuntimePrepPhase};
+use crate::agent::account::PreparedAccount;
 use crate::agent::launch_resolve::{
     ConnectCommandError, account_recipe_for_connect, resolve_launch,
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+struct AgentChatConnectionPlan {
+    agent_id: String,
+    launch_spec: daruda_acp::LaunchSpec,
+    connect_cwd: PathBuf,
+    initial_model: Option<String>,
+    initial_modes: Vec<String>,
+    restore_mode: Option<String>,
+    prepared: Option<PreparedAccount>,
+}
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
 /// milestones that shouldn't surface a banner (system node found, or a cache
@@ -313,33 +326,19 @@ impl Workspace {
         )
     }
 
-    /// Open the live ACP session for an already-pushed pane and store the
-    /// event-pump task on its view; closing the pane drops both. `resume`
-    /// carries the persisted session id: `Some` branches `session/load`,
-    /// `None` starts a fresh `session/new`. A failed resume retries once fresh.
-    pub(in crate::workspace) fn connect_agent_chat(
+    fn prepare_agent_chat_connection(
         &mut self,
         pane_id: PaneId,
-        cwd: PaneCwd,
-        resume: Option<String>,
+        cwd: &PaneCwd,
         cx: &mut Context<Self>,
-    ) {
-        let node_root = daruda_store::persistence::node_install_dir();
-
-        // Resolve the pane's agent_id → launch spec, reconciling a stale
-        // agent_id. `None` only when the pane is gone — fall back to the catalog
-        // default so the (soon-to-be-dropped) task still has a valid launch.
-        let launch = self.resolve_pane_launch(pane_id, cx).unwrap_or_else(|| {
-            self.agent_launch_for(&catalog_default_id(&self.agents))
-                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch)
-        });
+    ) -> Option<AgentChatConnectionPlan> {
+        // Resolve the pane's agent_id -> launch spec, reconciling a stale
+        // agent_id. `None` only when the pane is gone.
+        let launch = self.resolve_pane_launch(pane_id, cx)?;
         // Read back after `resolve_pane_launch` so any stale-id reconcile it did
         // is picked up. Only keys the dev-build wire-tap file name — never
         // affects the launch itself.
-        let agent_id = self
-            .agent_chat_view(pane_id)
-            .map(|v| v.read(cx).agent_id.clone())
-            .unwrap_or_default();
+        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
         let remembered_model = self
             .agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).last_known_model_id.clone());
@@ -355,61 +354,26 @@ impl Workspace {
                 view.agent_vocabulary_source = Some(vocabulary_source);
             });
         }
-        // Priority-ordered modes to try on a *fresh* session: this agent's own
-        // `default_mode`, when its catalog entry sets one — otherwise empty,
-        // so the adapter's own default mode applies. Resolved after the
-        // reconcile above so a pane whose agent_id was stale gets the mode of
-        // the agent it actually launches. `run_connection` uses this only on
-        // a fresh `session/new`; a real `session/load` uses `restore_mode`
-        // below instead.
+        // Priority-ordered modes to try on a fresh `session/new`.
         let initial_modes = daruda_config::agent::connect_mode_priority(agent_default_mode(
             &self.agents,
             &agent_id,
         ));
         // The mode this pane's session was last known to be in — reapplied
         // after a resume (`session/load`) via `session/set_mode`.
-        //
-        // WORKAROUND: `session/load`'s response can in principle carry the
-        // resumed session's real mode, but `claude-agent-acp` recomputes it
-        // from `settings.json` on every process launch instead of the
-        // session's actual last mode, so relying on that response alone loses
-        // the mode across every app restart. Root cause is upstream
-        // (`claude-agent-acp`'s `createSession`); the host tracks and
-        // reapplies the mode itself until that's fixed there.
         let restore_mode = self
             .agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).last_known_mode_id.clone());
 
         // Resolve the pane's owning lane so remote-ness is decided by the
         // lane's session host, not by whatever host (if any) `launch` itself
-        // names — a restored `PaneCwd::Remote` pane whose agent has since
-        // become host-agnostic must still attach to *this lane's* host
-        // rather than silently falling back to local. This is the only place
-        // a connect resolves the command/cwd pair to spawn, so a restored
-        // remote pane (which skips `resolve_new_pane_cwd`) is fixed up here
-        // on its lazy connect. See `resolve_session_command`'s doc.
+        // names.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
         let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        // Resolved once and reused below for `resolve_launch`, `is_remote`,
-        // and the registry write-back — `effective_session_host` re-resolves
-        // `registry_id` against the live catalog/tombstones on every call, so
-        // sharing one result here avoids walking that chase more than once
-        // for the same connect.
         let resolved_host = owning_lane.map(|lane| {
             lane.effective_session_host(&launch, &self.session_hosts, &self.session_host_tombstones)
         });
-        // Cloned out now so it stays available after `owning_lane`'s borrow
-        // of `self` ends (its last use is inside `resolve_launch` below,
-        // right before the write-back needs `&mut self`).
         let cached_host = owning_lane.and_then(|lane| lane.session_host.clone());
-        // The pane's account must belong to the auth domain its own agent
-        // launches under; an account from another domain is refused here
-        // rather than injected under the wrong config-dir env var. Gated on
-        // this connect's actual resolved host, not the launch's own shape —
-        // a managed account's config dir is a local path, and injecting one
-        // into a command that runs on another machine via `wrap_with_env`
-        // would point the remote adapter at a directory that doesn't exist
-        // there (see `account_recipe`'s doc).
         let is_remote = resolved_host
             .as_ref()
             .is_some_and(LaneSessionHost::is_remote);
@@ -439,33 +403,18 @@ impl Workspace {
         let resolved = resolve_launch(
             &launch,
             owning_lane,
-            &cwd,
+            cwd,
             prepared.as_ref(),
             cached_host.as_ref(),
             resolved_host.as_ref(),
             &self.session_hosts,
             &self.session_host_tombstones,
         );
-        // Sync the lane's cached session host with what this connect just
-        // resolved — a registry `target`/`container` edit, or a tombstone
-        // redirect landing on a new id, must persist onto the lane so a
-        // future connect resolves it directly instead of re-deriving it
-        // every time, and so anything reading `Lane::session_host` (e.g. a
-        // future `SessionHostModal` display) sees the fresh value right
-        // away rather than only after the next connect. Same idiom as the
-        // `cwd_changed` sync below (codex review #3 on the prior Lane
-        // session-host axis cycle), applied one layer up (Lane → Registry).
         if let Some(lane_ref) = owning_lane_ref
             && let Some(corrected) = resolved.host_write_back
         {
             self.set_lane_session_host(lane_ref, corrected, cx);
         }
-        // Keep the pane's own cwd in step with what this connect actually
-        // resolved. B′ (see `resolve_session_command`'s doc) means the live
-        // host can diverge from what the pane was created or last connected
-        // with; `AgentChatContent.cwd` is the cx-free cache `Pane::cwd()`,
-        // the account-switcher, and persistence all read, and left unsynced
-        // it would keep reporting a host this pane no longer attaches to.
         let cwd_changed = self
             .agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).cwd.as_ref() != Some(&resolved.resolved_cwd));
@@ -481,11 +430,8 @@ impl Workspace {
             }
             self.mutate_durable(cx, |_, _| {});
         }
+
         let connect_cwd = resolved.wire_cwd;
-        // `wrap` fails only for the two `ConnectCommandError` reasons — see
-        // that enum's doc. Never spawn a connection with a broken command:
-        // park the pane in the matching error and bail out of this connect
-        // attempt entirely.
         let launch_spec = match resolved.spec {
             Ok(spec) => spec,
             Err(err) => {
@@ -499,14 +445,50 @@ impl Workspace {
                     view.update(cx, |v, cx| {
                         v.set_error(message, daruda_acp::Remedy::Configure, cx);
                     });
-                    // Connecting → Error clears the badge; dirty the cached
-                    // docks so it doesn't linger stale (same pattern as every
-                    // other Error transition in this function).
+                    // Connecting -> Error clears the badge; dirty the cached
+                    // docks so it doesn't linger stale.
                     self.notify_status_docks(cx);
                 }
-                return;
+                return None;
             }
         };
+
+        Some(AgentChatConnectionPlan {
+            agent_id,
+            launch_spec,
+            connect_cwd,
+            initial_model,
+            initial_modes,
+            restore_mode,
+            prepared,
+        })
+    }
+
+    /// Open the live ACP session for an already-pushed pane and store the
+    /// event-pump task on its view; closing the pane drops both. `resume`
+    /// carries the persisted session id: `Some` branches `session/load`,
+    /// `None` starts a fresh `session/new`. A failed resume retries once fresh.
+    pub(in crate::workspace) fn connect_agent_chat(
+        &mut self,
+        pane_id: PaneId,
+        cwd: PaneCwd,
+        resume: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let node_root = daruda_store::persistence::node_install_dir();
+
+        let Some(plan) = self.prepare_agent_chat_connection(pane_id, &cwd, cx) else {
+            return;
+        };
+        let AgentChatConnectionPlan {
+            agent_id,
+            launch_spec,
+            connect_cwd,
+            initial_model,
+            initial_modes,
+            restore_mode,
+            prepared,
+        } = plan;
 
         // DIAG: an ACP adapter spawn that fails with `os error 2` means the
         // launcher (`docker` / `npx` / `ssh`) was not on this process's PATH —

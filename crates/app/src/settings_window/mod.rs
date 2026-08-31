@@ -2218,6 +2218,15 @@ impl SettingsWindow {
         let previous = &crate::settings_store::SettingsStore::global(cx)
             .user()
             .session_hosts;
+        self.collect_session_hosts_against(previous, true, cx)
+    }
+
+    fn collect_session_hosts_against(
+        &self,
+        previous: &[daruda_config::SessionHostEntry],
+        skip_blank_new: bool,
+        cx: &gpui::App,
+    ) -> Result<Vec<daruda_config::SessionHostEntry>, SharedString> {
         let mut entries = Vec::with_capacity(self.session_host_rows.len());
         let mut seen_labels = HashSet::new();
         for (index, row) in self.session_host_rows.iter().enumerate() {
@@ -2225,7 +2234,12 @@ impl SettingsWindow {
             let is_new = !previous.iter().any(|entry| entry.id == row.id);
             let target = row.target_input.read(cx).value().trim().to_string();
             let container = row.container_input.read(cx).value().trim().to_string();
-            if is_new && label.is_empty() && target.is_empty() && container.is_empty() {
+            if skip_blank_new
+                && is_new
+                && label.is_empty()
+                && target.is_empty()
+                && container.is_empty()
+            {
                 continue;
             }
             if label.is_empty() {
@@ -2364,95 +2378,7 @@ impl SettingsWindow {
         config.cursor.blinking = self.cursor_blinking;
 
         config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
-
-        // One pass over the whole catalog, so a non-editable entry keeps its
-        // config position instead of being appended after the editable rows.
-        // `index` counts editable rows only — it is the "Agent N" the section
-        // labels, which is the number an error message has to name.
-        let mut agents = Vec::with_capacity(self.agent_catalog.len());
-        let mut seen_agent_ids = HashSet::new();
-        let mut index = 0usize;
-        for item in &self.agent_catalog {
-            let row = match item {
-                // No fields to validate; carried through exactly as loaded.
-                AgentCatalogItem::Unresolved(entry) => {
-                    agents.push(entry.clone());
-                    continue;
-                }
-                AgentCatalogItem::Editable(row) => row,
-            };
-            index += 1;
-            let index = index - 1;
-            let id = row.id_input.read(cx).value().trim().to_string();
-            let name = row.name_input.read(cx).value().trim().to_string();
-            let command = row.command_input.read(cx).value().trim().to_string();
-            if id.is_empty() || name.is_empty() || command.is_empty() {
-                return Err(SharedString::from(s::settings_err_agent_catalog_field(
-                    index + 1,
-                )));
-            }
-            if !is_valid_agent_id(&id) {
-                return Err(SharedString::from(s::settings_err_agent_catalog_id(&id)));
-            }
-            if !seen_agent_ids.insert(id.clone()) {
-                return Err(SharedString::from(s::settings_err_agent_catalog_duplicate(
-                    &id,
-                )));
-            }
-
-            let kind = row
-                .transport_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "raw".to_string());
-            let host = row.host_input.read(cx).value().trim().to_string();
-            let container = row.container_input.read(cx).value().trim().to_string();
-            if !agent_row_is_valid(&kind, &host, &container) {
-                let msg = if kind == "ssh" {
-                    s::settings_err_agent_catalog_host(index + 1)
-                } else {
-                    s::settings_err_agent_catalog_container(index + 1)
-                };
-                return Err(SharedString::from(msg));
-            }
-
-            let launch = match kind.as_str() {
-                "ssh" => daruda_config::AgentLaunch::Ssh {
-                    adapter_command: command,
-                    host,
-                },
-                "docker" => daruda_config::AgentLaunch::Docker {
-                    adapter_command: command,
-                    container,
-                },
-                _ => daruda_config::AgentLaunch::Raw(command),
-            };
-            let definition = daruda_config::AgentDefinition {
-                id,
-                name,
-                launch,
-                // The empty pick is the "agent default" sentinel = no override.
-                default_mode: row.default_mode(cx),
-                default_model: row.default_model(cx),
-            };
-            // A row that came from a preset stays a reference to it, so the
-            // fields the user left alone keep following the preset.
-            agents.push(daruda_config::AgentEntry::for_definition(
-                definition,
-                row.preset.as_deref(),
-            ));
-        }
-        // Non-editable entries are part of this count: they carry no fields but
-        // they are still catalog entries, and `resolved_agents` already falls
-        // back to the built-in default when none of them resolve. Counting only
-        // the editable rows would reject a valid catalog whose entries all
-        // name manual-install or
-        // retired presets.
-        if agents.is_empty() {
-            return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
-        }
-        config.agents = agents;
+        config.agents = self.collect_agent_catalog(cx)?;
 
         // Session host registry: `label` must be unique across the whole
         // catalog (trim + case-insensitive) — two rows saved with the same
@@ -2460,43 +2386,8 @@ impl SettingsWindow {
         // unable to tell them apart. `target`/`container` go through the
         // exact same bare-word check `SessionHostModal` uses, so a value
         // that would break `wrap`'s shell quoting is rejected here too.
-        let mut session_hosts = Vec::with_capacity(self.session_host_rows.len());
-        let mut seen_session_host_labels: HashSet<String> = HashSet::new();
-        for (index, row) in self.session_host_rows.iter().enumerate() {
-            let label = row.label_input.read(cx).value().trim().to_string();
-            if label.is_empty() {
-                return Err(SharedString::from(
-                    s::settings_err_session_host_label_empty(index + 1),
-                ));
-            }
-            if !seen_session_host_labels.insert(label.to_ascii_lowercase()) {
-                return Err(SharedString::from(
-                    s::settings_err_session_host_label_duplicate(&label),
-                ));
-            }
-            let kind = if row.is_docker(cx) {
-                let container = row.container_input.read(cx).value().to_string();
-                let container = session_host::checked_bare_word(
-                    &container,
-                    session_host::SessionHostField::Container,
-                )
-                .map_err(|e| session_host_validation_message(index, e))?;
-                daruda_config::SessionHostKind::Docker { container }
-            } else {
-                let target = row.target_input.read(cx).value().to_string();
-                let target = session_host::checked_bare_word(
-                    &target,
-                    session_host::SessionHostField::Target,
-                )
-                .map_err(|e| session_host_validation_message(index, e))?;
-                daruda_config::SessionHostKind::Ssh { target }
-            };
-            session_hosts.push(daruda_config::SessionHostEntry {
-                id: session_host_entry_id(&self.base_config.session_hosts, row.id, &kind),
-                label,
-                kind,
-            });
-        }
+        let session_hosts =
+            self.collect_session_hosts_against(&self.base_config.session_hosts, false, cx)?;
         config.session_host_tombstones = reconcile_session_host_tombstones(
             &self.base_config.session_hosts,
             &self.base_config.session_host_tombstones,

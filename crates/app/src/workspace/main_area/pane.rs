@@ -454,6 +454,25 @@ impl Pane {
         cwd_basename(self.cwd())
     }
 
+    pub(in crate::workspace) fn is_terminal(&self) -> bool {
+        matches!(self.content, PaneContent::Terminal(_))
+    }
+
+    pub(in crate::workspace) fn is_file(&self) -> bool {
+        matches!(self.content, PaneContent::File(_))
+    }
+
+    pub(in crate::workspace) fn is_agent_chat(&self) -> bool {
+        matches!(self.content, PaneContent::AgentChat(_))
+    }
+
+    pub(in crate::workspace) fn file_identity(
+        &self,
+    ) -> Option<(PathBuf, daruda_store::project::LaneId)> {
+        self.file_content()
+            .map(|file| (file.view.path.clone(), file.view.lane_id))
+    }
+
     /// Focus handle the pane gives to the window when activated.
     /// File panes return their pane-level handle; the find-panel input
     /// has its own handle that takes priority while the panel is open

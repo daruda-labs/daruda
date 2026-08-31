@@ -1,6 +1,9 @@
 //! `accounts.json` load/save via the shared JSON helpers.
 
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+
+use fs4::fs_std::FileExt as _;
 
 use crate::accounts::{AccountsState, SCHEMA_VERSION};
 use crate::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -9,6 +12,10 @@ use crate::persistence::{LoadOutcome, default_data_dir, load_json_file, save_jso
 
 pub fn accounts_path_in(data_dir: &Path) -> PathBuf {
     data_dir.join("accounts.json")
+}
+
+fn accounts_lock_path_in(data_dir: &Path) -> PathBuf {
+    data_dir.join("accounts.json.lock")
 }
 
 /// Load `accounts.json`, upgrading an older schema in place. `None` for a
@@ -69,12 +76,43 @@ pub fn save_accounts_in(data_dir: &Path, state: &AccountsState) -> std::io::Resu
     save_json_atomic(data_dir, &path, state)
 }
 
+/// Load, mutate, and save `accounts.json` while holding a sibling lock file.
+///
+/// The plain load/save helpers remain available for callers that only read or
+/// already hold stronger coordination. Account UI flows that merge user edits
+/// into disk state should use this to avoid the read-modify-write race between
+/// open windows.
+pub fn mutate_accounts_in<R>(
+    data_dir: &Path,
+    mutate: impl FnOnce(&mut AccountsState) -> R,
+) -> std::io::Result<(AccountsState, R)> {
+    std::fs::create_dir_all(data_dir)?;
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(accounts_lock_path_in(data_dir))?;
+    lock_file.lock_exclusive()?;
+
+    let mut state = load_accounts_in(data_dir).unwrap_or_default();
+    let result = mutate(&mut state);
+    save_accounts_in(data_dir, &state)?;
+    Ok((state, result))
+}
+
 pub fn load_accounts() -> Option<AccountsState> {
     load_accounts_in(&default_data_dir())
 }
 
 pub fn save_accounts(state: &AccountsState) -> std::io::Result<()> {
     save_accounts_in(&default_data_dir(), state)
+}
+
+pub fn mutate_accounts<R>(
+    mutate: impl FnOnce(&mut AccountsState) -> R,
+) -> std::io::Result<(AccountsState, R)> {
+    mutate_accounts_in(&default_data_dir(), mutate)
 }
 
 #[cfg(test)]
@@ -99,6 +137,33 @@ mod tests {
         save_accounts_in(&dir, &state).unwrap();
         let back = load_accounts_in(&dir).unwrap();
         assert_eq!(back.accounts.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn mutate_accounts_in_loads_mutates_and_saves() {
+        let dir = std::env::temp_dir().join(format!("daruda-acct-test-{}", AccountId::new().0));
+        std::fs::create_dir_all(&dir).unwrap();
+        let account_id = AccountId::new();
+
+        let (state, added) = mutate_accounts_in(&dir, |state| {
+            state.accounts.push(ManagedAccount {
+                id: account_id,
+                recipe: AccountRecipeId::Claude,
+                email: Some("alice@company.com".into()),
+                organization: None,
+                config_dir: dir.join("alice"),
+                created_at: 1,
+                last_authenticated_at: 2,
+            });
+            true
+        })
+        .expect("mutate accounts");
+
+        assert!(added);
+        assert_eq!(state.accounts.len(), 1);
+        let back = load_accounts_in(&dir).expect("load mutated state");
+        assert_eq!(back.accounts[0].id, account_id);
         std::fs::remove_dir_all(&dir).ok();
     }
 

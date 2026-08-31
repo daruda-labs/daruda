@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod persistence;
-pub use persistence::{load_accounts, load_accounts_in, save_accounts, save_accounts_in};
+pub use persistence::{
+    load_accounts, load_accounts_in, mutate_accounts, mutate_accounts_in, save_accounts,
+    save_accounts_in,
+};
 
 /// Bump when `AccountsState`'s shape changes incompatibly.
 pub const SCHEMA_VERSION: u32 = 2;
