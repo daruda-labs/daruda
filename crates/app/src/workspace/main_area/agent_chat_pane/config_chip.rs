@@ -44,12 +44,12 @@ pub(in crate::workspace) fn config_chip(
         .map(|(_, name)| name.clone())
         .unwrap_or_else(|| current_fallback_label(&current));
 
-    let chip_value = if option.name.is_empty() {
-        display_name
+    let tooltip = if option.name.is_empty() {
+        display_name.clone()
     } else {
         strings::agent_chat_config_chip(&option.name, &display_name)
     };
-    let label = SharedString::from(format!("{}{}", chip_value, strings::TASK_PILL_CHEVRON));
+    let label = SharedString::from(visible_config_label(&display_name));
 
     let config_id = option.id.clone();
     let option_name = option.name.clone();
@@ -63,6 +63,7 @@ pub(in crate::workspace) fn config_chip(
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))
+        .tooltip(tooltip)
         .dropdown_menu(move |menu, _window, _cx| {
             build_config_menu(
                 pane_id,
@@ -74,6 +75,10 @@ pub(in crate::workspace) fn config_chip(
                 menu,
             )
         })
+}
+
+fn visible_config_label(display_name: &str) -> String {
+    format!("{}{}", display_name, strings::TASK_PILL_CHEVRON)
 }
 
 /// The option's choices as `(value, display name)` in menu order, plus the
@@ -170,6 +175,13 @@ fn build_config_menu(
 
 #[cfg(test)]
 mod tests {
-    // Pure view builder with no extractable logic (mirrors `mode_chip`).
-    // Op-level coverage lives in `crate::workspace::tests::agent_chat`.
+    use super::*;
+
+    #[test]
+    fn visible_label_is_only_the_current_option_value() {
+        assert_eq!(
+            visible_config_label("Sonnet 4"),
+            format!("Sonnet 4{}", strings::TASK_PILL_CHEVRON)
+        );
+    }
 }

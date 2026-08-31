@@ -1134,6 +1134,7 @@ fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppCon
             // Connected clears the gate and runs the catch-up rebuild.
             view.apply_event(
                 AcpEvent::Connected {
+                    program: None,
                     session_id: "sess-1".into(),
                     modes: None,
                     config_options: Vec::new(),

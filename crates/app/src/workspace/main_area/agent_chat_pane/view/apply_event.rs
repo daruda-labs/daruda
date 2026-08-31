@@ -100,8 +100,10 @@ impl AgentChatView {
                 // and the agent re-advertises them on every connect, so the
                 // pane loses nothing by picking them up only then.
                 login_methods: _,
+                program,
             } => {
                 self.status = AgentSessionStatus::Connected;
+                self.agent_program = program;
                 if let Some(state) = &modes {
                     self.last_known_mode_id = Some(state.current.clone());
                 }
@@ -171,7 +173,8 @@ impl AgentChatView {
                 // Fold protocol traffic through this pane's per-agent strategy
                 // (selected from its catalog id) so vendor-specific `_meta` is
                 // read the way that agent emits it. See `daruda_acp::adapter`.
-                let adapter = daruda_acp::adapter::adapter_for(&self.agent_id);
+                let adapter =
+                    daruda_acp::adapter::adapter_for(self.agent_program.as_deref(), &self.agent_id);
                 let effect = apply_update_with(&mut self.items, &update, adapter.as_ref());
                 touched_tool = effect.touched_tool;
                 touched_text = effect.touched_text;

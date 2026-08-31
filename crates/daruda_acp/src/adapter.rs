@@ -4,8 +4,9 @@
 //! where they place data. Rather than branch the mapper on sender identity, a
 //! [`DefaultAdapter`] absorbs the superset of conventions seen in the wild and
 //! named adapters override only the hooks that genuinely differ. The host
-//! selects one strategy per session via [`adapter_for`], keyed on the agent's
-//! catalog id.
+//! selects one strategy per session via [`adapter_for`], keyed on the program
+//! the agent reports at `initialize` — the catalog id is only daruda's label
+//! for it, and serves as the fallback for an agent that reports nothing.
 //!
 //! GPUI-free: a trait plus plain unit structs, unit-tested in isolation.
 
@@ -163,13 +164,58 @@ impl AcpAdapter for CodexAdapter {
     }
 }
 
-/// Select the strategy for a catalog agent id. Unknown ids (custom agents)
-/// resolve to [`DefaultAdapter`], which preserves the pre-strategy universal
-/// behavior for anything not explicitly special-cased.
-pub fn adapter_for(agent_id: &str) -> Box<dyn AcpAdapter> {
-    match agent_id {
-        "codex" | "codex-acp" => Box::new(CodexAdapter),
-        _ => Box::new(DefaultAdapter),
+/// Which strategy a session runs under. Named so the *choice* is a pure
+/// function that can be decided and tested apart from building the strategy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AdapterId {
+    Default,
+    Codex,
+}
+
+/// Adapter programs daruda has a dialect opinion about, keyed by the package
+/// name the program reports at `initialize` (`agent_info.name`). Listing
+/// claude-agent-acp as `Default` is not redundant with the fallback: it is what
+/// makes "a recognised program outranks the catalog id" a rule rather than a
+/// codex-only special case.
+const KNOWN_PROGRAMS: [(&str, AdapterId); 3] = [
+    ("codex-acp", AdapterId::Codex),
+    ("codex", AdapterId::Codex),
+    ("claude-agent-acp", AdapterId::Default),
+];
+
+/// The package name without its `@scope/` prefix — the scope is a publishing
+/// detail, not part of which dialect the program speaks.
+fn unscoped(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
+}
+
+/// Pick the strategy for a session.
+///
+/// `program` is what the agent called itself at `initialize`; `catalog_id` is
+/// daruda's own label for it. The program wins **when daruda recognises it** —
+/// it is the thing actually speaking, while the catalog id is user-editable and
+/// a custom id would otherwise silently drop the agent to [`DefaultAdapter`].
+/// An unrecognised program is not evidence against the catalog id (a fork or
+/// wrapper reports its own name), and `agent_info` is optional in the protocol,
+/// so both cases fall back to the id — which is exactly the pre-existing
+/// behavior.
+pub fn adapter_id_for(program: Option<&str>, catalog_id: &str) -> AdapterId {
+    if let Some(name) = program.map(unscoped)
+        && let Some((_, id)) = KNOWN_PROGRAMS.iter().find(|(known, _)| *known == name)
+    {
+        return *id;
+    }
+    match catalog_id {
+        "codex" | "codex-acp" => AdapterId::Codex,
+        _ => AdapterId::Default,
+    }
+}
+
+/// Build the strategy [`adapter_id_for`] picks.
+pub fn adapter_for(program: Option<&str>, catalog_id: &str) -> Box<dyn AcpAdapter> {
+    match adapter_id_for(program, catalog_id) {
+        AdapterId::Codex => Box::new(CodexAdapter),
+        AdapterId::Default => Box::new(DefaultAdapter),
     }
 }
 
@@ -251,11 +297,11 @@ mod tests {
         // codex and unknown ids both currently behave like Default for this hook.
         let m = meta(json!({"claudeCode": {"parentToolUseId": "toolu_y"}}));
         assert_eq!(
-            adapter_for("codex-acp").parent_tool_id(&m),
+            adapter_for(None, "codex-acp").parent_tool_id(&m),
             Some("toolu_y".to_owned())
         );
         assert_eq!(
-            adapter_for("some-custom-agent").parent_tool_id(&m),
+            adapter_for(None, "some-custom-agent").parent_tool_id(&m),
             Some("toolu_y".to_owned())
         );
     }
@@ -416,6 +462,74 @@ mod tests {
         assert_eq!(
             CodexAdapter.command_exit(&Some(raw.clone()), &None),
             DefaultAdapter.command_exit(&Some(raw), &None)
+        );
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn the_program_the_agent_reports_picks_the_strategy() {
+        assert_eq!(
+            adapter_id_for(Some("@agentclientprotocol/codex-acp"), "codex-acp"),
+            AdapterId::Codex
+        );
+        assert_eq!(
+            adapter_id_for(Some("@agentclientprotocol/claude-agent-acp"), "claude-acp"),
+            AdapterId::Default
+        );
+    }
+
+    /// The failure this selection exists to close: a user who registers
+    /// codex-acp under a catalog id of their own still gets the codex strategy.
+    #[test]
+    fn a_catalog_id_of_the_users_own_still_reaches_the_right_strategy() {
+        assert_eq!(
+            adapter_id_for(Some("@agentclientprotocol/codex-acp"), "my-codex"),
+            AdapterId::Codex
+        );
+    }
+
+    /// `agent_info` is optional in the protocol, so the catalog id remains the
+    /// fallback — an agent that reports nothing behaves exactly as before.
+    #[test]
+    fn an_agent_that_reports_nothing_falls_back_to_the_catalog_id() {
+        assert_eq!(adapter_id_for(None, "codex-acp"), AdapterId::Codex);
+        assert_eq!(adapter_id_for(None, "codex"), AdapterId::Codex);
+        assert_eq!(
+            adapter_id_for(None, "some-custom-agent"),
+            AdapterId::Default
+        );
+    }
+
+    /// The program on the other end of the pipe is the authority; the catalog
+    /// id is only daruda's label for it.
+    #[test]
+    fn the_reported_program_outranks_the_catalog_id() {
+        assert_eq!(
+            adapter_id_for(Some("@agentclientprotocol/claude-agent-acp"), "codex-acp"),
+            AdapterId::Default
+        );
+    }
+
+    /// The scope is a publishing detail, so an unscoped report resolves the same.
+    #[test]
+    fn the_package_scope_is_not_part_of_the_identity() {
+        assert_eq!(
+            adapter_id_for(Some("codex-acp"), "custom"),
+            AdapterId::Codex
+        );
+    }
+
+    /// An unrecognised program is not evidence against the catalog id — a fork
+    /// or wrapper reporting its own name still honours how it was registered.
+    #[test]
+    fn an_unrecognised_program_leaves_the_catalog_id_to_decide() {
+        assert_eq!(
+            adapter_id_for(Some("@someone/my-codex-wrapper"), "codex-acp"),
+            AdapterId::Codex
         );
     }
 }

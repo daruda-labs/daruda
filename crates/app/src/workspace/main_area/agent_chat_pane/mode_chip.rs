@@ -41,11 +41,8 @@ pub(in crate::workspace) fn mode_chip(
         .unwrap_or(modes.current.as_str())
         .to_string();
 
-    let label = SharedString::from(format!(
-        "{}{}",
-        strings::agent_chat_session_mode_chip(&display_name),
-        strings::TASK_PILL_CHEVRON
-    ));
+    let label = SharedString::from(visible_mode_label(&display_name));
+    let tooltip = strings::agent_chat_session_mode_chip(&display_name);
 
     // Owned data for the `'static` dropdown closure.
     let available: Vec<(String, String)> = modes
@@ -65,9 +62,14 @@ pub(in crate::workspace) fn mode_chip(
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))
+        .tooltip(tooltip)
         .dropdown_menu(move |menu, _window, _cx| {
             build_mode_menu(pane_id, &available, &current, &workspace, menu)
         })
+}
+
+fn visible_mode_label(display_name: &str) -> String {
+    format!("{}{}", display_name, strings::TASK_PILL_CHEVRON)
 }
 
 /// Build the mode selection popup menu. One item per available mode; the
@@ -99,7 +101,13 @@ fn build_mode_menu(
 
 #[cfg(test)]
 mod tests {
-    // The chip builder itself has no pure-logic tests (it is a pure
-    // view builder with no extractable logic). Op-level coverage lives in
-    // `crate::workspace::tests::agent_chat`.
+    use super::*;
+
+    #[test]
+    fn visible_label_is_only_the_current_mode_value() {
+        assert_eq!(
+            visible_mode_label("Review Changes"),
+            format!("Review Changes{}", strings::TASK_PILL_CHEVRON)
+        );
+    }
 }

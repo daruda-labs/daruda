@@ -27,7 +27,7 @@ const SAMPLED_STEPS: usize = 3;
 
 /// Replay prompts and updates into the item list a live pane would hold.
 fn replay(log: &str, agent_id: &str) -> Vec<ChatItem> {
-    let adapter = adapter_for(agent_id);
+    let adapter = adapter_for(None, agent_id);
     let mut items: Vec<ChatItem> = Vec::new();
     for line in log.lines() {
         let Some(brace) = line.find('{') else {

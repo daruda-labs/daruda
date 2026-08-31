@@ -462,6 +462,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// are attributed to this frozen source rather than the live catalog,
     /// which may be edited while the old process is still connected.
     pub(in crate::workspace) agent_vocabulary_source: Option<String>,
+    /// What the connected agent called itself at `initialize`. Decides the ACP
+    /// dialect the pane reads traffic with; `None` until a connect reports one,
+    /// which leaves [`agent_id`](Self::agent_id) to decide. Not persisted — the
+    /// agent re-reports it on every connect, and a restored pane has no traffic
+    /// to map until it reconnects.
+    pub(in crate::workspace) agent_program: Option<String>,
     /// Display name for `agent_id`, refreshed on config reload. Used as the
     /// activity-bar title fallback before the session reports its own title.
     pub(in crate::workspace) agent_name: String,
@@ -689,6 +695,7 @@ impl AgentChatView {
             // the mode id above — see `Workspace::rebuild_layout`.
             last_known_model_id: None,
             agent_id,
+            agent_program: None,
             agent_vocabulary_source: None,
             agent_name,
             // A restored pane connects lazily; the resume decision (and the

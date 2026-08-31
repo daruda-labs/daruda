@@ -1603,6 +1603,7 @@ async fn connect_and_later_events_replace_only_their_vocabulary_axis(cx: &mut Te
 
     // What the adapter advertises at connect: both axes at once.
     let connected = AcpEvent::Connected {
+        program: None,
         session_id: "s1".into(),
         modes: Some(ModeStateView {
             available: vec![

@@ -54,8 +54,10 @@ fn main() {
                     config_options,
                     capabilities,
                     login_methods,
+                    program,
                 } => {
                     eprintln!("[session-id] {session_id}");
+                    eprintln!("[program] {program:?}");
                     eprintln!(
                         "[connected] modes={modes:?} config_options={config_options:?} \
                          capabilities={capabilities:?} sending prompt 1"

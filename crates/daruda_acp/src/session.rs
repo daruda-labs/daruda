@@ -180,6 +180,14 @@ pub enum AcpEvent {
         /// asks for a re-login the session that could have answered is the one
         /// that just failed.
         login_methods: Vec<LoginMethod>,
+        /// The program the agent called itself at `initialize`
+        /// (`agent_info.name`, e.g. `@agentclientprotocol/codex-acp`). `None`
+        /// for an agent that reports no identity — the protocol still has the
+        /// field optional. This is what decides which ACP dialect the session
+        /// speaks, so the host feeds it to
+        /// [`crate::adapter::adapter_for`]: the catalog id is only daruda's
+        /// label and a user may register the same program under any id.
+        program: Option<String>,
     },
     /// The agent replaced its session config option state (the protocol carries
     /// the full option set), from either source: the reply to our
@@ -758,7 +766,7 @@ async fn run_connection(
             // `prompt_loop` below is deliberately outside every timeout here —
             // a live, quiet session is normal.
             let _ = event_tx.unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::Handshaking));
-            let (capabilities, login_methods, resume, fresh) =
+            let (capabilities, login_methods, program, resume, fresh) =
                 with_connect_timeout("initialize", CONNECT_HANDSHAKE_TIMEOUT, async {
                     let init = connection
                         .send_request(
@@ -769,6 +777,7 @@ async fn run_connection(
                         .await?;
                     let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
                     let login_methods = parse_login_methods(&init.auth_methods);
+                    let program = init.agent_info.map(|info| info.name);
 
                     // Gate the requested resume on advertised `session/load` support:
                     // downgrade to a fresh session (with a Notice) when the agent can't
@@ -784,7 +793,7 @@ async fn run_connection(
                     // mode is applied only on a fresh session; a real load preserves the
                     // resumed session's own mode.
                     let fresh = resume.is_none();
-                    Ok((capabilities, login_methods, resume, fresh))
+                    Ok((capabilities, login_methods, program, resume, fresh))
                 })
                 .await?;
 
@@ -945,6 +954,7 @@ async fn run_connection(
                 config_options: crate::mode_tracker::strip_mode_options(config_options),
                 capabilities,
                 login_methods,
+                program,
             });
 
             prompt_loop(
@@ -2050,6 +2060,79 @@ mod tests {
                 },
                 agent_client_protocol::on_receive_request!(),
             )
+    }
+
+    /// An agent reporting the exact `agentInfo` captured from a live
+    /// claude-agent-acp `initialize`. Which dialect a session speaks is decided
+    /// by the program on the wire, so that program has to reach the host.
+    fn self_identifying_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse};
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    let response: InitializeResponse = serde_json::from_value(serde_json::json!({
+                        "protocolVersion": 1,
+                        "agentCapabilities": {},
+                        "agentInfo": {
+                            "name": "@agentclientprotocol/claude-agent-acp",
+                            "title": "Claude Agent",
+                            "version": "0.70.0"
+                        }
+                    }))
+                    .expect("the captured initialize payload parses");
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(NewSessionResponse::new("sess-agent-info"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    #[test]
+    fn connected_carries_the_program_the_agent_reported() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+        let handle = AcpSessionHandle {
+            commands: command_tx,
+            permission_parks: permission_parks.clone(),
+        };
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                self_identifying_agent(),
+                PathBuf::from("."),
+                None,
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            let program = loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { program, .. }) => break program,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            };
+
+            assert_eq!(
+                program.as_deref(),
+                Some("@agentclientprotocol/claude-agent-acp"),
+                "the reported program reaches the host verbatim"
+            );
+
+            drop(handle);
+            connection.await.expect("connection task ends cleanly");
+        });
     }
 
     /// The advertised logins have to reach the host, and reach it classified:
