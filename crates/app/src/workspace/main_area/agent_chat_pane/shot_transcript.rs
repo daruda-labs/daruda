@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use daruda_acp::{ChatItem, DiffView, ToolCallItem, ToolKindView, ToolStatusView};
+use daruda_acp::{ChatItem, DiffView, MessagePhase, ToolCallItem, ToolKindView, ToolStatusView};
 
 /// A file modification a sample call reports.
 struct SampleDiff {
@@ -177,13 +177,17 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     let mut next_id = 0usize;
     for cycle in cycles() {
         items.push(thinking(cycle.thinking));
-        items.push(assistant(cycle.prose));
+        // Each cycle's prose is a preamble, not a reply. The seed already
+        // models the shape an agent that labels its messages sends — a thought
+        // summary, the preamble, then the tools — so the label belongs here
+        // too; without it the header this seed exists to show never engages.
+        items.push(assistant(cycle.prose, MessagePhase::Commentary));
         for call in cycle.tools {
             items.push(tool_call(next_id, call));
             next_id += 1;
         }
     }
-    items.push(assistant(CONCLUSION));
+    items.push(assistant(CONCLUSION, MessagePhase::Answer));
     items
 }
 
@@ -195,12 +199,12 @@ fn thinking(text: &str) -> ChatItem {
     }
 }
 
-fn assistant(text: &str) -> ChatItem {
+fn assistant(text: &str, phase: MessagePhase) -> ChatItem {
     ChatItem::AssistantText {
         text: text.to_string(),
         streaming: false,
         message_id: None,
-        phase: Default::default(),
+        phase,
     }
 }
 

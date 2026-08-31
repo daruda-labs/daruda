@@ -11,7 +11,9 @@ use crate::ui::{Icon, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::rows::LiveSubagentUnits;
-use crate::workspace::main_area::agent_chat_pane::rows::step::{StepSpan, step_span_at};
+use crate::workspace::main_area::agent_chat_pane::rows::step::{
+    StepSpan, step_header_text, step_span_at,
+};
 use crate::workspace::main_area::agent_chat_pane::tool_category::{ToolCategory, classify_tool};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
@@ -38,12 +40,26 @@ pub(super) fn step_bar(
     let icon = tool_category_icon(dominant_category(items, run, |item| {
         filter_revealed || this.filter_matches.matches(item)
     }));
-    // Prefer reasoning, then fall back to assistant prose.
     let title_items = items;
-    let mut header = FoldHeader::with_summary(move || {
-        step_title(title_items, title_run.clone(), TitleSource::Thinking)
-            .or_else(|| step_title(title_items, title_run, TitleSource::Assistant))
-    })
+    // An agent that wrote a preamble before this step gave the header two
+    // things to say, so it says the one the current state does not: the
+    // preamble while the fold hides it, the thought summary once the preamble
+    // is on screen. Without one, the header keeps its collapsed-only summary —
+    // reasoning first, assistant prose as the fallback.
+    let header_text = span.as_ref().and_then(|s| step_header_text(items, s));
+    let mut header = match header_text {
+        Some(text) => FoldHeader::with_alternate(
+            move || {
+                summary_of(title_items, text.collapsed)
+                    .or_else(|| step_title(title_items, title_run.clone(), TitleSource::Thinking))
+            },
+            move || text.expanded.and_then(|ix| summary_of(title_items, ix)),
+        ),
+        None => FoldHeader::with_summary(move || {
+            step_title(title_items, title_run.clone(), TitleSource::Thinking)
+                .or_else(|| step_title(title_items, title_run, TitleSource::Assistant))
+        }),
+    }
     .leading(
         div()
             .flex_none()
@@ -123,6 +139,17 @@ pub(super) fn tail_more_bar(
 enum TitleSource {
     Thinking,
     Assistant,
+}
+
+/// The one-line summary of a single item, in the tone its kind calls for.
+fn summary_of(items: &[ChatItem], ix: usize) -> Option<SummaryLine> {
+    match items.get(ix)? {
+        ChatItem::Thinking { text, .. } => {
+            SummaryLine::from_markdown(text).map(SummaryLine::reasoning)
+        }
+        ChatItem::AssistantText { text, .. } => SummaryLine::from_markdown(text),
+        _ => None,
+    }
 }
 
 fn step_title(

@@ -35,9 +35,11 @@
 #       `FoldToggle::External`.
 #
 #   (d) A `trailing(` badge is never gated on fold state. Trailing content reads
-#       the same expanded or collapsed — only the stretch slot's summary is
-#       collapsed-only. A `collapsed` / `!expanded` guard around a `.trailing(`
-#       call is the drift this check catches.
+#       the same expanded or collapsed. The stretch slot is the only one that
+#       varies with fold state — hidden when expanded (`StretchSlot::Summary`)
+#       or showing a different value in each (`StretchSlot::Alternate`). A
+#       `collapsed` / `!expanded` guard around a `.trailing(` call is the drift
+#       this check catches.
 #
 # What this does NOT catch
 # ------------------------

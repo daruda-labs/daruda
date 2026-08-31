@@ -99,6 +99,50 @@ pub(in crate::workspace) fn step_span_at(items: &[ChatItem], first_ix: usize) ->
     })
 }
 
+/// Which of a step's own prose items its header shows, per fold state.
+///
+/// Field names match [`super::super::render::fold_header`]'s slot vocabulary:
+/// the header shows `collapsed` while folded and `expanded` once open.
+pub(in crate::workspace) struct StepHeaderText {
+    /// The preamble the agent wrote before this step's work. Shown collapsed,
+    /// because it is what the fold hides and what the reader came for.
+    pub(in crate::workspace) collapsed: usize,
+    /// The thought summary, shown once the preamble is on screen — and whose
+    /// row the header then owns. `Some` only when the header can show it
+    /// whole; a longer thought keeps its own row, where the rest is reachable.
+    pub(in crate::workspace) expanded: Option<usize>,
+}
+
+/// A step's header text, or `None` when the step has no labelled preamble and
+/// the header keeps its plain collapsed-only summary.
+///
+/// Reading the preamble label rather than the agent id is what keeps this
+/// agent-neutral: only an adapter that labels its messages produces one, so the
+/// renderer never asks who is speaking.
+pub(in crate::workspace) fn step_header_text(
+    items: &[ChatItem],
+    span: &StepSpan,
+) -> Option<StepHeaderText> {
+    let mut prose = span.start..span.tool_start;
+    let collapsed = prose.clone().find(|&k| {
+        matches!(&items[k], ChatItem::AssistantText { phase, .. }
+            if *phase == daruda_acp::MessagePhase::Commentary)
+    })?;
+    let expanded = prose
+        .find(|&k| matches!(&items[k], ChatItem::Thinking { text, .. } if fits_a_header(text)));
+    Some(StepHeaderText {
+        collapsed,
+        expanded,
+    })
+}
+
+/// Whether a header showing this body's first line would be showing all of it.
+/// The header is one ellipsized row, so anything longer would be a promise the
+/// reader cannot collect on.
+fn fits_a_header(text: &str) -> bool {
+    text.lines().filter(|l| !l.trim().is_empty()).count() <= 1
+}
+
 /// Count the projected rows a step header would fold.
 fn folded_rows(items: &[ChatItem], span: &StepSpan, hierarchy: &ToolHierarchy<'_>) -> usize {
     let prose = (span.start..span.tool_start)
@@ -122,6 +166,114 @@ fn folded_rows(items: &[ChatItem], span: &StepSpan, hierarchy: &ToolHierarchy<'_
 
 fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
     matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
+}
+
+#[cfg(test)]
+mod header_text_tests {
+    use super::*;
+    use daruda_acp::MessagePhase;
+
+    fn asst(s: &str, phase: MessagePhase) -> ChatItem {
+        ChatItem::AssistantText {
+            text: s.to_owned(),
+            streaming: false,
+            message_id: None,
+            phase,
+        }
+    }
+
+    fn think(s: &str) -> ChatItem {
+        ChatItem::Thinking {
+            text: s.to_owned(),
+            streaming: false,
+            message_id: None,
+        }
+    }
+
+    fn tool() -> ChatItem {
+        ChatItem::ToolCall(daruda_acp::ToolCallItem {
+            id: "t".into(),
+            title: "Tool".into(),
+            kind: daruda_acp::ToolKindView::Execute,
+            tool_name: None,
+            status: daruda_acp::ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: None,
+            exit: None,
+        })
+    }
+
+    fn span_of(items: &[ChatItem]) -> StepSpan {
+        step_span_at(items, 0).expect("a step")
+    }
+
+    /// The captured codex shape: a one-line thought summary, then the preamble
+    /// it wrote for the reader, then the tools.
+    #[test]
+    fn the_preamble_is_shown_collapsed_and_the_thought_once_expanded() {
+        let items = [
+            think("**Inspecting Workspace struct and operations**"),
+            asst("`Workspace` structure walk", MessagePhase::Commentary),
+            tool(),
+        ];
+        let text = step_header_text(&items, &span_of(&items)).expect("both halves present");
+        assert_eq!(text.collapsed, 1, "the preamble is what the fold hides");
+        assert_eq!(text.expanded, Some(0), "the header takes over the thought");
+    }
+
+    /// Without a labelled preamble there is nothing to alternate with, so the
+    /// header keeps its existing collapsed-only behavior.
+    #[test]
+    fn an_unlabelled_reply_is_not_a_preamble() {
+        let items = [
+            think("why"),
+            asst("here goes", MessagePhase::Answer),
+            tool(),
+        ];
+        assert!(step_header_text(&items, &span_of(&items)).is_none());
+    }
+
+    /// A thought the header can only show the first line of stays in the body,
+    /// where the rest of it is reachable.
+    #[test]
+    fn a_thought_too_long_for_the_header_is_left_in_the_body() {
+        let items = [
+            think("**Inspecting**\n\nand a second paragraph the header cannot show"),
+            asst("walking the structure", MessagePhase::Commentary),
+            tool(),
+        ];
+        let text = step_header_text(&items, &span_of(&items)).expect("a preamble is present");
+        assert_eq!(text.collapsed, 1);
+        assert_eq!(text.expanded, None, "nothing the header can show whole");
+    }
+
+    #[test]
+    fn a_preamble_with_no_thought_still_alternates_from_an_empty_expanded_header() {
+        let items = [
+            asst("walking the structure", MessagePhase::Commentary),
+            tool(),
+        ];
+        let text = step_header_text(&items, &span_of(&items)).expect("a preamble is present");
+        assert_eq!(text.collapsed, 0);
+        assert_eq!(text.expanded, None);
+    }
+
+    /// Only the step's own prose counts — a preamble belonging to a later step
+    /// must not be pulled into this one's header.
+    #[test]
+    fn only_the_steps_own_prose_is_considered() {
+        let items = [
+            think("first"),
+            asst("first preamble", MessagePhase::Commentary),
+            tool(),
+            asst("second preamble", MessagePhase::Commentary),
+            tool(),
+        ];
+        let text = step_header_text(&items, &span_of(&items)).expect("a preamble is present");
+        assert_eq!(text.collapsed, 1, "not the preamble of the next step");
+    }
 }
 
 #[cfg(test)]

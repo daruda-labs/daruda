@@ -2628,3 +2628,86 @@ fn an_empty_thinking_block_projects_no_row() {
         vec![("user", false), ("filtered", true), ("solo", false)]
     );
 }
+
+fn commentary(s: &str) -> ChatItem {
+    ChatItem::AssistantText {
+        text: s.to_owned(),
+        streaming: false,
+        message_id: None,
+        phase: daruda_acp::MessagePhase::Commentary,
+    }
+}
+
+/// The captured codex turn: a one-line thought, the preamble it wrote, then
+/// tools. **Expanded** is where ownership shows: without it the thought takes a
+/// row of its own, which is the same line the header is already showing.
+#[test]
+fn a_header_owned_thought_gets_no_row_even_expanded() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("**Inspecting Workspace struct and operations**"),
+        commentary("walking the structure"),
+        tool("a", Completed),
+        asst("done"),
+    ];
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Step(1), FoldContext::past(false));
+    let rows = project(
+        &items,
+        &fold,
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    let step = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::StepHeader { collapsed, .. } if !collapsed));
+    assert!(step.is_some(), "the step is expanded");
+    let thought = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 1))
+        .expect("the row keeps its slot in the list");
+    assert!(
+        thought.hidden,
+        "the header is showing this thought, so its row must not repeat it"
+    );
+    let preamble = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 2))
+        .expect("the preamble has a row");
+    assert!(!preamble.hidden, "the preamble is the expanded body");
+}
+
+/// A thought the header cannot show whole keeps its row, or the rest of it
+/// would be unreachable.
+#[test]
+fn a_thought_the_header_cannot_show_whole_stays_visible_expanded() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("**Inspecting**\n\nand a second paragraph the header cannot show"),
+        commentary("walking the structure"),
+        tool("a", Completed),
+        asst("done"),
+    ];
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Step(1), FoldContext::past(false));
+    let rows = project(
+        &items,
+        &fold,
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    let thought = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 1))
+        .expect("the thought keeps a row");
+    assert!(
+        !thought.hidden,
+        "the header cannot show it whole, so the body must"
+    );
+}

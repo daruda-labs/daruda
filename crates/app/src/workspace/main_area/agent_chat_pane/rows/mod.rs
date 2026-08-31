@@ -400,6 +400,11 @@ impl RunRows<'_> {
 #[derive(Clone, Copy)]
 struct InStep {
     end: usize,
+    /// Item this step's header took over, so the walk hides its row instead of
+    /// repeating the line the header is already showing. `None` when the step
+    /// has no header, or none it can show whole (see
+    /// [`step::step_header_text`]).
+    owned: Option<usize>,
     collapsed: bool,
     renders_header: bool,
     /// The tail window covers this step, so its rows sit outside the range the
@@ -492,6 +497,10 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             let outside_tail = !tail_revealed && covered;
             in_step = Some(InStep {
                 end: s.span.end,
+                owned: s
+                    .renders_header
+                    .then(|| step::step_header_text(items, &s.span).and_then(|t| t.expanded))
+                    .flatten(),
                 // A headerless step has no chevron, so its own fold state is
                 // unreachable and only the window decides.
                 collapsed: if s.renders_header {
@@ -589,7 +598,10 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             let is_conclusion = Some(k) == conclusion_ix;
             let pending_permission =
                 matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
-            let force_visible = is_conclusion || pending_permission;
+            // A header showing an item whole owns it: the row would repeat
+            // the line already on screen one row above.
+            let header_owns = in_step.is_some_and(|s| s.owned == Some(k));
+            let force_visible = (is_conclusion || pending_permission) && !header_owns;
             let kind = if is_conclusion && base_indent > 0 {
                 RowKind::ConclusionItem(k)
             } else if solo_response {
@@ -599,7 +611,7 @@ fn project_run(ctx: RunContext<'_>, rows: &mut Vec<RenderRow>) {
             };
             out.push(
                 kind,
-                folded && !force_visible,
+                header_owns || (folded && !force_visible),
                 !filter.matches(&items[k]),
                 indent,
             );

@@ -28,6 +28,7 @@ pub use agent_client_protocol::schema::v1::SessionId;
 // `options` faithfully takes. The kind is re-exported rather than mapped to
 // `PermissionKindView` because that mapping renders an unrecognized kind as a
 // reject, which is right for a UI and wrong for anything selecting on it.
+pub use adapter::MessagePhase;
 pub use agent_client_protocol::schema::v1::{
     ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate, ToolCall, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
