@@ -14,7 +14,7 @@ use agent_client_protocol::schema::v1::{
     ToolCallUpdate, ToolKind,
 };
 
-use crate::adapter::{AcpAdapter, DefaultAdapter};
+use crate::adapter::{AcpAdapter, DefaultAdapter, MessagePhase};
 use crate::model::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
     ToolKindView, ToolOutputBlock, ToolStatusView,
@@ -63,6 +63,7 @@ pub fn apply_update_with(
                 &text_of(&chunk.content),
                 msg_id(chunk),
                 StreamKind::Assistant,
+                adapter.message_phase(&chunk.meta),
             );
             UpdateEffect {
                 touched_text: true,
@@ -75,6 +76,9 @@ pub fn apply_update_with(
                 &text_of(&chunk.content),
                 msg_id(chunk),
                 StreamKind::Thinking,
+                // Thinking is never a message role; no captured adapter labels
+                // a thought chunk, so the phase field it would set is unused.
+                MessagePhase::Answer,
             );
             UpdateEffect {
                 touched_text: true,
@@ -348,6 +352,7 @@ fn append_streaming(
     text: &str,
     message_id: Option<String>,
     kind: StreamKind,
+    phase: MessagePhase,
 ) {
     if let Some(last) = items.last_mut() {
         match (last, kind) {
@@ -356,6 +361,10 @@ fn append_streaming(
                     text: prev,
                     streaming: true,
                     message_id: mid,
+                    // Not matched on: the role was fixed when this message
+                    // started, so a chunk that restates it differently is an
+                    // adapter contradicting itself, not a new message.
+                    phase: _,
                 },
                 StreamKind::Assistant,
             ) if *mid == message_id => {
@@ -384,6 +393,7 @@ fn append_streaming(
             text: text.to_string(),
             streaming: true,
             message_id,
+            phase,
         }),
         StreamKind::Thinking => items.push(ChatItem::Thinking {
             text: text.to_string(),
@@ -999,6 +1009,13 @@ mod tests {
         // regardless of the (empty) meta.
         struct StubAdapter;
         impl AcpAdapter for StubAdapter {
+            fn message_phase(
+                &self,
+                _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            ) -> crate::adapter::MessagePhase {
+                crate::adapter::MessagePhase::Answer
+            }
+
             fn parent_tool_id(
                 &self,
                 _meta: &Option<agent_client_protocol::schema::v1::Meta>,
@@ -1896,6 +1913,7 @@ mod tests {
                 text: "2 + 2 is 4.".to_string(),
                 streaming: true,
                 message_id: None,
+                phase: Default::default(),
             }
         );
     }
@@ -1918,6 +1936,7 @@ mod tests {
                 text: "Hello world".to_string(),
                 streaming: true,
                 message_id: Some("m1".to_string()),
+                phase: Default::default(),
             }
         );
     }
@@ -1941,6 +1960,7 @@ mod tests {
                 text: "first".to_string(),
                 streaming: false, // finalized when the next message began
                 message_id: Some("m1".to_string()),
+                phase: Default::default(),
             }
         );
         assert_eq!(
@@ -1949,6 +1969,7 @@ mod tests {
                 text: "second".to_string(),
                 streaming: true,
                 message_id: Some("m2".to_string()),
+                phase: Default::default(),
             }
         );
     }
@@ -1990,6 +2011,7 @@ mod tests {
             text: "hi".to_string(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         }];
         apply_update(
             &mut items,
@@ -2009,6 +2031,7 @@ mod tests {
             text: "hi".to_string(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         }];
         apply_update(
             &mut items,
@@ -2029,6 +2052,7 @@ mod tests {
             text: "hi".to_string(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         }];
         apply_update(
             &mut items,
@@ -2082,6 +2106,7 @@ mod tests {
             text: "done".to_string(),
             streaming: true,
             message_id: None,
+            phase: Default::default(),
         }];
         finalize_streaming(&mut items);
         assert_eq!(
@@ -2090,6 +2115,7 @@ mod tests {
                 text: "done".to_string(),
                 streaming: false,
                 message_id: None,
+                phase: Default::default(),
             }
         );
     }
@@ -2105,6 +2131,7 @@ mod tests {
                 text: "let me look".to_string(),
                 streaming: true,
                 message_id: Some("m1".to_string()),
+                phase: Default::default(),
             },
             ChatItem::ToolCall(ToolCallItem {
                 id: "t1".to_string(),
@@ -2122,6 +2149,7 @@ mod tests {
                 text: "done".to_string(),
                 streaming: true,
                 message_id: Some("m2".to_string()),
+                phase: Default::default(),
             },
         ];
         finalize_streaming(&mut items);
@@ -3049,5 +3077,81 @@ mod tests {
                 truncated_from: None,
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod phase_mapping_tests {
+    use super::*;
+    use crate::adapter::{CodexAdapter, MessagePhase};
+    use agent_client_protocol::schema::v1::{ContentChunk, TextContent};
+
+    fn chunk(text: &str, id: &str, phase: &str) -> ContentChunk {
+        let mut c = ContentChunk::new(ContentBlock::Text(TextContent::new(text.to_string())))
+            .message_id(id);
+        c.meta = Some(
+            serde_json::json!({"codex": {"phase": phase}})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        c
+    }
+
+    fn phase_of(item: &ChatItem) -> MessagePhase {
+        match item {
+            ChatItem::AssistantText { phase, .. } => *phase,
+            other => panic!("expected assistant text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_labelled_message_carries_its_phase_into_the_model() {
+        let mut items = Vec::new();
+        apply_update_with(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(chunk("looking", "msg_1", "commentary")),
+            &CodexAdapter,
+        );
+        apply_update_with(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(chunk("done", "msg_2", "final_answer")),
+            &CodexAdapter,
+        );
+        assert_eq!(phase_of(&items[0]), MessagePhase::Commentary);
+        assert_eq!(phase_of(&items[1]), MessagePhase::Answer);
+    }
+
+    /// A message's role is fixed when it starts. Letting a later chunk restate
+    /// it would make "the role changed mid-message" representable, and the only
+    /// way to reach it is an adapter contradicting itself.
+    #[test]
+    fn a_later_chunk_of_the_same_message_cannot_change_its_phase() {
+        let mut items = Vec::new();
+        apply_update_with(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(chunk("look", "msg_1", "commentary")),
+            &CodexAdapter,
+        );
+        apply_update_with(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(chunk("ing", "msg_1", "final_answer")),
+            &CodexAdapter,
+        );
+        assert_eq!(items.len(), 1, "same message id, so one item");
+        assert_eq!(phase_of(&items[0]), MessagePhase::Commentary);
+    }
+
+    /// An agent that labels nothing produces exactly what it did before.
+    #[test]
+    fn an_unlabelled_message_is_an_answer() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("hi".to_string()),
+            ))),
+        );
+        assert_eq!(phase_of(&items[0]), MessagePhase::Answer);
     }
 }

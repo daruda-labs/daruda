@@ -6,6 +6,7 @@ fn asst(text: &str) -> ChatItem {
         text: text.to_owned(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 
@@ -486,11 +487,13 @@ fn is_active_matches_streaming_and_in_progress() {
         text: "a".to_owned(),
         streaming: true,
         message_id: None,
+        phase: Default::default(),
     }));
     assert!(!is_active(&ChatItem::AssistantText {
         text: "a".to_owned(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }));
     assert!(is_active(&ChatItem::Thinking {
         text: "t".to_owned(),
@@ -530,6 +533,7 @@ fn fold_active_resolves_per_key() {
             text: "a".to_owned(),
             streaming: true,
             message_id: None,
+            phase: Default::default(),
         },
         ChatItem::ToolCall(tool_call("t-live", InProgress, 0)),
         ChatItem::ToolCall(tool_call("t-done", Completed, 0)),
@@ -538,6 +542,7 @@ fn fold_active_resolves_per_key() {
             text: "b".to_owned(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         },
     ];
     // Block keys follow the item's own active state.
@@ -575,6 +580,7 @@ fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
             text: "a".to_owned(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         },
         ChatItem::UserText("q2".to_owned()),
         ChatItem::ToolCall(tool_call("t-new", Completed, 0)),
@@ -603,6 +609,7 @@ fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
         text: "a".to_owned(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }];
     assert_eq!(
         fold_turn(&FoldKey::Assistant(0), &leading),
@@ -743,6 +750,7 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
             text: "a".to_owned(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         },
         ChatItem::Thinking {
             text: "t".to_owned(),
@@ -778,6 +786,7 @@ fn trivial_reply_keeps_assistant_fold_key() {
             text: "a".to_owned(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         },
     ];
     assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Assistant(1)]);
@@ -985,6 +994,7 @@ fn rollup_of_run_covers_success_failure_running_partial_cancelled_and_ranges() {
         text: "thinking out loud".to_owned(),
         streaming: true,
         message_id: None,
+        phase: Default::default(),
     }];
     assert_eq!(rollup(&items, 0..1), Rollup::Running);
 

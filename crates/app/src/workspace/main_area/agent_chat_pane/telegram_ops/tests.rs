@@ -36,6 +36,7 @@ fn assistant_text(text: &str, streaming: bool) -> daruda_acp::ChatItem {
         text: text.to_string(),
         streaming,
         message_id: None,
+        phase: Default::default(),
     }
 }
 

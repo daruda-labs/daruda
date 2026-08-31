@@ -200,6 +200,7 @@ fn assistant(text: &str) -> ChatItem {
         text: text.to_string(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 

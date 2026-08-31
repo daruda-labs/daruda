@@ -27,6 +27,13 @@ pub enum ChatItem {
         text: String,
         streaming: bool,
         message_id: Option<String>,
+        /// What role this message plays in its turn, from the agent's own
+        /// label (see [`crate::adapter::AcpAdapter::message_phase`]). Fixed
+        /// when the message starts; a later chunk of the same message cannot
+        /// restate it. A field rather than a `ChatItem` variant of its own:
+        /// commentary is assistant text, so it renders, filters, and merges
+        /// through exactly the same paths.
+        phase: crate::adapter::MessagePhase,
     },
     /// Agent internal reasoning. `streaming` / `message_id` mirror
     /// [`ChatItem::AssistantText`].

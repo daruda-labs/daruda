@@ -36,6 +36,7 @@ fn asst(s: &str) -> ChatItem {
         text: s.to_owned(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
@@ -316,6 +317,7 @@ fn working_indicator_present_while_streaming() {
             text: "answer".into(),
             streaming: true,
             message_id: None,
+            phase: Default::default(),
         },
     ];
     let rows = project(

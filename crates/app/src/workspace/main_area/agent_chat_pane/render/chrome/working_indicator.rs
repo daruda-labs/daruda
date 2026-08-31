@@ -156,6 +156,7 @@ mod tests {
                 text: "a".into(),
                 streaming: true,
                 message_id: None,
+                phase: Default::default(),
             },
             tool("c1", ToolStatusView::Completed),
         ];

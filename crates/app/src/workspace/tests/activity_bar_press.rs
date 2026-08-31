@@ -22,6 +22,7 @@ fn assistant(text: &str) -> daruda_acp::ChatItem {
         text: text.to_owned(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 

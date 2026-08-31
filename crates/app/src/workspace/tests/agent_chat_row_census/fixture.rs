@@ -160,6 +160,7 @@ fn assistant(seq: usize) -> ChatItem {
         text: format!("prose {seq}"),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 

@@ -47,6 +47,26 @@ pub trait AcpAdapter: Send + Sync {
     /// The text is pipe-captured stdout+stderr, not markdown: the caller must
     /// render it verbatim (see [`crate::model::ToolOutputBlock::RawText`]).
     fn sideband_output(&self, meta: &Option<Meta>) -> Option<String>;
+
+    /// What role a streamed agent message plays in its turn, read from the
+    /// agent's vendor `_meta`. [`MessagePhase::Answer`] for an agent that does
+    /// not label its messages — and for any label this build has no opinion
+    /// about, so a new one can never make a message vanish from the transcript.
+    fn message_phase(&self, meta: &Option<Meta>) -> MessagePhase;
+}
+
+/// Which role a streamed agent message plays in its turn.
+///
+/// Only an adapter that labels its messages reports anything but `Answer`.
+/// Wire-captured from codex-acp, which sends exactly `commentary` (a preamble
+/// written before it starts working) and `final_answer`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MessagePhase {
+    /// The agent's reply — what every unlabelled message is.
+    #[default]
+    Answer,
+    /// A preamble the agent wrote before the work it is about.
+    Commentary,
 }
 
 /// Superset behavior for any agent without a dedicated strategy. Handles the one
@@ -108,6 +128,14 @@ impl AcpAdapter for DefaultAdapter {
             .as_str()
             .map(str::to_owned)
     }
+
+    fn message_phase(&self, _meta: &Option<Meta>) -> MessagePhase {
+        // No vendor namespace is read here. Unlike the hooks above — which
+        // predate a trustworthy strategy choice and so absorb the superset —
+        // selection now keys on the program the agent reports at `initialize`,
+        // so a namespaced key belongs to the adapter that owns the namespace.
+        MessagePhase::Answer
+    }
 }
 
 /// `_meta` key carrying a shell tool's captured output, and the same key the
@@ -141,9 +169,8 @@ fn command_exit_of(v: &Value) -> Option<CommandExit> {
     (code.is_some() || signal.is_some()).then_some(CommandExit { code, signal })
 }
 
-/// codex-acp. Currently identical to [`DefaultAdapter`]; kept as the explicit
-/// home for codex-specific behavior once it is confirmed from captured wire
-/// logs (the planned step after this seam lands).
+/// codex-acp. Delegates every hook whose convention it shares with the wider
+/// superset, and owns the `_meta.codex` namespace.
 pub struct CodexAdapter;
 
 impl AcpAdapter for CodexAdapter {
@@ -162,7 +189,23 @@ impl AcpAdapter for CodexAdapter {
     fn sideband_output(&self, meta: &Option<Meta>) -> Option<String> {
         DefaultAdapter.sideband_output(meta)
     }
+
+    fn message_phase(&self, meta: &Option<Meta>) -> MessagePhase {
+        match meta
+            .as_ref()
+            .and_then(|m| m.get("codex"))
+            .and_then(|c| c.get("phase"))
+            .and_then(Value::as_str)
+        {
+            Some(CODEX_COMMENTARY_PHASE) => MessagePhase::Commentary,
+            _ => MessagePhase::Answer,
+        }
+    }
 }
+
+/// codex-acp's label for a message it writes before the work it is about. Its
+/// sibling value, `final_answer`, needs no constant — it is the default.
+const CODEX_COMMENTARY_PHASE: &str = "commentary";
 
 /// Which strategy a session runs under. Named so the *choice* is a pure
 /// function that can be decided and tested apart from building the strategy.
@@ -530,6 +573,52 @@ mod selection_tests {
         assert_eq!(
             adapter_id_for(Some("@someone/my-codex-wrapper"), "codex-acp"),
             AdapterId::Codex
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn meta(v: serde_json::Value) -> Option<Meta> {
+        Some(v.as_object().unwrap().clone())
+    }
+
+    /// Wire-captured (`acp-wire-codex-acp.log`): codex labels every message
+    /// chunk, and across 3005 captured chunks it used exactly these two values.
+    #[test]
+    fn codex_reads_the_two_phases_it_actually_sends() {
+        assert_eq!(
+            CodexAdapter.message_phase(&meta(json!({"codex": {"phase": "commentary"}}))),
+            MessagePhase::Commentary
+        );
+        assert_eq!(
+            CodexAdapter.message_phase(&meta(json!({"codex": {"phase": "final_answer"}}))),
+            MessagePhase::Answer
+        );
+    }
+
+    /// A phase daruda has no opinion about must read as an ordinary answer, so
+    /// a codex release that adds one cannot make messages vanish from a pane.
+    #[test]
+    fn an_unknown_phase_is_an_ordinary_answer() {
+        assert_eq!(
+            CodexAdapter.message_phase(&meta(json!({"codex": {"phase": "something_new"}}))),
+            MessagePhase::Answer
+        );
+        assert_eq!(CodexAdapter.message_phase(&None), MessagePhase::Answer);
+    }
+
+    /// The vendor namespace stays with the named adapter. Default absorbing it
+    /// would make the strategy choice decorative and let two agents' keys
+    /// accumulate in one place.
+    #[test]
+    fn default_does_not_read_the_codex_namespace() {
+        assert_eq!(
+            DefaultAdapter.message_phase(&meta(json!({"codex": {"phase": "commentary"}}))),
+            MessagePhase::Answer
         );
     }
 }

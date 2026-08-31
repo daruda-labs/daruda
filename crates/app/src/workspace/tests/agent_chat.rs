@@ -207,6 +207,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                             text: "working".into(),
                             streaming: true,
                             message_id: None,
+                            phase: Default::default(),
                         },
                         ChatItem::ToolCall(ToolCallItem {
                             id: "t1".into(),

@@ -69,6 +69,7 @@ fn turn(n: usize) -> Vec<ChatItem> {
             text: reply,
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         },
     ];
     for k in 0..2 {

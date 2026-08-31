@@ -7,6 +7,7 @@ fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
         text: text.to_string(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 
@@ -1080,6 +1081,7 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
                 text: "done".to_string(),
                 streaming: true,
                 message_id: None,
+                phase: Default::default(),
             });
 
             let effect = view.apply_event(

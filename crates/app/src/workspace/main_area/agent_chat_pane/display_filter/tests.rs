@@ -32,6 +32,7 @@ fn asst() -> ChatItem {
         text: "hello".into(),
         streaming: false,
         message_id: None,
+        phase: Default::default(),
     }
 }
 

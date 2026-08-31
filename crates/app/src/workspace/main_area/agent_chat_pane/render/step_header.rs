@@ -198,6 +198,7 @@ mod tests {
             text: s.to_owned(),
             streaming: false,
             message_id: None,
+            phase: Default::default(),
         }
     }
 
