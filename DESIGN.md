@@ -657,12 +657,11 @@ text:  agent-chat size, pane-fg-muted
 
 **The filter's reveal is not a row.** It is one per run, and the response bar is
 that run's one header, so the control rides the bar's trailing slot as a chip
-(`Show 1 of 5 filtered rows` → `Hide them again`) rather than sitting in the
-transcript. As a row it took the step bars' indent and their `▶ / ▼`, carried
-neither their icon nor their count, and read as a step that had lost its icon —
-and it was *brighter* than the step titles it sat among (`fg_muted` over
-`fg_subtle`), putting a view control above the conversation in the visual
-hierarchy. The vocabulary now splits cleanly: **a full-width bar is conversation
+(`Show 5 filtered rows` → `Hide them again`) rather than sitting in the
+transcript. As a row it sat at the group bars' indent and wore their chevron
+while carrying no count of its own, so it read as one more group — and it was
+*brighter* than the bars it sat among (`fg_muted` over `fg_subtle`), putting a
+view control above the conversation in the visual hierarchy. The vocabulary now splits cleanly: **a full-width bar is conversation
 structure; a chip is a view setting.**
 
 The chip sits left of the run's own counts so the numbers that are always there
@@ -683,17 +682,17 @@ block; zero on every other turn and on the whole Codex session.
 
 The tail window's row is not that. Nothing collapses into it; it marks the edge
 of the step range the pane is showing, and it used to wear the same chevron and
-the same muted text as the step bars beside it — so the least distinguishable
+the same muted text as the group bars beside it — so the least distinguishable
 thing on the row was its own open/closed state, and `Hide 6 earlier steps` reads
 as a *description* ("6 earlier steps, hidden") exactly when those steps are on
 screen. It therefore takes its own shape:
 
 ```
 closed:   ─────────  N earlier steps ⌄  ─────────    (label centred between two rules)
-open:     ──  last N steps only ⌃  ───────────────    (stub left, label anchored)
+open:     ─────  last N steps only ⌃  ───────────    (centred in both states)
 
 rule:     1px pane-border-tint
-chevron:  DisclosureAxis::Vertical (⌄ / ⌃) — ▶ / ▼ is the step bars' glyph
+chevron:  DisclosureAxis::Vertical (⌄ / ⌃) — ▶ / ▼ is the fold-row bars' glyph
 label:    agent-chat size, pane-fg-muted
 ```
 

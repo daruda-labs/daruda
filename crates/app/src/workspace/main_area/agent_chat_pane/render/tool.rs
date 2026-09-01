@@ -698,8 +698,7 @@ fn tool_kind_label(kind: ToolKindView) -> String {
 }
 
 /// Map a tool kind to a leading header icon, so a tool call's type reads at a
-/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon. Shared
-/// with the step header, which leads with the icon of its run's dominant kind.
+/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon.
 pub(super) fn tool_kind_icon(kind: ToolKindView) -> IconName {
     // The vendored `IconName` set has no pencil/edit glyph, so Edit falls back
     // to `File` (Read already uses `Eye`, so no visual collision).
@@ -714,19 +713,6 @@ pub(super) fn tool_kind_icon(kind: ToolKindView) -> IconName {
         ToolKindView::Fetch => IconName::Globe,
         ToolKindView::SwitchMode => IconName::Refresh,
         ToolKindView::Other => IconName::Settings2,
-    }
-}
-
-pub(super) fn tool_category_icon(
-    category: crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory,
-) -> IconName {
-    use crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory;
-    match category {
-        ToolCategory::Read => IconName::Eye,
-        ToolCategory::Edit => IconName::File,
-        ToolCategory::Search => IconName::Search,
-        ToolCategory::Run => IconName::SquareTerminal,
-        ToolCategory::Other => IconName::Settings2,
     }
 }
 

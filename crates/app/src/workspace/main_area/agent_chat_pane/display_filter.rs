@@ -137,8 +137,9 @@ impl FilterFacet {
 pub(in crate::workspace) enum ProseKind {
     /// The reply itself — what every unlabelled message is.
     Answer,
-    /// A preamble the agent wrote before the work it is about. Belongs to the
-    /// step that follows it, which is why hiding it can empty a step out.
+    /// A preamble the agent wrote before the work it is about — prose the agent
+    /// labelled `MessagePhase::Commentary`. It is a row of its own, filtered
+    /// independently of the tool run it introduces.
     Preamble,
 }
 

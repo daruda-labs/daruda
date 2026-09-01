@@ -1,12 +1,11 @@
 //! The fixed conversation the agent-chat `--screenshot` scenarios seed.
 //!
 //! Screenshot-only, so it never reaches the shipping binary. It exists because
-//! the Step layer, the tail window and the display filter are only judgeable on
+//! the group bars, the tail window and the display filter are only judgeable on
 //! screen, and a live ACP session is neither reproducible nor available in a
 //! capture. The shape is chosen to put all of them on screen at once: enough
-//! work cycles for the tail window to have something to hide, mixed tool kinds
-//! so the Step header glyph is not the same terminal icon nine times, a failed
-//! call so the status rollup shows, and one edit carrying a diff.
+//! work cycles for the tail window to have something to hide, mixed tool kinds,
+//! a failed call so the status rollup shows, and one edit carrying a diff.
 
 use std::path::PathBuf;
 
@@ -52,17 +51,16 @@ impl Call {
     }
 }
 
-/// One work cycle. A Step header is earned by a tool run that has prose in
-/// front of it, so every cycle carries reasoning, the sentence that introduces
-/// the work, and the calls themselves.
+/// One work cycle: reasoning, the sentence that introduces the work, and the
+/// calls themselves — at least two, so the run earns a group bar.
 struct Cycle {
     thinking: &'static str,
     prose: &'static str,
     tools: Vec<Call>,
 }
 
-/// The sentence the conversation ends on — trailing prose belongs to no step,
-/// so this renders as the response's conclusion rather than inside a fold.
+/// The sentence the conversation ends on — trailing prose follows every tool
+/// run, so this renders as the response's conclusion.
 const CONCLUSION: &str = "The failure was a stale `rust-version` floor in `daruda_terminal`: CI pins 1.95, \
      the crate inherited nothing, and `incompatible_msrv` never fired at the call site. \
      Declaring the floor and rebuilding gets the workspace green again.";
@@ -177,10 +175,9 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     let mut next_id = 0usize;
     for cycle in cycles() {
         items.push(thinking(cycle.thinking));
-        // Each cycle's prose is a preamble, not a reply. The seed already
-        // models the shape an agent that labels its messages sends — a thought
-        // summary, the preamble, then the tools — so the label belongs here
-        // too; without it the header this seed exists to show never engages.
+        // Each cycle's prose is a preamble, not a reply — the shape an agent
+        // that labels its messages sends, which is what the prose filter's
+        // preamble facet keys off.
         items.push(assistant(cycle.prose, MessagePhase::Commentary));
         for call in cycle.tools {
             items.push(tool_call(next_id, call));
@@ -192,12 +189,9 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
 }
 
 /// [`sample_transcript`] as it stands mid-turn: the agent has not written its
-/// answer yet, so the run's last prose is the final step's preamble rather than
-/// a conclusion. Derived from the settled seed rather than assembled again, so
-/// the two cannot drift apart.
-///
-/// No other scenario covers this shape, which is why a step header and the
-/// prose row under it could both show the same line unnoticed.
+/// answer yet, so the run's last prose is a preamble rather than a conclusion.
+/// Derived from the settled seed rather than assembled again, so the two cannot
+/// drift apart.
 pub(in crate::workspace) fn working_transcript() -> Vec<ChatItem> {
     let mut items = sample_transcript();
     items.pop();
@@ -248,7 +242,7 @@ fn tool_call(ix: usize, call: Call) -> ChatItem {
 mod tests {
     use super::*;
 
-    /// One cycle earns one Step, and the tail window can only be looked at
+    /// One cycle earns one tool run, and the tail window can only be looked at
     /// when there is more history than the largest offered window keeps.
     #[test]
     fn the_seed_has_more_work_cycles_than_the_tail_window_keeps() {
@@ -258,10 +252,10 @@ mod tests {
             .filter(|i| matches!(i, ChatItem::Thinking { .. }))
             .count();
         assert!(seeded >= 8, "cycles: {seeded}");
-        // Every cycle is prose followed by at least one call, which is what a
-        // Step header is derived from.
+        // Every cycle is prose followed by a run of at least two calls, which
+        // is what earns a group bar.
         for cycle in cycles() {
-            assert!(!cycle.tools.is_empty());
+            assert!(cycle.tools.len() >= 2);
             assert!(!cycle.prose.is_empty());
         }
     }
@@ -294,7 +288,7 @@ mod tests {
     /// a tool run after it. Asserted here because the scenario it feeds exists
     /// only to put that shape on screen.
     #[test]
-    fn the_working_seed_ends_inside_a_step_rather_than_on_an_answer() {
+    fn the_working_seed_ends_on_a_preamble_rather_than_an_answer() {
         let settled = sample_transcript();
         let working = working_transcript();
         assert_eq!(working.len() + 1, settled.len());

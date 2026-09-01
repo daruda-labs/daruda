@@ -152,20 +152,20 @@ pub(crate) enum ScreenshotScenario {
     /// A fresh agent-chat pane before the first prompt, with view options open.
     AgentChatEmpty,
     /// A settled transcript in the default state. The only way to look at the
-    /// Step layer and the three activity-bar chips at once — whether the chips
-    /// fit beside the pane title, whether they read as three controls, and
-    /// whether a Step header's glyph says anything about what it folded.
+    /// prose spine, its group bars and the three activity-bar chips at once —
+    /// whether the chips fit beside the pane title, whether they read as three
+    /// controls, and whether a group bar's rollup says anything about what it
+    /// folded.
     AgentChat,
     /// The transcript mid-turn: the agent has run tools and written the
     /// preamble in front of them, but not yet the answer. The run's last prose
-    /// therefore sits *inside* a step, which is the only shape where a step
-    /// header and the prose row beneath it can end up saying the same line —
-    /// and the shape [`Self::AgentChat`]'s settled seed cannot reach.
+    /// is therefore a preamble rather than a conclusion — the one shape
+    /// [`Self::AgentChat`]'s settled seed cannot reach.
     AgentChatWorking,
     /// The same transcript with the display filter engaged and the folds open,
     /// so the filter's reveal chip renders on the response bar — the only way
     /// to check that it reads as a view control beside the run's counts rather
-    /// than as one more step in the list below it.
+    /// than as one more row in the list below it.
     AgentChatNarrowed,
     /// The same transcript with a custom fold matrix and its editor open.
     AgentChatFold,
@@ -175,7 +175,7 @@ pub(crate) enum ScreenshotScenario {
     /// since `agent-chat-narrowed` covers it with the filter popover and no
     /// state test can look at a rule, an inset label, or a rail.
     AgentChatTail,
-    /// The boundary open: the label anchors left and the steps it revealed carry
+    /// The boundary open: the label anchors left and the rows it revealed carry
     /// the rail.
     AgentChatTailOpen,
     /// The compact Activity Bar's combined options popover, open on one tab

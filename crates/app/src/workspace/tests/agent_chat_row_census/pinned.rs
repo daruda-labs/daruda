@@ -13,20 +13,25 @@ use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, proj
 const TAIL_N: u8 = 5;
 
 /// Codex rows per turn under each projection mode.
-const CODEX_AUTO: [usize; 3] = [63, 3, 14];
-const CODEX_TAIL: [usize; 3] = [11, 3, 10];
+///
+/// An open response now shows its prose spine and one bar per tool run rather
+/// than one titled row per work step, so `AUTO` and `EXPANDED` cost more rows
+/// than the step layer did — that is the shape being bought. `SUMMARY` is
+/// untouched: a folded response still costs its bar and its conclusion.
+const CODEX_AUTO: [usize; 3] = [155, 3, 33];
+const CODEX_TAIL: [usize; 3] = [18, 3, 19];
 const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
-const CODEX_EXPANDED: [usize; 3] = [242, 3, 44];
-const CODEX_SETTLED: [usize; 3] = [3, 2, 14];
+const CODEX_EXPANDED: [usize; 3] = [377, 3, 57];
+const CODEX_SETTLED: [usize; 3] = [3, 2, 33];
 
 /// Claude rows per turn under each projection mode. Turn 0 is the one turn
 /// with no tools and a single block; it costs one row for the response bar
 /// that carries the filter's reveal chip.
-const CLAUDE_AUTO: [usize; 3] = [3, 6, 25];
-const CLAUDE_TAIL: [usize; 3] = [3, 6, 9];
+const CLAUDE_AUTO: [usize; 3] = [3, 9, 47];
+const CLAUDE_TAIL: [usize; 3] = [3, 9, 14];
 const CLAUDE_SUMMARY: [usize; 3] = [3, 3, 3];
-const CLAUDE_EXPANDED: [usize; 3] = [3, 12, 69];
-const CLAUDE_SETTLED: [usize; 3] = [3, 3, 25];
+const CLAUDE_EXPANDED: [usize; 3] = [3, 70, 79];
+const CLAUDE_SETTLED: [usize; 3] = [3, 3, 47];
 const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 2, 2];
 
 /// Project through the fresh-pane defaults without a named test lens.

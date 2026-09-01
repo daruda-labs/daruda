@@ -820,7 +820,7 @@ impl Workspace {
     }
 
     /// Open the seeded transcript mid-turn — the agent's answer not yet
-    /// written, so its last prose is a step's preamble.
+    /// written, so its last prose is a preamble rather than a conclusion.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_working_transcript_for_shot(
         &mut self,
@@ -1061,7 +1061,11 @@ impl Workspace {
     /// entry point (`--replay-acp-log`) reaches seeding through this, so the
     /// closure seam above stays inside `workspace`. `false` when there was no
     /// accessible lane to open a pane in.
-    #[cfg(feature = "devtools")]
+    ///
+    /// Gated on `replay` rather than `devtools`: its only caller is the
+    /// crate-root replay entry point, so a screenshot-only build would see it
+    /// as dead code.
+    #[cfg(feature = "replay")]
     pub(crate) fn open_agent_chat_pane_with_transcript(
         &mut self,
         agent_id: Option<&str>,

@@ -590,7 +590,6 @@ fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
 
     past(FoldKey::Response(1));
     past(FoldKey::Assistant(2));
-    past(FoldKey::Step(1));
     past(FoldKey::Tool("t-old".to_owned()));
     past(FoldKey::ToolGroup("t-old".to_owned()));
     past(FoldKey::Diff("t-old#0".to_owned()));
@@ -761,14 +760,13 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
         ChatItem::Failure(daruda_acp::AcpFailure::unclassified("e")),
     ];
     let keys = collect_foldable_keys(&items);
-    // No `Assistant(1)`: a tool call follows that prose, so it is the step's
-    // preamble rather than the response's conclusion, and under a response bar
-    // a preamble renders inline — the same branch `render_item` takes.
+    // No `Assistant(1)`: a tool call follows that prose, so it is a preamble
+    // rather than the response's conclusion, and under a response bar a preamble
+    // renders inline — the same branch `render_item` takes.
     assert_eq!(
         keys,
         vec![
             FoldKey::Response(1),
-            FoldKey::Step(1),
             FoldKey::Thinking(2),
             FoldKey::Tool("c1".to_owned()),
             FoldKey::Diff("c1#0".to_owned()),

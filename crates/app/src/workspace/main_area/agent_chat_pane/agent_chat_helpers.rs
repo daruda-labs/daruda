@@ -16,7 +16,7 @@ use gpui::{AppContext as _, Context, Entity};
 
 use super::fold::{FoldContext, FoldKey, FoldState};
 use super::fold_mode::TurnPosition;
-use super::rows::{LiveSubagentUnits, RowKind, effective_tool_status, project, step};
+use super::rows::{LiveSubagentUnits, RowKind, effective_tool_status, project};
 use super::tool_hierarchy::ToolHierarchy;
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
@@ -85,8 +85,10 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     for row in &rows {
         match &row.kind {
             RowKind::ResponseHeader { run_start, .. } => keys.push(FoldKey::Response(*run_start)),
-            RowKind::StepHeader(header) => keys.push(FoldKey::Step(header.span.start)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
+            RowKind::ThinkingGroupHeader { first_ix, .. } => {
+                keys.push(FoldKey::ThinkingGroup(*first_ix))
+            }
             RowKind::TailMore { .. } => {}
             RowKind::User(_)
             | RowKind::AgentItem(_)
@@ -261,7 +263,7 @@ impl Rollup {
     /// that row puts on screen — a failure the display filter removed leaves no
     /// visible row to explain the mark. Progress is the exception and stays
     /// filter-blind: a live descendant is what holds the row on screen at all
-    /// (`ProjectedStep::live` / `group_live` ignore the filter too), so
+    /// (`group_live` ignores the filter too), so
     /// a glyph that settled while the work continued would deny its own row's
     /// reason for being there.
     pub(in crate::workspace) fn of_kept_run(
@@ -746,7 +748,7 @@ fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize
     match key {
         FoldKey::Assistant(ix)
         | FoldKey::Thinking(ix)
-        | FoldKey::Step(ix)
+        | FoldKey::ThinkingGroup(ix)
         | FoldKey::Response(ix)
         | FoldKey::Tail(ix)
         | FoldKey::Filtered(ix) => Some(*ix),
@@ -805,14 +807,14 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
                 .get(start..end)
                 .is_some_and(|run| run.iter().any(is_active))
         }
-        FoldKey::Step(_) => step::step_span_at(items, ix).is_some_and(|span| {
-            items
-                .get(span.start..span.end)
-                .is_some_and(|span| span.iter().any(is_active))
-        }),
         FoldKey::ToolGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
                 .take_while(|item| matches!(item, ChatItem::ToolCall(_)))
+                .any(is_active)
+        }),
+        FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
+            rest.iter()
+                .take_while(|item| matches!(item, ChatItem::Thinking { .. }))
                 .any(is_active)
         }),
         FoldKey::Diff(_)
@@ -831,9 +833,9 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
 /// height in place — never a `RenderRow::hidden` flip anywhere — so
 /// `rebuild_rows`'s hidden-range diff can't see them and falls back to
 /// remeasuring the tail, leaving a stale height on whichever row actually
-/// changed (the diff-collapse clipping bug). `Response` / `ToolGroup`
-/// collapse instead hides their child rows, which the hidden-range diff
-/// already catches correctly, so they resolve to `None` here.
+/// changed (the diff-collapse clipping bug). `Response` / `ToolGroup` /
+/// `ThinkingGroup` collapse instead hides their child rows, which the
+/// hidden-range diff already catches correctly, so they resolve to `None` here.
 pub(in crate::workspace) fn fold_key_item_index(
     key: &FoldKey,
     items: &[daruda_acp::ChatItem],
@@ -847,7 +849,7 @@ pub(in crate::workspace) fn fold_key_item_index(
         FoldKey::Diff(diff_key) => owner(diff_key.split('#').next().unwrap_or(diff_key.as_str())),
         FoldKey::Response(_)
         | FoldKey::ToolGroup(_)
-        | FoldKey::Step(_)
+        | FoldKey::ThinkingGroup(_)
         | FoldKey::Tail(_)
         | FoldKey::Filtered(_) => None,
     }

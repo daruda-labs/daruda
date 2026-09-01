@@ -15,7 +15,6 @@ use crate::workspace::main_area::agent_chat_pane::display_filter::{
 };
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
-use crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -211,30 +210,11 @@ fn facet_label(facet: FilterFacet) -> String {
     }
 }
 
-/// The filter panel's own word for a tool category.
-///
-/// Taken from [`facet_label`] rather than a second set of strings so a step
-/// header and the checkbox that hides it can never disagree about what a kind is
-/// called. Total on purpose: every category has exactly one facet, so a new one
-/// has to be named here.
-pub(super) fn category_label(category: ToolCategory) -> String {
-    facet_label(match category {
-        ToolCategory::Read => FilterFacet::ToolRead,
-        ToolCategory::Edit => FilterFacet::ToolEdit,
-        ToolCategory::Search => FilterFacet::ToolSearch,
-        ToolCategory::Run => FilterFacet::ToolRun,
-        ToolCategory::Other => FilterFacet::ToolOther,
-    })
-}
-
 /// The reveal control's copy.
 ///
-/// Collapsed, the number states exactly what clicking does — nothing more. It
-/// used to also name the whole cut when a fold held part of it back, which read
-/// as "1 now, 6 on the next click" when the other six were somewhere else
-/// entirely and this control could not reach them. What the filter took from
-/// inside a fold is the step headers' job now: they keep a tool count the filter
-/// cannot shrink, so a count above fewer cards is the tell.
+/// Collapsed, the number states exactly what clicking does — nothing more. A
+/// count that also named what a fold held back read as "1 now, 6 on the next
+/// click" when the other six were somewhere this control cannot reach.
 ///
 /// Revealed, there is no number at all. Those rows are on screen, so a count
 /// restates them, and `Hide 12 filtered rows` is readable as a description of
@@ -249,9 +229,8 @@ fn filtered_chip_label(filtered: FilteredAway, revealed: bool) -> String {
 /// The filter's reveal control, riding the response bar's trailing slot.
 ///
 /// The tally is one per run and the bar is the run's one header, so this is
-/// where it belongs. As a row of its own it sat at the step bars' indent, wore
-/// their chevron, and carried neither their icon nor their count — it read as a
-/// step that had lost its icon.
+/// where it belongs. As a row of its own it sat at the group bars' indent and
+/// wore their chevron while carrying no count — it read as one more group.
 pub(super) fn filtered_chip(
     run_start: usize,
     filtered: FilteredAway,

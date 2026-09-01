@@ -19,7 +19,7 @@ pub(in crate::workspace) enum FoldKey {
     ToolRawInput(String),
     Subagent(String),
     ToolGroup(String),
-    Step(usize),
+    ThinkingGroup(usize),
     Response(usize),
     Tail(usize),
     Filtered(usize),
@@ -42,7 +42,7 @@ impl FoldKey {
             FoldKey::ToolRawInput(_) => Some(FoldBlock::RawInput),
             FoldKey::Subagent(_) => Some(FoldBlock::Subagent),
             FoldKey::ToolGroup(_) => Some(FoldBlock::ToolGroup),
-            FoldKey::Step(_) => Some(FoldBlock::Step),
+            FoldKey::ThinkingGroup(_) => Some(FoldBlock::ThinkingGroup),
             FoldKey::Response(_) => Some(FoldBlock::Response),
             FoldKey::Tail(_) | FoldKey::Filtered(_) => None,
         }
@@ -55,7 +55,7 @@ impl FoldKey {
             FoldKey::Thinking(_)
             | FoldKey::Tool(_)
             | FoldKey::ToolGroup(_)
-            | FoldKey::Step(_)
+            | FoldKey::ThinkingGroup(_)
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
             // Chip-owned bulk remains collapsed until explicitly revealed.
             FoldKey::ToolRawInput(_)
@@ -256,10 +256,17 @@ mod tests {
     }
 
     #[test]
-    fn step_tracks_active_by_default() {
+    fn a_group_tracks_active_by_default() {
         let state = FoldState::default();
-        assert!(state.is_expanded(&FoldKey::Step(3), FoldContext::past(true)));
-        assert!(!state.is_expanded(&FoldKey::Step(3), FoldContext::past(false)));
+        // Both group kinds share the `ExpandedWhileActive` arm, so both are
+        // asserted rather than one standing in for the other.
+        for key in [FoldKey::ToolGroup("t".into()), FoldKey::ThinkingGroup(5)] {
+            assert!(state.is_expanded(&key, FoldContext::past(true)), "{key:?}");
+            assert!(
+                !state.is_expanded(&key, FoldContext::past(false)),
+                "{key:?}"
+            );
+        }
     }
 
     #[test]
@@ -411,7 +418,7 @@ mod tests {
             FoldKey::ToolRawInput("t".into()),
             FoldKey::Subagent("s".into()),
             FoldKey::ToolGroup("t".into()),
-            FoldKey::Step(2),
+            FoldKey::ThinkingGroup(5),
             FoldKey::Response(3),
             FoldKey::Tail(4),
             FoldKey::Filtered(4),
@@ -458,11 +465,16 @@ mod tests {
     }
 
     #[test]
-    fn expanded_opens_past_responses_and_settled_newest_steps() {
+    fn expanded_opens_past_responses_and_the_newest_settled_groups() {
         let state = FoldState::with_mode(FoldPreset::Expanded.mode());
         assert!(state.is_expanded(&FoldKey::Response(0), FoldContext::past(false)));
-        assert!(state.is_expanded(&FoldKey::Step(2), FoldContext::last(false)));
-        assert!(!state.is_expanded(&FoldKey::Step(2), FoldContext::past(false)));
+        for key in [FoldKey::ToolGroup("t".into()), FoldKey::ThinkingGroup(2)] {
+            assert!(state.is_expanded(&key, FoldContext::last(false)), "{key:?}");
+            assert!(
+                !state.is_expanded(&key, FoldContext::past(false)),
+                "{key:?}"
+            );
+        }
     }
 
     #[test]

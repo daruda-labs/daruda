@@ -20,7 +20,7 @@ mod mermaid;
 pub(in crate::workspace) mod mermaid_lightbox;
 mod options_panel;
 mod plan;
-mod step_header;
+mod tail_row;
 mod tail_window;
 mod tool;
 
@@ -108,7 +108,7 @@ use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
-use step_header::{step_bar, tail_more_bar};
+use tail_row::tail_more_bar;
 use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
@@ -403,7 +403,6 @@ fn render_row(
         // One block among siblings — it reports nothing about the run, so no
         // rollup glyph; the response bar above it carries the run's.
         RowKind::AgentItem(i) => render_agent_item(this, *i, row, t, window, cx),
-        RowKind::StepHeader(header) => step_bar(this, header, row.filter_revealed, t, cx),
         RowKind::TailMore {
             run_start,
             hidden_steps,
@@ -422,6 +421,19 @@ fn render_row(
             *collapsed,
             row.filter_revealed,
             t,
+            cx,
+        )
+        .into_any_element(),
+        RowKind::ThinkingGroupHeader {
+            first_ix,
+            count,
+            collapsed,
+        } => thinking_group_bar(
+            this,
+            *first_ix,
+            *first_ix..*first_ix + *count,
+            *collapsed,
+            row.filter_revealed,
             cx,
         )
         .into_any_element(),
@@ -471,7 +483,7 @@ fn render_row(
         .when(ix == visible.first, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
         .when(turn_break, |d| d.mt(px(theme::AGENT_CHAT_TURN_GAP)))
         .pb(px(bottom))
-        // Nest one content-pad unit per level (group members sit under the ⚙ bar).
+        // Nest one content-pad unit per level (group members sit under their bar).
         .when(row.indent > 0, |d| {
             d.pl(px(theme::AGENT_CHAT_PAD_X * (row.indent as f32 + 1.0)))
         })
@@ -518,7 +530,7 @@ fn response_bar(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let run = agent_run(&this.items, run_start);
-    let tools = kept_tools(this, run.clone(), filter_revealed);
+    let tools = run_tools(&this.items, run.clone());
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
     // leading block (a streaming placeholder that has not filled yet) falls
@@ -549,7 +561,10 @@ fn response_bar(
         ));
     }
     // Trailing content is fold-state-independent (see `FoldHeader::trailing`), so
-    // the count reads the same expanded or collapsed.
+    // the count reads the same expanded or collapsed — and, unlike a group bar's,
+    // the same filtered or not. A group that loses every call to the filter stops
+    // rendering, but this bar always renders, so a filter-aware count here would
+    // leave the turn showing no trace of work it did.
     if tools > 0 {
         header = header.trailing(count_label(s::agent_chat_tool_group_count(tools), this, cx));
     }
@@ -585,9 +600,34 @@ fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoEl
 /// prints a count sits on a disclosure, so the number has to be what expanding
 /// it puts on screen: filter matches normally, or the whole run while the
 /// filtered-row disclosure is open.
+/// Every tool call the run made, whatever the display filter hides.
+///
+/// The response bar summarizes the turn rather than disclosing a fixed set of
+/// rows, so its number describes what happened. [`kept_tools`] is the other
+/// half of that split: a group bar *is* the disclosure over its calls, so its
+/// number has to be what expanding it puts on screen.
+fn run_tools(items: &[ChatItem], run: std::ops::Range<usize>) -> usize {
+    run.filter(|&k| matches!(items.get(k), Some(ChatItem::ToolCall(_))))
+        .count()
+}
+
 fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>, filter_revealed: bool) -> usize {
     run.filter(|&k| {
         matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc))
+    })
+    .count()
+}
+
+/// Thinking items in `run` that the current projection displays. Mirrors
+/// [`kept_tools`]: the number on a disclosure has to be what expanding it puts
+/// on screen.
+fn kept_thoughts(
+    this: &AgentChatView,
+    run: std::ops::Range<usize>,
+    filter_revealed: bool,
+) -> usize {
+    run.filter(|&k| {
+        matches!(this.items.get(k), Some(item @ ChatItem::Thinking { .. }) if filter_revealed || this.filter_matches.matches(item))
     })
     .count()
 }
@@ -603,8 +643,8 @@ fn count_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>)
 }
 
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
-/// the group's fold (`FoldKey::ToolGroup`); shows a chevron, a ⚙ marker, the
-/// "N tool calls" count, and a status-rollup glyph.
+/// the group's fold (`FoldKey::ToolGroup`); shows a chevron, the "N tool calls"
+/// count, and a status-rollup glyph.
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
@@ -622,26 +662,47 @@ fn tool_group_bar(
     // `count` is the group's structural span; what the row offers is the part of
     // it the display filter keeps.
     let label = s::agent_chat_tool_group_count(kept_tools(this, run, filter_revealed));
-    let header = FoldHeader::with_title(
-        div()
-            .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(label))
-            .into_any_element(),
-    )
-    .leading(
-        div()
-            .flex_none()
-            .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from("⚙"))
-            .into_any_element(),
-    )
-    .trailing(rollup_glyph(rollup, t, cx));
+    let header =
+        FoldHeader::with_title(group_title(label, this, cx)).trailing(rollup_glyph(rollup, t, cx));
     // Borderless section bar, same as the response bar.
     FoldRow::section(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),
         FoldKey::ToolGroup(gid.to_string()),
+        !collapsed,
+        header,
+    )
+    .render(this.dim_amount, cx)
+}
+
+/// A group bar's count, as the identifier its stretch slot shows in both fold
+/// states. Shared so the two group bars cannot drift apart on colour or size.
+fn group_title(label: String, this: &AgentChatView, cx: &Context<AgentChatView>) -> AnyElement {
+    div()
+        .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(SharedString::from(label))
+        .into_any_element()
+}
+
+/// Collapsible header for a consecutive thinking run. The whole row toggles the
+/// group's fold (`FoldKey::ThinkingGroup`). No leading marker and no rollup
+/// glyph: a thought has no success or failure state to report.
+fn thinking_group_bar(
+    this: &AgentChatView,
+    first_ix: usize,
+    run: std::ops::Range<usize>,
+    collapsed: bool,
+    filter_revealed: bool,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    // The count is the group's own identity, so it shows in both fold states —
+    // and what it names is the part of the run the display filter keeps.
+    let label = s::agent_chat_thinking_group_count(kept_thoughts(this, run, filter_revealed));
+    let header = FoldHeader::with_title(group_title(label, this, cx));
+    // Borderless section bar, same as the tool-group bar.
+    FoldRow::section(
+        SharedString::from(format!("agent-chat-thinkgroup-{first_ix}")),
+        FoldKey::ThinkingGroup(first_ix),
         !collapsed,
         header,
     )
@@ -795,6 +856,48 @@ mod tests {
 
     fn row(kind: RowKind, hidden: bool) -> RenderRow {
         RenderRow::at(kind, hidden, 0)
+    }
+
+    fn tool(id: &str) -> ChatItem {
+        ChatItem::ToolCall(daruda_acp::ToolCallItem {
+            id: id.to_owned(),
+            title: "Tool".into(),
+            kind: daruda_acp::ToolKindView::Read,
+            tool_name: None,
+            status: daruda_acp::ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: None,
+            exit: None,
+        })
+    }
+
+    /// The response bar summarizes the turn, so its count says what the turn
+    /// did. The bar renders whatever the filter hides, so a count that shrank
+    /// with the filter would leave a fully narrowed turn showing no trace of
+    /// its work — `kept_tools` is the disclosure half of that split.
+    #[test]
+    fn the_runs_tool_count_ignores_what_the_filter_hides() {
+        let items = [
+            ChatItem::AssistantText {
+                text: "looking".into(),
+                streaming: false,
+                message_id: None,
+                phase: daruda_acp::MessagePhase::Answer,
+            },
+            tool("a"),
+            tool("b"),
+            ChatItem::Thinking {
+                text: "hm".into(),
+                streaming: false,
+                message_id: None,
+            },
+            tool("c"),
+        ];
+        assert_eq!(run_tools(&items, 0..items.len()), 3);
+        // Scoped to the run it is given, not the whole transcript.
+        assert_eq!(run_tools(&items, 0..2), 1);
     }
 
     /// A run can open with a hidden row — a tail boundary covering nothing, a

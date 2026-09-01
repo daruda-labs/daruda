@@ -2107,19 +2107,16 @@ pub fn agent_chat_tool_group_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.tool_group_count", count = count).into_owned()
 }
 
-/// Tool count with singular handling.
-pub fn agent_chat_step_tool_count(count: usize) -> String {
-    if count == 1 {
-        rust_i18n::t!("agent_chat.step_tool_count_one").into_owned()
-    } else {
-        rust_i18n::t!("agent_chat.step_tool_count", count = count).into_owned()
-    }
+/// Collapsed thinking-group header title, e.g. "3 thoughts". The group
+/// threshold is 2, so a count of 1 is unreachable and needs no singular form.
+pub fn agent_chat_thinking_group_count(count: usize) -> String {
+    rust_i18n::t!("agent_chat.thinking_group_count", count = count).into_owned()
 }
 
 /// Collapsed label for the filter's per-run disclosure: how many rows expanding
 /// it puts on screen, and nothing else. Singular handled explicitly. Rows the
-/// filter took from inside a fold are not named here — the step headers keep a
-/// tool count the filter cannot shrink, which is what marks those.
+/// filter took from inside a fold are not named here — clicking cannot reach
+/// them, so counting them would promise more than the control delivers.
 pub fn agent_chat_filtered_show(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.filtered_show_one").into_owned()
@@ -2297,10 +2294,6 @@ pub fn agent_chat_fold_block_response() -> String {
     rust_i18n::t!("agent_chat.fold_block_response").into_owned()
 }
 
-pub fn agent_chat_fold_block_step() -> String {
-    rust_i18n::t!("agent_chat.fold_block_step").into_owned()
-}
-
 pub fn agent_chat_fold_block_tool_group() -> String {
     rust_i18n::t!("agent_chat.fold_block_tool_group").into_owned()
 }
@@ -2315,6 +2308,10 @@ pub fn agent_chat_fold_block_subagent() -> String {
 
 pub fn agent_chat_fold_block_thinking() -> String {
     rust_i18n::t!("agent_chat.fold_block_thinking").into_owned()
+}
+
+pub fn agent_chat_fold_block_thinking_group() -> String {
+    rust_i18n::t!("agent_chat.fold_block_thinking_group").into_owned()
 }
 
 pub fn agent_chat_fold_block_assistant() -> String {

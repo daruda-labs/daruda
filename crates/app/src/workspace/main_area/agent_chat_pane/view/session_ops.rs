@@ -157,15 +157,15 @@ impl AgentChatView {
         let item_ix = fold_key_item_index(&key, &self.items);
         // A card's own fold decides whether its body — and so its embed editors —
         // is on screen at all. Narrow the follow-up reconcile to that card;
-        // response / step / tool-group folds only flip row visibility, leaving
-        // each card's own state (and its embeds) untouched.
+        // response and group folds only flip row visibility, leaving each card's
+        // own state (and its embeds) untouched.
         let embed_scope = match &key {
             FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
             FoldKey::Assistant(_)
             | FoldKey::Thinking(_)
             | FoldKey::Response(_)
             | FoldKey::ToolGroup(_)
-            | FoldKey::Step(_)
+            | FoldKey::ThinkingGroup(_)
             | FoldKey::Tail(_)
             | FoldKey::Filtered(_)
             | FoldKey::Diff(_)

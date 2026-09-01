@@ -36,11 +36,11 @@ impl TurnPosition {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum FoldBlock {
     Response,
-    Step,
     ToolGroup,
     Tool,
     Subagent,
     Thinking,
+    ThinkingGroup,
     Assistant,
     Diff,
     RawInput,
@@ -50,11 +50,11 @@ impl FoldBlock {
     /// Blocks in menu and serialization order.
     pub(in crate::workspace) const ALL: [FoldBlock; 9] = [
         Self::Response,
-        Self::Step,
         Self::ToolGroup,
         Self::Tool,
         Self::Subagent,
         Self::Thinking,
+        Self::ThinkingGroup,
         Self::Assistant,
         Self::Diff,
         Self::RawInput,
@@ -63,11 +63,11 @@ impl FoldBlock {
     const fn index(self) -> usize {
         match self {
             Self::Response => 0,
-            Self::Step => 1,
-            Self::ToolGroup => 2,
-            Self::Tool => 3,
-            Self::Subagent => 4,
-            Self::Thinking => 5,
+            Self::ToolGroup => 1,
+            Self::Tool => 2,
+            Self::Subagent => 3,
+            Self::Thinking => 4,
+            Self::ThinkingGroup => 5,
             Self::Assistant => 6,
             Self::Diff => 7,
             Self::RawInput => 8,
@@ -77,11 +77,11 @@ impl FoldBlock {
     pub(in crate::workspace) fn token(self) -> &'static str {
         match self {
             Self::Response => "response",
-            Self::Step => "step",
             Self::ToolGroup => "tool_group",
             Self::Tool => "tool",
             Self::Subagent => "subagent",
             Self::Thinking => "thinking",
+            Self::ThinkingGroup => "thinking_group",
             Self::Assistant => "assistant",
             Self::Diff => "diff",
             Self::RawInput => "raw_input",
@@ -153,7 +153,17 @@ impl FoldPreset {
             Self::Expanded => {
                 mode.set(TurnPosition::Past, FoldBlock::Response, BlockRule::Expanded);
                 mode.set(TurnPosition::Last, FoldBlock::Response, BlockRule::Expanded);
-                mode.set(TurnPosition::Last, FoldBlock::Step, BlockRule::Expanded);
+                // One level deeper on the newest turn: its groups open too.
+                mode.set(
+                    TurnPosition::Last,
+                    FoldBlock::ToolGroup,
+                    BlockRule::Expanded,
+                );
+                mode.set(
+                    TurnPosition::Last,
+                    FoldBlock::ThinkingGroup,
+                    BlockRule::Expanded,
+                );
             }
         }
         mode
@@ -324,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_opens_past_responses_and_keeps_settled_steps_open() {
+    fn expanded_opens_past_responses_and_keeps_the_newest_groups_open() {
         let ex = FoldPreset::Expanded.mode();
         assert_eq!(
             ex.rule(TurnPosition::Past, FoldBlock::Response),
@@ -334,14 +344,10 @@ mod tests {
             ex.rule(TurnPosition::Last, FoldBlock::Response),
             BlockRule::Expanded
         );
-        assert_eq!(
-            ex.rule(TurnPosition::Last, FoldBlock::Step),
-            BlockRule::Expanded
-        );
-        assert_eq!(
-            ex.rule(TurnPosition::Past, FoldBlock::Step),
-            BlockRule::Builtin
-        );
+        for block in [FoldBlock::ToolGroup, FoldBlock::ThinkingGroup] {
+            assert_eq!(ex.rule(TurnPosition::Last, block), BlockRule::Expanded);
+            assert_eq!(ex.rule(TurnPosition::Past, block), BlockRule::Builtin);
+        }
     }
 
     #[test]

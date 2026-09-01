@@ -152,9 +152,10 @@ fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) 
 
         match value.get("method").and_then(Value::as_str) {
             Some("session/prompt") => {
-                // A prompt closes whatever the previous turn was still
-                // streaming, exactly as sending one does in a live pane.
-                mapping::finalize_streaming(&mut out.items);
+                // A prompt closes the previous turn, exactly as sending one
+                // does in a live pane — and a turn can end with a tool still
+                // in flight, so both halves of the live pane's settle run.
+                settle(&mut out.items);
                 out.items.push(ChatItem::UserText(prompt_text(&value)));
             }
             Some("session/update") => {
@@ -168,9 +169,17 @@ fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) 
             _ => {}
         }
     }
-    mapping::finalize_streaming(&mut out.items);
+    settle(&mut out.items);
     out.sessions = sessions.len();
     out
+}
+
+/// End a turn the way a live pane does. A capture can stop mid-tool — the user
+/// pressed Stop, or the turn errored — and a tool left `Pending` would render as
+/// a spinner nothing will ever resolve. Mirrors `AgentChatView::settle_items`.
+fn settle(items: &mut [ChatItem]) {
+    mapping::finalize_streaming(items);
+    mapping::cancel_pending_tools(items);
 }
 
 /// The user's prompt as typed — every `text` block joined. Non-text blocks
@@ -385,6 +394,70 @@ mod tests {
             reported_program(&log).as_deref(),
             Some("@agentclientprotocol/codex-acp")
         );
+    }
+
+    #[test]
+    fn a_tool_still_running_when_the_turn_ends_is_cancelled() {
+        // A capture can stop mid-tool. Without settling it, the replayed pane
+        // shows a spinner that nothing will ever resolve.
+        let start = serde_json::json!({
+            "method": "session/update",
+            "params": {"sessionId": "s1", "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "t1",
+                "title": "git status",
+                "status": "in_progress",
+            }},
+        });
+        let log = format!("1 <- stdout {start}");
+
+        let replay = replay_capture(&log, &HashMap::new(), "");
+
+        let [ChatItem::ToolCall(tc)] = &replay.items[..] else {
+            panic!("one tool call, got {:?}", replay.items.len());
+        };
+        assert_eq!(tc.status, crate::model::ToolStatusView::Cancelled);
+    }
+
+    #[test]
+    fn a_corrupt_sidecar_line_costs_only_its_own_payload() {
+        // The sidecar is appended to while a session runs, so its tail can be a
+        // half-written line. One bad record must not take the good ones with it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("acp-wire.log");
+        let full = "y".repeat(4096);
+        let good = format!("preview…{}", payload_marker("1", full.len()));
+        let orphan = format!("preview…{}", payload_marker("2", 99));
+        std::fs::write(
+            &path,
+            format!(
+                "1 <- stdout {}\n2 <- stdout {}",
+                text_update(&good),
+                text_update(&orphan)
+            ),
+        )
+        .expect("write log");
+        std::fs::write(
+            path.with_extension("payload.jsonl"),
+            format!(
+                "{}\n{{ not json\n{{\"id\": 2}}\n",
+                serde_json::json!({"id": 1, "text": full})
+            ),
+        )
+        .expect("write sidecar");
+
+        let replay = replay_log(&path, "").expect("replayable");
+
+        // Adjacent chunks of one message merge, so both fields land in one item.
+        let [text] = &assistant_text(&replay.items)[..] else {
+            panic!("one merged message, got {:?}", replay.items.len());
+        };
+        assert!(text.starts_with(&full), "the readable payload landed whole");
+        assert!(
+            text.ends_with(&orphan),
+            "the field whose record is unreadable stayed exactly as written"
+        );
+        assert_eq!((replay.rehydrated, replay.unresolved), (1, 1));
     }
 
     #[test]

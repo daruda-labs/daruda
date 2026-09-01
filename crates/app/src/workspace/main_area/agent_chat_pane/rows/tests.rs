@@ -40,24 +40,6 @@ fn asst(s: &str) -> ChatItem {
     }
 }
 
-fn step_header(
-    first_ix: usize,
-    tool_count: usize,
-    collapsed: bool,
-    visible_body_prose: Option<usize>,
-) -> RowKind {
-    RowKind::StepHeader(StepHeaderRow {
-        span: step::StepSpan {
-            start: first_ix,
-            tool_start: first_ix,
-            end: first_ix,
-        },
-        tool_count,
-        collapsed,
-        visible_body_prose,
-    })
-}
-
 fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
     rows.iter()
         .map(|r| {
@@ -65,9 +47,9 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
                 RowKind::User(_) => "user",
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
-                RowKind::StepHeader(..) => "step",
                 RowKind::TailMore { .. } => "tail",
                 RowKind::ToolGroupHeader { .. } => "group",
+                RowKind::ThinkingGroupHeader { .. } => "thinkgroup",
                 RowKind::WorkingIndicator => "working",
             };
             (k, r.hidden)
@@ -100,17 +82,16 @@ fn turn_with_tools_nests_response_and_group() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", false),
-            ("item", true),
-            ("group", true),
-            ("item", true),
+            ("item", false),  // the prose is a plain paragraph
+            ("group", false), // the calls behind it are one group
             ("item", true),
             ("item", true),
-            ("item", false),
+            ("item", true),
+            ("item", false), // the conclusion
         ]
     );
     let indents: Vec<u8> = rows.iter().map(|r| r.indent).collect();
-    assert_eq!(indents, vec![0, 0, 1, 1, 2, 2, 3, 3, 3, 1]);
+    assert_eq!(indents, vec![0, 0, 1, 1, 1, 2, 2, 2, 1]);
 }
 
 /// A one-block reply with no tools still represents a whole response, so it
@@ -160,7 +141,6 @@ fn past_turn_collapses_current_expands() {
             ("user", false),     // first
             ("response", false), // header always shown
             ("tail", true),
-            ("step", true),  // settled step under a collapsed response
             ("item", false), // a1 = conclusion, stays visible
             ("group", true),
             ("item", true),
@@ -168,10 +148,9 @@ fn past_turn_collapses_current_expands() {
             ("user", false), // second
             ("response", false),
             ("tail", true),
-            ("step", false), // current turn's step: one row for the cycle
-            ("item", false), // a2 = conclusion, never folded away
-            ("group", true),
-            ("item", true),
+            ("item", false),  // a2 = conclusion, never folded away
+            ("group", false), // the open response shows its group bar
+            ("item", true),   // whose settled members stay folded
             ("item", true),
         ]
     );
@@ -224,7 +203,6 @@ fn summary_mode_folds_the_settled_newest_turn_like_history() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", true),
             ("item", false), // a1 = conclusion
             ("group", true),
             ("item", true),
@@ -232,7 +210,6 @@ fn summary_mode_folds_the_settled_newest_turn_like_history() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", true),  // the newest turn's step now folds too
             ("item", false), // a2 = conclusion
             ("group", true),
             ("item", true),
@@ -242,7 +219,7 @@ fn summary_mode_folds_the_settled_newest_turn_like_history() {
 }
 
 #[test]
-fn expanded_mode_opens_past_responses_and_keeps_settled_newest_steps_open() {
+fn expanded_mode_opens_past_responses_and_the_newest_settled_groups() {
     let items = two_settled_turns();
     let rows = project_under(&items, &FoldState::with_mode(FoldPreset::Expanded.mode()));
     assert_eq!(
@@ -251,19 +228,17 @@ fn expanded_mode_opens_past_responses_and_keeps_settled_newest_steps_open() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", false), // past response now open → its step header shows
-            ("item", false), // a1
-            ("group", true),
+            ("item", false),  // a1
+            ("group", false), // the past response is open, its group is not
             ("item", true),
             ("item", true),
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", false),
-            ("item", false), // a2 — the newest turn's settled step stays open
-            ("group", false),
-            ("item", true),
-            ("item", true),
+            ("item", false),  // a2
+            ("group", false), // the newest turn goes one level deeper
+            ("item", false),
+            ("item", false),
         ]
     );
 }
@@ -276,8 +251,8 @@ fn a_user_fold_survives_a_mode_switch() {
     for preset in FoldPreset::ALL {
         fold.set_mode(preset.mode());
         let rows = project_under(&items, &fold);
-        let newest_step = kinds(&rows)[11];
-        assert_eq!(newest_step, ("step", true), "{preset:?}");
+        let newest_group = kinds(&rows)[11];
+        assert_eq!(newest_group, ("group", true), "{preset:?}");
     }
 }
 
@@ -304,10 +279,9 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", false), // the settled cycle, folded to one row
-            ("item", false), // assistant prose = conclusion, never folded away
-            ("group", true), // tool group header, folded into the step
-            ("item", true),  // settled members collapsed
+            ("item", false),  // assistant prose = conclusion, never folded away
+            ("group", false), // the tool group's bar
+            ("item", true),   // settled members collapsed
             ("item", true),
             ("working", false), // gap indicator at the run tail
         ]
@@ -442,7 +416,6 @@ fn conclusion_stays_visible_when_response_collapsed() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", true), // the whole cycle folds with the response
             ("item", true), // "let me look" process → hidden
             ("group", true),
             ("item", true),
@@ -564,8 +537,7 @@ fn prose_before_a_trailing_tool_run_stays_visible_without_being_a_conclusion() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("step", true),  // the step absorbed its own preamble …
-            ("item", false), // … but "answer" is still forced visible
+            ("item", false), // "answer" is forced visible through the fold
             ("group", true),
             ("item", true),
             ("item", true),
@@ -608,14 +580,6 @@ fn a_trailing_answer_takes_the_conclusion_role_from_the_preamble() {
     assert!(
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
         "and the preamble is plain prose again"
-    );
-    assert_eq!(
-        rows.iter().find_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.visible_body_prose),
-            _ => None,
-        }),
-        Some(None),
-        "nothing escapes the step now, so the header may title itself freely"
     );
 }
 
@@ -709,6 +673,53 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         perm_row.hidden,
         "a resolved permission folds with the process"
     );
+}
+
+/// `force_visible` is `is_last_prose || pending_permission`, and neither term
+/// consults any enclosing fold — an actionable prompt cannot be shut away by
+/// one. A permission never becomes a group child, so the folds that can enclose
+/// it are the response's and the tail window's boundary; both feed the one
+/// `folded` term this escapes.
+#[test]
+fn a_pending_permission_outlives_every_fold_that_encloses_it() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("working"),
+        perm(false),
+        tool("a", Completed),
+        asst("mid"),
+        tool("b", Completed),
+        asst("done"),
+    ];
+    let visible = |rows: &[RenderRow], ix: usize| {
+        !rows
+            .iter()
+            .find(
+                |r| matches!(r.kind, RowKind::AgentItem(j) | RowKind::ConclusionItem(j) if j == ix),
+            )
+            .expect("row present")
+            .hidden
+    };
+
+    // The response's own fold, shut over the whole run.
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Response(1), FoldContext::past(true));
+    let rows = project_under(&items, &fold);
+    assert!(
+        visible(&rows, 2),
+        "the prompt survives a collapsed response"
+    );
+    assert!(
+        !visible(&rows, 1),
+        "the prose beside it does not, so the response really is shut"
+    );
+
+    // The tail window's boundary, shut over the run the prompt sits in.
+    let rows = project_tail(&items, TailWindow::Last(1));
+    assert!(visible(&rows, 2), "the prompt survives a covered run");
+    assert!(!visible(&rows, 1), "its neighbouring prose is covered");
+    assert!(!visible(&rows, 3), "so is the call the window left out");
 }
 
 #[test]
@@ -1017,19 +1028,19 @@ fn project_all(items: &[ChatItem]) -> Vec<RenderRow> {
 
 /// Guard against per-key rescans by checking growth when one turn doubles.
 #[test]
-fn a_long_single_turn_of_steps_stays_linear() {
+fn a_long_single_turn_of_cycles_stays_linear() {
     const N: usize = 250;
     let small = one_turn_of_cycles(N);
     let large = one_turn_of_cycles(N * 2);
 
-    let steps = |rows: &[RenderRow]| {
+    let groups = |rows: &[RenderRow]| {
         rows.iter()
-            .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
             .count()
     };
     assert!(
-        steps(&project_all(&small)) >= N,
-        "the fixture must actually build steps"
+        groups(&project_all(&small)) >= N,
+        "the fixture must actually build tool groups"
     );
 
     let sample = |items: &[ChatItem]| {
@@ -1153,9 +1164,8 @@ fn lone_tool_call_is_not_grouped() {
         vec![
             ("response", false),
             ("tail", true),
-            ("step", false), // the prose + the lone call are one settled cycle
-            ("item", true),  // "x"
-            ("item", true),  // the tool call — a plain item, not a group
+            ("item", false), // "x"
+            ("item", false), // the tool call — a plain item, not a group
             ("item", false), // "y" = conclusion, never folded away
         ],
         "a single tool call renders as a plain item, no group header"
@@ -1237,7 +1247,6 @@ fn every_row_kind_declares_a_distinct_slot() {
             filtered: FilteredAway::default(),
         },
         RowKind::AgentItem(0),
-        step_header(0, 0, false, None),
         RowKind::TailMore {
             run_start: 0,
             hidden_steps: 0,
@@ -1246,6 +1255,11 @@ fn every_row_kind_declares_a_distinct_slot() {
         },
         RowKind::ToolGroupHeader {
             gid: "g".into(),
+            first_ix: 0,
+            count: 0,
+            collapsed: false,
+        },
+        RowKind::ThinkingGroupHeader {
             first_ix: 0,
             count: 0,
             collapsed: false,
@@ -1322,7 +1336,6 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
     for row in rows.iter().filter(|r| !r.hidden) {
         let expected = match row.kind {
             RowKind::User(_) | RowKind::ResponseHeader { .. } => 0,
-            RowKind::ToolGroupHeader { .. } => 2,
             _ => 1,
         };
         assert_eq!(
@@ -1339,7 +1352,7 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
         .collect::<Vec<_>>();
     assert_eq!(
         visible,
-        vec!["user", "response", "step", "group", "item", "working"]
+        vec!["user", "response", "group", "item", "working"]
     );
 }
 
@@ -1370,9 +1383,8 @@ fn leading_run_without_a_user_anchor_still_gets_a_bar() {
         vec![
             ("response", false),
             ("tail", true),
-            ("step", false),
             ("item", false),
-            ("item", true)
+            ("item", false)
         ]
     );
 }
@@ -1400,7 +1412,7 @@ fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
     );
 }
 
-// ── Step boundaries ─────────────────────────────────────────────────────────
+// ── Tool runs ──────────────────────────────────────────────────────────────
 //
 fn think(s: &str) -> ChatItem {
     ChatItem::Thinking {
@@ -1410,8 +1422,10 @@ fn think(s: &str) -> ChatItem {
     }
 }
 
+/// The approved grammar: prose is a plain paragraph and the calls behind it are
+/// one group — no titled wrapper bundling the two into a single unit.
 #[test]
-fn a_step_absorbs_the_prose_in_front_of_its_run() {
+fn prose_in_front_of_a_run_stays_a_row_of_its_own() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -1429,24 +1443,28 @@ fn a_step_absorbs_the_prose_in_front_of_its_run() {
         TailWindow::All,
         &DisplayFilter::default(),
     );
-    let step = rows
-        .iter()
-        .find_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some((header.span.start, header.tool_count)),
-            _ => None,
-        })
-        .expect("the cycle earns a step header");
-    assert_eq!(
-        step,
-        (1, 2),
-        "the step opens at the thinking block and owns both tool calls"
-    );
     assert!(
         rows.iter()
             .filter(|r| matches!(r.kind, RowKind::AgentItem(1) | RowKind::AgentItem(2)))
-            .all(|r| r.hidden),
-        "a settled step folds the prose it absorbed"
+            .all(|r| !r.hidden),
+        "the thought and the prose are plain rows the response's own fold governs"
     );
+    let group = rows
+        .iter()
+        .find_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader {
+                first_ix, count, ..
+            } => Some((*first_ix, *count)),
+            _ => None,
+        })
+        .expect("two consecutive calls earn a group");
+    assert_eq!(group, (3, 2), "the group starts at the first call");
+    let indents: Vec<u8> = rows
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::AgentItem(1) | RowKind::AgentItem(2)))
+        .map(|r| r.indent)
+        .collect();
+    assert_eq!(indents, vec![1, 1], "no wrapper indents the prose");
     assert!(
         rows.iter()
             .any(|r| matches!(r.kind, RowKind::ConclusionItem(5)) && !r.hidden)
@@ -1454,7 +1472,7 @@ fn a_step_absorbs_the_prose_in_front_of_its_run() {
 }
 
 #[test]
-fn consecutive_runs_split_into_one_step_each() {
+fn consecutive_runs_each_get_their_own_group() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -1476,16 +1494,20 @@ fn consecutive_runs_split_into_one_step_each() {
     );
     let starts: Vec<usize> = rows
         .iter()
-        .filter_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.span.start),
+        .filter_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader { first_ix, .. } => Some(*first_ix),
             _ => None,
         })
         .collect();
-    assert_eq!(starts, vec![1, 4], "one step per cycle, split at the prose");
+    assert_eq!(
+        starts,
+        vec![2, 5],
+        "one group per run, split by the prose between them"
+    );
 }
 
 #[test]
-fn a_response_without_tools_gets_no_step() {
+fn a_response_without_tools_gets_no_group() {
     let items = [
         ChatItem::UserText("q".into()),
         asst("first message"),
@@ -1510,51 +1532,107 @@ fn a_response_without_tools_gets_no_step() {
     );
 }
 
+/// `RUN_GROUP_MIN` is the whole rule: one call is already one row, two earn a
+/// bar that says how many are behind it.
 #[test]
-fn a_prose_less_lone_tool_gets_no_step() {
+fn a_run_earns_a_group_at_two_calls_not_one() {
+    use ToolStatusView::Completed;
+    let groups = |items: &[ChatItem]| {
+        project(
+            items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(items),
+            TailWindow::All,
+            &DisplayFilter::default(),
+        )
+        .iter()
+        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+        .count()
+    };
+    assert_eq!(
+        groups(&[
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            asst("done"),
+        ]),
+        0
+    );
+    assert_eq!(
+        groups(&[
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            tool("b", Completed),
+            asst("done"),
+        ]),
+        1
+    );
+}
+
+/// `tool_run_end` stops at a nested child, so two top-level calls with one
+/// between them are two 1-length runs and neither earns a group bar — even
+/// though the child renders inside the first call's card, which leaves the two
+/// looking adjacent on screen. The tail window's run tally advances by the same
+/// `tool_run_end`, so the group walk and the tally cannot drift. Both real
+/// captures (`acp-wire-codex-acp.log`, `acp-wire-claude.log`) hold zero nested
+/// tool calls, so this split is unexercised in practice.
+#[test]
+fn a_nested_child_between_two_calls_leaves_them_two_ungrouped_runs() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
         tool("a", Completed),
-        asst("done"),
+        child_of("mid", "a", Completed),
+        tool("b", Completed),
     ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
     assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::StepHeader(..))),
-        "one tool call is already one row"
+        ToolHierarchy::build(&items).is_nested_child(&tool_of(&items, "mid")),
+        "the fixture says nothing unless the middle call really nests"
     );
-    let items = [
+    assert_eq!(
+        kinds(&project_all(&items)),
+        vec![
+            ("user", false),
+            ("response", false),
+            ("tail", true),
+            ("item", false), // a
+            ("item", false), // b, with no group bar over either
+        ]
+    );
+
+    // The same two calls with nothing between them are one run of two.
+    let adjacent = [
         ChatItem::UserText("q".into()),
         tool("a", Completed),
         tool("b", Completed),
-        asst("done"),
     ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
+    assert_eq!(
+        kinds(&project_all(&adjacent)),
+        vec![
+            ("user", false),
+            ("response", false),
+            ("tail", true),
+            ("group", false),
+            ("item", true),
+            ("item", true),
+        ]
     );
-    assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::StepHeader(..)))
-    );
+
+    // The window's tally splits the same way: with room for one run it covers
+    // the first call and keeps the second.
+    let rows = project_tail(&items, TailWindow::Last(1));
+    match tail_row(&rows).kind {
+        RowKind::TailMore {
+            hidden_steps,
+            kept_steps,
+            ..
+        } => assert_eq!((hidden_steps, kept_steps), (1, 1), "two runs, one covered"),
+        _ => unreachable!(),
+    }
 }
 
 #[test]
-fn the_running_step_expands_while_its_settled_sibling_folds() {
+fn the_running_group_expands_while_its_settled_sibling_folds() {
     use ToolStatusView::{Completed, InProgress};
     let items = [
         ChatItem::UserText("q".into()),
@@ -1575,113 +1653,34 @@ fn the_running_step_expands_while_its_settled_sibling_folds() {
     );
     let collapsed = |first: usize| {
         rows.iter()
-            .find_map(|r| match r.kind {
-                RowKind::StepHeader(header) if header.span.start == first => Some(header.collapsed),
+            .find_map(|r| match &r.kind {
+                RowKind::ToolGroupHeader {
+                    first_ix,
+                    collapsed,
+                    ..
+                } if *first_ix == first => Some(*collapsed),
                 _ => None,
             })
-            .expect("step header present")
+            .expect("group header present")
     };
-    assert!(collapsed(1), "the settled cycle folds to its header");
-    assert!(!collapsed(4), "the running cycle stays open");
+    assert!(collapsed(2), "the settled run folds to its bar");
+    assert!(!collapsed(5), "the running run stays open");
     assert!(
         rows.iter()
             .any(|r| matches!(r.kind, RowKind::AgentItem(5)) && !r.hidden)
     );
 }
 
-#[test]
-fn a_collapsed_response_surfaces_a_live_step() {
-    use ToolStatusView::{Completed, InProgress};
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("working"),
-        tool("a", InProgress),
-        tool("b", Completed),
-    ];
-    let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(1)], false);
-    let rows = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let step = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::StepHeader(..)))
-        .expect("step header present");
-    assert!(!step.hidden, "a live step survives a collapsed response");
-
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("working"),
-        tool("a", Completed),
-        tool("b", Completed),
-    ];
-    let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(1)], false);
-    let rows = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let step = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::StepHeader(..)))
-        .expect("step header present");
-    assert!(step.hidden, "a settled step folds with the response");
-}
-
-#[test]
-fn a_pending_permission_survives_a_folded_step() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("working"),
-        perm(false),
-        tool("a", Completed),
-        tool("b", Completed),
-        asst("done"),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let perm_row = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::AgentItem(2)))
-        .expect("permission row present");
-    assert!(
-        !perm_row.hidden,
-        "a pending permission is never folded away, step or no step"
-    );
-}
-
-#[test]
-fn step_headers_share_a_slot_by_their_first_index() {
-    let a = RenderRow::at(step_header(3, 2, false, None), false, 1);
-    let b = RenderRow::at(step_header(3, 5, true, Some(2)), true, 1);
-    assert!(a.same_slot(&b), "same first_ix → same slot");
-    assert!(!a.same_slot(&RenderRow::at(step_header(4, 2, false, None), false, 1)));
-    assert!(!a.same_slot(&RenderRow::at(RowKind::AgentItem(3), false, 1)));
-}
-
 // ── Tail window ────────────────────────────────────────────────────────────
 
+/// One prose row plus a two-call run per cycle, so every cycle contributes one
+/// tool run — the population the tail window counts.
 fn turn_of_cycles(cycles: usize) -> Vec<ChatItem> {
     let mut items = vec![ChatItem::UserText("q".into())];
     for i in 0..cycles {
         items.push(asst(&format!("cycle {i}")));
         items.push(tool(&format!("t{i}"), ToolStatusView::Completed));
+        items.push(tool(&format!("t{i}b"), ToolStatusView::Completed));
     }
     items.push(asst("done"));
     items
@@ -1698,9 +1697,9 @@ fn project_tail(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
     )
 }
 
-fn step_visibility(rows: &[RenderRow]) -> Vec<bool> {
+fn group_visibility(rows: &[RenderRow]) -> Vec<bool> {
     rows.iter()
-        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
         .map(|r| !r.hidden)
         .collect()
 }
@@ -1708,55 +1707,53 @@ fn step_visibility(rows: &[RenderRow]) -> Vec<bool> {
 fn tail_row(rows: &[RenderRow]) -> &RenderRow {
     rows.iter()
         .find(|r| matches!(r.kind, RowKind::TailMore { .. }))
-        .expect("a run with steps gets a tail row")
+        .expect("a run with tool calls gets a tail row")
 }
 
-/// A step the filter empties must not spend a slot in the tail window. The
-/// window is what the reader asked to see, so counting steps that render
-/// nothing makes `Recent steps: 3` put one step on screen and silently drop the
-/// other two.
+/// A run the filter empties must not spend a slot in the tail window. The
+/// window is what the reader asked to see, so counting runs that render nothing
+/// makes `Recent steps: 3` put one run on screen and silently drop the other
+/// two.
 #[test]
-fn the_window_counts_steps_the_filter_leaves_something_to_show() {
+fn the_window_counts_runs_the_filter_leaves_something_to_show() {
     use ToolStatusView::Completed;
-    // Alternating steps: prose-led ones keep their prose under the filter below,
-    // reasoning-led ones are emptied by it entirely.
+    // Alternating runs: the read-only ones survive the filter below, the
+    // edit-only ones are emptied by it entirely.
     let mut items = vec![ChatItem::UserText("q".into())];
     for i in 0..6 {
-        if i % 2 == 0 {
-            items.push(asst(&format!("step {i}")));
+        let kind = if i % 2 == 0 {
+            ToolKindView::Read
         } else {
-            items.push(think(&format!("step {i}")));
-        }
-        items.push(tool(&format!("t{i}"), Completed));
+            ToolKindView::Edit
+        };
+        items.push(asst(&format!("run {i}")));
+        items.push(kinded_tool(&format!("t{i}a"), kind, Completed));
+        items.push(kinded_tool(&format!("t{i}b"), kind, Completed));
     }
     items.push(asst("done"));
 
-    // Hides reasoning and every tool, so steps 1, 3 and 5 project no row at all.
-    let filter = DisplayFilter::default()
-        .toggled(FilterFacet::Thinking)
-        .toggled(FilterFacet::Tools);
     let rows = project(
         &items,
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
         TailWindow::Last(2),
-        &filter,
+        &only_reads(),
     );
 
     let shown: Vec<usize> = rows
         .iter()
         .filter(|r| !r.hidden)
-        .filter_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.span.start),
+        .filter_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader { first_ix, .. } => Some(*first_ix),
             _ => None,
         })
         .collect();
     assert_eq!(
         shown.len(),
         2,
-        "a window of 2 puts two steps on screen, not however many of the last \
-         two raw steps happened to survive the filter: {shown:?}"
+        "a window of 2 puts two runs on screen, not however many of the last \
+         two raw runs happened to survive the filter: {shown:?}"
     );
 
     match tail_row(&rows).kind {
@@ -1765,10 +1762,10 @@ fn the_window_counts_steps_the_filter_leaves_something_to_show() {
             kept_steps,
             ..
         } => {
-            assert_eq!(kept_steps, 2, "the label counts the same steps");
+            assert_eq!(kept_steps, 2, "the label counts the same population");
             assert_eq!(
                 hidden_steps, 1,
-                "three steps have content and two are kept, so one is behind the boundary"
+                "three runs have content and two are kept, so one is behind the boundary"
             );
         }
         _ => unreachable!(),
@@ -1776,16 +1773,16 @@ fn the_window_counts_steps_the_filter_leaves_something_to_show() {
 }
 
 #[test]
-fn a_window_keeps_only_the_last_steps_visible() {
+fn a_window_keeps_only_the_last_runs_visible() {
     let items = turn_of_cycles(8);
     for (n, kept) in [(1usize, 1usize), (3, 3), (5, 5)] {
         let rows = project_tail(&items, TailWindow::Last(n));
-        let vis = step_visibility(&rows);
-        assert_eq!(vis.len(), 8, "every step keeps its row at n={n}");
+        let vis = group_visibility(&rows);
+        assert_eq!(vis.len(), 8, "every run keeps its bar at n={n}");
         assert_eq!(
             vis,
             (0..8).map(|i| i >= 8 - kept).collect::<Vec<_>>(),
-            "only the last {kept} steps show at n={n}"
+            "only the last {kept} runs show at n={n}"
         );
         match tail_row(&rows).kind {
             RowKind::TailMore { hidden_steps, .. } => assert_eq!(hidden_steps, 8 - kept),
@@ -1796,11 +1793,11 @@ fn a_window_keeps_only_the_last_steps_visible() {
 }
 
 #[test]
-fn a_window_at_or_above_the_step_count_hides_nothing() {
+fn a_window_at_or_above_the_run_count_hides_nothing() {
     let items = turn_of_cycles(3);
     for tail in [TailWindow::Last(3), TailWindow::Last(10), TailWindow::All] {
         let rows = project_tail(&items, tail);
-        assert_eq!(step_visibility(&rows), vec![true; 3], "{tail:?}");
+        assert_eq!(group_visibility(&rows), vec![true; 3], "{tail:?}");
         let row = tail_row(&rows);
         assert!(row.hidden, "nothing to reveal → the row stays zero-height");
         match row.kind {
@@ -1832,7 +1829,7 @@ fn the_boundary_row_carries_the_kept_count_beside_the_hidden_one() {
     }
 }
 
-/// The rail marks exactly the steps the window covers, and only those — a row
+/// The rail marks exactly the runs the window covers, and only those — a row
 /// inside the kept range never carries it, or the mark would say nothing. With
 /// the boundary shut the marked rows are all hidden, so the mark costs nothing
 /// until something surfaces one.
@@ -1844,9 +1841,9 @@ fn only_rows_outside_the_window_carry_the_rail() {
     let shut = project_tail(&items, tail);
     assert!(
         shut.iter()
-            .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
             .all(|r| r.outside_window == r.hidden),
-        "with the boundary shut, a covered step is marked and hidden while a \
+        "with the boundary shut, a covered run is marked and hidden while a \
          kept one is neither"
     );
 
@@ -1862,13 +1859,13 @@ fn only_rows_outside_the_window_carry_the_rail() {
     );
     let marked: Vec<bool> = open
         .iter()
-        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
         .map(|r| r.outside_window)
         .collect();
     assert_eq!(
         marked,
         vec![true, true, true, true, false, false],
-        "the four steps the window covers are marked; the two it keeps are not"
+        "the four runs the window covers are marked; the two it keeps are not"
     );
     assert!(
         !tail_row(&open).outside_window,
@@ -1880,13 +1877,13 @@ fn only_rows_outside_the_window_carry_the_rail() {
     );
 }
 
-/// A live step the window covers stays surfaced whether or not the boundary is
+/// A live run the window covers stays surfaced whether or not the boundary is
 /// open — so the rail has to mark it in *both* states. Keying the mark on the
 /// boundary being open instead made the same row gain and lose its rail as the
 /// boundary flipped, leaving a visible row from outside the range unexplained in
 /// exactly the state where nothing else accounts for it.
 #[test]
-fn a_live_covered_step_carries_the_rail_with_the_boundary_shut() {
+fn a_live_covered_run_carries_the_rail_with_the_boundary_shut() {
     let mut items = turn_of_cycles(4);
     items[2] = tool("t0", ToolStatusView::InProgress);
     let tail = TailWindow::Last(1);
@@ -1894,13 +1891,13 @@ fn a_live_covered_step_carries_the_rail_with_the_boundary_shut() {
     let shut = project_tail(&items, tail);
     let surfaced: Vec<(bool, bool)> = shut
         .iter()
-        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
         .map(|r| (!r.hidden, r.outside_window))
         .collect();
     assert_eq!(
         surfaced,
         vec![(true, true), (false, true), (false, true), (true, false)],
-        "the live covered step is on screen and marked; the kept step is neither"
+        "the live covered run is on screen and marked; the kept run is neither"
     );
 
     let mut fold = FoldState::default();
@@ -1915,7 +1912,7 @@ fn a_live_covered_step_carries_the_rail_with_the_boundary_shut() {
     );
     let marked: Vec<bool> = open
         .iter()
-        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
         .map(|r| r.outside_window)
         .collect();
     assert_eq!(
@@ -1926,7 +1923,7 @@ fn a_live_covered_step_carries_the_rail_with_the_boundary_shut() {
 }
 
 #[test]
-fn a_response_without_steps_gets_no_tail_row() {
+fn a_response_without_tool_calls_gets_no_tail_row() {
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
     let rows = project_tail(&items, TailWindow::Last(1));
     assert!(
@@ -1936,25 +1933,39 @@ fn a_response_without_steps_gets_no_tail_row() {
     );
 }
 
+/// The window is a range ending at the last covered run, so a covered run takes
+/// the prose that introduced it along — while the conclusion, which follows
+/// every run, stays put.
 #[test]
-fn a_covered_step_takes_its_contents_with_it() {
+fn a_covered_run_takes_its_contents_with_it() {
     let items = turn_of_cycles(4);
     let rows = project_tail(&items, TailWindow::Last(1));
+    // Three of the four runs are covered, so the kept range opens at the end of
+    // the third — item 10, the last cycle's prose.
     for row in &rows {
         match row.kind {
-            RowKind::AgentItem(ix) if ix < 7 => {
-                assert!(row.hidden, "item {ix} sits in a covered step")
+            RowKind::AgentItem(ix) if ix < 10 => {
+                assert!(row.hidden, "item {ix} sits behind the boundary")
             }
+            RowKind::AgentItem(ix) => assert!(
+                row.hidden == matches!(items[ix], ChatItem::ToolCall(_)),
+                "item {ix} is inside the window; only its group's own fold holds it"
+            ),
             RowKind::ConclusionItem(ix) => {
-                assert!(!row.hidden, "the conclusion at {ix} is in no step")
+                assert!(!row.hidden, "the conclusion at {ix} follows every run")
             }
             _ => {}
         }
     }
+    assert_eq!(
+        group_visibility(&rows),
+        vec![false, false, false, true],
+        "only the run inside the window keeps its bar"
+    );
 }
 
 #[test]
-fn revealing_the_tail_shows_every_step_again() {
+fn revealing_the_tail_shows_every_run_again() {
     let items = turn_of_cycles(6);
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Tail(1), FoldContext::past(false));
@@ -1966,7 +1977,7 @@ fn revealing_the_tail_shows_every_step_again() {
         TailWindow::Last(2),
         &DisplayFilter::default(),
     );
-    assert_eq!(step_visibility(&rows), vec![true; 6]);
+    assert_eq!(group_visibility(&rows), vec![true; 6]);
     match tail_row(&rows).kind {
         RowKind::TailMore {
             hidden_steps,
@@ -1997,14 +2008,14 @@ fn a_collapsed_response_hides_its_tail_row_too() {
 }
 
 #[test]
-fn a_covered_step_with_a_running_tool_stays_surfaced() {
+fn a_covered_run_with_a_running_tool_stays_surfaced() {
     let mut items = turn_of_cycles(4);
     items[2] = tool("t0", ToolStatusView::InProgress);
     let rows = project_tail(&items, TailWindow::Last(1));
     assert_eq!(
-        step_visibility(&rows),
+        group_visibility(&rows),
         vec![true, false, false, true],
-        "the live cycle keeps its header, the settled covered ones fold"
+        "the live run keeps its bar, the settled covered ones fold"
     );
     match tail_row(&rows).kind {
         RowKind::TailMore { hidden_steps, .. } => assert_eq!(hidden_steps, 3),
@@ -2012,18 +2023,18 @@ fn a_covered_step_with_a_running_tool_stays_surfaced() {
     }
 }
 
-/// Keep the reveal control when all covered steps are live.
+/// Keep the reveal control when every covered run is live.
 #[test]
-fn a_run_whose_every_covered_step_is_live_keeps_its_tail_row() {
+fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
     let mut items = turn_of_cycles(2);
     items[2] = tool("t0", ToolStatusView::InProgress);
     let live = LiveSubagentUnits::of(&items);
 
     let rows = project_tail(&items, TailWindow::Last(1));
     assert_eq!(
-        step_visibility(&rows),
+        group_visibility(&rows),
         vec![true, true],
-        "the covered step is live, so its header stays surfaced"
+        "the covered run is live, so its bar stays surfaced"
     );
     let row = tail_row(&rows);
     assert!(!row.hidden, "the row must stay to offer the reveal");
@@ -2036,12 +2047,12 @@ fn a_run_whose_every_covered_step_is_live_keeps_its_tail_row() {
     else {
         unreachable!()
     };
-    assert_eq!(hidden_steps, 1, "the window covers one step");
+    assert_eq!(hidden_steps, 1, "the window covers one run");
     assert!(collapsed, "and it has not been revealed yet");
     let covered_prose = |rows: &[RenderRow]| {
         rows.iter()
             .find(|r| matches!(r.kind, RowKind::AgentItem(1)))
-            .expect("the covered step's assistant block keeps its row")
+            .expect("the covered range's assistant block keeps its row")
             .hidden
     };
     assert!(
@@ -2060,7 +2071,7 @@ fn a_run_whose_every_covered_step_is_live_keeps_its_tail_row() {
     );
     assert!(
         !covered_prose(&revealed),
-        "clicking the row unfolds the step it covers"
+        "clicking the row unfolds the range it covers"
     );
 }
 
@@ -2080,7 +2091,7 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
         &DisplayFilter::default(),
     );
     assert_eq!(
-        step_visibility(&rows),
+        group_visibility(&rows),
         vec![false, false, false, false, true, true]
     );
     match tail_row(&rows).kind {
@@ -2161,7 +2172,7 @@ fn tail_rows_share_a_slot_by_their_run_start() {
         false,
         1
     )));
-    assert!(!a.same_slot(&RenderRow::at(step_header(1, 2, true, None), false, 1)));
+    assert!(!a.same_slot(&RenderRow::at(RowKind::AgentItem(1), false, 1)));
 }
 
 // ── Display filter ─────────────────────────────────────────────────────────
@@ -2191,7 +2202,7 @@ fn filtered_count(rows: &[RenderRow]) -> usize {
     filtered_away(rows).revealable
 }
 
-fn one_step_turn() -> Vec<ChatItem> {
+fn one_run_turn() -> Vec<ChatItem> {
     vec![
         ChatItem::UserText("q".into()),
         asst("looking"),
@@ -2201,8 +2212,8 @@ fn one_step_turn() -> Vec<ChatItem> {
     ]
 }
 
-fn live_step_turn() -> Vec<ChatItem> {
-    let mut items = one_step_turn();
+fn live_run_turn() -> Vec<ChatItem> {
+    let mut items = one_run_turn();
     items[3] = tool("b", ToolStatusView::InProgress);
     items
 }
@@ -2245,7 +2256,7 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
 
 #[test]
 fn an_empty_filter_hides_nothing_and_its_row_covers_nothing() {
-    let items = live_step_turn();
+    let items = live_run_turn();
     let rows = project_filtered(&items, &DisplayFilter::default());
     assert_eq!(filtered_count(&rows), 0);
     assert!(
@@ -2256,12 +2267,12 @@ fn an_empty_filter_hides_nothing_and_its_row_covers_nothing() {
 
 #[test]
 fn a_filter_hides_the_rows_it_rejects_and_counts_them() {
-    let items = live_step_turn();
+    let items = live_run_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let rows = project_filtered(&items, &only_tools);
     for row in &rows {
         match row.kind {
-            RowKind::AgentItem(1) => assert!(row.hidden, "the step's prose is filtered"),
+            RowKind::AgentItem(1) => assert!(row.hidden, "the run's prose is filtered"),
             RowKind::ConclusionItem(4) => {
                 assert!(row.hidden, "the conclusion is prose too — the filter wins")
             }
@@ -2278,19 +2289,19 @@ fn a_filter_hides_the_rows_it_rejects_and_counts_them() {
     assert_eq!(
         filtered_count(&rows),
         2,
-        "the step's prose and the conclusion"
+        "the run's prose and the conclusion"
     );
 }
 
 #[test]
-fn a_step_whose_every_row_is_filtered_goes_with_them() {
-    let items = live_step_turn();
+fn a_run_whose_every_row_is_filtered_goes_with_them() {
+    let items = live_run_turn();
     let rows = project_filtered(&items, &only_reads());
     assert!(
         rows.iter()
-            .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
+            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
             .all(|r| r.hidden),
-        "no step survives a read-only filter over Edit-kind tools"
+        "no group survives a read-only filter over Edit-kind tools"
     );
     let visible: Vec<&'static str> = rows
         .iter()
@@ -2306,7 +2317,7 @@ fn a_step_whose_every_row_is_filtered_goes_with_them() {
 
 #[test]
 fn a_group_bar_summarizing_only_filtered_calls_goes_with_them() {
-    let items = live_step_turn();
+    let items = live_run_turn();
     let only_prose = DisplayFilter::from_tokens(["prose"]);
     let rows = project_filtered(&items, &only_prose);
     assert!(
@@ -2318,7 +2329,7 @@ fn a_group_bar_summarizing_only_filtered_calls_goes_with_them() {
 
 #[test]
 fn revealing_the_filter_shows_what_it_covers() {
-    let items = live_step_turn();
+    let items = live_run_turn();
     let mut fold = FoldState::default();
     fold.toggle(FoldKey::Filtered(1), FoldContext::past(false));
     let only_tools = DisplayFilter::from_tokens(["tools"]);
@@ -2359,7 +2370,7 @@ fn a_prompt_and_a_pending_permission_survive_every_filter() {
 
 #[test]
 fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
-    let items = one_step_turn();
+    let items = one_run_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
@@ -2398,7 +2409,7 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
 /// collapse at the render site is what erased this exact case.
 #[test]
 fn a_collapsed_response_emptied_by_the_filter_still_offers_the_reveal() {
-    let items = one_step_turn();
+    let items = one_run_turn();
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
     let rows = project(
@@ -2423,7 +2434,7 @@ fn a_collapsed_response_emptied_by_the_filter_still_offers_the_reveal() {
 
 #[test]
 fn the_placeholder_counts_only_what_the_filter_alone_took() {
-    let items = one_step_turn();
+    let items = one_run_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
@@ -2438,35 +2449,23 @@ fn the_placeholder_counts_only_what_the_filter_alone_took() {
     assert_eq!(filtered_count(&rows), 1);
 }
 
-/// When a collapsed step holds everything the filter took, the bar has nothing
-/// to offer and says so by carrying no chip — the reveal only ever names rows it
-/// can itself put on screen. The step header is what marks the cut here: it
-/// keeps the count of tools the step made, so `2 tools` above no tool cards is
-/// the tell. This is the pair that replaced the old `Show 1 of 7` label.
+/// The reveal only ever names rows it can itself put on screen. A settled
+/// group's own bar is one; the calls its fold holds are not, so hiding every
+/// tool offers one row back, not three.
 #[test]
-fn a_cut_a_fold_holds_shows_on_the_step_header_not_the_bar() {
-    let items = one_step_turn();
+fn the_reveal_counts_the_bar_it_can_show_not_the_calls_its_fold_holds() {
+    let items = one_run_turn();
     let rows = project_filtered(
         &items,
         &DisplayFilter::default().toggled(FilterFacet::Tools),
     );
 
-    assert!(
-        !filtered_away(&rows).offers_reveal(),
-        "the fold holds all of it, so there is nothing the chip could reveal"
+    assert_eq!(
+        filtered_away(&rows).revealable,
+        1,
+        "the group bar alone — its members are already behind its fold"
     );
 
-    let header = rows
-        .iter()
-        .find_map(|r| match r.kind {
-            RowKind::StepHeader(header) if !r.hidden => Some(header),
-            _ => None,
-        })
-        .expect("the step keeps its header");
-    assert_eq!(
-        header.tool_count, 2,
-        "the header still counts what the step did"
-    );
     let on_screen_tools = rows
         .iter()
         .filter(|r| !r.hidden)
@@ -2476,10 +2475,7 @@ fn a_cut_a_fold_holds_shows_on_the_step_header_not_the_bar() {
         })
         .filter(|&ix| matches!(items[ix], ChatItem::ToolCall(_)))
         .count();
-    assert_eq!(
-        on_screen_tools, 0,
-        "and no tool card is on screen to match that count"
-    );
+    assert_eq!(on_screen_tools, 0, "no tool card is on screen");
 }
 
 #[test]
@@ -2592,70 +2588,6 @@ fn kinded_tool(id: &str, kind: ToolKindView, status: ToolStatusView) -> ChatItem
     })
 }
 
-/// The count states what the step *did*, not what survives the filter. A header
-/// reading `3 tools` above fewer cards is the intended tell that the filter is
-/// holding something back — the reveal chip only ever names rows it can itself
-/// put on screen, so without this the cut inside a fold had no marker at all.
-#[test]
-fn a_step_header_counts_every_tool_the_step_made() {
-    use ToolKindView::{Edit, Read};
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("looking at the failure"),
-        kinded_tool("a", Edit, Completed),
-        kinded_tool("b", Read, Completed),
-        kinded_tool("c", Read, Completed),
-        asst("done"),
-    ];
-    let step_count = |fold: &FoldState, filter: &DisplayFilter| {
-        project(
-            &items,
-            fold,
-            false,
-            &LiveSubagentUnits::of(&items),
-            TailWindow::All,
-            filter,
-        )
-        .iter()
-        .find_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.tool_count),
-            _ => None,
-        })
-        .expect("step header")
-    };
-    assert_eq!(
-        step_count(&FoldState::default(), &DisplayFilter::default()),
-        3,
-        "an unfiltered pane counts the whole step"
-    );
-    assert_eq!(
-        step_count(
-            &FoldState::default(),
-            &DisplayFilter::from_tokens(["tool_edit"]),
-        ),
-        3,
-        "hiding the edits leaves the count at what the step did, so the two \
-         reads on screen under `3 tools` say an edit was cut"
-    );
-    assert_eq!(
-        step_count(
-            &FoldState::default(),
-            &DisplayFilter::from_tokens(["thinking"]),
-        ),
-        3,
-        "a filter aimed at prose does not touch the tool count either"
-    );
-
-    let mut revealed = FoldState::default();
-    revealed.toggle(FoldKey::Filtered(1), FoldContext::past(false));
-    assert_eq!(
-        step_count(&revealed, &DisplayFilter::from_tokens(["tool_edit"]),),
-        3,
-        "and the reveal cannot move it either — there is one count in every state"
-    );
-}
-
 /// `text_of` collapses a content block it cannot render to an empty string, so
 /// an assistant message can arrive with no text at all. It has nothing to show.
 #[test]
@@ -2672,10 +2604,10 @@ fn an_empty_assistant_reply_projects_no_row() {
     assert_eq!(kinds(&rows), vec![("user", false)]);
 }
 
-/// A bodyless message must not occupy the row slot that tips a step into
-/// earning a header, or an invisible item grows visible chrome.
+/// A bodyless message renders nothing, so it must not change the layout of the
+/// items that do.
 #[test]
-fn an_empty_message_earns_no_step_header() {
+fn an_empty_message_projects_the_same_rows_as_no_message() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -2697,8 +2629,8 @@ fn an_empty_message_earns_no_step_header() {
 }
 
 /// The conclusion escapes its enclosing fold, so an empty message taking that
-/// slot leaves a blank row pinned over a collapsed step — and buries the real
-/// reply that should have held it.
+/// slot leaves a blank row pinned over a collapsed response — and buries the
+/// real reply that should have held it.
 #[test]
 fn an_empty_message_is_never_the_conclusion() {
     use ToolStatusView::Completed;
@@ -2726,8 +2658,14 @@ fn an_empty_message_is_never_the_conclusion() {
         .collect();
     assert_eq!(
         visible_items,
-        vec![1],
-        "the real reply holds the conclusion"
+        vec![1, 2],
+        "the real reply and the call it introduced"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::ConclusionItem(_))),
+        "the empty message cannot be the conclusion, and nothing else claims it"
     );
 }
 
@@ -2748,188 +2686,6 @@ fn an_empty_thinking_block_projects_no_row() {
     );
 }
 
-fn commentary(s: &str) -> ChatItem {
-    ChatItem::AssistantText {
-        text: s.to_owned(),
-        streaming: false,
-        message_id: None,
-        phase: daruda_acp::MessagePhase::Commentary,
-    }
-}
-
-/// The captured codex turn: a one-line thought, the preamble it wrote, then
-/// tools. **Expanded** is where ownership shows: without it the thought takes a
-/// row of its own, which is the same line the header is already showing.
-#[test]
-fn a_header_owned_thought_gets_no_row_even_expanded() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        think("**Inspecting Workspace struct and operations**"),
-        commentary("walking the structure"),
-        tool("a", Completed),
-        asst("done"),
-    ];
-    let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Step(1), FoldContext::past(false));
-    let rows = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let step = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::StepHeader(header) if !header.collapsed));
-    assert!(step.is_some(), "the step is expanded");
-    let thought = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 1))
-        .expect("the row keeps its slot in the list");
-    assert!(
-        thought.hidden,
-        "the header is showing this thought, so its row must not repeat it"
-    );
-    let preamble = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 2))
-        .expect("the preamble has a row");
-    assert!(!preamble.hidden, "the preamble is the expanded body");
-}
-
-/// A thought the header cannot show whole keeps its row, or the rest of it
-/// would be unreachable.
-#[test]
-fn a_thought_the_header_cannot_show_whole_stays_visible_expanded() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        think("**Inspecting**\n\nand a second paragraph the header cannot show"),
-        commentary("walking the structure"),
-        tool("a", Completed),
-        asst("done"),
-    ];
-    let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Step(1), FoldContext::past(false));
-    let rows = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let thought = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == 1))
-        .expect("the thought keeps a row");
-    assert!(
-        !thought.hidden,
-        "the header cannot show it whole, so the body must"
-    );
-}
-
-/// The screenshot shape: prose, then the tools it introduces, and no trailing
-/// answer yet because the turn is still running. `force_visible` lifts that
-/// prose out of the step's fold, so the header may not title itself from it.
-#[test]
-fn prose_that_escapes_a_steps_fold_is_named_on_the_header_row() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("classifying the work"),
-        tool("a", Completed),
-        tool("b", Completed),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    let escaped = rows.iter().find_map(|r| match r.kind {
-        RowKind::StepHeader(header) => Some(header.visible_body_prose),
-        _ => None,
-    });
-    assert_eq!(
-        escaped,
-        Some(Some(1)),
-        "the conclusion sits inside the step, so its row survives the fold"
-    );
-    assert!(
-        rows.iter()
-            .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && !r.hidden),
-        "and it is the row that stays on screen, not the header's summary"
-    );
-    assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ConclusionItem(_))),
-        "prose the agent wrote before work it is still doing is no conclusion"
-    );
-}
-
-/// Trailing prose is outside every step, so it is nothing the step header
-/// could have said — the field stays empty rather than naming a stranger.
-#[test]
-fn a_conclusion_outside_the_step_leaves_the_header_free() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("looking"),
-        tool("a", Completed),
-        asst("done"),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::default(),
-    );
-    assert_eq!(
-        rows.iter().find_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.visible_body_prose),
-            _ => None,
-        }),
-        Some(None)
-    );
-}
-
-/// A conclusion the filter holds keeps no visible row, so the header is still
-/// the only thing that can say the line and must go on saying it.
-#[test]
-fn a_filtered_away_conclusion_does_not_free_the_header() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("classifying the work"),
-        tool("a", Completed),
-        tool("b", Completed),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &DisplayFilter::from_tokens([FilterFacet::Tools.token()]),
-    );
-    assert_eq!(
-        rows.iter().find_map(|r| match r.kind {
-            RowKind::StepHeader(header) => Some(header.visible_body_prose),
-            _ => None,
-        }),
-        Some(None),
-        "no visible row for the prose → the header keeps its title"
-    );
-}
-
 fn preamble(text: &str) -> ChatItem {
     ChatItem::AssistantText {
         text: text.to_owned(),
@@ -2939,12 +2695,11 @@ fn preamble(text: &str) -> ChatItem {
     }
 }
 
-/// The captured-codex case: every tool in the step is a kind the filter hides,
-/// and the only survivor is the preamble the agent wrote ahead of them. The step
-/// then renders for that one row while its header names work none of which is on
-/// screen. Hiding preambles as their own kind is what empties it out.
+/// The captured-codex case: every call in the run is a kind the filter hides,
+/// and the preamble the agent wrote ahead of them is the survivor holding the
+/// turn on screen. Hiding preambles as their own kind takes that row too.
 #[test]
-fn hiding_preambles_empties_a_step_whose_tools_are_all_filtered() {
+fn hiding_preambles_takes_their_rows_with_them() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -2953,7 +2708,7 @@ fn hiding_preambles_empties_a_step_whose_tools_are_all_filtered() {
         kinded_tool("b", ToolKindView::Execute, Completed),
         asst("done"),
     ];
-    let visible_steps = |filter: &DisplayFilter| -> usize {
+    let preamble_shown = |filter: &DisplayFilter| {
         project(
             &items,
             &FoldState::default(),
@@ -2963,26 +2718,291 @@ fn hiding_preambles_empties_a_step_whose_tools_are_all_filtered() {
             filter,
         )
         .iter()
-        .filter(|r| !r.hidden)
-        .filter(|r| matches!(r.kind, RowKind::StepHeader(..)))
-        .count()
+        .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && !r.hidden)
     };
 
-    // Replies + Edits: the preamble is prose, so it survives and holds the step
-    // on screen even though both of its commands are hidden.
+    // Replies + Edits: the preamble is prose, so it survives even though both
+    // of its commands are hidden.
     let with_preambles = DisplayFilter::from_tokens(["prose", "tool_edit"]);
+    assert!(preamble_shown(&with_preambles), "the preamble survives");
+
+    // The same, with preambles their own hidden kind.
+    let without = DisplayFilter::from_tokens(["prose", "prose_answer", "tool_edit"]);
+    assert!(!preamble_shown(&without), "and now it does not");
+}
+
+// ── Thinking groups ─────────────────────────────────────────────────────────
+
+fn think_group_headers(rows: &[RenderRow]) -> Vec<&RenderRow> {
+    rows.iter()
+        .filter(|r| matches!(r.kind, RowKind::ThinkingGroupHeader { .. }))
+        .collect()
+}
+
+/// Every thinking group's `(first_ix, count)`, in projection order.
+fn think_group_spans(rows: &[RenderRow]) -> Vec<(usize, usize)> {
+    rows.iter()
+        .filter_map(|r| match r.kind {
+            RowKind::ThinkingGroupHeader {
+                first_ix, count, ..
+            } => Some((first_ix, count)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_thinking_run_gets_one_group_header_and_indents_its_members() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("first"),
+        think("second"),
+        asst("done"),
+    ];
+    let rows = project_all(&items);
+    let headers = think_group_headers(&rows);
+    assert_eq!(headers.len(), 1, "one run, one header");
+    let RowKind::ThinkingGroupHeader {
+        first_ix,
+        count,
+        collapsed: _,
+    } = headers[0].kind
+    else {
+        unreachable!()
+    };
+    assert_eq!((first_ix, count), (1, 2));
+    let header_indent = headers[0].indent;
+    for ix in [1usize, 2] {
+        let child = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::AgentItem(j) if j == ix))
+            .expect("a row per thought");
+        assert_eq!(
+            child.indent,
+            header_indent + 1,
+            "thought {ix} nests under its group bar"
+        );
+    }
+}
+
+#[test]
+fn a_lone_thought_is_not_grouped() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("just one"),
+        asst("done"),
+    ];
+    let rows = project_all(&items);
+    assert!(think_group_headers(&rows).is_empty());
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && !r.hidden),
+        "the thought keeps its own plain row"
+    );
+}
+
+#[test]
+fn prose_between_two_runs_splits_them_into_separate_groups() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        asst("out loud"),
+        think("c"),
+        think("d"),
+        asst("done"),
+    ];
     assert_eq!(
-        visible_steps(&with_preambles),
-        1,
-        "the preamble alone keeps the step"
+        think_group_spans(&project_all(&items)),
+        vec![(1, 2), (4, 2)]
+    );
+}
+
+#[test]
+fn a_tool_call_between_two_runs_splits_them_into_separate_groups() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        tool("x", ToolStatusView::Completed),
+        think("c"),
+        think("d"),
+        asst("done"),
+    ];
+    assert_eq!(
+        think_group_spans(&project_all(&items)),
+        vec![(1, 2), (4, 2)]
+    );
+}
+
+/// The thinking run grows only while the item is `Thinking` *and* not bodyless,
+/// so an empty streaming chunk stops the run rather than being skipped through:
+/// it earns no row, and letting it join a group would render a blank child and
+/// inflate the count. The cost is cutting a run the reader sees as contiguous.
+/// Both real captures (`acp-wire-codex-acp.log`, `acp-wire-claude.log`) hold
+/// zero bodyless thinking items, so the stricter reading costs nothing today.
+#[test]
+fn an_empty_thought_inside_a_run_splits_it_rather_than_being_skipped_through() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think(""),
+        think("b"),
+        think("c"),
+        asst("done"),
+    ];
+    let rows = project_all(&items);
+    assert_eq!(
+        think_group_spans(&rows),
+        vec![(3, 2)],
+        "b + c earn the only group; a is left alone below RUN_GROUP_MIN"
+    );
+    assert_eq!(
+        kinds(&rows),
+        vec![
+            ("user", false),
+            ("response", false),
+            ("item", false),       // a, a lone thought with no bar of its own
+            ("thinkgroup", false), // b + c
+            ("item", true),
+            ("item", true),
+            ("item", false), // the conclusion
+        ]
     );
 
-    // The same, with preambles their own hidden kind: nothing in the step is
-    // left, so it stops taking a row.
-    let without = DisplayFilter::from_tokens(["prose", "prose_answer", "tool_edit"]);
-    assert_eq!(
-        visible_steps(&without),
-        0,
-        "no survivors, so the step is gone"
+    // The same three thoughts with the empty chunk gone are one run of three.
+    let contiguous = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        think("c"),
+        asst("done"),
+    ];
+    assert_eq!(think_group_spans(&project_all(&contiguous)), vec![(1, 3)]);
+}
+
+#[test]
+fn hiding_reasoning_takes_the_group_bar_with_it() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        asst("done"),
+    ];
+    let no_reasoning = DisplayFilter::from_tokens(["prose", "tools"]);
+    let rows = project_filtered(&items, &no_reasoning);
+    let headers = think_group_headers(&rows);
+    assert_eq!(headers.len(), 1, "the bar keeps its slot");
+    assert!(headers[0].hidden, "nothing left for it to summarize");
+    for ix in [1usize, 2] {
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r.kind, RowKind::AgentItem(j) if j == ix) && r.hidden),
+            "thought {ix} is filtered away"
+        );
+    }
+    assert!(
+        filtered_away(&rows).offers_reveal(),
+        "the bar carries the reveal that brings them back"
     );
+}
+
+/// The reveal undoes the *filter*, not the group's own fold: the bar comes back
+/// and its thoughts stay behind whichever fold state the group is in — the same
+/// division of labour the tool group has.
+#[test]
+fn revealing_the_filter_brings_the_group_bar_back() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        asst("done"),
+    ];
+    let no_reasoning = DisplayFilter::from_tokens(["prose", "tools"]);
+    let project_revealed = |fold: &FoldState| {
+        project(
+            &items,
+            fold,
+            false,
+            &LiveSubagentUnits::of(&items),
+            TailWindow::All,
+            &no_reasoning,
+        )
+    };
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Filtered(1), FoldContext::past(false));
+    let rows = project_revealed(&fold);
+    assert!(!think_group_headers(&rows)[0].hidden, "the bar is back");
+    for ix in [1usize, 2] {
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r.kind, RowKind::AgentItem(j) if j == ix) && r.hidden),
+            "thought {ix} is still behind the settled group's own fold"
+        );
+    }
+
+    fold.toggle(FoldKey::ThinkingGroup(1), FoldContext::last(false));
+    let rows = project_revealed(&fold);
+    for ix in [1usize, 2] {
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r.kind, RowKind::AgentItem(j) if j == ix) && !r.hidden),
+            "thought {ix} shows once the group is open too"
+        );
+    }
+}
+
+#[test]
+fn a_thinking_group_folds_independently_of_the_tool_group_beside_it() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("a"),
+        think("b"),
+        tool("x", ToolStatusView::Completed),
+        tool("y", ToolStatusView::Completed),
+        asst("done"),
+    ];
+    // Auto opens the newest response and leaves both settled groups collapsed,
+    // which is what makes the two toggles observable apart.
+    let visible = |fold: &FoldState| -> Vec<usize> {
+        project_under(&items, fold)
+            .into_iter()
+            .filter(|r| !r.hidden)
+            .filter_map(|r| match r.kind {
+                RowKind::AgentItem(ix) => Some(ix),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut fold = FoldState::with_mode(FoldPreset::Auto.mode());
+    assert_eq!(visible(&fold), Vec::<usize>::new(), "both groups collapsed");
+
+    fold.toggle(FoldKey::ThinkingGroup(1), FoldContext::last(false));
+    assert_eq!(
+        visible(&fold),
+        vec![1, 2],
+        "the thoughts open without touching the tools"
+    );
+
+    fold.toggle(FoldKey::ToolGroup("x".into()), FoldContext::last(false));
+    assert_eq!(visible(&fold), vec![1, 2, 3, 4], "now both are open");
+}
+
+#[test]
+fn thinking_groups_share_a_slot_by_their_first_index() {
+    let group = |first_ix, count, collapsed| {
+        RenderRow::at(
+            RowKind::ThinkingGroupHeader {
+                first_ix,
+                count,
+                collapsed,
+            },
+            false,
+            1,
+        )
+    };
+    let a = group(3, 2, false);
+    assert!(a.same_slot(&group(3, 5, true)), "same first_ix → same slot");
+    assert!(!a.same_slot(&group(4, 2, false)));
+    assert!(!a.same_slot(&RenderRow::at(RowKind::AgentItem(3), false, 1)));
 }

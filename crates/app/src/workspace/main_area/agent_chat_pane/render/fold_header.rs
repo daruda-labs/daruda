@@ -14,7 +14,7 @@
 //! caller cannot restate them. Enforced by `scripts/lint-fold-header.sh`.
 //!
 //! Every collapsible header in the pane routes through here — the conversation's
-//! seven plus the plan region, whose collapse state is a view flag rather than a
+//! nine plus the plan region, whose collapse state is a view flag rather than a
 //! [`FoldKey`] and so arrives as [`FoldToggle::External`].
 
 use gpui::{
@@ -55,16 +55,6 @@ enum SummaryTone {
     Reasoning,
 }
 
-/// How strongly a summary should read in the header row.
-#[derive(Clone, Copy)]
-enum SummaryEmphasis {
-    /// Tertiary text for folded previews that are helpful but secondary.
-    Subtle,
-    /// Primary text for a folded row's own label, where the line is the row's
-    /// main visible content rather than a hint beside one.
-    Primary,
-}
-
 /// The one-line preview shown in a collapsed header's `stretch` slot.
 ///
 /// There is no constructor taking a bare `String`: a summary is either derived
@@ -75,7 +65,6 @@ enum SummaryEmphasis {
 pub(super) struct SummaryLine {
     text: String,
     tone: SummaryTone,
-    emphasis: SummaryEmphasis,
 }
 
 impl SummaryLine {
@@ -85,7 +74,6 @@ impl SummaryLine {
         Some(Self {
             text: summary_preview_line(text)?,
             tone: SummaryTone::Prose,
-            emphasis: SummaryEmphasis::Subtle,
         })
     }
 
@@ -96,7 +84,6 @@ impl SummaryLine {
         Self {
             text: text.into(),
             tone: SummaryTone::Prose,
-            emphasis: SummaryEmphasis::Subtle,
         }
     }
 
@@ -104,19 +91,6 @@ impl SummaryLine {
     pub(super) fn reasoning(mut self) -> Self {
         self.tone = SummaryTone::Reasoning;
         self
-    }
-
-    /// Render this summary as the header row's primary text.
-    pub(super) fn primary(mut self) -> Self {
-        self.emphasis = SummaryEmphasis::Primary;
-        self
-    }
-
-    /// The flattened preview text. Test-only: the render path consumes the whole
-    /// `SummaryLine`, so nothing on the way to the screen reads it back out.
-    #[cfg(test)]
-    pub(super) fn text(&self) -> &str {
-        &self.text
     }
 }
 
@@ -138,17 +112,6 @@ enum StretchSlot<'a> {
     /// is expanded the closure is never called, so a collapsed-state-only string
     /// is not computed (nor a markdown body parsed) for an expanded row.
     Summary(SummaryBuilder<'a>),
-    /// A preview in *both* states, showing a different value in each: what the
-    /// fold hides when collapsed, and a label for it once its body is on screen.
-    /// Both sides are lazy, so a state costs only the value it shows.
-    ///
-    /// The expanded side may return `None` — a header whose label would be a
-    /// truncation of content the body still owns is better left empty than
-    /// promising a value the reader cannot get the rest of.
-    Alternate {
-        collapsed: SummaryBuilder<'a>,
-        expanded: SummaryBuilder<'a>,
-    },
     /// An identifier shown in both fold states — a file path, a tool label.
     /// Stays an element because it can carry its own font / colour / selection.
     Title(AnyElement),
@@ -159,17 +122,13 @@ enum StretchSlot<'a> {
 impl<'a> StretchSlot<'a> {
     /// The builder this slot runs in the given fold state, if it has one.
     ///
-    /// Split out of `render` so *which* side of an [`Self::Alternate`] runs is
-    /// a decision a test can make without a window. [`Self::Title`] is absent
-    /// on purpose: it is an element the caller already built, not a summary
-    /// this slot builds, so `render` places it before consulting this.
+    /// Split out of `render` so which state builds a summary is a decision a
+    /// test can make without a window. [`Self::Title`] is absent on purpose: it
+    /// is an element the caller already built, not a summary this slot builds,
+    /// so `render` places it before consulting this.
     fn builder_for(self, expanded: bool) -> Option<SummaryBuilder<'a>> {
         match self {
             Self::Summary(build) if !expanded => Some(build),
-            Self::Alternate {
-                collapsed,
-                expanded: on_expand,
-            } => Some(if expanded { on_expand } else { collapsed }),
             Self::Summary(_) | Self::Title(_) | Self::Spacer => None,
         }
     }
@@ -177,9 +136,9 @@ impl<'a> StretchSlot<'a> {
 
 /// One fold header row's content, in the three-slot grammar.
 pub(super) struct FoldHeader<'a> {
-    /// Fixed-width label at the left — agent name, "Thinking", the ⚙ marker, a
-    /// tool icon + kind. `None` for a header that leads straight into its
-    /// stretch slot (the conclusion, a diff path).
+    /// Fixed-width label at the left — agent name, "Thinking", a tool icon +
+    /// kind. `None` for a header that leads straight into its stretch slot (the
+    /// conclusion, a group's count, a diff path).
     leading: Option<AnyElement>,
     stretch: StretchSlot<'a>,
     /// Fixed-width, right-anchored, in order — rollup glyph, tool count, tool
@@ -187,8 +146,7 @@ pub(super) struct FoldHeader<'a> {
     ///
     /// Trailing content is **fold-state-independent**: a badge reads the same
     /// expanded or collapsed. The `stretch` slot is the only one that varies —
-    /// hidden when expanded ([`StretchSlot::Summary`]) or showing a different
-    /// value in each state ([`StretchSlot::Alternate`]).
+    /// it is hidden once expanded ([`StretchSlot::Summary`]).
     trailing: Vec<AnyElement>,
 }
 
@@ -198,23 +156,6 @@ impl<'a> FoldHeader<'a> {
         Self {
             leading: None,
             stretch: StretchSlot::Summary(Box::new(f)),
-            trailing: Vec::new(),
-        }
-    }
-
-    /// A header whose stretch slot shows a different value in each fold state:
-    /// what the fold hides, then a label for it once its body is on screen.
-    /// The expanded side may yield `None` — see [`StretchSlot::Alternate`].
-    pub(super) fn with_alternate(
-        collapsed: impl FnOnce() -> Option<SummaryLine> + 'a,
-        expanded: impl FnOnce() -> Option<SummaryLine> + 'a,
-    ) -> Self {
-        Self {
-            leading: None,
-            stretch: StretchSlot::Alternate {
-                collapsed: Box::new(collapsed),
-                expanded: Box::new(expanded),
-            },
             trailing: Vec::new(),
         }
     }
@@ -481,10 +422,7 @@ fn summary_element(
     dim: f32,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
-    let color = match line.emphasis {
-        SummaryEmphasis::Subtle => theme::agent_chat_fg_subtle(cx),
-        SummaryEmphasis::Primary => theme::agent_chat_fg(cx),
-    };
+    let color = theme::agent_chat_fg_subtle(cx);
     stretch_container(has_leading)
         .when(matches!(line.tone, SummaryTone::Reasoning), |el| {
             el.italic()
@@ -540,8 +478,8 @@ fn disclosure_row(
 ///
 /// The label is centred between two equal rules in **both** states, so the row
 /// does not move as it opens. What marks the flip is the chevron, which takes
-/// [`DisclosureAxis::Vertical`] to stay distinct from the `▶`/`▼` tree glyph the
-/// step bars own, plus the label itself naming the state it goes to.
+/// [`DisclosureAxis::Vertical`] to stay distinct from the `▶`/`▼` tree glyph
+/// every fold-row bar owns, plus the label itself naming the state it goes to.
 pub(super) fn window_boundary_row(
     base: impl Into<ElementId>,
     toggle: impl Into<FoldToggle>,
@@ -644,7 +582,7 @@ mod tests {
 
     use std::cell::Cell;
 
-    use super::{StretchSlot, SummaryEmphasis, SummaryTone};
+    use super::{StretchSlot, SummaryTone};
 
     /// Records which builders ran, so laziness is observable: a slot that shows
     /// one side must not pay for parsing the other's markdown body.
@@ -673,60 +611,18 @@ mod tests {
     }
 
     #[test]
-    fn an_alternate_slot_shows_a_different_value_in_each_state() {
-        for (expanded, want) in [(false, "body"), (true, "head")] {
-            let ran = Cell::new(0);
-            let slot = StretchSlot::Alternate {
-                collapsed: probe(&ran, 1, "body"),
-                expanded: probe(&ran, 2, "head"),
-            };
-            let line = slot
-                .builder_for(expanded)
-                .and_then(|b| b())
-                .expect("either state shows something");
-            assert_eq!(line.text, want, "expanded={expanded}");
-            assert_eq!(
-                ran.get(),
-                if expanded { 2 } else { 1 },
-                "only the shown side is built"
-            );
-        }
-    }
-
-    /// The expanded side may decline — a caller whose head would be truncated
-    /// keeps the header empty rather than promising a value it cannot show.
-    #[test]
-    fn an_alternate_side_that_declines_leaves_the_slot_empty() {
-        let slot = StretchSlot::Alternate {
-            collapsed: Box::new(|| Some(SummaryLine::plain("body"))),
-            expanded: Box::new(|| None),
-        };
-        assert!(slot.builder_for(true).and_then(|b| b()).is_none());
-    }
-
-    #[test]
     fn a_spacer_shows_nothing_in_either_state() {
         assert!(StretchSlot::Spacer.builder_for(false).is_none());
         assert!(StretchSlot::Spacer.builder_for(true).is_none());
     }
 
-    /// Tone rides on the value, so the two sides of an `Alternate` can differ:
-    /// a reasoning head stays italic while the prose body does not.
+    /// Tone rides on the value, so a reasoning summary stays italic while a
+    /// prose one does not.
     #[test]
-    fn each_side_carries_its_own_tone() {
-        let slot = StretchSlot::Alternate {
-            collapsed: Box::new(|| Some(SummaryLine::plain("body"))),
-            expanded: Box::new(|| Some(SummaryLine::plain("head").reasoning())),
-        };
-        let head = slot.builder_for(true).and_then(|b| b()).expect("head");
-        assert!(matches!(head.tone, SummaryTone::Reasoning));
-    }
-
-    #[test]
-    fn primary_summary_keeps_the_line_tone() {
-        let line = SummaryLine::plain("head").reasoning().primary();
+    fn a_summary_carries_its_own_tone() {
+        let slot = StretchSlot::Summary(Box::new(|| Some(SummaryLine::plain("head").reasoning())));
+        let line = slot.builder_for(false).and_then(|b| b()).expect("summary");
         assert!(matches!(line.tone, SummaryTone::Reasoning));
-        assert!(matches!(line.emphasis, SummaryEmphasis::Primary));
     }
 
     #[test]

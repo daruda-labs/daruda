@@ -1,7 +1,6 @@
 //! Projects the flat chat model into stable virtual-list rows. Folding changes
 //! `hidden` flags instead of removing rows so scroll positions remain stable.
 
-pub(in crate::workspace) mod step;
 pub(in crate::workspace) mod tail;
 
 use std::collections::HashSet;
@@ -14,15 +13,15 @@ use super::fold::{FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
 use tail::TailWindow;
 
-const TOOL_GROUP_MIN: usize = 2;
+/// Minimum consecutive same-kind items that earn a group header. Governs tool
+/// runs and thinking runs alike, so the two thresholds cannot drift apart.
+const RUN_GROUP_MIN: usize = 2;
 
 /// What the display filter dropped from one run and the reveal can put back.
 ///
 /// Only reachable rows are counted: a row a fold already holds does not come
 /// back when the reveal opens, so counting it would make the chip promise more
-/// than clicking it delivers. What the filter took from *inside* a fold is not
-/// tallied here at all — the step headers carry that, by keeping a tool count
-/// the filter cannot shrink.
+/// than clicking it delivers.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct FilteredAway {
     /// Rows the reveal puts on screen.
@@ -54,11 +53,10 @@ pub(in crate::workspace) enum RowKind {
         collapsed: bool,
         /// What the display filter took out of this response. The bar is the
         /// run's one header, so the reveal control rides here rather than on a
-        /// row of its own that would read as another step.
+        /// row of its own that would read as more transcript.
         filtered: FilteredAway,
     },
     AgentItem(usize),
-    StepHeader(StepHeaderRow),
     TailMore {
         run_start: usize,
         hidden_steps: usize,
@@ -75,22 +73,16 @@ pub(in crate::workspace) enum RowKind {
         count: usize,
         collapsed: bool,
     },
+    /// Keyed on the run's first item rather than a message id: a thought carries
+    /// no stable id of its own, so the item index is what the fold key, the row
+    /// slot, and the element id all key off.
+    ThinkingGroupHeader {
+        first_ix: usize,
+        count: usize,
+        collapsed: bool,
+    },
     ConclusionItem(usize),
     WorkingIndicator,
-}
-
-/// The projection-owned facts needed to render one step header. Keeping the
-/// span here prevents the renderer from rediscovering a potentially different
-/// step boundary from the first item index.
-#[derive(Clone, Copy)]
-pub(in crate::workspace) struct StepHeaderRow {
-    pub(in crate::workspace) span: step::StepSpan,
-    pub(in crate::workspace) tool_count: usize,
-    pub(in crate::workspace) collapsed: bool,
-    /// This step's own prose item whose row escapes the fold and is on screen
-    /// anyway. The header must not title itself from it, or the same line reads
-    /// twice: once summarized, once in full.
-    pub(in crate::workspace) visible_body_prose: Option<usize>,
 }
 
 pub(in crate::workspace) struct RenderRow {
@@ -107,9 +99,9 @@ pub(in crate::workspace) struct RenderRow {
     /// to the range the pane is showing, and the renderer answers it with the
     /// rail tying the row back to the boundary above it.
     ///
-    /// Deliberately *not* "the boundary revealed it": a live covered step stays
-    /// surfaced through a shut boundary, and keying the mark on the boundary
-    /// made that row gain and lose its rail as the boundary flipped.
+    /// Deliberately *not* "the boundary revealed it": a live covered tool run
+    /// stays surfaced through a shut boundary, and keying the mark on the
+    /// boundary made that row gain and lose its rail as the boundary flipped.
     pub(in crate::workspace) outside_window: bool,
 }
 
@@ -191,9 +183,9 @@ pub(in crate::workspace) enum RowSlot<'a> {
     User(usize),
     Response(usize),
     AgentItem(usize),
-    Step(usize),
     TailMore(usize),
     ToolGroup(&'a str),
+    ThinkingGroup(usize),
     Conclusion(usize),
     /// At most one indicator exists, so any two of them are the same slot.
     Working,
@@ -208,9 +200,9 @@ impl RowKind {
             RowKind::User(ix) => RowSlot::User(*ix),
             RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
-            RowKind::StepHeader(header) => RowSlot::Step(header.span.start),
             RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
             RowKind::ToolGroupHeader { gid, .. } => RowSlot::ToolGroup(gid.as_str()),
+            RowKind::ThinkingGroupHeader { first_ix, .. } => RowSlot::ThinkingGroup(*first_ix),
             RowKind::ConclusionItem(ix) => RowSlot::Conclusion(*ix),
             RowKind::WorkingIndicator => RowSlot::Working,
         }
@@ -386,14 +378,37 @@ struct RunRows<'a> {
     /// Accumulated while the walk runs; written to the bar by `finish`.
     filtered: FilteredAway,
     revealed: bool,
-    /// Applied to every row pushed while the walk is inside a step the tail
-    /// window covers. Pusher state rather than a `push` parameter: it changes
-    /// once per step, not once per row, and the eight call sites below would
-    /// each have to restate it.
+    /// Applied to every row the walk pushes while it sits before the tail
+    /// window's start — prose and thinking as much as tool calls, since the
+    /// window covers a range rather than testing each row. Pusher state rather
+    /// than a `push` parameter: it changes once per position, not once per row,
+    /// and the call sites below would each have to restate it.
     outside_window: bool,
 }
 
 impl<'a> RunRows<'a> {
+    /// A group header's children, one indent deeper. Identical for every group
+    /// kind, so extracting it is what keeps the tool and thinking branches from
+    /// drifting on the fold and filter terms.
+    fn push_group_children(
+        &mut self,
+        run: std::ops::Range<usize>,
+        folded: bool,
+        group_collapsed: bool,
+        indent: u8,
+        items: &[ChatItem],
+        filter: &FilterMatchIndex,
+    ) {
+        for j in run {
+            self.push(
+                RowKind::AgentItem(j),
+                folded || group_collapsed,
+                !filter.matches(&items[j]),
+                indent + 1,
+            );
+        }
+    }
+
     fn new(
         rows: &'a mut Vec<RenderRow>,
         bar_ix: Option<usize>,
@@ -441,16 +456,15 @@ impl<'a> RunRows<'a> {
 /// ever either of these, so "both at once" and "one without the other" are
 /// states that should not be expressible.
 ///
-/// A step ends at its tool run, so prose after the final tool is outside every
-/// step — the response's conclusion, and it gets the chrome that names it.
-/// Prose still inside a step is not a conclusion: it is what the agent said
-/// before the work it is doing. Both stay on screen through an enclosing fold,
-/// which is what conflating them was really buying — a collapsed step would
+/// Prose after the final tool call is the response's conclusion, and it gets
+/// the chrome that names it. Prose the agent wrote before work it went on to do
+/// is a preamble, not an answer. Both stay on screen through an enclosing fold,
+/// which is what conflating them was really buying — a collapsed response would
 /// otherwise show nothing of what the agent just said.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LastProse {
     Conclusion(usize),
-    InStep(usize),
+    Preamble(usize),
 }
 
 impl LastProse {
@@ -459,7 +473,7 @@ impl LastProse {
             matches!(items[k], ChatItem::AssistantText { .. }) && !is_bodyless(&items[k])
         })?;
         Some(if (ix + 1..run.end).any(|j| is_tool_call(&items[j])) {
-            Self::InStep(ix)
+            Self::Preamble(ix)
         } else {
             Self::Conclusion(ix)
         })
@@ -468,52 +482,93 @@ impl LastProse {
     /// The item, whichever role it plays — both stay visible.
     fn ix(self) -> usize {
         match self {
-            Self::Conclusion(ix) | Self::InStep(ix) => ix,
+            Self::Conclusion(ix) | Self::Preamble(ix) => ix,
         }
     }
 }
 
-/// All display decisions derived for one work step before the row walk starts.
-/// Keeping them together prevents the header, body, filter, and tail paths from
-/// independently interpreting the same step.
+/// What the tail window makes of a response's top-level tool runs.
+///
+/// `kept` is the window's population: counting every run let one the filter
+/// emptied spend a slot, so `Recent steps: 3` put however many of the last three
+/// happened to survive on screen. `total` decides only whether the boundary row
+/// exists at all, which must not move with the filter or the row would change
+/// list slots as the filter changes.
 #[derive(Clone, Copy)]
-struct ProjectedStep {
-    span: step::StepSpan,
-    header: Option<StepHeaderRow>,
-    /// Item this step's header took over, so the walk hides its row instead of
-    /// repeating the line the header is already showing. `None` when the step
-    /// has no header, or none it can show whole (see
-    /// [`step::step_header_text`]).
-    header_owned_prose: Option<usize>,
-    body_collapsed: bool,
-    header_structurally_hidden: bool,
-    kept: bool,
-    live: bool,
-    /// The tail window covers this step, so its rows sit outside the range the
-    /// pane is showing — whether or not the boundary is currently open.
-    outside_window: bool,
+struct ToolRunWindow {
+    total: usize,
+    kept: usize,
+    /// Runs the boundary row holds back — `kept` minus what the window shows.
+    hidden: usize,
+    /// First item the window keeps: the end of the last covered run. The window
+    /// is a range, not a per-row test, so the prose a covered run was introduced
+    /// by goes behind the boundary with it while the conclusion, which follows
+    /// every run, never does.
+    window_start: usize,
 }
 
-impl ProjectedStep {
-    fn active_state(self) -> ActiveStep {
-        ActiveStep {
-            end: self.span.end,
-            header_owned_prose: self.header_owned_prose,
-            body_collapsed: self.body_collapsed,
-            renders_header: self.header.is_some(),
-            outside_window: self.outside_window,
+impl ToolRunWindow {
+    fn of(
+        items: &[ChatItem],
+        run: std::ops::Range<usize>,
+        hierarchy: &ToolHierarchy<'_>,
+        filter: &FilterMatchIndex,
+        tail: TailWindow,
+    ) -> Self {
+        // One entry per run: where it ends, and whether the filter leaves it
+        // anything to show.
+        let mut runs: Vec<(usize, bool)> = Vec::new();
+        let mut k = run.start;
+        while k < run.end {
+            if !top_level_tool(items, k, hierarchy) {
+                k += 1;
+                continue;
+            }
+            let span = k..tool_run_end(items, k, run.end, hierarchy);
+            k = span.end;
+            runs.push((span.end, span.clone().any(|j| filter.matches(&items[j]))));
+        }
+        let kept = runs.iter().filter(|(_, kept)| *kept).count();
+        // Position within the kept population. An emptied run takes the position
+        // of the next rendering one rather than a slot of its own, so it cannot
+        // shift the window. Positions only rise, so the covered runs are a
+        // prefix and the last one's end is where the kept range begins.
+        let mut position = 0;
+        let mut window_start = run.start;
+        for (end, run_kept) in &runs {
+            if tail.hides(position, kept) {
+                window_start = *end;
+            }
+            position += usize::from(*run_kept);
+        }
+        Self {
+            total: runs.len(),
+            kept,
+            hidden: tail.hidden_steps(kept),
+            window_start,
         }
     }
 }
 
-/// The subset of a projected step needed while walking its body items.
-#[derive(Clone, Copy)]
-struct ActiveStep {
-    end: usize,
-    header_owned_prose: Option<usize>,
-    body_collapsed: bool,
-    renders_header: bool,
-    outside_window: bool,
+/// End of the maximal stretch of consecutive top-level tool calls beginning at
+/// `start`. The row walk and the window's tally both advance by this, so they
+/// cannot disagree about where a run ends. A nested child renders inside its
+/// parent's card, so it breaks a run rather than joining it.
+fn tool_run_end(
+    items: &[ChatItem],
+    start: usize,
+    limit: usize,
+    hierarchy: &ToolHierarchy<'_>,
+) -> usize {
+    let mut k = start + 1;
+    while k < limit && top_level_tool(items, k, hierarchy) {
+        k += 1;
+    }
+    k
+}
+
+fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
+    matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
 }
 
 struct RunProjector<'items, 'rows> {
@@ -533,88 +588,6 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             spec,
             output,
         }
-    }
-
-    fn projected_steps(&self, tail_revealed: bool) -> Vec<ProjectedStep> {
-        let ProjectionContext {
-            items,
-            fold,
-            boundary,
-            hierarchy,
-            live_units,
-            tail,
-            filter,
-        } = self.context;
-        let raw_steps = step::steps(items, self.spec.run.clone(), hierarchy);
-        // The window counts steps the filter leaves something to show. Counting
-        // raw steps let an emptied one spend a slot, so `Recent steps: 3` put
-        // however many of the last three happened to survive on screen.
-        let renders: Vec<bool> = raw_steps
-            .iter()
-            .map(|step| {
-                (step.span.start..step.span.end)
-                    .any(|ix| projects_a_row(items, ix, hierarchy, filter))
-            })
-            .collect();
-        let step_count = renders.iter().filter(|&&r| r).count();
-        // Position within that sequence. An emptied step takes the position of
-        // the next rendering one rather than a slot of its own, so it shares
-        // that neighbourhood's coverage and cannot shift the window.
-        let mut step_ix = 0;
-
-        raw_steps
-            .into_iter()
-            .zip(renders)
-            .map(|(step, kept)| {
-                let span = step.span;
-                let key = FoldKey::Step(span.start);
-                let step_collapsed = !fold.is_expanded(
-                    &key,
-                    fold_context_at(&key, span.start, items, boundary),
-                );
-                let covered = tail.hides(step_ix, step_count);
-                step_ix += usize::from(kept);
-                let outside_tail = !tail_revealed && covered;
-                let header_owned_prose = step
-                    .renders_header
-                    .then(|| step::step_header_text(items, &span).and_then(|text| text.expanded))
-                    .flatten();
-                let visible_body_prose = match self.spec.last_prose {
-                    Some(LastProse::InStep(ix))
-                        if (span.start..span.tool_start).contains(&ix)
-                            && header_owned_prose != Some(ix)
-                            && (self.spec.filter_revealed || filter.matches(&items[ix])) =>
-                    {
-                        Some(ix)
-                    }
-                    _ => None,
-                };
-                let live = (span.tool_start..span.end).any(|ix| {
-                    matches!(&items[ix], ChatItem::ToolCall(tool) if tool_or_subtree_live(tool, live_units))
-                });
-                let header = step.renders_header.then(|| StepHeaderRow {
-                    span,
-                    tool_count: step.tool_count(items, hierarchy),
-                    collapsed: step_collapsed,
-                    visible_body_prose,
-                });
-
-                ProjectedStep {
-                    span,
-                    header,
-                    header_owned_prose,
-                    body_collapsed: if step.renders_header {
-                        step_collapsed || outside_tail
-                    } else {
-                        outside_tail
-                    },
-                    header_structurally_hidden: self.spec.response_collapsed || outside_tail,
-                    kept,
-                    live,
-                    outside_window: covered,
-                }
-            })
-            .collect()
     }
 
     fn project(self) {
@@ -639,118 +612,126 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             &tail_key,
             fold_context_at(&tail_key, run.start, items, boundary),
         );
-        let steps = self.projected_steps(tail_revealed);
-        // Same population the window was computed over, so the boundary's
-        // numbers and what is on screen cannot disagree.
-        let rendering_steps = steps.iter().filter(|step| step.kept).count();
-        let hidden_steps = tail.hidden_steps(rendering_steps);
+        let window = ToolRunWindow::of(items, run.clone(), hierarchy, filter, tail);
         let mut out = RunRows::new(
             self.output,
             self.spec.bar_ix,
             run.len(),
             self.spec.filter_revealed,
         );
-        if !steps.is_empty() {
+        if window.total > 0 {
             out.push(
                 RowKind::TailMore {
                     run_start: run.start,
-                    hidden_steps,
-                    kept_steps: rendering_steps - hidden_steps,
+                    hidden_steps: window.hidden,
+                    kept_steps: window.kept - window.hidden,
                     collapsed: !tail_revealed,
                 },
-                response_collapsed || hidden_steps == 0,
+                response_collapsed || window.hidden == 0,
                 false,
                 base_indent,
             );
         }
 
-        let mut next_step = 0usize;
-        let mut in_step: Option<ActiveStep> = None;
         let mut k = run.start;
         while k < run.end {
-            if in_step.is_some_and(|step| k >= step.end) {
-                in_step = None;
-            }
-            if let Some(step) = steps
-                .get(next_step)
-                .copied()
-                .filter(|step| step.span.start == k)
-            {
-                in_step = Some(step.active_state());
-                // Set before the header push so the header carries the rail as well.
-                out.outside_window = step.outside_window;
-                if let Some(header) = step.header {
-                    out.push(
-                        RowKind::StepHeader(header),
-                        step.header_structurally_hidden && !step.live,
-                        !step.kept,
-                        base_indent,
-                    );
-                }
-                next_step += 1;
-            }
-            // Every row pushed for the rest of this iteration belongs to whichever
-            // step the walk is in — one assignment point, so the flag cannot drift.
-            out.outside_window = in_step.is_some_and(|step| step.outside_window);
             if is_bodyless(&items[k])
                 || matches!(&items[k], ChatItem::ToolCall(tool) if hierarchy.is_nested_child(tool))
             {
                 k += 1;
                 continue;
             }
-            let (indent, folded) = match in_step {
-                Some(step) => (
-                    base_indent + u8::from(step.renders_header),
-                    response_collapsed || step.body_collapsed,
-                ),
-                None => (base_indent, response_collapsed),
-            };
-            if matches!(items[k], ChatItem::ToolCall(_)) {
-                let gstart = k;
-                k += 1;
-                while k < run.end
-                    && matches!(&items[k], ChatItem::ToolCall(t) if !hierarchy.is_nested_child(t))
-                {
-                    k += 1;
-                }
-                let grun = gstart..k;
+            // One assignment point, so the flag cannot drift. The rail marks
+            // coverage itself rather than the boundary's state — a live covered
+            // run stays surfaced through a shut boundary, and keying the mark on
+            // the boundary made the row gain and lose it as the boundary flipped.
+            out.outside_window = k < window.window_start;
+            let folded = response_collapsed || (!tail_revealed && out.outside_window);
+            if top_level_tool(items, k, hierarchy) {
+                let grun = k..tool_run_end(items, k, run.end, hierarchy);
+                k = grun.end;
+                let run_kept = grun.clone().any(|j| filter.matches(&items[j]));
                 // Live group headers stay visible through enclosing folds.
                 let group_live = grun.clone().any(
                 |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
             );
-                if grun.len() >= TOOL_GROUP_MIN {
-                    let gid = tool_id(&items[gstart]);
+                if grun.len() >= RUN_GROUP_MIN {
+                    let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
+                    let group_collapsed = !fold.is_expanded(
+                        &group_key,
+                        fold_context_at(&group_key, grun.start, items, boundary),
+                    );
+                    out.push(
+                        RowKind::ToolGroupHeader {
+                            gid,
+                            first_ix: grun.start,
+                            count: grun.len(),
+                            collapsed: group_collapsed,
+                        },
+                        folded && !group_live,
+                        !run_kept,
+                        base_indent,
+                    );
+                    out.push_group_children(
+                        grun,
+                        folded,
+                        group_collapsed,
+                        base_indent,
+                        items,
+                        filter,
+                    );
+                } else {
+                    out.push(
+                        RowKind::AgentItem(grun.start),
+                        folded && !group_live,
+                        !run_kept,
+                        base_indent,
+                    );
+                }
+            } else if matches!(&items[k], ChatItem::Thinking { .. }) {
+                let gstart = k;
+                k += 1;
+                // An empty streaming chunk gets no row of its own, so letting it
+                // join a group would render a blank child and inflate the count.
+                while k < run.end
+                    && matches!(&items[k], ChatItem::Thinking { .. })
+                    && !is_bodyless(&items[k])
+                {
+                    k += 1;
+                }
+                let grun = gstart..k;
+                if grun.len() >= RUN_GROUP_MIN {
+                    let group_key = FoldKey::ThinkingGroup(gstart);
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         fold_context_at(&group_key, gstart, items, boundary),
                     );
                     let group_kept = grun.clone().any(|j| filter.matches(&items[j]));
                     out.push(
-                        RowKind::ToolGroupHeader {
-                            gid,
+                        RowKind::ThinkingGroupHeader {
                             first_ix: gstart,
                             count: grun.len(),
                             collapsed: group_collapsed,
                         },
-                        folded && !group_live,
+                        folded,
                         !group_kept,
-                        indent,
+                        base_indent,
                     );
-                    for j in grun {
-                        out.push(
-                            RowKind::AgentItem(j),
-                            folded || group_collapsed,
-                            !filter.matches(&items[j]),
-                            indent + 1,
-                        );
-                    }
+                    out.push_group_children(
+                        grun,
+                        folded,
+                        group_collapsed,
+                        base_indent,
+                        items,
+                        filter,
+                    );
                 } else {
                     out.push(
                         RowKind::AgentItem(gstart),
-                        folded && !group_live,
+                        folded,
                         !filter.matches(&items[gstart]),
-                        indent,
+                        base_indent,
                     );
                 }
             } else {
@@ -763,10 +744,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let is_conclusion = last_prose == Some(LastProse::Conclusion(k));
                 let pending_permission =
                     matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
-                // A header showing an item whole owns it: the row would repeat
-                // the line already on screen one row above.
-                let header_owns = in_step.is_some_and(|step| step.header_owned_prose == Some(k));
-                let force_visible = (is_last_prose || pending_permission) && !header_owns;
+                let force_visible = is_last_prose || pending_permission;
                 let kind = if is_conclusion && base_indent > 0 && !sole_block {
                     RowKind::ConclusionItem(k)
                 } else {
@@ -774,26 +752,15 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 };
                 out.push(
                     kind,
-                    header_owns || (folded && !force_visible),
+                    folded && !force_visible,
                     !filter.matches(&items[k]),
-                    indent,
+                    base_indent,
                 );
                 k += 1;
             }
         }
         out.finish();
     }
-}
-
-fn projects_a_row(
-    items: &[ChatItem],
-    ix: usize,
-    hierarchy: &ToolHierarchy<'_>,
-    filter: &FilterMatchIndex,
-) -> bool {
-    !matches!(&items[ix], ChatItem::ToolCall(tc) if hierarchy.is_nested_child(tc))
-        && !is_bodyless(&items[ix])
-        && filter.matches(&items[ix])
 }
 
 fn is_tool_call(item: &ChatItem) -> bool {
@@ -803,7 +770,7 @@ fn is_tool_call(item: &ChatItem) -> bool {
 /// A message carrying no renderable text. Two sources feed it: a message's
 /// leading chunk arrives empty, and `daruda_acp` collapses a content block it
 /// cannot render (image, audio, resource) to an empty string. Neither earns a
-/// row, a block slot in the step / response thresholds, or the conclusion —
+/// row, a block slot in the response threshold, or the conclusion —
 /// which escapes its enclosing fold and would pin a blank row over it.
 pub(super) fn is_bodyless(item: &ChatItem) -> bool {
     matches!(

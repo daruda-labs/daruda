@@ -345,11 +345,11 @@ fn rule_label(rule: BlockRule) -> String {
 fn block_label(block: FoldBlock) -> String {
     match block {
         FoldBlock::Response => s::agent_chat_fold_block_response(),
-        FoldBlock::Step => s::agent_chat_fold_block_step(),
         FoldBlock::ToolGroup => s::agent_chat_fold_block_tool_group(),
         FoldBlock::Tool => s::agent_chat_fold_block_tool(),
         FoldBlock::Subagent => s::agent_chat_fold_block_subagent(),
         FoldBlock::Thinking => s::agent_chat_fold_block_thinking(),
+        FoldBlock::ThinkingGroup => s::agent_chat_fold_block_thinking_group(),
         FoldBlock::Assistant => s::agent_chat_fold_block_assistant(),
         FoldBlock::Diff => s::agent_chat_fold_block_diff(),
         FoldBlock::RawInput => s::agent_chat_fold_block_raw_input(),
