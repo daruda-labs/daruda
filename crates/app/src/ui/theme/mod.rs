@@ -53,6 +53,33 @@ fn bundled_theme_json(name: &str) -> Option<&'static str> {
     }
 }
 
+/// WCAG contrast ratio of `fg` over `bg`, compositing `fg`'s alpha. Test-only:
+/// the palette's contrast guards are assertions, not a runtime concern.
+#[cfg(test)]
+pub(crate) fn contrast_ratio(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
+    let (fg, bg) = (gpui::Rgba::from(fg), gpui::Rgba::from(bg));
+    let channel = |f: f32, b: f32| {
+        let v = f * fg.a + b * (1.0 - fg.a);
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let lum = |r: f32, g: f32, b: f32| 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let l_fg = lum(
+        channel(fg.r, bg.r),
+        channel(fg.g, bg.g),
+        channel(fg.b, bg.b),
+    );
+    let l_bg = lum(
+        channel(bg.r, bg.r),
+        channel(bg.g, bg.g),
+        channel(bg.b, bg.b),
+    );
+    (l_fg.max(l_bg) + 0.05) / (l_fg.min(l_bg) + 0.05)
+}
+
 /// Install the named UI theme as the live `DarudaTheme` Global.
 ///
 /// - Looks up the bundled JSON via [`bundled_theme_json`].
@@ -681,12 +708,21 @@ pub fn agent_chat_fg_subtle(cx: &App) -> gpui::Hsla {
 /// link hue is retained, but its lightness is resolved against the pane
 /// background because `ui_preset` and `terminal_preset` are independent.
 pub fn agent_chat_link_color(cx: &App) -> gpui::Hsla {
-    let mut link = current(cx).link_color;
-    let bg = agent_chat_bg(cx);
-    link.l = if bg.l < 0.5 {
-        link.l.max(0.74)
+    link_on(agent_chat_bg(cx), current(cx).link_color)
+}
+
+/// Clickable text on the file-viewer pane. The same surface as Agent Chat's
+/// ([`file_viewer_pane_bg`] delegates to it), resolved by the same rule.
+pub fn file_viewer_pane_link_color(cx: &App) -> gpui::Hsla {
+    link_on(file_viewer_pane_bg(cx), current(cx).link_color)
+}
+
+/// Keep a link's hue, resolve its lightness against the surface it sits on.
+fn link_on(background: gpui::Hsla, mut link: gpui::Hsla) -> gpui::Hsla {
+    link.l = if background.l < 0.5 {
+        link.l.max(p::PANE_LINK_MIN_L_ON_DARK)
     } else {
-        link.l.min(0.34)
+        link.l.min(p::PANE_LINK_MAX_L_ON_LIGHT)
     };
     link
 }
@@ -811,27 +847,7 @@ mod tests {
     /// agent-chat foreground ramp is alpha-based, so an uncomposited pair
     /// would measure the wrong thing.
     fn contrast_over(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
-        let (fg, bg) = (gpui::Rgba::from(fg), gpui::Rgba::from(bg));
-        let channel = |f: f32, b: f32| {
-            let v = f * fg.a + b * (1.0 - fg.a);
-            if v <= 0.03928 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        let lum = |r: f32, g: f32, b: f32| 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        let l_fg = lum(
-            channel(fg.r, bg.r),
-            channel(fg.g, bg.g),
-            channel(fg.b, bg.b),
-        );
-        let l_bg = lum(
-            channel(bg.r, bg.r),
-            channel(bg.g, bg.g),
-            channel(bg.b, bg.b),
-        );
-        (l_fg.max(l_bg) + 0.05) / (l_fg.min(l_bg) + 0.05)
+        super::contrast_ratio(fg, bg)
     }
 
     /// Controls on the agent-chat bar take their colour from this surface, and
@@ -902,6 +918,136 @@ mod tests {
                 "light pane should darken the dark-theme link, got {:?} from {:?}",
                 light_pane_link,
                 light_ui_link
+            );
+        });
+    }
+
+    /// The markdown view's fills and structural lines — inline-code chips, the
+    /// code-block fill and border, table lines, the `<hr>` rule — are a neutral
+    /// tint whose direction comes from the surface they are drawn on. Taking it
+    /// from the UI canvas instead erases all of them at once whenever the two
+    /// disagree, which `ui_preset` / `terminal_preset` being independent makes
+    /// a supported combination rather than a corner case.
+    #[gpui::test]
+    fn markdown_structural_lines_step_off_the_pane_not_the_ui_canvas(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            // The vendored `STRUCTURAL_LINE_ALPHA`; asserted here for the
+            // direction it is applied in, not for the value.
+            let alpha = 0.28;
+            let tint = |surface: gpui::Hsla| {
+                if surface.l < 0.5 {
+                    gpui::hsla(0., 0., 1., alpha)
+                } else {
+                    gpui::hsla(0., 0., 0., alpha)
+                }
+            };
+            // A line has to separate from its surface; it is deliberately faint
+            // (a gridline, not a control edge), so this is a visibility floor,
+            // not DESIGN.md's 3:1 affordance floor.
+            let visible = 1.5;
+
+            apply_ui_theme("daruda_light", cx);
+            let light_canvas = Theme::global(cx).background;
+            assert!(
+                light_canvas.l >= 0.5,
+                "the light UI canvas is not light: {light_canvas:?}"
+            );
+
+            for preset in daruda_config::theme_presets::PRESETS {
+                let Some(colors) = daruda_config::theme_presets::colors_for_preset(preset.name)
+                else {
+                    continue;
+                };
+                let bg = colors.background;
+                set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+                let pane = agent_chat_bg(cx);
+
+                let ours = contrast_over(tint(pane), pane);
+                assert!(
+                    ours >= visible,
+                    "a line on the {} pane measures {ours:.2}:1",
+                    preset.name
+                );
+
+                // What the UI canvas would have picked with a light `ui_preset`
+                // over this terminal: the same tint the pane already is.
+                let from_canvas = contrast_over(tint(light_canvas), pane);
+                assert!(
+                    from_canvas < visible,
+                    "{}: the UI canvas still yields a visible line ({from_canvas:.2}:1), so \
+                     this test no longer covers the combination it was written for",
+                    preset.name
+                );
+            }
+
+            apply_ui_theme("daruda_dark", cx);
+        });
+    }
+
+    /// A markdown blockquote is the one run of prose the view colours itself.
+    /// It reached for the UI theme's muted tone, which DESIGN.md §AgentChatPane
+    /// rules out on this pane: `ui_preset` and `terminal_preset` are
+    /// independent config keys, so a UI colour has no verified contrast on a
+    /// terminal-mirrored background. The quote now *is* `pane-fg-muted`, the
+    /// tier every other secondary label on the pane already uses.
+    #[gpui::test]
+    fn a_markdown_quote_reads_on_the_pane_it_is_painted_on(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            let ui_tone = current(cx).text_muted;
+            // Solarized's own foreground is deliberately low-contrast (#839496
+            // on #002b36), so the pane's muted tier lands at 4.23:1 there —
+            // every secondary label on that preset does, not just a quote. That
+            // is the ramp's shortfall, tracked apart from this colour choice.
+            let ramp_short = ["solarized_dark"];
+            let mut ui_tone_failures = 0;
+
+            for preset in daruda_config::theme_presets::PRESETS {
+                let Some(colors) = daruda_config::theme_presets::colors_for_preset(preset.name)
+                else {
+                    continue;
+                };
+                let (bg, fg) = (colors.background, colors.foreground);
+                set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+                set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
+                let pane_bg = agent_chat_bg(cx);
+
+                let quote = agent_chat_fg(cx).opacity(p::MD_VIEW_MUTED_ALPHA);
+                let quote_ratio = contrast_over(quote, pane_bg);
+                // It is the pane's documented muted tier, not a second guess.
+                let tier = contrast_over(agent_chat_fg_muted(cx), pane_bg);
+                assert!(
+                    (quote_ratio - tier).abs() < 0.01,
+                    "{} quote is off the pane's muted tier: {quote_ratio:.2} vs {tier:.2}",
+                    preset.name
+                );
+                if !ramp_short.contains(&preset.name) {
+                    assert!(
+                        quote_ratio >= 4.5,
+                        "quote on the {} pane measures {quote_ratio:.2}:1",
+                        preset.name
+                    );
+                }
+
+                let ui_ratio = contrast_over(ui_tone, pane_bg);
+                if ui_ratio < 4.5 {
+                    ui_tone_failures += 1;
+                    assert!(
+                        quote_ratio > ui_ratio,
+                        "{}: the pane colour ({quote_ratio:.2}) is no better than the UI tone \
+                         it replaced ({ui_ratio:.2})",
+                        preset.name
+                    );
+                }
+            }
+
+            assert!(
+                ui_tone_failures > 0,
+                "if the UI theme's muted tone cleared every terminal preset the \
+                 host-supplied colour would be unnecessary"
             );
         });
     }

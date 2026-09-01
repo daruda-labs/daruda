@@ -74,6 +74,24 @@ pub(super) fn user_bubble(
     div().flex().flex_row().justify_end().child(inner)
 }
 
+/// Markdown painted on the chat pane. The body colour, the surface it sits on
+/// and the configured text size always travel together: a caller that sets only
+/// the colour leaves the view deriving its fills and structural lines from the
+/// UI canvas, which this pane does not paint on (DESIGN.md §AgentChatPane) —
+/// under a light `ui_preset` over a dark terminal that erased every table line,
+/// rule, code-block border and inline-code chip at once.
+pub(super) fn pane_markdown(
+    id: impl Into<gpui::ElementId>,
+    text: impl Into<gpui::SharedString>,
+    color: gpui::Hsla,
+    cx: &App,
+) -> crate::ui::Markdown {
+    crate::ui::markdown(id, text)
+        .color(color)
+        .surface(theme::agent_chat_bg(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+}
+
 /// The assistant prose body — drag-selectable rendered markdown with mermaid
 /// fences rasterized. Shared by the labeled [`assistant_block`] (trivial /
 /// top-level reply) and the header-less inline render used under a response bar.
@@ -83,18 +101,18 @@ pub(super) fn assistant_markdown(
     markdown: MarkdownRender<'_>,
     cx: &App,
 ) -> AnyElement {
-    crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(theme::dim_toward_gray(
-            theme::agent_chat_fg(cx),
-            markdown.dim,
-        ))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .code_block_render(mermaid_code_block_render(
-            markdown.mermaid_images,
-            markdown.dim,
-        ))
-        .link_click_handler(markdown.links.handler())
-        .into_any_element()
+    pane_markdown(
+        ("agent-chat-md-assistant", ix),
+        text.to_string(),
+        theme::dim_toward_gray(theme::agent_chat_fg(cx), markdown.dim),
+        cx,
+    )
+    .code_block_render(mermaid_code_block_render(
+        markdown.mermaid_images,
+        markdown.dim,
+    ))
+    .link_click_handler(markdown.links.handler())
+    .into_any_element()
 }
 
 /// Assistant response — left-aligned, foldable block (default expanded). The
@@ -187,18 +205,18 @@ pub(super) fn thinking_block(
                     .into_any_element(),
             );
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
-        crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
-            .color(theme::dim_toward_gray(
-                theme::agent_chat_fg_subtle(cx),
-                markdown.dim,
-            ))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .code_block_render(mermaid_code_block_render(
-                markdown.mermaid_images,
-                markdown.dim,
-            ))
-            .link_click_handler(markdown.links.handler())
-            .into_any_element()
+        pane_markdown(
+            ("agent-chat-md-thinking", ix),
+            text.to_string(),
+            theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim),
+            cx,
+        )
+        .code_block_render(mermaid_code_block_render(
+            markdown.mermaid_images,
+            markdown.dim,
+        ))
+        .link_click_handler(markdown.links.handler())
+        .into_any_element()
     })
     .render(markdown.dim, cx)
 }

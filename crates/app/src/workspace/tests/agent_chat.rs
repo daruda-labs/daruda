@@ -1402,11 +1402,14 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
 
     // The second pane's user makes an explicit choice on all three settings.
     let chosen = workspace.read_with(cx, |ws, _| agent_view(ws, chosen_id));
-    chosen.update(cx, |v, cx| {
-        v.set_tail_window(TailWindow::Last(2), cx);
-        v.toggle_display_facet(FilterFacet::Prose, cx);
-        v.set_fold_mode(FoldPreset::Expanded.mode(), cx);
-    });
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        chosen.update(cx, |v, cx| {
+            v.set_tail_window(TailWindow::Last(2), cx);
+            v.toggle_display_facet(FilterFacet::Prose, cx);
+            v.set_fold_mode(FoldPreset::Expanded.mode(), window, cx);
+        });
+    })
+    .expect("the test window is live");
     cx.run_until_parked();
 
     let mut after = daruda_config::Config::default();

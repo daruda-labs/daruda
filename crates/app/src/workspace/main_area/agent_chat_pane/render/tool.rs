@@ -282,12 +282,12 @@ pub(super) fn tool_card(
             // instructions) is real code, so it keeps the default
             // boxed/highlighted rendering.
             body = body.child(
-                crate::ui::markdown(
+                super::blocks::pane_markdown(
                     SharedString::from(format!("agent-chat-subagent-instructions-{}", tc.id)),
                     SharedString::from(prompt.to_string()),
+                    theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
+                    cx,
                 )
-                .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-                .text_size(font_size)
                 .code_block_render(mermaid_code_block_render(assets.mermaid_images, dim))
                 .link_click_handler(markdown_links.handler()),
             );
@@ -547,48 +547,44 @@ fn output_block_view(
         } => {
             let plain_id_prefix = format!("agent-chat-tool-out-{tool_id}-{ix}");
             let plain_color = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
-            let font_size = px(theme::agent_chat_font_size(cx));
             let mermaid_images = mermaid_images.clone();
-            let markdown =
-                crate::ui::markdown(SharedString::from(plain_id_prefix.clone()), text.clone())
-                    .color(plain_color)
-                    .text_size(font_size)
-                    .link_click_handler(context.links.handler())
-                    .code_block_render(move |lang, source, _window, cx| {
-                        // A ```mermaid fence in tool output renders as the same
-                        // diagram card as chat prose (shared builder); a cache
-                        // miss (still rasterizing) falls through to the plain
-                        // bare-fence branch below, same as the prose hook.
-                        if let Some(card) =
-                            mermaid_fence_element(&mermaid_images, lang, source, dim, cx)
-                        {
-                            return Some(card);
-                        }
-                        // The Claude ACP adapter wraps every tool result in a bare,
-                        // language-less fence (`markdownEscape`) even when the
-                        // content isn't source code (command output, search hits,
-                        // …). A tagged fence keeps the default boxed/highlighted
-                        // rendering; a bare one renders as flush plain text
-                        // instead, so non-code output doesn't double the tool
-                        // card's own border/bg chrome for content that reads as
-                        // prose, not code.
-                        if !lang.is_empty() {
-                            return None;
-                        }
-                        let mut hasher = DefaultHasher::new();
-                        source.hash(&mut hasher);
-                        let id = SharedString::from(format!(
-                            "{plain_id_prefix}-plain-{}",
-                            hasher.finish()
-                        ));
-                        Some(plain_monospace_text(
-                            id,
-                            source,
-                            plain_color,
-                            px(theme::agent_chat_font_size(cx)),
-                        ))
-                    })
-                    .into_any_element();
+            let markdown = super::blocks::pane_markdown(
+                SharedString::from(plain_id_prefix.clone()),
+                text.clone(),
+                plain_color,
+                cx,
+            )
+            .link_click_handler(context.links.handler())
+            .code_block_render(move |lang, source, _window, cx| {
+                // A ```mermaid fence in tool output renders as the same
+                // diagram card as chat prose (shared builder); a cache
+                // miss (still rasterizing) falls through to the plain
+                // bare-fence branch below, same as the prose hook.
+                if let Some(card) = mermaid_fence_element(&mermaid_images, lang, source, dim, cx) {
+                    return Some(card);
+                }
+                // The Claude ACP adapter wraps every tool result in a bare,
+                // language-less fence (`markdownEscape`) even when the
+                // content isn't source code (command output, search hits,
+                // …). A tagged fence keeps the default boxed/highlighted
+                // rendering; a bare one renders as flush plain text
+                // instead, so non-code output doesn't double the tool
+                // card's own border/bg chrome for content that reads as
+                // prose, not code.
+                if !lang.is_empty() {
+                    return None;
+                }
+                let mut hasher = DefaultHasher::new();
+                source.hash(&mut hasher);
+                let id = SharedString::from(format!("{plain_id_prefix}-plain-{}", hasher.finish()));
+                Some(plain_monospace_text(
+                    id,
+                    source,
+                    plain_color,
+                    px(theme::agent_chat_font_size(cx)),
+                ))
+            })
+            .into_any_element();
             with_truncation_note(markdown, *truncated_from, dim, cx)
         }
         ToolOutputBlock::RawText {

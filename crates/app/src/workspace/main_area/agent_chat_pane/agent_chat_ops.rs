@@ -799,7 +799,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_fold_mode(FoldPreset::Summary.mode(), cx);
+            v.set_fold_mode(FoldPreset::Summary.mode(), window, cx);
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
             v.set_tail_window(TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
             v.set_activity_options_tab(tab, cx);
@@ -861,7 +861,7 @@ impl Workspace {
             // Expanded so the filter's cut is reachable: rows a fold still holds
             // are not part of what the chip offers, so a folded transcript
             // leaves it with nothing to show and no chip at all.
-            v.set_fold_mode(super::fold_mode::FoldPreset::Expanded.mode(), cx);
+            v.set_fold_mode(super::fold_mode::FoldPreset::Expanded.mode(), window, cx);
             // One category unchecked leaves the Tool parent mixed.
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
             // No tail: the window's own boundary has `agent-chat-tail`, and with
@@ -932,6 +932,7 @@ impl Workspace {
                     "last.tool.edit=expanded",
                     "past.thinking=collapsed",
                 ]),
+                window,
                 cx,
             );
             v.set_activity_options_tab(super::view::ActivityOptionsTab::Fold, cx);

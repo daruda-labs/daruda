@@ -2,10 +2,10 @@
 //! plus block-level click/drag selection plumbed through `Workspace`.
 
 use crate::ui::theme;
-use crate::ui::theme::DarudaTheme;
+use crate::ui::theme::PaneSurfaceTokens;
 use gpui::{
-    AnyElement, Context, HighlightStyle, ImageSource, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, RenderImage, StyledText, div, img, prelude::*, px,
+    AnyElement, App, Context, HighlightStyle, ImageSource, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, RenderImage, StyledText, div, img, prelude::*, px,
 };
 
 use crate::workspace::Workspace;
@@ -13,21 +13,71 @@ use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSp
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 use crate::workspace::main_area::file_view_pane::{CharSelection, VisualRow};
 
+/// The colours this preview paints with, resolved against the surface it is
+/// painted on.
+///
+/// The preview sits on `file_viewer_pane_bg`, which mirrors the *terminal*
+/// palette (DESIGN.md §AgentChatPane — the file viewer shares that surface so a
+/// file opened from a transcript does not land on an unrelated one). Every
+/// colour therefore comes from [`PaneSurfaceTokens`], never from the UI theme:
+/// `ui_preset` and `terminal_preset` are independent, so a light UI theme over
+/// a dark terminal previously painted `#2d2d2d` prose onto a near-black pane
+/// while the table and code fills stayed light — the body vanished and the
+/// blocks inverted.
+///
+/// Semantic hues (`SUCCESS` for a ticked task box, `AGENT_RUNNING` for inline
+/// code) are deliberately not in here: they carry meaning rather than surface
+/// rank, and daruda uses them on pane surfaces elsewhere.
+struct MdColors {
+    /// Body prose, and headings — a terminal-mirrored surface has no tone
+    /// above its own foreground, so heading rank is carried by size and weight
+    /// (the same way the agent-chat markdown renders them).
+    text: gpui::Hsla,
+    /// Blockquote prose, its bar, and list bullets.
+    muted: gpui::Hsla,
+    /// Footnotes, HTML passthrough, strikethrough.
+    subtle: gpui::Hsla,
+    link: gpui::Hsla,
+    /// The weaker of the two fills — code block, table body rows (the UI
+    /// theme's `BG_PANEL` rung).
+    fill: gpui::Hsla,
+    /// The stronger fill, one step above [`Self::fill`] — inline-code chip,
+    /// table header (the `BG_RAISED` rung).
+    raised: gpui::Hsla,
+    /// Code-block border, table lines, the `<hr>` rule.
+    line: gpui::Hsla,
+}
+
+impl MdColors {
+    fn for_pane(cx: &App) -> Self {
+        let tokens = PaneSurfaceTokens::file_viewer(cx);
+        Self {
+            text: tokens.foreground,
+            muted: tokens.foreground_muted,
+            subtle: tokens.foreground_subtle,
+            link: theme::file_viewer_pane_link_color(cx),
+            fill: tokens.tint,
+            raised: tokens.active_tint,
+            line: tokens.border_tint,
+        }
+    }
+}
+
 /// The monospace card both a fenced code block and an unrendered mermaid fence
 /// sit in.
-fn code_surface(t: &DarudaTheme) -> gpui::Div {
+fn code_surface(t: &MdColors) -> gpui::Div {
     div()
         .flex()
         .flex_col()
-        .bg(t.md_code_block_bg)
+        .bg(t.fill)
         .border_1()
-        .border_color(t.border)
+        .border_color(t.line)
         .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
         .px(px(theme::MD_CODE_BLOCK_PAD_X))
         .py(px(theme::MD_CODE_BLOCK_PAD_Y))
         .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
         .font(gpui::font("monospace"))
-        .text_color(t.text_body)
+        .text_color(t.text)
 }
 
 /// A code block's whole text plus the byte ranges its syntax colours cover.
@@ -76,10 +126,9 @@ pub(super) fn render_md_body(
     char_selection: Option<&CharSelection>,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let t = theme::current(cx);
-    let body_text = t.text_body;
+    let t = MdColors::for_pane(cx);
+    let body_text = t.text;
     let block_sel_bg = theme::SELECTION_BG;
-    let t = t.clone();
     let mut col = div()
         .flex()
         .flex_col()
@@ -100,31 +149,21 @@ pub(super) fn render_md_body(
     col
 }
 
-fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
+fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
     match block {
         MdBlock::Heading { level, spans } => {
             let (size, color, mt) = match level {
-                1 => (
-                    theme::MD_H1_FONT_SIZE,
-                    t.md_h1_color,
-                    theme::MD_HEADING_MARGIN_TOP,
-                ),
-                2 => (
-                    theme::MD_H2_FONT_SIZE,
-                    t.md_h2_color,
-                    theme::MD_HEADING_MARGIN_TOP,
-                ),
-                3 => (
-                    theme::MD_H3_FONT_SIZE,
-                    t.md_h3_color,
-                    theme::MD_HEADING_MARGIN_TOP,
-                ),
-                _ => (theme::MD_H4_FONT_SIZE, t.md_h4_color, 0.0),
+                1 => (theme::MD_H1_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
+                2 => (theme::MD_H2_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
+                3 => (theme::MD_H3_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
+                _ => (theme::MD_H4_FONT_SIZE, t.text, 0.0),
             };
             div()
                 .flex()
                 .flex_row()
                 .flex_wrap()
+                .w_full()
+                .min_w_0()
                 .mt(px(mt))
                 .text_size(px(size))
                 .text_color(color)
@@ -143,6 +182,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                     .flex()
                     .flex_row()
                     .flex_wrap()
+                    .w_full()
+                    .min_w_0()
                     .items_center()
                     .children(render_md_spans(spans, t))
                     .into_any_element()
@@ -170,8 +211,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             for item in items {
                 let (bullet, bullet_color) = match item.checked {
                     Some(true) => ("☑", theme::SUCCESS),
-                    Some(false) => ("☐", t.text_muted),
-                    None => ("•", t.text_muted),
+                    Some(false) => ("☐", t.muted),
+                    None => ("•", t.muted),
                 };
                 let mut item_col = div().flex().flex_col();
                 let row = div()
@@ -184,6 +225,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                             .flex()
                             .flex_row()
                             .flex_wrap()
+                            .w_full()
+                            .min_w_0()
                             .children(render_md_spans(&item.spans, t)),
                     );
                 item_col = item_col.child(row);
@@ -212,7 +255,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                         div()
                             .flex_none()
                             .min_w(px(theme::MD_LIST_INDENT))
-                            .text_color(t.text_muted)
+                            .text_color(t.muted)
                             .child(num),
                     )
                     .child(
@@ -220,6 +263,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                             .flex()
                             .flex_row()
                             .flex_wrap()
+                            .w_full()
+                            .min_w_0()
                             .children(render_md_spans(&item.spans, t)),
                     );
                 item_col = item_col.child(row);
@@ -243,7 +288,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                 div()
                     .flex_none()
                     .w(px(theme::MD_BLOCKQUOTE_BORDER_W))
-                    .bg(t.border)
+                    .bg(t.line)
                     .rounded(px(theme::MD_BLOCKQUOTE_BORDER_W / 2.0)),
             )
             .child(
@@ -251,8 +296,10 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                     .flex()
                     .flex_row()
                     .flex_wrap()
+                    .w_full()
+                    .min_w_0()
                     .italic()
-                    .text_color(t.text_muted)
+                    .text_color(t.muted)
                     .children(render_md_spans(spans, t)),
             )
             .into_any_element(),
@@ -260,7 +307,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         MdBlock::Rule => div()
             .w_full()
             .h(px(theme::MD_RULE_H))
-            .bg(t.border)
+            .bg(t.line)
             .my(px(theme::MD_BLOCK_MARGIN_Y))
             .into_any_element(),
 
@@ -268,15 +315,19 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             .flex()
             .flex_row()
             .flex_wrap()
+            .w_full()
+            .min_w_0()
             .gap(px(theme::MD_LIST_ROW_GAP))
             .text_size(px(theme::MD_FOOTNOTE_FONT_SIZE))
-            .text_color(t.md_footnote_color)
+            .text_color(t.subtle)
             .child(div().flex_none().child(format!("[^{label}]:")))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .flex_wrap()
+                    .w_full()
+                    .min_w_0()
                     .children(render_md_spans(spans, t)),
             )
             .into_any_element(),
@@ -284,13 +335,13 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         MdBlock::HtmlBlock(html) => div()
             .font(gpui::font("monospace"))
             .text_size(px(theme::MD_HTML_FONT_SIZE))
-            .text_color(t.text_subtle)
+            .text_color(t.subtle)
             .child(html.clone())
             .into_any_element(),
 
         MdBlock::Table { header, rows } => {
-            let table_border = t.border;
-            let body_text = t.text_body;
+            let table_border = t.line;
+            let body_text = t.text;
             let render_cell = |cell: &[MdSpan], is_header: bool, is_last: bool| {
                 let mut d = div()
                     .flex_1()
@@ -308,6 +359,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                             .flex()
                             .flex_row()
                             .flex_wrap()
+                            .w_full()
+                            .min_w_0()
                             .whitespace_normal()
                             .children(render_md_spans(cell, t)),
                     );
@@ -325,7 +378,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                 .w_full()
                 .border_b_1()
                 .border_color(table_border)
-                .bg(t.md_table_header_bg)
+                .bg(t.raised)
                 .children(
                     header
                         .iter()
@@ -337,11 +390,9 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                 .iter()
                 .enumerate()
                 .map(|(i, row)| {
-                    let bg = if i % 2 == 0 {
-                        t.md_table_row_bg_even
-                    } else {
-                        t.md_table_row_bg_odd
-                    };
+                    // Both rungs were the same colour in the UI palette, so the
+                    // stripe never showed; one fill keeps that appearance.
+                    let bg = t.fill;
                     let is_last_row = i + 1 == row_count;
                     div()
                         .flex()
@@ -373,22 +424,48 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
     }
 }
 
-fn render_md_spans(spans: &[MdSpan], t: &DarudaTheme) -> Vec<AnyElement> {
+fn render_md_spans(spans: &[MdSpan], t: &MdColors) -> Vec<AnyElement> {
     let mut els: Vec<AnyElement> = Vec::new();
+    let mut plain_text = String::new();
+
     for span in spans {
-        els.push(render_md_span(span, t));
+        match span {
+            MdSpan::Text(text) => plain_text.push_str(text),
+            // A Markdown soft break is semantically a space. Keeping it in the
+            // same text element lets GPUI shape and wrap the prose as one run;
+            // a standalone flex child can otherwise occupy a row by itself.
+            MdSpan::SoftBreak => plain_text.push(' '),
+            _ => {
+                if !plain_text.is_empty() {
+                    els.push(render_plain_text(std::mem::take(&mut plain_text)));
+                }
+                els.push(render_md_span(span, t));
+            }
+        }
+    }
+    if !plain_text.is_empty() {
+        els.push(render_plain_text(plain_text));
     }
     els
 }
 
-fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
+fn render_plain_text(text: String) -> AnyElement {
+    div()
+        .min_w_0()
+        .whitespace_normal()
+        .child(text)
+        .into_any_element()
+}
+
+fn render_md_span(span: &MdSpan, t: &MdColors) -> AnyElement {
     match span {
-        MdSpan::Text(s) => div().child(s.clone()).into_any_element(),
+        MdSpan::Text(s) => render_plain_text(s.clone()),
 
         MdSpan::Bold(inner) => div()
             .flex()
             .flex_row()
             .flex_wrap()
+            .min_w_0()
             .font_weight(gpui::FontWeight::BOLD)
             .children(render_md_spans(inner, t))
             .into_any_element(),
@@ -397,13 +474,14 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .flex()
             .flex_row()
             .flex_wrap()
+            .min_w_0()
             .italic()
             .children(render_md_spans(inner, t))
             .into_any_element(),
 
         MdSpan::Code(s) => div()
             .font(gpui::font("monospace"))
-            .bg(t.md_code_inline_bg)
+            .bg(t.raised)
             .text_color(theme::AGENT_RUNNING)
             .px(px(theme::MD_CODE_INLINE_PAD_X))
             .rounded(px(theme::MD_BLOCK_RADIUS))
@@ -411,7 +489,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .into_any_element(),
 
         MdSpan::Link { text, .. } => div()
-            .text_color(t.link_color)
+            .text_color(t.link)
             .child(text.clone())
             .into_any_element(),
 
@@ -419,25 +497,28 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .flex()
             .flex_row()
             .flex_wrap()
-            .text_color(t.text_subtle)
+            .min_w_0()
+            .text_color(t.subtle)
             .children(render_md_spans(inner, t))
             .into_any_element(),
 
         MdSpan::SoftBreak => div().child(" ").into_any_element(),
-        MdSpan::HardBreak => div()
-            .w_full()
-            .h(px(theme::FILE_VIEWER_FONT_SIZE))
-            .into_any_element(),
+        // A full-width item ends the flex line; it carries no height of its own
+        // because `<br>` moves to the next line rather than leaving a gap.
+        MdSpan::HardBreak => div().w_full().h_0().into_any_element(),
+        // A paragraph boundary does leave a gap — the same one that separates
+        // top-level blocks.
+        MdSpan::ParagraphBreak => div().w_full().h(px(theme::MD_BLOCK_GAP)).into_any_element(),
 
         MdSpan::Footnote(label) => div()
-            .text_color(t.md_footnote_color)
+            .text_color(t.subtle)
             .text_size(px(theme::MD_FOOTNOTE_FONT_SIZE))
             .child(format!("[^{label}]"))
             .into_any_element(),
 
         MdSpan::Html(s) => div()
             .font(gpui::font("monospace"))
-            .text_color(t.text_subtle)
+            .text_color(t.subtle)
             .text_size(px(theme::MD_HTML_FONT_SIZE))
             .child(s.clone())
             .into_any_element(),
@@ -471,11 +552,11 @@ fn render_md_image(
     raster: Option<&RasterImage>,
     alt: &str,
     layout: ImageLayout,
-    t: &DarudaTheme,
+    t: &MdColors,
 ) -> AnyElement {
     let Some(raster) = raster else {
         return div()
-            .text_color(t.md_footnote_color)
+            .text_color(t.subtle)
             .child(format!("[{alt}]"))
             .into_any_element();
     };
@@ -692,5 +773,138 @@ mod tests {
         for (range, _) in &highlights {
             assert!(text.is_char_boundary(range.start) && text.is_char_boundary(range.end));
         }
+    }
+
+    use super::MdColors;
+    use crate::ui::theme::{
+        apply_ui_theme, contrast_ratio, current, file_viewer_pane_bg, init_if_missing,
+        set_agent_chat_bg, set_agent_chat_fg,
+    };
+
+    /// Every colour this preview paints comes from the surface it is painted
+    /// on. It used to come from the UI theme, and the file viewer's surface
+    /// mirrors the *terminal* palette — with `ui_preset` and `terminal_preset`
+    /// being independent config keys, a light UI theme over a dark terminal put
+    /// `#2d2d2d` prose on a near-black pane.
+    #[gpui::test]
+    fn the_preview_reads_on_the_pane_it_is_painted_on(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            // The combination the defect needed: light chrome, dark terminal.
+            apply_ui_theme("daruda_light", cx);
+            let mut ui_source_failures = 0;
+
+            for preset in daruda_config::theme_presets::PRESETS {
+                let Some(colors) = daruda_config::theme_presets::colors_for_preset(preset.name)
+                else {
+                    continue;
+                };
+                let (bg, fg) = (colors.background, colors.foreground);
+                set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+                set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
+                let pane = file_viewer_pane_bg(cx);
+                let t = MdColors::for_pane(cx);
+
+                let body = contrast_ratio(t.text, pane);
+                assert!(
+                    body >= 4.5,
+                    "{}: body prose measures {body:.2}:1",
+                    preset.name
+                );
+                let quote = contrast_ratio(t.muted, pane);
+                assert!(
+                    quote >= 3.0,
+                    "{}: quote prose measures {quote:.2}:1",
+                    preset.name
+                );
+                // Fills and lines have to separate from the surface at all —
+                // they are decoration, so this is a visibility floor, not
+                // DESIGN.md's 3:1 affordance floor.
+                for (what, color) in [("fill", t.fill), ("raised", t.raised), ("line", t.line)] {
+                    let ratio = contrast_ratio(color, pane);
+                    assert!(
+                        ratio > 1.0,
+                        "{}: the {what} does not separate from the pane",
+                        preset.name
+                    );
+                }
+
+                // What the UI theme would have painted on this same surface.
+                if contrast_ratio(current(cx).text_body, pane) < 4.5 {
+                    ui_source_failures += 1;
+                }
+            }
+
+            assert!(
+                ui_source_failures > 0,
+                "if the UI theme's body tone were legible on every terminal preset the \
+                 pane-derived colours would be unnecessary"
+            );
+            apply_ui_theme("daruda_dark", cx);
+        });
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{MdColors, render_md_block};
+    use crate::ui::theme;
+    use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
+    use gpui::{
+        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+        Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window, WindowBounds,
+        WindowOptions, div, point, px, size,
+    };
+
+    struct Probe {
+        md: String,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let colors = MdColors::for_pane(cx);
+            let blocks = parse_markdown(&self.md, "default", false);
+            // Mirrors `render_md_body`: a flex *column*, so each block gets the
+            // container's width instead of its own max-content width.
+            div()
+                .id("md-probe")
+                .debug_selector(|| "md-probe".into())
+                .flex()
+                .flex_col()
+                .w_full()
+                .px(px(theme::MD_BODY_PAD_X))
+                .py(px(theme::MD_BODY_PAD_Y))
+                .gap(px(theme::MD_BLOCK_GAP))
+                .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                .children(blocks.iter().map(|b| render_md_block(b, &colors)))
+        }
+    }
+
+    fn height(cx: &mut TestAppContext, md: &str, width: Pixels) -> Pixels {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let md = md.to_string();
+        let window = cx
+            .update(|cx| cx.open_window(opts, |_w, cx| cx.new(|_cx| Probe { md })))
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|w, _| w.refresh());
+        vcx.run_until_parked();
+        vcx.debug_bounds("md-probe").expect("painted").size.height
+    }
+
+    #[gpui::test]
+    fn a_blockquote_soft_break_wraps_like_a_space(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let split = "> A blockquote reads one step down from the prose around it, on the bar it is\n\
+                     > marked with. It must stay legible on the pane background.";
+        let joined = "> A blockquote reads one step down from the prose around it, on the bar it is \
+                      marked with. It must stay legible on the pane background.";
+
+        assert_eq!(height(cx, split, px(430.)), height(cx, joined, px(430.)));
     }
 }

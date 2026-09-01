@@ -220,12 +220,14 @@ fn facet_label(facet: FilterFacet) -> String {
 
 /// The reveal control's copy.
 ///
-/// Collapsed, the number states exactly what clicking does — nothing more. A
-/// count that also named what a fold held back read as "1 now, 6 on the next
-/// click" when the other six were somewhere this control cannot reach.
+/// Collapsed, the number names what the filter took out of this run, counted in
+/// blocks — a group the filter empties is one. It deliberately does not consult
+/// folds: a group's fold flips on its own as its last call settles, and a
+/// fold-aware count climbed to the group's size and dropped back mid-turn,
+/// reading as if rows had been lost rather than folded.
 ///
 /// Revealed, there is no number at all. Those rows are on screen, so a count
-/// restates them, and `Hide 12 filtered rows` is readable as a description of
+/// restates them, and `Hide 12 filtered items` is readable as a description of
 /// the current state precisely when the state is the opposite.
 fn filtered_chip_label(filtered: FilteredAway, revealed: bool) -> String {
     if revealed {
@@ -327,11 +329,10 @@ mod tests {
         );
     }
 
-    /// The unrevealed half names what clicking reveals, and nothing else. The
-    /// number is the reachable count, so the same count reads the same way no
-    /// matter how much the filter took from inside a fold.
+    /// The unrevealed half carries exactly one number — the filter's cut — so
+    /// there is no second count for the reader to reconcile it against.
     #[test]
-    fn the_unrevealed_label_names_only_what_clicking_reveals() {
+    fn the_unrevealed_label_carries_exactly_one_count() {
         let one = filtered_chip_label(cut(1), false);
         assert!(one.contains('1'), "{one}");
         let many = filtered_chip_label(cut(12), false);

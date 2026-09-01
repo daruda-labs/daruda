@@ -1946,6 +1946,30 @@ pub const MD_IMAGE_MAX_HEIGHT: f32 = 600.0;
 /// Height of an image embedded in a text line (px) — sized to the body line so
 /// inline icons/badges flow with the text instead of breaking the line.
 pub const MD_INLINE_IMAGE_HEIGHT: f32 = FILE_VIEWER_FONT_SIZE * 1.3;
+
+// The two metrics below drive the *rich* markdown view (`crate::ui::markdown`
+// over `gpui_component::text::TextView`) that agent chat renders with, not the
+// file viewer's own `MdBlock` renderer the `MD_*` constants above serve. Both
+// are multiples of the caller's text size, so the vertical rhythm follows a
+// configured `font.agent_chat_size` instead of the vendored rem-based defaults.
+/// Line height of every rendered markdown line, as a multiple of the text size.
+/// Matches the 1.6 ratio the 13 px default body had, and gpui's own `phi()`
+/// default that code blocks and table cells already sat on.
+pub const MD_VIEW_LINE_HEIGHT: f32 = 1.6;
+/// Gap between paragraphs (and between loose list items), as a multiple of the
+/// text size.
+pub const MD_VIEW_PARAGRAPH_GAP: f32 = 1.25;
+/// Alpha for de-emphasised markdown text (a blockquote and its bar) over the
+/// body colour. The same step as the agent-chat foreground ramp's muted tier,
+/// so a quote in the chat pane lands exactly on `pane-fg-muted` (DESIGN.md
+/// §AgentChatPane) instead of the UI theme's muted tone, which has no verified
+/// contrast on a terminal-mirrored surface.
+pub const MD_VIEW_MUTED_ALPHA: f32 = AGENT_CHAT_FG_MUTED_ALPHA;
+/// Floor for a link's lightness on a dark pane surface, so the UI theme's link
+/// hue stays legible on a background that theme never saw.
+pub const PANE_LINK_MIN_L_ON_DARK: f32 = 0.74;
+/// Ceiling for the same on a light pane surface.
+pub const PANE_LINK_MAX_L_ON_LIGHT: f32 = 0.34;
 /// Minimum dimension for a divider / header lane (px) — 1 device pixel.
 /// Used as `min_w` / `min_h` inside flex layouts so the lane always
 /// has a clickable line even when its surrounding area collapses.

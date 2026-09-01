@@ -22,7 +22,6 @@ use super::super::rows::RowKind;
 use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
-#[cfg(feature = "devtools")]
 use super::super::window_access::WindowAccess;
 use super::{ActivityOptionsTab, AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
@@ -176,7 +175,7 @@ impl AgentChatView {
         self.fold.toggle(key, ctx);
         let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {
-            self.reconcile_embeds_after_fold(&scope, window, cx);
+            self.reconcile_embeds_after_fold(&scope, &mut WindowAccess::Live(window), cx);
         }
         // A fold change flips row `hidden` flags (and may collapse a group):
         // reproject + reflow the affected span.
@@ -213,7 +212,7 @@ impl AgentChatView {
         self.fold.set_all(keys, expanded);
         // Every card's fold just moved, so every card's embeds may need building
         // (expand-all) or releasing (collapse-all).
-        self.reconcile_embeds_after_fold(&ReconcileScope::All, window, cx);
+        self.reconcile_embeds_after_fold(&ReconcileScope::All, &mut WindowAccess::Live(window), cx);
         // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
         self.rebuild_rows();
         // Unlike a single `toggle_fold`, this can change dozens of rows' inner
@@ -292,6 +291,18 @@ impl AgentChatView {
         self.display_filter.reseed(defaults.filter);
         if before == (self.tail, self.fold.mode(), self.display_filter) {
             return;
+        }
+        // A reseeded fold matrix moves every card's derived default, so the cards
+        // it just opened owe the same embed pass a fold click does — see
+        // [`Self::reconcile_embeds_after_fold`]. By handle, not a live borrow:
+        // this arrives from `apply_config`'s global observer, which fires from
+        // `flush_effects` with the window already back in `App::windows`.
+        if self.fold.mode() != before.1 {
+            self.reconcile_embeds_after_fold(
+                &ReconcileScope::All,
+                &mut WindowAccess::ByHandle(self.window_handle),
+                cx,
+            );
         }
         // A reveal names a row the old filter hid, so it cannot outlive it.
         self.fold.clear_filter_reveals();
@@ -376,7 +387,12 @@ impl AgentChatView {
         }
     }
 
-    pub(in crate::workspace) fn set_fold_mode(&mut self, mode: FoldMode, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn set_fold_mode(
+        &mut self,
+        mode: FoldMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.fold.chosen_mode() == Some(mode) {
             return;
         }
@@ -390,8 +406,29 @@ impl AgentChatView {
             (Some(_), Some(_)) => {}
         }
         self.fold.set_mode(mode);
+        self.reconcile_embeds_after_mode_move(current, window, cx);
         self.reproject(cx);
         self.persist_pane_prefs(cx);
+    }
+
+    /// Rebuild the embeds a fold-*mode* move put on (or took off) the screen.
+    ///
+    /// A mode carries the derived default for every card at once, so unlike
+    /// `toggle_fold` there is no single card to scope to — this is the same debt
+    /// `set_all_folds` pays, for the same reason (see
+    /// [`Self::reconcile_embeds_after_fold`]). Gated on the *effective* matrix
+    /// actually moving: picking a value equal to the configured default only
+    /// changes whether the pane is following it, which no card's body can see.
+    fn reconcile_embeds_after_mode_move(
+        &mut self,
+        before: FoldMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.fold.mode() == before {
+            return;
+        }
+        self.reconcile_embeds_after_fold(&ReconcileScope::All, &mut WindowAccess::Live(window), cx);
     }
 
     /// Pick a segment of the fold editor's preset strip. `None` is the `Custom`
@@ -400,6 +437,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn select_fold_preset(
         &mut self,
         preset: Option<FoldPreset>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mode = match preset {
@@ -409,11 +447,15 @@ impl AgentChatView {
                 None => return,
             },
         };
-        self.set_fold_mode(mode, cx);
+        self.set_fold_mode(mode, window, cx);
     }
 
     /// Hand the fold axis back to config — see [`Self::reset_tail_window`].
-    pub(in crate::workspace) fn reset_fold_mode(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn reset_fold_mode(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let before = self.fold.mode_choice();
         // Leaving a hand-edited matrix, same as picking a preset does — the two
         // sit side by side in the panel, so only one of them keeping the work
@@ -428,6 +470,7 @@ impl AgentChatView {
         if before == self.fold.mode_choice() {
             return;
         }
+        self.reconcile_embeds_after_mode_move(current, window, cx);
         self.reproject(cx);
         self.persist_pane_prefs(cx);
     }

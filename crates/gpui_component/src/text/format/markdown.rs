@@ -269,6 +269,7 @@ fn ast_to_node(
                 .collect();
             node::Node::List {
                 ordered: list.ordered,
+                spread: list.spread,
                 children,
             }
         }

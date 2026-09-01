@@ -31,6 +31,12 @@ pub(in crate::workspace) enum MdSpan {
     Strikethrough(Vec<MdSpan>),
     SoftBreak,
     HardBreak,
+    /// The boundary between two paragraphs inside one inline run — a
+    /// blockquote or a loose list item. `pulldown-cmark` reports these as
+    /// `Start`/`End(Paragraph)` events nested in the block, and without an arm
+    /// for them both fell to `parse_inline`'s catch-all and became empty text:
+    /// the paragraphs ran together on a single line.
+    ParagraphBreak,
     /// Inline footnote reference `[^label]`.
     Footnote(String),
     /// Inline HTML shown verbatim in dim monospace.
@@ -363,11 +369,15 @@ fn parse_item(
         match &events[i] {
             Event::End(TagEnd::Item) => break,
 
-            // Loose lists wrap item content in a paragraph.
+            // Loose lists wrap item content in a paragraph. A second one
+            // starts a new line rather than continuing the first.
             Event::Start(Tag::Paragraph) => {
                 let (ps, consumed) = collect_inline_until(events, i + 1, |e| {
                     matches!(e, Event::End(TagEnd::Paragraph))
                 });
+                if !spans.is_empty() {
+                    spans.push(MdSpan::ParagraphBreak);
+                }
                 spans.extend(ps);
                 i += consumed + 2;
             }
@@ -413,6 +423,20 @@ where
     while i < events.len() {
         if stop(&events[i]) {
             break;
+        }
+        // A paragraph nested in this run (a blockquote, a loose list item) is a
+        // boundary, not content: its `Start`/`End` carry nothing to render, and
+        // the second and later ones start a new line.
+        if matches!(events[i], Event::Start(Tag::Paragraph)) {
+            if !spans.is_empty() {
+                spans.push(MdSpan::ParagraphBreak);
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(events[i], Event::End(TagEnd::Paragraph)) {
+            i += 1;
+            continue;
         }
         let (span, consumed) = parse_inline(events, i);
         spans.push(span);
@@ -603,7 +627,7 @@ fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
             MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
                 out.push_str(&flatten_spans_to_text(inner));
             }
-            MdSpan::SoftBreak | MdSpan::HardBreak => out.push(' '),
+            MdSpan::SoftBreak | MdSpan::HardBreak | MdSpan::ParagraphBreak => out.push(' '),
             MdSpan::Footnote(label) => out.push_str(&format!("[^{label}]")),
             MdSpan::Html(s) => out.push_str(s),
             MdSpan::Image { url, alt, .. } => {
@@ -667,7 +691,7 @@ pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option
                 }
                 found = Some((alt.as_str(), raster.as_ref()));
             }
-            MdSpan::SoftBreak | MdSpan::HardBreak => {}
+            MdSpan::SoftBreak | MdSpan::HardBreak | MdSpan::ParagraphBreak => {}
             MdSpan::Text(t) if t.trim().is_empty() => {}
             _ => return None,
         }
@@ -919,6 +943,7 @@ fn resolve_images_in_spans(
             | MdSpan::Link { .. }
             | MdSpan::SoftBreak
             | MdSpan::HardBreak
+            | MdSpan::ParagraphBreak
             | MdSpan::Footnote(_)
             | MdSpan::Html(_) => {}
         }

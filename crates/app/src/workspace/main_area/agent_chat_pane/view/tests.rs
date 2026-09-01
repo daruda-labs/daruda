@@ -226,7 +226,7 @@ fn switching_to_summary_collapses_the_responses_earlier_sends_held_open(
 ) {
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
             for turn in 0..3 {
                 view.items
@@ -239,7 +239,7 @@ fn switching_to_summary_collapses_the_responses_earlier_sends_held_open(
             view.items.push(assistant_text_item("final last"));
             view.rebuild_rows();
 
-            view.set_fold_mode(FoldPreset::Summary.mode(), cx);
+            view.set_fold_mode(FoldPreset::Summary.mode(), window, cx);
 
             let open: Vec<usize> = view
                 .rows
@@ -1594,16 +1594,16 @@ fn the_reset_is_offered_on_a_chosen_default_and_withheld_while_following(
 ) {
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             assert!(view.fold.mode_choice().is_following(), "a fresh pane");
 
-            view.set_fold_mode(view.defaults.fold_mode, cx);
+            view.set_fold_mode(view.defaults.fold_mode, window, cx);
             assert!(
                 !view.fold.mode_choice().is_following(),
                 "pinning the default's own value still offers the reset"
             );
 
-            view.reset_fold_mode(cx);
+            view.reset_fold_mode(window, cx);
             assert!(view.fold.mode_choice().is_following());
         })
         .expect("view update");
@@ -1626,10 +1626,10 @@ fn resetting_the_tail_window_hands_the_axis_back(cx: &mut gpui::TestAppContext) 
 fn resetting_the_fold_mode_hands_the_axis_back(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             view.reseed_transcript_defaults(&other_defaults(), cx);
-            view.set_fold_mode(FoldPreset::Expanded.mode(), cx);
-            view.reset_fold_mode(cx);
+            view.set_fold_mode(FoldPreset::Expanded.mode(), window, cx);
+            view.reset_fold_mode(window, cx);
             assert_eq!(
                 view.fold.mode_choice(),
                 PaneChoice::Seeded(other_defaults().fold_mode)
@@ -1662,19 +1662,19 @@ fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppC
 
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             let edited = FoldPreset::Auto.mode().with_rule(
                 TurnPosition::Past,
                 FoldBlock::Thinking,
                 BlockRule::Collapsed,
             );
-            view.set_fold_mode(edited, cx);
+            view.set_fold_mode(edited, window, cx);
             assert_eq!(view.fold.mode(), edited);
 
-            view.select_fold_preset(Some(FoldPreset::Summary), cx);
+            view.select_fold_preset(Some(FoldPreset::Summary), window, cx);
             assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
 
-            view.select_fold_preset(None, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(view.fold.mode(), edited, "the edited matrix, cell for cell");
         })
         .expect("view update");
@@ -1689,22 +1689,22 @@ fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::Tes
 
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             let edited = FoldPreset::Auto.mode().with_rule(
                 TurnPosition::Past,
                 FoldBlock::Thinking,
                 BlockRule::Collapsed,
             );
-            view.set_fold_mode(edited, cx);
+            view.set_fold_mode(edited, window, cx);
 
-            view.reset_fold_mode(cx);
+            view.reset_fold_mode(window, cx);
             assert_eq!(
                 view.fold.mode(),
                 view.defaults.fold_mode,
                 "the pane follows the default again"
             );
 
-            view.select_fold_preset(None, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(view.fold.mode(), edited, "the edited matrix, cell for cell");
         })
         .expect("view update");
@@ -1719,7 +1719,7 @@ fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppCon
 
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             let custom_default = FoldPreset::Summary.mode().with_rule(
                 TurnPosition::Last,
                 FoldBlock::Tool,
@@ -1742,12 +1742,12 @@ fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppCon
                 FoldBlock::Thinking,
                 BlockRule::Collapsed,
             );
-            view.set_fold_mode(edited, cx);
+            view.set_fold_mode(edited, window, cx);
 
-            view.reset_fold_mode(cx);
+            view.reset_fold_mode(window, cx);
             assert_eq!(view.fold.mode(), custom_default, "it follows the default");
 
-            view.select_fold_preset(None, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(view.fold.mode(), edited, "the edit is still reachable");
         })
         .expect("view update");
@@ -1762,33 +1762,33 @@ fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppCont
 
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
+        .update(cx, |view, window, cx| {
             let first = FoldPreset::Auto.mode().with_rule(
                 TurnPosition::Past,
                 FoldBlock::Thinking,
                 BlockRule::Collapsed,
             );
             let second = first.with_rule(TurnPosition::Last, FoldBlock::Diff, BlockRule::Expanded);
-            view.set_fold_mode(first, cx);
+            view.set_fold_mode(first, window, cx);
             assert_eq!(view.custom_fold_mode, Some(first));
-            view.set_fold_mode(second, cx);
+            view.set_fold_mode(second, window, cx);
             assert_eq!(
                 view.custom_fold_mode,
                 Some(second),
                 "custom→custom must keep the segment target on the latest edit"
             );
 
-            view.select_fold_preset(None, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(
                 view.fold.mode(),
                 second,
                 "clicking the selected Custom segment is a no-op"
             );
 
-            view.select_fold_preset(Some(FoldPreset::Expanded), cx);
+            view.select_fold_preset(Some(FoldPreset::Expanded), window, cx);
             assert_eq!(view.custom_fold_mode, Some(second));
 
-            view.select_fold_preset(None, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(view.fold.mode(), second, "the final edit, not the first");
         })
         .expect("view update");
@@ -1800,9 +1800,9 @@ fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppCont
 fn the_custom_segment_is_inert_with_nothing_remembered(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
-        .update(cx, |view, _window, cx| {
-            view.select_fold_preset(Some(FoldPreset::Summary), cx);
-            view.select_fold_preset(None, cx);
+        .update(cx, |view, window, cx| {
+            view.select_fold_preset(Some(FoldPreset::Summary), window, cx);
+            view.select_fold_preset(None, window, cx);
             assert_eq!(view.custom_fold_mode, None);
             assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
         })

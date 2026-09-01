@@ -1,6 +1,8 @@
 //! Fold-mode chip and editable rule popover.
 
-use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{
+    Anchor, AnyElement, App, Context, IntoElement, SharedString, Window, div, prelude::*, px,
+};
 
 use super::options_panel::{axis_chip_label, fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
@@ -138,9 +140,9 @@ pub(super) fn fold_mode_panel(
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 .disabled(mode_choice.is_following())
-                .on_click(move |_, _window, app| {
+                .on_click(move |_, window, app| {
                     if let Some(view) = reset_view.upgrade() {
-                        view.update(app, |v, cx| v.reset_fold_mode(cx));
+                        view.update(app, |v, cx| v.reset_fold_mode(window, cx));
                     }
                 }),
             ),
@@ -225,13 +227,13 @@ fn preset_group(
         .selected(segment.is_selected(mode))
         .disabled(!segment.is_enabled(mode, custom_mode))
     }))
-    .on_click(move |indices, _window, app| {
+    .on_click(move |indices, window, app| {
         let Some(segment) = indices.first().and_then(|&ix| PresetSegment::ALL.get(ix)) else {
             return;
         };
         let preset = segment.preset();
         if let Some(view) = view.upgrade() {
-            view.update(app, |v, cx| v.select_fold_preset(preset, cx));
+            view.update(app, |v, cx| v.select_fold_preset(preset, window, cx));
         }
     })
 }
@@ -289,10 +291,10 @@ fn block_rule_row(
         )),
         current,
         cx,
-        move |rule, app| {
+        move |rule, window, app| {
             if let Some(view) = view.upgrade() {
                 view.update(app, |v, cx| {
-                    v.set_fold_mode(mode.with_rule(turn, block, rule), cx)
+                    v.set_fold_mode(mode.with_rule(turn, block, rule), window, cx)
                 });
             }
         },
@@ -319,10 +321,10 @@ fn tool_rule_row(
         )),
         current,
         cx,
-        move |rule, app| {
+        move |rule, window, app| {
             if let Some(view) = view.upgrade() {
                 view.update(app, |v, cx| {
-                    v.set_fold_mode(mode.with_tool_rule(turn, category, rule), cx)
+                    v.set_fold_mode(mode.with_tool_rule(turn, category, rule), window, cx)
                 });
             }
         },
@@ -335,7 +337,7 @@ fn rule_row(
     id: SharedString,
     current: BlockRule,
     cx: &App,
-    on_change: impl Fn(BlockRule, &mut App) + 'static,
+    on_change: impl Fn(BlockRule, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
     let button_id_prefix = id.clone();
     div()
@@ -365,9 +367,9 @@ fn rule_row(
                     )
                     .selected(rule == current)
                 }))
-                .on_click(move |indices, _window, app| {
+                .on_click(move |indices, window, app| {
                     if let Some(&ix) = indices.first() {
-                        on_change(RULES[ix], app);
+                        on_change(RULES[ix], window, app);
                     }
                 }),
         )

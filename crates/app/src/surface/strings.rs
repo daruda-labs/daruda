@@ -2119,10 +2119,10 @@ pub fn agent_chat_thinking_group_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.thinking_group_count", count = count).into_owned()
 }
 
-/// Collapsed label for the filter's per-run disclosure: how many rows expanding
-/// it puts on screen, and nothing else. Singular handled explicitly. Rows the
-/// filter took from inside a fold are not named here — clicking cannot reach
-/// them, so counting them would promise more than the control delivers.
+/// Collapsed label for the filter's per-run disclosure: how many blocks the
+/// filter took out of this run. Singular handled explicitly. The unit is a
+/// block rather than a row because a group the filter empties comes back as one
+/// thing — hence "items", not "rows".
 pub fn agent_chat_filtered_show(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.filtered_show_one").into_owned()
@@ -2134,7 +2134,7 @@ pub fn agent_chat_filtered_show(count: usize) -> String {
 /// Expanded label for the same disclosure. Takes no count, and there is one
 /// string rather than a singular / plural / partial set: the rows are on screen,
 /// so a number here restates them and reads as a description of the current
-/// state ("12 filtered rows, hidden") in exactly the state where they are not.
+/// state ("12 filtered items, hidden") in exactly the state where they are not.
 /// The reveal's own extent is the *collapsed* label's job — see
 /// [`agent_chat_filtered_show`], which the reader saw a click ago.
 pub fn agent_chat_filtered_hide_again() -> String {

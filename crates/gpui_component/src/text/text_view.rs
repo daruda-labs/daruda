@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId, Entity,
-    EntityId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
+    EntityId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     InteractiveElement, IntoElement, KeyBinding, LayoutId, ListState, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString, Size,
     StyleRefinement, Styled, Window, div, px,
@@ -44,6 +44,8 @@ struct TextViewElement {
     list_state: Option<ListState>,
     state: Entity<TextViewState>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    muted_color: Option<Hsla>,
+    surface: Option<Hsla>,
 }
 
 impl RenderOnce for TextViewElement {
@@ -52,13 +54,21 @@ impl RenderOnce for TextViewElement {
             v_flex()
                 .size_full()
                 .map(|this| match &mut state.parsed_result {
-                    Some(Ok(content)) => this.child(content.root_node.render_root(
-                        self.list_state.clone(),
-                        &content.node_cx,
-                        self.link_click_handler.clone(),
-                        window,
-                        cx,
-                    )),
+                    // daruda patch: the view's whole vertical rhythm comes from
+                    // one inherited line height, so prose, code, table cells and
+                    // a list item's bullet all sit on the same pitch and follow
+                    // the host's text size.
+                    Some(Ok(content)) => this.line_height(content.node_cx.style.line_height).child(
+                        content.root_node.render_root(
+                            self.list_state.clone(),
+                            &content.node_cx,
+                            self.link_click_handler.clone(),
+                            self.muted_color,
+                            self.surface,
+                            window,
+                            cx,
+                        ),
+                    ),
                     Some(Err(err)) => this.child(
                         v_flex()
                             .gap_1()
@@ -112,6 +122,8 @@ pub struct TextView {
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     code_block_render: Option<Arc<CodeBlockRenderFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    muted_color: Option<Hsla>,
+    surface: Option<Hsla>,
 }
 
 #[derive(PartialEq)]
@@ -526,6 +538,8 @@ impl TextView {
             code_block_actions: None,
             code_block_render: None,
             link_click_handler: None,
+            muted_color: None,
+            surface: None,
         }
     }
 
@@ -559,6 +573,8 @@ impl TextView {
             code_block_actions: None,
             code_block_render: None,
             link_click_handler: None,
+            muted_color: None,
+            surface: None,
         }
     }
 
@@ -593,6 +609,8 @@ impl TextView {
             code_block_actions: None,
             code_block_render: None,
             link_click_handler: None,
+            muted_color: None,
+            surface: None,
         }
     }
 
@@ -690,6 +708,31 @@ impl TextView {
         F: Fn(&str, &mut Window, &mut App) -> bool + 'static,
     {
         self.link_click_handler = Some(Arc::new(f));
+        self
+    }
+
+    /// Colour for the view's de-emphasised text — today the blockquote and its
+    /// bar. Unset falls back to `Theme::muted_foreground`.
+    ///
+    /// daruda patch: a host that paints on its own surface (the agent-chat
+    /// pane mirrors the *terminal* palette) has no reason to expect the UI
+    /// theme's muted tone to be legible there, and `text_color` did not reach
+    /// the quote. Carried on the element rather than in [`TextViewStyle`]
+    /// because a style change re-parses the document — a colour that tracks
+    /// per-pane dimming would reparse the whole transcript on every focus
+    /// change.
+    pub fn muted_text_color(mut self, color: Hsla) -> Self {
+        self.muted_color = Some(color);
+        self
+    }
+
+    /// The background the view is painted on. Its lightness decides whether the
+    /// view's fills and structural lines — inline-code chips, the code-block
+    /// fill and border, table lines, the `<hr>` rule — lighten or darken.
+    /// Unset falls back to `Theme::background`, the UI canvas, which is only
+    /// the right surface when the host paints on it.
+    pub fn surface_color(mut self, color: Hsla) -> Self {
+        self.surface = Some(color);
         self
     }
 }
@@ -832,6 +875,8 @@ impl Element for TextView {
                 },
                 state: self.state.clone(),
                 link_click_handler: self.link_click_handler.clone(),
+                muted_color: self.muted_color,
+                surface: self.surface,
             })
             .refine_style(&self.style)
             .vertical_scrollbar(list_state)

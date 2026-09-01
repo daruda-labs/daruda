@@ -5,10 +5,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, DefiniteLength, Div, Element, ElementId, FontStyle, FontWeight, Half,
-    HighlightStyle, InteractiveElement as _, IntoElement, Length, ListState, ObjectFit,
-    ParentElement, SharedString, SharedUri, StatefulInteractiveElement, Styled, StyledImage as _,
-    Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
+    AbsoluteLength, AnyElement, App, DefiniteLength, Div, Element, ElementId, FontStyle,
+    FontWeight, Half, HighlightStyle, Hsla, InteractiveElement as _, IntoElement, Length,
+    ListState, ObjectFit, ParentElement, SharedString, SharedUri, StatefulInteractiveElement,
+    Styled, StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
 };
 use markdown::mdast;
 use ropey::Rope;
@@ -397,17 +397,9 @@ impl CodeBlock {
                     // one. The fill mirrors the inline-code tint and the host's
                     // `theme::agent_chat_tint` (tool cards); the border shares
                     // the structural-line tint used by the table + rule.
-                    .bg(if cx.theme().background.l < 0.5 {
-                        gpui::hsla(0., 0., 1., 0.05)
-                    } else {
-                        gpui::hsla(0., 0., 0., 0.05)
-                    })
+                    .bg(options.tint(CODE_BLOCK_FILL_ALPHA, cx))
                     .border_1()
-                    .border_color(if cx.theme().background.l < 0.5 {
-                        gpui::hsla(0., 0., 1., 0.28)
-                    } else {
-                        gpui::hsla(0., 0., 0., 0.28)
-                    })
+                    .border_color(options.tint(STRUCTURAL_LINE_ALPHA, cx))
                     .font_family(cx.theme().mono_font_family.clone())
                     // daruda patch: no fixed `.text_size(mono_font_size)` — inherit the host's ambient size instead.
                     .relative()
@@ -480,6 +472,9 @@ pub(crate) enum Node {
         /// Only contains ListItem, others will be ignored
         children: Vec<Node>,
         ordered: bool,
+        /// A loose list — its items are separated by a blank line, so they are
+        /// spaced like paragraphs instead of stacked flush.
+        spread: bool,
     },
     ListItem {
         children: Vec<Node>,
@@ -604,6 +599,7 @@ impl Node {
 impl Paragraph {
     fn render(
         &self,
+        options: NodeRenderOptions,
         node_cx: &NodeContext,
         link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         _window: &mut Window,
@@ -700,11 +696,7 @@ impl Paragraph {
                         // off the background on any theme and lets the pane
                         // opacity show through. Mirrors the host's
                         // `theme::agent_chat_tint` (tool cards).
-                        let tint = if cx.theme().background.l < 0.5 {
-                            gpui::hsla(0., 0., 1., 0.08)
-                        } else {
-                            gpui::hsla(0., 0., 0., 0.08)
-                        };
+                        let tint = options.tint(INLINE_CODE_TINT_ALPHA, cx);
                         highlight.background_color = Some(tint);
                     }
 
@@ -758,12 +750,36 @@ struct NodeRenderOptions {
     in_list: bool,
     todo: bool,
     ordered: bool,
+    /// The enclosing list is loose, so its items take paragraph spacing.
+    loose: bool,
+    /// Host-supplied colour for de-emphasised text (the blockquote and its
+    /// bar). `None` falls back to the UI theme's muted foreground. Render-time,
+    /// not part of [`TextViewStyle`], so tracking it costs no re-parse.
+    muted_color: Option<Hsla>,
+    /// The background the view is actually painted on, which decides whether a
+    /// tint lightens or darkens. `None` falls back to the UI theme's canvas —
+    /// only correct when the host paints on it.
+    surface: Option<Hsla>,
     depth: usize,
     is_first: bool,
     is_last: bool,
 }
 
 impl NodeRenderOptions {
+    /// A neutral tint over [`Self::surface`] — white over a dark background,
+    /// black over a light one — so fills and structural lines sit one step off
+    /// whatever the view is painted on.
+    ///
+    /// daruda patch: this read `cx.theme().background`, the *UI* canvas. On the
+    /// agent-chat pane (DESIGN.md §AgentChatPane: the pane mirrors the terminal
+    /// palette, and `ui_preset` / `terminal_preset` are independent) a light UI
+    /// theme over a dark terminal picked the black tint for a near-black
+    /// surface — table lines, the `<hr>` rule, the code-block border and fill,
+    /// and every inline-code chip all vanished at once.
+    fn tint(&self, alpha: f32, cx: &App) -> Hsla {
+        tint_over(self.surface.unwrap_or_else(|| cx.theme().background), alpha)
+    }
+
     fn is_first(mut self, is_first: bool) -> Self {
         self.is_first = is_first;
         self
@@ -849,7 +865,9 @@ impl Node {
                     .collect::<Vec<_>>()
                     .join("\n")
             }
-            Node::List { children, ordered } => children
+            Node::List {
+                children, ordered, ..
+            } => children
                 .iter()
                 .enumerate()
                 .map(|(i, child)| {
@@ -953,6 +971,25 @@ impl Node {
     }
 }
 
+/// A neutral tint one step off `surface`: white over a dark background, black
+/// over a light one. Split from [`NodeRenderOptions::tint`] so the rule can be
+/// asserted without an `App`.
+fn tint_over(surface: Hsla, alpha: f32) -> Hsla {
+    if surface.l < 0.5 {
+        gpui::hsla(0., 0., 1., alpha)
+    } else {
+        gpui::hsla(0., 0., 0., alpha)
+    }
+}
+
+/// Alpha of the tint filling an inline-code span.
+const INLINE_CODE_TINT_ALPHA: f32 = 0.08;
+/// Alpha of the tint filling a fenced code block.
+const CODE_BLOCK_FILL_ALPHA: f32 = 0.05;
+/// Alpha of every structural line — code-block border, table frame / row /
+/// cell separators, and the `<hr>` rule. One value so they read as one system.
+const STRUCTURAL_LINE_ALPHA: f32 = 0.28;
+
 /// How a single child of a `ListItem` should be laid out.
 ///
 /// Split out as a pure function because the render path only produces opaque
@@ -1021,7 +1058,13 @@ impl Node {
                 checked,
             } => v_flex()
                 .id("li")
-                .when(*spread, |this| this.child(div()))
+                // A loose item is spaced from the one above it like a
+                // paragraph. Upstream pushed an empty `div()` here, which in a
+                // gap-less flex column added no height at all — a
+                // blank-line-separated list rendered exactly like a tight one.
+                .when((options.loose || *spread) && ix > 0, |this| {
+                    this.pt(node_cx.style.paragraph_gap)
+                })
                 .children({
                     let mut items: Vec<Div> = Vec::with_capacity(children.len());
 
@@ -1157,6 +1200,7 @@ impl Node {
 
     fn render_table(
         item: &Node,
+        options: NodeRenderOptions,
         node_cx: &NodeContext,
         link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
         window: &mut Window,
@@ -1190,11 +1234,7 @@ impl Node {
         // light one — the shared structural-line tint (same alpha as the
         // code-block border + the `<hr>` rule). The fixed hairline is
         // near-invisible against the agent-chat pane's mirrored terminal bg.
-        let line_color = if cx.theme().background.l < 0.5 {
-            gpui::hsla(0., 0., 1., 0.28)
-        } else {
-            gpui::hsla(0., 0., 0., 0.28)
-        };
+        let line_color = options.tint(STRUCTURAL_LINE_ALPHA, cx);
 
         match item {
             Node::Table(table) => div()
@@ -1267,6 +1307,7 @@ impl Node {
                                                                 .min_w_0()
                                                                 .overflow_hidden()
                                                                 .child(cell.children.render(
+                                                                    options,
                                                                     node_cx,
                                                                     link_click_handler,
                                                                     window,
@@ -1292,11 +1333,15 @@ impl Node {
         list_state: Option<ListState>,
         node_cx: &NodeContext,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+        muted_color: Option<Hsla>,
+        surface: Option<Hsla>,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
         let options = NodeRenderOptions {
             is_last: true,
+            muted_color,
+            surface,
             ..Default::default()
         };
 
@@ -1343,8 +1388,8 @@ impl Node {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
-        let mb = if options.in_list || options.is_last {
-            rems(0.)
+        let mb: AbsoluteLength = if options.in_list || options.is_last {
+            px(0.).into()
         } else {
             node_cx.style.paragraph_gap
         };
@@ -1370,8 +1415,7 @@ impl Node {
             Node::Paragraph(paragraph) => div()
                 .id("p")
                 .pb(mb)
-                .line_height(rems(1.3))
-                .child(paragraph.render(node_cx, link_click_handler, window, cx))
+                .child(paragraph.render(options, node_cx, link_click_handler, window, cx))
                 .into_any_element(),
             Node::Heading { level, children } => {
                 let (text_size, font_weight) = match level {
@@ -1404,6 +1448,7 @@ impl Node {
                     // width-dependent class as the list-item and table-cell
                     // wrap fixes above.
                     .child(div().flex_1().min_w_0().child(children.render(
+                        options,
                         node_cx,
                         link_click_handler,
                         window,
@@ -1411,38 +1456,49 @@ impl Node {
                     )))
                     .into_any_element()
             }
-            Node::Blockquote { children } => div()
-                .w_full()
-                .pb(mb)
-                .child(
-                    div()
-                        .id("blockquote")
-                        .w_full()
-                        .text_color(cx.theme().muted_foreground)
-                        .border_l_3()
-                        // The quote bar tracks the muted text color it accompanies.
-                        // The upstream `secondary_active` maps to daruda's canvas
-                        // (near-black), which is invisible on the agent-chat pane's
-                        // mirrored terminal background.
-                        .border_color(cx.theme().muted_foreground)
-                        .px_4()
-                        .children({
-                            let children_len = children.len();
-                            children.into_iter().enumerate().map(move |(index, c)| {
-                                c.render_block(
-                                    options
-                                        .is_first(index == 0)
-                                        .is_last(index == children_len - 1),
-                                    node_cx,
-                                    link_click_handler,
-                                    window,
-                                    cx,
-                                )
-                            })
-                        }),
-                )
-                .into_any_element(),
-            Node::List { children, ordered } => v_flex()
+            Node::Blockquote { children } => {
+                let muted = options
+                    .muted_color
+                    .unwrap_or_else(|| cx.theme().muted_foreground);
+                div()
+                    .w_full()
+                    .pb(mb)
+                    .child(
+                        div()
+                            .id("blockquote")
+                            .w_full()
+                            // A quote and its bar are de-emphasised against the text
+                            // around them, so both take the host's muted colour —
+                            // the UI theme's own is only correct on a surface that
+                            // theme picked. Upstream's `secondary_active` bar maps to
+                            // daruda's canvas (near-black) and was invisible on the
+                            // agent-chat pane's mirrored terminal background.
+                            .text_color(muted)
+                            .border_l_3()
+                            .border_color(muted)
+                            .px_4()
+                            .children({
+                                let children_len = children.len();
+                                children.into_iter().enumerate().map(move |(index, c)| {
+                                    c.render_block(
+                                        options
+                                            .is_first(index == 0)
+                                            .is_last(index == children_len - 1),
+                                        node_cx,
+                                        link_click_handler,
+                                        window,
+                                        cx,
+                                    )
+                                })
+                            }),
+                    )
+                    .into_any_element()
+            }
+            Node::List {
+                children,
+                ordered,
+                spread,
+            } => v_flex()
                 .id(if *ordered { "ol" } else { "ul" })
                 .pb(mb)
                 .children({
@@ -1456,6 +1512,7 @@ impl Node {
                             ix,
                             NodeRenderOptions {
                                 ordered: *ordered,
+                                loose: *spread,
                                 ..options
                             },
                             node_cx,
@@ -1475,18 +1532,15 @@ impl Node {
                 code_block.render(&options, node_cx, link_click_handler, window, cx)
             }
             Node::Table { .. } => {
-                Self::render_table(self, node_cx, link_click_handler, window, cx).into_any_element()
+                Self::render_table(self, options, node_cx, link_click_handler, window, cx)
+                    .into_any_element()
             }
             Node::Divider => {
                 // Background-derived rule instead of the fixed `border` hairline,
                 // which is near-invisible on the agent-chat pane's mirrored
                 // terminal background. Shares the structural-line tint (same
                 // alpha as the table lines + code-block border).
-                let rule_color = if cx.theme().background.l < 0.5 {
-                    gpui::hsla(0., 0., 1., 0.28)
-                } else {
-                    gpui::hsla(0., 0., 0., 0.28)
-                };
+                let rule_color = options.tint(STRUCTURAL_LINE_ALPHA, cx);
                 div()
                     .pt(rems(0.5))
                     .when(!options.is_last, |this| this.pb(rems(0.5)))
@@ -1516,8 +1570,9 @@ impl Node {
 mod tests {
     use super::{
         ListItemChildLayout::{self, *},
-        Node, Paragraph, classify_list_item_children,
+        Node, Paragraph, STRUCTURAL_LINE_ALPHA, classify_list_item_children, tint_over,
     };
+    use gpui::hsla;
 
     fn p() -> Node {
         Node::Paragraph(Paragraph::default())
@@ -1527,6 +1582,7 @@ mod tests {
         Node::List {
             children: vec![],
             ordered: false,
+            spread: false,
         }
     }
 
@@ -1573,6 +1629,31 @@ mod tests {
         assert_eq!(
             classify_list_item_children(&children),
             Vec::<ListItemChildLayout>::new(),
+        );
+    }
+
+    /// The tint has to lighten a dark surface and darken a light one. Reading
+    /// the direction off the *UI* canvas instead of the surface actually being
+    /// painted on is what erased every table line, rule and code-block border
+    /// on the agent-chat pane under a light `ui_preset`.
+    #[test]
+    fn a_tint_steps_away_from_the_surface_it_is_drawn_on() {
+        let near_black = hsla(0., 0., 0.07, 1.);
+        let near_white = hsla(0., 0., 0.97, 1.);
+
+        assert_eq!(
+            tint_over(near_black, STRUCTURAL_LINE_ALPHA).l,
+            1.0,
+            "a dark surface needs a lighter line"
+        );
+        assert_eq!(
+            tint_over(near_white, STRUCTURAL_LINE_ALPHA).l,
+            0.0,
+            "a light surface needs a darker line"
+        );
+        assert_eq!(
+            tint_over(near_black, STRUCTURAL_LINE_ALPHA).a,
+            STRUCTURAL_LINE_ALPHA
         );
     }
 }

@@ -2397,8 +2397,8 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
     }
     assert_eq!(
         filtered_away(&rows).revealable,
-        1,
-        "the tally reports the filter's cut even under a collapsed bar"
+        2,
+        "the tally reports the filter's cut — both prose blocks — under a collapsed bar"
     );
 }
 
@@ -2432,28 +2432,32 @@ fn a_collapsed_response_emptied_by_the_filter_still_offers_the_reveal() {
     );
 }
 
+/// Collapsing the response is the reader's own gesture and says nothing about
+/// what the filter took, so the tally must read the same on both sides of it.
 #[test]
-fn the_placeholder_counts_only_what_the_filter_alone_took() {
+fn collapsing_the_response_does_not_move_the_tally() {
     let items = one_run_turn();
     let only_tools = DisplayFilter::from_tokens(["tools"]);
     let mut collapsed = FoldState::default();
     collapsed.toggle(FoldKey::Response(1), FoldContext::past(true));
-    let rows = project(
-        &items,
-        &collapsed,
-        false,
-        &LiveSubagentUnits::of(&items),
-        TailWindow::All,
-        &only_tools,
-    );
-    assert_eq!(filtered_count(&rows), 1);
+    let tally = |fold: &FoldState| {
+        filtered_count(&project(
+            &items,
+            fold,
+            false,
+            &LiveSubagentUnits::of(&items),
+            TailWindow::All,
+            &only_tools,
+        ))
+    };
+    assert_eq!(tally(&FoldState::default()), tally(&collapsed));
 }
 
-/// The reveal only ever names rows it can itself put on screen. A settled
-/// group's own bar is one; the calls its fold holds are not, so hiding every
-/// tool offers one row back, not three.
+/// A group the filter empties is one unit in the tally, and none of its calls
+/// stays on screen — the group is what the reveal brings back, and the calls
+/// come with it.
 #[test]
-fn the_reveal_counts_the_bar_it_can_show_not_the_calls_its_fold_holds() {
+fn a_group_the_filter_empties_leaves_no_call_on_screen() {
     let items = one_run_turn();
     let rows = project_filtered(
         &items,
@@ -2463,7 +2467,7 @@ fn the_reveal_counts_the_bar_it_can_show_not_the_calls_its_fold_holds() {
     assert_eq!(
         filtered_away(&rows).revealable,
         1,
-        "the group bar alone — its members are already behind its fold"
+        "the group is the unit, not its two calls"
     );
 
     let on_screen_tools = rows
@@ -2476,6 +2480,94 @@ fn the_reveal_counts_the_bar_it_can_show_not_the_calls_its_fold_holds() {
         .filter(|&ix| matches!(items[ix], ChatItem::ToolCall(_)))
         .count();
     assert_eq!(on_screen_tools, 0, "no tool card is on screen");
+}
+
+/// A read-kind call, so a filter aimed at edits leaves it on screen.
+fn read_tool(id: &str, status: ToolStatusView) -> ChatItem {
+    let mut item = tool(id, status);
+    if let ChatItem::ToolCall(tc) = &mut item {
+        tc.kind = ToolKindView::Read;
+    }
+    item
+}
+
+/// One run: prose, then a single group of `calls` edit calls, the last of which
+/// is still running when `running`.
+fn turn_of_one_group(calls: usize, running: bool) -> Vec<ChatItem> {
+    let mut items = vec![ChatItem::UserText("q".into()), asst("looking")];
+    for i in 0..calls {
+        let last = i + 1 == calls;
+        let status = if last && running {
+            ToolStatusView::InProgress
+        } else {
+            ToolStatusView::Completed
+        };
+        items.push(tool(&format!("g{i}"), status));
+    }
+    items
+}
+
+fn hides_edits() -> DisplayFilter {
+    DisplayFilter::default().toggled(FilterFacet::ToolEdit)
+}
+
+/// The tally answers "what did the filter take", which is a question about the
+/// filter alone. A group's fold flips on its own as the last call settles, and
+/// letting that move the number made it climb to the group's size and then drop
+/// back mid-turn — the same cut reported two different ways seconds apart.
+#[test]
+fn a_group_settling_does_not_move_the_tally() {
+    let running = project_filtered(&turn_of_one_group(5, true), &hides_edits());
+    let settled = project_filtered(&turn_of_one_group(5, false), &hides_edits());
+    assert_eq!(
+        filtered_count(&running),
+        filtered_count(&settled),
+        "the fold moved but the filter's cut did not"
+    );
+}
+
+/// A group the filter empties is one unit, however many calls it holds: the
+/// reveal brings back the group, and the calls come with it rather than as
+/// units of their own.
+#[test]
+fn a_group_the_filter_empties_counts_as_one_unit() {
+    for calls in [2, 5, 9] {
+        for running in [true, false] {
+            let rows = project_filtered(&turn_of_one_group(calls, running), &hides_edits());
+            assert_eq!(
+                filtered_count(&rows),
+                1,
+                "{calls} calls, running={running}: the group is the unit"
+            );
+        }
+    }
+}
+
+/// A group the filter leaves something is on screen already, so what the reveal
+/// brings back is the individual calls it took — and that count cannot depend on
+/// whether the group happens to be folded.
+#[test]
+fn a_surviving_group_counts_the_calls_the_filter_took_from_it() {
+    use ToolStatusView::{Completed, InProgress};
+    let mixed = |running: bool| {
+        vec![
+            ChatItem::UserText("q".into()),
+            asst("looking"),
+            tool("e0", Completed),
+            read_tool("r0", Completed),
+            tool("e1", Completed),
+            read_tool("r1", Completed),
+            tool("e2", if running { InProgress } else { Completed }),
+        ]
+    };
+    for running in [true, false] {
+        let rows = project_filtered(&mixed(running), &hides_edits());
+        assert_eq!(
+            filtered_count(&rows),
+            3,
+            "running={running}: the three edit calls the filter took"
+        );
+    }
 }
 
 #[test]
@@ -3005,4 +3097,92 @@ fn thinking_groups_share_a_slot_by_their_first_index() {
     assert!(a.same_slot(&group(3, 5, true)), "same first_ix → same slot");
     assert!(!a.same_slot(&group(4, 2, false)));
     assert!(!a.same_slot(&RenderRow::at(RowKind::AgentItem(3), false, 1)));
+}
+
+/// TEMP DIAGNOSTIC — remove.
+#[test]
+fn diag_tail_population() {
+    let Some(path) = std::env::var_os("DIAG_LOG") else {
+        return;
+    };
+    let agent = std::env::var("DIAG_AGENT").unwrap_or_else(|_| "claude".into());
+    let preset = match std::env::var("DIAG_PRESET")
+        .unwrap_or_else(|_| "auto".into())
+        .as_str()
+    {
+        "expanded" => FoldPreset::Expanded,
+        "summary" => FoldPreset::Summary,
+        _ => FoldPreset::Auto,
+    };
+    let replay = daruda_acp::replay_log(std::path::Path::new(&path), &agent).expect("replay");
+    let all = replay.items;
+    // Last turn, as it looked while newest.
+    let items = match std::env::var("DIAG_END") {
+        Ok(v) => all[..v.parse::<usize>().unwrap()].to_vec(),
+        Err(_) => all,
+    };
+    let live = LiveSubagentUnits::of(&items);
+    for tail in [TailWindow::All, TailWindow::Last(5)] {
+        let rows = project(
+            &items,
+            &FoldState::with_mode(preset.mode()),
+            false,
+            &live,
+            tail,
+            &DisplayFilter::default(),
+        );
+        println!("=== tail {tail:?} preset {preset:?} ===");
+        for r in &rows {
+            if r.hidden {
+                continue;
+            }
+            let k = match &r.kind {
+                RowKind::User(i) => format!("User({i})"),
+                RowKind::ResponseHeader {
+                    run_start,
+                    collapsed,
+                    ..
+                } => format!("Response@{run_start} collapsed={collapsed}"),
+                RowKind::AgentItem(i) => format!("Item({i}:{})", label(&items[*i])),
+                RowKind::TailMore {
+                    run_start,
+                    hidden_steps,
+                    kept_steps,
+                    collapsed,
+                } => format!(
+                    "TailMore@{run_start} hidden={hidden_steps} kept={kept_steps} collapsed={collapsed}"
+                ),
+                RowKind::ToolGroupHeader {
+                    first_ix,
+                    count,
+                    collapsed,
+                    ..
+                } => format!("ToolGroup@{first_ix} x{count} collapsed={collapsed}"),
+                RowKind::ThinkingGroupHeader {
+                    first_ix,
+                    count,
+                    collapsed,
+                } => format!("ThinkGroup@{first_ix} x{count} collapsed={collapsed}"),
+                RowKind::ConclusionItem(i) => format!("Conclusion({i})"),
+                RowKind::WorkingIndicator => "Working".into(),
+            };
+            println!(
+                "  {}{} outside={}",
+                "  ".repeat(r.indent as usize),
+                k,
+                r.outside_window
+            );
+        }
+    }
+}
+
+fn label(it: &ChatItem) -> &'static str {
+    match it {
+        ChatItem::UserText(_) => "user",
+        ChatItem::AssistantText { .. } => "text",
+        ChatItem::Thinking { .. } => "think",
+        ChatItem::ToolCall(_) => "tool",
+        ChatItem::Permission(_) => "perm",
+        _ => "other",
+    }
 }

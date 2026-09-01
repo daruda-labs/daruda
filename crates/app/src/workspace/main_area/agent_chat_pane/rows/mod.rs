@@ -19,26 +19,54 @@ const RUN_GROUP_MIN: usize = 2;
 
 /// What the display filter dropped from one run and the reveal can put back.
 ///
-/// Only reachable rows are counted: a row a fold already holds does not come
-/// back when the reveal opens, so counting it would make the chip promise more
-/// than clicking it delivers.
+/// The unit is a block, not a row: a group the filter empties counts once,
+/// because the reveal brings back the group and its calls come with it. Folds
+/// are deliberately not consulted — a group's fold flips on its own as its last
+/// call settles, and letting that move the number made it climb to the group's
+/// size and drop back mid-turn, reporting one cut two ways seconds apart.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct FilteredAway {
-    /// Rows the reveal puts on screen.
+    /// Blocks the filter took out of this run.
     pub(in crate::workspace) revealable: usize,
 }
 
 impl FilteredAway {
     /// Whether the bar carries a reveal chip.
     ///
-    /// `revealable` already accounts for folds — a row a fold holds is not
-    /// counted — so the bar's own collapse must not be checked again on top of
-    /// it. The conclusion's `force_visible` escape is exactly the row that
-    /// survives a collapsed response and can still be filtered out of it,
-    /// leaving the turn showing nothing but its bar; a second collapse check
-    /// erased the one control that leads back.
+    /// The tally describes the filter alone, so the bar's own collapse must not
+    /// be checked on top of it. The conclusion's `force_visible` escape is
+    /// exactly the row that survives a collapsed response and can still be
+    /// filtered out of it, leaving the turn showing nothing but its bar; a
+    /// second collapse check erased the one control that leads back.
     pub(in crate::workspace) fn offers_reveal(self) -> bool {
         self.revealable > 0
+    }
+}
+
+/// Whether the filter left a group anything to show. Decides what the group
+/// contributes to the tally: the group itself, or the calls taken from it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GroupFilter {
+    /// At least one call survives, so the group is on screen and what the
+    /// reveal brings back is each call the filter took from it.
+    Kept,
+    /// Every call is rejected, so the group is what the reveal brings back and
+    /// its calls are already covered by it.
+    Emptied,
+}
+
+impl GroupFilter {
+    fn of(run: std::ops::Range<usize>, items: &[ChatItem], filter: &FilterMatchIndex) -> Self {
+        if run.into_iter().any(|j| filter.matches(&items[j])) {
+            Self::Kept
+        } else {
+            Self::Emptied
+        }
+    }
+
+    /// The header's own `filtered` term: an emptied group has no row on screen.
+    fn hides_the_header(self) -> bool {
+        self == Self::Emptied
     }
 }
 
@@ -389,23 +417,27 @@ struct RunRows<'a> {
 impl<'a> RunRows<'a> {
     /// A group header's children, one indent deeper. Identical for every group
     /// kind, so extracting it is what keeps the tool and thinking branches from
-    /// drifting on the fold and filter terms.
+    /// drifting on the fold and filter terms. `structural` is the enclosing
+    /// fold and the group's own collapse together — the children cannot tell
+    /// them apart.
     fn push_group_children(
         &mut self,
         run: std::ops::Range<usize>,
-        folded: bool,
-        group_collapsed: bool,
+        structural: bool,
         indent: u8,
         items: &[ChatItem],
         filter: &FilterMatchIndex,
+        group: GroupFilter,
     ) {
         for j in run {
-            self.push(
-                RowKind::AgentItem(j),
-                folded || group_collapsed,
-                !filter.matches(&items[j]),
-                indent + 1,
-            );
+            let kind = RowKind::AgentItem(j);
+            let filtered = !filter.matches(&items[j]);
+            match group {
+                GroupFilter::Kept => self.push(kind, structural, filtered, indent + 1),
+                // The header already stands for the whole cut; tallying the
+                // calls under it would count the same thing twice.
+                GroupFilter::Emptied => self.emit(kind, structural, filtered, indent + 1),
+            }
         }
     }
 
@@ -425,12 +457,17 @@ impl<'a> RunRows<'a> {
         }
     }
 
+    /// Push a row and, when the filter rejected it, tally it as one block the
+    /// reveal brings back.
     fn push(&mut self, kind: RowKind, structural: bool, filtered: bool, indent: u8) {
-        // A row a fold already holds does not come back when the reveal opens,
-        // so it is not part of what the chip offers to show.
-        if filtered && !structural {
+        if filtered {
             self.filtered.revealable += 1;
         }
+        self.emit(kind, structural, filtered, indent);
+    }
+
+    /// Push a row the tally already covers through the group header above it.
+    fn emit(&mut self, kind: RowKind, structural: bool, filtered: bool, indent: u8) {
         self.rows.push(RenderRow {
             kind,
             hidden: structural || (filtered && !self.revealed),
@@ -650,7 +687,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             if top_level_tool(items, k, hierarchy) {
                 let grun = k..tool_run_end(items, k, run.end, hierarchy);
                 k = grun.end;
-                let run_kept = grun.clone().any(|j| filter.matches(&items[j]));
+                let group = GroupFilter::of(grun.clone(), items, filter);
                 // Live group headers stay visible through enclosing folds.
                 let group_live = grun.clone().any(
                 |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
@@ -670,22 +707,22 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                             collapsed: group_collapsed,
                         },
                         folded && !group_live,
-                        !run_kept,
+                        group.hides_the_header(),
                         base_indent,
                     );
                     out.push_group_children(
                         grun,
-                        folded,
-                        group_collapsed,
+                        folded || group_collapsed,
                         base_indent,
                         items,
                         filter,
+                        group,
                     );
                 } else {
                     out.push(
                         RowKind::AgentItem(grun.start),
                         folded && !group_live,
-                        !run_kept,
+                        group.hides_the_header(),
                         base_indent,
                     );
                 }
@@ -707,7 +744,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         &group_key,
                         fold_context_at(&group_key, gstart, items, boundary),
                     );
-                    let group_kept = grun.clone().any(|j| filter.matches(&items[j]));
+                    let group = GroupFilter::of(grun.clone(), items, filter);
                     out.push(
                         RowKind::ThinkingGroupHeader {
                             first_ix: gstart,
@@ -715,16 +752,16 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                             collapsed: group_collapsed,
                         },
                         folded,
-                        !group_kept,
+                        group.hides_the_header(),
                         base_indent,
                     );
                     out.push_group_children(
                         grun,
-                        folded,
-                        group_collapsed,
+                        folded || group_collapsed,
                         base_indent,
                         items,
                         filter,
+                        group,
                     );
                 } else {
                     out.push(

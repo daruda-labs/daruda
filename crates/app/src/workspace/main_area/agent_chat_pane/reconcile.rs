@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use daruda_acp::{ChatItem, ToolOutputBlock};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{Context, Window};
+use gpui::Context;
 
 use super::agent_chat_helpers::{
     DiffStat, TurnBoundary, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
@@ -112,22 +112,31 @@ impl AgentChatView {
     /// Re-run the embed reconcilers after a fold change, which is the other way
     /// (besides an ACP event) a card body can arrive on or leave the screen.
     ///
+    /// Every caller that moves the fold owes this pass: the renderer only *reads*
+    /// the embed caches, so a body that arrives on screen without it renders
+    /// through the inline fallbacks — a diff as plain `+`/`-` lines with no
+    /// gutter and no syntax colour — for as long as no ACP event happens to
+    /// arrive.
+    ///
     /// `scope` narrows it to the toggled card when the caller knows which one it
-    /// was; expand-all / collapse-all pass [`ReconcileScope::All`].
+    /// was; a change that moves the whole matrix at once (expand-all /
+    /// collapse-all, a fold-mode edit, a reseeded default) passes
+    /// [`ReconcileScope::All`].
+    ///
+    /// `access` is how the caller says which world it is in: a fold *click* runs
+    /// inside the window's own update cycle and has to hand over the borrow it
+    /// already holds, while the config-reload path fires from `flush_effects`
+    /// and resolves one from the stored handle — see [`WindowAccess`].
     pub(in crate::workspace) fn reconcile_embeds_after_fold(
         &mut self,
         scope: &ReconcileScope,
-        window: &mut Window,
+        access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
     ) {
-        // A fold click runs inside the window's own update cycle, so the editors
-        // have to be built against the borrow the caller already holds — see
-        // [`WindowAccess`].
-        let mut access = WindowAccess::Live(window);
-        self.reconcile_output_editors(scope, &mut access, cx);
+        self.reconcile_output_editors(scope, access, cx);
         let theme = self.syntax_theme().to_owned();
         let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
-        self.reconcile_diff_editors(&theme, is_light, scope, &mut access, cx);
+        self.reconcile_diff_editors(&theme, is_light, scope, access, cx);
     }
 
     /// Rebuild every content-derived embed for the whole conversation.
@@ -584,6 +593,7 @@ mod tests {
     };
     use gpui::TestAppContext;
 
+    use super::super::fold_mode::{FoldMode, FoldPreset};
     use super::super::view::tests::make_test_view;
     use super::super::window_access::WindowAccess;
     use super::{ReconcileScope, mermaid_key};
@@ -873,6 +883,145 @@ mod tests {
             assert!(
                 v.assets.output_editors.is_empty(),
                 "collapsing releases the editor again"
+            );
+        });
+    }
+
+    /// A settled tool call carrying a diff: its card derives collapsed, so
+    /// nothing about it is on screen until a fold decision opens it.
+    fn settled_tool_with_diff(id: &str) -> ChatItem {
+        let ChatItem::ToolCall(mut tc) =
+            tool_call_with(vec![raw("out")], vec![diff("a.java", "new\n")])
+        else {
+            unreachable!("tool_call_with builds a ToolCall")
+        };
+        tc.id = id.to_string();
+        tc.kind = ToolKindView::Edit;
+        tc.status = ToolStatusView::Completed;
+        ChatItem::ToolCall(tc)
+    }
+
+    /// Every card's tool rule set to `expanded`, on both turn positions so the
+    /// single-item fixture matches whichever one it derives.
+    fn all_tools_expanded() -> FoldMode {
+        FoldMode::from_tokens(["auto", "past.tool=expanded", "last.tool=expanded"])
+    }
+
+    /// A fold *mode* edit moves the derived default for every card at once, so
+    /// it opens card bodies exactly like expand-all does — and owes the same
+    /// embed pass. Without it the renderer, which only ever *reads* the embed
+    /// caches, falls back to the inline per-line diff walk: `+`/`-` prefixed
+    /// lines with no gutter and no syntax colour, for as long as no ACP event
+    /// happens to arrive and reconcile on its own.
+    #[gpui::test]
+    fn a_fold_mode_edit_builds_the_embeds_it_reveals(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.set_syntax_theme(SYNTAX_THEME);
+            v.items = vec![settled_tool_with_diff("call_1")];
+            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+            v.reconcile_diff_editors(
+                SYNTAX_THEME,
+                is_light,
+                &ReconcileScope::All,
+                &mut by_handle(v),
+                cx,
+            );
+        });
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.is_empty(),
+                "a collapsed card renders no body, so it needs no editor yet"
+            );
+        });
+
+        window
+            .update(cx, |v, window, cx| {
+                v.set_fold_mode(all_tools_expanded(), window, cx);
+            })
+            .expect("the window is open");
+
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.contains_key(KEY),
+                "a mode edit that opens a card must build the embeds its body needs"
+            );
+        });
+    }
+
+    /// The reset button hands the axis back to config, which is just as much a
+    /// whole-matrix move as picking a preset is.
+    #[gpui::test]
+    fn resetting_the_fold_mode_builds_the_embeds_it_reveals(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, _cx| {
+            v.set_syntax_theme(SYNTAX_THEME);
+            v.defaults.fold_mode = all_tools_expanded();
+            v.items = vec![settled_tool_with_diff("call_1")];
+        });
+        // Pin the pane to a matrix that keeps every card shut, so the reset is
+        // what opens them.
+        window
+            .update(cx, |v, window, cx| {
+                v.set_fold_mode(FoldPreset::Summary.mode(), window, cx);
+            })
+            .expect("the window is open");
+        view.read_with(cx, |v, _| assert!(v.assets.diff_editors.is_empty()));
+
+        window
+            .update(cx, |v, window, cx| v.reset_fold_mode(window, cx))
+            .expect("the window is open");
+
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.contains_key(KEY),
+                "following config again must build the embeds that default reveals"
+            );
+        });
+    }
+
+    /// The config-reload path: a pane open across an edit to the agent's
+    /// transcript defaults follows the new fold matrix, which opens card bodies
+    /// with no click and no event behind them. Unlike the two above this runs
+    /// outside any window update, so its reconcile resolves the window from the
+    /// stored handle.
+    #[gpui::test]
+    fn reseeded_defaults_build_the_embeds_they_reveal(cx: &mut TestAppContext) {
+        use super::super::transcript_defaults::TranscriptDefaults;
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.set_syntax_theme(SYNTAX_THEME);
+            v.items = vec![settled_tool_with_diff("call_1")];
+            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+            v.reconcile_diff_editors(
+                SYNTAX_THEME,
+                is_light,
+                &ReconcileScope::All,
+                &mut by_handle(v),
+                cx,
+            );
+        });
+        view.read_with(cx, |v, _| assert!(v.assets.diff_editors.is_empty()));
+
+        view.update(cx, |v, cx| {
+            let defaults = TranscriptDefaults {
+                fold_mode: all_tools_expanded(),
+                ..v.defaults
+            };
+            v.reseed_transcript_defaults(&defaults, cx);
+        });
+
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.contains_key(KEY),
+                "a reseeded default that opens a card must build its embeds too"
             );
         });
     }
