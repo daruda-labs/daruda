@@ -270,6 +270,13 @@ impl FoldMode {
     }
 }
 
+/// The preset tokens a stored `fold_mode` list can name, in menu order.
+/// Re-exported as `crate::workspace::fold_preset_tokens` so the Settings agent
+/// catalog offers exactly this vocabulary instead of a copy of it.
+pub(crate) fn preset_tokens() -> [&'static str; FoldPreset::ALL.len()] {
+    FoldPreset::ALL.map(FoldPreset::token)
+}
+
 fn parse_tool_cell(token: &str) -> Option<(TurnPosition, ToolCategory, BlockRule)> {
     let (cell, rule) = token.split_once('=')?;
     let mut parts = cell.split('.');

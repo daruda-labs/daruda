@@ -182,6 +182,7 @@ pub(in crate::workspace) fn render(
             display_filter: content.display_filter,
             fold_mode: content.fold.mode_choice(),
             fold_editor_turn: content.fold_editor_turn,
+            custom_fold_mode: content.custom_fold_mode,
             activity_options_tab: content.activity_options_tab,
             compact_options,
             filter_popover_open,
@@ -596,10 +597,6 @@ fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoEl
         .child(SharedString::from(agent_display_name(this).to_string()))
 }
 
-/// Tool calls in `run` that the current projection displays. Every header that
-/// prints a count sits on a disclosure, so the number has to be what expanding
-/// it puts on screen: filter matches normally, or the whole run while the
-/// filtered-row disclosure is open.
 /// Every tool call the run made, whatever the display filter hides.
 ///
 /// The response bar summarizes the turn rather than disclosing a fixed set of
@@ -611,6 +608,10 @@ fn run_tools(items: &[ChatItem], run: std::ops::Range<usize>) -> usize {
         .count()
 }
 
+/// Tool calls in `run` that the current projection displays — filter matches
+/// normally, or the whole run while the filtered-row disclosure is open. The
+/// count a group bar prints, because expanding it is what puts those rows on
+/// screen; see [`run_tools`] for the response bar's different rule.
 fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>, filter_revealed: bool) -> usize {
     run.filter(|&k| {
         matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc))

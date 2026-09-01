@@ -135,6 +135,9 @@ impl AgentEntry {
                     // A remote transport is not expressible as an override.
                     _ => return None,
                 },
+                // Copied whole rather than diffed against `base` like `name`
+                // and `command`: every registry preset leaves these `None`, so
+                // the value *is* the override.
                 default_mode: definition.default_mode.clone(),
                 default_model: definition.default_model.clone(),
                 fold_mode: definition.fold_mode.clone(),

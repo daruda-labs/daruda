@@ -4,14 +4,71 @@
 use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
 use gpui::{
-    AnyElement, Context, ImageSource, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    RenderImage, div, img, prelude::*, px,
+    AnyElement, Context, HighlightStyle, ImageSource, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, RenderImage, StyledText, div, img, prelude::*, px,
 };
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::CharSelection;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan, lone_image};
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
+use crate::workspace::main_area::file_view_pane::{CharSelection, VisualRow};
+
+/// The monospace card both a fenced code block and an unrendered mermaid fence
+/// sit in.
+fn code_surface(t: &DarudaTheme) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .bg(t.md_code_block_bg)
+        .border_1()
+        .border_color(t.border)
+        .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
+        .px(px(theme::MD_CODE_BLOCK_PAD_X))
+        .py(px(theme::MD_CODE_BLOCK_PAD_Y))
+        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .font(gpui::font("monospace"))
+        .text_color(t.text_body)
+}
+
+/// A code block's whole text plus the byte ranges its syntax colours cover.
+///
+/// One `StyledText` per block rather than a div per row and per span: gpui
+/// shapes and wraps multi-line text itself, so the element count stops tracking
+/// the block's line count. This preview builds the whole document every time it
+/// renders and the File pane is not `.cached()`, so that count is paid on every
+/// repaint. Same shape zed's markdown renderer uses (`flush_text`,
+/// `crates/markdown/src/markdown.rs`), which flushes at container boundaries,
+/// never per line.
+///
+/// A row with no spans contributes its plain `content` and no highlight, so it
+/// takes the surface's own text colour.
+fn code_block_text(rows: &[VisualRow]) -> (String, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
+    let mut text = String::new();
+    let mut highlights = Vec::new();
+    for (ix, row) in rows.iter().enumerate() {
+        if ix > 0 {
+            text.push('\n');
+        }
+        if row.spans.is_empty() {
+            text.push_str(&row.content);
+            continue;
+        }
+        for span in row.spans.iter().filter(|s| !s.text.is_empty()) {
+            let start = text.len();
+            text.push_str(&span.text);
+            if let Some(color) = span.color {
+                highlights.push((
+                    start..text.len(),
+                    HighlightStyle {
+                        color: Some(color),
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+    }
+    (text, highlights)
+}
 
 /// Top-level Markdown body: a padded column of selectable blocks.
 pub(super) fn render_md_body(
@@ -93,64 +150,19 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         }
 
         MdBlock::CodeBlock { rows, .. } => {
-            let body_text = t.text_body;
-            let mut code_col = div()
-                .flex()
-                .flex_col()
-                .bg(t.md_code_block_bg)
-                .border_1()
-                .border_color(t.border)
-                .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
-                .px(px(theme::MD_CODE_BLOCK_PAD_X))
-                .py(px(theme::MD_CODE_BLOCK_PAD_Y))
-                .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-                .font(gpui::font("monospace"));
-            for row in rows {
-                let line_el = if row.spans.is_empty() {
-                    div()
-                        .text_color(body_text)
-                        .child(row.content.clone())
-                        .into_any_element()
-                } else {
-                    div()
-                        .flex()
-                        .flex_row()
-                        .children(row.spans.iter().filter(|s| !s.text.is_empty()).map(|s| {
-                            div()
-                                .text_color(s.color.unwrap_or(body_text))
-                                .child(s.text.clone())
-                                .into_any_element()
-                        }))
-                        .into_any_element()
-                };
-                code_col = code_col.child(line_el);
-            }
-            code_col.into_any_element()
+            let (text, highlights) = code_block_text(rows);
+            code_surface(t)
+                .child(StyledText::new(text).with_highlights(highlights))
+                .into_any_element()
         }
 
         MdBlock::Mermaid { source, raster } => match raster {
             Some(raster) => render_md_image(Some(raster), "", ImageLayout::Diagram, t),
-            None => {
-                // Rendering failed/pending: fall back to the raw source, styled
-                // like a code block.
-                let body_text = t.text_body;
-                let mut col = div()
-                    .flex()
-                    .flex_col()
-                    .bg(t.md_code_block_bg)
-                    .border_1()
-                    .border_color(t.border)
-                    .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
-                    .px(px(theme::MD_CODE_BLOCK_PAD_X))
-                    .py(px(theme::MD_CODE_BLOCK_PAD_Y))
-                    .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-                    .font(gpui::font("monospace"))
-                    .text_color(body_text);
-                for line in source.lines() {
-                    col = col.child(div().child(line.to_owned()).into_any_element());
-                }
-                col.into_any_element()
-            }
+            // Rendering failed/pending: fall back to the raw source, styled
+            // like a code block.
+            None => code_surface(t)
+                .child(StyledText::new(source.clone()))
+                .into_any_element(),
         },
 
         MdBlock::BulletList(items) => {
@@ -600,4 +612,85 @@ fn block_with_selection(
         .cursor_default()
         .on_mouse_down(MouseButton::Left, down_handler)
         .on_mouse_move(move_handler)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::code_block_text;
+    use crate::workspace::main_area::file_view_pane::{HighlightedSpan, VisualRow, VisualRowKind};
+
+    fn row(content: &str, spans: Vec<HighlightedSpan>) -> VisualRow {
+        VisualRow {
+            kind: VisualRowKind::Context,
+            line_no_left: String::new(),
+            line_no_right: String::new(),
+            content: content.to_string(),
+            header_context: String::new(),
+            spans,
+            word_changes: Vec::new(),
+        }
+    }
+
+    fn span(text: &str, color: Option<gpui::Hsla>) -> HighlightedSpan {
+        HighlightedSpan {
+            text: text.to_string(),
+            color,
+            style: Default::default(),
+        }
+    }
+
+    const RED: gpui::Hsla = gpui::Hsla {
+        h: 0.0,
+        s: 1.0,
+        l: 0.5,
+        a: 1.0,
+    };
+
+    #[test]
+    fn rows_join_with_newlines_so_one_element_covers_the_block() {
+        let (text, highlights) =
+            code_block_text(&[row("fn a() {}", vec![]), row("fn b() {}", vec![])]);
+        assert_eq!(text, "fn a() {}\nfn b() {}");
+        assert!(
+            highlights.is_empty(),
+            "an unhighlighted row takes the surface colour"
+        );
+    }
+
+    #[test]
+    fn a_highlight_range_addresses_the_joined_text_not_its_own_row() {
+        let (text, highlights) = code_block_text(&[
+            row("let x", vec![]),
+            row("", vec![span("let", Some(RED)), span(" y", None)]),
+        ]);
+        assert_eq!(text, "let x\nlet y");
+        assert_eq!(highlights.len(), 1);
+        assert_eq!(
+            highlights[0].0,
+            6..9,
+            "offset counts the earlier row and its newline"
+        );
+        assert_eq!(highlights[0].1.color, Some(RED));
+    }
+
+    #[test]
+    fn an_empty_span_contributes_no_range() {
+        let (text, highlights) =
+            code_block_text(&[row("", vec![span("", Some(RED)), span("x", None)])]);
+        assert_eq!(text, "x");
+        assert!(highlights.is_empty());
+    }
+
+    #[test]
+    fn every_highlight_lands_on_a_char_boundary() {
+        // `StyledText::with_highlights` debug-asserts this, and multi-byte
+        // source is ordinary in a code block.
+        let (text, highlights) = code_block_text(&[row(
+            "",
+            vec![span("사과", Some(RED)), span("=1", Some(RED))],
+        )]);
+        for (range, _) in &highlights {
+            assert!(text.is_char_boundary(range.start) && text.is_char_boundary(range.end));
+        }
+    }
 }

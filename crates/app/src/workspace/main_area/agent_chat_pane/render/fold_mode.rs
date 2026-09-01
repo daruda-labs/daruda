@@ -7,8 +7,8 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
-    ButtonVariants as _, Disableable as _, Popover, Selectable as _, Sizable as _, button,
-    button_chip_on_surface, button_group,
+    ButtonVariants as _, Disableable as _, Divider, Popover, Selectable as _, Sizable as _, button,
+    button_chip_on_surface, button_group, tab, tab_bar,
 };
 use crate::workspace::main_area::agent_chat_pane::fold_mode::{
     BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition,
@@ -29,6 +29,7 @@ pub(super) fn fold_mode_chip(
     pane_id: PaneId,
     mode: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
+    custom_mode: Option<FoldMode>,
     default_open: bool,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
@@ -51,7 +52,14 @@ pub(super) fn fold_mode_chip(
     )
     .content(move |_, window, cx| {
         panel_root(theme::AGENT_CHAT_RULES_PANEL_W, window)
-            .child(fold_mode_panel(&view, mode, editor_turn, pane_id, cx))
+            .child(fold_mode_panel(
+                &view,
+                mode,
+                editor_turn,
+                custom_mode,
+                pane_id,
+                cx,
+            ))
             .into_any_element()
     })
 }
@@ -77,6 +85,7 @@ pub(super) fn fold_mode_panel(
     view: &gpui::WeakEntity<AgentChatView>,
     mode_choice: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
+    custom_mode: Option<FoldMode>,
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
@@ -106,8 +115,11 @@ pub(super) fn fold_mode_panel(
             fixed_region()
                 .gap(px(theme::GAP_LG))
                 .child(panel_heading(s::agent_chat_fold_editor_presets(), cx))
-                .child(preset_group(view, mode, pane_id, cx))
-                .child(turn_group(view, editor_turn, pane_id, cx)),
+                .child(preset_group(view, mode, custom_mode, pane_id, cx))
+                // Separates "set a value" from "switch what is being edited":
+                // the strip above is a choice, the tabs below are a view swap.
+                .child(Divider::horizontal())
+                .child(turn_tabs(view, editor_turn, pane_id)),
         )
         .child(
             scroll_region(SharedString::from(format!(
@@ -136,9 +148,64 @@ pub(super) fn fold_mode_panel(
         .into_any_element()
 }
 
+/// The strip's segments: the three presets plus the state a hand-edited matrix
+/// lands in. `Custom` is not a preset — it re-selects the matrix the user last
+/// edited, so choosing a preset does not throw that work away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PresetSegment {
+    Preset(FoldPreset),
+    Custom,
+}
+
+impl PresetSegment {
+    /// The length is derived from [`FoldPreset::ALL`], so a new preset fails to
+    /// compile here rather than silently dropping off the strip.
+    const ALL: [PresetSegment; FoldPreset::ALL.len() + 1] = [
+        Self::Preset(FoldPreset::Auto),
+        Self::Preset(FoldPreset::Summary),
+        Self::Preset(FoldPreset::Expanded),
+        Self::Custom,
+    ];
+
+    fn preset(self) -> Option<FoldPreset> {
+        match self {
+            Self::Preset(preset) => Some(preset),
+            Self::Custom => None,
+        }
+    }
+
+    fn token(self) -> &'static str {
+        match self {
+            Self::Preset(preset) => preset_token(preset),
+            Self::Custom => "custom",
+        }
+    }
+
+    fn label(self) -> String {
+        match self {
+            Self::Preset(preset) => preset_label(preset),
+            Self::Custom => s::agent_chat_fold_mode_custom(),
+        }
+    }
+
+    /// A hand-edited matrix matches no preset, which is exactly the state
+    /// `Custom` names.
+    fn is_selected(self, mode: FoldMode) -> bool {
+        mode.preset() == self.preset()
+    }
+
+    fn is_enabled(self, mode: FoldMode, custom_mode: Option<FoldMode>) -> bool {
+        match self {
+            Self::Preset(_) => true,
+            Self::Custom => mode.preset().is_none() || custom_mode.is_some(),
+        }
+    }
+}
+
 fn preset_group(
     view: &gpui::WeakEntity<AgentChatView>,
     mode: FoldMode,
+    custom_mode: Option<FoldMode>,
     pane_id: PaneId,
     cx: &App,
 ) -> impl IntoElement + use<> {
@@ -147,52 +214,57 @@ fn preset_group(
         SharedString::from(format!("agent-chat-fold-presets-{pane_id}")),
         cx,
     )
-    .children(FoldPreset::ALL.into_iter().map(|preset| {
+    .children(PresetSegment::ALL.into_iter().map(|segment| {
         button(
             SharedString::from(format!(
                 "agent-chat-fold-preset-{}-{pane_id}",
-                preset_token(preset)
+                segment.token()
             )),
-            preset_label(preset),
+            segment.label(),
         )
-        .selected(mode.preset() == Some(preset))
+        .selected(segment.is_selected(mode))
+        .disabled(!segment.is_enabled(mode, custom_mode))
     }))
     .on_click(move |indices, _window, app| {
-        let Some(&ix) = indices.first() else {
+        let Some(segment) = indices.first().and_then(|&ix| PresetSegment::ALL.get(ix)) else {
             return;
         };
+        let preset = segment.preset();
         if let Some(view) = view.upgrade() {
-            view.update(app, |v, cx| v.set_fold_mode(FoldPreset::ALL[ix].mode(), cx));
+            view.update(app, |v, cx| v.select_fold_preset(preset, cx));
         }
     })
 }
 
-fn turn_group(
+/// Which matrix column the rows below edit — a view switch, not a value, so it
+/// reads as tabs rather than as a third segmented strip in the same popover.
+fn turn_tabs(
     view: &gpui::WeakEntity<AgentChatView>,
     current: TurnPosition,
     pane_id: PaneId,
-    cx: &App,
 ) -> impl IntoElement + use<> {
     let view = view.clone();
-    button_group(
-        SharedString::from(format!("agent-chat-fold-turns-{pane_id}")),
-        cx,
+    let active_ix = TurnPosition::ALL
+        .iter()
+        .position(|turn| *turn == current)
+        .unwrap_or(0);
+    tab_bar(SharedString::from(format!(
+        "agent-chat-fold-turns-{pane_id}"
+    )))
+    .w_full()
+    .gap(px(0.))
+    .selected_index(active_ix)
+    .children(
+        TurnPosition::ALL
+            .into_iter()
+            .map(|turn| tab(SharedString::from(turn_label(turn)))),
     )
-    .children(TurnPosition::ALL.into_iter().map(|turn| {
-        button(
-            SharedString::from(format!("agent-chat-fold-turn-{}-{pane_id}", turn.token())),
-            turn_label(turn),
-        )
-        .selected(turn == current)
-    }))
-    .on_click(move |indices, _window, app| {
-        let Some(&ix) = indices.first() else {
+    .on_click(move |ix, _window, app| {
+        let Some(&turn) = TurnPosition::ALL.get(*ix) else {
             return;
         };
         if let Some(view) = view.upgrade() {
-            view.update(app, |v, cx| {
-                v.set_fold_editor_turn(TurnPosition::ALL[ix], cx)
-            });
+            view.update(app, |v, cx| v.set_fold_editor_turn(turn, cx));
         }
     })
 }
@@ -373,8 +445,9 @@ mod tests {
 
     #[test]
     fn every_editor_option_has_a_label() {
-        for preset in FoldPreset::ALL {
-            assert!(!preset_label(preset).is_empty(), "{preset:?}");
+        for segment in PresetSegment::ALL {
+            assert!(!segment.label().is_empty(), "{segment:?}");
+            assert!(!segment.token().is_empty(), "{segment:?}");
         }
         for block in FoldBlock::ALL {
             assert!(!block_label(block).is_empty(), "{block:?}");
@@ -423,5 +496,46 @@ mod tests {
         );
         let custom = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
         assert_eq!(mode_value(custom), s::agent_chat_fold_mode_custom());
+    }
+
+    /// The strip has to say *something* about a hand-edited matrix; before
+    /// `Custom` existed it showed nothing selected, which reads as "no choice".
+    #[test]
+    fn custom_is_the_selected_segment_for_a_hand_edited_matrix() {
+        let custom = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
+        assert!(custom.preset().is_none(), "the fixture is hand-edited");
+        let selected: Vec<PresetSegment> = PresetSegment::ALL
+            .into_iter()
+            .filter(|segment| segment.is_selected(custom))
+            .collect();
+        assert_eq!(selected, vec![PresetSegment::Custom]);
+    }
+
+    #[test]
+    fn a_preset_matrix_selects_exactly_its_own_segment() {
+        for preset in FoldPreset::ALL {
+            let selected: Vec<PresetSegment> = PresetSegment::ALL
+                .into_iter()
+                .filter(|segment| segment.is_selected(preset.mode()))
+                .collect();
+            assert_eq!(selected, vec![PresetSegment::Preset(preset)], "{preset:?}");
+        }
+    }
+
+    /// `Custom` is a real choice, so it is offered only when there is a matrix
+    /// to return to — or when it is already the state the pane is in.
+    #[test]
+    fn custom_is_offered_only_when_there_is_something_to_return_to() {
+        let custom = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
+        let auto = FoldPreset::Auto.mode();
+        assert!(!PresetSegment::Custom.is_enabled(auto, None));
+        assert!(PresetSegment::Custom.is_enabled(auto, Some(custom)));
+        assert!(
+            PresetSegment::Custom.is_enabled(custom, None),
+            "already custom: the segment names the current state"
+        );
+        for preset in FoldPreset::ALL {
+            assert!(PresetSegment::Preset(preset).is_enabled(auto, None));
+        }
     }
 }

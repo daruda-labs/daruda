@@ -477,5 +477,13 @@ impl DisplayFilter {
     }
 }
 
+/// The stored visible set that names every kind. Re-exported as
+/// `crate::workspace::show_everything_tokens` for the Settings agent catalog:
+/// a per-agent `display_filter` needs this list to state "unfiltered", since
+/// its `None` means "follow `[agent]`", which may itself be narrowed.
+pub(crate) fn show_everything_tokens() -> Vec<&'static str> {
+    DisplayFilter::default().tokens()
+}
+
 #[cfg(test)]
 mod tests;

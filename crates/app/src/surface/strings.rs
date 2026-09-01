@@ -1765,9 +1765,8 @@ pub fn agent_chat_tab_title() -> String {
     rust_i18n::t!("agent_chat.tab_title").into_owned()
 }
 
-/// Closes a diff shown through the inline fallback, which cannot scroll and so
-/// drops what it does not render. Names the count — and points at the file —
-/// because unlike the editor embed there is no scrolling to the rest.
+/// Closes a diff cut short by the inline fallback. Names the count and points
+/// at the file, since the fallback has no scroller to reach the rest with.
 pub fn agent_chat_diff_fallback_truncated(n: usize) -> String {
     rust_i18n::t!("agent_chat.diff_fallback_truncated", n = n).into_owned()
 }
@@ -4262,6 +4261,51 @@ pub fn settings_agent_vocabulary_agent_default() -> String {
 /// choice rather than a blank.
 pub fn settings_agent_vocabulary_agent_default_named(name: &str) -> String {
     rust_i18n::t!("settings.agent_vocabulary_agent_default_named", name = name).into_owned()
+}
+
+/// Heading for the per-agent transcript-presentation group inside a catalog
+/// row.
+pub fn settings_agent_section_transcript() -> String {
+    rust_i18n::t!("settings.agent_section_transcript").into_owned()
+}
+
+/// One-line explanation of what the transcript group's three pickers set, and
+/// of what leaving them unset does.
+pub fn settings_agent_transcript_description() -> String {
+    rust_i18n::t!("settings.agent_transcript_description").into_owned()
+}
+
+/// Label for an agent catalog row's optional fold-mode override.
+pub fn settings_agent_field_fold_mode() -> String {
+    rust_i18n::t!("settings.agent_field_fold_mode").into_owned()
+}
+
+/// Label for an agent catalog row's optional trailing-step-window override.
+pub fn settings_agent_field_tail_window() -> String {
+    rust_i18n::t!("settings.agent_field_tail_window").into_owned()
+}
+
+/// Label for an agent catalog row's optional display-filter override.
+pub fn settings_agent_field_display_filter() -> String {
+    rust_i18n::t!("settings.agent_field_display_filter").into_owned()
+}
+
+/// The "no override" entry in a row's transcript pickers — the axis follows
+/// the app-wide Agent settings.
+pub fn settings_agent_transcript_default() -> String {
+    rust_i18n::t!("settings.agent_transcript_default").into_owned()
+}
+
+/// The entry standing in for a stored transcript value no picker can state —
+/// a fold matrix with cell overrides, an off-list step count, a partial
+/// visible set. Selected, and written back untouched while it stays picked.
+pub fn settings_agent_transcript_custom() -> String {
+    rust_i18n::t!("settings.agent_transcript_custom").into_owned()
+}
+
+/// The display-filter picker's one stated value: nothing hidden.
+pub fn settings_agent_display_filter_everything() -> String {
+    rust_i18n::t!("settings.agent_display_filter_everything").into_owned()
 }
 
 /// Hint line shown under the host/container field for an `ssh`/`docker`

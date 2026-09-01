@@ -188,24 +188,24 @@ fn strip() -> f32 {
 #[test]
 fn bounded_embed_height_cases() {
     assert_eq!(
-        bounded_embed_height(3),
+        bounded_embed_height(3, theme::AGENT_CHAT_EMBED_MAX_H),
         px(3.0 * theme::AGENT_CHAT_EMBED_ROW_H + strip())
     );
 
     let rows = (theme::AGENT_CHAT_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize;
     assert_eq!(
-        bounded_embed_height(rows),
+        bounded_embed_height(rows, theme::AGENT_CHAT_EMBED_MAX_H),
         px(theme::AGENT_CHAT_EMBED_MAX_H + strip())
     );
     assert_eq!(
-        bounded_embed_height(rows),
+        bounded_embed_height(rows, theme::AGENT_CHAT_EMBED_MAX_H),
         px(rows as f32 * theme::AGENT_CHAT_EMBED_ROW_H + strip())
     );
 
     // The bound is what makes `InputState` shape only the visible rows, so
     // it must not grow with the output.
     assert_eq!(
-        bounded_embed_height(11_000),
+        bounded_embed_height(11_000, theme::AGENT_CHAT_EMBED_MAX_H),
         px(theme::AGENT_CHAT_EMBED_MAX_H + strip())
     );
 }

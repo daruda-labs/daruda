@@ -16,6 +16,7 @@ use futures::channel::mpsc::unbounded;
 use gpui::Context;
 
 use super::agent_chat_ops::{agent_name_for, resolve_open_agent_id};
+use super::transcript_defaults::TranscriptDefaults;
 use super::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::agent::account::PreparedAccount;
 use crate::agent::launch_resolve::{
@@ -311,16 +312,21 @@ impl Workspace {
         // launch the effective agent (a catalog entry, or the Claude id when the
         // catalog is somehow empty).
         let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        let defaults = TranscriptDefaults::resolve(
+            &self.agent,
+            self.agents.iter().find(|a| a.id == effective_id),
+        );
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
             let name = agent_name_for(&self.agents, &effective_id);
-            view.update(cx, |v, _| {
+            view.update(cx, |v, cx| {
                 v.agent_id = id;
                 v.agent_name = name;
                 // The program belongs to the agent that reported it. Leaving it
                 // would read the incoming agent's traffic in the outgoing one's
                 // dialect until the next connect restates it.
                 v.agent_program = None;
+                v.reseed_transcript_defaults(&defaults, cx);
             });
             self.mutate_durable(cx, |_, _| {});
         }
@@ -328,6 +334,15 @@ impl Workspace {
             self.agent_launch_for(&effective_id)
                 .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch),
         )
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn resolve_pane_launch_for_test(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Option<AgentLaunch> {
+        self.resolve_pane_launch(pane_id, cx)
     }
 
     fn prepare_agent_chat_connection(

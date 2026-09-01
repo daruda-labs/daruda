@@ -677,6 +677,20 @@ pub fn agent_chat_fg_subtle(cx: &App) -> gpui::Hsla {
     agent_chat_fg(cx).opacity(p::AGENT_CHAT_FG_SUBTLE_ALPHA)
 }
 
+/// Clickable text on the terminal-mirrored agent-chat surface. The UI theme's
+/// link hue is retained, but its lightness is resolved against the pane
+/// background because `ui_preset` and `terminal_preset` are independent.
+pub fn agent_chat_link_color(cx: &App) -> gpui::Hsla {
+    let mut link = current(cx).link_color;
+    let bg = agent_chat_bg(cx);
+    link.l = if bg.l < 0.5 {
+        link.l.max(0.74)
+    } else {
+        link.l.min(0.34)
+    };
+    link
+}
+
 /// File-viewer pane foreground. Mirrors Agent Chat's terminal-derived text
 /// ramp so file-viewer chrome tracks live terminal theme changes.
 pub fn file_viewer_pane_fg(cx: &App) -> gpui::Hsla {
@@ -845,6 +859,50 @@ mod tests {
                     assert!(ratio >= floor, "{name} on {bg:?} measures {ratio:.2}:1");
                 }
             }
+        });
+    }
+
+    /// Agent-chat file links sit on the terminal-derived pane surface, not the
+    /// UI surface the global link token was tuned for. Keep the link hue but
+    /// prove its lightness follows the pane when UI and terminal themes differ.
+    #[gpui::test]
+    fn the_agent_chat_link_color_tracks_the_pane_background(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+
+            assert!(apply_ui_theme("daruda_light", cx));
+            set_agent_chat_bg(cx, 17, 17, 17);
+            set_agent_chat_fg(cx, 216, 216, 216);
+            let dark_ui_link = current(cx).link_color;
+            let dark_pane_link = agent_chat_link_color(cx);
+            let dark_ratio = contrast_over(dark_pane_link, agent_chat_bg(cx));
+            assert!(
+                dark_ratio >= 4.5,
+                "light UI link on dark agent-chat bg measures {dark_ratio:.2}:1"
+            );
+            assert!(
+                dark_pane_link.l > dark_ui_link.l,
+                "dark pane should lift the light-theme link, got {:?} from {:?}",
+                dark_pane_link,
+                dark_ui_link
+            );
+
+            assert!(apply_ui_theme("daruda_dark", cx));
+            set_agent_chat_bg(cx, 250, 250, 250);
+            set_agent_chat_fg(cx, 40, 40, 40);
+            let light_ui_link = current(cx).link_color;
+            let light_pane_link = agent_chat_link_color(cx);
+            let light_ratio = contrast_over(light_pane_link, agent_chat_bg(cx));
+            assert!(
+                light_ratio >= 4.5,
+                "dark UI link on light agent-chat bg measures {light_ratio:.2}:1"
+            );
+            assert!(
+                light_pane_link.l < light_ui_link.l,
+                "light pane should darken the dark-theme link, got {:?} from {:?}",
+                light_pane_link,
+                light_ui_link
+            );
         });
     }
 

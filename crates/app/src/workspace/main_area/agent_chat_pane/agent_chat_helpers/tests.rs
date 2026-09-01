@@ -523,6 +523,24 @@ fn is_active_matches_streaming_and_in_progress() {
     )));
 }
 
+/// `FoldKey::Response` carries the response's *first* item index (`rows::project`
+/// passes `run.start`), so the liveness scan has to include that item. Skipping
+/// it made a turn that opens with the only live block read as settled — under the
+/// `Summary` preset that projects the row `hidden` until a second item arrives.
+#[test]
+fn a_response_is_active_when_only_its_first_item_is() {
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::AssistantText {
+            text: "a".to_owned(),
+            streaming: true,
+            message_id: None,
+            phase: Default::default(),
+        },
+    ];
+    assert!(fold_active(&FoldKey::Response(1), &items));
+}
+
 #[test]
 fn fold_active_resolves_per_key() {
     use daruda_acp::ToolStatusView::{Completed, InProgress};

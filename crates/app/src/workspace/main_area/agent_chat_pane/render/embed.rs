@@ -24,6 +24,7 @@ pub(in crate::workspace) fn bounded_editor_embed(
     id: &str,
     editor: &Entity<crate::ui::InputState>,
     copy_source: Option<SharedString>,
+    max_h: f32,
     t: &theme::DarudaTheme,
     dim: f32,
     cx: &App,
@@ -32,7 +33,7 @@ pub(in crate::workspace) fn bounded_editor_embed(
     // The bound is the whole point: `calculate_visible_range`
     // (`gpui_component/src/input/element.rs`) derives the shaped row range from
     // the painted height, so an unbounded embed shapes every row on every paint.
-    let height = bounded_embed_height(rows);
+    let height = bounded_embed_height(rows, max_h);
     // `scroll_handle().bounds()` / `.max_offset()` are permanently zero for this
     // element (see `InputState::scroll_size`'s doc comment), so the viewport
     // extent comes from `last_bounds()` — the same pairing the File viewer's

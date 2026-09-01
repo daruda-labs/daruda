@@ -526,7 +526,15 @@ fn output_block_view(
         // editor, so it is the fence body rather than the raw block text — what
         // the user actually sees in the embed.
         let copy = output_editor_source(block).map(|src| SharedString::from(src.text.to_string()));
-        let body = bounded_editor_embed(&key, editor, copy, context.t, context.dim, cx);
+        let body = bounded_editor_embed(
+            &key,
+            editor,
+            copy,
+            theme::AGENT_CHAT_EMBED_MAX_H,
+            context.t,
+            context.dim,
+            cx,
+        );
         return with_truncation_note(body, output_truncated_from(block), context.dim, cx);
     }
     let dim = context.dim;

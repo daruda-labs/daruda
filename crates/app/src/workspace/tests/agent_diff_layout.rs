@@ -25,11 +25,11 @@ use crate::workspace::main_area::agent_chat_pane::output_editor::bounded_embed_h
 const DIFF_TEXT: &str = "@@ -1,0 +1,5 @@\nuse std::collections::{HashMap, HashSet, BTreeMap, BTreeSet};\nlet a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;";
 const DIFF_ROWS: usize = 6;
 /// Far more rows than the cap can show — a whole-file `Write` of a large file.
-const LARGE_ROWS: usize = 200;
+const LARGE_ROWS: usize = 400;
 
 /// How many rows the cap can actually show.
 fn capped_rows() -> usize {
-    (theme::AGENT_CHAT_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize
+    (theme::AGENT_CHAT_DIFF_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize
 }
 
 /// The row count `calculate_visible_range` may report at most: a full viewport
@@ -79,7 +79,7 @@ impl Render for DiffProbe {
         // `render/diff.rs::diff_body` embeds the diff through: the capped height
         // goes on both the wrapper and the `Input`.
         let rows = self.editor.read(cx).display_rows().max(1);
-        let height = bounded_embed_height(rows);
+        let height = bounded_embed_height(rows, theme::AGENT_CHAT_DIFF_EMBED_MAX_H);
         let surface = crate::ui::theme::agent_chat_bg(cx);
         div().flex().flex_col().w_full().child(
             div()
@@ -135,7 +135,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
         DIFF_ROWS < capped_rows(),
         "the six-row case must stay under the cap"
     );
-    let expected = bounded_embed_height(DIFF_ROWS);
+    let expected = bounded_embed_height(DIFF_ROWS, theme::AGENT_CHAT_DIFF_EMBED_MAX_H);
     assert_eq!(
         wrapper.size.height, expected,
         "an uncapped diff measures its content plus the thumb strip"
@@ -464,7 +464,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
     );
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(rows),
+        bounded_embed_height(rows, theme::AGENT_CHAT_DIFF_EMBED_MAX_H),
         "the diff embed in a real card is capped"
     );
     let visible = visible.expect("the embedded editor painted");

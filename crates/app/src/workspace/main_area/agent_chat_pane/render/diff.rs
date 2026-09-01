@@ -35,9 +35,7 @@ const ICON_OPEN_IN_NEW: &str = "icons/ui/open-in-new.svg";
 /// it so the treatment matches the File viewer exactly — gutter + syntax +
 /// word-diff backgrounds. Falls back to inline old/new colored monospace lines
 /// when the editor is absent (the two sides are identical, or the window was
-/// gone at build time); that fallback is capped at
-/// `AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS`, so no diff can make a list row's element
-/// count track a file's line count.
+/// gone at build time), capped at `AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn diff_block(
     tool_id: &str,
@@ -63,8 +61,9 @@ pub(super) fn diff_block(
     let path_string = diff.path.display().to_string();
     // The path is the block's identity, shown in both fold states, so it takes
     // the stretch slot; the truncation idiom lives in `fold_header`. It reads as
-    // a link through cursor + hover underline, and takes the `link_color` role
-    // so it matches markdown link text instead of borrowing a git status hue.
+    // a link through cursor + hover underline. The hue follows the UI link
+    // token, but the lightness is resolved against the agent-chat pane so a
+    // light UI over a dark terminal preset (or the inverse) stays readable.
     // Clicking it opens the file in the pane-area file
     // viewer — dispatched through `Workspace::open_diff_in_file_view`, reached
     // via `WindowRegistry` since this self-owned view has no direct `Workspace`
@@ -77,7 +76,10 @@ pub(super) fn diff_block(
             "agent-chat-diff-path-{diff_key}"
         )))
         .cursor_pointer()
-        .text_color(theme::dim_toward_gray(t.link_color, dim))
+        .text_color(theme::dim_toward_gray(
+            theme::agent_chat_link_color(cx),
+            dim,
+        ))
         .hover(|s| s.underline())
         .font_family(theme::FONT_FAMILY_MONOSPACE)
         .text_size(px(theme::agent_chat_font_size(cx)))
@@ -232,6 +234,7 @@ fn diff_body(
             &format!("diff-{diff_key}"),
             editor,
             None,
+            theme::AGENT_CHAT_DIFF_EMBED_MAX_H,
             t,
             dim,
             cx,
@@ -308,13 +311,8 @@ struct FallbackSplit {
 }
 
 /// Split `cap` rows across the removed side then the added side, the order they
-/// render in. The cap is what keeps a fallback diff's element count off the
-/// file's line count: the fallback cannot scroll, and the chat list re-runs
-/// layout for every visible row on every repaint, so an unbounded one made a
-/// single big diff cost the whole pane hundreds of taffy nodes per frame.
-/// Cut lines are gone, not scrolled past — see
-/// [`AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS`](theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS)
-/// for why that makes it a different number from the embed's height cap.
+/// render in. Cut lines are dropped, not scrolled past — the fallback has no
+/// scroller, so `cap` is what keeps its element count off the file's line count.
 fn fallback_split(old_count: usize, new_count: usize, cap: usize) -> FallbackSplit {
     let old_shown = old_count.min(cap);
     let new_shown = new_count.min(cap - old_shown);
@@ -379,11 +377,11 @@ mod tests {
         assert_eq!((split.old_shown, split.new_shown, split.hidden), (5, 7, 33));
     }
 
+    /// Starving the added side is acceptable: the cut is reported either way,
+    /// and the answer for a diff this size is its editor, not a re-balanced
+    /// fallback that still cannot scroll.
     #[test]
     fn a_removed_side_past_the_cap_leaves_the_added_side_nothing() {
-        // Not a starvation bug to fix here: the cut is reported either way, and
-        // the fix for a diff this size is to build its editor, not to re-balance
-        // a fallback that cannot scroll.
         let split = fallback_split(30, 30, 12);
         assert_eq!(
             (split.old_shown, split.new_shown, split.hidden),
@@ -399,9 +397,6 @@ mod tests {
 
     #[test]
     fn the_shipped_cap_bounds_a_diff_larger_than_itself() {
-        // Pins the constant to the fallback rather than to the embed's viewport
-        // height: this one decides what is rendered at all, so it is read here
-        // from `theme` and not re-derived from a pixel budget.
         let cap = theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS;
         assert!(cap > 0);
         let split = fallback_split(0, cap + 1, cap);

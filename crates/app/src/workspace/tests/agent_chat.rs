@@ -1461,6 +1461,342 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     let _ = std::fs::remove_dir_all(&project_root);
 }
 
+/// The two agent ids the per-agent transcript tests below run their panes on.
+const TRANSCRIPT_AGENT_A: &str = "transcript-agent-a";
+const TRANSCRIPT_AGENT_B: &str = "transcript-agent-b";
+
+/// One `[[agents]]` row stating all three transcript axes. Callers give the two
+/// agents disagreeing values on every axis, so a pane on one can never be
+/// mistaken for a pane on the other. The id doubles as the name: these entries
+/// exist only to be told apart.
+fn transcript_agent_entry(
+    id: &str,
+    tail_window: u8,
+    fold_mode: &str,
+    filter: FilterFacet,
+) -> daruda_config::AgentEntry {
+    daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        id: id.to_string(),
+        name: id.to_string(),
+        fold_mode: Some(vec![fold_mode.to_string()]),
+        tail_window: Some(tail_window),
+        display_filter: Some(vec![filter.token().to_string()]),
+        ..daruda_config::AgentDefinition::claude_default()
+    })
+}
+
+/// Open a chat pane on `agent_id` in the active runtime, in its own tab, and
+/// return its id.
+fn open_agent_chat_pane_on(
+    ws: &mut Workspace,
+    agent_id: &str,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<Workspace>,
+) -> PaneId {
+    use crate::workspace::main_area::pane::TabEntry;
+    use crate::workspace::main_area::pane_tree::PaneLayout;
+
+    let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
+    let pane = ws.create_agent_chat_pane(cwd, None, agent_id.to_string(), None, window, cx);
+    let pane_id = pane.id;
+    ws.active_runtime_mut().panes.push(pane);
+    let tab_id = ws.alloc_id();
+    ws.active_runtime_mut().tabs.push(TabEntry {
+        id: tab_id,
+        layout: PaneLayout::Pane(pane_id),
+        last_focused_pane: pane_id,
+        user_label: None,
+    });
+    pane_id
+}
+
+/// The three transcript axes a pane currently sits on, as one tuple: the tests
+/// below compare two panes against each other as well as against config.
+fn transcript_settings(
+    view: &Entity<AgentChatView>,
+    cx: &mut TestAppContext,
+) -> (PaneChoice<TailWindow>, FoldMode, PaneChoice<DisplayFilter>) {
+    view.read_with(cx, |v, _| (v.tail, v.fold.mode(), v.display_filter))
+}
+
+/// A reload must resolve the defaults per pane, against that pane's own agent.
+/// Two agents are what makes this observable: with one agent in the window,
+/// resolving once for the whole window and resolving per pane land every pane
+/// on the same values, so only disagreeing agents can tell the two apart.
+#[gpui::test]
+async fn a_config_reload_moves_each_pane_to_its_own_agents_transcript_settings(
+    cx: &mut TestAppContext,
+) {
+    let before = daruda_config::Config {
+        agents: vec![
+            transcript_agent_entry(TRANSCRIPT_AGENT_A, 3, "expanded", FilterFacet::Thinking),
+            transcript_agent_entry(TRANSCRIPT_AGENT_B, 7, "summary", FilterFacet::Tools),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_per_agent_reseed_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    let (window_handle, workspace) = super::build_workspace_with(cx, &before, Some(project));
+    cx.run_until_parked();
+
+    let (pane_a, pane_b) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                (
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_A, window, cx),
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_B, window, cx),
+                )
+            })
+        })
+        .unwrap();
+
+    // Every axis of both agents changes, and the two stay disagreeing.
+    let after = daruda_config::Config {
+        agents: vec![
+            transcript_agent_entry(TRANSCRIPT_AGENT_A, 2, "summary", FilterFacet::Tools),
+            transcript_agent_entry(TRANSCRIPT_AGENT_B, 6, "expanded", FilterFacet::Thinking),
+        ],
+        ..daruda_config::Config::default()
+    };
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.reload_config(&after, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view_a = workspace.read_with(cx, |ws, _| agent_view(ws, pane_a));
+    let view_b = workspace.read_with(cx, |ws, _| agent_view(ws, pane_b));
+    let (tail_a, fold_a, filter_a) = transcript_settings(&view_a, cx);
+    let (tail_b, fold_b, filter_b) = transcript_settings(&view_b, cx);
+
+    assert_eq!(
+        tail_a,
+        PaneChoice::Seeded(TailWindow::Last(2)),
+        "the first pane must land on its own agent's reloaded tail window"
+    );
+    assert_eq!(
+        fold_a,
+        FoldPreset::Summary.mode(),
+        "the first pane must land on its own agent's reloaded fold mode"
+    );
+    assert_eq!(
+        filter_a,
+        PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Tools.token()])),
+        "the first pane must land on its own agent's reloaded display filter"
+    );
+
+    assert_eq!(
+        tail_b,
+        PaneChoice::Seeded(TailWindow::Last(6)),
+        "the second pane must land on its own agent's reloaded tail window"
+    );
+    assert_eq!(
+        fold_b,
+        FoldPreset::Expanded.mode(),
+        "the second pane must land on its own agent's reloaded fold mode"
+    );
+    assert_eq!(
+        filter_b,
+        PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Thinking.token()])),
+        "the second pane must land on its own agent's reloaded display filter"
+    );
+
+    assert_ne!(
+        tail_a, tail_b,
+        "one resolve for the window would tie the two panes' tail windows together"
+    );
+    assert_ne!(
+        fold_a, fold_b,
+        "one resolve for the window would tie the two panes' fold modes together"
+    );
+    assert_ne!(
+        filter_a, filter_b,
+        "one resolve for the window would tie the two panes' display filters together"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// A pane whose owning agent was removed falls back at reconnect time. That id
+/// rewrite must move untouched transcript axes to the fallback agent's own
+/// defaults, not leave them on the global defaults used while the id was stale.
+#[gpui::test]
+async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_settings(
+    cx: &mut TestAppContext,
+) {
+    let before = daruda_config::Config {
+        agents: vec![transcript_agent_entry(
+            TRANSCRIPT_AGENT_A,
+            3,
+            "expanded",
+            FilterFacet::Thinking,
+        )],
+        ..daruda_config::Config::default()
+    };
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_stale_agent_reseed_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    let (window_handle, workspace) = super::build_workspace_with(cx, &before, Some(project));
+    cx.run_until_parked();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_A, window, cx)
+            })
+        })
+        .unwrap();
+
+    let mut after = daruda_config::Config {
+        agents: vec![transcript_agent_entry(
+            TRANSCRIPT_AGENT_B,
+            6,
+            "summary",
+            FilterFacet::Tools,
+        )],
+        ..daruda_config::Config::default()
+    };
+    after.agent.tail_window = 9;
+    after.agent.fold_mode = vec!["expanded".to_string()];
+    after.agent.display_filter = Some(vec![FilterFacet::Thinking.token().to_string()]);
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.reload_config(&after, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    assert_eq!(
+        transcript_settings(&view, cx),
+        (
+            PaneChoice::Seeded(TailWindow::Last(9)),
+            FoldPreset::Expanded.mode(),
+            PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Thinking.token()])),
+        ),
+        "while the id is stale, reload can only fall back to the global defaults"
+    );
+
+    workspace.update(cx, |ws, cx| {
+        ws.resolve_pane_launch_for_test(pane_id, cx)
+            .expect("the fallback agent is launchable");
+    });
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    let agent_id = view.read_with(cx, |v, _| v.agent_id.clone());
+    assert_eq!(agent_id, TRANSCRIPT_AGENT_B);
+    assert_eq!(
+        transcript_settings(&view, cx),
+        (
+            PaneChoice::Seeded(TailWindow::Last(6)),
+            FoldPreset::Summary.mode(),
+            PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Tools.token()])),
+        ),
+        "the reconnect fallback must reseed against the agent it now runs"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// A new pane is born on its own agent's transcript defaults, not on whichever
+/// agent the catalog lists first. As with the reload above, a single agent
+/// cannot show the difference — both panes would be born identical either way.
+#[gpui::test]
+async fn a_new_pane_is_born_on_its_own_agents_transcript_settings(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![
+            transcript_agent_entry(TRANSCRIPT_AGENT_A, 3, "expanded", FilterFacet::Thinking),
+            transcript_agent_entry(TRANSCRIPT_AGENT_B, 7, "summary", FilterFacet::Tools),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let project_root = std::env::temp_dir().join(format!(
+        "daruda_agent_chat_per_agent_birth_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&project_root);
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    let (window_handle, workspace) = super::build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    let (pane_a, pane_b) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                (
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_A, window, cx),
+                    open_agent_chat_pane_on(ws, TRANSCRIPT_AGENT_B, window, cx),
+                )
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view_a = workspace.read_with(cx, |ws, _| agent_view(ws, pane_a));
+    let view_b = workspace.read_with(cx, |ws, _| agent_view(ws, pane_b));
+    let (tail_a, fold_a, filter_a) = transcript_settings(&view_a, cx);
+    let (tail_b, fold_b, filter_b) = transcript_settings(&view_b, cx);
+
+    assert_eq!(
+        tail_a,
+        PaneChoice::Seeded(TailWindow::Last(3)),
+        "the first pane must be born on its own agent's tail window"
+    );
+    assert_eq!(
+        fold_a,
+        FoldPreset::Expanded.mode(),
+        "the first pane must be born on its own agent's fold mode"
+    );
+    assert_eq!(
+        filter_a,
+        PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Thinking.token()])),
+        "the first pane must be born on its own agent's display filter"
+    );
+
+    assert_eq!(
+        tail_b,
+        PaneChoice::Seeded(TailWindow::Last(7)),
+        "the second pane must be born on its own agent's tail window"
+    );
+    assert_eq!(
+        fold_b,
+        FoldPreset::Summary.mode(),
+        "the second pane must be born on its own agent's fold mode"
+    );
+    assert_eq!(
+        filter_b,
+        PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Tools.token()])),
+        "the second pane must be born on its own agent's display filter"
+    );
+
+    assert_ne!(
+        tail_a, tail_b,
+        "resolving against one catalog entry would tie the two panes' tail windows together"
+    );
+    assert_ne!(
+        fold_a, fold_b,
+        "resolving against one catalog entry would tie the two panes' fold modes together"
+    );
+    assert_ne!(
+        filter_a, filter_b,
+        "resolving against one catalog entry would tie the two panes' display filters together"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
 #[gpui::test]
 async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::TabEntry;

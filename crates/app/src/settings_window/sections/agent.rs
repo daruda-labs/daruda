@@ -307,19 +307,23 @@ impl SettingsWindow {
                 s::settings_agent_field_id(),
                 crate::ui::input(&row.id_input, cx, 0),
             ))
-            .child(field_row(
-                s::settings_agent_field_name(),
-                crate::ui::input(&row.name_input, cx, 0),
-            ))
-            .when_some(provenance.name_base.clone(), |body, base| {
-                body.child(Self::preset_base_value(base, cx))
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_name(),
+                    crate::ui::input(&row.name_input, cx, 0),
+                    provenance.name_base.clone(),
+                    cx,
+                )
             })
-            .child(field_row(
-                s::settings_agent_field_command(),
-                crate::ui::input(&row.command_input, cx, 0),
-            ))
-            .when_some(provenance.command_base.clone(), |body, base| {
-                body.child(Self::preset_base_value(base, cx))
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_command(),
+                    crate::ui::input(&row.command_input, cx, 0),
+                    provenance.command_base.clone(),
+                    cx,
+                )
             })
             // ssh/docker rows run on a remote host or inside a container, so
             // a command missing from *this* machine's PATH is expected — the
@@ -348,19 +352,60 @@ impl SettingsWindow {
                     )
                 },
             )
-            .child(field_row(
-                s::settings_agent_field_default_mode(),
-                crate::ui::select::select(&row.default_mode_select, cx, 0),
-            ))
-            .when_some(provenance.default_mode_base.clone(), |body, base| {
-                body.child(Self::preset_base_value(base, cx))
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_default_mode(),
+                    crate::ui::select::select(&row.default_mode_select, cx, 0),
+                    provenance.default_mode_base.clone(),
+                    cx,
+                )
             })
-            .child(field_row(
-                s::settings_agent_field_default_model(),
-                crate::ui::select::select(&row.default_model_select, cx, 0),
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_default_model(),
+                    crate::ui::select::select(&row.default_model_select, cx, 0),
+                    provenance.default_model_base.clone(),
+                    cx,
+                )
+            })
+            .child(Self::section_label(
+                s::settings_agent_section_transcript(),
+                cx,
             ))
-            .when_some(provenance.default_model_base.clone(), |body, base| {
-                body.child(Self::preset_base_value(base, cx))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(s::settings_agent_transcript_description()),
+            )
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_fold_mode(),
+                    crate::ui::select::select(&row.fold_mode_select, cx, 0),
+                    provenance.fold_mode_base.clone(),
+                    cx,
+                )
+            })
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_tail_window(),
+                    crate::ui::select::select(&row.tail_window_select, cx, 0),
+                    provenance.tail_window_base.clone(),
+                    cx,
+                )
+            })
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_display_filter(),
+                    crate::ui::select::select(&row.display_filter_select, cx, 0),
+                    provenance.display_filter_base.clone(),
+                    cx,
+                )
             });
 
         // A preset reference is `Raw`-only, so picking a remote transport
@@ -407,6 +452,22 @@ impl SettingsWindow {
         }
 
         body.into_any_element()
+    }
+
+    /// A labelled control plus the value it inherits when the row states none.
+    /// Seven fields render this trio; the base line is what tells an override
+    /// from a row that is simply following its preset.
+    fn field_with_base(
+        body: gpui::Div,
+        label: String,
+        control: impl IntoElement,
+        base: Option<String>,
+        cx: &gpui::App,
+    ) -> gpui::Div {
+        body.child(field_row(label, control))
+            .when_some(base, |body, base| {
+                body.child(Self::preset_base_value(base, cx))
+            })
     }
 
     /// The preset's own value for a field the row above overrides — muted, so
@@ -492,6 +553,9 @@ pub(in crate::settings_window) struct RowProvenance {
     pub(in crate::settings_window) command_base: Option<String>,
     pub(in crate::settings_window) default_mode_base: Option<String>,
     pub(in crate::settings_window) default_model_base: Option<String>,
+    pub(in crate::settings_window) fold_mode_base: Option<String>,
+    pub(in crate::settings_window) tail_window_base: Option<String>,
+    pub(in crate::settings_window) display_filter_base: Option<String>,
 }
 
 impl RowProvenance {
@@ -504,6 +568,9 @@ impl RowProvenance {
             || self.command_base.is_some()
             || self.default_mode_base.is_some()
             || self.default_model_base.is_some()
+            || self.fold_mode_base.is_some()
+            || self.tail_window_base.is_some()
+            || self.display_filter_base.is_some()
     }
 
     fn source_label(&self) -> String {
@@ -524,6 +591,9 @@ impl AgentCatalogRow {
                 command_base: None,
                 default_mode_base: None,
                 default_model_base: None,
+                fold_mode_base: None,
+                tail_window_base: None,
+                display_filter_base: None,
             };
         };
         // A row only carries a preset id it resolved from, so the lookup holds.
@@ -533,9 +603,9 @@ impl AgentCatalogRow {
             _ => String::new(),
         };
         let base_name = base.map(|b| b.name).unwrap_or_default();
-        // Presets carry neither a session mode nor a model, so any value on
-        // either axis is an override — labelled "not set" rather than shown as
-        // an empty preset value.
+        // Presets state none of the mode, model or transcript axes, so any
+        // value on one of them is an override — labelled "not set" rather than
+        // shown as an empty preset value.
         RowProvenance {
             preset: Some(preset),
             name_base: overridden_base(&self.name_input.read(cx).value(), &base_name)
@@ -547,6 +617,15 @@ impl AgentCatalogRow {
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             default_model_base: self
                 .default_model(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
+            fold_mode_base: self
+                .fold_mode(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
+            tail_window_base: self
+                .tail_window(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
+            display_filter_base: self
+                .display_filter(cx)
                 .map(|_| s::settings_agent_override_preset_value_unset()),
         }
     }

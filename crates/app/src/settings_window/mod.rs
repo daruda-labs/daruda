@@ -322,14 +322,28 @@ pub(super) struct AgentCatalogRow {
     /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
-    /// The per-agent transcript-presentation keys this row was built from. No
-    /// editor renders them yet, so the row carries them across a save instead
-    /// of writing back a definition that has silently dropped them.
+    /// Fold rules a fresh chat pane under this agent starts on. The empty
+    /// value is the "follow `[agent]`" sentinel that means no override; a
+    /// stored matrix the presets cannot state gets its own entry, backed by
+    /// `transcript` — see [`sections::agent_transcript`].
+    pub(super) fold_mode_select: Entity<SelectState>,
+    /// Trailing-step window a fresh chat pane starts on. Same sentinel and
+    /// same preservation rule as `fold_mode_select`.
+    pub(super) tail_window_select: Entity<SelectState>,
+    /// Visible row kinds a fresh chat pane starts on. Same sentinel and same
+    /// preservation rule as `fold_mode_select`.
+    pub(super) display_filter_select: Entity<SelectState>,
+    /// The per-agent transcript-presentation keys this row loaded that its
+    /// three pickers cannot state. Each backs that picker's
+    /// configured-elsewhere entry and is written back verbatim while it stays
+    /// picked, so an unrelated edit cannot flatten a hand-written value.
     pub(super) transcript: AgentRowTranscript,
 }
 
-/// The per-agent transcript-presentation keys an [`AgentCatalogRow`] holds but
-/// does not edit. See [`daruda_config::AgentDefinition`] for what each means.
+/// The per-agent transcript-presentation values an [`AgentCatalogRow`] carries
+/// verbatim because no picker can state them. `None` on an axis means the
+/// picker holds the whole value. See [`daruda_config::AgentDefinition`] for
+/// what each key means.
 #[derive(Clone, Default)]
 pub(super) struct AgentRowTranscript {
     pub(super) fold_mode: Option<Vec<String>>,
@@ -549,11 +563,7 @@ impl SettingsWindow {
             ),
         };
         let path_warning = agent_command_path_warning(&command);
-        let transcript = AgentRowTranscript {
-            fold_mode: definition.fold_mode.clone(),
-            tail_window: definition.tail_window,
-            display_filter: definition.display_filter.clone(),
-        };
+        let transcript = sections::agent_transcript::transcript_row(definition, window, cx);
         let transport_kind = SharedString::from(transport_kind);
         let default_mode = SharedString::from(definition.default_mode.clone().unwrap_or_default());
         let default_model =
@@ -568,7 +578,10 @@ impl SettingsWindow {
             );
         AgentCatalogRow {
             preset,
-            transcript,
+            transcript: transcript.preserved,
+            fold_mode_select: transcript.fold_mode_select,
+            tail_window_select: transcript.tail_window_select,
+            display_filter_select: transcript.display_filter_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
                     .placeholder("agent-id")
@@ -634,9 +647,10 @@ impl SettingsWindow {
             window,
             cx,
         ));
-        // Both pickers persist on pick, like the transport one below. Their
-        // option lists are rebuilt in place by the id/command handlers further
-        // down, which reuse these same entities so this wiring stays valid.
+        // Every picker persists on pick, like the transport one below. The
+        // mode/model option lists are rebuilt in place by the id/command
+        // handlers further down, which reuse these same entities so this
+        // wiring stays valid.
         for state in [&row.default_mode_select, &row.default_model_select] {
             subs.push(cx.subscribe_in(
                 state,
@@ -644,6 +658,27 @@ impl SettingsWindow {
                 |this, _state, ev: &select::ConfirmEvent, _window, cx| {
                     if matches!(ev, select::SelectEvent::Confirm(_)) {
                         this.persist_agent_catalog(cx);
+                    }
+                },
+            ));
+        }
+        // A transcript picker may shed a "Custom (from config)" entry by
+        // choosing one of the stated values. Rebuild the catalog from the
+        // committed config after a successful save so the hidden preserved value
+        // cannot be picked again later in the same Settings window.
+        for state in [
+            &row.fold_mode_select,
+            &row.tail_window_select,
+            &row.display_filter_select,
+        ] {
+            subs.push(cx.subscribe_in(
+                state,
+                window,
+                |this, _state, ev: &select::ConfirmEvent, window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_))
+                        && this.persist_agent_catalog(cx)
+                    {
+                        this.reload_agent_catalog_from_live(window, cx);
                     }
                 },
             ));
@@ -1651,6 +1686,53 @@ impl SettingsWindow {
         }
     }
 
+    fn reload_agent_catalog_from_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let live = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .clone();
+        self.load_agent_catalog_from_config(&live, window, cx);
+        cx.notify();
+    }
+
+    fn load_agent_catalog_from_config(
+        &mut self,
+        live: &daruda_config::Config,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let vocabulary = &self.agent_vocabulary;
+        let catalog = live
+            .agents
+            .iter()
+            .map(|entry| match entry.resolve() {
+                Some(definition) => AgentCatalogItem::Editable(Self::agent_row_from_definition(
+                    &definition,
+                    vocabulary,
+                    entry.preset_id().map(str::to_string),
+                    window,
+                    cx,
+                )),
+                None => AgentCatalogItem::Unresolved(entry.clone()),
+            })
+            .collect::<Vec<_>>();
+        for item in &catalog {
+            if let AgentCatalogItem::Editable(row) = item {
+                Self::subscribe_agent_row(row, window, cx, &mut self._input_subscriptions);
+            }
+        }
+        self.agent_catalog = catalog;
+        self.section_focus_targets.remove(&BuiltinSection::Agent);
+        if let Some(row) = self.agent_catalog.iter().find_map(|item| match item {
+            AgentCatalogItem::Editable(row) => Some(row),
+            AgentCatalogItem::Unresolved(_) => None,
+        }) {
+            self.section_focus_targets
+                .entry(BuiltinSection::Agent)
+                .or_default()
+                .push(row.id_input.read(cx).focus_handle(cx));
+        }
+    }
+
     fn overwrite_conflict(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(patch) = self.conflict.clone()
             && self.apply_settings_patch_force(patch.clone(), cx)
@@ -1756,39 +1838,7 @@ impl SettingsWindow {
                 self.agent_use_modifier_to_send = live.agent.use_modifier_to_send;
             }
             daruda_config::SettingsPatch::AgentCatalog(_) => {
-                let vocabulary = &self.agent_vocabulary;
-                let catalog = live
-                    .agents
-                    .iter()
-                    .map(|entry| match entry.resolve() {
-                        Some(definition) => {
-                            AgentCatalogItem::Editable(Self::agent_row_from_definition(
-                                &definition,
-                                vocabulary,
-                                entry.preset_id().map(str::to_string),
-                                window,
-                                cx,
-                            ))
-                        }
-                        None => AgentCatalogItem::Unresolved(entry.clone()),
-                    })
-                    .collect::<Vec<_>>();
-                for item in &catalog {
-                    if let AgentCatalogItem::Editable(row) = item {
-                        Self::subscribe_agent_row(row, window, cx, &mut self._input_subscriptions);
-                    }
-                }
-                self.agent_catalog = catalog;
-                self.section_focus_targets.remove(&BuiltinSection::Agent);
-                if let Some(row) = self.agent_catalog.iter().find_map(|item| match item {
-                    AgentCatalogItem::Editable(row) => Some(row),
-                    AgentCatalogItem::Unresolved(_) => None,
-                }) {
-                    self.section_focus_targets
-                        .entry(BuiltinSection::Agent)
-                        .or_default()
-                        .push(row.id_input.read(cx).focus_handle(cx));
-                }
+                self.load_agent_catalog_from_config(live, window, cx);
             }
             daruda_config::SettingsPatch::SessionHosts { .. } => {
                 let rows = live
@@ -2207,9 +2257,9 @@ impl SettingsWindow {
                     launch,
                     default_mode: row.default_mode(cx),
                     default_model: row.default_model(cx),
-                    fold_mode: row.transcript.fold_mode.clone(),
-                    tail_window: row.transcript.tail_window,
-                    display_filter: row.transcript.display_filter.clone(),
+                    fold_mode: row.fold_mode(cx),
+                    tail_window: row.tail_window(cx),
+                    display_filter: row.display_filter(cx),
                 },
                 row.preset.as_deref(),
             ));

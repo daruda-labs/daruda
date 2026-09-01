@@ -65,6 +65,12 @@ mod update_ops;
 mod usage_labels;
 mod window_close_ops;
 
+// The transcript vocabularies the Settings agent catalog writes into
+// `[[agents]]` are defined by the chat pane that reads them back, so the
+// editor offers them from that one definition rather than a copy.
+pub(crate) use main_area::agent_chat_pane::display_filter::show_everything_tokens;
+pub(crate) use main_area::agent_chat_pane::fold_mode::preset_tokens as fold_preset_tokens;
+
 pub(in crate::workspace) use config_sync::ConfigMirrors;
 pub(in crate::workspace) use modal_view::ModalView;
 pub(in crate::workspace) use persistence::LaneRuntime;

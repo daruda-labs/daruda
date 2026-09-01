@@ -1653,3 +1653,158 @@ fn resetting_the_display_filter_hands_the_axis_back(cx: &mut gpui::TestAppContex
         })
         .expect("view update");
 }
+
+/// The whole point of the `Custom` segment: pressing a preset must not throw
+/// away a hand-edited matrix.
+#[gpui::test]
+fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppContext) {
+    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let edited = FoldPreset::Auto.mode().with_rule(
+                TurnPosition::Past,
+                FoldBlock::Thinking,
+                BlockRule::Collapsed,
+            );
+            view.set_fold_mode(edited, cx);
+            assert_eq!(view.fold.mode(), edited);
+
+            view.select_fold_preset(Some(FoldPreset::Summary), cx);
+            assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
+
+            view.select_fold_preset(None, cx);
+            assert_eq!(view.fold.mode(), edited, "the edited matrix, cell for cell");
+        })
+        .expect("view update");
+}
+
+/// `Reset to default` sits beside the preset strip and is the other way out of
+/// a hand-edited matrix, so it has to keep the edit reachable too — otherwise
+/// two adjacent controls lose the same work differently.
+#[gpui::test]
+fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::TestAppContext) {
+    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let edited = FoldPreset::Auto.mode().with_rule(
+                TurnPosition::Past,
+                FoldBlock::Thinking,
+                BlockRule::Collapsed,
+            );
+            view.set_fold_mode(edited, cx);
+
+            view.reset_fold_mode(cx);
+            assert_eq!(
+                view.fold.mode(),
+                view.defaults.fold_mode,
+                "the pane follows the default again"
+            );
+
+            view.select_fold_preset(None, cx);
+            assert_eq!(view.fold.mode(), edited, "the edited matrix, cell for cell");
+        })
+        .expect("view update");
+}
+
+/// A configured default is a token list, so it can encode a matrix of its own.
+/// The capture has to key on leaving the edit, not on the default happening to
+/// be a preset — otherwise resetting onto a custom default loses it silently.
+#[gpui::test]
+fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppContext) {
+    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let custom_default = FoldPreset::Summary.mode().with_rule(
+                TurnPosition::Last,
+                FoldBlock::Tool,
+                BlockRule::Expanded,
+            );
+            assert!(
+                custom_default.preset().is_none(),
+                "the fixture only means something if the default is itself custom"
+            );
+            view.reseed_transcript_defaults(
+                &TranscriptDefaults {
+                    fold_mode: custom_default,
+                    ..other_defaults()
+                },
+                cx,
+            );
+
+            let edited = FoldPreset::Auto.mode().with_rule(
+                TurnPosition::Past,
+                FoldBlock::Thinking,
+                BlockRule::Collapsed,
+            );
+            view.set_fold_mode(edited, cx);
+
+            view.reset_fold_mode(cx);
+            assert_eq!(view.fold.mode(), custom_default, "it follows the default");
+
+            view.select_fold_preset(None, cx);
+            assert_eq!(view.fold.mode(), edited, "the edit is still reachable");
+        })
+        .expect("view update");
+}
+
+/// Editing goes custom→custom and keeps the remembered target current, so
+/// pressing the already-selected Custom segment cannot roll the pane back to an
+/// older matrix.
+#[gpui::test]
+fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppContext) {
+    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let first = FoldPreset::Auto.mode().with_rule(
+                TurnPosition::Past,
+                FoldBlock::Thinking,
+                BlockRule::Collapsed,
+            );
+            let second = first.with_rule(TurnPosition::Last, FoldBlock::Diff, BlockRule::Expanded);
+            view.set_fold_mode(first, cx);
+            assert_eq!(view.custom_fold_mode, Some(first));
+            view.set_fold_mode(second, cx);
+            assert_eq!(
+                view.custom_fold_mode,
+                Some(second),
+                "custom→custom must keep the segment target on the latest edit"
+            );
+
+            view.select_fold_preset(None, cx);
+            assert_eq!(
+                view.fold.mode(),
+                second,
+                "clicking the selected Custom segment is a no-op"
+            );
+
+            view.select_fold_preset(Some(FoldPreset::Expanded), cx);
+            assert_eq!(view.custom_fold_mode, Some(second));
+
+            view.select_fold_preset(None, cx);
+            assert_eq!(view.fold.mode(), second, "the final edit, not the first");
+        })
+        .expect("view update");
+}
+
+/// Nothing edited yet means nothing to return to, so the segment is a no-op
+/// (and the strip renders it disabled).
+#[gpui::test]
+fn the_custom_segment_is_inert_with_nothing_remembered(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.select_fold_preset(Some(FoldPreset::Summary), cx);
+            view.select_fold_preset(None, cx);
+            assert_eq!(view.custom_fold_mode, None);
+            assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
+        })
+        .expect("view update");
+}

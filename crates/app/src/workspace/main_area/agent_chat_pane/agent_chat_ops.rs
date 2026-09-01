@@ -606,8 +606,7 @@ impl Workspace {
         // re-applies these through `reseed_transcript_defaults`.
         let defaults =
             TranscriptDefaults::resolve(&self.agent, self.agents.iter().find(|a| a.id == agent_id));
-        // The Workspace owns the resolved palette name; seeding it here is what
-        // lets a pane build diff embeds before (or without) its first ACP event.
+        // Seeded here so a pane can build diff embeds before its first event.
         let syntax_theme = self.syntax_theme.clone();
         let view = cx.new({
             let cwd = cwd.clone();
@@ -1060,8 +1059,7 @@ impl Workspace {
             resolve_open_agent_id(&self.agents, agent_id.or(self.last_agent_id.as_deref()));
         let pane_id = self.insert_agent_chat_pane(agent_id, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
-        // The seed builds embed entities, which re-enter the window — hand it
-        // the live borrow rather than making it resolve the handle again.
+        // The seed builds embed entities, which re-enter the window.
         view.update(cx, |v, cx| seed(v, window, cx));
         self.reveal_new_agent_chat_pane(pane_id, window, cx);
         Some(pane_id)

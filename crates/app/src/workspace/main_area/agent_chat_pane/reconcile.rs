@@ -130,15 +130,11 @@ impl AgentChatView {
         self.reconcile_diff_editors(&theme, is_light, scope, &mut access, cx);
     }
 
-    /// Rebuild every content-derived embed for the whole conversation: diff
-    /// editors, tool images, verbatim-output editors, mermaid rasters.
+    /// Rebuild every content-derived embed for the whole conversation.
     ///
-    /// The `items`-replaced-wholesale counterpart to `apply_event`'s passes.
-    /// Those are scoped to the call an event named and gated on what that event
-    /// touched; a caller that swaps the entire transcript has neither a scope to
-    /// narrow to nor an event flag to gate on, so it owes the full pass. Without
-    /// it every diff falls back to the inline render and every verbatim output
-    /// loses its editor — silently, since both fallbacks are legitimate renders.
+    /// The `items`-replaced-wholesale counterpart to `apply_event`'s passes: a
+    /// caller that swaps the entire transcript has neither a call to scope to
+    /// nor an event flag to gate on, so it owes the full pass.
     #[cfg(feature = "devtools")]
     pub(in crate::workspace) fn reconcile_all_embeds(
         &mut self,
@@ -746,12 +742,9 @@ mod tests {
         }
     }
 
-    /// Seeding replaces `items` wholesale outside the ACP pump, so it owes the
-    /// same embed pass an event does. It used to owe it and not pay: a seeded
-    /// pane rendered every diff through the inline per-line fallback, which is
-    /// both a different picture from the live one the screenshots are meant to
-    /// verify and — because the chat list re-lays-out every visible row on every
-    /// repaint — a per-frame cost proportional to the diff's line count.
+    /// Seeding replaces `items` outside the ACP pump, so it owes the same embed
+    /// pass an event does — without it the replay harness and the screenshot
+    /// scenarios render a path no live session takes.
     #[cfg(feature = "devtools")]
     #[gpui::test]
     fn seeding_a_transcript_builds_its_diff_embeds(cx: &mut TestAppContext) {

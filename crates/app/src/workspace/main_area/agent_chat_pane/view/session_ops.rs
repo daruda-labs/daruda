@@ -15,7 +15,7 @@ use super::super::agent_chat_helpers::{
 use super::super::agent_chat_ops::model_select;
 use super::super::display_filter::{DisplayFilter, FilterFacet};
 use super::super::fold::FoldKey;
-use super::super::fold_mode::{FoldMode, TurnPosition};
+use super::super::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
@@ -302,14 +302,10 @@ impl AgentChatView {
 
     /// Replace the conversation with a fixed transcript — a `--screenshot`
     /// scenario or a `--replay-acp-log` capture — then run the same aftermath a
-    /// live event does: rebuild the content-derived embeds, then re-derive the
-    /// projection. The one seeding entry point, so no caller can leave `rows`,
-    /// the virtualized list or the embed caches out of step with `items`.
-    ///
-    /// The embed pass is not optional garnish. Skipping it left every diff on
-    /// the inline per-line fallback and every verbatim output un-editored, so
-    /// the two tools that exist to exercise this pane — the replay harness and
-    /// the screenshot scenarios — rendered a path no live session takes.
+    /// live event does. The one seeding entry point, so no caller can leave
+    /// `rows`, the virtualized list or the embed caches out of step with
+    /// `items`; without the embed pass a seeded pane renders diffs and verbatim
+    /// output through fallbacks no live session takes.
     #[cfg(feature = "devtools")]
     pub(in crate::workspace) fn seed_transcript(
         &mut self,
@@ -324,8 +320,7 @@ impl AgentChatView {
         // is what the send path already checks, so the pane reads as connected
         // and behaves as inert rather than half-live.
         self.status = AgentSessionStatus::Connected;
-        // Seeding runs inside the opener's window update cycle, so the editors
-        // build against the borrow the caller already holds — see [`WindowAccess`].
+        // Seeding runs inside the opener's window update cycle — see [`WindowAccess`].
         let mut access = WindowAccess::Live(window);
         self.reconcile_all_embeds(&mut access, cx);
         self.reproject(cx);
@@ -385,14 +380,50 @@ impl AgentChatView {
         if self.fold.chosen_mode() == Some(mode) {
             return;
         }
+        let current = self.fold.mode();
+        match (current.preset(), mode.preset()) {
+            // Keep the segment's target equal to the latest hand-edited matrix.
+            // Then pressing the already-selected Custom segment applies the
+            // same value instead of resurrecting an older edit.
+            (_, None) => self.custom_fold_mode = Some(mode),
+            (None, Some(_)) => self.custom_fold_mode = Some(current),
+            (Some(_), Some(_)) => {}
+        }
         self.fold.set_mode(mode);
         self.reproject(cx);
         self.persist_pane_prefs(cx);
     }
 
+    /// Pick a segment of the fold editor's preset strip. `None` is the `Custom`
+    /// segment: it re-selects the remembered hand-edited matrix, and is a no-op
+    /// when there is none (the strip disables it in that state).
+    pub(in crate::workspace) fn select_fold_preset(
+        &mut self,
+        preset: Option<FoldPreset>,
+        cx: &mut Context<Self>,
+    ) {
+        let mode = match preset {
+            Some(preset) => preset.mode(),
+            None => match self.custom_fold_mode {
+                Some(mode) => mode,
+                None => return,
+            },
+        };
+        self.set_fold_mode(mode, cx);
+    }
+
     /// Hand the fold axis back to config — see [`Self::reset_tail_window`].
     pub(in crate::workspace) fn reset_fold_mode(&mut self, cx: &mut Context<Self>) {
         let before = self.fold.mode_choice();
+        // Leaving a hand-edited matrix, same as picking a preset does — the two
+        // sit side by side in the panel, so only one of them keeping the work
+        // would be a surprise. Keyed on actually moving away from it rather than
+        // on where it lands: a configured default is a token list, so it can be
+        // a matrix of its own, and the edit would be just as gone.
+        let current = self.fold.mode();
+        if current.preset().is_none() && current != self.defaults.fold_mode {
+            self.custom_fold_mode = Some(current);
+        }
         self.fold.reset_mode(self.defaults.fold_mode);
         if before == self.fold.mode_choice() {
             return;

@@ -28,7 +28,7 @@ use gpui::{
 
 use super::display_filter::DisplayFilter;
 use super::fold::FoldState;
-use super::fold_mode::TurnPosition;
+use super::fold_mode::{FoldMode, TurnPosition};
 use super::pane_choice::PaneChoice;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 use super::rows::tail::TailWindow;
@@ -537,6 +537,11 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) fold: FoldState,
     /// Transient tab selected in the fold-rule editor.
     pub(in crate::workspace) fold_editor_turn: TurnPosition,
+    /// The hand-edited matrix the fold editor's `Custom` segment restores.
+    /// Kept current while editing so the selected segment cannot revive an
+    /// older matrix. Session-only: the mode itself is persisted, so only "press
+    /// a preset then come back" is scoped here.
+    pub(in crate::workspace) custom_fold_mode: Option<FoldMode>,
     /// Active section in the compact Activity Bar's combined options popover.
     pub(in crate::workspace) activity_options_tab: ActivityOptionsTab,
     #[cfg(feature = "screenshot")]
@@ -575,12 +580,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// Cached start of the newest turn.
     pub(in crate::workspace) turn_boundary: super::agent_chat_helpers::TurnBoundary,
     /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
-    /// The Workspace owns the resolved value (user + project config layers), so it
-    /// cannot be derived here — it is seeded at construction and re-pushed on a
-    /// config reload. Seeded rather than filled by the first ACP event because a
-    /// diff embed can be materialized without one (a fold expand, a seeded
-    /// transcript), and a pane that had not yet seen an event would fall back to
-    /// the inline diff render for the rest of its life.
+    /// The Workspace owns the resolved value (user + project config layers), so
+    /// it cannot be derived here — it is seeded at construction and re-pushed on
+    /// a config reload. Construction rather than the first ACP event, because a
+    /// fold expand or a seeded transcript can ask for a diff embed without one.
     /// Single update site: [`Self::set_syntax_theme`].
     syntax_theme: String,
     /// Activity-bar title derived from `session_title` + the first user prompt.
@@ -719,6 +722,7 @@ impl AgentChatView {
             assets: AssetCache::default(),
             fold: FoldState::with_mode(defaults.fold_mode),
             fold_editor_turn: TurnPosition::Last,
+            custom_fold_mode: None,
             activity_options_tab: ActivityOptionsTab::Fold,
             #[cfg(feature = "screenshot")]
             screenshot_filter_open: false,

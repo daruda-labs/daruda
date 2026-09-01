@@ -36,10 +36,10 @@
 #
 #   (d) A `trailing(` badge is never gated on fold state. Trailing content reads
 #       the same expanded or collapsed. The stretch slot is the only one that
-#       varies with fold state — hidden when expanded (`StretchSlot::Summary`)
-#       or showing a different value in each (`StretchSlot::Alternate`). A
-#       `collapsed` / `!expanded` guard around a `.trailing(` call is the drift
-#       this check catches.
+#       varies with it, and only in one variant: `StretchSlot::Summary` builds
+#       nothing once expanded (`builder_for`), while `Title` and `Spacer` read
+#       the same in both. A `collapsed` / `!expanded` guard around a
+#       `.trailing(` call is the drift this check catches.
 #
 # What this does NOT catch
 # ------------------------

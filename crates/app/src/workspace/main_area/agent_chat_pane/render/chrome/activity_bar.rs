@@ -61,6 +61,8 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub display_filter: PaneChoice<DisplayFilter>,
     pub fold_mode: PaneChoice<FoldMode>,
     pub fold_editor_turn: TurnPosition,
+    /// The fold editor's `Custom` segment target — see `AgentChatView`.
+    pub custom_fold_mode: Option<FoldMode>,
     pub activity_options_tab: ActivityOptionsTab,
     pub compact_options: bool,
     pub filter_popover_open: bool,
@@ -115,6 +117,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
                 props.pane_id,
                 props.fold_mode,
                 props.fold_editor_turn,
+                props.custom_fold_mode,
                 props.fold_popover_open,
                 &surface,
                 cx,
@@ -266,6 +269,7 @@ fn view_options_chip(
     let pane_id = props.pane_id;
     let mode = props.fold_mode;
     let editor_turn = props.fold_editor_turn;
+    let custom_mode = props.custom_fold_mode;
     let filter = props.display_filter;
     let tail = props.tail;
     let active_tab = props.activity_options_tab;
@@ -290,6 +294,7 @@ fn view_options_chip(
             pane_id,
             mode,
             editor_turn,
+            custom_mode,
             filter,
             tail,
             active_tab,
@@ -305,6 +310,7 @@ fn activity_options_panel(
     pane_id: PaneId,
     mode: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
+    custom_mode: Option<FoldMode>,
     filter: PaneChoice<DisplayFilter>,
     tail: PaneChoice<TailWindow>,
     active_tab: ActivityOptionsTab,
@@ -312,9 +318,14 @@ fn activity_options_panel(
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
     let panel = match active_tab {
-        ActivityOptionsTab::Fold => {
-            super::super::fold_mode::fold_mode_panel(view, mode, editor_turn, pane_id, cx)
-        }
+        ActivityOptionsTab::Fold => super::super::fold_mode::fold_mode_panel(
+            view,
+            mode,
+            editor_turn,
+            custom_mode,
+            pane_id,
+            cx,
+        ),
         ActivityOptionsTab::Filter => super::super::filter::filter_panel(view, filter, pane_id, cx),
         ActivityOptionsTab::RecentSteps => {
             super::super::tail_window::tail_window_panel(view, tail, pane_id, cx)

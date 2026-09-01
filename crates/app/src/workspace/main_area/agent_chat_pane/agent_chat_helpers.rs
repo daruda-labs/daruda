@@ -795,16 +795,18 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         FoldKey::Assistant(_) | FoldKey::Thinking(_) | FoldKey::Tool(_) => {
             items.get(ix).map(is_active).unwrap_or(false)
         }
+        // Keyed by the response's own first item (`rows::project` passes
+        // `run.start`), so the scan starts at `ix` — not after it. An `ix` that
+        // is itself a `UserText` yields an empty run, which reads inactive.
         FoldKey::Response(_) => {
-            let start = ix + 1;
             let end = items
                 .iter()
-                .skip(start)
+                .skip(ix)
                 .position(|it| matches!(it, ChatItem::UserText(_)))
-                .map(|off| start + off)
+                .map(|off| ix + off)
                 .unwrap_or(items.len());
             items
-                .get(start..end)
+                .get(ix..end)
                 .is_some_and(|run| run.iter().any(is_active))
         }
         FoldKey::ToolGroup(_) => items.get(ix..).is_some_and(|rest| {
