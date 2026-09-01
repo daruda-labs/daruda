@@ -1,9 +1,10 @@
 //! Where a catalog row's Fold / Recent steps / Filter pickers get their
 //! options, and what each picked entry writes back into `[[agents]]`.
 //!
-//! Every axis leads with an unset entry — the `None` that lets the agent fall
-//! through to the app-wide `[agent]` section — and offers the handful of values
-//! a dropdown can state.
+//! This row is the default — there is no layer under it but the built-in value.
+//! So each axis offers its values directly, and the one that *is* the built-in
+//! writes nothing back: an unwritten key and a key stating the built-in value
+//! resolve alike, and the shorter of the two keeps the file clean.
 //!
 //! Two of the three keys can hold values no dropdown can state: a fold matrix
 //! with `"<turn>.<block>=<rule>"` cell overrides, or a partial visible facet
@@ -14,13 +15,10 @@
 
 use crate::surface::strings as s;
 use crate::ui::select::{self, SelectOption, SelectState};
-use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES};
+use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT};
 use gpui::{AppContext as _, Entity, SharedString, Window};
 
 use super::super::{AgentCatalogRow, AgentRowTranscript, SettingsWindow};
-
-/// Picker value for "this row states nothing", so the axis follows `[agent]`.
-const UNSET: &str = "";
 
 /// Picker value for the entry standing in for a stored value none of the
 /// offered choices can state. Not a token any axis produces, so it cannot
@@ -47,14 +45,21 @@ pub(in crate::settings_window) fn transcript_row(
     window: &mut Window,
     cx: &mut gpui::Context<SettingsWindow>,
 ) -> TranscriptRow {
-    let fold = picker(fold_options(), definition.fold_mode.clone(), |tokens| {
-        fold_value(tokens)
-    });
-    let tail = picker(tail_options(), definition.tail_window, |size| {
-        tail_value(*size)
-    });
+    let fold = picker(
+        fold_options(),
+        fold_built_in(),
+        definition.fold_mode.clone(),
+        |tokens| fold_value(tokens),
+    );
+    let tail = picker(
+        tail_options(),
+        &tail_built_in(),
+        definition.tail_window,
+        |size| tail_value(*size),
+    );
     let filter = picker(
         filter_options(),
+        FILTER_EVERYTHING,
         definition.display_filter.clone(),
         |tokens| filter_value(tokens),
     );
@@ -75,37 +80,37 @@ pub(in crate::settings_window) fn transcript_row(
 }
 
 impl AgentCatalogRow {
-    /// The `fold_mode` this row states, or `None` for the unset entry. The
-    /// "configured elsewhere" entry writes back exactly what config held, so a
-    /// matrix with cell overrides survives an edit to any other field.
+    /// The `fold_mode` this row writes, or `None` to write no key at all —
+    /// which the built-in entry means, since an absent key resolves to exactly
+    /// that value. The "configured elsewhere" entry writes back what config
+    /// held, so a matrix with cell overrides survives an edit to another field.
     pub(in crate::settings_window) fn fold_mode(&self, cx: &gpui::App) -> Option<Vec<String>> {
         let value = picked(&self.fold_mode_select, cx)?;
         match value.as_str() {
             CUSTOM => self.transcript.fold_mode.clone(),
+            token if token == fold_built_in() => None,
             token => Some(vec![token.to_owned()]),
         }
     }
 
-    /// The `tail_window` this row states, same unset / preserved rules as
+    /// The `tail_window` this row writes, same built-in / preserved rules as
     /// [`Self::fold_mode`].
     pub(in crate::settings_window) fn tail_window(&self, cx: &gpui::App) -> Option<u8> {
         let value = picked(&self.tail_window_select, cx)?;
         match value.as_str() {
             CUSTOM => self.transcript.tail_window,
+            size if size == tail_built_in() => None,
             size => size.parse().ok(),
         }
     }
 
-    /// The `display_filter` this row states, same unset / preserved rules as
-    /// [`Self::fold_mode`].
+    /// The `display_filter` this row writes, same built-in / preserved rules as
+    /// [`Self::fold_mode`]. The unfiltered set *is* the built-in one, so the
+    /// only entry this axis offers writes nothing.
     pub(in crate::settings_window) fn display_filter(&self, cx: &gpui::App) -> Option<Vec<String>> {
         let value = picked(&self.display_filter_select, cx)?;
-        // Named rather than wildcarded: unlike the other two axes a picked token
-        // is not itself the value here, so a second `filter_options` entry has
-        // to state what it writes rather than inherit the unfiltered set.
         match value.as_str() {
             CUSTOM => self.transcript.display_filter.clone(),
-            FILTER_EVERYTHING => Some(everything_tokens()),
             _ => None,
         }
     }
@@ -120,20 +125,18 @@ struct Picker<T> {
     preserved: Option<T>,
 }
 
-/// Assemble one axis: the unset entry, then `offered`, then — only when the
-/// stored value is none of them — the entry that keeps it verbatim.
+/// Assemble one axis: the values it offers, then — only when the stored value
+/// is none of them — the entry that keeps it verbatim. An absent key selects
+/// `built_in`, the entry that resolves to the same thing.
 fn picker<T>(
     offered: Vec<SelectOption>,
+    built_in: &str,
     stored: Option<T>,
     expressed_as: impl Fn(&T) -> Option<String>,
 ) -> Picker<T> {
-    let mut options = vec![SelectOption::new(
-        UNSET,
-        s::settings_agent_transcript_default(),
-    )];
-    options.extend(offered);
+    let mut options = offered;
     let selected = match stored.as_ref().map(&expressed_as) {
-        None => UNSET.to_owned(),
+        None => built_in.to_owned(),
         Some(Some(value)) => value,
         Some(None) => {
             options.push(SelectOption::new(
@@ -154,11 +157,10 @@ fn picker<T>(
     }
 }
 
-/// A picker's value, or `None` for the unset entry (and for no selection at
-/// all, which reads the same: the row states nothing).
+/// A picker's value. `None` only when nothing is selected at all, which reads
+/// as "this row writes no key".
 fn picked(state: &Entity<SelectState>, cx: &gpui::App) -> Option<String> {
-    let value = state.read(cx).selected_value()?.to_string();
-    (value != UNSET).then_some(value)
+    Some(state.read(cx).selected_value()?.to_string())
 }
 
 /// The fold presets the picker offers. Destructured from the fold vocabulary
@@ -171,6 +173,14 @@ fn fold_options() -> Vec<SelectOption> {
         SelectOption::new(summary, s::agent_chat_fold_mode_summary()),
         SelectOption::new(expanded, s::agent_chat_fold_mode_expanded()),
     ]
+}
+
+/// The fold preset an absent `fold_mode` resolves to. Destructured from the
+/// same vocabulary the options come from, so a reordered preset list cannot
+/// leave this pointing at the wrong entry.
+fn fold_built_in() -> &'static str {
+    let [auto, _summary, _expanded] = crate::workspace::fold_preset_tokens();
+    auto
 }
 
 /// The picker value for a stored `fold_mode`, or `None` when no offered entry
@@ -199,6 +209,11 @@ fn tail_options() -> Vec<SelectOption> {
     options
 }
 
+/// The window an absent `tail_window` resolves to.
+fn tail_built_in() -> String {
+    TAIL_WINDOW_DEFAULT.to_string()
+}
+
 /// The picker value for a stored `tail_window`, or `None` for a size the chip
 /// never offers — a hand-written `tail_window = 12` stays exactly that.
 fn tail_value(size: u8) -> Option<String> {
@@ -223,13 +238,6 @@ fn filter_value(tokens: &[String]) -> Option<String> {
     (stored == everything).then(|| FILTER_EVERYTHING.to_owned())
 }
 
-fn everything_tokens() -> Vec<String> {
-    crate::workspace::show_everything_tokens()
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,15 +250,41 @@ mod tests {
         options.iter().map(|o| o.value.to_string()).collect()
     }
 
-    /// Every axis leads with the unset entry, because that is what a fresh row
-    /// selects and what `None` in config means.
+    fn everything_tokens() -> Vec<String> {
+        crate::workspace::show_everything_tokens()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// An absent key selects the entry that resolves to the same thing, so a
+    /// fresh row reads as the value a pane would actually get.
     #[test]
-    fn the_unset_entry_leads_every_axis() {
-        for offered in [fold_options(), tail_options(), filter_options()] {
-            let picker = picker(offered, None::<u8>, |_| None);
-            assert_eq!(picker.selected, SharedString::from(UNSET));
-            assert_eq!(values(&picker.options)[0], UNSET);
+    fn an_absent_key_selects_the_built_in_entry() {
+        for (offered, built_in) in [
+            (fold_options(), fold_built_in().to_owned()),
+            (tail_options(), tail_built_in()),
+            (filter_options(), FILTER_EVERYTHING.to_owned()),
+        ] {
+            let picker = picker(offered, &built_in, None::<u8>, |_| None);
+            assert_eq!(picker.selected, SharedString::from(built_in.clone()));
+            assert!(
+                values(&picker.options).contains(&built_in),
+                "the built-in entry has to be one the axis offers"
+            );
             assert!(picker.preserved.is_none());
+        }
+    }
+
+    /// No axis offers an entry standing for "states nothing" — this row is the
+    /// default, so such an entry would duplicate the built-in one.
+    #[test]
+    fn no_axis_offers_an_unset_entry() {
+        for offered in [fold_options(), tail_options(), filter_options()] {
+            assert!(
+                values(&offered).iter().all(|value| !value.is_empty()),
+                "an empty value is the shape the removed unset entry had"
+            );
         }
     }
 
@@ -258,9 +292,12 @@ mod tests {
     /// "configured elsewhere" one — there is nothing left to preserve.
     #[test]
     fn an_offered_value_is_selected_directly() {
-        let picker = picker(fold_options(), Some(strings(&["summary"])), |t| {
-            fold_value(t)
-        });
+        let picker = picker(
+            fold_options(),
+            fold_built_in(),
+            Some(strings(&["summary"])),
+            |t| fold_value(t),
+        );
         assert_eq!(picker.selected, SharedString::from("summary"));
         assert!(picker.preserved.is_none());
         assert!(!values(&picker.options).contains(&CUSTOM.to_owned()));
@@ -271,7 +308,9 @@ mod tests {
     #[test]
     fn a_value_no_entry_states_is_kept_verbatim() {
         let matrix = strings(&["summary", "last.thinking=expanded"]);
-        let picker = picker(fold_options(), Some(matrix.clone()), |t| fold_value(t));
+        let picker = picker(fold_options(), fold_built_in(), Some(matrix.clone()), |t| {
+            fold_value(t)
+        });
         assert_eq!(picker.selected, SharedString::from(CUSTOM));
         assert_eq!(picker.preserved, Some(matrix));
         assert_eq!(values(&picker.options).last().unwrap(), CUSTOM);

@@ -844,7 +844,8 @@ fn a_transcript_value_no_picker_states_gets_its_own_entry(cx: &mut TestAppContex
 
 /// Picking a different entry is the user replacing the value, so the preserved
 /// one stops being written — on every axis, including the one whose stored
-/// value was off-list.
+/// value was off-list. The filter's replacement is the unfiltered set, which is
+/// the built-in value, so that axis stops writing a key at all.
 #[gpui::test]
 fn picking_another_transcript_entry_replaces_the_preserved_value(cx: &mut TestAppContext) {
     let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
@@ -866,14 +867,84 @@ fn picking_another_transcript_entry_replaces_the_preserved_value(cx: &mut TestAp
         assert_eq!(saved.fold_mode, Some(vec!["expanded".to_string()]));
         assert_eq!(saved.tail_window, Some(3));
         assert_eq!(
-            saved.display_filter,
-            Some(
-                crate::workspace::show_everything_tokens()
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            )
+            saved.display_filter, None,
+            "the unfiltered set is the built-in value, so no key is written"
         );
+    });
+}
+
+/// The built-in value writes no key: an absent key and a key stating that value
+/// resolve alike, so the row keeps the file clean rather than restating it.
+#[gpui::test]
+fn picking_the_built_in_value_writes_no_key(cx: &mut TestAppContext) {
+    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.fold_mode_select.clone(), "auto");
+    confirm_agent_row_select(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.tail_window_select.clone(),
+        &daruda_config::TAIL_WINDOW_DEFAULT.to_string(),
+    );
+    confirm_agent_row_select(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.display_filter_select.clone(),
+        sections::agent_transcript::FILTER_EVERYTHING,
+    );
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the edited row must validate");
+        let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
+        assert_eq!(saved.fold_mode, None);
+        assert_eq!(saved.tail_window, None);
+        assert_eq!(saved.display_filter, None);
+    });
+}
+
+/// The round trip the rule above depends on: a row that wrote nothing reopens
+/// on the built-in entry, not on a blank or a stale selection.
+#[gpui::test]
+fn a_row_that_wrote_no_key_reopens_on_the_built_in_entry(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::Custom(
+            daruda_config::AgentDefinition::claude_default(),
+        )],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).expect("a custom row");
+        assert_eq!(
+            row.fold_mode_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string()),
+            Some("auto".to_string())
+        );
+        assert_eq!(
+            row.tail_window_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string()),
+            Some(daruda_config::TAIL_WINDOW_DEFAULT.to_string())
+        );
+        assert_eq!(
+            row.display_filter_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string()),
+            Some(sections::agent_transcript::FILTER_EVERYTHING.to_string())
+        );
+        // And reading them back writes nothing, so an untouched row cannot
+        // grow three keys just by being rendered.
+        assert_eq!(row.fold_mode(cx), None);
+        assert_eq!(row.tail_window(cx), None);
+        assert_eq!(row.display_filter(cx), None);
     });
 }
 

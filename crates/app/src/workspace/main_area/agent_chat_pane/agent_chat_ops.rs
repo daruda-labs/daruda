@@ -604,8 +604,7 @@ impl Workspace {
         // Seed from the resolved config; a restore overwrites it with the pane's
         // own persisted choice (see `rebuild_layout`), and a live config reload
         // re-applies these through `reseed_transcript_defaults`.
-        let defaults =
-            TranscriptDefaults::resolve(&self.agent, self.agents.iter().find(|a| a.id == agent_id));
+        let defaults = TranscriptDefaults::resolve(self.agents.iter().find(|a| a.id == agent_id));
         // Seeded here so a pane can build diff embeds before its first event.
         let syntax_theme = self.syntax_theme.clone();
         let view = cx.new({

@@ -90,10 +90,8 @@ impl Workspace {
                     view.agent_name = name;
                     cx.notify();
                 }
-                let defaults = TranscriptDefaults::resolve(
-                    &self.agent,
-                    self.agents.iter().find(|a| a.id == view.agent_id),
-                );
+                let defaults =
+                    TranscriptDefaults::resolve(self.agents.iter().find(|a| a.id == view.agent_id));
                 view.reseed_transcript_defaults(&defaults, cx);
             });
         }

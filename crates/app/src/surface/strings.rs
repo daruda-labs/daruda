@@ -4290,12 +4290,6 @@ pub fn settings_agent_field_display_filter() -> String {
     rust_i18n::t!("settings.agent_field_display_filter").into_owned()
 }
 
-/// The "no override" entry in a row's transcript pickers — the axis follows
-/// the app-wide Agent settings.
-pub fn settings_agent_transcript_default() -> String {
-    rust_i18n::t!("settings.agent_transcript_default").into_owned()
-}
-
 /// The entry standing in for a stored transcript value no picker can state —
 /// a fold matrix with cell overrides, an off-list step count, a partial
 /// visible set. Selected, and written back untouched while it stays picked.
