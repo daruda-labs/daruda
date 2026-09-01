@@ -106,6 +106,9 @@ fn agents_round_trip_through_toml() {
                 launch: AgentLaunch::Raw("codex acp".to_string()),
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             }),
             AgentEntry::Preset {
                 preset: "codex-acp".to_string(),
@@ -807,6 +810,10 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
                     default_model: Some("gemini-2.5-pro".to_string()),
+                    fold_mode: Some(vec!["summary".to_string()]),
+                    tail_window: Some(3),
+                    // An empty visible set, not an absent key.
+                    display_filter: Some(Vec::new()),
                 },
             },
             AgentEntry::Preset {
@@ -819,6 +826,9 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 launch: AgentLaunch::Raw("hermes acp".to_string()),
                 default_mode: Some("yolo".to_string()),
                 default_model: None,
+                fold_mode: Some(vec!["expanded".to_string()]),
+                tail_window: Some(10),
+                display_filter: Some(vec!["prose".to_string(), "tools".to_string()]),
             }),
             AgentEntry::Custom(AgentDefinition {
                 id: "remote".to_string(),
@@ -829,6 +839,9 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 },
                 default_mode: None,
                 default_model: Some("claude-opus-4".to_string()),
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             }),
         ],
         ..Config::default()
@@ -843,6 +856,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
         "{on_disk}"
     );
     assert!(on_disk.contains("preset = \"retired-agent\""), "{on_disk}");
+    assert!(on_disk.contains("display_filter = []"), "{on_disk}");
 
     assert_eq!(Config::load_from(&path).agents, cfg.agents);
 }

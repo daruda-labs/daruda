@@ -1796,6 +1796,9 @@ mod tests {
             launch: daruda_config::AgentLaunch::Raw(command.to_string()),
             default_mode: None,
             default_model: None,
+            fold_mode: None,
+            tail_window: None,
+            display_filter: None,
         }
     }
 
@@ -1857,6 +1860,9 @@ mod tests {
                 },
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             daruda_config::AgentDefinition {
                 id: "remote-docker".to_string(),
@@ -1868,6 +1874,9 @@ mod tests {
                 },
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             agent(
                 "remote-cwd",

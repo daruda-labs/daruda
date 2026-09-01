@@ -604,7 +604,11 @@ impl Workspace {
         // Seed from the resolved config; a restore overwrites it with the pane's
         // own persisted choice (see `rebuild_layout`), and a live config reload
         // re-applies these through `reseed_transcript_defaults`.
-        let defaults = TranscriptDefaults::from_config(&self.agent);
+        let defaults =
+            TranscriptDefaults::resolve(&self.agent, self.agents.iter().find(|a| a.id == agent_id));
+        // The Workspace owns the resolved palette name; seeding it here is what
+        // lets a pane build diff embeds before (or without) its first ACP event.
+        let syntax_theme = self.syntax_theme.clone();
         let view = cx.new({
             let cwd = cwd.clone();
             let agent_name = agent_name.clone();
@@ -623,8 +627,8 @@ impl Workspace {
                     agent_id,
                     agent_name,
                     title,
-                    defaults.tail,
-                    defaults.fold_mode,
+                    defaults,
+                    syntax_theme,
                     cx,
                 )
             }
@@ -813,7 +817,9 @@ impl Workspace {
     ) {
         self.open_agent_chat_pane_seeded(
             None,
-            |v, cx| v.seed_transcript(super::shot_transcript::sample_transcript(), cx),
+            |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::sample_transcript(), window, cx)
+            },
             window,
             cx,
         );
@@ -829,7 +835,9 @@ impl Workspace {
     ) {
         self.open_agent_chat_pane_seeded(
             None,
-            |v, cx| v.seed_working_transcript(super::shot_transcript::working_transcript(), cx),
+            |v, window, cx| {
+                v.seed_working_transcript(super::shot_transcript::working_transcript(), window, cx)
+            },
             window,
             cx,
         );
@@ -1040,7 +1048,7 @@ impl Workspace {
     pub(in crate::workspace) fn open_agent_chat_pane_seeded(
         &mut self,
         agent_id: Option<&str>,
-        seed: impl FnOnce(&mut AgentChatView, &mut Context<AgentChatView>),
+        seed: impl FnOnce(&mut AgentChatView, &mut Window, &mut Context<AgentChatView>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
@@ -1052,7 +1060,9 @@ impl Workspace {
             resolve_open_agent_id(&self.agents, agent_id.or(self.last_agent_id.as_deref()));
         let pane_id = self.insert_agent_chat_pane(agent_id, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
-        view.update(cx, seed);
+        // The seed builds embed entities, which re-enter the window — hand it
+        // the live borrow rather than making it resolve the handle again.
+        view.update(cx, |v, cx| seed(v, window, cx));
         self.reveal_new_agent_chat_pane(pane_id, window, cx);
         Some(pane_id)
     }
@@ -1073,8 +1083,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.open_agent_chat_pane_seeded(agent_id, |v, cx| v.seed_transcript(items, cx), window, cx)
-            .is_some()
+        self.open_agent_chat_pane_seeded(
+            agent_id,
+            |v, window, cx| v.seed_transcript(items, window, cx),
+            window,
+            cx,
+        )
+        .is_some()
     }
 
     /// Switch the active session mode. Shim for the mode chip: routes the
@@ -1627,6 +1642,9 @@ mod tests {
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1650,6 +1668,9 @@ mod tests {
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             AgentDefinition::claude_default(),
         ]

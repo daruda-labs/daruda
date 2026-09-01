@@ -183,6 +183,9 @@ fn legacy_ssh_claude_agent() -> daruda_config::AgentDefinition {
         },
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     }
 }
 

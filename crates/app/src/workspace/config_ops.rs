@@ -70,8 +70,9 @@ impl Workspace {
             .collect::<Vec<_>>();
         // The transcript defaults a pane follows until the user overrides them.
         // Applied here as well as at pane creation so an open, untouched pane
-        // tracks a `[agent]` edit live instead of waiting for the next restore.
-        let transcript_defaults = TranscriptDefaults::from_config(&self.agent);
+        // tracks a config edit live instead of waiting for the next restore.
+        // Resolved per pane, not once: the defaults are per-agent, and a window
+        // holds panes on different agents.
         for view in self
             .main_area
             .runtimes
@@ -89,7 +90,11 @@ impl Workspace {
                     view.agent_name = name;
                     cx.notify();
                 }
-                view.reseed_transcript_defaults(&transcript_defaults, cx);
+                let defaults = TranscriptDefaults::resolve(
+                    &self.agent,
+                    self.agents.iter().find(|a| a.id == view.agent_id),
+                );
+                view.reseed_transcript_defaults(&defaults, cx);
             });
         }
         // Keep the `InputState`'s auto-grow cap in sync with the new

@@ -38,6 +38,17 @@ pub struct AgentDefinition {
     /// and neither is knowable ahead of time from this catalog alone. An id
     /// the agent doesn't advertise is simply skipped at connect.
     pub default_model: Option<String>,
+    /// Fold rules a fresh chat pane under this agent starts on. `None` follows
+    /// [`AgentConfig::fold_mode`]; an empty list means the built-in preset,
+    /// which is what makes the app-wide key a bare `Vec`.
+    pub fold_mode: Option<Vec<String>>,
+    /// Trailing-step window a fresh chat pane under this agent starts on.
+    /// `None` follows [`AgentConfig::tail_window`].
+    pub tail_window: Option<u8>,
+    /// Visible row kinds a fresh chat pane under this agent starts on. `None`
+    /// follows [`AgentConfig::display_filter`]; unlike `fold_mode`, an empty
+    /// list is a real value naming an empty visible set — see that field.
+    pub display_filter: Option<Vec<String>>,
 }
 
 /// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
@@ -325,6 +336,12 @@ struct AgentDefinitionRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    fold_mode: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tail_window: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_filter: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
@@ -375,6 +392,9 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             command,
             default_mode: v.default_mode,
             default_model: v.default_model,
+            fold_mode: v.fold_mode,
+            tail_window: v.tail_window,
+            display_filter: v.display_filter,
             ssh,
             docker,
         }
@@ -407,6 +427,9 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             launch,
             default_mode: v.default_mode,
             default_model: v.default_model,
+            fold_mode: v.fold_mode,
+            tail_window: v.tail_window,
+            display_filter: v.display_filter,
         }
     }
 }
@@ -426,6 +449,9 @@ impl AgentDefinition {
             ),
             default_mode: None,
             default_model: None,
+            fold_mode: None,
+            tail_window: None,
+            display_filter: None,
         }
     }
 
@@ -486,6 +512,14 @@ pub struct AgentConfig {
     /// Initial fold preset and optional `"<turn>.<block>=<rule>"` overrides.
     /// Presets are `auto`, `summary`, and `expanded`; unknown tokens are ignored.
     pub fold_mode: Vec<String>,
+    /// Initial visible row kinds — the facet tokens a fresh pane shows.
+    ///
+    /// `Option` rather than a bare `Vec` because the list names the *visible*
+    /// set and the reader starts from all-off: `Some([])` is the pane with
+    /// every box unchecked, a state the user can actually reach, so only `None`
+    /// can mean "no opinion, show everything".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_filter: Option<Vec<String>>,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
     /// the option stays in the session state and the agent can still change it.
@@ -544,6 +578,7 @@ impl Default for AgentConfig {
             reading_width: READING_WIDTH_DEFAULT,
             tail_window: TAIL_WINDOW_DEFAULT,
             fold_mode: Vec::new(),
+            display_filter: None,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }

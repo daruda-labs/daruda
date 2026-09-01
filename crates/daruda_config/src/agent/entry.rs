@@ -38,6 +38,9 @@ pub struct PresetOverrides {
     pub command: Option<String>,
     pub default_mode: Option<String>,
     pub default_model: Option<String>,
+    pub fold_mode: Option<Vec<String>>,
+    pub tail_window: Option<u8>,
+    pub display_filter: Option<Vec<String>>,
 }
 
 impl AgentEntry {
@@ -60,6 +63,15 @@ impl AgentEntry {
                 }
                 if let Some(default_model) = &overrides.default_model {
                     definition.default_model = Some(default_model.clone());
+                }
+                if let Some(fold_mode) = &overrides.fold_mode {
+                    definition.fold_mode = Some(fold_mode.clone());
+                }
+                if let Some(tail_window) = overrides.tail_window {
+                    definition.tail_window = Some(tail_window);
+                }
+                if let Some(display_filter) = &overrides.display_filter {
+                    definition.display_filter = Some(display_filter.clone());
                 }
                 Some(definition)
             }
@@ -125,6 +137,9 @@ impl AgentEntry {
                 },
                 default_mode: definition.default_mode.clone(),
                 default_model: definition.default_model.clone(),
+                fold_mode: definition.fold_mode.clone(),
+                tail_window: definition.tail_window,
+                display_filter: definition.display_filter.clone(),
             },
         };
         // The reference stands in for `definition` only if it resolves back to
@@ -161,6 +176,12 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    fold_mode: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tail_window: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_filter: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
@@ -178,6 +199,9 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
                     command: v.command,
                     default_mode: v.default_mode,
                     default_model: v.default_model,
+                    fold_mode: v.fold_mode,
+                    tail_window: v.tail_window,
+                    display_filter: v.display_filter,
                 },
             });
         }
@@ -194,6 +218,9 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
             docker: v.docker,
             default_mode: v.default_mode,
             default_model: v.default_model,
+            fold_mode: v.fold_mode,
+            tail_window: v.tail_window,
+            display_filter: v.display_filter,
         });
         Ok(Self::for_definition(definition, None))
     }
@@ -209,6 +236,9 @@ impl From<AgentEntry> for AgentEntryRepr {
                 command: overrides.command,
                 default_mode: overrides.default_mode,
                 default_model: overrides.default_model,
+                fold_mode: overrides.fold_mode,
+                tail_window: overrides.tail_window,
+                display_filter: overrides.display_filter,
                 ssh: None,
                 docker: None,
             },
@@ -221,6 +251,9 @@ impl From<AgentEntry> for AgentEntryRepr {
                     command: repr.command,
                     default_mode: repr.default_mode,
                     default_model: repr.default_model,
+                    fold_mode: repr.fold_mode,
+                    tail_window: repr.tail_window,
+                    display_filter: repr.display_filter,
                     ssh: repr.ssh,
                     docker: repr.docker,
                 }
@@ -245,6 +278,9 @@ mod tests {
             launch: AgentLaunch::Raw(command.to_string()),
             default_mode: None,
             default_model: None,
+            fold_mode: None,
+            tail_window: None,
+            display_filter: None,
         }
     }
 
@@ -297,6 +333,9 @@ mod tests {
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
                     default_model: Some("gemini-2.5-pro".to_string()),
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
             },
             AgentEntry::Custom(custom("hermes", "hermes acp")),
@@ -309,6 +348,9 @@ mod tests {
                 },
                 default_mode: Some("plan".to_string()),
                 default_model: Some("claude-opus-4".to_string()),
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             }),
         ] {
             let toml_str = toml::to_string(&entry).expect("serialize");
@@ -386,6 +428,9 @@ mod tests {
                     command: None,
                     default_mode: Some("plan".to_string()),
                     default_model: None,
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
             }
         );
@@ -411,6 +456,9 @@ mod tests {
                     command: None,
                     default_mode: None,
                     default_model: Some("gpt-5-codex".to_string()),
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
             }
         );
@@ -478,6 +526,9 @@ mod tests {
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: None,
                     default_model: None,
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
             }
         );

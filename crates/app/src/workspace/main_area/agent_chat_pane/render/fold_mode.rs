@@ -2,7 +2,7 @@
 
 use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use super::options_panel::{fixed_region, panel_root, scroll_region};
+use super::options_panel::{axis_chip_label, fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
@@ -13,6 +13,7 @@ use crate::ui::{
 use crate::workspace::main_area::agent_chat_pane::fold_mode::{
     BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition,
 };
+use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::tool_category::ToolCategory;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -26,7 +27,7 @@ const RULES: [BlockRule; 3] = [
 /// Activity-bar chip for the pane's transcript fold rules.
 pub(super) fn fold_mode_chip(
     pane_id: PaneId,
-    mode: FoldMode,
+    mode: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
     default_open: bool,
     surface: &PaneSurfaceTokens,
@@ -45,7 +46,7 @@ pub(super) fn fold_mode_chip(
             surface,
             cx,
         )
-        .selected(!fold_is_default(mode))
+        .selected(!mode.is_following())
         .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip())),
     )
     .content(move |_, window, cx| {
@@ -55,17 +56,14 @@ pub(super) fn fold_mode_chip(
     })
 }
 
-/// The chip's full text. Also the fold axis's slot in the compact bar's
-/// tooltip, so the two readings of the same setting cannot diverge.
-pub(super) fn fold_mode_chip_label(mode: FoldMode) -> String {
-    s::agent_chat_fold_mode_chip(&mode_value(mode))
-}
-
-/// Whether the axis is at the value a fresh pane starts on. The compact bar
-/// shows one control for three axes, so it needs this to say that something
-/// behind the gear is set — `Custom` in particular has no other tell there.
-pub(super) fn fold_is_default(mode: FoldMode) -> bool {
-    mode == FoldPreset::Auto.mode()
+/// The chip's full text, overridden mark included. Also the fold axis's slot
+/// in the compact bar's tooltip, so the two readings of the same setting
+/// cannot diverge.
+pub(super) fn fold_mode_chip_label(mode: PaneChoice<FoldMode>) -> String {
+    axis_chip_label(
+        s::agent_chat_fold_mode_chip(&mode_value(mode.value())),
+        mode,
+    )
 }
 
 fn mode_value(mode: FoldMode) -> String {
@@ -77,11 +75,12 @@ fn mode_value(mode: FoldMode) -> String {
 
 pub(super) fn fold_mode_panel(
     view: &gpui::WeakEntity<AgentChatView>,
-    mode: FoldMode,
+    mode_choice: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
+    let mode = mode_choice.value();
     let mut rows = Vec::new();
     for block in FoldBlock::ALL {
         rows.push(block_rule_row(view, mode, editor_turn, block, pane_id, cx));
@@ -120,14 +119,16 @@ pub(super) fn fold_mode_panel(
             fixed_region().child(
                 button(
                     SharedString::from(format!("agent-chat-fold-reset-{pane_id}")),
-                    s::agent_chat_fold_editor_reset_auto(),
+                    s::agent_chat_fold_editor_reset_default(),
                 )
                 .ghost()
                 .xsmall()
-                .disabled(fold_is_default(mode))
+                // Offered on a value that already equals the default: what the
+                // button undoes is the *override*, not the value.
+                .disabled(mode_choice.is_following())
                 .on_click(move |_, _window, app| {
                     if let Some(view) = reset_view.upgrade() {
-                        view.update(app, |v, cx| v.set_fold_mode(FoldPreset::Auto.mode(), cx));
+                        view.update(app, |v, cx| v.reset_fold_mode(cx));
                     }
                 }),
             ),
@@ -386,21 +387,28 @@ mod tests {
         }
     }
 
+    /// The mark is about following config, not about the value: a pane parked
+    /// on the same mode config states is still overridden.
     #[test]
-    fn only_the_auto_preset_counts_as_default() {
-        assert!(fold_is_default(FoldMode::default()));
-        assert!(fold_is_default(FoldPreset::Auto.mode()));
-        assert!(!fold_is_default(FoldPreset::Summary.mode()));
-        assert!(!fold_is_default(FoldMode::from_tokens([
-            "auto",
-            "last.tool=expanded"
-        ])));
+    fn only_a_chosen_mode_marks_the_chip() {
+        let auto = FoldPreset::Auto.mode();
+        assert_eq!(
+            fold_mode_chip_label(PaneChoice::Seeded(auto)),
+            s::agent_chat_fold_mode_chip(&preset_label(FoldPreset::Auto))
+        );
+        assert_ne!(
+            fold_mode_chip_label(PaneChoice::Chosen(auto)),
+            fold_mode_chip_label(PaneChoice::Seeded(auto))
+        );
     }
 
     #[test]
     fn the_chip_label_carries_the_value_the_tooltip_shows() {
         let custom = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
-        assert!(fold_mode_chip_label(custom).contains(&s::agent_chat_fold_mode_custom()));
+        assert!(
+            fold_mode_chip_label(PaneChoice::Seeded(custom))
+                .contains(&s::agent_chat_fold_mode_custom())
+        );
     }
 
     #[test]

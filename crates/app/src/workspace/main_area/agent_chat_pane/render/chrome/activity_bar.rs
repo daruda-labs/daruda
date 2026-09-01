@@ -9,8 +9,9 @@
 //!
 //! Below [`theme::AGENT_CHAT_COMPACT_OPTIONS_W`] the three chips collapse into
 //! one gear. That loses their labels, so the gear takes over both of their
-//! jobs: it marks itself selected when any axis is off its default, and its
-//! tooltip spells out all three values.
+//! jobs: it marks itself selected when any axis has been taken off the
+//! configured default, and its tooltip spells out all three chip labels — the
+//! overridden mark included, so the narrowed bar still says *which* axis.
 
 use daruda_acp::UsageView;
 use gpui::{
@@ -18,9 +19,9 @@ use gpui::{
 };
 
 use super::super::filter::display_filter_chip_label;
-use super::super::fold_mode::{fold_is_default, fold_mode_chip_label};
+use super::super::fold_mode::fold_mode_chip_label;
 use super::super::options_panel::{fixed_region, panel_root};
-use super::super::tail_window::{tail_is_default, tail_window_chip_label};
+use super::super::tail_window::tail_window_chip_label;
 use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::ui::theme;
@@ -31,6 +32,7 @@ use crate::ui::{
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
 use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, TurnPosition};
+use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
     ActivityOptionsTab, AgentChatView, ChatContentWidth,
@@ -55,9 +57,9 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub usage: Option<&'a UsageView>,
     pub has_items: bool,
     pub content_width: ChatContentWidth,
-    pub tail: TailWindow,
-    pub display_filter: DisplayFilter,
-    pub fold_mode: FoldMode,
+    pub tail: PaneChoice<TailWindow>,
+    pub display_filter: PaneChoice<DisplayFilter>,
+    pub fold_mode: PaneChoice<FoldMode>,
     pub fold_editor_turn: TurnPosition,
     pub activity_options_tab: ActivityOptionsTab,
     pub compact_options: bool,
@@ -226,21 +228,29 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
         )
 }
 
-/// Whether every transcript axis is at the value a fresh pane starts on.
+/// Whether every transcript axis still follows the configured default.
 ///
-/// The compact bar replaces three labelled chips with one glyph, which by
-/// itself cannot say that anything is set — a `Custom` fold in particular has
-/// no other tell there. Marking the gear selected restores the signal the
-/// chips carried for free.
-fn options_are_default(fold: FoldMode, filter: DisplayFilter, tail: TailWindow) -> bool {
-    fold_is_default(fold) && filter.shows_everything() && tail_is_default(tail)
+/// The compact bar replaces three labelled chips — each of which carries its
+/// own overridden dot — with one glyph, which by itself cannot say that
+/// anything is set. Marking the gear selected restores that signal, and reads
+/// the same `PaneChoice` the dots do, so wide and narrow agree.
+fn every_axis_follows_config(
+    fold: PaneChoice<FoldMode>,
+    filter: PaneChoice<DisplayFilter>,
+    tail: PaneChoice<TailWindow>,
+) -> bool {
+    fold.is_following() && filter.is_following() && tail.is_following()
 }
 
 /// The gear's tooltip: the wide bar's three chip labels, verbatim. Always all
 /// three, not just the adjusted ones — a reader checking "what is this pane
 /// showing me" wants the full answer, and a variable-length list would need a
 /// separator the locale has no way to control.
-fn options_tooltip(fold: FoldMode, filter: DisplayFilter, tail: TailWindow) -> String {
+fn options_tooltip(
+    fold: PaneChoice<FoldMode>,
+    filter: PaneChoice<DisplayFilter>,
+    tail: PaneChoice<TailWindow>,
+) -> String {
     s::agent_chat_view_options_tooltip(
         &fold_mode_chip_label(fold),
         &display_filter_chip_label(filter),
@@ -259,7 +269,7 @@ fn view_options_chip(
     let filter = props.display_filter;
     let tail = props.tail;
     let active_tab = props.activity_options_tab;
-    let adjusted = !options_are_default(mode, filter, tail);
+    let adjusted = !every_axis_follows_config(mode, filter, tail);
     let tooltip = options_tooltip(mode, filter, tail);
     let view = cx.entity().downgrade();
     Popover::new(SharedString::from(format!(
@@ -293,10 +303,10 @@ fn view_options_chip(
 fn activity_options_panel(
     view: &gpui::WeakEntity<AgentChatView>,
     pane_id: PaneId,
-    mode: FoldMode,
+    mode: PaneChoice<FoldMode>,
     editor_turn: TurnPosition,
-    filter: DisplayFilter,
-    tail: TailWindow,
+    filter: PaneChoice<DisplayFilter>,
+    tail: PaneChoice<TailWindow>,
     active_tab: ActivityOptionsTab,
     window: &Window,
     cx: &mut Context<crate::ui::PopoverState>,

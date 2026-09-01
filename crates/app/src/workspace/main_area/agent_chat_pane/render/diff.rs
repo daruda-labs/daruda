@@ -35,7 +35,9 @@ const ICON_OPEN_IN_NEW: &str = "icons/ui/open-in-new.svg";
 /// it so the treatment matches the File viewer exactly — gutter + syntax +
 /// word-diff backgrounds. Falls back to inline old/new colored monospace lines
 /// when the editor is absent (the two sides are identical, or the window was
-/// gone at build time).
+/// gone at build time); that fallback is capped at
+/// `AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS`, so no diff can make a list row's element
+/// count track a file's line count.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn diff_block(
     tool_id: &str,
@@ -258,8 +260,13 @@ fn diff_body(
         );
     }
 
+    let split = fallback_split(
+        diff.old_text.as_deref().map_or(0, |t| t.lines().count()),
+        diff.new_text.lines().count(),
+        theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS,
+    );
     if let Some(old) = &diff.old_text {
-        for line in old.lines() {
+        for line in old.lines().take(split.old_shown) {
             block = block.child(diff_line(
                 line,
                 t.file_diff_del_bg,
@@ -269,7 +276,7 @@ fn diff_body(
             ));
         }
     }
-    for line in diff.new_text.lines() {
+    for line in diff.new_text.lines().take(split.new_shown) {
         block = block.child(diff_line(
             line,
             t.file_diff_add_bg,
@@ -278,7 +285,44 @@ fn diff_body(
             cx,
         ));
     }
+    if split.hidden > 0 {
+        block = block.child(
+            div()
+                .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+                .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(SharedString::from(s::agent_chat_diff_fallback_truncated(
+                    split.hidden,
+                ))),
+        );
+    }
     block
+}
+
+/// How much of an inline-fallback diff is rendered, and how much is cut.
+struct FallbackSplit {
+    old_shown: usize,
+    new_shown: usize,
+    hidden: usize,
+}
+
+/// Split `cap` rows across the removed side then the added side, the order they
+/// render in. The cap is what keeps a fallback diff's element count off the
+/// file's line count: the fallback cannot scroll, and the chat list re-runs
+/// layout for every visible row on every repaint, so an unbounded one made a
+/// single big diff cost the whole pane hundreds of taffy nodes per frame.
+/// Cut lines are gone, not scrolled past — see
+/// [`AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS`](theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS)
+/// for why that makes it a different number from the embed's height cap.
+fn fallback_split(old_count: usize, new_count: usize, cap: usize) -> FallbackSplit {
+    let old_shown = old_count.min(cap);
+    let new_shown = new_count.min(cap - old_shown);
+    FallbackSplit {
+        old_shown,
+        new_shown,
+        hidden: (old_count + new_count) - (old_shown + new_shown),
+    }
 }
 
 /// The collapsed diff summary `+N −M`: added count in `file_diff_add_text`
@@ -317,4 +361,50 @@ fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char, cx: &App) -> impl Int
         .whitespace_normal()
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(format!("{marker} {line}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fallback_split, theme};
+
+    #[test]
+    fn a_diff_under_the_cap_is_shown_whole() {
+        let split = fallback_split(3, 4, 12);
+        assert_eq!((split.old_shown, split.new_shown, split.hidden), (3, 4, 0));
+    }
+
+    #[test]
+    fn the_added_side_gets_what_the_removed_side_left() {
+        let split = fallback_split(5, 40, 12);
+        assert_eq!((split.old_shown, split.new_shown, split.hidden), (5, 7, 33));
+    }
+
+    #[test]
+    fn a_removed_side_past_the_cap_leaves_the_added_side_nothing() {
+        // Not a starvation bug to fix here: the cut is reported either way, and
+        // the fix for a diff this size is to build its editor, not to re-balance
+        // a fallback that cannot scroll.
+        let split = fallback_split(30, 30, 12);
+        assert_eq!(
+            (split.old_shown, split.new_shown, split.hidden),
+            (12, 0, 48)
+        );
+    }
+
+    #[test]
+    fn an_empty_diff_hides_nothing() {
+        let split = fallback_split(0, 0, 12);
+        assert_eq!((split.old_shown, split.new_shown, split.hidden), (0, 0, 0));
+    }
+
+    #[test]
+    fn the_shipped_cap_bounds_a_diff_larger_than_itself() {
+        // Pins the constant to the fallback rather than to the embed's viewport
+        // height: this one decides what is rendered at all, so it is read here
+        // from `theme` and not re-derived from a pixel budget.
+        let cap = theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS;
+        assert!(cap > 0);
+        let split = fallback_split(0, cap + 1, cap);
+        assert_eq!((split.new_shown, split.hidden), (cap, 1));
+    }
 }

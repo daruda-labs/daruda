@@ -322,6 +322,19 @@ pub(super) struct AgentCatalogRow {
     /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
+    /// The per-agent transcript-presentation keys this row was built from. No
+    /// editor renders them yet, so the row carries them across a save instead
+    /// of writing back a definition that has silently dropped them.
+    pub(super) transcript: AgentRowTranscript,
+}
+
+/// The per-agent transcript-presentation keys an [`AgentCatalogRow`] holds but
+/// does not edit. See [`daruda_config::AgentDefinition`] for what each means.
+#[derive(Clone, Default)]
+pub(super) struct AgentRowTranscript {
+    pub(super) fold_mode: Option<Vec<String>>,
+    pub(super) tail_window: Option<u8>,
+    pub(super) display_filter: Option<Vec<String>>,
 }
 
 /// One row of the session host registry editor. Unlike [`AgentCatalogRow`],
@@ -536,6 +549,11 @@ impl SettingsWindow {
             ),
         };
         let path_warning = agent_command_path_warning(&command);
+        let transcript = AgentRowTranscript {
+            fold_mode: definition.fold_mode.clone(),
+            tail_window: definition.tail_window,
+            display_filter: definition.display_filter.clone(),
+        };
         let transport_kind = SharedString::from(transport_kind);
         let default_mode = SharedString::from(definition.default_mode.clone().unwrap_or_default());
         let default_model =
@@ -550,6 +568,7 @@ impl SettingsWindow {
             );
         AgentCatalogRow {
             preset,
+            transcript,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
                     .placeholder("agent-id")
@@ -2188,6 +2207,9 @@ impl SettingsWindow {
                     launch,
                     default_mode: row.default_mode(cx),
                     default_model: row.default_model(cx),
+                    fold_mode: row.transcript.fold_mode.clone(),
+                    tail_window: row.transcript.tail_window,
+                    display_filter: row.transcript.display_filter.clone(),
                 },
                 row.preset.as_deref(),
             ));

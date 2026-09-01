@@ -137,10 +137,88 @@ fn agent_definition_field_round_trip() {
         launch: AgentLaunch::Raw("codex acp".to_string()),
         default_mode: Some("yolo".to_string()),
         default_model: Some("gpt-5-codex".to_string()),
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
     assert_eq!(back, d);
+}
+
+#[test]
+fn per_agent_transcript_defaults_round_trip() {
+    let d = AgentDefinition {
+        id: "codex".to_string(),
+        name: "Codex".to_string(),
+        launch: AgentLaunch::Raw("codex acp".to_string()),
+        default_mode: None,
+        default_model: None,
+        fold_mode: Some(vec!["summary".to_string()]),
+        tail_window: Some(3),
+        // The empty list is a value of its own here (an empty visible set), so
+        // it has to survive the trip as `Some([])` rather than collapse to
+        // `None` — see the field's doc.
+        display_filter: Some(Vec::new()),
+    };
+    let toml_str = toml::to_string(&d).expect("serialize");
+    let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back, d, "{toml_str}");
+}
+
+/// The catalog's real persistence boundary is [`AgentEntry`], not
+/// [`AgentDefinition`] — a field reaching only the latter's wire struct would
+/// still be dropped by every `[[agents]]` read and write.
+#[test]
+fn per_agent_transcript_defaults_round_trip_through_a_catalog_entry() {
+    for entry in [
+        AgentEntry::Custom(AgentDefinition {
+            id: "hermes".to_string(),
+            name: "Hermes".to_string(),
+            launch: AgentLaunch::Raw("hermes acp".to_string()),
+            default_mode: None,
+            default_model: None,
+            fold_mode: Some(vec!["expanded".to_string()]),
+            tail_window: Some(10),
+            display_filter: Some(vec!["prose".to_string()]),
+        }),
+        AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides {
+                fold_mode: Some(vec!["summary".to_string()]),
+                tail_window: Some(1),
+                display_filter: Some(Vec::new()),
+                ..PresetOverrides::default()
+            },
+        },
+    ] {
+        let toml_str = toml::to_string(&entry).expect("serialize");
+        let back: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back, entry, "{toml_str}");
+        let resolved = back.resolve().expect("both entries are runnable");
+        assert_eq!(resolved.fold_mode, entry.resolve().unwrap().fold_mode);
+        assert_eq!(resolved.tail_window, entry.resolve().unwrap().tail_window);
+        assert_eq!(
+            resolved.display_filter,
+            entry.resolve().unwrap().display_filter
+        );
+    }
+}
+
+/// A pre-per-agent config keeps loading, and daruda must not start writing
+/// empty keys back into it.
+#[test]
+fn a_definition_without_transcript_defaults_stays_absent() {
+    let d: AgentDefinition =
+        toml::from_str("id = \"codex\"\nname = \"Codex\"\ncommand = \"codex acp\"\n")
+            .expect("deserialize");
+    assert_eq!(d.fold_mode, None);
+    assert_eq!(d.tail_window, None);
+    assert_eq!(d.display_filter, None);
+    let toml_str = toml::to_string(&d).expect("serialize");
+    for key in ["fold_mode", "tail_window", "display_filter"] {
+        assert!(!toml_str.contains(key), "{key} in {toml_str}");
+    }
 }
 
 #[test]
@@ -181,6 +259,9 @@ fn default_model_round_trips_alongside_a_launch_sub_table() {
         },
         default_mode: None,
         default_model: Some("claude-opus-4".to_string()),
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -219,6 +300,9 @@ fn ssh_launch_toml_round_trips() {
         },
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[ssh]"));
@@ -240,6 +324,9 @@ fn docker_launch_toml_round_trips() {
         },
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[docker]"));

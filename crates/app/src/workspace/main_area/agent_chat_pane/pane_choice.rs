@@ -21,6 +21,13 @@ impl<T: Copy> PaneChoice<T> {
         }
     }
 
+    /// Whether the pane still tracks config. The reset affordance reads this
+    /// rather than comparing values: a pane sitting on `Chosen(default)` is
+    /// overridden, it merely happens to agree.
+    pub(in crate::workspace) fn is_following(self) -> bool {
+        matches!(self, Self::Seeded(_))
+    }
+
     /// Follow a new config default. A pane the user has already decided for
     /// keeps its own value — that is what makes `Seeded` mean "still following
     /// config" rather than "happens to equal the old config".
@@ -28,6 +35,13 @@ impl<T: Copy> PaneChoice<T> {
         if matches!(self, Self::Seeded(_)) {
             *self = Self::Seeded(value);
         }
+    }
+
+    /// Drop this pane's own decision and follow `value` again. The inverse of
+    /// a `Chosen` write: it is the *absence* of a choice, so the pane moves
+    /// with every later [`reseed`](Self::reseed).
+    pub(in crate::workspace) fn reset(&mut self, value: T) {
+        *self = Self::Seeded(value);
     }
 }
 
@@ -77,6 +91,24 @@ mod tests {
             PaneChoice::Chosen(7),
             "a user choice is not config's"
         );
+    }
+
+    #[test]
+    fn following_is_about_the_variant_not_the_value() {
+        assert!(PaneChoice::Seeded(7u8).is_following());
+        assert!(
+            !PaneChoice::Chosen(7u8).is_following(),
+            "a choice that agrees with config is still a choice"
+        );
+    }
+
+    #[test]
+    fn a_reset_choice_follows_later_config_edits_again() {
+        let mut chosen = PaneChoice::Chosen(7u8);
+        chosen.reset(3);
+        assert_eq!(chosen, PaneChoice::Seeded(3));
+        chosen.reseed(9);
+        assert_eq!(chosen, PaneChoice::Seeded(9), "the reset put it back");
     }
 
     #[test]

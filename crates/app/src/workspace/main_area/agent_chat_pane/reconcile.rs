@@ -113,10 +113,7 @@ impl AgentChatView {
     /// (besides an ACP event) a card body can arrive on or leave the screen.
     ///
     /// `scope` narrows it to the toggled card when the caller knows which one it
-    /// was; expand-all / collapse-all pass [`ReconcileScope::All`]. Diff embeds
-    /// need the Workspace-resolved syntax theme, so they are skipped until the
-    /// view has seen one — until then those diffs render through the inline
-    /// fallback, which is correct, just unhighlighted.
+    /// was; expand-all / collapse-all pass [`ReconcileScope::All`].
     pub(in crate::workspace) fn reconcile_embeds_after_fold(
         &mut self,
         scope: &ReconcileScope,
@@ -128,10 +125,33 @@ impl AgentChatView {
         // [`WindowAccess`].
         let mut access = WindowAccess::Live(window);
         self.reconcile_output_editors(scope, &mut access, cx);
-        if let Some(theme) = self.syntax_theme().map(str::to_owned) {
-            let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
-            self.reconcile_diff_editors(&theme, is_light, scope, &mut access, cx);
-        }
+        let theme = self.syntax_theme().to_owned();
+        let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+        self.reconcile_diff_editors(&theme, is_light, scope, &mut access, cx);
+    }
+
+    /// Rebuild every content-derived embed for the whole conversation: diff
+    /// editors, tool images, verbatim-output editors, mermaid rasters.
+    ///
+    /// The `items`-replaced-wholesale counterpart to `apply_event`'s passes.
+    /// Those are scoped to the call an event named and gated on what that event
+    /// touched; a caller that swaps the entire transcript has neither a scope to
+    /// narrow to nor an event flag to gate on, so it owes the full pass. Without
+    /// it every diff falls back to the inline render and every verbatim output
+    /// loses its editor — silently, since both fallbacks are legitimate renders.
+    #[cfg(feature = "devtools")]
+    pub(in crate::workspace) fn reconcile_all_embeds(
+        &mut self,
+        access: &mut WindowAccess<'_>,
+        cx: &mut Context<Self>,
+    ) {
+        let scope = ReconcileScope::All;
+        let theme = self.syntax_theme().to_owned();
+        let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
+        self.reconcile_diff_editors(&theme, is_light, &scope, access, cx);
+        self.reconcile_tool_images(&scope, cx);
+        self.reconcile_output_editors(&scope, access, cx);
+        self.reconcile_mermaid(Self::host_is_dark(cx), cx);
     }
 
     /// Rebuild the theme-dependent embeds after a UI theme swap.
@@ -155,10 +175,7 @@ impl AgentChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(theme) = self.syntax_theme().map(str::to_owned) else {
-            // No syntax theme seen yet, so no diff embed has been built either.
-            return;
-        };
+        let theme = self.syntax_theme().to_owned();
         let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
         let mut access = WindowAccess::ByHandle(self.window_handle);
         self.reconcile_diff_editors(&theme, is_light, &ReconcileScope::All, &mut access, cx);
@@ -727,6 +744,45 @@ mod tests {
             text: text.to_string(),
             truncated_from: None,
         }
+    }
+
+    /// Seeding replaces `items` wholesale outside the ACP pump, so it owes the
+    /// same embed pass an event does. It used to owe it and not pay: a seeded
+    /// pane rendered every diff through the inline per-line fallback, which is
+    /// both a different picture from the live one the screenshots are meant to
+    /// verify and — because the chat list re-lays-out every visible row on every
+    /// repaint — a per-frame cost proportional to the diff's line count.
+    #[cfg(feature = "devtools")]
+    #[gpui::test]
+    fn seeding_a_transcript_builds_its_diff_embeds(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+
+        // No `set_syntax_theme` here on purpose: the palette a diff embed is
+        // fingerprinted against is a construction seed, so seeding is enough.
+        window
+            .update(cx, |v, window, cx| {
+                v.seed_transcript(
+                    vec![tool_call_with(
+                        vec![raw("out")],
+                        vec![diff("a.rs", "first\nsecond\n")],
+                    )],
+                    window,
+                    cx,
+                );
+            })
+            .expect("the test window is live");
+
+        let view = window.root(cx).expect("the view is the window root");
+        view.read_with(cx, |v, _| {
+            assert!(
+                v.assets.diff_editors.contains_key(KEY),
+                "a seeded diff gets the same editor a streamed one does"
+            );
+            assert!(
+                v.assets.output_editors.contains_key(KEY),
+                "and so does its verbatim output"
+            );
+        });
     }
 
     /// Settled, so its card is collapsed and renders no body.

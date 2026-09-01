@@ -429,7 +429,10 @@ impl DisplayFilter {
         self
     }
 
-    /// Nothing is hidden — the pane is not narrowed at all.
+    /// Nothing is hidden — the pane is not narrowed at all. A property of the
+    /// value only: whether the pane still *follows* config is `PaneChoice`'s
+    /// question, and the UI asks that one, so this is left to assertions.
+    #[cfg(test)]
     pub(in crate::workspace) fn shows_everything(self) -> bool {
         self == Self::default()
     }

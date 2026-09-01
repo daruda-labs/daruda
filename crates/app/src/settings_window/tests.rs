@@ -647,6 +647,9 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                     command: None,
                     default_mode: None,
                     default_model: None,
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
             }
         );
@@ -689,6 +692,9 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
                 },
                 default_mode: None,
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             })
         );
     });
@@ -709,6 +715,9 @@ fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContex
         },
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     });
     let config = daruda_config::Config {
         agents: vec![ssh_entry.clone()],
@@ -733,6 +742,9 @@ fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppCon
         },
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     });
     let config = daruda_config::Config {
         agents: vec![docker_entry.clone()],
@@ -744,6 +756,51 @@ fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppCon
             .validate(cx)
             .expect("an untouched docker row must validate");
         assert_eq!(cfg.agents[0], docker_entry);
+    });
+}
+
+/// The Settings form renders no editor for `fold_mode` / `tail_window` /
+/// `display_filter`, so the save path has to carry a row's values across
+/// untouched — an unrelated edit must not erase a hand-written key.
+#[gpui::test]
+fn transcript_defaults_survive_a_catalog_save_that_does_not_edit_them(cx: &mut TestAppContext) {
+    let fold_mode = vec!["summary".to_string(), "last.thinking=expanded".to_string()];
+    let display_filter = vec!["prose".to_string(), "tool_read".to_string()];
+    let tuned = daruda_config::AgentDefinition {
+        id: "hand-tuned-claude".to_string(),
+        name: "Hand Tuned".to_string(),
+        launch: daruda_config::AgentLaunch::Raw(
+            "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+        ),
+        default_mode: None,
+        default_model: None,
+        fold_mode: Some(fold_mode.clone()),
+        tail_window: Some(12),
+        display_filter: Some(display_filter.clone()),
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::Custom(tuned)],
+        ..Default::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config);
+    // Edit a field the form does own: the save rebuilds the whole definition
+    // from the row, so this is the path that would drop the three keys.
+    let name_input = win.read_with(cx, |w, _| {
+        w.agent_editable_row(0).unwrap().name_input.clone()
+    });
+    wh.update(cx, |_root, window, cx| {
+        name_input.update(cx, |i, cx_state| {
+            i.set_value("Renamed".to_owned(), window, cx_state)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a renamed row must validate");
+        let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
+        assert_eq!(saved.name, "Renamed");
+        assert_eq!(saved.fold_mode, Some(fold_mode));
+        assert_eq!(saved.tail_window, Some(12));
+        assert_eq!(saved.display_filter, Some(display_filter));
     });
 }
 
@@ -797,6 +854,9 @@ fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppCon
                     ),
                     default_mode: None,
                     default_model: None,
+                    fold_mode: None,
+                    tail_window: None,
+                    display_filter: None,
                 },
                 None,
                 window,
@@ -1186,6 +1246,9 @@ fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
         ),
         default_mode: Some("legacy-mode".to_string()),
         default_model: Some("legacy-model".to_string()),
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     });
     let config = daruda_config::Config {
         agents: vec![entry.clone()],

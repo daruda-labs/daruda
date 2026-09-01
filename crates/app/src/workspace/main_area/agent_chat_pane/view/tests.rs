@@ -73,8 +73,12 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             "claude".to_string(),
             "Claude".to_string(),
             None,
-            super::super::rows::tail::TailWindow::All,
-            super::super::fold_mode::FoldMode::default(),
+            super::super::transcript_defaults::TranscriptDefaults {
+                tail: super::super::rows::tail::TailWindow::All,
+                fold_mode: super::super::fold_mode::FoldMode::default(),
+                filter: super::super::display_filter::DisplayFilter::default(),
+            },
+            daruda_config::file_viewer::DEFAULT_SYNTAX_THEME.to_owned(),
             cx,
         )
     })
@@ -1520,4 +1524,132 @@ fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContex
         count(cx) > settled,
         "crossing into the compact bar has to repaint, or the chips stay stale"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Returning an axis to the configured default
+// ---------------------------------------------------------------------------
+
+use super::super::display_filter::{DisplayFilter, FilterFacet};
+use super::super::pane_choice::PaneChoice;
+use super::super::rows::tail::TailWindow;
+use super::super::transcript_defaults::TranscriptDefaults;
+
+/// A config state distinct from the built-in one on every axis, so a reset
+/// that lands on the *built-in* default instead of the one in force is caught.
+fn other_defaults() -> TranscriptDefaults {
+    TranscriptDefaults {
+        tail: TailWindow::Last(5),
+        fold_mode: FoldPreset::Summary.mode(),
+        filter: DisplayFilter::default().toggled(FilterFacet::Thinking),
+    }
+}
+
+/// The one check that tells `Seeded(x)` from `Chosen(x)`: both panes hold the
+/// same value, and only the one that is *following* moves when config does.
+#[gpui::test]
+fn a_reset_axis_follows_the_next_default_but_an_equal_choice_does_not(
+    cx: &mut gpui::TestAppContext,
+) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            // Pin the value the pane already shows — a choice, not agreement.
+            view.set_tail_window(TailWindow::All, cx);
+            assert_eq!(view.tail, PaneChoice::Chosen(TailWindow::All));
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            assert_eq!(
+                view.tail,
+                PaneChoice::Chosen(TailWindow::All),
+                "a choice that happens to equal the old default is still a choice"
+            );
+
+            // The same pane, handed back: it lands on the default now in force,
+            // not on the one it was built with.
+            view.reset_tail_window(cx);
+            assert_eq!(view.tail, PaneChoice::Seeded(TailWindow::Last(5)));
+
+            view.reseed_transcript_defaults(
+                &TranscriptDefaults {
+                    tail: TailWindow::Last(3),
+                    ..other_defaults()
+                },
+                cx,
+            );
+            assert_eq!(
+                view.tail,
+                PaneChoice::Seeded(TailWindow::Last(3)),
+                "a reset pane tracks every later config edit"
+            );
+        })
+        .expect("view update");
+}
+
+/// What the panel footers pass to `.disabled(..)`. Value equality is the wrong
+/// question: a pane pinned to the default's own value still has an override to
+/// undo, and a following pane has none.
+#[gpui::test]
+fn the_reset_is_offered_on_a_chosen_default_and_withheld_while_following(
+    cx: &mut gpui::TestAppContext,
+) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            assert!(view.fold.mode_choice().is_following(), "a fresh pane");
+
+            view.set_fold_mode(view.defaults.fold_mode, cx);
+            assert!(
+                !view.fold.mode_choice().is_following(),
+                "pinning the default's own value still offers the reset"
+            );
+
+            view.reset_fold_mode(cx);
+            assert!(view.fold.mode_choice().is_following());
+        })
+        .expect("view update");
+}
+
+#[gpui::test]
+fn resetting_the_tail_window_hands_the_axis_back(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            view.set_tail_window(TailWindow::Last(1), cx);
+            view.reset_tail_window(cx);
+            assert_eq!(view.tail, PaneChoice::Seeded(other_defaults().tail));
+        })
+        .expect("view update");
+}
+
+#[gpui::test]
+fn resetting_the_fold_mode_hands_the_axis_back(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            view.set_fold_mode(FoldPreset::Expanded.mode(), cx);
+            view.reset_fold_mode(cx);
+            assert_eq!(
+                view.fold.mode_choice(),
+                PaneChoice::Seeded(other_defaults().fold_mode)
+            );
+        })
+        .expect("view update");
+}
+
+#[gpui::test]
+fn resetting_the_display_filter_hands_the_axis_back(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            view.toggle_display_facet(FilterFacet::ToolRun, cx);
+            view.reset_display_filter(cx);
+            assert_eq!(
+                view.display_filter,
+                PaneChoice::Seeded(other_defaults().filter)
+            );
+        })
+        .expect("view update");
 }

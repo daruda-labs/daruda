@@ -1110,6 +1110,9 @@ mod tests {
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: Some("yolo".to_string()),
                 default_model: None,
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1135,6 +1138,9 @@ mod tests {
                 launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: None,
                 default_model: Some("opus".to_string()),
+                fold_mode: None,
+                tail_window: None,
+                display_filter: None,
             },
             AgentDefinition::claude_default(),
         ];

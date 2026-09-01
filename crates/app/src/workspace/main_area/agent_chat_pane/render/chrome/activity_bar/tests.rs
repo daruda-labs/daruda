@@ -2,8 +2,8 @@
 //! last-active timestamp, and the compact bar's state signal.
 
 use super::{
-    DisplayFilter, FoldMode, TailWindow, context_meter, format_token_count, last_active_tooltip,
-    options_are_default, options_tooltip,
+    DisplayFilter, FoldMode, PaneChoice, TailWindow, context_meter, every_axis_follows_config,
+    format_token_count, last_active_tooltip, options_tooltip,
 };
 use crate::workspace::main_area::agent_chat_pane::display_filter::FilterFacet;
 use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
@@ -101,56 +101,63 @@ fn format_token_count_cases() {
     }
 }
 
-fn defaults() -> (FoldMode, DisplayFilter, TailWindow) {
+/// A pane nobody has touched: every axis still following config.
+fn following() -> (
+    PaneChoice<FoldMode>,
+    PaneChoice<DisplayFilter>,
+    PaneChoice<TailWindow>,
+) {
     (
-        FoldMode::default(),
-        DisplayFilter::default(),
-        TailWindow::All,
+        PaneChoice::Seeded(FoldMode::default()),
+        PaneChoice::Seeded(DisplayFilter::default()),
+        PaneChoice::Seeded(TailWindow::All),
     )
 }
 
 #[test]
 fn a_fresh_pane_leaves_the_compact_gear_unmarked() {
-    let (fold, filter, tail) = defaults();
-    assert!(options_are_default(fold, filter, tail));
+    let (fold, filter, tail) = following();
+    assert!(every_axis_follows_config(fold, filter, tail));
 }
 
 /// Each axis has to be able to mark the gear on its own — this is the signal
 /// that replaces three chip labels, so one axis going unnoticed is the whole
-/// bug it exists to prevent.
+/// bug it exists to prevent. The mark tracks the *override*, not the value:
+/// a pane pinned to the default's own value has still been taken off config.
 #[test]
-fn any_single_adjusted_axis_marks_the_compact_gear() {
-    let (fold, filter, tail) = defaults();
-    assert!(!options_are_default(
-        FoldPreset::Summary.mode(),
+fn any_single_overridden_axis_marks_the_compact_gear() {
+    let (fold, filter, tail) = following();
+    assert!(!every_axis_follows_config(
+        PaneChoice::Chosen(FoldPreset::Summary.mode()),
         filter,
         tail
     ));
-    assert!(!options_are_default(
-        FoldMode::from_tokens(["auto", "last.tool=expanded"]),
+    assert!(!every_axis_follows_config(
+        PaneChoice::Chosen(FoldMode::default()),
         filter,
         tail
     ));
-    assert!(!options_are_default(
+    assert!(!every_axis_follows_config(
         fold,
-        DisplayFilter::default().toggled(FilterFacet::ToolEdit),
+        PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
         tail
     ));
-    assert!(!options_are_default(
+    assert!(!every_axis_follows_config(
         fold,
         filter,
-        TailWindow::last(TAIL_WINDOW_CHOICES[0])
+        PaneChoice::Chosen(TailWindow::last(TAIL_WINDOW_CHOICES[0]))
     ));
 }
 
 /// The gear replaces three labelled chips, so its tooltip has to carry all
-/// three values — that is the only place a compact bar states them.
+/// three values — that is the only place a compact bar states them — and the
+/// overridden marks with them, so a narrowed bar still says which axis.
 #[test]
 fn the_compact_tooltip_names_every_axis() {
     let tip = options_tooltip(
-        FoldMode::from_tokens(["auto", "last.tool=expanded"]),
-        DisplayFilter::default().toggled(FilterFacet::ToolEdit),
-        TailWindow::last(TAIL_WINDOW_CHOICES[0]),
+        PaneChoice::Chosen(FoldMode::from_tokens(["auto", "last.tool=expanded"])),
+        PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
+        PaneChoice::Chosen(TailWindow::last(TAIL_WINDOW_CHOICES[0])),
     );
     for value in [
         crate::surface::strings::agent_chat_fold_mode_custom(),
@@ -159,8 +166,13 @@ fn the_compact_tooltip_names_every_axis() {
         assert!(tip.contains(&value), "{value:?} missing from {tip:?}");
     }
     // And the default reading names the defaults rather than going silent.
-    let (fold, filter, tail) = defaults();
+    let (fold, filter, tail) = following();
     let quiet = options_tooltip(fold, filter, tail);
     assert!(quiet.contains(&crate::surface::strings::agent_chat_fold_mode_auto()));
     assert!(quiet.contains(&crate::surface::strings::agent_chat_filter_none()));
+    assert_ne!(
+        quiet,
+        options_tooltip(PaneChoice::Chosen(FoldMode::default()), filter, tail),
+        "the tooltip carries each chip's overridden mark"
+    );
 }

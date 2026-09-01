@@ -47,6 +47,12 @@ impl AgentPreset {
             // account/plan dependent, so there is nothing to pin ahead of a
             // real connection.
             default_model: None,
+            // Nor any transcript-presentation default: those are a taste the
+            // user states per agent, so the `[agent]` section applies until
+            // they do.
+            fold_mode: None,
+            tail_window: None,
+            display_filter: None,
         })
     }
 }

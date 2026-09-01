@@ -2,7 +2,7 @@
 
 use gpui::{Anchor, AnyElement, App, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use super::options_panel::{fixed_region, panel_root, scroll_region};
+use super::options_panel::{axis_chip_label, fixed_region, panel_root, scroll_region};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
@@ -14,13 +14,14 @@ use crate::workspace::main_area::agent_chat_pane::display_filter::{
     DisplayFilter, FilterAxis, FilterFacet, SectionState,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 pub(super) fn display_filter_chip(
     pane_id: PaneId,
-    filter: DisplayFilter,
+    filter: PaneChoice<DisplayFilter>,
     default_open: bool,
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
@@ -38,7 +39,7 @@ pub(super) fn display_filter_chip(
             surface,
             cx,
         )
-        .selected(!filter.shows_everything())
+        .selected(!filter.is_following())
         .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
     )
     .content(move |_, window, cx| {
@@ -48,10 +49,14 @@ pub(super) fn display_filter_chip(
     })
 }
 
-/// The chip's full text. Also the filter axis's slot in the compact bar's
-/// tooltip, so the two readings of the same setting cannot diverge.
-pub(super) fn display_filter_chip_label(filter: DisplayFilter) -> String {
-    s::agent_chat_filter_chip(&filter_value(filter))
+/// The chip's full text, overridden mark included. Also the filter axis's slot
+/// in the compact bar's tooltip, so the two readings of the same setting
+/// cannot diverge.
+pub(super) fn display_filter_chip_label(filter: PaneChoice<DisplayFilter>) -> String {
+    axis_chip_label(
+        s::agent_chat_filter_chip(&filter_value(filter.value())),
+        filter,
+    )
 }
 
 /// The chip names what is **missing**, not what is left: it is the shorter
@@ -73,11 +78,12 @@ fn filter_value(filter: DisplayFilter) -> String {
 
 pub(super) fn filter_panel(
     view: &gpui::WeakEntity<AgentChatView>,
-    current: DisplayFilter,
+    choice: PaneChoice<DisplayFilter>,
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
-    let clear_view = view.clone();
+    let current = choice.value();
+    let reset_view = view.clone();
     let mut facets = scroll_region(SharedString::from(format!(
         "agent-chat-filter-facets-scroll-{pane_id}"
     )));
@@ -116,15 +122,17 @@ pub(super) fn filter_panel(
         .child(
             fixed_region().child(
                 button(
-                    SharedString::from(format!("agent-chat-filter-clear-{pane_id}")),
-                    s::agent_chat_filter_clear(),
+                    SharedString::from(format!("agent-chat-filter-reset-{pane_id}")),
+                    s::agent_chat_filter_reset_default(),
                 )
                 .ghost()
                 .xsmall()
-                .disabled(current.shows_everything())
+                // Offered on a value that already equals the default: what the
+                // button undoes is the *override*, not the value.
+                .disabled(choice.is_following())
                 .on_click(move |_, _window, app| {
-                    if let Some(view) = clear_view.upgrade() {
-                        view.update(app, |v, cx| v.clear_display_filter(cx));
+                    if let Some(view) = reset_view.upgrade() {
+                        view.update(app, |v, cx| v.reset_display_filter(cx));
                     }
                 }),
             ),

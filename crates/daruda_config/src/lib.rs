@@ -1026,6 +1026,36 @@ fn status_bar_item_slug(item: StatusBarItem) -> &'static str {
     }
 }
 
+/// The per-agent transcript-presentation keys, written only where set so an
+/// agent that follows `[agent]` keeps no key of its own. An empty
+/// `display_filter` list is a set of its own (nothing visible), so it is
+/// written like any other value rather than treated as absent.
+fn write_transcript_defaults(
+    table: &mut toml_edit::Table,
+    fold_mode: Option<&[String]>,
+    tail_window: Option<u8>,
+    display_filter: Option<&[String]>,
+) {
+    if let Some(fold_mode) = fold_mode {
+        table["fold_mode"] = string_array(fold_mode);
+    }
+    if let Some(tail_window) = tail_window {
+        table["tail_window"] = toml_edit::value(i64::from(tail_window));
+    }
+    if let Some(display_filter) = display_filter {
+        table["display_filter"] = string_array(display_filter);
+    }
+}
+
+fn string_array(values: &[String]) -> toml_edit::Item {
+    toml_edit::value(
+        values
+            .iter()
+            .map(String::as_str)
+            .collect::<toml_edit::Array>(),
+    )
+}
+
 /// One `[[agents]]` table as [`patch_config_file_to`] writes it. Hand-built
 /// rather than serialized because the surrounding document is a `toml_edit`
 /// tree that preserves the user's comments and formatting — which means this
@@ -1053,6 +1083,12 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             if let Some(default_model) = &overrides.default_model {
                 table["default_model"] = toml_edit::value(default_model.clone());
             }
+            write_transcript_defaults(
+                &mut table,
+                overrides.fold_mode.as_deref(),
+                overrides.tail_window,
+                overrides.display_filter.as_deref(),
+            );
         }
         AgentEntry::Custom(agent) => {
             table["id"] = toml_edit::value(agent.id.clone());
@@ -1089,6 +1125,12 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             if let Some(default_model) = &agent.default_model {
                 table["default_model"] = toml_edit::value(default_model.clone());
             }
+            write_transcript_defaults(
+                &mut table,
+                agent.fold_mode.as_deref(),
+                agent.tail_window,
+                agent.display_filter.as_deref(),
+            );
             if let Some((key, sub_table)) = remote {
                 table[key] = toml_edit::Item::Table(sub_table);
             }

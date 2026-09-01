@@ -1765,6 +1765,13 @@ pub fn agent_chat_tab_title() -> String {
     rust_i18n::t!("agent_chat.tab_title").into_owned()
 }
 
+/// Closes a diff shown through the inline fallback, which cannot scroll and so
+/// drops what it does not render. Names the count — and points at the file —
+/// because unlike the editor embed there is no scrolling to the rest.
+pub fn agent_chat_diff_fallback_truncated(n: usize) -> String {
+    rust_i18n::t!("agent_chat.diff_fallback_truncated", n = n).into_owned()
+}
+
 /// Tooltip on a mermaid diagram card's zoom button, which opens the lightbox.
 pub fn agent_chat_diagram_zoom() -> String {
     rust_i18n::t!("agent_chat.diagram_zoom").into_owned()
@@ -2155,8 +2162,9 @@ pub fn agent_chat_filter_none() -> String {
     rust_i18n::t!("agent_chat.filter_none").into_owned()
 }
 
-pub fn agent_chat_filter_clear() -> String {
-    rust_i18n::t!("agent_chat.filter_clear").into_owned()
+/// The filter panel's footer: hand the axis back to the configured default.
+pub fn agent_chat_filter_reset_default() -> String {
+    rust_i18n::t!("agent_chat.filter_reset_default").into_owned()
 }
 
 pub fn agent_chat_filter_axis_kind() -> String {
@@ -2286,8 +2294,9 @@ pub fn agent_chat_fold_editor_rule_collapsed() -> String {
     rust_i18n::t!("agent_chat.fold_editor_rule_collapsed").into_owned()
 }
 
-pub fn agent_chat_fold_editor_reset_auto() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_reset_auto").into_owned()
+/// The fold panel's footer: hand the axis back to the configured default.
+pub fn agent_chat_fold_editor_reset_default() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_reset_default").into_owned()
 }
 
 pub fn agent_chat_fold_block_response() -> String {
@@ -2338,8 +2347,21 @@ pub fn agent_chat_tail_window_all() -> String {
     rust_i18n::t!("agent_chat.tail_window_all").into_owned()
 }
 
+/// The tail axis's list has no footer button — its return to the configured
+/// default is the first entry of the radio list itself.
+pub fn agent_chat_tail_window_default() -> String {
+    rust_i18n::t!("agent_chat.tail_window_default").into_owned()
+}
+
 pub fn agent_chat_tail_window_last(count: usize) -> String {
     rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
+}
+
+/// An Activity Bar chip's label with the mark that says this pane has taken
+/// the axis off the configured default. A dot, so it costs the chip no reading
+/// and no restatement of the value it already carries.
+pub fn agent_chat_chip_overridden(label: &str) -> String {
+    rust_i18n::t!("agent_chat.chip_overridden", label = label).into_owned()
 }
 
 /// The compact bar's gear tooltip: the wide bar's three chip labels verbatim,

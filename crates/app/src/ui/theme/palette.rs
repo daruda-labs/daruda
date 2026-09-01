@@ -837,6 +837,15 @@ pub const AGENT_CHAT_EMBED_ROW_H: f32 = 20.0;
 /// failure unit (assert + backtrace) readable while leaving a split pane's card
 /// header and the neighbouring conversation on screen.
 pub const AGENT_CHAT_EMBED_MAX_H: f32 = 240.0;
+/// Max lines the inline diff fallback renders before it cuts and reports the
+/// remainder. Deliberately *not* derived from [`AGENT_CHAT_EMBED_MAX_H`]: that
+/// one bounds a scrollable viewport, while this bounds content that has no way
+/// to be reached once dropped. What it buys is a ceiling on element count — the
+/// fallback builds a div per line and the chat list re-runs layout for every
+/// visible row on every repaint, so an unbounded one made a single large diff
+/// cost the whole pane. 300 is far above any hand-readable diff and still a
+/// fixed ceiling; the header's open-in-file-viewer link is the way to the rest.
+pub const AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS: usize = 300;
 /// Agent chat header: gap between the agent icon and the label/text (px).
 pub const AGENT_CHAT_HEADER_ICON_GAP: f32 = GAP_STANDARD;
 /// Agent chat header: agent icon square size (px).

@@ -40,6 +40,35 @@ fn queue_texts(v: &AgentChatView) -> Vec<String> {
         .collect()
 }
 
+/// A pane's diff embeds are fingerprinted against the Workspace-resolved syntax
+/// palette, and a fold expand or a seeded transcript can ask for one before any
+/// ACP event has arrived. Filling the field from the first event instead left an
+/// event-less pane rendering every diff through the inline fallback for the rest
+/// of its life, so the seed belongs at construction.
+#[gpui::test]
+async fn a_new_pane_is_born_with_the_resolved_syntax_theme(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.open_agent_chat_pane(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let pane_id = ws.active_runtime().panes.last().expect("pane opened").id;
+        let view = agent_view(ws, pane_id);
+        assert_eq!(
+            view.read(cx).syntax_theme(),
+            ws.syntax_theme,
+            "the pane starts on the Workspace's resolved palette, not on nothing"
+        );
+    });
+}
+
 #[gpui::test]
 async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
     use crate::surface::strings as s;
@@ -565,6 +594,9 @@ fn codex_agent() -> daruda_config::AgentDefinition {
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     }
 }
 
@@ -818,6 +850,9 @@ fn codex() -> daruda_config::AgentDefinition {
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
         default_mode: None,
         default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
     }
 }
 

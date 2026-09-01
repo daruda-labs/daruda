@@ -144,15 +144,31 @@ impl FoldState {
         self.mode.chosen()
     }
 
+    /// The mode together with whether it is still config's. The Activity Bar
+    /// reads both — the label from one, the overridden mark from the other.
+    pub(in crate::workspace) fn mode_choice(&self) -> PaneChoice<FoldMode> {
+        self.mode
+    }
+
     /// Follow a reloaded config default. A mode the user picked is untouched.
     pub(in crate::workspace) fn reseed_mode(&mut self, mode: FoldMode) {
         self.mode.reseed(mode);
     }
 
     pub(in crate::workspace) fn set_mode(&mut self, mode: FoldMode) {
-        self.mode = PaneChoice::Chosen(mode);
-        // Picking a mode is a statement about the whole transcript, so it
-        // supersedes the transient send-time hold. User overrides survive it.
+        self.decide_mode(PaneChoice::Chosen(mode));
+    }
+
+    /// Drop the pane's own mode and follow the configured default again.
+    pub(in crate::workspace) fn reset_mode(&mut self, mode: FoldMode) {
+        self.decide_mode(PaneChoice::Seeded(mode));
+    }
+
+    fn decide_mode(&mut self, mode: PaneChoice<FoldMode>) {
+        self.mode = mode;
+        // Deciding the mode — picking one or handing the axis back to config —
+        // is a statement about the whole transcript, so it supersedes the
+        // transient send-time hold. User overrides survive it.
         self.held_response = None;
     }
 

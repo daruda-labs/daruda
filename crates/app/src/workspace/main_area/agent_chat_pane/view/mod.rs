@@ -28,13 +28,14 @@ use gpui::{
 
 use super::display_filter::DisplayFilter;
 use super::fold::FoldState;
-use super::fold_mode::{FoldMode, TurnPosition};
+use super::fold_mode::TurnPosition;
 use super::pane_choice::PaneChoice;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
+use super::transcript_defaults::TranscriptDefaults;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// How long a subagent's run stays "active" after its last child tool event
@@ -551,6 +552,11 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) tail: PaneChoice<TailWindow>,
     /// Display filter and whether it still follows config.
     pub(in crate::workspace) display_filter: PaneChoice<DisplayFilter>,
+    /// The defaults the Workspace last resolved for this pane's agent. Kept so
+    /// a reset can hand an axis back to config without the view re-deriving it;
+    /// written only where the seeds are applied (construction and
+    /// [`Self::reseed_transcript_defaults`]).
+    pub(in crate::workspace) defaults: TranscriptDefaults,
     /// Virtualized conversation list state (gpui `list`). [`FollowMode::Tail`]
     /// auto-scrolls with streaming output and re-engages when the user scrolls
     /// back to the bottom. Synced with `items` via [`Self::sync_list_after`].
@@ -570,12 +576,13 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) turn_boundary: super::agent_chat_helpers::TurnBoundary,
     /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
     /// The Workspace owns the resolved value (user + project config layers), so it
-    /// cannot be derived here — but a fold expand materializes diff editors
-    /// outside any ACP event, so the view has to know it on its own. `None` until
-    /// the first event; a fold expand before that builds output embeds only and
-    /// the diffs fall back to inline until the next event.
+    /// cannot be derived here — it is seeded at construction and re-pushed on a
+    /// config reload. Seeded rather than filled by the first ACP event because a
+    /// diff embed can be materialized without one (a fold expand, a seeded
+    /// transcript), and a pane that had not yet seen an event would fall back to
+    /// the inline diff render for the rest of its life.
     /// Single update site: [`Self::set_syntax_theme`].
-    syntax_theme: Option<String>,
+    syntax_theme: String,
     /// Activity-bar title derived from `session_title` + the first user prompt.
     /// Neither input moves per frame, but resolving it *in* `render` made it the
     /// paint path's top cost on a pane whose first message was long. Derived
@@ -666,8 +673,8 @@ impl AgentChatView {
         agent_id: String,
         agent_name: String,
         title: Option<String>,
-        tail: TailWindow,
-        fold_mode: FoldMode,
+        defaults: TranscriptDefaults,
+        syntax_theme: String,
         cx: &mut Context<Self>,
     ) -> Self {
         // Re-rasterize mermaid diagrams when the UI theme changes. The chat
@@ -710,7 +717,7 @@ impl AgentChatView {
             telegram_first_response_watch: None,
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
-            fold: FoldState::with_mode(fold_mode),
+            fold: FoldState::with_mode(defaults.fold_mode),
             fold_editor_turn: TurnPosition::Last,
             activity_options_tab: ActivityOptionsTab::Fold,
             #[cfg(feature = "screenshot")]
@@ -720,8 +727,9 @@ impl AgentChatView {
             #[cfg(feature = "screenshot")]
             screenshot_options_open: false,
             content_width: ChatContentWidth::Full,
-            tail: PaneChoice::Seeded(tail),
-            display_filter: PaneChoice::default(),
+            tail: PaneChoice::Seeded(defaults.tail),
+            display_filter: PaneChoice::Seeded(defaults.filter),
+            defaults,
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
                 // arrive. `Top` alignment + `Tail` follow = scroll history up
@@ -736,7 +744,7 @@ impl AgentChatView {
             live_units: LiveSubagentUnits::default(),
             filter_matches: FilterMatchIndex::default(),
             turn_boundary: Default::default(),
-            syntax_theme: None,
+            syntax_theme,
             activity_title: None,
             session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
@@ -770,9 +778,11 @@ impl AgentChatView {
         self.activity_title.as_deref()
     }
 
-    /// The recorded syntax theme, if the view has seen one yet.
-    pub(in crate::workspace) fn syntax_theme(&self) -> Option<&str> {
-        self.syntax_theme.as_deref()
+    /// The Workspace-resolved syntax theme id this pane's diff embeds are built
+    /// against. Always set — see the field's doc for why it is a construction
+    /// seed rather than something the first event fills in.
+    pub(in crate::workspace) fn syntax_theme(&self) -> &str {
+        &self.syntax_theme
     }
 
     /// Record the Workspace-resolved syntax theme id. Single update site for
@@ -781,8 +791,8 @@ impl AgentChatView {
     /// directly — an idle pane gets no events, so waiting for one would leave the
     /// diff embeds fingerprinted against a palette the user already left.
     pub(in crate::workspace) fn set_syntax_theme(&mut self, theme: &str) {
-        if self.syntax_theme.as_deref() != Some(theme) {
-            self.syntax_theme = Some(theme.to_owned());
+        if self.syntax_theme != theme {
+            self.syntax_theme = theme.to_owned();
         }
     }
 
@@ -852,7 +862,7 @@ impl AgentChatView {
     /// terminal-mirrored chat background, not the surrounding UI theme, so a
     /// light UI shell with a dark terminal preset still gets dark-surface
     /// Mermaid colors and cache keys.
-    fn host_is_dark(cx: &App) -> bool {
+    pub(in crate::workspace) fn host_is_dark(cx: &App) -> bool {
         !crate::ui::theme::agent_chat_syntax_is_light(cx)
     }
 }

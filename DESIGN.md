@@ -531,7 +531,7 @@ chip (carries a value — Fold / Filter / Recent steps)
   text:          agent-chat size, pane-fg-muted
 
   hover:     background pane-tint
-  selected:  background pane-active-tint   (axis is off its default)
+  selected:  background pane-active-tint   (axis no longer follows the default)
   disabled:  no chip is ever disabled
 
 icon button (carries a glyph — expand all / collapse all / reading width / view options)
@@ -551,14 +551,25 @@ icon button (carries a glyph — expand all / collapse all / reading width / vie
   borderless word is indistinguishable from a readout. A glyph needs no frame to
   read as a control, and boxing three of them adds frames without information.
   (Same reasoning, same fix as StatusBar's pill buttons.)
-- **Selected means "off its default" — or "my popover is open".** The two share
-  one fill, because the vendored `Popover` forces `selected` on its trigger
-  while open (`popover.rs`, `selected || is_open`). So `Fold: Auto` marks itself
-  while its panel is up and unmarks on close. Harmless in practice — the panel
-  you are looking at states the value — but it means the fill is only a
-  reliable "off default" signal when the popover is *shut*, which is when it
-  matters. The Recent-steps chip is the odd one out: it opens a menu, not a
-  popover, so it never marks itself for being open.
+- **"Off its default" means the pane stopped *following* the default, not that
+  its value differs.** Each axis is held as `Seeded` (still tracking config, so
+  a settings edit moves it) or `Chosen` (the user decided for this pane). A
+  pane sitting on `Chosen` reads as adjusted even when its value happens to
+  equal what config states — which it must, because a settings edit will no
+  longer move it. Value comparison would call that pane untouched and quietly
+  lie about it.
+- **A `Chosen` axis appends a `•` to its chip label.** The dot is the reliable
+  mark: it costs no reading, restates no value, and carries the same vocabulary
+  as StatusBar's project-config dot. It is also what the gear's tooltip inherits
+  when the bar collapses.
+- **Selected means the same thing as the dot — or "my popover is open".** The
+  two share one fill, because the vendored `Popover` forces `selected` on its
+  trigger while open (`popover.rs`, `selected || is_open`). So an untouched
+  `Fold: Auto` marks itself while its panel is up and unmarks on close.
+  Harmless in practice — the panel you are looking at states the value — but it
+  is why the dot, not the fill, is the signal that survives an open popover.
+  The Recent-steps chip is the odd one out: it opens a menu, not a popover, so
+  it never marks itself for being open.
 - Chip copy is `Label: Value`. The label is constant and the value is the state;
   keeping both means a chip still reads on its own, out of the row.
 
@@ -575,7 +586,7 @@ quoted at that size.
 | Pane width | Right zone | Where the values are |
 |------------|-----------|----------------------|
 | > 596px | three chips + three icon buttons | in the chip labels |
-| ≤ 596px | one `View options` gear + three icon buttons | in the gear's tooltip; the gear is `selected` when any axis is off its default (and, like the chips, while its popover is open) |
+| ≤ 596px | one `View options` gear + three icon buttons | in the gear's tooltip, each with its own `•` when overridden; the gear is `selected` when any axis is off its default (and, like the chips, while its popover is open) |
 
 596px is **derived, not chosen**: `title floor (180) + control cluster (400) +
 2 × md padding (16)`. The cluster budget is what the three chips measure at
@@ -590,8 +601,9 @@ spelled-out chips would outgrow the budget while the bar stayed wide.
 
 Collapsing costs the chips their labels, so the gear must repay both of their
 jobs: `selected` for the at-a-glance signal, and a tooltip that spells out all
-three values verbatim (not just the adjusted ones — a reader asking "what is
-this pane showing me" wants the whole answer).
+three chip labels verbatim, dots included (not just the adjusted ones — a
+reader asking "what is this pane showing me" wants the whole answer, and the
+dots are what say which axis is no longer config's).
 
 **Options panel (the Fold and Filter chips, and the gear)**
 
@@ -613,10 +625,14 @@ width:         240px single-axis · 430px fold-rule editor and combined panel
 max-height:    520px
 section-heading: agent-chat size, subtle
 row-gap:       xs (4px); nested rows indent 20px
-footer:        Fold and Filter only — one ghost reset ("Reset to Auto preset" /
-               "Show everything"), disabled when that axis is already default.
-               Recent steps needs none: picking `All` in its radio list *is* the
-               reset.
+footer:        Fold and Filter only — one ghost "Reset to default", which
+               hands the axis back to config rather than setting a value.
+               Disabled when the axis is *already following* config, not when
+               its value happens to match: a pane pinned to the default's own
+               value still has an override to undo. Recent steps has no footer
+               because its list can hold the same affordance as a first entry —
+               `Default`, above the window values. Picking `All` there is not
+               the reset; `All` is a value the pane would then be pinned to.
 ```
 
 The panel body scales with `font.agent_chat_size`, not the UI type ladder, even

@@ -22,6 +22,8 @@ use super::super::rows::RowKind;
 use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
+#[cfg(feature = "devtools")]
+use super::super::window_access::WindowAccess;
 use super::{ActivityOptionsTab, AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
 impl AgentChatView {
@@ -244,10 +246,12 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Get this pane's just-made choice onto disk. Deferred because the save
+    /// Get this pane's transcript preferences onto disk as they now stand. The
+    /// snapshot writes each axis from its `chosen()`, so this is equally the
+    /// way a reset *erases* a stored override. Deferred because the save
     /// re-enters the workspace, which is still mid-update while the chip
     /// handler that called this runs.
-    fn persist_pane_choice(&self, cx: &mut Context<Self>) {
+    fn persist_pane_prefs(&self, cx: &mut Context<Self>) {
         let window_handle = self.window_handle;
         cx.defer(move |cx| {
             if let Some(workspace) =
@@ -266,38 +270,51 @@ impl AgentChatView {
         self.content_width = self.content_width.toggle();
         self.list_state.remeasure();
         cx.notify();
-        self.persist_pane_choice(cx);
+        self.persist_pane_prefs(cx);
     }
 
-    /// Follow a reloaded `[agent]` section: every transcript preference the
-    /// user has not picked for this pane moves to the new default, and the ones
-    /// they did pick stay. The single site that applies both, so a pane open
-    /// across a config edit ends up where a freshly restored one would.
-    /// Nothing is persisted — a seed is not a choice.
+    /// Follow a reloaded config: every transcript preference the user has not
+    /// picked for this pane moves to the new default, and the ones they did
+    /// pick stay. The single site that applies all three, so a pane open across
+    /// a config edit ends up where a freshly restored one would. Nothing is
+    /// persisted — a seed is not a choice.
     pub(in crate::workspace) fn reseed_transcript_defaults(
         &mut self,
         defaults: &TranscriptDefaults,
         cx: &mut Context<Self>,
     ) {
-        let before = (self.tail, self.fold.mode());
+        // Remembered so a later reset can hand an axis back to *this* default
+        // without the view resolving config on its own.
+        self.defaults = *defaults;
+        let before = (self.tail, self.fold.mode(), self.display_filter);
         self.tail.reseed(defaults.tail);
         self.fold.reseed_mode(defaults.fold_mode);
-        if before == (self.tail, self.fold.mode()) {
+        self.display_filter.reseed(defaults.filter);
+        if before == (self.tail, self.fold.mode(), self.display_filter) {
             return;
         }
-        // Both feed the projection, so the transcript has to be re-derived
+        // A reveal names a row the old filter hid, so it cannot outlive it.
+        self.fold.clear_filter_reveals();
+        // All three feed the projection, so the transcript has to be re-derived
         // before the pane paints again.
         self.reproject(cx);
     }
 
     /// Replace the conversation with a fixed transcript — a `--screenshot`
-    /// scenario or a `--replay-acp-log` capture — then re-derive the projection
-    /// exactly as a live event would. The one seeding entry point, so no caller
-    /// can leave `rows` and the virtualized list out of step with `items`.
+    /// scenario or a `--replay-acp-log` capture — then run the same aftermath a
+    /// live event does: rebuild the content-derived embeds, then re-derive the
+    /// projection. The one seeding entry point, so no caller can leave `rows`,
+    /// the virtualized list or the embed caches out of step with `items`.
+    ///
+    /// The embed pass is not optional garnish. Skipping it left every diff on
+    /// the inline per-line fallback and every verbatim output un-editored, so
+    /// the two tools that exist to exercise this pane — the replay harness and
+    /// the screenshot scenarios — rendered a path no live session takes.
     #[cfg(feature = "devtools")]
     pub(in crate::workspace) fn seed_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.items = items;
@@ -307,6 +324,10 @@ impl AgentChatView {
         // is what the send path already checks, so the pane reads as connected
         // and behaves as inert rather than half-live.
         self.status = AgentSessionStatus::Connected;
+        // Seeding runs inside the opener's window update cycle, so the editors
+        // build against the borrow the caller already holds — see [`WindowAccess`].
+        let mut access = WindowAccess::Live(window);
+        self.reconcile_all_embeds(&mut access, cx);
         self.reproject(cx);
     }
 
@@ -315,12 +336,13 @@ impl AgentChatView {
     pub(in crate::workspace) fn seed_working_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let now = std::time::Instant::now();
         self.queue.turn = Turn::InFlight { started_at: now };
         let _ = self.reconcile_activity(now);
-        self.seed_transcript(items, cx);
+        self.seed_transcript(items, window, cx);
     }
 
     pub(in crate::workspace) fn set_tail_window(
@@ -339,7 +361,23 @@ impl AgentChatView {
         self.reproject(cx);
         // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
-            self.persist_pane_choice(cx);
+            self.persist_pane_prefs(cx);
+        }
+    }
+
+    /// Hand the tail axis back to config. Not a pick of the default's value:
+    /// the pane follows every later config edit again, and the save below
+    /// clears the stored override rather than writing a new one.
+    pub(in crate::workspace) fn reset_tail_window(&mut self, cx: &mut Context<Self>) {
+        let before = self.tail;
+        self.tail.reset(self.defaults.tail);
+        let reveal_changed = self.fold.clear_tail_reveals();
+        if before == self.tail && !reveal_changed {
+            return;
+        }
+        self.reproject(cx);
+        if before != self.tail {
+            self.persist_pane_prefs(cx);
         }
     }
 
@@ -349,7 +387,18 @@ impl AgentChatView {
         }
         self.fold.set_mode(mode);
         self.reproject(cx);
-        self.persist_pane_choice(cx);
+        self.persist_pane_prefs(cx);
+    }
+
+    /// Hand the fold axis back to config — see [`Self::reset_tail_window`].
+    pub(in crate::workspace) fn reset_fold_mode(&mut self, cx: &mut Context<Self>) {
+        let before = self.fold.mode_choice();
+        self.fold.reset_mode(self.defaults.fold_mode);
+        if before == self.fold.mode_choice() {
+            return;
+        }
+        self.reproject(cx);
+        self.persist_pane_prefs(cx);
     }
 
     /// Record the pane width measured during the last paint.
@@ -403,8 +452,18 @@ impl AgentChatView {
         self.set_display_filter(self.display_filter.value().toggled(facet), cx);
     }
 
-    pub(in crate::workspace) fn clear_display_filter(&mut self, cx: &mut Context<Self>) {
-        self.set_display_filter(DisplayFilter::default(), cx);
+    /// Hand the filter axis back to config — see [`Self::reset_tail_window`].
+    pub(in crate::workspace) fn reset_display_filter(&mut self, cx: &mut Context<Self>) {
+        let before = self.display_filter;
+        self.display_filter.reset(self.defaults.filter);
+        let reveal_changed = self.fold.clear_filter_reveals();
+        if before == self.display_filter && !reveal_changed {
+            return;
+        }
+        self.reproject(cx);
+        if before != self.display_filter {
+            self.persist_pane_prefs(cx);
+        }
     }
 
     /// Turn a whole parented filter section (`Prose`, `Tools`) on or off — what
@@ -430,7 +489,7 @@ impl AgentChatView {
         self.reproject(cx);
         // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
-            self.persist_pane_choice(cx);
+            self.persist_pane_prefs(cx);
         }
     }
 
