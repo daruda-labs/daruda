@@ -1905,7 +1905,7 @@ fn only_rows_outside_the_window_carry_the_rail() {
 #[test]
 fn a_live_covered_run_carries_the_rail_with_the_boundary_shut() {
     let mut items = turn_of_cycles(4);
-    items[2] = tool("g0", ToolStatusView::InProgress);
+    items[2] = tool("t0", ToolStatusView::InProgress);
     let tail = TailWindow::Last(1);
 
     let shut = project_tail(&items, tail);
@@ -1992,6 +1992,83 @@ fn call_visibility(items: &[ChatItem], rows: &[RenderRow]) -> Vec<bool> {
         )
         .map(|r| !r.hidden)
         .collect()
+}
+
+/// Row identity, visibility and coverage together — the three answers the two
+/// windows decide between them.
+fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool, bool)> {
+    rows.iter()
+        .map(|r| {
+            let kind = match r.kind {
+                RowKind::User(_) => "user",
+                RowKind::ResponseHeader { .. } => "response",
+                RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
+                RowKind::TailMore { .. } => "tail",
+                RowKind::ToolGroupTailMore { .. } => "grouptail",
+                RowKind::ToolGroupHeader { .. } => "group",
+                RowKind::ThinkingGroupHeader { .. } => "thinkgroup",
+                RowKind::WorkingIndicator => "working",
+            };
+            (kind, r.hidden, r.outside_window)
+        })
+        .collect()
+}
+
+/// The two levels compose: the response's boundary covers a whole run, and that
+/// run's group still trims its own calls underneath it. Every other in-group
+/// test uses a single-run turn, where the response window covers nothing — so
+/// this is the one that exercises `push_group_children` layering its window
+/// under an already-folded group.
+#[test]
+fn the_response_window_and_a_group_window_compose() {
+    let items = turn_of_cycles(2);
+    let tail = TailWindow::Last(1);
+
+    let shut = project_open_group(&items, tail);
+    assert_eq!(
+        marks(&shut),
+        vec![
+            ("user", false, false),
+            ("response", false, false),
+            ("tail", false, false),
+            ("item", true, true),      // the covered run's prose
+            ("group", true, true),     // and its group, behind the response's boundary
+            ("grouptail", true, true), // whose own boundary is folded with it
+            ("item", true, true),
+            ("item", true, true),
+            ("item", false, false), // the kept run's prose
+            ("group", false, false),
+            ("grouptail", false, false), // trimming the kept run to its last call
+            ("item", true, true),
+            ("item", false, false),
+            ("item", false, false), // the conclusion
+        ],
+        "a covered run is hidden whole; the kept run is trimmed from inside"
+    );
+
+    let mut fold = FoldState::with_mode(FoldPreset::Expanded.mode());
+    fold.toggle(FoldKey::Tail(1), FoldContext::last(false));
+    let open = project_open_group_under(&items, &fold, tail);
+    assert_eq!(
+        marks(&open),
+        vec![
+            ("user", false, false),
+            ("response", false, false),
+            ("tail", false, false),
+            ("item", false, true),  // the response's reveal surfaces the run
+            ("group", false, true), // its group
+            ("grouptail", false, true), // and the group's own boundary with it
+            ("item", true, true),   // which still holds this call back
+            ("item", false, true),
+            ("item", false, false),
+            ("group", false, false),
+            ("grouptail", false, false),
+            ("item", true, true),
+            ("item", false, false),
+            ("item", false, false),
+        ],
+        "revealing a run does not reveal what its group's own window covers"
+    );
 }
 
 /// The axis's whole point, one level in: a group is one step, so an open run of
@@ -2297,7 +2374,7 @@ fn a_collapsed_response_hides_its_tail_row_too() {
 #[test]
 fn a_covered_run_with_a_running_tool_stays_surfaced() {
     let mut items = turn_of_cycles(4);
-    items[2] = tool("g0", ToolStatusView::InProgress);
+    items[2] = tool("t0", ToolStatusView::InProgress);
     let rows = project_tail(&items, TailWindow::Last(1));
     assert_eq!(
         group_visibility(&rows),
@@ -2314,7 +2391,7 @@ fn a_covered_run_with_a_running_tool_stays_surfaced() {
 #[test]
 fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
     let mut items = turn_of_cycles(2);
-    items[2] = tool("g0", ToolStatusView::InProgress);
+    items[2] = tool("t0", ToolStatusView::InProgress);
     let live = LiveSubagentUnits::of(&items);
 
     let rows = project_tail(&items, TailWindow::Last(1));

@@ -22,6 +22,9 @@ const CODEX_AUTO: [usize; 3] = [155, 3, 33];
 const CODEX_TAIL: [usize; 3] = [18, 3, 19];
 const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
 const CODEX_EXPANDED: [usize; 3] = [377, 3, 57];
+/// The ceiling with the step axis engaged. Codex's cut is the response-level
+/// one: its runs are short, so most of what goes is whole steps.
+const CODEX_EXPANDED_TAIL: [usize; 3] = [40, 3, 26];
 const CODEX_SETTLED: [usize; 3] = [3, 2, 33];
 
 /// Claude rows per turn under each projection mode. Turn 0 is the one turn
@@ -31,6 +34,10 @@ const CLAUDE_AUTO: [usize; 3] = [3, 9, 47];
 const CLAUDE_TAIL: [usize; 3] = [3, 9, 14];
 const CLAUDE_SUMMARY: [usize; 3] = [3, 3, 3];
 const CLAUDE_EXPANDED: [usize; 3] = [3, 70, 79];
+/// The same ceiling with the step axis engaged — the numbers the in-group
+/// window is measured by. Turn 1 is the shape that motivated it; see
+/// [`the_step_window_reaches_inside_a_long_tool_group`].
+const CLAUDE_EXPANDED_TAIL: [usize; 3] = [3, 27, 19];
 const CLAUDE_SETTLED: [usize; 3] = [3, 3, 47];
 const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 2, 2];
 
@@ -140,6 +147,29 @@ fn expanded_mode_is_the_ceiling() {
     {
         assert!(s <= a && a <= e, "{s} <= {a} <= {e}");
     }
+}
+
+/// Claude's turn 1 is three tool runs of 12, 13 and 36 calls, so a window of
+/// five covers no whole *run*: the response-level cut has nothing to take, and
+/// every row the axis removes here it removes from inside a group. That is why
+/// the turn cost the full 70 rows under `Expanded` whatever the window said.
+#[test]
+fn the_step_window_reaches_inside_a_long_tool_group() {
+    let lens = Lens::preset(FoldPreset::Expanded).tail(TailWindow::last(TAIL_N));
+    assert_eq!(
+        per_turn_as_last(&claude_session(), lens),
+        CLAUDE_EXPANDED_TAIL
+    );
+    assert_eq!(
+        per_turn_as_last(&codex_session(), lens),
+        CODEX_EXPANDED_TAIL
+    );
+    assert!(
+        CLAUDE_EXPANDED_TAIL[1] < CLAUDE_EXPANDED[1],
+        "a window narrower than the group has to cut it: {} vs {}",
+        CLAUDE_EXPANDED_TAIL[1],
+        CLAUDE_EXPANDED[1]
+    );
 }
 
 #[test]

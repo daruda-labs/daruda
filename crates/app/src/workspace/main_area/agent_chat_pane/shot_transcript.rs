@@ -258,6 +258,14 @@ mod tests {
             assert!(cycle.tools.len() >= 2);
             assert!(!cycle.prose.is_empty());
         }
+        // The in-group boundary capture engages a window one narrower than the
+        // longest group, so the seed has to hold a group of more than two —
+        // otherwise `open_agent_chat_group_tail_boundary_for_shot` finds no
+        // target and quietly captures the wrong state.
+        assert!(
+            cycles().iter().any(|c| c.tools.len() > 2),
+            "no group long enough for the in-group boundary capture"
+        );
     }
 
     #[test]
