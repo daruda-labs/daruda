@@ -593,10 +593,10 @@ mod tests {
     };
     use gpui::TestAppContext;
 
-    use super::super::fold_mode::{FoldMode, FoldPreset};
     use super::super::view::tests::make_test_view;
     use super::super::window_access::WindowAccess;
     use super::{ReconcileScope, mermaid_key};
+    use crate::transcript::fold_mode::{FoldMode, FoldPreset};
     use crate::workspace::main_area::file_view_pane::diff_editor::DiffColors;
 
     const KEY: &str = "call_1#0";

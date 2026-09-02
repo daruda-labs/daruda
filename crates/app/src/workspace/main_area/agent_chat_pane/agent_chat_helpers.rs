@@ -15,12 +15,12 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AppContext as _, Context, Entity};
 
 use super::fold::{FoldContext, FoldKey, FoldState};
-use super::fold_mode::TurnPosition;
 use super::rows::{LiveSubagentUnits, RowKind, effective_tool_status, project};
 use super::tool_hierarchy::ToolHierarchy;
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
+use crate::transcript::fold_mode::TurnPosition;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, DiffEditorModel, build_diff_editor_model,
 };
@@ -72,7 +72,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         false,
         &super::rows::LiveSubagentUnits::default(),
         super::rows::tail::TailWindow::All,
-        &super::display_filter::DisplayFilter::default(),
+        &crate::transcript::display_filter::DisplayFilter::default(),
     );
     // Inline assistant prose has no independent fold control.
     let inline_assistant: std::collections::HashSet<usize> = rows
@@ -738,7 +738,7 @@ pub(in crate::workspace) fn fold_context_at(
     let context = FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items));
     match (key, items.get(ix)) {
         (FoldKey::Tool(_), Some(daruda_acp::ChatItem::ToolCall(tc))) => {
-            context.with_tool_category(super::tool_category::classify_tool(tc))
+            context.with_tool_category(crate::transcript::tool_category::classify_tool(tc))
         }
         _ => context,
     }

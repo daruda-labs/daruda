@@ -4,9 +4,9 @@ use daruda_acp::ChatItem;
 
 use super::fixture::{claude_session, codex_session};
 use super::{Lens, per_turn_as_last, per_turn_settled, rows, turn_bounds, visible_per_turn};
-use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, project};
 

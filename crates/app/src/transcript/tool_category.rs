@@ -3,7 +3,7 @@
 use daruda_acp::{ToolCallItem, ToolKindView};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum ToolCategory {
+pub(crate) enum ToolCategory {
     Read,
     Edit,
     Search,
@@ -12,10 +12,10 @@ pub(in crate::workspace) enum ToolCategory {
 }
 
 impl ToolCategory {
-    pub(in crate::workspace) const ALL: [Self; 5] =
+    pub(crate) const ALL: [Self; 5] =
         [Self::Read, Self::Edit, Self::Search, Self::Run, Self::Other];
 
-    pub(in crate::workspace) const fn index(self) -> usize {
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::Read => 0,
             Self::Edit => 1,
@@ -25,7 +25,7 @@ impl ToolCategory {
         }
     }
 
-    pub(in crate::workspace) const fn token(self) -> &'static str {
+    pub(crate) const fn token(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Edit => "edit",
@@ -35,45 +35,45 @@ impl ToolCategory {
         }
     }
 
-    pub(in crate::workspace) fn from_token(token: &str) -> Option<Self> {
+    pub(crate) fn from_token(token: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|category| category.token() == token)
     }
 
-    pub(in crate::workspace) const fn bit(self) -> u8 {
+    pub(crate) const fn bit(self) -> u8 {
         1 << self.index()
     }
 }
 
 /// Compact set used by the filter's partial Tool selection.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(in crate::workspace) struct ToolCategorySet(u8);
+pub(crate) struct ToolCategorySet(u8);
 
 impl ToolCategorySet {
     const ALL_BITS: u8 = (1 << ToolCategory::ALL.len()) - 1;
 
-    pub(in crate::workspace) fn all() -> Self {
+    pub(crate) fn all() -> Self {
         Self(Self::ALL_BITS)
     }
 
-    pub(in crate::workspace) fn contains(self, category: ToolCategory) -> bool {
+    pub(crate) fn contains(self, category: ToolCategory) -> bool {
         self.0 & category.bit() != 0
     }
 
-    pub(in crate::workspace) fn insert(&mut self, category: ToolCategory) {
+    pub(crate) fn insert(&mut self, category: ToolCategory) {
         self.0 |= category.bit();
     }
 
-    pub(in crate::workspace) fn toggle(&mut self, category: ToolCategory) {
+    pub(crate) fn toggle(&mut self, category: ToolCategory) {
         self.0 ^= category.bit();
     }
 
-    pub(in crate::workspace) fn is_empty(self) -> bool {
+    pub(crate) fn is_empty(self) -> bool {
         self.0 == 0
     }
 
-    pub(in crate::workspace) fn is_all(self) -> bool {
+    pub(crate) fn is_all(self) -> bool {
         self.0 == Self::ALL_BITS
     }
 }
@@ -114,7 +114,7 @@ fn category_for_kind(kind: ToolKindView) -> ToolCategory {
 }
 
 /// Resolve one category from diffs, then tool name, then ACP kind.
-pub(in crate::workspace) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
+pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
     if !tc.diffs.is_empty() {
         return ToolCategory::Edit;
     }

@@ -17,7 +17,7 @@ use gpui::{App, Context, Window};
 use super::Workspace;
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode;
+use crate::transcript::fold_mode::FoldMode;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
@@ -693,7 +693,7 @@ impl Workspace {
                             // The current field wins; the superseded one is read
                             // only for a file written before the split, where an
                             // empty list meant "unfiltered" rather than "nothing".
-                            use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
+                            use crate::transcript::display_filter::DisplayFilter;
                             let display_filter = ac
                                 .visible_kinds
                                 .as_ref()
@@ -704,7 +704,7 @@ impl Workspace {
                                         .map(|tokens| DisplayFilter::from_legacy_tokens(tokens))
                                 });
                             let fold_mode = ac.fold_mode.as_ref().map(|tokens| {
-                                crate::workspace::main_area::agent_chat_pane::fold_mode::FoldMode::from_tokens(
+                                crate::transcript::fold_mode::FoldMode::from_tokens(
                                     tokens.iter().map(String::as_str),
                                 )
                             });

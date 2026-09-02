@@ -312,10 +312,8 @@ impl Workspace {
         // launch the effective agent (a catalog entry, or the Claude id when the
         // catalog is somehow empty).
         let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
-        let defaults = TranscriptDefaults::resolve(
-            &self.agent,
-            self.agents.iter().find(|a| a.id == effective_id),
-        );
+        let defaults =
+            TranscriptDefaults::resolve(self.agents.iter().find(|a| a.id == effective_id));
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
             let name = agent_name_for(&self.agents, &effective_id);

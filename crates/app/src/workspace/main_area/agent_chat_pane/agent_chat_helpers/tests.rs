@@ -589,7 +589,7 @@ fn fold_active_resolves_per_key() {
 
 #[test]
 fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
-    use crate::workspace::main_area::agent_chat_pane::fold_mode::TurnPosition;
+    use crate::transcript::fold_mode::TurnPosition;
     use daruda_acp::ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q1".to_owned()),
@@ -1064,9 +1064,7 @@ fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
 /// succeeded.
 #[test]
 fn a_rollup_ignores_the_calls_the_display_filter_removed() {
-    use crate::workspace::main_area::agent_chat_pane::display_filter::{
-        DisplayFilter, FilterFacet,
-    };
+    use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
     use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
     use daruda_acp::{ToolKindView, ToolStatusView};
 
@@ -1114,9 +1112,7 @@ fn a_rollup_ignores_the_calls_the_display_filter_removed() {
 /// otherwise the glyph denies the reason its own row is on screen.
 #[test]
 fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
-    use crate::workspace::main_area::agent_chat_pane::display_filter::{
-        DisplayFilter, FilterFacet,
-    };
+    use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
     use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
     use daruda_acp::{ToolKindView, ToolStatusView};
 

@@ -7,7 +7,7 @@
 use daruda_config::TAIL_WINDOW_CHOICES;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use super::options_panel::axis_chip_label;
+use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;

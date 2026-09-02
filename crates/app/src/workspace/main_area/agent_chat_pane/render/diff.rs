@@ -12,12 +12,12 @@ use super::DiffStats;
 use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
+use crate::transcript::fold_mode::TurnPosition;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Icon, Sizable as _, button_bare, copy_button};
 use crate::window_registry::WindowRegistry;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{DiffStat, diff_editor_key};
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, FoldState};
-use crate::workspace::main_area::agent_chat_pane::fold_mode::TurnPosition;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 

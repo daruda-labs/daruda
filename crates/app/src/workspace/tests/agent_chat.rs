@@ -7,9 +7,9 @@ use daruda_store::project::PaneCwd;
 use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
+use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::display_filter::{DisplayFilter, FilterFacet};
-use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
@@ -1412,9 +1412,10 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     .expect("the test window is live");
     cx.run_until_parked();
 
-    let mut after = daruda_config::Config::default();
-    after.agent.tail_window = 5;
-    after.agent.fold_mode = vec!["summary".to_string()];
+    let after = daruda_config::Config {
+        agents: vec![claude_entry_with(5, "summary")],
+        ..daruda_config::Config::default()
+    };
     assert_ne!(FoldPreset::Summary.mode(), FoldMode::default());
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
@@ -1433,7 +1434,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
         assert_eq!(
             v.display_filter,
             PaneChoice::Seeded(DisplayFilter::default()),
-            "the filter is a per-pane act, so no reload can narrow an untouched pane"
+            "the reload states no filter, so an untouched pane stays unfiltered"
         );
         assert_eq!(
             v.fold.mode(),
@@ -1462,6 +1463,17 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     });
 
     let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// The built-in Claude entry with transcript axes stated on it. The reload
+/// tests open their panes on that id, so this is how a changed config reaches
+/// them now that the entry is the only layer above the built-in values.
+fn claude_entry_with(tail_window: u8, fold_mode: &str) -> daruda_config::AgentEntry {
+    daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        tail_window: Some(tail_window),
+        fold_mode: Some(vec![fold_mode.to_string()]),
+        ..daruda_config::AgentDefinition::claude_default()
+    })
 }
 
 /// The two agent ids the per-agent transcript tests below run their panes on.
@@ -1661,7 +1673,7 @@ async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_setting
         })
         .unwrap();
 
-    let mut after = daruda_config::Config {
+    let after = daruda_config::Config {
         agents: vec![transcript_agent_entry(
             TRANSCRIPT_AGENT_B,
             6,
@@ -1670,10 +1682,6 @@ async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_setting
         )],
         ..daruda_config::Config::default()
     };
-    after.agent.tail_window = 9;
-    after.agent.fold_mode = vec!["expanded".to_string()];
-    after.agent.display_filter = Some(vec![FilterFacet::Thinking.token().to_string()]);
-
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| ws.reload_config(&after, cx));
     })
@@ -1684,11 +1692,12 @@ async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_setting
     assert_eq!(
         transcript_settings(&view, cx),
         (
-            PaneChoice::Seeded(TailWindow::Last(9)),
-            FoldPreset::Expanded.mode(),
-            PaneChoice::Seeded(DisplayFilter::from_tokens([FilterFacet::Thinking.token()])),
+            PaneChoice::Seeded(TailWindow::All),
+            FoldMode::default(),
+            PaneChoice::Seeded(DisplayFilter::default()),
         ),
-        "while the id is stale, reload can only fall back to the global defaults"
+        "while the id is stale no entry states these axes, so reload can only \
+         fall back to the built-in values"
     );
 
     workspace.update(cx, |ws, cx| {
@@ -1851,9 +1860,10 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
         );
     }
 
-    let mut after = daruda_config::Config::default();
-    after.agent.tail_window = 5;
-    after.agent.fold_mode = vec!["summary".to_string()];
+    let after = daruda_config::Config {
+        agents: vec![claude_entry_with(5, "summary")],
+        ..daruda_config::Config::default()
+    };
 
     let restored_handle = cx.add_window(|window, cx| {
         let mut ws = Workspace::new_with_project_for_test(

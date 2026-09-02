@@ -314,17 +314,7 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                     .bg(t.line)
                     .rounded(px(theme::MD_BLOCKQUOTE_BORDER_W / 2.0)),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .w_full()
-                    .min_w_0()
-                    .italic()
-                    .text_color(t.muted)
-                    .children(render_md_spans(spans, t)),
-            )
+            .child(render_md_prose(spans, t).italic().text_color(t.muted))
             .into_any_element(),
 
         MdBlock::Rule => div()
@@ -344,15 +334,7 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
             .text_size(px(theme::MD_FOOTNOTE_FONT_SIZE))
             .text_color(t.subtle)
             .child(div().flex_none().child(format!("[^{label}]:")))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .w_full()
-                    .min_w_0()
-                    .children(render_md_spans(spans, t)),
-            )
+            .child(render_md_prose(spans, t))
             .into_any_element(),
 
         MdBlock::HtmlBlock(html) => div()
@@ -530,8 +512,10 @@ fn render_md_span(span: &MdSpan, t: &MdColors) -> AnyElement {
         // A full-width item ends the flex line; it carries no height of its own
         // because `<br>` moves to the next line rather than leaving a gap.
         MdSpan::HardBreak => div().w_full().h_0().into_any_element(),
-        // A paragraph boundary does leave a gap — the same one that separates
-        // top-level blocks.
+        // Every block that can hold one goes through `render_md_prose`, which
+        // splits the run here instead. Reaching this arm means a caller took
+        // the wrapping row directly, and the row's preceding text collapses to
+        // zero width — so leave a gap, but keep the split as the way in.
         MdSpan::ParagraphBreak => div().w_full().h(px(theme::MD_BLOCK_GAP)).into_any_element(),
 
         MdSpan::Footnote(label) => div()
@@ -995,24 +979,46 @@ mod layout_tests {
         }
     }
 
-    /// A paragraph break is block-level. Left inside the item's wrapping row
-    /// as a full-width flex item, it collapsed the *preceding* text element to
-    /// zero width — the prose then wrapped one character per line and ran over
-    /// the item below. Block height never moved, so only the text element's own
-    /// painted width catches it.
+    /// A paragraph break is block-level. Left inside a wrapping row as a
+    /// full-width flex item, it collapsed the *preceding* text element to zero
+    /// width — the prose then wrapped one character per line and ran over
+    /// whatever sat below. Block height never moved, so only the text element's
+    /// own painted width catches it.
+    ///
+    /// Every block that can hold a break is covered: the list item was fixed
+    /// first and the blockquote stayed broken behind it.
     #[gpui::test]
     fn a_second_paragraph_does_not_squeeze_the_first(cx: &mut TestAppContext) {
         crate::test_support::init_gpui_component(cx);
         let long = "the quick brown fox jumps over the lazy dog and keeps running far";
         let w = px(635.);
 
-        let alone = bounds_of(cx, &format!("- {long}"), w, "md-plain").width;
-        let followed = bounds_of(cx, &format!("- {long}\n\n  {long}"), w, "md-plain").width;
+        for (label, one, two) in [
+            (
+                "list item",
+                format!("- {long}"),
+                format!("- {long}\n\n  {long}"),
+            ),
+            (
+                "blockquote",
+                format!("> {long}"),
+                format!("> {long}\n>\n> {long}"),
+            ),
+            (
+                "footnote",
+                format!("[^a]: {long}"),
+                format!("[^a]: {long}\n\n    {long}"),
+            ),
+        ] {
+            let alone = bounds_of(cx, &one, w, "md-plain").width;
+            let followed = bounds_of(cx, &two, w, "md-plain").width;
 
-        assert!(alone > px(0.), "the probe found no prose: {alone:?}");
-        assert_eq!(
-            followed, alone,
-            "a second paragraph squeezed the first: followed={followed:?} alone={alone:?}"
-        );
+            assert!(alone > px(0.), "{label}: the probe found no prose");
+            assert_eq!(
+                followed, alone,
+                "{label}: a second paragraph squeezed the first: \
+                 followed={followed:?} alone={alone:?}"
+            );
+        }
     }
 }

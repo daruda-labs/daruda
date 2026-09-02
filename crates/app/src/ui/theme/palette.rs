@@ -913,19 +913,22 @@ pub const AGENT_CHAT_TITLE_MIN_W: f32 = 180.0;
 /// [`AGENT_CHAT_MSG_FONT_SIZE`] and exists so the derivation has one home.
 pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 =
     AGENT_CHAT_TITLE_MIN_W + AGENT_CHAT_OPTIONS_CLUSTER_W + 2.0 * AGENT_CHAT_PAD_X;
-/// Width (px) of single-column Activity Bar popovers.
-pub const AGENT_CHAT_OPTIONS_PANEL_W: f32 = 240.0;
-/// Width (px) of fold-rule and combined options popovers.
-pub const AGENT_CHAT_RULES_PANEL_W: f32 = 430.0;
+/// Width (px) of a single-column transcript-editor popover — the display
+/// filter. Read by both hosts that open the editors: the chat pane's Activity
+/// Bar and the Settings agent catalog.
+pub const TRANSCRIPT_EDITOR_PANEL_W: f32 = 240.0;
+/// Width (px) of the fold-rule editor and the combined options popover.
+pub const TRANSCRIPT_EDITOR_RULES_PANEL_W: f32 = 430.0;
 /// Max height (px) of the fold-rule editor popover.
-pub const AGENT_CHAT_RULES_PANEL_MAX_H: f32 = 520.0;
-/// Largest fraction of the window an Activity Bar popover may claim, on either
-/// axis. Width is capped as well as height because the fold editor is 430px and
-/// the window can be narrower than that leaves room for — not to keep the panel
-/// off the docks beside its pane, which it does not do and is not meant to.
-pub const AGENT_CHAT_PANEL_VIEWPORT_FRACTION: f32 = 0.8;
-/// Indent (px) for nested Activity Bar options.
-pub const AGENT_CHAT_OPTION_NEST_INDENT: f32 = 20.0;
+pub const TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H: f32 = 520.0;
+/// Largest fraction of the window a transcript-editor popover may claim, on
+/// either axis. Width is capped as well as height because the fold editor is
+/// 430px and the window can be narrower than that leaves room for — not to keep
+/// the panel off whatever sits beside it, which it does not do and is not meant
+/// to.
+pub const TRANSCRIPT_EDITOR_VIEWPORT_FRACTION: f32 = 0.8;
+/// Indent (px) for a nested row inside a transcript editor.
+pub const TRANSCRIPT_EDITOR_NEST_INDENT: f32 = 20.0;
 /// Corner radius (px) of an Activity Bar chip. `RADIUS_SM`, not the 2px
 /// `radius.xs` DESIGN.md reserves for inline chips: these are toolbar controls,
 /// and every button-shaped constant in the app already sits at `RADIUS_SM`

@@ -5,8 +5,8 @@ use super::{
     DisplayFilter, FoldMode, PaneChoice, TailWindow, context_meter, every_axis_follows_config,
     format_token_count, last_active_tooltip, options_tooltip,
 };
-use crate::workspace::main_area::agent_chat_pane::display_filter::FilterFacet;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
+use crate::transcript::display_filter::FilterFacet;
+use crate::transcript::fold_mode::FoldPreset;
 use daruda_acp::{CostView, UsageView};
 use daruda_config::TAIL_WINDOW_CHOICES;
 

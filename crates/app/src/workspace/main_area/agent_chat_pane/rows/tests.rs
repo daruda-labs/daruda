@@ -1,7 +1,7 @@
 use super::*;
-use crate::workspace::main_area::agent_chat_pane::display_filter::{DisplayFilter, FilterFacet};
+use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+use crate::transcript::fold_mode::FoldPreset;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldContext;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use daruda_acp::{

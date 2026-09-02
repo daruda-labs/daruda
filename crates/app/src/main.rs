@@ -34,6 +34,7 @@ pub mod surface;
 mod telegram;
 #[cfg(test)]
 mod test_support;
+mod transcript;
 pub mod ui;
 mod update;
 mod watcher_pumps;

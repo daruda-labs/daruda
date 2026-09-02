@@ -238,6 +238,7 @@ impl Config {
     /// Clamp all numeric fields to their valid ranges.
     fn clamp(&mut self) {
         let legacy_default_mode = self.agent.take_legacy_default_permission_mode();
+        let legacy_transcript = self.agent.take_legacy_transcript();
         self.font.clamp();
         self.window.clamp();
         self.left_dock.clamp();
@@ -258,6 +259,7 @@ impl Config {
         if let Some(mode) = legacy_default_mode {
             migrate_legacy_default_permission_mode(&mut self.agents, &mode);
         }
+        migrate_legacy_transcript(&mut self.agents, &legacy_transcript);
     }
 
     /// The launchable agent catalog: every [`AgentEntry`] that resolves, in
@@ -343,6 +345,60 @@ fn legacy_mode_can_apply_to(launch: &AgentLaunch, mode: &str) -> bool {
         // Unknown adapters previously received the global candidate too; keep
         // that safe behavior because `daruda_acp` skips unadvertised modes.
         None => true,
+    }
+}
+
+/// Lift the pre-catalog `[agent]` transcript keys onto every entry that states
+/// nothing on that axis — which is what those keys used to do at resolve time.
+///
+/// Per axis, so an entry that already states one keeps it. Nothing writes the
+/// `[agent]` keys back, so this runs once in practice: the next save moves the
+/// value into `[[agents]]` and the old key, left untouched in the file by the
+/// `toml_edit` patcher, stops being read.
+fn migrate_legacy_transcript(agents: &mut [AgentEntry], legacy: &agent::LegacyTranscript) {
+    if legacy.is_empty() {
+        return;
+    }
+    for entry in agents {
+        let Some(definition) = entry.resolve() else {
+            continue;
+        };
+        let fold_mode = definition
+            .fold_mode
+            .is_none()
+            .then(|| legacy.fold_mode.clone())
+            .flatten();
+        let tail_window = definition
+            .tail_window
+            .is_none()
+            .then_some(legacy.tail_window)
+            .flatten();
+        let display_filter = definition
+            .display_filter
+            .is_none()
+            .then(|| legacy.display_filter.clone())
+            .flatten();
+        set_agent_entry_transcript(entry, fold_mode, tail_window, display_filter);
+    }
+}
+
+fn set_agent_entry_transcript(
+    entry: &mut AgentEntry,
+    fold_mode: Option<Vec<String>>,
+    tail_window: Option<u8>,
+    display_filter: Option<Vec<String>>,
+) {
+    match entry {
+        AgentEntry::Preset { overrides, .. } => {
+            overrides.fold_mode = overrides.fold_mode.take().or(fold_mode);
+            overrides.tail_window = overrides.tail_window.take().or(tail_window);
+            overrides.display_filter = overrides.display_filter.take().or(display_filter);
+        }
+        AgentEntry::Custom(definition) => {
+            definition.fold_mode = definition.fold_mode.take().or(fold_mode);
+            definition.tail_window = definition.tail_window.take().or(tail_window);
+            definition.display_filter = definition.display_filter.take().or(display_filter);
+        }
     }
 }
 
@@ -450,7 +506,7 @@ fn apply_settings_patch_to_inner(
         patch.apply_to(&mut config);
         config.clamp();
         patch_settings_document(&mut doc, &config, patch);
-        remove_legacy_agent_permission_mode(&mut doc, &config);
+        remove_legacy_agent_keys_from(&mut doc, &config);
 
         let text = doc.to_string();
         let mut written: Config = toml::from_str(&text).map_err(|e| {
@@ -648,9 +704,7 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "input_max_rows",
             toml_edit::value(i64::from(config.agent.input_max_rows)),
         );
-        // Stale key from the removed global permission-mode axis — clear it
-        // so an existing config.toml doesn't keep carrying it forward.
-        t.remove("default_permission_mode");
+        remove_legacy_agent_keys(t);
     });
 
     patch_section(&mut doc, "telegram", |t| {
@@ -1027,7 +1081,7 @@ fn status_bar_item_slug(item: StatusBarItem) -> &'static str {
 }
 
 /// The per-agent transcript-presentation keys, written only where set so an
-/// agent that follows `[agent]` keeps no key of its own. An empty
+/// agent that follows the built-in keeps no key of its own. An empty
 /// `display_filter` list is a set of its own (nothing visible), so it is
 /// written like any other value rather than treated as absent.
 fn write_transcript_defaults(
@@ -1140,11 +1194,36 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
     table
 }
 
-fn remove_legacy_agent_permission_mode(doc: &mut toml_edit::DocumentMut, config: &Config) {
+/// The `[agent]` keys [`Config::clamp`] migrates into the agent catalog. Listed
+/// once because both save paths have to clear the same set: left in place they
+/// re-migrate on the next load and undo the edit that was just saved.
+const LEGACY_AGENT_KEYS: [&str; 4] = [
+    "default_permission_mode",
+    "fold_mode",
+    "tail_window",
+    "display_filter",
+];
+
+/// Clear the migrated keys from an `[agent]` table, reporting whether any was
+/// there.
+fn remove_legacy_agent_keys(table: &mut dyn toml_edit::TableLike) -> bool {
+    // A loop rather than `any`, which short-circuits and would leave every key
+    // after the first hit in the file.
+    let mut removed = false;
+    for key in LEGACY_AGENT_KEYS {
+        removed |= table.remove(key).is_some();
+    }
+    removed
+}
+
+/// The incremental Settings save patches in place, so it clears the same keys
+/// the full save does — and rewrites `[[agents]]`, which is where the values
+/// they carried have just landed.
+fn remove_legacy_agent_keys_from(doc: &mut toml_edit::DocumentMut, config: &Config) {
     let removed = doc
         .get_mut("agent")
         .and_then(toml_edit::Item::as_table_like_mut)
-        .is_some_and(|t| t.remove("default_permission_mode").is_some());
+        .is_some_and(remove_legacy_agent_keys);
     if removed {
         replace_agents(doc, &config.agents);
     }

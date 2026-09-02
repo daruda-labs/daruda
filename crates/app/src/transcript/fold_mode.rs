@@ -1,17 +1,17 @@
 //! Fold defaults by turn position and block kind. Explicit user choices still
 //! override these rules; tail and filter rows remain owned by their chips.
 
-use super::tool_category::ToolCategory;
+use crate::transcript::tool_category::ToolCategory;
 
 /// Whether a block belongs to the newest turn or history.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum TurnPosition {
+pub(crate) enum TurnPosition {
     Past,
     Last,
 }
 
 impl TurnPosition {
-    pub(in crate::workspace) const ALL: [TurnPosition; 2] = [Self::Past, Self::Last];
+    pub(crate) const ALL: [TurnPosition; 2] = [Self::Past, Self::Last];
 
     const fn index(self) -> usize {
         match self {
@@ -20,7 +20,7 @@ impl TurnPosition {
         }
     }
 
-    pub(in crate::workspace) fn token(self) -> &'static str {
+    pub(crate) fn token(self) -> &'static str {
         match self {
             Self::Past => "past",
             Self::Last => "last",
@@ -34,7 +34,7 @@ impl TurnPosition {
 
 /// Foldable block kinds controlled by a mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum FoldBlock {
+pub(crate) enum FoldBlock {
     Response,
     ToolGroup,
     Tool,
@@ -48,7 +48,7 @@ pub(in crate::workspace) enum FoldBlock {
 
 impl FoldBlock {
     /// Blocks in menu and serialization order.
-    pub(in crate::workspace) const ALL: [FoldBlock; 9] = [
+    pub(crate) const ALL: [FoldBlock; 9] = [
         Self::Response,
         Self::ToolGroup,
         Self::Tool,
@@ -74,7 +74,7 @@ impl FoldBlock {
         }
     }
 
-    pub(in crate::workspace) fn token(self) -> &'static str {
+    pub(crate) fn token(self) -> &'static str {
         match self {
             Self::Response => "response",
             Self::ToolGroup => "tool_group",
@@ -95,7 +95,7 @@ impl FoldBlock {
 
 /// A mode's override for one matrix cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(in crate::workspace) enum BlockRule {
+pub(crate) enum BlockRule {
     #[default]
     Builtin,
     Expanded,
@@ -103,7 +103,7 @@ pub(in crate::workspace) enum BlockRule {
 }
 
 impl BlockRule {
-    pub(in crate::workspace) fn token(self) -> Option<&'static str> {
+    pub(crate) fn token(self) -> Option<&'static str> {
         match self {
             Self::Builtin => None,
             Self::Expanded => Some("expanded"),
@@ -120,7 +120,7 @@ impl BlockRule {
 
 /// Named fold-mode presets offered by the chip.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(in crate::workspace) enum FoldPreset {
+pub(crate) enum FoldPreset {
     /// Auto reproduces the shipped default behavior exactly, so a pane that
     /// never picks a mode looks the same as one that picks this.
     #[default]
@@ -130,8 +130,7 @@ pub(in crate::workspace) enum FoldPreset {
 }
 
 impl FoldPreset {
-    pub(in crate::workspace) const ALL: [FoldPreset; 3] =
-        [Self::Auto, Self::Summary, Self::Expanded];
+    pub(crate) const ALL: [FoldPreset; 3] = [Self::Auto, Self::Summary, Self::Expanded];
 
     fn token(self) -> &'static str {
         match self {
@@ -145,7 +144,7 @@ impl FoldPreset {
         Self::ALL.into_iter().find(|p| p.token() == token)
     }
 
-    pub(in crate::workspace) fn mode(self) -> FoldMode {
+    pub(crate) fn mode(self) -> FoldMode {
         let mut mode = FoldMode::neutral();
         match self {
             Self::Auto => mode.set(TurnPosition::Last, FoldBlock::Response, BlockRule::Expanded),
@@ -172,7 +171,7 @@ impl FoldPreset {
 
 /// One [`BlockRule`] per turn position and block kind.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) struct FoldMode {
+pub(crate) struct FoldMode {
     rules: [[BlockRule; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
     tool_rules: [[BlockRule; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
 }
@@ -191,7 +190,7 @@ impl FoldMode {
         }
     }
 
-    pub(in crate::workspace) fn rule(self, turn: TurnPosition, block: FoldBlock) -> BlockRule {
+    pub(crate) fn rule(self, turn: TurnPosition, block: FoldBlock) -> BlockRule {
         self.rules[turn.index()][block.index()]
     }
 
@@ -199,7 +198,7 @@ impl FoldMode {
         self.rules[turn.index()][block.index()] = rule;
     }
 
-    pub(in crate::workspace) fn with_rule(
+    pub(crate) fn with_rule(
         mut self,
         turn: TurnPosition,
         block: FoldBlock,
@@ -209,15 +208,11 @@ impl FoldMode {
         self
     }
 
-    pub(in crate::workspace) fn tool_rule(
-        self,
-        turn: TurnPosition,
-        category: ToolCategory,
-    ) -> BlockRule {
+    pub(crate) fn tool_rule(self, turn: TurnPosition, category: ToolCategory) -> BlockRule {
         self.tool_rules[turn.index()][category.index()]
     }
 
-    pub(in crate::workspace) fn with_tool_rule(
+    pub(crate) fn with_tool_rule(
         mut self,
         turn: TurnPosition,
         category: ToolCategory,
@@ -228,13 +223,13 @@ impl FoldMode {
     }
 
     /// The matching preset, or `None` for a custom matrix.
-    pub(in crate::workspace) fn preset(self) -> Option<FoldPreset> {
+    pub(crate) fn preset(self) -> Option<FoldPreset> {
         FoldPreset::ALL.into_iter().find(|p| p.mode() == self)
     }
 
     /// Parse tokens left-to-right; presets replace the matrix and cell tokens
     /// override it. Unknown tokens are ignored for forward compatibility.
-    pub(in crate::workspace) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
+    pub(crate) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
         let mut mode = Self::default();
         for token in tokens {
             if let Some(preset) = FoldPreset::from_token(token) {
@@ -249,7 +244,7 @@ impl FoldMode {
     }
 
     /// Serialize as a preset or a neutral base plus cell overrides.
-    pub(in crate::workspace) fn tokens(self) -> Vec<String> {
+    pub(crate) fn tokens(self) -> Vec<String> {
         if let Some(preset) = self.preset() {
             return vec![preset.token().to_owned()];
         }
@@ -268,13 +263,6 @@ impl FoldMode {
         }
         out
     }
-}
-
-/// The preset tokens a stored `fold_mode` list can name, in menu order.
-/// Re-exported as `crate::workspace::fold_preset_tokens` so the Settings agent
-/// catalog offers exactly this vocabulary instead of a copy of it.
-pub(crate) fn preset_tokens() -> [&'static str; FoldPreset::ALL.len()] {
-    FoldPreset::ALL.map(FoldPreset::token)
 }
 
 fn parse_tool_cell(token: &str) -> Option<(TurnPosition, ToolCategory, BlockRule)> {

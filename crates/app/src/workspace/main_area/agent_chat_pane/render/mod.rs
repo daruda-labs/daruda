@@ -4,6 +4,7 @@
 //! changes stay outside render. Message selection keys use append-only item
 //! indexes; tool diffs embed cached read-only editors when available.
 
+mod axis_chip;
 mod blocks;
 mod chrome;
 mod diff;
@@ -18,7 +19,6 @@ mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
 pub(in crate::workspace) mod mermaid_lightbox;
-mod options_panel;
 mod plan;
 mod tail_row;
 mod tail_window;
@@ -181,8 +181,7 @@ pub(in crate::workspace) fn render(
             tail: content.tail,
             display_filter: content.display_filter,
             fold_mode: content.fold.mode_choice(),
-            fold_editor_turn: content.fold_editor_turn,
-            custom_fold_mode: content.custom_fold_mode,
+            fold_editor: content.fold_editor,
             activity_options_tab: content.activity_options_tab,
             compact_options,
             filter_popover_open,

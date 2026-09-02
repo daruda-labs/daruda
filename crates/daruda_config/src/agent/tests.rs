@@ -746,24 +746,6 @@ fn input_max_rows_defaults_and_clamps() {
 }
 
 #[test]
-fn fold_mode_defaults_to_the_shipped_preset_and_round_trips() {
-    assert!(AgentConfig::default().fold_mode.is_empty());
-
-    let cfg: AgentConfig =
-        toml::from_str(r#"fold_mode = ["auto", "last.tool=expanded"]"#).expect("deserialize");
-    assert_eq!(cfg.fold_mode, vec!["auto", "last.tool=expanded"]);
-    let back: AgentConfig =
-        toml::from_str(&toml::to_string(&cfg).expect("serialize")).expect("round trip");
-    assert_eq!(back.fold_mode, vec!["auto", "last.tool=expanded"]);
-
-    let odd: AgentConfig = toml::from_str(r#"fold_mode = ["not_a_mode"]"#).expect("deserialize");
-    assert_eq!(odd.fold_mode, vec!["not_a_mode"]);
-
-    let omitted: AgentConfig = toml::from_str("").expect("deserialize");
-    assert!(omitted.fold_mode.is_empty());
-}
-
-#[test]
 fn reading_width_defaults_round_trips_and_clamps() {
     assert_eq!(AgentConfig::default().reading_width, READING_WIDTH_DEFAULT);
 
@@ -783,20 +765,6 @@ fn reading_width_defaults_round_trips_and_clamps() {
 
     let omitted: AgentConfig = toml::from_str("use_modifier_to_send = false").expect("deserialize");
     assert_eq!(omitted.reading_width, READING_WIDTH_DEFAULT);
-}
-
-#[test]
-fn tail_window_defaults_to_all_and_round_trips() {
-    assert_eq!(AgentConfig::default().tail_window, TAIL_WINDOW_ALL);
-
-    let cfg: AgentConfig = toml::from_str("tail_window = 5").expect("deserialize");
-    assert_eq!(cfg.tail_window, 5);
-    let toml_str = toml::to_string(&cfg).expect("serialize");
-    let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
-    assert_eq!(back.tail_window, 5);
-
-    let omitted: AgentConfig = toml::from_str("use_modifier_to_send = false").expect("deserialize");
-    assert_eq!(omitted.tail_window, TAIL_WINDOW_DEFAULT);
 }
 
 #[test]

@@ -38,16 +38,16 @@ pub struct AgentDefinition {
     /// and neither is knowable ahead of time from this catalog alone. An id
     /// the agent doesn't advertise is simply skipped at connect.
     pub default_model: Option<String>,
-    /// Fold rules a fresh chat pane under this agent starts on. `None` follows
-    /// [`AgentConfig::fold_mode`]; an empty list means the built-in preset,
-    /// which is what makes the app-wide key a bare `Vec`.
+    /// Fold rules a fresh chat pane under this agent starts on. This entry is
+    /// the default a pane returns to; `None` means the built-in matrix, which
+    /// an empty list also resolves to.
     pub fold_mode: Option<Vec<String>>,
     /// Trailing-step window a fresh chat pane under this agent starts on.
-    /// `None` follows [`AgentConfig::tail_window`].
+    /// `None` means [`TAIL_WINDOW_DEFAULT`].
     pub tail_window: Option<u8>,
     /// Visible row kinds a fresh chat pane under this agent starts on. `None`
-    /// follows [`AgentConfig::display_filter`]; unlike `fold_mode`, an empty
-    /// list is a real value naming an empty visible set — see that field.
+    /// means the unfiltered set; unlike `fold_mode`, an empty list is a real
+    /// value naming an empty visible set, so the two cannot be collapsed.
     pub display_filter: Option<Vec<String>>,
 }
 
@@ -481,6 +481,21 @@ pub(crate) fn default_agents() -> Vec<AgentEntry> {
     vec![AgentEntry::Custom(AgentDefinition::claude_default())]
 }
 
+/// The app-wide transcript keys a pre-catalog `[agent]` section could state.
+/// Carried from load to [`crate::Config::clamp`] and nowhere else.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LegacyTranscript {
+    pub(crate) fold_mode: Option<Vec<String>>,
+    pub(crate) tail_window: Option<u8>,
+    pub(crate) display_filter: Option<Vec<String>>,
+}
+
+impl LegacyTranscript {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.fold_mode.is_none() && self.tail_window.is_none() && self.display_filter.is_none()
+    }
+}
+
 /// Agent chat configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -491,6 +506,20 @@ pub struct AgentConfig {
     #[doc(hidden)]
     #[serde(default, rename = "default_permission_mode", skip_serializing)]
     pub legacy_default_permission_mode: Option<String>,
+    /// Legacy app-wide transcript presentation, from before the catalog held
+    /// these per agent. Same treatment as
+    /// [`Self::legacy_default_permission_mode`]: deserialized only so
+    /// [`crate::Config::clamp`] can lift them onto the entries that state
+    /// nothing, never written back.
+    #[doc(hidden)]
+    #[serde(default, rename = "fold_mode", skip_serializing)]
+    pub legacy_fold_mode: Option<Vec<String>>,
+    #[doc(hidden)]
+    #[serde(default, rename = "tail_window", skip_serializing)]
+    pub legacy_tail_window: Option<u8>,
+    #[doc(hidden)]
+    #[serde(default, rename = "display_filter", skip_serializing)]
+    pub legacy_display_filter: Option<Vec<String>>,
     /// How the agent chat input submits a message. When `false` (the
     /// default), plain Enter sends and Shift+Enter inserts a newline —
     /// matching Zed's agent panel default. When `true`, Enter inserts a
@@ -507,19 +536,6 @@ pub struct AgentConfig {
     /// reading-width mode. Clamped to
     /// [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
     pub reading_width: f32,
-    /// Initial visible trailing-step count; `0` shows every step.
-    pub tail_window: u8,
-    /// Initial fold preset and optional `"<turn>.<block>=<rule>"` overrides.
-    /// Presets are `auto`, `summary`, and `expanded`; unknown tokens are ignored.
-    pub fold_mode: Vec<String>,
-    /// Initial visible row kinds — the facet tokens a fresh pane shows.
-    ///
-    /// `Option` rather than a bare `Vec` because the list names the *visible*
-    /// set and the reader starts from all-off: `Some([])` is the pane with
-    /// every box unchecked, a state the user can actually reach, so only `None`
-    /// can mean "no opinion, show everything".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_filter: Option<Vec<String>>,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
     /// the option stays in the session state and the agent can still change it.
@@ -573,12 +589,12 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             legacy_default_permission_mode: None,
+            legacy_fold_mode: None,
+            legacy_tail_window: None,
+            legacy_display_filter: None,
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
-            tail_window: TAIL_WINDOW_DEFAULT,
-            fold_mode: Vec::new(),
-            display_filter: None,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }
@@ -590,6 +606,16 @@ impl AgentConfig {
             .take()
             .map(|mode| mode.trim().to_string())
             .filter(|mode| !mode.is_empty())
+    }
+
+    /// The legacy app-wide transcript keys, taken so a later save cannot write
+    /// them back. All three at once because they are migrated together.
+    pub(crate) fn take_legacy_transcript(&mut self) -> LegacyTranscript {
+        LegacyTranscript {
+            fold_mode: self.legacy_fold_mode.take(),
+            tail_window: self.legacy_tail_window.take(),
+            display_filter: self.legacy_display_filter.take(),
+        }
     }
 
     /// Clamp numeric fields to their valid ranges.

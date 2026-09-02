@@ -248,6 +248,12 @@ impl SettingsWindow {
         row: &AgentCatalogRow,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        // Built before the theme borrow: these need `&mut Context` to downgrade
+        // the window entity their editors dispatch through.
+        let fold_control =
+            super::agent_transcript::editor::fold_mode_control(catalog_index, row, cx);
+        let filter_control =
+            super::agent_transcript::editor::display_filter_control(catalog_index, row, cx);
         let t = theme::current(cx);
         let remove_id = format!("settings-agent-remove-{catalog_index}");
         let transport_kind = row
@@ -384,7 +390,7 @@ impl SettingsWindow {
                 Self::field_with_base(
                     body,
                     s::settings_agent_field_fold_mode(),
-                    crate::ui::select::select(&row.fold_mode_select, cx, 0),
+                    fold_control,
                     provenance.fold_mode_base.clone(),
                     cx,
                 )
@@ -402,7 +408,7 @@ impl SettingsWindow {
                 Self::field_with_base(
                     body,
                     s::settings_agent_field_display_filter(),
-                    crate::ui::select::select(&row.display_filter_select, cx, 0),
+                    filter_control,
                     provenance.display_filter_base.clone(),
                     cx,
                 )
@@ -619,13 +625,13 @@ impl AgentCatalogRow {
                 .default_model(cx)
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             fold_mode_base: self
-                .fold_mode(cx)
+                .fold_mode()
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             tail_window_base: self
                 .tail_window(cx)
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             display_filter_base: self
-                .display_filter(cx)
+                .display_filter()
                 .map(|_| s::settings_agent_override_preset_value_unset()),
         }
     }

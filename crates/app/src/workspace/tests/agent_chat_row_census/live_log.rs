@@ -11,8 +11,8 @@
 use daruda_acp::ChatItem;
 
 use super::{Lens, per_turn_as_last, per_turn_settled, turn_bounds};
-use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::fold_mode::FoldPreset;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 
 const TAIL_WINDOWS: [TailWindow; 2] = [TailWindow::All, TailWindow::Last(5)];
