@@ -107,6 +107,22 @@ fn base_url(token: &str, method: &str) -> String {
     format!("https://api.telegram.org/bot{token}/{method}")
 }
 
+/// Placeholder standing in for the bot token in anything that leaves this
+/// module as text.
+const REDACTED_TOKEN: &str = "<redacted>";
+
+/// Strip the bot token out of a transport error before it becomes a
+/// [`ClientError`].
+///
+/// Telegram carries the token in the URL path, and every HTTP client puts the
+/// URL it failed on into its `Display` — so the raw string is a live bot
+/// credential, and `crate::telegram::global` writes these errors to the
+/// on-disk log. Anyone who reads a log file, or attaches one to a bug report,
+/// would be handing over control of the bot.
+fn http_error(token: &str, e: impl std::fmt::Display) -> ClientError {
+    ClientError::Http(e.to_string().replace(token, REDACTED_TOKEN))
+}
+
 /// Long-poll for new updates starting after `offset`. `timeout_s` is
 /// passed straight through to Telegram as the long-poll duration; the
 /// underlying HTTP client waits `timeout_s + 5s` to give Telegram
@@ -128,10 +144,7 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
         .timeout(Duration::from_secs(timeout_s) + LONG_POLL_MARGIN)
         .build();
 
-    let response = agent
-        .get(&url)
-        .call()
-        .map_err(|e| ClientError::Http(e.to_string()))?;
+    let response = agent.get(&url).call().map_err(|e| http_error(token, e))?;
 
     let body = read_body(response)?;
     parse_updates(&body)
@@ -171,7 +184,7 @@ pub fn send_message(
     let response = agent
         .post(&base_url(token, "sendMessage"))
         .send_json(payload)
-        .map_err(|e| ClientError::Http(e.to_string()))?;
+        .map_err(|e| http_error(token, e))?;
 
     let body = read_body(response)?;
     parse_send_message_response(&body)
@@ -196,7 +209,7 @@ pub fn answer_callback(
     let response = agent
         .post(&base_url(token, "answerCallbackQuery"))
         .send_json(payload)
-        .map_err(|e| ClientError::Http(e.to_string()))?;
+        .map_err(|e| http_error(token, e))?;
 
     let body = read_body(response)?;
     parse_answer_callback_response(&body)
@@ -225,7 +238,7 @@ pub fn edit_message_text(
     let response = agent
         .post(&base_url(token, "editMessageText"))
         .send_json(payload)
-        .map_err(|e| ClientError::Http(e.to_string()))?;
+        .map_err(|e| http_error(token, e))?;
 
     let body = read_body(response)?;
     parse_edit_message_response(&body)
@@ -236,6 +249,9 @@ fn read_body(response: ureq::Response) -> Result<String, ClientError> {
     response
         .into_reader()
         .take(MAX_BODY_BYTES as u64)
+        // No redaction hop here: a body-read failure is a local IO error and
+        // never carries the request URL, which is the only place the token
+        // appears.
         .read_to_string(&mut body)
         .map_err(|e| ClientError::Http(e.to_string()))?;
     Ok(body)
@@ -420,6 +436,29 @@ fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_transport_error_never_carries_the_bot_token() {
+        // Telegram puts the token in the URL path and every HTTP client prints
+        // the URL it failed on, so an unredacted error is a live credential —
+        // and these errors are written to the on-disk log.
+        let token = "8966665968:AAH4Qfs8dEYGzgaqnYhxj5VR4WLcEIt_odY";
+        let raw = format!("{}: connection timed out", base_url(token, "getUpdates"));
+
+        let ClientError::Http(message) = http_error(token, raw) else {
+            panic!("http_error builds an Http error");
+        };
+
+        assert!(!message.contains(token), "the token leaked: {message}");
+        assert!(
+            message.contains(REDACTED_TOKEN),
+            "the placeholder marks where it was: {message}"
+        );
+        assert!(
+            message.contains("getUpdates"),
+            "the failing call is still identifiable: {message}"
+        );
+    }
 
     #[test]
     fn get_updates_is_stubbed_under_test_no_network() {
