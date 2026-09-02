@@ -577,36 +577,32 @@ struct UnitWindow {
 }
 
 impl UnitWindow {
-    /// Nothing held back, whatever the axis says. Thinking groups take this: a
-    /// stretch of thoughts is one step's reasoning, not a run of steps, so the
-    /// step axis has nothing to count inside it.
-    fn open(start: usize) -> Self {
-        Self {
-            total: 0,
-            kept: 0,
-            hidden: 0,
-            window_start: start,
-        }
-    }
-
-    /// `units` is one entry per unit in transcript order: where it ends, and
-    /// whether the filter leaves it anything to show.
-    fn of_units(units: &[(usize, bool)], start: usize, tail: TailWindow) -> Self {
-        let kept = units.iter().filter(|(_, kept)| *kept).count();
+    /// `units` yields one entry per unit in transcript order: where it ends,
+    /// and whether the filter leaves it anything to show. Taken as a `Clone`
+    /// iterator rather than a slice so a level whose units are already a range
+    /// — a group's calls — needs no allocation to describe them.
+    fn of_units(
+        units: impl Iterator<Item = (usize, bool)> + Clone,
+        start: usize,
+        tail: TailWindow,
+    ) -> Self {
+        let kept = units.clone().filter(|(_, kept)| *kept).count();
         // Position within the kept population. An emptied unit takes the
         // position of the next rendering one rather than a slot of its own, so
         // it cannot shift the window. Positions only rise, so the covered units
         // are a prefix and the last one's end is where the kept range begins.
+        let mut total = 0;
         let mut position = 0;
         let mut window_start = start;
         for (end, unit_kept) in units {
+            total += 1;
             if tail.hides(position, kept) {
-                window_start = *end;
+                window_start = end;
             }
-            position += usize::from(*unit_kept);
+            position += usize::from(unit_kept);
         }
         Self {
-            total: units.len(),
+            total,
             kept,
             hidden: tail.hidden_steps(kept),
             window_start,
@@ -630,16 +626,18 @@ impl UnitWindow {
                 span.clone().any(|j| context.filter.matches(&items[j])),
             ));
         }
-        Self::of_units(&units, run.start, context.tail)
+        Self::of_units(units.iter().copied(), run.start, context.tail)
     }
 
-    /// One group's window: one unit per call it holds.
+    /// One group's window: one unit per call it holds. A group is a contiguous
+    /// range, so its units are derived on the fly.
     fn over_group_calls(group: std::ops::Range<usize>, context: ProjectionContext<'_>) -> Self {
-        let units: Vec<(usize, bool)> = group
-            .clone()
-            .map(|j| (j + 1, context.filter.matches(&context.items[j])))
-            .collect();
-        Self::of_units(&units, group.start, context.tail)
+        let start = group.start;
+        Self::of_units(
+            group.map(move |j| (j + 1, context.filter.matches(&context.items[j]))),
+            start,
+            context.tail,
+        )
     }
 
     /// Whether the item at `ix` sits before the window's kept range.
@@ -648,33 +646,35 @@ impl UnitWindow {
     }
 }
 
-/// The window applied inside one group's children, together with whether its
-/// boundary row is open. Paired because a covered child's visibility is the two
-/// answers together, and splitting them let one child branch read only one.
+/// What the step axis makes of one group's children.
 #[derive(Clone, Copy)]
-struct GroupWindow {
-    cut: UnitWindow,
-    revealed: bool,
+enum GroupWindow {
+    /// A group the axis does not divide. Reasoning groups take this: a stretch
+    /// of thoughts is one step's reasoning, not a run of steps, so the step
+    /// axis has nothing to count inside it.
+    Undivided,
+    /// A tool group, whose calls are the units — with whether its own boundary
+    /// row is open. The two travel together because a covered child's
+    /// visibility is both answers at once.
+    Divided { cut: UnitWindow, revealed: bool },
 }
 
 impl GroupWindow {
-    /// A group the step axis does not divide — see [`UnitWindow::open`].
-    fn open(start: usize) -> Self {
-        Self {
-            cut: UnitWindow::open(start),
-            revealed: false,
-        }
-    }
-
     fn covers(self, ix: usize) -> bool {
-        self.cut.covers(ix)
+        match self {
+            Self::Undivided => false,
+            Self::Divided { cut, .. } => cut.covers(ix),
+        }
     }
 
     /// A covered child the boundary is still holding back. Liveness is the
     /// caller's term: a running call stays surfaced through a shut boundary,
     /// exactly as a live run does one level up.
     fn withholds(self, ix: usize) -> bool {
-        self.covers(ix) && !self.revealed
+        match self {
+            Self::Undivided => false,
+            Self::Divided { cut, revealed } => !revealed && cut.covers(ix),
+        }
     }
 }
 
@@ -791,13 +791,11 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         fold_context_at(&group_key, grun.start, items, boundary),
                     );
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
-                    let group_window = GroupWindow {
-                        cut: UnitWindow::over_group_calls(grun.clone(), context),
-                        revealed: fold.is_expanded(
-                            &group_tail_key,
-                            fold_context_at(&group_tail_key, grun.start, items, boundary),
-                        ),
-                    };
+                    let group_tail_revealed = fold.is_expanded(
+                        &group_tail_key,
+                        fold_context_at(&group_tail_key, grun.start, items, boundary),
+                    );
+                    let group_cut = UnitWindow::over_group_calls(grun.clone(), context);
                     out.push(
                         RowKind::ToolGroupHeader {
                             gid: gid.clone(),
@@ -815,11 +813,11 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     out.push(
                         RowKind::ToolGroupTailMore {
                             gid,
-                            hidden_calls: group_window.cut.hidden,
-                            kept_calls: group_window.cut.kept - group_window.cut.hidden,
-                            collapsed: !group_window.revealed,
+                            hidden_calls: group_cut.hidden,
+                            kept_calls: group_cut.kept - group_cut.hidden,
+                            collapsed: !group_tail_revealed,
                         },
-                        folded || group_collapsed || group_window.cut.hidden == 0,
+                        folded || group_collapsed || group_cut.hidden == 0,
                         false,
                         base_indent + 1,
                     );
@@ -829,7 +827,10 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         folded || group_collapsed,
                         base_indent,
                         group,
-                        group_window,
+                        GroupWindow::Divided {
+                            cut: group_cut,
+                            revealed: group_tail_revealed,
+                        },
                     );
                 } else {
                     out.push(
@@ -870,11 +871,11 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                     out.push_group_children(
                         context,
-                        grun.clone(),
+                        grun,
                         folded || group_collapsed,
                         base_indent,
                         group,
-                        GroupWindow::open(grun.start),
+                        GroupWindow::Undivided,
                     );
                 } else {
                     out.push(
