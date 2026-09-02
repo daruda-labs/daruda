@@ -96,7 +96,12 @@ impl<'a> Compiler<'a> {
                 MdSpan::SoftBreak => self.append(" ", active),
                 MdSpan::HardBreak => self.append("\n", active),
                 MdSpan::ParagraphBreak => {
+                    // `render_md_prose` splits the run here, so reaching this is
+                    // a bug. The assert is debug-only, so release still needs a
+                    // separator — without one the two paragraphs' words jam
+                    // together.
                     debug_assert!(false, "paragraph breaks must be split before compile_prose");
+                    self.append("\n", active);
                 }
                 MdSpan::Footnote(label) => {
                     let mut nested = active;
@@ -272,6 +277,27 @@ mod tests {
         assert_eq!(
             compiled.link_urls,
             vec!["https://example.com/first", "https://example.com/second"]
+        );
+
+        // Two links to the *same* URL are still two ranges. Merging them by URL
+        // would pass the assertions above, so this is the case that pins the
+        // per-link identity the compiler tracks.
+        let same = [
+            MdSpan::Link {
+                children: vec![MdSpan::Text("one".into())],
+                url: "https://example.com/x".into(),
+            },
+            MdSpan::Link {
+                children: vec![MdSpan::Text("two".into())],
+                url: "https://example.com/x".into(),
+            },
+        ];
+        let parts = compile_prose(&same);
+        let compiled = text_part(&parts);
+        assert_eq!(compiled.link_ranges, vec![0..3, 3..6]);
+        assert_eq!(
+            compiled.link_urls,
+            vec!["https://example.com/x", "https://example.com/x"]
         );
     }
 

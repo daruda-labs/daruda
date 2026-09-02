@@ -2040,6 +2040,42 @@ mod tests {
     /// Sent as [`CompatSessionNotification`] because that is the only way to put
     /// a draft-protocol `sessionUpdate` on the wire — the typed
     /// `SessionNotification` has no variant for one.
+    /// The three notifications a native subagent run produces: the spawn, one
+    /// child tool call under the *child's* session id, and the terminal state.
+    /// Shared so the live path and the resume path cannot drift apart.
+    fn native_subagent_replay(root: SessionId) -> [(SessionId, serde_json::Value); 3] {
+        [
+            (
+                root.clone(),
+                serde_json::json!({
+                    "sessionUpdate": "subagent_spawned",
+                    "subagentSessionId": "sess-kid",
+                    "name": "Lorentz",
+                    "task": "Probe the UI",
+                    "capabilities": {},
+                }),
+            ),
+            (
+                SessionId::from("sess-kid"),
+                serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "c1",
+                    "title": "Read main.rs",
+                    "kind": "read",
+                    "status": "completed",
+                }),
+            ),
+            (
+                root,
+                serde_json::json!({
+                    "sessionUpdate": "subagent_state_update",
+                    "subagentSessionId": "sess-kid",
+                    "state": "completed",
+                }),
+            ),
+        ]
+    }
+
     fn native_subagent_agent() -> impl ConnectTo<Client> + 'static {
         use agent_client_protocol::schema::v1::{
             InitializeResponse, NewSessionResponse, PromptResponse,
@@ -2061,42 +2097,15 @@ mod tests {
             .on_receive_request(
                 async |req: PromptRequest, responder, conn| {
                     let root = req.session_id.clone();
-                    for (session, update) in [
-                        (
-                            root.clone(),
-                            serde_json::json!({
-                                "sessionUpdate": "subagent_spawned",
-                                "subagentSessionId": "sess-kid",
-                                "name": "Lorentz",
-                                "task": "Probe the UI",
-                                "capabilities": {},
-                            }),
-                        ),
-                        (
-                            SessionId::from("sess-kid"),
-                            serde_json::json!({
-                                "sessionUpdate": "tool_call",
-                                "toolCallId": "c1",
-                                "title": "Read main.rs",
-                                "kind": "read",
-                                "status": "completed",
-                            }),
-                        ),
-                        (
-                            root.clone(),
-                            serde_json::json!({
-                                "sessionUpdate": "subagent_state_update",
-                                "subagentSessionId": "sess-kid",
-                                "state": "completed",
-                            }),
-                        ),
+                    let unknown = (
                         // An update kind this build has no knowledge of, to prove
                         // it is reported rather than fatal.
-                        (
-                            root.clone(),
-                            serde_json::json!({ "sessionUpdate": "quantum_update" }),
-                        ),
-                    ] {
+                        root.clone(),
+                        serde_json::json!({ "sessionUpdate": "quantum_update" }),
+                    );
+                    for (session, update) in
+                        native_subagent_replay(root).into_iter().chain([unknown])
+                    {
                         conn.send_notification(CompatSessionNotification {
                             session_id: session,
                             update,
@@ -2130,37 +2139,7 @@ mod tests {
             )
             .on_receive_request(
                 async |req: LoadSessionRequest, responder, conn| {
-                    let root = req.session_id.clone();
-                    for (session, update) in [
-                        (
-                            root.clone(),
-                            serde_json::json!({
-                                "sessionUpdate": "subagent_spawned",
-                                "subagentSessionId": "sess-kid",
-                                "name": "Lorentz",
-                                "task": "Probe the UI",
-                                "capabilities": {},
-                            }),
-                        ),
-                        (
-                            SessionId::from("sess-kid"),
-                            serde_json::json!({
-                                "sessionUpdate": "tool_call",
-                                "toolCallId": "c1",
-                                "title": "Read main.rs",
-                                "kind": "read",
-                                "status": "completed",
-                            }),
-                        ),
-                        (
-                            root.clone(),
-                            serde_json::json!({
-                                "sessionUpdate": "subagent_state_update",
-                                "subagentSessionId": "sess-kid",
-                                "state": "completed",
-                            }),
-                        ),
-                    ] {
+                    for (session, update) in native_subagent_replay(req.session_id.clone()) {
                         conn.send_notification(CompatSessionNotification {
                             session_id: session,
                             update,

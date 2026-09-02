@@ -366,6 +366,16 @@ fn render_compiled_text(
         .with_highlights(highlights)
         .with_font_family_overrides(monospace_ranges);
 
+    // Only a URL this host will actually open becomes a clickable range. A
+    // range that fails the allowlist later would still take the pointer cursor
+    // and swallow the block selection the click would otherwise have started,
+    // leaving a link that does nothing at all.
+    let (link_ranges, link_urls): (Vec<_>, Vec<_>) = link_ranges
+        .into_iter()
+        .zip(link_urls)
+        .filter(|(_, url)| is_allowed_markdown_url(url))
+        .unzip();
+
     let text: AnyElement = if link_ranges.is_empty() {
         styled.into_any_element()
     } else {
@@ -430,10 +440,13 @@ fn render_inline_md_image(
 }
 
 fn highlight_for(style: InlineStyle, t: &MdColors) -> HighlightStyle {
-    let color = if style.code {
-        Some(t.text)
-    } else if style.link {
+    // Link wins over code: `[`CLAUDE.md`](…)` is the common form in this repo's
+    // own docs, and without the link colour it is a click with no affordance —
+    // `underline` is deliberately off (DESIGN.md), so colour is the only cue.
+    let color = if style.link {
         Some(t.link)
+    } else if style.code {
+        Some(t.text)
     } else if style.strikethrough || style.footnote || style.html {
         Some(t.subtle)
     } else {
@@ -991,15 +1004,24 @@ mod tests {
         a: 1.0,
     };
 
+    /// One distinct hue per slot. With every slot the same colour an assertion
+    /// like `color == colors.link` passes for `text` and `subtle` too, so the
+    /// contract this fixture exists to pin would go unchecked.
     fn colors() -> MdColors {
+        let hue = |h: f32| gpui::Hsla {
+            h,
+            s: 1.0,
+            l: 0.5,
+            a: 1.0,
+        };
         MdColors {
-            text: RED,
-            muted: RED,
-            subtle: RED,
-            link: RED,
-            fill: RED,
-            raised: RED,
-            line: RED,
+            text: hue(0.0),
+            muted: hue(0.1),
+            subtle: hue(0.2),
+            link: hue(0.3),
+            fill: hue(0.4),
+            raised: hue(0.5),
+            line: hue(0.6),
         }
     }
 
@@ -1036,6 +1058,20 @@ mod tests {
         );
         assert_eq!(link.color, Some(colors.link));
         assert!(link.underline.is_none());
+
+        // `[`CLAUDE.md`](…)` — code inside a link. Without the link colour it
+        // is indistinguishable from ordinary inline code, and underline is off,
+        // so nothing marks it clickable. Code still contributes its fill.
+        let linked_code = highlight_for(
+            InlineStyle {
+                code: true,
+                link: true,
+                ..Default::default()
+            },
+            &colors,
+        );
+        assert_eq!(linked_code.color, Some(colors.link));
+        assert_eq!(linked_code.background_color, Some(colors.fill));
     }
 
     #[test]
@@ -1469,6 +1505,49 @@ mod layout_tests {
                      ![thumbnail](missing.png) tail";
 
         assert_eq!(height(cx, plain, px(635.)), height(cx, image, px(635.)));
+    }
+
+    /// A URL this host will not open must not be clickable at all. Left in the
+    /// range list it would take the pointer cursor and consume the click,
+    /// discarding the block selection the press would otherwise have started —
+    /// a link that does nothing whatsoever.
+    #[gpui::test]
+    fn a_link_this_host_will_not_open_is_not_clickable(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(430.), px(220.)));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let block_mouse_downs = Arc::new(Mutex::new(0));
+        let window = cx
+            .update(|cx| {
+                let opened = opened.clone();
+                let block_mouse_downs = block_mouse_downs.clone();
+                cx.open_window(options, |_window, cx| {
+                    cx.new(|_| LinkProbe {
+                        md: "[docs](./other.md) tail".into(),
+                        opened,
+                        block_mouse_downs,
+                    })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let text = vcx.debug_bounds("md-plain").expect("text painted");
+        let inside_link = point(text.origin.x + px(2.), text.center().y);
+
+        vcx.simulate_click(inside_link, Modifiers::none());
+        assert!(
+            opened.lock().unwrap().is_empty(),
+            "a relative link must not reach the URL handler"
+        );
+        assert!(
+            *block_mouse_downs.lock().unwrap() > 0,
+            "the click falls through to block selection instead of vanishing"
+        );
     }
 
     #[gpui::test]
