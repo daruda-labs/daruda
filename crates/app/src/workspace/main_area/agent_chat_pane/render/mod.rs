@@ -108,7 +108,7 @@ use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
-use tail_row::tail_more_bar;
+use tail_row::{tail_more_bar, tool_group_tail_more_bar};
 use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
@@ -409,6 +409,12 @@ fn render_row(
             kept_steps,
             collapsed,
         } => tail_more_bar(this, *run_start, *hidden_steps, *kept_steps, *collapsed, cx),
+        RowKind::ToolGroupTailMore {
+            gid,
+            hidden_calls,
+            kept_calls,
+            collapsed,
+        } => tool_group_tail_more_bar(this, gid, *hidden_calls, *kept_calls, *collapsed, cx),
         RowKind::ToolGroupHeader {
             gid,
             first_ix,

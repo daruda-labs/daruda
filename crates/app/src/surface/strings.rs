@@ -2245,6 +2245,27 @@ pub fn agent_chat_tail_more_collapse(count: usize) -> String {
     }
 }
 
+/// The same row one level in, inside a tool group. The unit there is a call,
+/// not a step, so the copy names calls — the group itself is the step the axis
+/// counted.
+pub fn agent_chat_tail_more_show_calls(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.tail_more_show_calls_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.tail_more_show_calls", count = count).into_owned()
+    }
+}
+
+/// The in-group boundary while it is open. Names the kept calls, for the same
+/// reason [`agent_chat_tail_more_collapse`] names the kept steps.
+pub fn agent_chat_tail_more_collapse_calls(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("agent_chat.tail_more_collapse_calls_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.tail_more_collapse_calls", count = count).into_owned()
+    }
+}
+
 pub fn agent_chat_fold_mode_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.fold_mode_chip", value = value).into_owned()
 }

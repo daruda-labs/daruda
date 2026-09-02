@@ -22,6 +22,10 @@ pub(in crate::workspace) enum FoldKey {
     ThinkingGroup(usize),
     Response(usize),
     Tail(usize),
+    /// One tool group's own recent-steps boundary, keyed like
+    /// [`FoldKey::ToolGroup`] by the group's first call. Chip-owned, so it is
+    /// no more a mode-controlled block than [`FoldKey::Tail`] is.
+    ToolGroupTail(String),
     Filtered(usize),
 }
 
@@ -44,7 +48,7 @@ impl FoldKey {
             FoldKey::ToolGroup(_) => Some(FoldBlock::ToolGroup),
             FoldKey::ThinkingGroup(_) => Some(FoldBlock::ThinkingGroup),
             FoldKey::Response(_) => Some(FoldBlock::Response),
-            FoldKey::Tail(_) | FoldKey::Filtered(_) => None,
+            FoldKey::Tail(_) | FoldKey::ToolGroupTail(_) | FoldKey::Filtered(_) => None,
         }
     }
 
@@ -61,6 +65,7 @@ impl FoldKey {
             FoldKey::ToolRawInput(_)
             | FoldKey::Subagent(_)
             | FoldKey::Tail(_)
+            | FoldKey::ToolGroupTail(_)
             | FoldKey::Filtered(_) => FoldPolicy::DefaultCollapsed,
         }
     }
@@ -221,8 +226,12 @@ impl FoldState {
         self.held_response = None;
     }
 
+    /// Both levels of the recent-steps axis: a response's boundary and each
+    /// group's own. Changing the window invalidates every reveal it granted.
     pub(in crate::workspace) fn clear_tail_reveals(&mut self) -> bool {
-        self.clear_matching_overrides(|key| matches!(key, FoldKey::Tail(_)))
+        self.clear_matching_overrides(|key| {
+            matches!(key, FoldKey::Tail(_) | FoldKey::ToolGroupTail(_))
+        })
     }
 
     pub(in crate::workspace) fn clear_filter_reveals(&mut self) -> bool {
@@ -530,10 +539,14 @@ mod tests {
     }
 
     #[test]
-    fn the_two_chip_owned_rows_ignore_every_mode() {
+    fn the_chip_owned_rows_ignore_every_mode() {
         for preset in FoldPreset::ALL {
             let state = FoldState::with_mode(preset.mode());
-            for key in [FoldKey::Tail(0), FoldKey::Filtered(0)] {
+            for key in [
+                FoldKey::Tail(0),
+                FoldKey::ToolGroupTail("t".into()),
+                FoldKey::Filtered(0),
+            ] {
                 for ctx in [FoldContext::past(true), FoldContext::last(true)] {
                     assert!(!state.is_expanded(&key, ctx), "{preset:?} {key:?}");
                 }
@@ -548,6 +561,7 @@ mod tests {
             [
                 FoldKey::Tail(1),
                 FoldKey::Tail(9),
+                FoldKey::ToolGroupTail("t".into()),
                 FoldKey::Filtered(1),
                 FoldKey::Tool("t".into()),
             ],
@@ -557,6 +571,13 @@ mod tests {
         assert!(state.clear_tail_reveals());
         assert!(!state.is_expanded(&FoldKey::Tail(1), FoldContext::past(false)));
         assert!(!state.is_expanded(&FoldKey::Tail(9), FoldContext::past(false)));
+        assert!(
+            !state.is_expanded(
+                &FoldKey::ToolGroupTail("t".into()),
+                FoldContext::past(false)
+            ),
+            "one axis owns both levels of its reveal"
+        );
         assert!(
             state.is_expanded(&FoldKey::Filtered(1), FoldContext::past(false)),
             "the filter chip owns a separate reveal"

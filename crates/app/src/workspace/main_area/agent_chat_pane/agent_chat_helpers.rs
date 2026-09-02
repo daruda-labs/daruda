@@ -89,7 +89,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             RowKind::ThinkingGroupHeader { first_ix, .. } => {
                 keys.push(FoldKey::ThinkingGroup(*first_ix))
             }
-            RowKind::TailMore { .. } => {}
+            RowKind::TailMore { .. } | RowKind::ToolGroupTailMore { .. } => {}
             RowKind::User(_)
             | RowKind::AgentItem(_)
             | RowKind::ConclusionItem(_)
@@ -755,7 +755,8 @@ fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize
         FoldKey::Tool(id)
         | FoldKey::Subagent(id)
         | FoldKey::ToolRawInput(id)
-        | FoldKey::ToolGroup(id) => tool_item_index(items, id),
+        | FoldKey::ToolGroup(id)
+        | FoldKey::ToolGroupTail(id) => tool_item_index(items, id),
         FoldKey::Diff(diff_key) => {
             let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
             tool_item_index(items, tool_id)
@@ -823,6 +824,7 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         | FoldKey::ToolRawInput(_)
         | FoldKey::Subagent(_)
         | FoldKey::Tail(_)
+        | FoldKey::ToolGroupTail(_)
         | FoldKey::Filtered(_) => false,
     }
 }
@@ -853,6 +855,7 @@ pub(in crate::workspace) fn fold_key_item_index(
         | FoldKey::ToolGroup(_)
         | FoldKey::ThinkingGroup(_)
         | FoldKey::Tail(_)
+        | FoldKey::ToolGroupTail(_)
         | FoldKey::Filtered(_) => None,
     }
 }

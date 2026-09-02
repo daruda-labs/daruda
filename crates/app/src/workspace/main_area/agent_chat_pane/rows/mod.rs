@@ -95,6 +95,20 @@ pub(in crate::workspace) enum RowKind {
         kept_steps: usize,
         collapsed: bool,
     },
+    /// The same boundary one level in: the calls of a single tool group that
+    /// the window covers. A group is one step of the response, so the
+    /// response's own boundary never trims inside it — without this row an
+    /// expanded run of twenty calls ignored the axis entirely.
+    ToolGroupTailMore {
+        /// The group's identity — its first call's id, the same value
+        /// [`RowKind::ToolGroupHeader`] carries.
+        gid: String,
+        hidden_calls: usize,
+        /// Calls the window keeps, for the open label. Same split of duties as
+        /// [`RowKind::TailMore`]'s two counts.
+        kept_calls: usize,
+        collapsed: bool,
+    },
     ToolGroupHeader {
         gid: String,
         first_ix: usize,
@@ -213,6 +227,7 @@ pub(in crate::workspace) enum RowSlot<'a> {
     AgentItem(usize),
     TailMore(usize),
     ToolGroup(&'a str),
+    ToolGroupTail(&'a str),
     ThinkingGroup(usize),
     Conclusion(usize),
     /// At most one indicator exists, so any two of them are the same slot.
@@ -229,6 +244,7 @@ impl RowKind {
             RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
             RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
+            RowKind::ToolGroupTailMore { gid, .. } => RowSlot::ToolGroupTail(gid.as_str()),
             RowKind::ToolGroupHeader { gid, .. } => RowSlot::ToolGroup(gid.as_str()),
             RowKind::ThinkingGroupHeader { first_ix, .. } => RowSlot::ThinkingGroup(*first_ix),
             RowKind::ConclusionItem(ix) => RowSlot::Conclusion(*ix),
@@ -422,16 +438,28 @@ impl<'a> RunRows<'a> {
     /// them apart.
     fn push_group_children(
         &mut self,
+        context: ProjectionContext<'_>,
         run: std::ops::Range<usize>,
         structural: bool,
         indent: u8,
-        items: &[ChatItem],
-        filter: &FilterMatchIndex,
         group: GroupFilter,
+        window: GroupWindow,
     ) {
+        let items = context.items;
+        let filter = context.filter;
+        let enclosing = self.outside_window;
         for j in run {
             let kind = RowKind::AgentItem(j);
             let filtered = !filter.matches(&items[j]);
+            // A running call stays on screen through its group's shut boundary,
+            // the same escape a live run gets from the response's. The rail
+            // still marks it, because coverage is what the rail reports.
+            let live = matches!(
+                &items[j],
+                ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, context.live_units)
+            );
+            self.outside_window = enclosing || window.covers(j);
+            let structural = structural || (window.withholds(j) && !live);
             match group {
                 GroupFilter::Kept => self.push(kind, structural, filtered, indent + 1),
                 // The header already stands for the whole cut; tallying the
@@ -439,6 +467,7 @@ impl<'a> RunRows<'a> {
                 GroupFilter::Emptied => self.emit(kind, structural, filtered, indent + 1),
             }
         }
+        self.outside_window = enclosing;
     }
 
     fn new(
@@ -524,66 +553,128 @@ impl LastProse {
     }
 }
 
-/// What the tail window makes of a response's top-level tool runs.
+/// What the tail window makes of one sequence of units — a response's top-level
+/// tool runs, or the calls of a single tool group. Both levels ask the same
+/// question of the same axis, so they share the arithmetic rather than each
+/// deciding what "the last N" means.
 ///
-/// `kept` is the window's population: counting every run let one the filter
+/// `kept` is the window's population: counting every unit let one the filter
 /// emptied spend a slot, so `Recent steps: 3` put however many of the last three
 /// happened to survive on screen. `total` decides only whether the boundary row
 /// exists at all, which must not move with the filter or the row would change
 /// list slots as the filter changes.
 #[derive(Clone, Copy)]
-struct ToolRunWindow {
+struct UnitWindow {
     total: usize,
     kept: usize,
-    /// Runs the boundary row holds back — `kept` minus what the window shows.
+    /// Units the boundary row holds back — `kept` minus what the window shows.
     hidden: usize,
-    /// First item the window keeps: the end of the last covered run. The window
+    /// First item the window keeps: the end of the last covered unit. The window
     /// is a range, not a per-row test, so the prose a covered run was introduced
     /// by goes behind the boundary with it while the conclusion, which follows
     /// every run, never does.
     window_start: usize,
 }
 
-impl ToolRunWindow {
-    fn of(
-        items: &[ChatItem],
-        run: std::ops::Range<usize>,
-        hierarchy: &ToolHierarchy<'_>,
-        filter: &FilterMatchIndex,
-        tail: TailWindow,
-    ) -> Self {
-        // One entry per run: where it ends, and whether the filter leaves it
-        // anything to show.
-        let mut runs: Vec<(usize, bool)> = Vec::new();
-        let mut k = run.start;
-        while k < run.end {
-            if !top_level_tool(items, k, hierarchy) {
-                k += 1;
-                continue;
-            }
-            let span = k..tool_run_end(items, k, run.end, hierarchy);
-            k = span.end;
-            runs.push((span.end, span.clone().any(|j| filter.matches(&items[j]))));
+impl UnitWindow {
+    /// Nothing held back, whatever the axis says. Thinking groups take this: a
+    /// stretch of thoughts is one step's reasoning, not a run of steps, so the
+    /// step axis has nothing to count inside it.
+    fn open(start: usize) -> Self {
+        Self {
+            total: 0,
+            kept: 0,
+            hidden: 0,
+            window_start: start,
         }
-        let kept = runs.iter().filter(|(_, kept)| *kept).count();
-        // Position within the kept population. An emptied run takes the position
-        // of the next rendering one rather than a slot of its own, so it cannot
-        // shift the window. Positions only rise, so the covered runs are a
-        // prefix and the last one's end is where the kept range begins.
+    }
+
+    /// `units` is one entry per unit in transcript order: where it ends, and
+    /// whether the filter leaves it anything to show.
+    fn of_units(units: &[(usize, bool)], start: usize, tail: TailWindow) -> Self {
+        let kept = units.iter().filter(|(_, kept)| *kept).count();
+        // Position within the kept population. An emptied unit takes the
+        // position of the next rendering one rather than a slot of its own, so
+        // it cannot shift the window. Positions only rise, so the covered units
+        // are a prefix and the last one's end is where the kept range begins.
         let mut position = 0;
-        let mut window_start = run.start;
-        for (end, run_kept) in &runs {
+        let mut window_start = start;
+        for (end, unit_kept) in units {
             if tail.hides(position, kept) {
                 window_start = *end;
             }
-            position += usize::from(*run_kept);
+            position += usize::from(*unit_kept);
         }
         Self {
-            total: runs.len(),
+            total: units.len(),
             kept,
             hidden: tail.hidden_steps(kept),
             window_start,
         }
+    }
+
+    /// The response's own window: one unit per top-level tool run.
+    fn over_tool_runs(run: std::ops::Range<usize>, context: ProjectionContext<'_>) -> Self {
+        let items = context.items;
+        let mut units: Vec<(usize, bool)> = Vec::new();
+        let mut k = run.start;
+        while k < run.end {
+            if !top_level_tool(items, k, context.hierarchy) {
+                k += 1;
+                continue;
+            }
+            let span = k..tool_run_end(items, k, run.end, context.hierarchy);
+            k = span.end;
+            units.push((
+                span.end,
+                span.clone().any(|j| context.filter.matches(&items[j])),
+            ));
+        }
+        Self::of_units(&units, run.start, context.tail)
+    }
+
+    /// One group's window: one unit per call it holds.
+    fn over_group_calls(group: std::ops::Range<usize>, context: ProjectionContext<'_>) -> Self {
+        let units: Vec<(usize, bool)> = group
+            .clone()
+            .map(|j| (j + 1, context.filter.matches(&context.items[j])))
+            .collect();
+        Self::of_units(&units, group.start, context.tail)
+    }
+
+    /// Whether the item at `ix` sits before the window's kept range.
+    fn covers(self, ix: usize) -> bool {
+        ix < self.window_start
+    }
+}
+
+/// The window applied inside one group's children, together with whether its
+/// boundary row is open. Paired because a covered child's visibility is the two
+/// answers together, and splitting them let one child branch read only one.
+#[derive(Clone, Copy)]
+struct GroupWindow {
+    cut: UnitWindow,
+    revealed: bool,
+}
+
+impl GroupWindow {
+    /// A group the step axis does not divide — see [`UnitWindow::open`].
+    fn open(start: usize) -> Self {
+        Self {
+            cut: UnitWindow::open(start),
+            revealed: false,
+        }
+    }
+
+    fn covers(self, ix: usize) -> bool {
+        self.cut.covers(ix)
+    }
+
+    /// A covered child the boundary is still holding back. Liveness is the
+    /// caller's term: a running call stays surfaced through a shut boundary,
+    /// exactly as a live run does one level up.
+    fn withholds(self, ix: usize) -> bool {
+        self.covers(ix) && !self.revealed
     }
 }
 
@@ -628,12 +719,12 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
     }
 
     fn project(self) {
+        let context = self.context;
         let items = self.context.items;
         let fold = self.context.fold;
         let boundary = self.context.boundary;
         let hierarchy = self.context.hierarchy;
         let live_units = self.context.live_units;
-        let tail = self.context.tail;
         let filter = self.context.filter;
         let run = self.spec.run.clone();
         let base_indent = self.spec.base_indent;
@@ -649,7 +740,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             &tail_key,
             fold_context_at(&tail_key, run.start, items, boundary),
         );
-        let window = ToolRunWindow::of(items, run.clone(), hierarchy, filter, tail);
+        let window = UnitWindow::over_tool_runs(run.clone(), context);
         let mut out = RunRows::new(
             self.output,
             self.spec.bar_ix,
@@ -699,9 +790,17 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         &group_key,
                         fold_context_at(&group_key, grun.start, items, boundary),
                     );
+                    let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
+                    let group_window = GroupWindow {
+                        cut: UnitWindow::over_group_calls(grun.clone(), context),
+                        revealed: fold.is_expanded(
+                            &group_tail_key,
+                            fold_context_at(&group_tail_key, grun.start, items, boundary),
+                        ),
+                    };
                     out.push(
                         RowKind::ToolGroupHeader {
-                            gid,
+                            gid: gid.clone(),
                             first_ix: grun.start,
                             count: grun.len(),
                             collapsed: group_collapsed,
@@ -710,13 +809,27 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         group.hides_the_header(),
                         base_indent,
                     );
+                    // Sits with the children it holds back, one indent in from
+                    // the header — the same relation the response's boundary
+                    // has to the run's blocks.
+                    out.push(
+                        RowKind::ToolGroupTailMore {
+                            gid,
+                            hidden_calls: group_window.cut.hidden,
+                            kept_calls: group_window.cut.kept - group_window.cut.hidden,
+                            collapsed: !group_window.revealed,
+                        },
+                        folded || group_collapsed || group_window.cut.hidden == 0,
+                        false,
+                        base_indent + 1,
+                    );
                     out.push_group_children(
+                        context,
                         grun,
                         folded || group_collapsed,
                         base_indent,
-                        items,
-                        filter,
                         group,
+                        group_window,
                     );
                 } else {
                     out.push(
@@ -756,12 +869,12 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         base_indent,
                     );
                     out.push_group_children(
-                        grun,
+                        context,
+                        grun.clone(),
                         folded || group_collapsed,
                         base_indent,
-                        items,
-                        filter,
                         group,
+                        GroupWindow::open(grun.start),
                     );
                 } else {
                     out.push(

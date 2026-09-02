@@ -168,6 +168,7 @@ impl AgentChatView {
             | FoldKey::ToolGroup(_)
             | FoldKey::ThinkingGroup(_)
             | FoldKey::Tail(_)
+            | FoldKey::ToolGroupTail(_)
             | FoldKey::Filtered(_)
             | FoldKey::Diff(_)
             | FoldKey::ToolRawInput(_) => None,

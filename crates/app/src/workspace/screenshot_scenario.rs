@@ -55,6 +55,10 @@ const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
 /// CLI token for the same boundary row, open.
 const NAME_AGENT_CHAT_TAIL_OPEN: &str = "agent-chat-tail-open";
+/// CLI token for a tool group's own boundary row, closed.
+const NAME_AGENT_CHAT_GROUP_TAIL: &str = "agent-chat-group-tail";
+/// CLI token for the same in-group boundary row, open.
+const NAME_AGENT_CHAT_GROUP_TAIL_OPEN: &str = "agent-chat-group-tail-open";
 /// CLI token prefix for the compact bar's combined options popover, suffixed
 /// with an [`ActivityOptionsTab`] token (`agent-chat-options:filter`). Bare
 /// `agent-chat-options` opens the Fold tab.
@@ -178,6 +182,13 @@ pub(crate) enum ScreenshotScenario {
     /// The boundary open: the label anchors left and the rows it revealed carry
     /// the rail.
     AgentChatTailOpen,
+    /// The same boundary one level in: a tool group holding more calls than the
+    /// window keeps, open, so the row the group's own window puts inside it is
+    /// on screen. Its indent and rule are what say it belongs to the group
+    /// rather than to the response — nothing a state test can check.
+    AgentChatGroupTail,
+    /// The in-group boundary open, with the calls it revealed railed.
+    AgentChatGroupTailOpen,
     /// The compact Activity Bar's combined options popover, open on one tab
     /// with every axis off its default — the only way to see the gear's own
     /// selected state, whether the tab strip reads as three choices, and
@@ -234,6 +245,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
+            NAME_AGENT_CHAT_GROUP_TAIL => Some(Self::AgentChatGroupTail),
+            NAME_AGENT_CHAT_GROUP_TAIL_OPEN => Some(Self::AgentChatGroupTailOpen),
             NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
@@ -403,6 +416,16 @@ pub(crate) fn drive(
                 ws.open_agent_chat_tail_boundary_for_shot(true, window, cx)
             });
         }
+        ScreenshotScenario::AgentChatGroupTail => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_group_tail_boundary_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatGroupTailOpen => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_group_tail_boundary_for_shot(true, window, cx)
+            });
+        }
         ScreenshotScenario::AgentChatOptions(tab) => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_options_for_shot(tab, window, cx)
@@ -529,6 +552,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-tail-open"),
             Some(ScreenshotScenario::AgentChatTailOpen)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-group-tail"),
+            Some(ScreenshotScenario::AgentChatGroupTail)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-group-tail-open"),
+            Some(ScreenshotScenario::AgentChatGroupTailOpen)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-failure"),

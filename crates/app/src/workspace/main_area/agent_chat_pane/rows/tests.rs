@@ -48,6 +48,7 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
                 RowKind::TailMore { .. } => "tail",
+                RowKind::ToolGroupTailMore { .. } => "grouptail",
                 RowKind::ToolGroupHeader { .. } => "group",
                 RowKind::ThinkingGroupHeader { .. } => "thinkgroup",
                 RowKind::WorkingIndicator => "working",
@@ -84,6 +85,7 @@ fn turn_with_tools_nests_response_and_group() {
             ("tail", true),
             ("item", false),  // the prose is a plain paragraph
             ("group", false), // the calls behind it are one group
+            ("grouptail", true),
             ("item", true),
             ("item", true),
             ("item", true),
@@ -91,7 +93,9 @@ fn turn_with_tools_nests_response_and_group() {
         ]
     );
     let indents: Vec<u8> = rows.iter().map(|r| r.indent).collect();
-    assert_eq!(indents, vec![0, 0, 1, 1, 1, 2, 2, 2, 1]);
+    // The group's own tail row sits with the calls it holds back, not with
+    // the header above them.
+    assert_eq!(indents, vec![0, 0, 1, 1, 1, 2, 2, 2, 2, 1]);
 }
 
 /// A one-block reply with no tools still represents a whole response, so it
@@ -143,6 +147,7 @@ fn past_turn_collapses_current_expands() {
             ("tail", true),
             ("item", false), // a1 = conclusion, stays visible
             ("group", true),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
             ("user", false), // second
@@ -150,7 +155,8 @@ fn past_turn_collapses_current_expands() {
             ("tail", true),
             ("item", false),  // a2 = conclusion, never folded away
             ("group", false), // the open response shows its group bar
-            ("item", true),   // whose settled members stay folded
+            ("grouptail", true),
+            ("item", true), // whose settled members stay folded
             ("item", true),
         ]
     );
@@ -205,6 +211,7 @@ fn summary_mode_folds_the_settled_newest_turn_like_history() {
             ("tail", true),
             ("item", false), // a1 = conclusion
             ("group", true),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
             ("user", false),
@@ -212,6 +219,7 @@ fn summary_mode_folds_the_settled_newest_turn_like_history() {
             ("tail", true),
             ("item", false), // a2 = conclusion
             ("group", true),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
         ]
@@ -230,6 +238,7 @@ fn expanded_mode_opens_past_responses_and_the_newest_settled_groups() {
             ("tail", true),
             ("item", false),  // a1
             ("group", false), // the past response is open, its group is not
+            ("grouptail", true),
             ("item", true),
             ("item", true),
             ("user", false),
@@ -237,6 +246,7 @@ fn expanded_mode_opens_past_responses_and_the_newest_settled_groups() {
             ("tail", true),
             ("item", false),  // a2
             ("group", false), // the newest turn goes one level deeper
+            ("grouptail", true),
             ("item", false),
             ("item", false),
         ]
@@ -251,7 +261,10 @@ fn a_user_fold_survives_a_mode_switch() {
     for preset in FoldPreset::ALL {
         fold.set_mode(preset.mode());
         let rows = project_under(&items, &fold);
-        let newest_group = kinds(&rows)[11];
+        let newest_group = *kinds(&rows)
+            .iter()
+            .rfind(|(kind, _)| *kind == "group")
+            .expect("the newest turn has a tool group");
         assert_eq!(newest_group, ("group", true), "{preset:?}");
     }
 }
@@ -281,7 +294,8 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
             ("tail", true),
             ("item", false),  // assistant prose = conclusion, never folded away
             ("group", false), // the tool group's bar
-            ("item", true),   // settled members collapsed
+            ("grouptail", true),
+            ("item", true), // settled members collapsed
             ("item", true),
             ("working", false), // gap indicator at the run tail
         ]
@@ -418,6 +432,7 @@ fn conclusion_stays_visible_when_response_collapsed() {
             ("tail", true),
             ("item", true), // "let me look" process → hidden
             ("group", true),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
             ("item", false), // "done: fixed it" conclusion → visible
@@ -539,6 +554,7 @@ fn prose_before_a_trailing_tool_run_stays_visible_without_being_a_conclusion() {
             ("tail", true),
             ("item", false), // "answer" is forced visible through the fold
             ("group", true),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
         ]
@@ -608,6 +624,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
             ("response", false),
             ("tail", true),
             ("group", true), // no assistant text → nothing stays visible
+            ("grouptail", true),
             ("item", true),
             ("item", true),
         ]
@@ -991,8 +1008,8 @@ fn live_subagent_units_stays_linear_over_a_long_tool_run() {
     let elapsed = started.elapsed();
     assert_eq!(
         rows.len(),
-        items.len() + 3,
-        "the run's bar + tail row + one group header + every member"
+        items.len() + 4,
+        "the run's bar + tail row + one group header + its own tail row + every member"
     );
     assert!(
         elapsed < std::time::Duration::from_secs(2),
@@ -1196,6 +1213,7 @@ fn in_progress_group_defaults_expanded() {
             ("response", false),
             ("tail", true),
             ("group", false),
+            ("grouptail", true),
             ("item", false),
             ("item", false)
         ]
@@ -1223,6 +1241,7 @@ fn group_member_visibility_follows_fold_override() {
             ("response", false),
             ("tail", true),
             ("group", false),
+            ("grouptail", true),
             ("item", false),
             ("item", false)
         ],
@@ -1613,6 +1632,7 @@ fn a_nested_child_between_two_calls_leaves_them_two_ungrouped_runs() {
             ("response", false),
             ("tail", true),
             ("group", false),
+            ("grouptail", true),
             ("item", true),
             ("item", true),
         ]
@@ -1885,7 +1905,7 @@ fn only_rows_outside_the_window_carry_the_rail() {
 #[test]
 fn a_live_covered_run_carries_the_rail_with_the_boundary_shut() {
     let mut items = turn_of_cycles(4);
-    items[2] = tool("t0", ToolStatusView::InProgress);
+    items[2] = tool("g0", ToolStatusView::InProgress);
     let tail = TailWindow::Last(1);
 
     let shut = project_tail(&items, tail);
@@ -1920,6 +1940,273 @@ fn a_live_covered_run_carries_the_rail_with_the_boundary_shut() {
         vec![true, true, true, false],
         "opening the boundary changes which covered rows are visible, not which are outside"
     );
+}
+
+/// The group's calls only earn rows once the group is open, which is what makes
+/// the in-group window observable at all.
+fn project_open_group(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
+    project_open_group_under(
+        items,
+        &FoldState::with_mode(FoldPreset::Expanded.mode()),
+        tail,
+    )
+}
+
+fn project_open_group_under(
+    items: &[ChatItem],
+    fold: &FoldState,
+    tail: TailWindow,
+) -> Vec<RenderRow> {
+    project(
+        items,
+        fold,
+        false,
+        &LiveSubagentUnits::of(items),
+        tail,
+        &DisplayFilter::default(),
+    )
+}
+
+fn group_tail_row(rows: &[RenderRow]) -> &RenderRow {
+    rows.iter()
+        .find(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
+        .expect("a tool group gets a boundary of its own")
+}
+
+fn group_tail_counts(rows: &[RenderRow]) -> (usize, usize) {
+    match &group_tail_row(rows).kind {
+        RowKind::ToolGroupTailMore {
+            hidden_calls,
+            kept_calls,
+            ..
+        } => (*hidden_calls, *kept_calls),
+        _ => unreachable!(),
+    }
+}
+
+/// Visibility of each of the group's calls, in transcript order.
+fn call_visibility(items: &[ChatItem], rows: &[RenderRow]) -> Vec<bool> {
+    rows.iter()
+        .filter(
+            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::ToolCall(_))),
+        )
+        .map(|r| !r.hidden)
+        .collect()
+}
+
+/// The axis's whole point, one level in: a group is one step, so an open run of
+/// twenty calls used to ignore `Recent steps` entirely.
+#[test]
+fn a_window_trims_the_calls_inside_one_group() {
+    let items = turn_of_one_group(8, false);
+    for kept in [1usize, 3, 5] {
+        let rows = project_open_group(&items, TailWindow::Last(kept));
+        assert_eq!(
+            call_visibility(&items, &rows),
+            (0..8).map(|i| i >= 8 - kept).collect::<Vec<_>>(),
+            "only the last {kept} calls of the group show"
+        );
+        assert_eq!(group_tail_counts(&rows), (8 - kept, kept));
+        assert!(
+            !group_tail_row(&rows).hidden,
+            "the group's boundary offers the reveal"
+        );
+    }
+}
+
+#[test]
+fn a_window_at_or_above_the_group_size_hides_nothing_inside_it() {
+    let items = turn_of_one_group(3, false);
+    for tail in [TailWindow::Last(3), TailWindow::Last(10), TailWindow::All] {
+        let rows = project_open_group(&items, tail);
+        assert_eq!(call_visibility(&items, &rows), vec![true; 3], "{tail:?}");
+        let row = group_tail_row(&rows);
+        assert!(row.hidden, "nothing to reveal → the row stays zero-height");
+        assert_eq!(group_tail_counts(&rows).0, 0, "{tail:?}");
+    }
+}
+
+/// The row exists for every group whatever the axis says, so changing the
+/// window flips `hidden` instead of splicing a row into the list — the same
+/// slot-stability the response's own boundary keeps.
+#[test]
+fn the_group_boundary_keeps_its_slot_as_the_window_changes() {
+    let items = turn_of_one_group(4, false);
+    let slots = |tail| {
+        project_open_group(&items, tail)
+            .iter()
+            .position(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
+    };
+    assert_eq!(slots(TailWindow::All), slots(TailWindow::Last(2)));
+    let a = project_open_group(&items, TailWindow::All);
+    let b = project_open_group(&items, TailWindow::Last(2));
+    assert!(
+        a.iter().zip(&b).all(|(x, y)| x.same_slot(y)),
+        "the projection differs only in what each row says and shows"
+    );
+}
+
+/// A collapsed group already shows none of its calls, so its boundary has
+/// nothing to offer and must not paint over the header.
+#[test]
+fn a_collapsed_group_hides_its_own_boundary() {
+    let items = turn_of_one_group(6, false);
+    let rows = project_open_group_under(&items, &FoldState::default(), TailWindow::Last(2));
+    assert!(
+        group_tail_row(&rows).hidden,
+        "the settled group is folded, so its boundary is too"
+    );
+}
+
+/// A single call is not a group, so it has no boundary of its own — the
+/// response's window is the only one that can cover it.
+#[test]
+fn an_ungrouped_call_gets_no_group_boundary() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        asst("working"),
+        tool("t0", ToolStatusView::Completed),
+        asst("done"),
+    ];
+    let rows = project_open_group(&items, TailWindow::Last(1));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
+    );
+}
+
+/// The rail marks exactly the calls the group's window covers, and the reveal
+/// is what puts them on screen — the same two-part answer the response's
+/// boundary gives one level up.
+#[test]
+fn opening_a_group_boundary_reveals_its_covered_calls_railed() {
+    let items = turn_of_one_group(5, false);
+    let tail = TailWindow::Last(2);
+
+    let shut = project_open_group(&items, tail);
+    let covered: Vec<(bool, bool)> = shut
+        .iter()
+        .filter(
+            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::ToolCall(_))),
+        )
+        .map(|r| (!r.hidden, r.outside_window))
+        .collect();
+    assert_eq!(
+        covered,
+        vec![
+            (false, true),
+            (false, true),
+            (false, true),
+            (true, false),
+            (true, false)
+        ],
+        "with the boundary shut, a covered call is marked and hidden"
+    );
+
+    let mut fold = FoldState::with_mode(FoldPreset::Expanded.mode());
+    fold.toggle(
+        FoldKey::ToolGroupTail("g0".into()),
+        FoldContext::last(false),
+    );
+    let open = project_open_group_under(&items, &fold, tail);
+    assert_eq!(
+        call_visibility(&items, &open),
+        vec![true; 5],
+        "the reveal puts the covered calls back"
+    );
+    assert!(
+        !group_tail_row(&open).outside_window,
+        "the boundary itself is never one of the rows it brackets"
+    );
+    assert!(
+        open.iter().filter(|r| r.outside_window).count() == 3,
+        "opening the boundary changes which covered calls are visible, not which are outside"
+    );
+}
+
+/// A running call the group's window covers stays surfaced through a shut
+/// boundary, exactly as a live run does under the response's — otherwise the
+/// axis would hide the one call the reader is waiting on.
+#[test]
+fn a_live_covered_call_stays_surfaced_through_a_shut_group_boundary() {
+    let mut items = turn_of_one_group(4, false);
+    items[2] = tool("g0", ToolStatusView::InProgress);
+    let rows = project_open_group(&items, TailWindow::Last(1));
+    let surfaced: Vec<(bool, bool)> = rows
+        .iter()
+        .filter(
+            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::ToolCall(_))),
+        )
+        .map(|r| (!r.hidden, r.outside_window))
+        .collect();
+    assert_eq!(
+        surfaced,
+        vec![(true, true), (false, true), (false, true), (true, false)],
+        "the live covered call is on screen and marked; the kept call is neither"
+    );
+}
+
+/// A call the filter drops must not spend a slot in the group's window, for the
+/// same reason an emptied run must not spend one in the response's.
+#[test]
+fn the_group_window_counts_calls_the_filter_leaves_something_to_show() {
+    use ToolStatusView::Completed;
+    let mut items = vec![ChatItem::UserText("q".into()), asst("working")];
+    for i in 0..6 {
+        let kind = if i % 2 == 0 {
+            ToolKindView::Read
+        } else {
+            ToolKindView::Edit
+        };
+        items.push(kinded_tool(&format!("t{i}"), kind, Completed));
+    }
+    items.push(asst("done"));
+
+    let rows = project(
+        &items,
+        &FoldState::with_mode(FoldPreset::Expanded.mode()),
+        false,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::Last(2),
+        &only_reads(),
+    );
+    assert_eq!(
+        group_tail_counts(&rows),
+        (1, 2),
+        "three calls survive the filter and two are kept, so one is behind the boundary"
+    );
+}
+
+/// Deliberate scope: the axis counts work steps, and a stretch of thoughts is
+/// one step's reasoning rather than a run of them. A reasoning group is folded
+/// by its own rule, never trimmed by this one.
+#[test]
+fn a_reasoning_group_is_not_divided_by_the_step_axis() {
+    let mut items = vec![ChatItem::UserText("q".into())];
+    for i in 0..4 {
+        items.push(ChatItem::Thinking {
+            text: format!("thought {i}"),
+            streaming: false,
+            message_id: None,
+        });
+    }
+    items.push(asst("done"));
+    let rows = project_open_group(&items, TailWindow::Last(1));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. })),
+        "a reasoning group has no step boundary of its own"
+    );
+    let thoughts: Vec<bool> = rows
+        .iter()
+        .filter(
+            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::Thinking { .. })),
+        )
+        .map(|r| !r.hidden)
+        .collect();
+    assert_eq!(thoughts, vec![true; 4], "every thought stays on screen");
 }
 
 #[test]
@@ -2010,7 +2297,7 @@ fn a_collapsed_response_hides_its_tail_row_too() {
 #[test]
 fn a_covered_run_with_a_running_tool_stays_surfaced() {
     let mut items = turn_of_cycles(4);
-    items[2] = tool("t0", ToolStatusView::InProgress);
+    items[2] = tool("g0", ToolStatusView::InProgress);
     let rows = project_tail(&items, TailWindow::Last(1));
     assert_eq!(
         group_visibility(&rows),
@@ -2027,7 +2314,7 @@ fn a_covered_run_with_a_running_tool_stays_surfaced() {
 #[test]
 fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
     let mut items = turn_of_cycles(2);
-    items[2] = tool("t0", ToolStatusView::InProgress);
+    items[2] = tool("g0", ToolStatusView::InProgress);
     let live = LiveSubagentUnits::of(&items);
 
     let rows = project_tail(&items, TailWindow::Last(1));
@@ -3151,6 +3438,14 @@ fn diag_tail_population() {
                     collapsed,
                 } => format!(
                     "TailMore@{run_start} hidden={hidden_steps} kept={kept_steps} collapsed={collapsed}"
+                ),
+                RowKind::ToolGroupTailMore {
+                    gid,
+                    hidden_calls,
+                    kept_calls,
+                    collapsed,
+                } => format!(
+                    "GroupTailMore@{gid} hidden={hidden_calls} kept={kept_calls} collapsed={collapsed}"
                 ),
                 RowKind::ToolGroupHeader {
                     first_ix,

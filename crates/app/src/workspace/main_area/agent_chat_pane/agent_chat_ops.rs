@@ -31,6 +31,10 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 /// and small enough against the seed that the tail-more row has a real count.
 #[cfg(feature = "screenshot")]
 const SHOT_TAIL_WINDOW: usize = 3;
+/// The window the in-group boundary capture runs under — one narrower than the
+/// seed's longest tool group, so that group has a call to hold back.
+#[cfg(feature = "screenshot")]
+const SHOT_GROUP_TAIL_WINDOW: usize = 2;
 
 /// The catalog's default agent id — the first entry, or the built-in Claude id
 /// if the catalog is somehow empty (the config layer guarantees non-empty, so
@@ -910,6 +914,54 @@ impl Workspace {
             });
             if let Some(run_start) = run_start {
                 v.toggle_fold(FoldKey::Tail(run_start), window, cx);
+            }
+        });
+    }
+
+    /// Open the seeded transcript with a window narrower than its longest tool
+    /// group and that group expanded, so the boundary the group's own window
+    /// puts among its calls is what the capture shows. `reveal` opens it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_group_tail_boundary_for_shot(
+        &mut self,
+        reveal: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold::FoldKey;
+        use super::rows::RowKind;
+        use super::rows::tail::TailWindow;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_tail_window(TailWindow::Last(SHOT_GROUP_TAIL_WINDOW), cx);
+            // The last group with a call behind its own boundary, taken from the
+            // projection that just ran — which group that is belongs to the seed.
+            let target = v.rows.iter().rev().find_map(|r| match &r.kind {
+                RowKind::ToolGroupTailMore {
+                    gid, hidden_calls, ..
+                } if *hidden_calls > 0 => Some(gid.clone()),
+                _ => None,
+            });
+            let Some(gid) = target else { return };
+            // Only expand what the seed left folded: `toggle_fold` flips the
+            // visible state, so calling it unconditionally would shut a group
+            // the configured mode already opened.
+            let collapsed = v.rows.iter().any(|r| {
+                matches!(
+                    &r.kind,
+                    RowKind::ToolGroupHeader { gid: g, collapsed, .. } if *g == gid && *collapsed
+                )
+            });
+            if collapsed {
+                v.toggle_fold(FoldKey::ToolGroup(gid.clone()), window, cx);
+            }
+            if reveal {
+                v.toggle_fold(FoldKey::ToolGroupTail(gid), window, cx);
             }
         });
     }
