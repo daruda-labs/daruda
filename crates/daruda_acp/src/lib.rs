@@ -17,6 +17,7 @@ pub mod login_method;
 pub mod mapping;
 pub(crate) mod mode_tracker;
 pub mod model;
+pub mod native_subagents;
 pub mod node;
 pub(crate) mod output_highlight;
 pub mod session;
@@ -47,6 +48,7 @@ pub use model::{
     PlanStatus, SessionCapabilitiesView, SessionModeView, SlashCommand, SlashCommandInput,
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
 };
+pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
 pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision,

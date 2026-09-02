@@ -77,8 +77,20 @@ pub struct DefaultAdapter;
 
 impl AcpAdapter for DefaultAdapter {
     fn parent_tool_id(&self, meta: &Option<Meta>) -> Option<String> {
-        meta.as_ref()?
-            .get("claudeCode")?
+        let meta = meta.as_ref()?;
+        // daruda's own namespace wins. In native subagent mode Claude still
+        // stamps `claudeCode.parentToolUseId`, but that mode suppresses the
+        // launch call it names — so following it would leave the child pointing
+        // at a tool the transcript never carried, and a dangling parent renders
+        // the child as a top-level row instead of inside its card.
+        if let Some(id) = meta
+            .get(crate::native_subagents::DARUDA_META_KEY)
+            .and_then(|v| v.get(crate::native_subagents::PARENT_TOOL_ID_META_KEY))
+            .and_then(Value::as_str)
+        {
+            return Some(id.to_owned());
+        }
+        meta.get("claudeCode")?
             .get("parentToolUseId")?
             .as_str()
             .map(str::to_owned)
@@ -279,6 +291,19 @@ mod tests {
                 json!({"claudeCode": {"parentToolUseId": "toolu_parent"}})
             )),
             Some("toolu_parent".to_owned())
+        );
+    }
+
+    #[test]
+    fn daruda_parent_tool_id_beats_the_claude_one() {
+        // In native subagent mode both are present, and the claude id names a
+        // launch call that mode never emits.
+        assert_eq!(
+            DefaultAdapter.parent_tool_id(&meta(json!({
+                "daruda": {"parentToolId": "subagent:child-1"},
+                "claudeCode": {"parentToolUseId": "toolu_suppressed"},
+            }))),
+            Some("subagent:child-1".to_owned())
         );
     }
 

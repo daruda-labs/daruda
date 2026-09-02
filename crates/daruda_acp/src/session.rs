@@ -54,10 +54,12 @@ use agent_client_protocol::schema::v1::{
     ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
-    SessionConfigOptionsCapabilities, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TextContent,
+    SessionConfigOptionsCapabilities, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, StopReason, TextContent,
 };
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectTo, ConnectionTo};
+use agent_client_protocol::{
+    AcpAgent, Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification,
+};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -72,6 +74,7 @@ use crate::model::{
     ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView, ConfigValueView,
     ModeStateView, SessionCapabilitiesView,
 };
+use crate::native_subagents::{NativeSubagentRouter, Routed};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -636,6 +639,95 @@ async fn with_connect_timeout<T>(
     }
 }
 
+/// `session/update`, received as a raw payload instead of a typed one.
+///
+/// The typed `SessionNotification` rejects any `sessionUpdate` this schema
+/// version has no variant for — and the SDK logs a rejected notification and
+/// moves on (`jsonrpc/incoming_actor.rs`: "Notification errors are logged
+/// without replying"), so the update is not an error the host ever sees, it
+/// simply never happened. A draft-protocol update — a native subagent session's
+/// traffic — would therefore vanish in silence. Taking `update` as JSON lets
+/// [`NativeSubagentRouter`] decide what it is; every standard update still ends
+/// up in the same typed [`SessionUpdate`] it always did.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonRpcNotification)]
+#[notification(method = "session/update")]
+#[serde(rename_all = "camelCase")]
+struct CompatSessionNotification {
+    /// Which session this update belongs to. The typed handler discarded this;
+    /// with native subagents it is the only thing distinguishing a child's tool
+    /// call from the main agent's.
+    session_id: SessionId,
+    update: serde_json::Value,
+    #[serde(default, rename = "_meta")]
+    #[allow(dead_code, reason = "Part of the wire shape; nothing reads it yet.")]
+    meta: Option<agent_client_protocol::schema::v1::Meta>,
+}
+
+/// Fold one standard `session/update` into the host's event stream.
+///
+/// The two mode-bearing updates go through the tracker (0..2 events out); the
+/// rest map 1:1. Shared by root traffic and by the native subagent router's
+/// normalized output, so a subagent's tool calls take exactly the path the main
+/// agent's take.
+fn forward_session_update(
+    update: SessionUpdate,
+    mode_tracker: &ModeTracker,
+    tx: &UnboundedSender<AcpEvent>,
+) {
+    let update = match update {
+        SessionUpdate::CurrentModeUpdate(u) => {
+            if let Some(state) = mode_tracker.apply_current_mode(u.current_mode_id.to_string()) {
+                let _ = tx.unbounded_send(AcpEvent::ModeChanged { state });
+            }
+            return;
+        }
+        // The agent pushed a config-option change it made itself (e.g. a
+        // fast-mode toggle, or effort reconciliation after a mode downgrade) —
+        // not a reply to our `set_config_option`. Carries the full option set,
+        // so reuse the same ConfigOptionsChanged full-replace the request path
+        // emits; without this the model/effort chips show a stale value after
+        // any agent-driven change.
+        SessionUpdate::ConfigOptionUpdate(u) => {
+            send_config_options_fold(
+                mode_tracker,
+                config_options_from_protocol(&u.config_options),
+                tx,
+            );
+            return;
+        }
+        other => other,
+    };
+    let event = match update {
+        SessionUpdate::AvailableCommandsUpdate(u) => AcpEvent::AvailableCommandsChanged(
+            u.available_commands
+                .iter()
+                .map(crate::model::SlashCommand::from)
+                .collect(),
+        ),
+        SessionUpdate::Plan(p) => AcpEvent::PlanChanged(
+            p.entries
+                .iter()
+                .map(crate::model::PlanEntryView::from)
+                .collect(),
+        ),
+        // Title and last-activity timestamp. The adapter pushes both together at
+        // turn-end, but each field is mapped independently so a title-only or
+        // timestamp-only update (per the protocol's per-field `MaybeUndefined`)
+        // is also handled correctly.
+        SessionUpdate::SessionInfoUpdate(u) => AcpEvent::SessionInfoChanged {
+            title: u.title.into(),
+            updated_at: u.updated_at.into(),
+        },
+        // Live context-window / cost accounting. Surfaced as a typed event (like
+        // mode / plan / config) rather than raw `Update` so the host renders a
+        // context meter without parsing protocol types. Distinct from the CLI's
+        // cumulative Usage tab: this is the current context fill.
+        SessionUpdate::UsageUpdate(u) => AcpEvent::UsageChanged(crate::model::UsageView::from(&u)),
+        update => AcpEvent::Update(Box::new(update)),
+    };
+    let _ = tx.unbounded_send(event);
+}
+
 /// Drive the whole connection: handshake, session creation, then the prompt /
 /// cancel select loop, until the command channel closes or the protocol fails.
 ///
@@ -662,73 +754,42 @@ async fn run_connection(
     // `crate::mode_tracker` for why mode can't be forwarded as it arrives.
     let mode_tracker = ModeTracker::default();
     let notif_mode_tracker = mode_tracker.clone();
+    // Holds this connection's subagent session graph. Shared with the
+    // notification handler, which is registered before `initialize` answers —
+    // hence the handle rather than a value.
+    let router = Arc::new(Mutex::new(NativeSubagentRouter::default()));
+    let notif_router = router.clone();
 
     agent_client_protocol::Client
         .builder()
         .on_receive_notification(
-            async move |notification: SessionNotification, _cx| {
-                // The two mode-bearing updates are folded through the tracker
-                // (0..2 events out); the rest map 1:1.
-                let update = match notification.update {
-                    SessionUpdate::CurrentModeUpdate(u) => {
-                        if let Some(state) =
-                            notif_mode_tracker.apply_current_mode(u.current_mode_id.to_string())
-                        {
-                            let _ = notif_tx.unbounded_send(AcpEvent::ModeChanged { state });
+            async move |notification: CompatSessionNotification, _cx| {
+                // Routing happens before anything is typed: a native subagent's
+                // update has no variant in this schema version, and the SDK
+                // drops what it cannot parse (logged, never surfaced), so the
+                // child's whole run would vanish without this hop.
+                let routed = notif_router
+                    .lock()
+                    .expect("native subagent router mutex poisoned")
+                    .route(&notification.session_id.0, &notification.update);
+                match routed {
+                    Routed::Standard(update) => {
+                        forward_session_update(*update, &notif_mode_tracker, &notif_tx);
+                    }
+                    Routed::Normalized(updates) => {
+                        for update in updates {
+                            forward_session_update(update, &notif_mode_tracker, &notif_tx);
                         }
-                        return Ok(());
                     }
-                    // The agent pushed a config-option change it made itself
-                    // (e.g. a fast-mode toggle, or effort reconciliation after a
-                    // mode downgrade) — not a reply to our `set_config_option`.
-                    // Carries the full option set, so reuse the same
-                    // ConfigOptionsChanged full-replace the request path emits;
-                    // without this the model/effort chips show a stale value
-                    // after any agent-driven change.
-                    SessionUpdate::ConfigOptionUpdate(u) => {
-                        send_config_options_fold(
-                            &notif_mode_tracker,
-                            config_options_from_protocol(&u.config_options),
-                            &notif_tx,
-                        );
-                        return Ok(());
+                    // An update kind this build does not know is reported and
+                    // skipped: an agent that adds one must not be able to break
+                    // a session that otherwise works.
+                    Routed::Unknown { kind } => {
+                        let _ = notif_tx.unbounded_send(AcpEvent::Notice(format!(
+                            "Ignoring an unrecognized session update from the agent ({kind})."
+                        )));
                     }
-                    other => other,
-                };
-                let event = match update {
-                    SessionUpdate::AvailableCommandsUpdate(u) => {
-                        AcpEvent::AvailableCommandsChanged(
-                            u.available_commands
-                                .iter()
-                                .map(crate::model::SlashCommand::from)
-                                .collect(),
-                        )
-                    }
-                    SessionUpdate::Plan(p) => AcpEvent::PlanChanged(
-                        p.entries
-                            .iter()
-                            .map(crate::model::PlanEntryView::from)
-                            .collect(),
-                    ),
-                    // Title and last-activity timestamp. The adapter pushes both
-                    // together at turn-end, but each field is mapped independently
-                    // so a title-only or timestamp-only update (per the protocol's
-                    // per-field `MaybeUndefined`) is also handled correctly.
-                    SessionUpdate::SessionInfoUpdate(u) => AcpEvent::SessionInfoChanged {
-                        title: u.title.into(),
-                        updated_at: u.updated_at.into(),
-                    },
-                    // Live context-window / cost accounting. Surfaced as a typed
-                    // event (like mode / plan / config) rather than raw `Update`
-                    // so the host renders a context meter without parsing
-                    // protocol types. Distinct from the CLI's cumulative Usage
-                    // tab: this is the current context fill.
-                    SessionUpdate::UsageUpdate(u) => {
-                        AcpEvent::UsageChanged(crate::model::UsageView::from(&u))
-                    }
-                    update => AcpEvent::Update(Box::new(update)),
-                };
-                let _ = notif_tx.unbounded_send(event);
+                }
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -814,6 +875,14 @@ async fn run_connection(
             let _ = event_tx.unbounded_send(AcpEvent::AgentIdentified {
                 program: program.clone(),
             });
+            // Same ordering requirement as the event above, for the same
+            // reason: a `session/load` below replays under this program, and
+            // the router reads that dialect's `_meta` to tell a subagent's
+            // answer from its preamble.
+            router
+                .lock()
+                .expect("native subagent router mutex poisoned")
+                .set_adapter(crate::adapter::adapter_for(program.as_deref(), ""));
 
             // New session, or resume an existing one via session/load. A load
             // replays the prior conversation as session/update notifications
@@ -1383,7 +1452,8 @@ fn resolve_resume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::PermissionOptionId;
+    use crate::model::ChatItem;
+    use agent_client_protocol::schema::v1::{PermissionOptionId, SessionNotification};
 
     #[test]
     fn cancelled_is_not_a_normal_completion() {
@@ -1936,6 +2006,148 @@ mod tests {
                 },
                 agent_client_protocol::on_receive_request!(),
             )
+    }
+
+    /// In-process fake agent running the native subagent sequence: it announces
+    /// a child on the root session, sends the child's own tool call under the
+    /// *child's* session id, then reports the child completed.
+    ///
+    /// Sent as [`CompatSessionNotification`] because that is the only way to put
+    /// a draft-protocol `sessionUpdate` on the wire — the typed
+    /// `SessionNotification` has no variant for one.
+    fn native_subagent_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{
+            InitializeResponse, NewSessionResponse, PromptResponse,
+        };
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(InitializeResponse::new(ProtocolVersion::V1))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(NewSessionResponse::new("sess-root"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |req: PromptRequest, responder, conn| {
+                    let root = req.session_id.clone();
+                    for (session, update) in [
+                        (
+                            root.clone(),
+                            serde_json::json!({
+                                "sessionUpdate": "subagent_spawned",
+                                "subagentSessionId": "sess-kid",
+                                "name": "Lorentz",
+                                "task": "Probe the UI",
+                                "capabilities": {},
+                            }),
+                        ),
+                        (
+                            SessionId::from("sess-kid"),
+                            serde_json::json!({
+                                "sessionUpdate": "tool_call",
+                                "toolCallId": "c1",
+                                "title": "Read main.rs",
+                                "kind": "read",
+                                "status": "completed",
+                            }),
+                        ),
+                        (
+                            root.clone(),
+                            serde_json::json!({
+                                "sessionUpdate": "subagent_state_update",
+                                "subagentSessionId": "sess-kid",
+                                "state": "completed",
+                            }),
+                        ),
+                        // An update kind this build has no knowledge of, to prove
+                        // it is reported rather than fatal.
+                        (
+                            root.clone(),
+                            serde_json::json!({ "sessionUpdate": "quantum_update" }),
+                        ),
+                    ] {
+                        conn.send_notification(CompatSessionNotification {
+                            session_id: session,
+                            update,
+                            meta: None,
+                        })?;
+                    }
+                    responder.respond(PromptResponse::new(StopReason::EndTurn))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// The whole native subagent path over a real SDK connection: the compat
+    /// notification really does bind to `session/update`, the raw payload
+    /// survives, and the router turns a child session's work into the flat
+    /// parent/child tool calls the render model already draws.
+    #[test]
+    fn a_native_subagent_arrives_as_a_launch_card_with_its_child() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                native_subagent_agent(),
+                PathBuf::from("."),
+                None,
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            }
+            command_tx
+                .unbounded_send(Command::Prompt("go".to_string()))
+                .unwrap();
+
+            let mut items: Vec<ChatItem> = Vec::new();
+            let mut notices = 0usize;
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Update(update)) => {
+                        crate::mapping::apply_update(&mut items, &update);
+                    }
+                    Some(AcpEvent::Notice(_)) => notices += 1,
+                    Some(AcpEvent::TurnEnded { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("turn never ended"),
+                }
+            }
+
+            let [ChatItem::ToolCall(parent), ChatItem::ToolCall(child)] = &items[..] else {
+                panic!("a launch and its one child, got {items:?}");
+            };
+            assert!(parent.is_subagent_launch());
+            assert_eq!(parent.subagent_type(), Some("Lorentz"));
+            assert_eq!(parent.status, crate::model::ToolStatusView::Completed);
+            assert_eq!(
+                child.parent_tool_id.as_deref(),
+                Some(parent.id.as_str()),
+                "the child renders inside its launch, not as a top-level row"
+            );
+            assert_eq!(notices, 1, "the unknown kind is reported exactly once");
+
+            drop(command_tx);
+            let _ = connection.await;
+        });
     }
 
     /// Measures the SDK 2.0 dispatch semantics the permission park relies on:

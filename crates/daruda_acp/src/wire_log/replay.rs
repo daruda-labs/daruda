@@ -17,8 +17,9 @@ use serde_json::Value;
 
 use super::{Marker, marker_of, payload_sidecar_path};
 use crate::adapter::adapter_for;
+use crate::mapping;
 use crate::model::ChatItem;
-use crate::{SessionUpdate, mapping};
+use crate::native_subagents::{NativeSubagentRouter, Routed};
 
 /// Placeholder for a prompt whose content blocks carry no text (an
 /// attachment-only turn), so the turn still anchors a user row.
@@ -65,9 +66,12 @@ impl std::error::Error for ReplayError {
 pub struct Replay {
     /// The conversation, as a live pane's `items` would hold it.
     pub items: Vec<ChatItem>,
-    /// Distinct `sessionId`s in the capture. More than one means the file spans
-    /// several sessions, which no single live pane ever holds at once — the
-    /// caller should say so rather than present the concatenation as one.
+    /// Distinct *conversation* `sessionId`s in the capture. More than one means
+    /// the file spans several sessions, which no single live pane ever holds at
+    /// once — the caller should say so rather than present the concatenation as
+    /// one. A native subagent's child sessions are excluded: they belong to the
+    /// one conversation that spawned them, so counting them would report every
+    /// subagent run as a multi-session file.
     pub sessions: usize,
     /// Elided fields restored from the sidecar.
     pub rehydrated: usize,
@@ -134,7 +138,11 @@ fn parse_line(line: &str) -> Option<Value> {
 
 /// The pure core: replay `log` with `payloads` already loaded.
 fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) -> Replay {
-    let adapter = adapter_for(reported_program(log).as_deref(), catalog_id);
+    let program = reported_program(log);
+    let adapter = adapter_for(program.as_deref(), catalog_id);
+    // The same routing the live connection does, so a capture of a native
+    // subagent run replays into the same parent/child cards it drew live.
+    let mut router = NativeSubagentRouter::new(adapter_for(program.as_deref(), catalog_id));
     let mut out = Replay::default();
     let mut sessions: Vec<String> = Vec::new();
 
@@ -162,7 +170,19 @@ fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) 
                 let Some(update) = value.pointer("/params/update") else {
                     continue;
                 };
-                if let Ok(su) = serde_json::from_value::<SessionUpdate>(update.clone()) {
+                let session = value
+                    .pointer("/params/sessionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let updates = match router.route(session, update) {
+                    Routed::Standard(su) => vec![*su],
+                    Routed::Normalized(us) => us,
+                    // A capture is read after the fact; there is no one to
+                    // notice to, and a kind this build cannot map has nothing
+                    // to contribute to the item list.
+                    Routed::Unknown { .. } => Vec::new(),
+                };
+                for su in updates {
                     mapping::apply_update_with(&mut out.items, &su, adapter.as_ref());
                 }
             }
@@ -170,7 +190,7 @@ fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) 
         }
     }
     settle(&mut out.items);
-    out.sessions = sessions.len();
+    out.sessions = sessions.iter().filter(|id| !router.is_child(id)).count();
     out
 }
 
@@ -417,6 +437,65 @@ mod tests {
             panic!("one tool call, got {:?}", replay.items.len());
         };
         assert_eq!(tc.status, crate::model::ToolStatusView::Cancelled);
+    }
+
+    #[test]
+    fn a_native_subagent_capture_replays_as_one_card_with_its_children() {
+        // The child's tool calls arrive under the *child's* sessionId and would
+        // be dropped by a plain typed parse — `subagent_spawned` has no variant
+        // in this schema version.
+        let lines = [
+            serde_json::json!({
+                "method": "session/update",
+                "params": {"sessionId": "root", "update": {
+                    "sessionUpdate": "subagent_spawned",
+                    "subagentSessionId": "kid",
+                    "name": "Lorentz",
+                    "task": "Probe the UI",
+                }},
+            }),
+            serde_json::json!({
+                "method": "session/update",
+                "params": {"sessionId": "kid", "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "c1",
+                    "title": "Read main.rs",
+                    "status": "completed",
+                }},
+            }),
+            serde_json::json!({
+                "method": "session/update",
+                "params": {"sessionId": "root", "update": {
+                    "sessionUpdate": "subagent_state_update",
+                    "subagentSessionId": "kid",
+                    "state": "completed",
+                }},
+            }),
+        ];
+        let log = lines
+            .iter()
+            .enumerate()
+            .map(|(i, v)| format!("{i} <- stdout {v}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let replay = replay_capture(&log, &HashMap::new(), "");
+
+        let [ChatItem::ToolCall(parent), ChatItem::ToolCall(child)] = &replay.items[..] else {
+            panic!("a launch and its one child, got {:?}", replay.items);
+        };
+        assert!(parent.is_subagent_launch(), "the launch card is a launch");
+        assert_eq!(parent.subagent_type(), Some("Lorentz"));
+        assert_eq!(parent.status, crate::model::ToolStatusView::Completed);
+        assert_eq!(
+            child.parent_tool_id.as_deref(),
+            Some(parent.id.as_str()),
+            "the child renders inside its launch, not as a top-level row"
+        );
+        assert_eq!(
+            replay.sessions, 1,
+            "a subagent's child session is not a second conversation"
+        );
     }
 
     #[test]
