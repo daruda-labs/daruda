@@ -88,6 +88,7 @@ tree-sitter-highlight = "0.25"
 # dependency the editor needs to name it.
 tree-sitter-yaml = "0.7"
 unicode-segmentation = "1"
+url = "2"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 uuid = { version = "1.10", features = ["v4"] }
 open = "5.3.5"

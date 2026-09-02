@@ -7,6 +7,7 @@
 mod body;
 mod content_element;
 mod markdown;
+mod prose;
 mod scrollbar;
 mod search_panel;
 mod toolbar;

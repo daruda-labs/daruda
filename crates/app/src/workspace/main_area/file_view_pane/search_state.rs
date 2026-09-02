@@ -158,6 +158,7 @@ impl PaneFileView {
 
 #[cfg(test)]
 mod tests {
+    use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
     use crate::workspace::main_area::file_view_pane::{
         FileViewMode, PaneFileContent, PaneFileView, SelectionDrag, VisualRow, VisualRowKind,
     };
@@ -203,6 +204,26 @@ mod tests {
                 removed: 0,
             },
             view_mode: FileViewMode::Changes,
+            hide_unchanged: false,
+            selection_drag: SelectionDrag::None,
+            search: None,
+            pending_scroll_line: None,
+        }
+    }
+
+    fn markdown_viewer(markdown: &str) -> PaneFileView {
+        PaneFileView {
+            lane_id: 0,
+            path: "test.md".into(),
+            staged: false,
+            file_status: None,
+            content: PaneFileContent::LoadedMarkdown {
+                blocks: parse_markdown(markdown, "default", false),
+                raw_rows: Vec::new(),
+                total_count: markdown.lines().count(),
+                byte_truncated: false,
+            },
+            view_mode: FileViewMode::Preview,
             hide_unchanged: false,
             selection_drag: SelectionDrag::None,
             search: None,
@@ -280,6 +301,11 @@ mod tests {
         }
         assert!(fv.search.as_ref().unwrap().matches.is_empty());
         assert!(fv.search.as_ref().unwrap().focused.is_none());
+
+        let mut fv = markdown_viewer("[**nested searchable**](https://example.com)");
+        fv.search_open();
+        fv.search_update_query("nested searchable");
+        assert_eq!(fv.search.as_ref().unwrap().matches, vec![0]);
     }
 
     #[test]

@@ -1,16 +1,22 @@
 //! Markdown preview renderer — block + span tree → GPUI elements,
 //! plus block-level click/drag selection plumbed through `Workspace`.
 
+use std::rc::Rc;
+
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use gpui::{
-    AnyElement, App, Context, HighlightStyle, ImageSource, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, RenderImage, StyledText, div, img, prelude::*, px,
+    AnyElement, App, Context, FontStyle, FontWeight, HighlightStyle, ImageSource, InteractiveText,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, RenderImage, StrikethroughStyle,
+    StyledText, Window, div, img, prelude::*, px,
 };
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{
     ListItem, MdBlock, MdSpan, lone_image,
+};
+use crate::workspace::main_area::file_view_pane::render::prose::{
+    CompiledText, InlineStyle, ProsePart, compile_prose,
 };
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 use crate::workspace::main_area::file_view_pane::{CharSelection, VisualRow};
@@ -27,9 +33,8 @@ use crate::workspace::main_area::file_view_pane::{CharSelection, VisualRow};
 /// while the table and code fills stayed light — the body vanished and the
 /// blocks inverted.
 ///
-/// Semantic hues (`SUCCESS` for a ticked task box, `AGENT_RUNNING` for inline
-/// code) are deliberately not in here: they carry meaning rather than surface
-/// rank, and daruda uses them on pane surfaces elsewhere.
+/// The semantic `SUCCESS` hue for a ticked task box stays outside this surface
+/// palette. Inline code uses the pane's own fill and foreground roles.
 struct MdColors {
     /// Body prose, and headings — a terminal-mirrored surface has no tone
     /// above its own foreground, so heading rank is carried by size and weight
@@ -43,11 +48,20 @@ struct MdColors {
     /// The weaker of the two fills — code block, table body rows (the UI
     /// theme's `BG_PANEL` rung).
     fill: gpui::Hsla,
-    /// The stronger fill, one step above [`Self::fill`] — inline-code chip,
-    /// table header (the `BG_RAISED` rung).
+    /// The stronger fill, one step above [`Self::fill`] — table header (the
+    /// `BG_RAISED` rung).
     raised: gpui::Hsla,
     /// Code-block border, table lines, the `<hr>` rule.
     line: gpui::Hsla,
+}
+
+type OpenUrl = Rc<dyn Fn(&str, &mut Window, &mut App)>;
+
+#[derive(Clone, Copy)]
+struct TableCellPosition {
+    is_header: bool,
+    is_first: bool,
+    is_last: bool,
 }
 
 impl MdColors {
@@ -129,7 +143,12 @@ pub(super) fn render_md_body(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = MdColors::for_pane(cx);
-    render_md_body_layout(blocks, char_selection, &t, |block, block_idx| {
+    let open_url: OpenUrl = Rc::new(|url, _window, cx| {
+        if is_allowed_markdown_url(url) {
+            cx.open_url(url);
+        }
+    });
+    render_md_body_layout(blocks, char_selection, &t, open_url, |block, block_idx| {
         block_with_selection(block, block_idx, cx)
     })
 }
@@ -141,6 +160,7 @@ fn render_md_body_layout(
     blocks: &[MdBlock],
     char_selection: Option<&CharSelection>,
     t: &MdColors,
+    on_open_url: OpenUrl,
     mut decorate_block: impl FnMut(gpui::Div, usize) -> gpui::Div,
 ) -> gpui::Div {
     let body_text = t.text;
@@ -156,13 +176,24 @@ fn render_md_body_layout(
 
     for (i, block) in blocks.iter().enumerate() {
         let is_sel = is_block_selected(char_selection, i);
+        let mut next_part_idx = 0;
         let block_el = div()
             .rounded(px(theme::MD_BLOCK_RADIUS))
             .when(is_sel, |d| d.bg(block_sel_bg))
-            .child(render_md_block(block, t));
+            .child(render_md_block(
+                block,
+                t,
+                i,
+                &mut next_part_idx,
+                &on_open_url,
+            ));
         col = col.child(decorate_block(block_el, i));
     }
     col
+}
+
+fn is_allowed_markdown_url(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "mailto"))
 }
 
 /// Vertical gap between the items of a list. A loose list is made of
@@ -183,24 +214,141 @@ fn list_item_gap(loose: bool) -> f32 {
 /// out at zero width, wrapping a character at a time over the item below.
 /// `flex_1().w_0()` is the shape zed gives prose beside a bullet cell
 /// (`push_markdown_list_item`); measured here it ties with `w_full().min_w_0()`.
-fn render_md_prose(spans: &[MdSpan], t: &MdColors) -> gpui::Div {
-    div()
+fn render_md_prose(
+    spans: &[MdSpan],
+    t: &MdColors,
+    block_idx: usize,
+    next_part_idx: &mut usize,
+    on_open_url: &OpenUrl,
+) -> gpui::Div {
+    let mut prose = div()
         .flex()
         .flex_col()
         .flex_1()
         .w_0()
-        .gap(px(theme::MD_BLOCK_GAP))
-        .children(
-            spans
-                .split(|s| matches!(s, MdSpan::ParagraphBreak))
-                .map(|run| {
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .children(render_md_spans(run, t))
-                }),
-        )
+        .gap(px(theme::MD_BLOCK_GAP));
+    for run in spans.split(|span| matches!(span, MdSpan::ParagraphBreak)) {
+        prose = prose.child(render_prose_run(
+            run,
+            t,
+            block_idx,
+            next_part_idx,
+            on_open_url,
+        ));
+    }
+    prose
+}
+
+fn render_prose_run(
+    spans: &[MdSpan],
+    t: &MdColors,
+    block_idx: usize,
+    next_part_idx: &mut usize,
+    on_open_url: &OpenUrl,
+) -> gpui::Div {
+    let mut row = div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .whitespace_normal();
+    for part in compile_prose(spans) {
+        row = match part {
+            ProsePart::Text(text) => {
+                let part_idx = *next_part_idx;
+                *next_part_idx += 1;
+                row.child(render_compiled_text(
+                    text,
+                    t,
+                    block_idx,
+                    part_idx,
+                    on_open_url,
+                ))
+            }
+            ProsePart::Image(image) => row.child(render_md_image(
+                image.raster,
+                image.alt,
+                ImageLayout::Inline,
+                t,
+            )),
+        };
+    }
+    row
+}
+
+fn render_compiled_text(
+    compiled: CompiledText,
+    t: &MdColors,
+    block_idx: usize,
+    part_idx: usize,
+    on_open_url: &OpenUrl,
+) -> AnyElement {
+    let CompiledText {
+        text,
+        style_runs,
+        link_ranges,
+        link_urls,
+    } = compiled;
+    let highlights = style_runs
+        .iter()
+        .map(|run| (run.range.clone(), highlight_for(run.style, t)))
+        .collect::<Vec<_>>();
+    let monospace_ranges = style_runs
+        .iter()
+        .filter(|run| run.style.code || run.style.html)
+        .map(|run| (run.range.clone(), gpui::SharedString::from("monospace")))
+        .collect::<Vec<_>>();
+    let styled = StyledText::new(text)
+        .with_highlights(highlights)
+        .with_font_family_overrides(monospace_ranges);
+
+    let text: AnyElement = if link_ranges.is_empty() {
+        styled.into_any_element()
+    } else {
+        let on_open_url = on_open_url.clone();
+        InteractiveText::new(format!("markdown-prose-{block_idx}-{part_idx}"), styled)
+            .on_click(link_ranges, move |range_idx, window, cx| {
+                if let Some(url) = link_urls.get(range_idx) {
+                    on_open_url(url, window, cx);
+                }
+            })
+            .into_any_element()
+    };
+
+    div()
+        .flex_1()
+        .w_0()
+        .min_w_0()
+        .whitespace_normal()
+        .when(cfg!(test), |d| d.debug_selector(|| "md-plain".into()))
+        .child(text)
+        .into_any_element()
+}
+
+fn highlight_for(style: InlineStyle, t: &MdColors) -> HighlightStyle {
+    let color = if style.code {
+        Some(t.text)
+    } else if style.link {
+        Some(t.link)
+    } else if style.strikethrough || style.footnote || style.html {
+        Some(t.subtle)
+    } else {
+        None
+    };
+    HighlightStyle {
+        color,
+        font_weight: style.bold.then_some(FontWeight::BOLD),
+        font_style: style.italic.then_some(FontStyle::Italic),
+        background_color: style.code.then_some(t.fill),
+        underline: None,
+        strikethrough: style.strikethrough.then_some(StrikethroughStyle {
+            thickness: px(1.),
+            color: None,
+        }),
+        fade_out: None,
+    }
 }
 
 /// What fills a list item's marker cell.
@@ -213,7 +361,15 @@ enum ListMarker {
 
 /// One list. Both kinds share the row, its wrap and the nested-block indent —
 /// only the marker cell differs, so that is all `marker` decides.
-fn render_list(items: &[ListItem], loose: bool, marker: ListMarker, t: &MdColors) -> AnyElement {
+fn render_list(
+    items: &[ListItem],
+    loose: bool,
+    marker: ListMarker,
+    t: &MdColors,
+    block_idx: usize,
+    next_part_idx: &mut usize,
+    on_open_url: &OpenUrl,
+) -> AnyElement {
     let mut list = div().flex().flex_col().gap(px(list_item_gap(loose)));
     for (i, item) in items.iter().enumerate() {
         let cell = match marker {
@@ -244,21 +400,35 @@ fn render_list(items: &[ListItem], loose: bool, marker: ListMarker, t: &MdColors
                 .flex_row()
                 .gap(px(theme::MD_LIST_ROW_GAP))
                 .child(cell)
-                .child(render_md_prose(&item.spans, t)),
+                .child(render_md_prose(
+                    &item.spans,
+                    t,
+                    block_idx,
+                    next_part_idx,
+                    on_open_url,
+                )),
         );
         for child in &item.children {
-            item_col = item_col.child(
-                div()
-                    .pl(px(theme::MD_LIST_INDENT))
-                    .child(render_md_block(child, t)),
-            );
+            item_col = item_col.child(div().pl(px(theme::MD_LIST_INDENT)).child(render_md_block(
+                child,
+                t,
+                block_idx,
+                next_part_idx,
+                on_open_url,
+            )));
         }
         list = list.child(item_col);
     }
     list.into_any_element()
 }
 
-fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
+fn render_md_block(
+    block: &MdBlock,
+    t: &MdColors,
+    block_idx: usize,
+    next_part_idx: &mut usize,
+    on_open_url: &OpenUrl,
+) -> AnyElement {
     match block {
         MdBlock::Heading { level, spans } => {
             let (size, color, mt) = match level {
@@ -268,16 +438,19 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                 _ => (theme::MD_H4_FONT_SIZE, t.text, 0.0),
             };
             div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
                 .w_full()
                 .min_w_0()
                 .mt(px(mt))
                 .text_size(px(size))
                 .text_color(color)
                 .font_weight(gpui::FontWeight::BOLD)
-                .children(render_md_spans(spans, t))
+                .child(render_prose_run(
+                    spans,
+                    t,
+                    block_idx,
+                    next_part_idx,
+                    on_open_url,
+                ))
                 .into_any_element()
         }
 
@@ -288,13 +461,15 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                 render_md_image(raster, alt, ImageLayout::Block, t)
             } else {
                 div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
                     .w_full()
                     .min_w_0()
-                    .items_center()
-                    .children(render_md_spans(spans, t))
+                    .child(render_prose_run(
+                        spans,
+                        t,
+                        block_idx,
+                        next_part_idx,
+                        on_open_url,
+                    ))
                     .into_any_element()
             }
         }
@@ -315,13 +490,29 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                 .into_any_element(),
         },
 
-        MdBlock::BulletList { items, loose } => render_list(items, *loose, ListMarker::Bullet, t),
+        MdBlock::BulletList { items, loose } => render_list(
+            items,
+            *loose,
+            ListMarker::Bullet,
+            t,
+            block_idx,
+            next_part_idx,
+            on_open_url,
+        ),
 
         MdBlock::OrderedList {
             start,
             items,
             loose,
-        } => render_list(items, *loose, ListMarker::Ordered(*start), t),
+        } => render_list(
+            items,
+            *loose,
+            ListMarker::Ordered(*start),
+            t,
+            block_idx,
+            next_part_idx,
+            on_open_url,
+        ),
 
         MdBlock::Blockquote(spans) => div()
             .flex()
@@ -334,7 +525,11 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                     .bg(t.line)
                     .rounded(px(theme::MD_BLOCKQUOTE_BORDER_W / 2.0)),
             )
-            .child(render_md_prose(spans, t).italic().text_color(t.muted))
+            .child(
+                render_md_prose(spans, t, block_idx, next_part_idx, on_open_url)
+                    .italic()
+                    .text_color(t.muted),
+            )
             .into_any_element(),
 
         MdBlock::Rule => div()
@@ -351,89 +546,74 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
             .w_full()
             .min_w_0()
             .gap(px(theme::MD_LIST_ROW_GAP))
-            .text_size(px(theme::MD_FOOTNOTE_FONT_SIZE))
             .text_color(t.subtle)
             .child(div().flex_none().child(format!("[^{label}]:")))
-            .child(render_md_prose(spans, t))
+            .child(render_md_prose(
+                spans,
+                t,
+                block_idx,
+                next_part_idx,
+                on_open_url,
+            ))
             .into_any_element(),
 
         MdBlock::HtmlBlock(html) => div()
             .font(gpui::font("monospace"))
-            .text_size(px(theme::MD_HTML_FONT_SIZE))
             .text_color(t.subtle)
             .child(html.clone())
             .into_any_element(),
 
         MdBlock::Table { header, rows } => {
             let table_border = t.line;
-            let body_text = t.text;
-            let render_cell = |cell: &[MdSpan], is_header: bool, is_last: bool| {
-                let mut d = div()
-                    .flex_1()
-                    .min_w(px(theme::MD_TABLE_CELL_MIN_W))
-                    .overflow_hidden()
-                    .px(px(theme::MD_TABLE_CELL_PAD_X))
-                    .py(px(theme::MD_TABLE_CELL_PAD_Y))
-                    // Only interior cells get a right border; outer border from the table div handles the edge.
-                    .when(!is_last, |d| d.border_r_1().border_color(table_border))
-                    .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-                    .text_color(body_text)
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .w_full()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .children(render_md_spans(cell, t)),
-                    );
-                if is_header {
-                    d = d.font_weight(gpui::FontWeight::BOLD);
-                }
-                d
-            };
-
             let col_count = header.len();
             let row_count = rows.len();
-            let header_row = div()
+            let mut header_row = div()
                 .flex()
                 .flex_row()
                 .w_full()
                 .border_b_1()
                 .border_color(table_border)
-                .bg(t.raised)
-                .children(
-                    header
-                        .iter()
-                        .enumerate()
-                        .map(|(i, cell)| render_cell(cell, true, i + 1 == col_count)),
-                );
+                .bg(t.raised);
+            for (cell_idx, cell) in header.iter().enumerate() {
+                header_row = header_row.child(render_table_cell(
+                    cell,
+                    TableCellPosition {
+                        is_header: true,
+                        is_first: cell_idx == 0,
+                        is_last: cell_idx + 1 == col_count,
+                    },
+                    t,
+                    block_idx,
+                    next_part_idx,
+                    on_open_url,
+                ));
+            }
 
-            let body_rows: Vec<AnyElement> = rows
-                .iter()
-                .enumerate()
-                .map(|(i, row)| {
-                    // Both rungs were the same colour in the UI palette, so the
-                    // stripe never showed; one fill keeps that appearance.
-                    let bg = t.fill;
-                    let is_last_row = i + 1 == row_count;
-                    div()
-                        .flex()
-                        .flex_row()
-                        .w_full()
-                        // Skip bottom border on the last row — the table's outer border_1 covers it.
-                        .when(!is_last_row, |d| d.border_b_1().border_color(table_border))
-                        .bg(bg)
-                        .children(
-                            row.iter()
-                                .enumerate()
-                                .map(|(j, cell)| render_cell(cell, false, j + 1 == row.len())),
-                        )
-                        .into_any_element()
-                })
-                .collect();
+            let mut body_rows = Vec::with_capacity(rows.len());
+            for (row_idx, row) in rows.iter().enumerate() {
+                let is_last_row = row_idx + 1 == row_count;
+                let mut row_div = div()
+                    .flex()
+                    .flex_row()
+                    .w_full()
+                    .when(!is_last_row, |d| d.border_b_1().border_color(table_border))
+                    .bg(t.fill);
+                for (cell_idx, cell) in row.iter().enumerate() {
+                    row_div = row_div.child(render_table_cell(
+                        cell,
+                        TableCellPosition {
+                            is_header: false,
+                            is_first: false,
+                            is_last: cell_idx + 1 == row.len(),
+                        },
+                        t,
+                        block_idx,
+                        next_part_idx,
+                        on_open_url,
+                    ));
+                }
+                body_rows.push(row_div.into_any_element());
+            }
 
             div()
                 .w_full()
@@ -449,119 +629,36 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
     }
 }
 
-fn render_md_spans(spans: &[MdSpan], t: &MdColors) -> Vec<AnyElement> {
-    debug_assert!(
-        !spans
-            .iter()
-            .any(|span| matches!(span, MdSpan::ParagraphBreak)),
-        "paragraph breaks must be split by render_md_prose"
-    );
-
-    let mut els: Vec<AnyElement> = Vec::new();
-    let mut plain_text = String::new();
-
-    for span in spans {
-        match span {
-            MdSpan::Text(text) => plain_text.push_str(text),
-            // A Markdown soft break is semantically a space. Keeping it in the
-            // same text element lets GPUI shape and wrap the prose as one run;
-            // a standalone flex child can otherwise occupy a row by itself.
-            MdSpan::SoftBreak => plain_text.push(' '),
-            _ => {
-                if !plain_text.is_empty() {
-                    els.push(render_plain_text(std::mem::take(&mut plain_text)));
-                }
-                els.push(render_md_span(span, t));
-            }
-        }
-    }
-    if !plain_text.is_empty() {
-        els.push(render_plain_text(plain_text));
-    }
-    els
-}
-
-fn render_plain_text(text: String) -> AnyElement {
+fn render_table_cell(
+    cell: &[MdSpan],
+    position: TableCellPosition,
+    t: &MdColors,
+    block_idx: usize,
+    next_part_idx: &mut usize,
+    on_open_url: &OpenUrl,
+) -> gpui::Div {
     div()
-        .min_w_0()
-        .whitespace_normal()
-        .when(cfg!(test), |d| d.debug_selector(|| "md-plain".into()))
-        .child(text)
-        .into_any_element()
-}
-
-fn render_md_span(span: &MdSpan, t: &MdColors) -> AnyElement {
-    match span {
-        MdSpan::Text(s) => render_plain_text(s.clone()),
-
-        MdSpan::Bold(inner) => div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .min_w_0()
-            .font_weight(gpui::FontWeight::BOLD)
-            .children(render_md_spans(inner, t))
-            .into_any_element(),
-
-        MdSpan::Italic(inner) => div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .min_w_0()
-            .italic()
-            .children(render_md_spans(inner, t))
-            .into_any_element(),
-
-        MdSpan::Code(s) => div()
-            .font(gpui::font("monospace"))
-            .bg(t.raised)
-            .text_color(theme::AGENT_RUNNING)
-            .px(px(theme::MD_CODE_INLINE_PAD_X))
-            .rounded(px(theme::MD_BLOCK_RADIUS))
-            .child(s.clone())
-            .into_any_element(),
-
-        MdSpan::Link { text, .. } => div()
-            .text_color(t.link)
-            .child(text.clone())
-            .into_any_element(),
-
-        MdSpan::Strikethrough(inner) => div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .min_w_0()
-            .text_color(t.subtle)
-            .children(render_md_spans(inner, t))
-            .into_any_element(),
-
-        MdSpan::SoftBreak => div().child(" ").into_any_element(),
-        // A full-width item ends the flex line; it carries no height of its own
-        // because `<br>` moves to the next line rather than leaving a gap.
-        MdSpan::HardBreak => div().w_full().h_0().into_any_element(),
-        // Every block that can hold one goes through `render_md_prose`, which
-        // splits the run here instead. Reaching this arm means a caller took
-        // the wrapping row directly, and the row's preceding text collapses to
-        // zero width — so leave a gap, but keep the split as the way in.
-        MdSpan::ParagraphBreak => div().w_full().h(px(theme::MD_BLOCK_GAP)).into_any_element(),
-
-        MdSpan::Footnote(label) => div()
-            .text_color(t.subtle)
-            .text_size(px(theme::MD_FOOTNOTE_FONT_SIZE))
-            .child(format!("[^{label}]"))
-            .into_any_element(),
-
-        MdSpan::Html(s) => div()
-            .font(gpui::font("monospace"))
-            .text_color(t.subtle)
-            .text_size(px(theme::MD_HTML_FONT_SIZE))
-            .child(s.clone())
-            .into_any_element(),
-
-        MdSpan::Image { alt, raster, .. } => {
-            render_md_image(raster.as_ref(), alt, ImageLayout::Inline, t)
-        }
-    }
+        .flex_1()
+        .min_w(px(theme::MD_TABLE_CELL_MIN_W))
+        .overflow_hidden()
+        .px(px(theme::MD_TABLE_CELL_PAD_X))
+        .py(px(theme::MD_TABLE_CELL_PAD_Y))
+        .when(!position.is_last, |d| d.border_r_1().border_color(t.line))
+        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_color(t.text)
+        .when(position.is_header, |d| {
+            d.font_weight(gpui::FontWeight::BOLD)
+        })
+        .when(cfg!(test) && position.is_header && position.is_first, |d| {
+            d.debug_selector(|| "markdown-table-first-header-cell".into())
+        })
+        .child(render_prose_run(
+            cell,
+            t,
+            block_idx,
+            next_part_idx,
+            on_open_url,
+        ))
 }
 
 /// How a markdown image is sized.
@@ -732,8 +829,8 @@ fn block_with_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{MdColors, code_block_text, render_md_spans};
-    use crate::workspace::main_area::file_view_pane::markdown_viewer::MdSpan;
+    use super::{MdColors, code_block_text, highlight_for, is_allowed_markdown_url};
+    use crate::workspace::main_area::file_view_pane::render::prose::InlineStyle;
     use crate::workspace::main_area::file_view_pane::{HighlightedSpan, VisualRow, VisualRowKind};
 
     fn row(content: &str, spans: Vec<HighlightedSpan>) -> VisualRow {
@@ -763,10 +860,8 @@ mod tests {
         a: 1.0,
     };
 
-    #[test]
-    #[should_panic(expected = "paragraph breaks must be split by render_md_prose")]
-    fn a_direct_span_run_rejects_paragraph_breaks() {
-        let colors = MdColors {
+    fn colors() -> MdColors {
+        MdColors {
             text: RED,
             muted: RED,
             subtle: RED,
@@ -774,9 +869,61 @@ mod tests {
             fill: RED,
             raised: RED,
             line: RED,
-        };
+        }
+    }
 
-        let _ = render_md_spans(&[MdSpan::ParagraphBreak], &colors);
+    #[test]
+    fn inline_style_mapping_matches_the_design_contract() {
+        let colors = colors();
+        let code = highlight_for(
+            InlineStyle {
+                code: true,
+                ..Default::default()
+            },
+            &colors,
+        );
+        assert_eq!(code.color, Some(colors.text));
+        assert_eq!(code.background_color, Some(colors.fill));
+        assert!(code.underline.is_none());
+
+        let strike = highlight_for(
+            InlineStyle {
+                strikethrough: true,
+                ..Default::default()
+            },
+            &colors,
+        );
+        assert_eq!(strike.color, Some(colors.subtle));
+        assert!(strike.strikethrough.is_some());
+
+        let link = highlight_for(
+            InlineStyle {
+                link: true,
+                ..Default::default()
+            },
+            &colors,
+        );
+        assert_eq!(link.color, Some(colors.link));
+        assert!(link.underline.is_none());
+    }
+
+    #[test]
+    fn markdown_links_allow_only_external_safe_schemes() {
+        for url in [
+            "https://example.com/path",
+            "http://localhost:3000",
+            "mailto:dev@example.com",
+        ] {
+            assert!(is_allowed_markdown_url(url), "{url}");
+        }
+        for url in [
+            "javascript:alert(1)",
+            "file:///tmp/secret",
+            "../relative.md",
+            "data:text/html,hello",
+        ] {
+            assert!(!is_allowed_markdown_url(url), "{url}");
+        }
     }
 
     #[test]
@@ -898,15 +1045,17 @@ mod tests {
 
 #[cfg(test)]
 mod layout_tests {
+    use std::rc::Rc;
     use std::sync::{Arc, Mutex};
 
-    use super::{MdColors, render_md_body_layout};
+    use super::{MdColors, OpenUrl, render_md_body_layout};
     use crate::ui::theme;
     use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
     use gpui::{
-        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-        Pixels, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
-        VisualTestContext, Window, WindowBounds, WindowOptions, div, point, px, size,
+        AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers,
+        MouseButton, ParentElement as _, Pixels, Render, StatefulInteractiveElement as _,
+        Styled as _, TestAppContext, VisualTestContext, Window, WindowBounds, WindowOptions, div,
+        point, px, size,
     };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -932,15 +1081,54 @@ mod layout_tests {
         first_inline_bounds: Arc<Mutex<Option<Bounds<Pixels>>>>,
     }
 
+    struct LinkProbe {
+        md: String,
+        opened: Arc<Mutex<Vec<String>>>,
+        block_mouse_downs: Arc<Mutex<usize>>,
+    }
+
+    impl Render for LinkProbe {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let colors = MdColors::for_pane(cx);
+            let blocks = parse_markdown(&self.md, "default", false);
+            let opened = self.opened.clone();
+            let on_open_url: OpenUrl = Rc::new(move |url, _, _| {
+                opened.lock().unwrap().push(url.to_owned());
+            });
+            let block_mouse_downs = self.block_mouse_downs.clone();
+            let body =
+                render_md_body_layout(&blocks, None, &colors, on_open_url, move |block, _| {
+                    let block_mouse_downs = block_mouse_downs.clone();
+                    block.on_mouse_down(MouseButton::Left, move |_, _, _| {
+                        *block_mouse_downs.lock().unwrap() += 1;
+                    })
+                })
+                .id("md-link-probe")
+                .debug_selector(|| "md-link-probe".into());
+
+            div()
+                .size_full()
+                .font_family("Menlo")
+                .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                .child(body)
+        }
+    }
+
     impl Render for Probe {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             match self.engine {
                 Engine::FileViewer => {
                     let colors = MdColors::for_pane(cx);
                     let blocks = parse_markdown(&self.md, "default", false);
-                    let body = render_md_body_layout(&blocks, None, &colors, |block, _| block)
-                        .id("md-probe")
-                        .debug_selector(|| "md-probe".into());
+                    let body = render_md_body_layout(
+                        &blocks,
+                        None,
+                        &colors,
+                        Rc::new(|_, _, _| {}),
+                        |block, _| block,
+                    )
+                    .id("md-probe")
+                    .debug_selector(|| "md-probe".into());
                     // Faithful to the real pane, outermost first: the walker's
                     // `flex_1().min_h(0).overflow_hidden()` slot in a column, the pane
                     // root (`relative().size_full()` + the configured font), the
@@ -1066,6 +1254,103 @@ mod layout_tests {
                       marked with. It must stay legible on the pane background.";
 
         assert_eq!(height(cx, split, px(430.)), height(cx, joined, px(430.)));
+    }
+
+    #[gpui::test]
+    fn style_boundaries_do_not_change_prose_layout(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let width = px(330.);
+        for (label, plain, styled) in [
+            (
+                "paragraph",
+                "alpha beta gamma delta epsilon zeta eta theta",
+                "[alpha](https://a.test) [beta](https://b.test) gamma delta epsilon zeta eta theta",
+            ),
+            (
+                "heading",
+                "## alpha beta gamma delta epsilon",
+                "## [alpha](https://a.test) [beta](https://b.test) gamma delta epsilon",
+            ),
+            (
+                "list",
+                "- alpha beta gamma delta epsilon",
+                "- [alpha](https://a.test) [beta](https://b.test) gamma delta epsilon",
+            ),
+            (
+                "blockquote",
+                "> alpha beta gamma delta epsilon",
+                "> [alpha](https://a.test) [beta](https://b.test) gamma delta epsilon",
+            ),
+            (
+                "footnote",
+                "[^n]: alpha beta gamma delta epsilon",
+                "[^n]: [alpha](https://a.test) [beta](https://b.test) gamma delta epsilon",
+            ),
+        ] {
+            assert_eq!(
+                bounds_of(cx, plain, width, "md-probe"),
+                bounds_of(cx, styled, width, "md-probe"),
+                "{label}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn table_columns_ignore_inline_style_boundaries(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let plain = "| alpha beta gamma delta | short |\n| --- | --- |\n| body | value |";
+        let styled = "| [alpha](https://a.test) [beta](https://b.test) gamma delta | short |\n\
+                      | --- | --- |\n| body | value |";
+
+        assert_eq!(
+            bounds_of(cx, plain, px(430.), "markdown-table-first-header-cell"),
+            bounds_of(cx, styled, px(430.), "markdown-table-first-header-cell")
+        );
+    }
+
+    #[gpui::test]
+    fn interactive_text_opens_only_a_pressed_link_range(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(430.), px(220.)));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let block_mouse_downs = Arc::new(Mutex::new(0));
+        let window = cx
+            .update(|cx| {
+                let opened = opened.clone();
+                let block_mouse_downs = block_mouse_downs.clone();
+                cx.open_window(options, |_window, cx| {
+                    cx.new(|_| LinkProbe {
+                        md: "[open](https://example.com/right)".into(),
+                        opened,
+                        block_mouse_downs,
+                    })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let text = vcx.debug_bounds("md-plain").expect("text painted");
+        let inside_link = point(text.origin.x + px(2.), text.center().y);
+        let outside_link = point(text.origin.x + text.size.width - px(2.), text.center().y);
+
+        vcx.simulate_click(inside_link, Modifiers::none());
+        assert_eq!(
+            opened.lock().unwrap().as_slice(),
+            ["https://example.com/right"]
+        );
+
+        let prior_block_downs = *block_mouse_downs.lock().unwrap();
+        vcx.simulate_click(outside_link, Modifiers::none());
+        assert_eq!(opened.lock().unwrap().len(), 1);
+        assert!(*block_mouse_downs.lock().unwrap() > prior_block_downs);
+
+        vcx.simulate_mouse_down(inside_link, MouseButton::Left, Modifiers::none());
+        vcx.simulate_mouse_up(outside_link, MouseButton::Left, Modifiers::none());
+        assert_eq!(opened.lock().unwrap().len(), 1);
     }
 
     /// The gap a loose list takes is the one between blocks, so three items

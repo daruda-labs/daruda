@@ -24,8 +24,7 @@ pub(in crate::workspace) enum MdSpan {
     Italic(Vec<MdSpan>),
     Code(String),
     Link {
-        text: String,
-        #[allow(dead_code)]
+        children: Vec<MdSpan>,
         url: String,
     },
     Strikethrough(Vec<MdSpan>),
@@ -526,8 +525,13 @@ fn parse_inline(events: &[Event<'_>], pos: usize) -> (MdSpan, usize) {
             };
             let (inner, consumed) =
                 collect_inline_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Link)));
-            let text = flatten_spans_to_text(&inner);
-            (MdSpan::Link { text, url }, consumed + 2)
+            (
+                MdSpan::Link {
+                    children: inner,
+                    url,
+                },
+                consumed + 2,
+            )
         }
 
         Event::Start(Tag::Image { dest_url, .. }) => {
@@ -678,8 +682,13 @@ fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
     let mut out = String::new();
     for s in spans {
         match s {
-            MdSpan::Text(t) | MdSpan::Code(t) | MdSpan::Link { text: t, .. } => out.push_str(t),
-            MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
+            MdSpan::Text(t) | MdSpan::Code(t) => out.push_str(t),
+            MdSpan::Bold(inner)
+            | MdSpan::Italic(inner)
+            | MdSpan::Link {
+                children: inner, ..
+            }
+            | MdSpan::Strikethrough(inner) => {
                 out.push_str(&flatten_spans_to_text(inner));
             }
             MdSpan::SoftBreak | MdSpan::HardBreak | MdSpan::ParagraphBreak => out.push(' '),
@@ -990,12 +999,16 @@ fn resolve_images_in_spans(
                     *raster = resolve(url);
                 }
             }
-            MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
+            MdSpan::Bold(inner)
+            | MdSpan::Italic(inner)
+            | MdSpan::Link {
+                children: inner, ..
+            }
+            | MdSpan::Strikethrough(inner) => {
                 resolve_images_in_spans(inner, resolve);
             }
             MdSpan::Text(_)
             | MdSpan::Code(_)
-            | MdSpan::Link { .. }
             | MdSpan::SoftBreak
             | MdSpan::HardBreak
             | MdSpan::ParagraphBreak
@@ -1053,6 +1066,30 @@ mod tests {
         if let MdBlock::Paragraph(spans) = &blocks[0] {
             assert!(spans.iter().any(|s| matches!(s, MdSpan::Bold(_))));
         }
+    }
+
+    #[test]
+    fn links_preserve_nested_inline_styles_and_plain_text() {
+        let blocks = parse_markdown(
+            "[**bold** and *italic*](https://example.com)\n",
+            "base16-ocean.dark",
+            false,
+        );
+        let MdBlock::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let [MdSpan::Link { children, url }] = spans.as_slice() else {
+            panic!("expected one link");
+        };
+
+        assert_eq!(url, "https://example.com");
+        assert!(children.iter().any(|span| matches!(span, MdSpan::Bold(_))));
+        assert!(
+            children
+                .iter()
+                .any(|span| matches!(span, MdSpan::Italic(_)))
+        );
+        assert_eq!(md_block_plain_text(&blocks[0]), "bold and italic");
     }
 
     #[test]
@@ -1228,8 +1265,9 @@ mod tests {
                 MdSpan::Code(_) => {
                     observed.insert("span.code");
                 }
-                MdSpan::Link { .. } => {
+                MdSpan::Link { children, .. } => {
                     observed.insert("span.link");
+                    observe_spans(children, observed);
                 }
                 MdSpan::Strikethrough(inner) => {
                     observed.insert("span.strikethrough");
@@ -1779,13 +1817,14 @@ A-->B
 
     #[test]
     fn resolve_images_recurses_into_nested_spans() {
-        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Bold(vec![
-            MdSpan::Image {
+        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Link {
+            children: vec![MdSpan::Bold(vec![MdSpan::Image {
                 url: "n.png".to_owned(),
                 alt: String::new(),
                 raster: None,
-            },
-        ])])];
+            }])],
+            url: "https://example.com".to_owned(),
+        }])];
         let mut count = 0;
         resolve_images(&mut blocks, &mut |_| {
             count += 1;

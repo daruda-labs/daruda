@@ -1124,21 +1124,19 @@ max-width:   680px
 | H4–H6 | 12px | 500 | mute (#8a8f98) |
 
 **Inline elements:**
-```
-inline-code:
-  background: surface-2 (#141516)
-  text:       #ccaa6e  (= agent-running gold)
-  font:       terminal, 12px
-  padding:    0 xs (0 4px)
-  radius:     xs (2px)
 
-link:
-  color:      link (#809ff9)   -- NOT accent: ~4.1:1 fails as body text
-  underline:  on hover only
-
-strong:       ink (#f7f8f8), weight 600
-em:           body (#d0d6e0), italic
-```
+| Element | Style |
+|---------|-------|
+| Text | Inherited body style |
+| Strong | Bold weight |
+| Emphasis | Italic face |
+| Inline code | Monospace, pane fill background, pane foreground; no padding or radius |
+| Link | Link color, no underline |
+| Strikethrough | Subtle color with a 1px strike |
+| Footnote reference | Subtle color at body size |
+| Inline HTML | Monospace, subtle color at body size |
+| Soft / hard break | Compiled into the surrounding text |
+| Image | The only boundary that flushes compiled text |
 
 **Block elements:**
 ```

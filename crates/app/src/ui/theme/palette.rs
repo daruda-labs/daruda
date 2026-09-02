@@ -1923,10 +1923,6 @@ pub const MD_BLOCK_GAP: f32 = GAP_LG;
 pub const MD_HEADING_MARGIN_TOP: f32 = 12.0;
 /// Footnote reference / definition text color.
 pub const MD_FOOTNOTE_COLOR: Hsla = hsla(209.0, 0.45, 0.60, 1.0);
-/// Footnote font size (slightly smaller than body, px).
-pub const MD_FOOTNOTE_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// HTML passthrough font size (px).
-pub const MD_HTML_FONT_SIZE: f32 = FONT_SIZE_SM;
 /// Horizontal cell padding (px).
 pub const MD_TABLE_CELL_PAD_X: f32 = PAD_LG;
 /// Vertical cell padding (px).
@@ -1937,12 +1933,10 @@ pub const MD_TABLE_CELL_MIN_W: f32 = 60.0;
 pub const MD_LIST_ITEM_GAP: f32 = GAP_XS;
 /// Gap between the bullet/number and item text in a list row (px).
 pub const MD_LIST_ROW_GAP: f32 = GAP_STANDARD;
-/// Corner radius for inline code, selection highlight, and table container (px).
+/// Corner radius for selection highlights and the table container (px).
 pub const MD_BLOCK_RADIUS: f32 = RADIUS_XS;
 /// Vertical margin above/below standalone block elements (Rule, Table) (px).
 pub const MD_BLOCK_MARGIN_Y: f32 = PAD_XS;
-/// Horizontal padding for inline code (px).
-pub const MD_CODE_INLINE_PAD_X: f32 = 3.0;
 /// Maximum rendered height of a block image / diagram in the preview (px).
 /// Width fits the pane; height is capped so a tall image can't dominate.
 pub const MD_IMAGE_MAX_HEIGHT: f32 = 600.0;

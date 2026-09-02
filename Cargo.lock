@@ -1666,6 +1666,7 @@ dependencies = [
  "tree-sitter-yaml",
  "unicode-segmentation",
  "ureq",
+ "url",
  "uuid",
  "which",
  "x11rb",
