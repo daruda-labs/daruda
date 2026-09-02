@@ -34,7 +34,9 @@ pub(in crate::settings_window) const CUSTOM: &str = "__custom__";
 /// remaining dropdown cannot state.
 pub(in crate::settings_window) struct TranscriptRow {
     pub(in crate::settings_window) fold_mode: Option<FoldMode>,
+    pub(in crate::settings_window) fold_mode_loaded: Option<Vec<String>>,
     pub(in crate::settings_window) display_filter: Option<DisplayFilter>,
+    pub(in crate::settings_window) display_filter_loaded: Option<Vec<String>>,
     pub(in crate::settings_window) tail_window_select: Entity<SelectState>,
     pub(in crate::settings_window) preserved: AgentRowTranscript,
 }
@@ -59,10 +61,12 @@ pub(in crate::settings_window) fn transcript_row(
             .fold_mode
             .as_ref()
             .map(|tokens| FoldMode::from_tokens(tokens.iter().map(String::as_str))),
+        fold_mode_loaded: definition.fold_mode.clone(),
         display_filter: definition
             .display_filter
             .as_ref()
             .map(|tokens| DisplayFilter::from_stored(tokens)),
+        display_filter_loaded: definition.display_filter.clone(),
         preserved: AgentRowTranscript {
             tail_window: tail.preserved,
         },
@@ -76,7 +80,13 @@ impl AgentCatalogRow {
     /// which is what "follow the built-in" means, since an absent key resolves
     /// to exactly that value.
     pub(in crate::settings_window) fn fold_mode(&self) -> Option<Vec<String>> {
-        Some(self.fold_mode?.tokens())
+        let mode = self.fold_mode?;
+        Some(
+            untouched(self.fold_mode_loaded.as_deref(), mode, |tokens| {
+                FoldMode::from_tokens(tokens.iter().map(String::as_str))
+            })
+            .unwrap_or_else(|| mode.tokens()),
+        )
     }
 
     /// The value the fold editor edits: the row's own override, or the built-in
@@ -100,7 +110,12 @@ impl AgentCatalogRow {
     /// [`Self::fold_mode`].
     pub(in crate::settings_window) fn display_filter(&self) -> Option<Vec<String>> {
         let filter = self.display_filter?;
-        Some(filter.tokens().into_iter().map(str::to_owned).collect())
+        Some(
+            untouched(self.display_filter_loaded.as_deref(), filter, |tokens| {
+                DisplayFilter::from_stored(tokens)
+            })
+            .unwrap_or_else(|| filter.tokens().into_iter().map(str::to_owned).collect()),
+        )
     }
 
     /// The value the filter editor edits — see [`Self::fold_mode_value`].
@@ -112,20 +127,42 @@ impl AgentCatalogRow {
 impl SettingsWindow {
     /// Write a fold value onto a row. `None` drops the key, which is what the
     /// editor's reset footer hands back.
+    ///
+    /// Recording the move is part of writing, not of the caller: a path that
+    /// wrote without recording would dead-end its own `Custom` segment, which
+    /// is what the chat pane's [`AgentChatView::set_fold_mode`] avoids by
+    /// remembering here too.
     pub(in crate::settings_window) fn set_agent_row_fold_mode(
         &mut self,
         catalog_index: usize,
         mode: Option<FoldMode>,
         cx: &mut gpui::Context<Self>,
     ) {
+        // An edit that lands on the built-in states nothing: an absent key and
+        // a key stating that value resolve alike.
+        let stored = mode.filter(|mode| *mode != FoldMode::default());
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
             return;
         };
-        if row.fold_mode == mode {
+        if row.fold_mode == stored {
             return;
         }
-        row.fold_mode = mode;
-        self.persist_agent_catalog(cx);
+        // Recorded against what was asked for, not what gets stored: landing on
+        // the built-in is still a departure from a matrix worth recalling, and
+        // the normalization above would otherwise swallow it.
+        if let Some(next) = mode {
+            row.fold_editor.remember(row.fold_mode_value(), next);
+        }
+        let previous = std::mem::replace(&mut row.fold_mode, stored);
+        // Nothing reached disk, so the row must not go on claiming it did —
+        // same hand-back as `remove_agent_catalog_item`. The recall above
+        // stands either way: it names where the user came from, not what
+        // config holds.
+        if !self.persist_agent_catalog(cx)
+            && let Some(row) = self.agent_editable_row_mut(catalog_index)
+        {
+            row.fold_mode = previous;
+        }
         cx.notify();
     }
 
@@ -143,7 +180,6 @@ impl SettingsWindow {
         let Some(target) = row.fold_editor.segment_target(preset) else {
             return;
         };
-        row.fold_editor.remember(row.fold_mode_value(), target);
         self.set_agent_row_fold_mode(catalog_index, Some(target), cx);
     }
 
@@ -222,36 +258,61 @@ impl SettingsWindow {
         filter: Option<DisplayFilter>,
         cx: &mut gpui::Context<Self>,
     ) {
+        // The unfiltered set is the built-in one — see
+        // [`Self::set_agent_row_fold_mode`].
+        let filter = filter.filter(|f| *f != DisplayFilter::default());
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
             return;
         };
         if row.display_filter == filter {
             return;
         }
-        row.display_filter = filter;
-        self.persist_agent_catalog(cx);
+        let previous = std::mem::replace(&mut row.display_filter, filter);
+        // See [`Self::set_agent_row_fold_mode`].
+        if !self.persist_agent_catalog(cx)
+            && let Some(row) = self.agent_editable_row_mut(catalog_index)
+        {
+            row.display_filter = previous;
+        }
         cx.notify();
     }
 }
 
-/// One axis's picker as a row is built.
-struct Picker<T> {
+/// The tokens an axis loaded, when they still spell the value the row holds.
+///
+/// An untouched axis is written back exactly as it was read, so a save that
+/// edits some other field rewrites nothing here — including a token this build
+/// does not know, which [`FoldMode::from_tokens`] and
+/// [`DisplayFilter::from_stored`] both drop on the way in. Editing the axis
+/// moves the value off what the tokens spell, and from then on the row states
+/// the value.
+fn untouched<T: PartialEq>(
+    loaded: Option<&[String]>,
+    current: T,
+    parse: impl Fn(&[String]) -> T,
+) -> Option<Vec<String>> {
+    let tokens = loaded?;
+    (parse(tokens) == current).then(|| tokens.to_vec())
+}
+
+/// The tail picker as a row is built.
+struct Picker {
     selected: SharedString,
     options: Vec<SelectOption>,
-    /// The stored value the [`CUSTOM`] entry stands for, `None` when the stored
-    /// value is one of `options` (or absent).
-    preserved: Option<T>,
+    /// The stored size the [`CUSTOM`] entry stands for, `None` when the stored
+    /// size is one of `options` (or absent).
+    preserved: Option<u8>,
 }
 
 /// Assemble one axis: the values it offers, then — only when the stored value
 /// is none of them — the entry that keeps it verbatim. An absent key selects
 /// `built_in`, the entry that resolves to the same thing.
-fn picker<T>(
+fn picker(
     offered: Vec<SelectOption>,
     built_in: &str,
-    stored: Option<T>,
-    expressed_as: impl Fn(&T) -> Option<String>,
-) -> Picker<T> {
+    stored: Option<u8>,
+    expressed_as: impl Fn(&u8) -> Option<String>,
+) -> Picker {
     let mut options = offered;
     let selected = match stored.as_ref().map(&expressed_as) {
         None => built_in.to_owned(),
@@ -325,7 +386,7 @@ mod tests {
     #[test]
     fn an_absent_tail_key_selects_the_built_in_entry() {
         let built_in = tail_built_in();
-        let picker = picker(tail_options(), &built_in, None::<u8>, |_| None);
+        let picker = picker(tail_options(), &built_in, None, |_| None);
         assert_eq!(picker.selected, SharedString::from(built_in.clone()));
         assert!(
             values(&picker.options).contains(&built_in),

@@ -329,12 +329,18 @@ pub(super) struct AgentCatalogRow {
     /// write no key — which resolves to the built-in. Edited through the same
     /// editor the chat pane opens; see [`sections::agent_transcript`].
     pub(super) fold_mode: Option<FoldMode>,
+    /// The `fold_mode` tokens this row loaded, kept so an untouched axis is
+    /// written back exactly as it was read — see `sections::agent_transcript`.
+    pub(super) fold_mode_loaded: Option<Vec<String>>,
     /// Where this row's fold editor is looking. Not part of the value: the pane
     /// editing the same agent keeps its own — see [`FoldEditorState`].
     pub(super) fold_editor: FoldEditorState,
     /// Visible row kinds a fresh chat pane starts on. Same `None`-is-built-in
     /// rule as `fold_mode`.
     pub(super) display_filter: Option<DisplayFilter>,
+    /// The `display_filter` tokens this row loaded — same rule as
+    /// `fold_mode_loaded`.
+    pub(super) display_filter_loaded: Option<Vec<String>>,
     /// Trailing-step window a fresh chat pane starts on. Still a dropdown, and
     /// so still able to load a size it cannot offer.
     pub(super) tail_window_select: Entity<SelectState>,
@@ -582,8 +588,10 @@ impl SettingsWindow {
             preset,
             transcript: transcript.preserved,
             fold_mode: transcript.fold_mode,
+            fold_mode_loaded: transcript.fold_mode_loaded,
             fold_editor: FoldEditorState::default(),
             display_filter: transcript.display_filter,
+            display_filter_loaded: transcript.display_filter_loaded,
             tail_window_select: transcript.tail_window_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)

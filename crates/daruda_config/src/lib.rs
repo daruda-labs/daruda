@@ -1027,7 +1027,7 @@ fn status_bar_item_slug(item: StatusBarItem) -> &'static str {
 }
 
 /// The per-agent transcript-presentation keys, written only where set so an
-/// agent that follows `[agent]` keeps no key of its own. An empty
+/// agent that follows the built-in keeps no key of its own. An empty
 /// `display_filter` list is a set of its own (nothing visible), so it is
 /// written like any other value rather than treated as absent.
 fn write_transcript_defaults(

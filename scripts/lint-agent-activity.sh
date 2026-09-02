@@ -86,6 +86,20 @@ FAIL=0
 # the pane cannot name it and a hit there is always an unrelated `turn` — the
 # fold editor's turn *column* (`FoldEditorState::turn`) is one such name.
 
+# The narrowing above rests on `Turn` being unqualified-private, so confirm
+# that first: widening its visibility would silently un-defend the invariant
+# everywhere outside the scanned scope.
+if ! grep -qE '^enum Turn \{' "$VIEW_DIR/mod.rs"; then
+    echo "" >&2
+    echo "lint-agent-activity: FAIL — \`enum Turn\` is no longer private to view/:" >&2
+    grep -nE '(pub(\([^)]*\))? )?enum Turn \{' "$VIEW_DIR/mod.rs" >&2 || true
+    echo "" >&2
+    echo "  Check (a) only scans $SCAN_DIR because nothing outside it can name" >&2
+    echo "  \`Turn\`. A visibility wider than module-private breaks that premise —" >&2
+    echo "  either restore it, or widen SCAN_DIR back to crates/app/src." >&2
+    FAIL=1
+fi
+
 HITS_A=$(
     grep -rEn '\.turn\b|Turn::(InFlight|Idle)\b' "$SCAN_DIR" \
         --include='*.rs' \

@@ -1,5 +1,5 @@
-//! The transcript-presentation defaults a chat pane starts on, resolved over
-//! the per-agent and app-wide config layers.
+//! The transcript-presentation defaults a chat pane starts on, as the pane's
+//! own agent entry states them.
 
 use daruda_config::{AgentDefinition, TAIL_WINDOW_DEFAULT};
 

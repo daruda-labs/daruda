@@ -4,7 +4,7 @@ use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;
-use crate::transcript::fold_mode::FoldPreset;
+use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};
 
 /// Construct a Settings window wrapped in `gpui_component::Root` —
 /// matches the production windowing path so `gpui_component::Input`'s
@@ -892,9 +892,10 @@ fn editing_a_transcript_axis_replaces_the_loaded_value(cx: &mut TestAppContext) 
     );
     let (wh, win) = build_window_with_config(cx, config);
     confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+    // Showing thinking leaves the set still narrowed, so the axis keeps
+    // stating a value rather than falling back to the built-in.
     win.update(cx, |w, cx| {
         w.select_agent_row_fold_preset(0, Some(FoldPreset::Expanded), cx);
-        w.set_agent_row_filter_section(0, FilterFacet::Tools, true, cx);
         w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
     });
 
@@ -905,11 +906,12 @@ fn editing_a_transcript_axis_replaces_the_loaded_value(cx: &mut TestAppContext) 
         assert_eq!(saved.tail_window, Some(3));
         let filter =
             DisplayFilter::from_stored(&saved.display_filter.expect("an edited filter is written"));
-        assert!(filter.contains(FilterFacet::Tools), "the section went on");
         assert!(
             filter.contains(FilterFacet::Thinking),
             "the toggle flipped the loaded value rather than restating it"
         );
+        assert_ne!(filter, loaded, "and it is no longer what was loaded");
+        assert!(!filter.shows_everything(), "still a narrowed set");
     });
 }
 
@@ -1028,8 +1030,128 @@ fn replacing_a_custom_step_count_rebases_the_row(cx: &mut TestAppContext) {
     );
 }
 
+/// The drift the shared editor exists to prevent: a rule edit that lands back
+/// on a preset still has to leave the matrix recallable, exactly as the chat
+/// pane's `set_fold_mode` does. Settings reaches this through `on_change`,
+/// which no preset-strip test covers.
+#[gpui::test]
+fn a_rule_edit_back_onto_a_preset_keeps_the_matrix_recallable(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let matrix = FoldPreset::Summary.mode().with_rule(
+        TurnPosition::Last,
+        FoldBlock::Diff,
+        BlockRule::Expanded,
+    );
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Summary), cx);
+        w.set_agent_row_fold_mode(0, Some(matrix), cx);
+        // Straight back to the preset — the matrix is now only reachable
+        // through the `Custom` segment.
+        w.set_agent_row_fold_mode(0, Some(FoldPreset::Summary.mode()), cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(
+            row.fold_editor.custom(),
+            Some(matrix),
+            "the edit must survive landing back on a preset"
+        );
+        assert_eq!(row.fold_mode_value(), FoldPreset::Summary.mode());
+
+        w.select_agent_row_fold_preset(0, None, cx);
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().fold_mode_value(),
+            matrix,
+            "the Custom segment returns to it"
+        );
+    });
+}
+
+/// Editing an axis onto the built-in writes no key: an absent key and a key
+/// stating that value resolve alike. The departure is still recallable.
+#[gpui::test]
+fn editing_onto_the_built_in_drops_the_key(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let matrix = FoldPreset::Auto.mode().with_rule(
+        TurnPosition::Past,
+        FoldBlock::Thinking,
+        BlockRule::Collapsed,
+    );
+    win.update(cx, |w, cx| {
+        w.set_agent_row_fold_mode(0, Some(matrix), cx);
+        assert!(w.agent_editable_row(0).unwrap().fold_mode().is_some());
+
+        w.set_agent_row_fold_mode(0, Some(FoldMode::default()), cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), None, "the built-in states nothing");
+        assert_eq!(row.fold_editor.custom(), Some(matrix), "still recallable");
+
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+        assert!(w.agent_editable_row(0).unwrap().display_filter().is_some());
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().display_filter(),
+            None,
+            "back to the unfiltered set, which is the built-in one"
+        );
+    });
+}
+
+/// The turn column is a view switch, not a value: moving it must not make the
+/// row state a key it did not state before.
+#[gpui::test]
+fn moving_the_fold_turn_column_writes_nothing(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |w, cx| {
+        w.set_agent_row_fold_turn(0, TurnPosition::Past, cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_editor.turn(), TurnPosition::Past);
+        assert_eq!(row.fold_mode(), None, "a view switch is not a value");
+    });
+}
+
+/// An axis nobody edited is written back exactly as it was read, so a save that
+/// edits some other field cannot rewrite it — including a token this build does
+/// not know, which the parsers drop on the way in.
+#[gpui::test]
+fn an_untouched_axis_keeps_tokens_this_build_cannot_state(cx: &mut TestAppContext) {
+    let stored_fold = vec!["summary".to_string(), "last.notebook=collapsed".to_string()];
+    let stored_filter = vec!["prose".to_string(), "brand_new_facet".to_string()];
+    let tuned = daruda_config::AgentDefinition {
+        id: "forward".to_string(),
+        name: "Forward".to_string(),
+        launch: daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        default_mode: None,
+        default_model: None,
+        fold_mode: Some(stored_fold.clone()),
+        tail_window: None,
+        display_filter: Some(stored_filter.clone()),
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::Custom(tuned)],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, _cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), Some(stored_fold.clone()));
+        assert_eq!(row.display_filter(), Some(stored_filter.clone()));
+    });
+
+    // Editing the axis moves the value off what the tokens spell, so from then
+    // on the row states the value and the unknown token is gone by choice.
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Expanded), cx);
+        let written = w.agent_editable_row(0).unwrap().fold_mode();
+        assert_eq!(written, Some(vec!["expanded".to_string()]));
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().display_filter(),
+            Some(stored_filter),
+            "the axis nobody touched is still untouched"
+        );
+    });
+}
+
 /// A row that states nothing writes nothing, so the agent keeps falling
-/// through to the app-wide `[agent]` section.
+/// through to the built-in values.
 #[gpui::test]
 fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
