@@ -2109,6 +2109,131 @@ mod tests {
             )
     }
 
+    /// Replays a native subagent exchange *during* `session/load`, before the
+    /// load response returns. `LoadSessionResponse` is what lets the host reach
+    /// `Connected`, so every notification here lands while the session is still
+    /// resuming.
+    fn native_subagent_resume_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{InitializeResponse, LoadSessionResponse};
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(
+                        InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
+                            agent_client_protocol::schema::v1::AgentCapabilities::new()
+                                .load_session(true),
+                        ),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |req: LoadSessionRequest, responder, conn| {
+                    let root = req.session_id.clone();
+                    for (session, update) in [
+                        (
+                            root.clone(),
+                            serde_json::json!({
+                                "sessionUpdate": "subagent_spawned",
+                                "subagentSessionId": "sess-kid",
+                                "name": "Lorentz",
+                                "task": "Probe the UI",
+                                "capabilities": {},
+                            }),
+                        ),
+                        (
+                            SessionId::from("sess-kid"),
+                            serde_json::json!({
+                                "sessionUpdate": "tool_call",
+                                "toolCallId": "c1",
+                                "title": "Read main.rs",
+                                "kind": "read",
+                                "status": "completed",
+                            }),
+                        ),
+                        (
+                            root.clone(),
+                            serde_json::json!({
+                                "sessionUpdate": "subagent_state_update",
+                                "subagentSessionId": "sess-kid",
+                                "state": "completed",
+                            }),
+                        ),
+                    ] {
+                        conn.send_notification(CompatSessionNotification {
+                            session_id: session,
+                            update,
+                            meta: None,
+                        })?;
+                    }
+                    responder.respond(LoadSessionResponse::new())
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// A resume replays the whole conversation before the session is
+    /// `Connected`, so the router has to hold the parent/child relation across
+    /// that boundary. Nothing else covers it: the capture-replay guard
+    /// (`wire_log::replay`) reconstructs from a file rather than a live load,
+    /// and the live subagent test above runs entirely after `Connected`.
+    #[test]
+    fn a_resume_replays_a_subagent_before_the_session_is_connected() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                native_subagent_resume_agent(),
+                PathBuf::from("."),
+                None,
+                Vec::new(),
+                None,
+                Some(SessionId::from("sess-root")),
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            // The loop exits at `Connected`, so everything counted here
+            // necessarily arrived while the session was still loading.
+            let mut items: Vec<ChatItem> = Vec::new();
+            let mut updates_before_connected = 0usize;
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Update(update)) => {
+                        updates_before_connected += 1;
+                        crate::mapping::apply_update(&mut items, &update);
+                    }
+                    Some(AcpEvent::Connected { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            }
+
+            assert!(
+                updates_before_connected > 0,
+                "the replay is supposed to land during the load, not after it"
+            );
+            let [ChatItem::ToolCall(parent), ChatItem::ToolCall(child)] = &items[..] else {
+                panic!("a launch and its one child, got {items:?}");
+            };
+            assert!(parent.is_subagent_launch());
+            assert_eq!(parent.subagent_type(), Some("Lorentz"));
+            assert_eq!(parent.status, crate::model::ToolStatusView::Completed);
+            assert_eq!(
+                child.parent_tool_id.as_deref(),
+                Some(parent.id.as_str()),
+                "a resumed child renders inside its launch, not as a top-level row"
+            );
+
+            drop(command_tx);
+            let _ = connection.await;
+        });
+    }
+
     /// The whole native subagent path over a real SDK connection: the compat
     /// notification really does bind to `session/update`, the raw payload
     /// survives, and the router turns a child session's work into the flat
