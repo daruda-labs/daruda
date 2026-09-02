@@ -395,6 +395,23 @@ fn spawn_send_task(
             // `pending_permissions`.
             let token = cx.update(|_cx| keychain::read_token());
             let Some(token) = token else {
+                // The caller only builds a ping when the feature is on and a
+                // chat is paired, so reaching here means the config says
+                // "paired" while the Keychain has no token — the relay is dead
+                // and nothing else on this path would say so. Every other
+                // failure in this file is logged; without this one the symptom
+                // is a bridge that looks configured and silently sends nothing.
+                LogWriter::log(
+                    ErrorReport::new("Telegram ping dropped: no bot token")
+                        .severity(ErrorSeverity::Warning)
+                        .message(
+                            "Telegram is enabled and paired, but no bot token is stored in the \
+                             Keychain. Re-pair from Settings to restore the relay.",
+                        )
+                        .at(file!(), line!())
+                        .dedup("telegram.missing_token")
+                        .build(),
+                );
                 continue;
             };
 
