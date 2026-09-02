@@ -732,6 +732,76 @@ preset = \"codex-acp\"\n";
     );
 }
 
+/// The app-wide `[agent]` transcript keys used to apply to every entry that
+/// stated nothing. Dropping that layer without lifting them would have silently
+/// stopped a hand-set value from working.
+#[test]
+fn legacy_app_wide_transcript_keys_lift_onto_entries_that_state_nothing() {
+    let input = "\
+[agent]\n\
+fold_mode = [\"expanded\"]\n\
+tail_window = 3\n\
+display_filter = [\"prose\"]\n\
+[[agents]]\n\
+id = \"states-nothing\"\n\
+name = \"States Nothing\"\n\
+command = \"npx -y some-acp\"\n\
+[[agents]]\n\
+id = \"states-fold\"\n\
+name = \"States Fold\"\n\
+command = \"npx -y some-acp\"\n\
+fold_mode = [\"summary\"]\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    cfg.clamp();
+
+    let resolved = cfg.resolved_agents();
+    assert_eq!(
+        resolved[0].fold_mode.as_deref(),
+        Some(["expanded".to_string()].as_slice())
+    );
+    assert_eq!(resolved[0].tail_window, Some(3));
+    assert_eq!(
+        resolved[0].display_filter.as_deref(),
+        Some(["prose".to_string()].as_slice())
+    );
+
+    // Per axis: the entry that already states fold keeps its own, and still
+    // takes the two it says nothing about.
+    assert_eq!(
+        resolved[1].fold_mode.as_deref(),
+        Some(["summary".to_string()].as_slice())
+    );
+    assert_eq!(resolved[1].tail_window, Some(3));
+}
+
+/// The lifted keys are never written back under `[agent]`, so the migration
+/// settles rather than re-running against a value the catalog now owns.
+#[test]
+fn legacy_app_wide_transcript_keys_are_not_written_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[agent]\nfold_mode = [\"expanded\"]\ntail_window = 3\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    assert_eq!(cfg.resolved_agents()[0].tail_window, Some(3));
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let agent_section = text
+        .split("[[agents]]")
+        .next()
+        .expect("the [agent] section comes first");
+    assert!(
+        !agent_section.contains("fold_mode"),
+        "the app-wide key must not be rewritten: {text}"
+    );
+    assert!(text.contains("tail_window = 3"), "{text}");
+}
+
 #[test]
 fn settings_patch_migrates_and_removes_a_stale_permission_mode_key() {
     let dir = tempfile::tempdir().unwrap();

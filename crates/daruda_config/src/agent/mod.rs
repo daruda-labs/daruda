@@ -481,6 +481,21 @@ pub(crate) fn default_agents() -> Vec<AgentEntry> {
     vec![AgentEntry::Custom(AgentDefinition::claude_default())]
 }
 
+/// The app-wide transcript keys a pre-catalog `[agent]` section could state.
+/// Carried from load to [`crate::Config::clamp`] and nowhere else.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LegacyTranscript {
+    pub(crate) fold_mode: Option<Vec<String>>,
+    pub(crate) tail_window: Option<u8>,
+    pub(crate) display_filter: Option<Vec<String>>,
+}
+
+impl LegacyTranscript {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.fold_mode.is_none() && self.tail_window.is_none() && self.display_filter.is_none()
+    }
+}
+
 /// Agent chat configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -491,6 +506,20 @@ pub struct AgentConfig {
     #[doc(hidden)]
     #[serde(default, rename = "default_permission_mode", skip_serializing)]
     pub legacy_default_permission_mode: Option<String>,
+    /// Legacy app-wide transcript presentation, from before the catalog held
+    /// these per agent. Same treatment as
+    /// [`Self::legacy_default_permission_mode`]: deserialized only so
+    /// [`crate::Config::clamp`] can lift them onto the entries that state
+    /// nothing, never written back.
+    #[doc(hidden)]
+    #[serde(default, rename = "fold_mode", skip_serializing)]
+    pub legacy_fold_mode: Option<Vec<String>>,
+    #[doc(hidden)]
+    #[serde(default, rename = "tail_window", skip_serializing)]
+    pub legacy_tail_window: Option<u8>,
+    #[doc(hidden)]
+    #[serde(default, rename = "display_filter", skip_serializing)]
+    pub legacy_display_filter: Option<Vec<String>>,
     /// How the agent chat input submits a message. When `false` (the
     /// default), plain Enter sends and Shift+Enter inserts a newline —
     /// matching Zed's agent panel default. When `true`, Enter inserts a
@@ -560,6 +589,9 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             legacy_default_permission_mode: None,
+            legacy_fold_mode: None,
+            legacy_tail_window: None,
+            legacy_display_filter: None,
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
@@ -574,6 +606,16 @@ impl AgentConfig {
             .take()
             .map(|mode| mode.trim().to_string())
             .filter(|mode| !mode.is_empty())
+    }
+
+    /// The legacy app-wide transcript keys, taken so a later save cannot write
+    /// them back. All three at once because they are migrated together.
+    pub(crate) fn take_legacy_transcript(&mut self) -> LegacyTranscript {
+        LegacyTranscript {
+            fold_mode: self.legacy_fold_mode.take(),
+            tail_window: self.legacy_tail_window.take(),
+            display_filter: self.legacy_display_filter.take(),
+        }
     }
 
     /// Clamp numeric fields to their valid ranges.

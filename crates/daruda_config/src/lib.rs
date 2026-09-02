@@ -238,6 +238,7 @@ impl Config {
     /// Clamp all numeric fields to their valid ranges.
     fn clamp(&mut self) {
         let legacy_default_mode = self.agent.take_legacy_default_permission_mode();
+        let legacy_transcript = self.agent.take_legacy_transcript();
         self.font.clamp();
         self.window.clamp();
         self.left_dock.clamp();
@@ -258,6 +259,7 @@ impl Config {
         if let Some(mode) = legacy_default_mode {
             migrate_legacy_default_permission_mode(&mut self.agents, &mode);
         }
+        migrate_legacy_transcript(&mut self.agents, &legacy_transcript);
     }
 
     /// The launchable agent catalog: every [`AgentEntry`] that resolves, in
@@ -343,6 +345,60 @@ fn legacy_mode_can_apply_to(launch: &AgentLaunch, mode: &str) -> bool {
         // Unknown adapters previously received the global candidate too; keep
         // that safe behavior because `daruda_acp` skips unadvertised modes.
         None => true,
+    }
+}
+
+/// Lift the pre-catalog `[agent]` transcript keys onto every entry that states
+/// nothing on that axis — which is what those keys used to do at resolve time.
+///
+/// Per axis, so an entry that already states one keeps it. Nothing writes the
+/// `[agent]` keys back, so this runs once in practice: the next save moves the
+/// value into `[[agents]]` and the old key, left untouched in the file by the
+/// `toml_edit` patcher, stops being read.
+fn migrate_legacy_transcript(agents: &mut [AgentEntry], legacy: &agent::LegacyTranscript) {
+    if legacy.is_empty() {
+        return;
+    }
+    for entry in agents {
+        let Some(definition) = entry.resolve() else {
+            continue;
+        };
+        let fold_mode = definition
+            .fold_mode
+            .is_none()
+            .then(|| legacy.fold_mode.clone())
+            .flatten();
+        let tail_window = definition
+            .tail_window
+            .is_none()
+            .then_some(legacy.tail_window)
+            .flatten();
+        let display_filter = definition
+            .display_filter
+            .is_none()
+            .then(|| legacy.display_filter.clone())
+            .flatten();
+        set_agent_entry_transcript(entry, fold_mode, tail_window, display_filter);
+    }
+}
+
+fn set_agent_entry_transcript(
+    entry: &mut AgentEntry,
+    fold_mode: Option<Vec<String>>,
+    tail_window: Option<u8>,
+    display_filter: Option<Vec<String>>,
+) {
+    match entry {
+        AgentEntry::Preset { overrides, .. } => {
+            overrides.fold_mode = overrides.fold_mode.take().or(fold_mode);
+            overrides.tail_window = overrides.tail_window.take().or(tail_window);
+            overrides.display_filter = overrides.display_filter.take().or(display_filter);
+        }
+        AgentEntry::Custom(definition) => {
+            definition.fold_mode = definition.fold_mode.take().or(fold_mode);
+            definition.tail_window = definition.tail_window.take().or(tail_window);
+            definition.display_filter = definition.display_filter.take().or(display_filter);
+        }
     }
 }
 
@@ -651,6 +707,12 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         // Stale key from the removed global permission-mode axis — clear it
         // so an existing config.toml doesn't keep carrying it forward.
         t.remove("default_permission_mode");
+        // Likewise the app-wide transcript axes, now stated per agent. Left in
+        // place they would re-apply on every load, undoing an axis the user
+        // later handed back to the built-in in Settings.
+        t.remove("fold_mode");
+        t.remove("tail_window");
+        t.remove("display_filter");
     });
 
     patch_section(&mut doc, "telegram", |t| {
