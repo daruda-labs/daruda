@@ -322,7 +322,7 @@ fn activity_options_panel(
             super::super::tail_window::tail_window_panel(view, tail, pane_id, cx)
         }
     };
-    panel_root(theme::AGENT_CHAT_RULES_PANEL_W, window)
+    panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
         .child(fixed_region().child(activity_options_tabs(view, active_tab, pane_id, cx)))
         .child(panel)
         .into_any_element()

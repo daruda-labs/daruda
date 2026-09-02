@@ -1,6 +1,4 @@
-//! The overridden mark an Activity Bar chip carries. The popover shell the
-//! panels sit in is host-neutral and lives with the editors they hold, in
-//! [`crate::transcript::editor`].
+//! The overridden mark an Activity Bar chip carries.
 
 use crate::surface::strings as s;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;

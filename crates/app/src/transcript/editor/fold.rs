@@ -265,7 +265,7 @@ fn rule_row(
         .items_center()
         .gap(px(theme::GAP_LG))
         .when(nested, |row| {
-            row.pl(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
+            row.pl(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
         })
         .child(
             div()

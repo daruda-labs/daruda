@@ -66,7 +66,7 @@ pub(crate) fn filter_editor(
                     .child(parent_checkbox(current, parent, id_prefix, &actions))
                     .child(
                         div()
-                            .ml(px(theme::AGENT_CHAT_OPTION_NEST_INDENT))
+                            .ml(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
                             .flex()
                             .flex_col()
                             .gap(px(theme::GAP_SM))

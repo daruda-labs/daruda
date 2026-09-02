@@ -994,7 +994,7 @@ fn replacing_a_custom_step_count_rebases_the_row(cx: &mut TestAppContext) {
     );
     win.read_with(cx, |w, _cx| {
         assert_eq!(
-            w.agent_editable_row(0).unwrap().transcript.tail_window,
+            w.agent_editable_row(0).unwrap().tail_window_loaded,
             Some(12)
         );
     });
@@ -1005,7 +1005,7 @@ fn replacing_a_custom_step_count_rebases_the_row(cx: &mut TestAppContext) {
         let row = w.agent_editable_row(0).unwrap();
         assert_eq!(row.tail_window(cx), Some(3));
         assert_eq!(
-            row.transcript.tail_window, None,
+            row.tail_window_loaded, None,
             "the old count must not remain hidden behind the picker"
         );
     });

@@ -344,19 +344,11 @@ pub(super) struct AgentCatalogRow {
     /// Trailing-step window a fresh chat pane starts on. Still a dropdown, and
     /// so still able to load a size it cannot offer.
     pub(super) tail_window_select: Entity<SelectState>,
-    /// The one transcript key this row loaded that its dropdown cannot state.
-    /// It backs that picker's configured-elsewhere entry and is written back
+    /// The size this row loaded when the dropdown above cannot state it. It
+    /// backs that picker's configured-elsewhere entry and is written back
     /// verbatim while it stays picked, so an unrelated edit cannot flatten a
-    /// hand-written value.
-    pub(super) transcript: AgentRowTranscript,
-}
-
-/// The per-agent transcript-presentation values an [`AgentCatalogRow`] carries
-/// verbatim because no picker can state them. `None` means the picker holds the
-/// whole value. See [`daruda_config::AgentDefinition`] for what the key means.
-#[derive(Clone, Default)]
-pub(super) struct AgentRowTranscript {
-    pub(super) tail_window: Option<u8>,
+    /// hand-written value. `None` means the picker holds the whole value.
+    pub(super) tail_window_loaded: Option<u8>,
 }
 
 /// One row of the session host registry editor. Unlike [`AgentCatalogRow`],
@@ -586,7 +578,7 @@ impl SettingsWindow {
             );
         AgentCatalogRow {
             preset,
-            transcript: transcript.preserved,
+            tail_window_loaded: transcript.tail_window_loaded,
             fold_mode: transcript.fold_mode,
             fold_mode_loaded: transcript.fold_mode_loaded,
             fold_editor: FoldEditorState::default(),

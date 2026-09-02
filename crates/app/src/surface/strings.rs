@@ -4290,11 +4290,13 @@ pub fn settings_agent_field_display_filter() -> String {
     rust_i18n::t!("settings.agent_field_display_filter").into_owned()
 }
 
-/// The entry standing in for a stored transcript value no picker can state —
-/// a fold matrix with cell overrides, an off-list step count, a partial
-/// visible set. Selected, and written back untouched while it stays picked.
-pub fn settings_agent_transcript_custom() -> String {
-    rust_i18n::t!("settings.agent_transcript_custom").into_owned()
+/// The Recent steps entry standing in for a stored size the list cannot offer.
+/// Selected, and written back untouched while it stays picked.
+///
+/// Deliberately not "Custom": the Fold field one row above says that, and there
+/// it names a hand-edited matrix the editor can state — the opposite of this.
+pub fn settings_agent_tail_window_off_list() -> String {
+    rust_i18n::t!("settings.agent_tail_window_off_list").into_owned()
 }
 
 /// A transcript axis a row leaves to the built-in: the value it resolves to,

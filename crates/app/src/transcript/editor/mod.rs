@@ -55,7 +55,7 @@ fn panel_w(design_w: f32, window: &Window) -> Pixels {
 
 fn panel_max_h(window: &Window) -> Pixels {
     px(cap_to_viewport(
-        theme::AGENT_CHAT_RULES_PANEL_MAX_H,
+        theme::TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H,
         f32::from(window.viewport_size().height),
     ))
 }
@@ -63,7 +63,7 @@ fn panel_max_h(window: &Window) -> Pixels {
 /// The design size, lowered when the window is too small to hold it with room
 /// left over for the popover's own margin.
 fn cap_to_viewport(design: f32, viewport: f32) -> f32 {
-    design.min(viewport * theme::AGENT_CHAT_PANEL_VIEWPORT_FRACTION)
+    design.min(viewport * theme::TRANSCRIPT_EDITOR_VIEWPORT_FRACTION)
 }
 
 /// The band a panel scrolls: rules and facets outgrow the popover, headings and
@@ -112,14 +112,14 @@ mod tests {
 
     /// Every design size a host actually passes in.
     const DESIGNS: [f32; 3] = [
-        theme::AGENT_CHAT_RULES_PANEL_MAX_H,
-        theme::AGENT_CHAT_RULES_PANEL_W,
-        theme::AGENT_CHAT_OPTIONS_PANEL_W,
+        theme::TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H,
+        theme::TRANSCRIPT_EDITOR_RULES_PANEL_W,
+        theme::TRANSCRIPT_EDITOR_PANEL_W,
     ];
 
     #[test]
     fn the_viewport_fraction_only_ever_lowers_the_design_cap() {
-        let fraction = theme::AGENT_CHAT_PANEL_VIEWPORT_FRACTION;
+        let fraction = theme::TRANSCRIPT_EDITOR_VIEWPORT_FRACTION;
         assert!(
             (0.0..=1.0).contains(&fraction),
             "a fraction of the viewport"
@@ -140,9 +140,9 @@ mod tests {
     fn a_window_narrower_than_the_fold_editor_shrinks_it() {
         // The cap only bites below ~538px of window width (430 / 0.8), which is
         // a hand-resized window rather than any capture size.
-        let capped = cap_to_viewport(theme::AGENT_CHAT_RULES_PANEL_W, 480.0);
+        let capped = cap_to_viewport(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, 480.0);
         assert!(
-            capped < theme::AGENT_CHAT_RULES_PANEL_W,
+            capped < theme::TRANSCRIPT_EDITOR_RULES_PANEL_W,
             "the design width has to give way to a small window"
         );
     }

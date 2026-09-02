@@ -58,7 +58,7 @@ pub(in crate::settings_window) fn fold_mode_control(
     ))
     .content(move |_, window, cx| {
         let w = window_entity.clone();
-        panel_root(theme::AGENT_CHAT_RULES_PANEL_W, window)
+        panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
             .child(fold_panel(
                 &w,
                 catalog_index,
@@ -141,7 +141,7 @@ pub(in crate::settings_window) fn display_filter_control(
     ))
     .content(move |_, window, cx| {
         let w = window_entity.clone();
-        panel_root(theme::AGENT_CHAT_OPTIONS_PANEL_W, window)
+        panel_root(theme::TRANSCRIPT_EDITOR_PANEL_W, window)
             .child(filter_panel(&w, catalog_index, filter, overridden, cx))
             .into_any_element()
     })

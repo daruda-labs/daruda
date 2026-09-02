@@ -838,7 +838,7 @@ settings:
   agent_field_fold_mode: "접기"
   agent_field_tail_window: "최근 단계"
   agent_field_display_filter: "필터"
-  agent_transcript_custom: "사용자 지정 (설정 파일)"
+  agent_tail_window_off_list: "기타 (설정 파일)"
   agent_transcript_built_in: "%{value} (기본값)"
   agent_remote_path_hint: "원격 작업 디렉터리는 워크트리별로 설정됩니다 — 사이드바에서 워크트리를 우클릭하고 \"세션 호스트…\"를 선택하세요."
   agent_preset: "프리셋"

@@ -839,7 +839,7 @@ settings:
   agent_field_fold_mode: "Fold"
   agent_field_tail_window: "Recent steps"
   agent_field_display_filter: "Filter"
-  agent_transcript_custom: "Custom (from config)"
+  agent_tail_window_off_list: "Other (from config)"
   agent_transcript_built_in: "%{value} (built-in)"
   agent_remote_path_hint: "The remote working directory is set per-Worktree — right-click a Worktree in the sidebar and choose \"Session Host…\"."
   agent_preset: "Preset"

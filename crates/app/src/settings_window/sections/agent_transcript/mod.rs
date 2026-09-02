@@ -21,13 +21,13 @@ use crate::ui::select::{self, SelectOption, SelectState};
 use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT};
 use gpui::{AppContext as _, Entity, SharedString, Window};
 
-use super::super::{AgentCatalogRow, AgentRowTranscript, SettingsWindow};
+use super::super::{AgentCatalogRow, SettingsWindow};
 
 pub(in crate::settings_window) mod editor;
 
-/// Picker value for the entry standing in for a stored value none of the
-/// offered choices can state. Not a token any axis produces, so it cannot
-/// collide with a real choice.
+/// Picker value for the entry standing in for a stored size none of the offered
+/// choices can state. Not a token the axis produces, so it cannot collide with
+/// a real choice.
 pub(in crate::settings_window) const CUSTOM: &str = "__custom__";
 
 /// The transcript controls a row renders, plus the one stored value the
@@ -38,7 +38,7 @@ pub(in crate::settings_window) struct TranscriptRow {
     pub(in crate::settings_window) display_filter: Option<DisplayFilter>,
     pub(in crate::settings_window) display_filter_loaded: Option<Vec<String>>,
     pub(in crate::settings_window) tail_window_select: Entity<SelectState>,
-    pub(in crate::settings_window) preserved: AgentRowTranscript,
+    pub(in crate::settings_window) tail_window_loaded: Option<u8>,
 }
 
 /// Build the transcript half of a catalog row from the definition it loaded.
@@ -67,9 +67,7 @@ pub(in crate::settings_window) fn transcript_row(
             .as_ref()
             .map(|tokens| DisplayFilter::from_stored(tokens)),
         display_filter_loaded: definition.display_filter.clone(),
-        preserved: AgentRowTranscript {
-            tail_window: tail.preserved,
-        },
+        tail_window_loaded: tail.preserved,
         tail_window_select: cx
             .new(|cx| select::state_with_options(tail.options, Some(&tail.selected), window, cx)),
     }
@@ -100,7 +98,7 @@ impl AgentCatalogRow {
     pub(in crate::settings_window) fn tail_window(&self, cx: &gpui::App) -> Option<u8> {
         let value = picked(&self.tail_window_select, cx)?;
         match value.as_str() {
-            CUSTOM => self.transcript.tail_window,
+            CUSTOM => self.tail_window_loaded,
             size if size == tail_built_in() => None,
             size => size.parse().ok(),
         }
@@ -320,7 +318,7 @@ fn picker(
         Some(None) => {
             options.push(SelectOption::new(
                 CUSTOM,
-                s::settings_agent_transcript_custom(),
+                s::settings_agent_tail_window_off_list(),
             ));
             return Picker {
                 selected: SharedString::from(CUSTOM),

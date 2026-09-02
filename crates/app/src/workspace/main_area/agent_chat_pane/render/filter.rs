@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{Anchor, AnyElement, Context, IntoElement, SharedString, prelude::*, px};
 
-use super::options_panel::axis_chip_label;
+use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::ResetSpec;
@@ -43,7 +43,7 @@ pub(super) fn display_filter_chip(
         .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
     )
     .content(move |_, window, cx| {
-        panel_root(theme::AGENT_CHAT_OPTIONS_PANEL_W, window)
+        panel_root(theme::TRANSCRIPT_EDITOR_PANEL_W, window)
             .child(filter_panel(&view, filter, pane_id, cx))
             .into_any_element()
     })
