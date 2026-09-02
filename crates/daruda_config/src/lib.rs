@@ -506,7 +506,7 @@ fn apply_settings_patch_to_inner(
         patch.apply_to(&mut config);
         config.clamp();
         patch_settings_document(&mut doc, &config, patch);
-        remove_legacy_agent_permission_mode(&mut doc, &config);
+        remove_legacy_agent_keys_from(&mut doc, &config);
 
         let text = doc.to_string();
         let mut written: Config = toml::from_str(&text).map_err(|e| {
@@ -704,15 +704,7 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "input_max_rows",
             toml_edit::value(i64::from(config.agent.input_max_rows)),
         );
-        // Stale key from the removed global permission-mode axis — clear it
-        // so an existing config.toml doesn't keep carrying it forward.
-        t.remove("default_permission_mode");
-        // Likewise the app-wide transcript axes, now stated per agent. Left in
-        // place they would re-apply on every load, undoing an axis the user
-        // later handed back to the built-in in Settings.
-        t.remove("fold_mode");
-        t.remove("tail_window");
-        t.remove("display_filter");
+        remove_legacy_agent_keys(t);
     });
 
     patch_section(&mut doc, "telegram", |t| {
@@ -1202,11 +1194,36 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
     table
 }
 
-fn remove_legacy_agent_permission_mode(doc: &mut toml_edit::DocumentMut, config: &Config) {
+/// The `[agent]` keys [`Config::clamp`] migrates into the agent catalog. Listed
+/// once because both save paths have to clear the same set: left in place they
+/// re-migrate on the next load and undo the edit that was just saved.
+const LEGACY_AGENT_KEYS: [&str; 4] = [
+    "default_permission_mode",
+    "fold_mode",
+    "tail_window",
+    "display_filter",
+];
+
+/// Clear the migrated keys from an `[agent]` table, reporting whether any was
+/// there.
+fn remove_legacy_agent_keys(table: &mut dyn toml_edit::TableLike) -> bool {
+    // A loop rather than `any`, which short-circuits and would leave every key
+    // after the first hit in the file.
+    let mut removed = false;
+    for key in LEGACY_AGENT_KEYS {
+        removed |= table.remove(key).is_some();
+    }
+    removed
+}
+
+/// The incremental Settings save patches in place, so it clears the same keys
+/// the full save does — and rewrites `[[agents]]`, which is where the values
+/// they carried have just landed.
+fn remove_legacy_agent_keys_from(doc: &mut toml_edit::DocumentMut, config: &Config) {
     let removed = doc
         .get_mut("agent")
         .and_then(toml_edit::Item::as_table_like_mut)
-        .is_some_and(|t| t.remove("default_permission_mode").is_some());
+        .is_some_and(remove_legacy_agent_keys);
     if removed {
         replace_agents(doc, &config.agents);
     }
