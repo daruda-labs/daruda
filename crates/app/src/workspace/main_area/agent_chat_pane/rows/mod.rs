@@ -695,6 +695,17 @@ fn tool_run_end(
     k
 }
 
+/// Whether this call earns a row of its own.
+///
+/// This is the transcript's row boundary, and **both narrowing axes stop at
+/// it**: a nested subagent child never becomes a [`RenderRow`], so neither the
+/// step window nor the display filter — whose unit is a projected row — can
+/// reach inside the card that renders it. The other half of the rule lives in
+/// [`FilterMatchIndex::build`], which keeps every descendant of a kept tool for
+/// the same reason, and the card walks the hierarchy itself
+/// (`render/tool.rs`). Narrowing one axis into a card while the other stays out
+/// is the divergence this states out loud; `no_axis_narrows_inside_a_tool_card`
+/// pins it.
 fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
     matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
 }
@@ -779,10 +790,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let grun = k..tool_run_end(items, k, run.end, hierarchy);
                 k = grun.end;
                 let group = GroupFilter::of(grun.clone(), items, filter);
-                // Live group headers stay visible through enclosing folds.
-                let group_live = grun.clone().any(
-                |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
-            );
+                let group_live = run_is_live(items, grun.clone(), live_units);
                 if grun.len() >= RUN_GROUP_MIN {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
@@ -978,6 +986,24 @@ impl LiveSubagentUnits {
     pub(in crate::workspace) fn contains(&self, tool_id: &str) -> bool {
         self.ids.contains(tool_id)
     }
+}
+
+/// Whether any call in `run` is live — the run-wide reading of
+/// [`tool_or_subtree_live`].
+///
+/// A group *header* speaks for its whole run, so it escapes an enclosing fold
+/// while any member still works. A group *child* asks the per-call question
+/// instead, and escapes only its own group's window rather than the fold above
+/// it (see `RunRows::push_group_children`). The two granularities answer for
+/// different subjects; they are not one rule stated twice.
+fn run_is_live(
+    items: &[ChatItem],
+    run: std::ops::Range<usize>,
+    live_units: &LiveSubagentUnits,
+) -> bool {
+    run.into_iter().any(
+        |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
+    )
 }
 
 /// Whether a tool or one of its flattened descendants is live.

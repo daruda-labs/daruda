@@ -2586,6 +2586,79 @@ fn only_reads() -> DisplayFilter {
     DisplayFilter::from_tokens(["tool_read"])
 }
 
+/// One turn that delegates: a subagent launch followed by the children the
+/// adapter flattened under it, none of which earns a row.
+fn turn_with_subagent(children: usize, running: bool) -> Vec<ChatItem> {
+    let mut items = vec![ChatItem::UserText("q".into()), asst("delegating")];
+    items.push(tool("task", ToolStatusView::Completed));
+    for i in 0..children {
+        let last = i + 1 == children;
+        let status = if last && running {
+            ToolStatusView::InProgress
+        } else {
+            ToolStatusView::Completed
+        };
+        items.push(child_of(&format!("c{i}"), "task", status));
+    }
+    items.push(asst("done"));
+    items
+}
+
+/// The row boundary both narrowing axes observe — see [`top_level_tool`]. A
+/// nested child owns no row, so no combination of the step window, the display
+/// filter and the fold mode can give it one, and a card's children cannot move
+/// the row layer at all.
+///
+/// Stated as a test because the rule lives in two places (`top_level_tool`'s
+/// exclusion and [`FilterMatchIndex::build`]'s descendant keeping) and a change
+/// that narrows one axis into a card while the other stays out is silent.
+#[test]
+fn no_axis_narrows_inside_a_tool_card() {
+    let nested_rows = |items: &[ChatItem], tail, filter: &DisplayFilter, preset: FoldPreset| {
+        project(
+            items,
+            &FoldState::with_mode(preset.mode()),
+            false,
+            &LiveSubagentUnits::of(items),
+            tail,
+            filter,
+        )
+        .iter()
+        .filter(|r| match r.kind {
+            RowKind::AgentItem(ix) | RowKind::ConclusionItem(ix) => {
+                matches!(&items[ix], ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some())
+            }
+            _ => false,
+        })
+        .count()
+    };
+    for running in [false, true] {
+        let items = turn_with_subagent(6, running);
+        for tail in [TailWindow::All, TailWindow::Last(1)] {
+            for filter in [DisplayFilter::default(), only_reads()] {
+                for preset in FoldPreset::ALL {
+                    assert_eq!(
+                        nested_rows(&items, tail, &filter, preset),
+                        0,
+                        "running={running} {tail:?} {preset:?}"
+                    );
+                }
+            }
+        }
+    }
+    // And they contribute nothing to it: one child or six, the projection is
+    // the same shape, because the card — not the row walk — renders them.
+    let one = turn_with_subagent(1, false);
+    let many = turn_with_subagent(6, false);
+    for tail in [TailWindow::All, TailWindow::Last(1)] {
+        assert_eq!(
+            kinds(&project_tail(&one, tail)),
+            kinds(&project_tail(&many, tail)),
+            "a card's children never move the row layer: {tail:?}"
+        );
+    }
+}
+
 #[test]
 fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     use ToolStatusView::Completed;
