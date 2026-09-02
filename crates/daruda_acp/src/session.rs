@@ -782,8 +782,23 @@ async fn run_connection(
                     .lock()
                     .expect("native subagent router mutex poisoned")
                     .route(&notification.session_id.0, &notification.update);
+                let legacy_delegation = notif_router
+                    .lock()
+                    .expect("native subagent router mutex poisoned")
+                    .first_legacy_delegation(&notification.update);
                 match routed {
                     Routed::Standard(update) => {
+                        // The agent delegated the old way, so the subagent's own
+                        // calls are never sent — the transcript would just show
+                        // an opaque `spawnAgent` and nothing about what ran.
+                        if legacy_delegation {
+                            let _ = notif_tx.unbounded_send(AcpEvent::Notice(
+                                "This agent delegated to a subagent without native subagent \
+                                 sessions, so the subagent's own tool calls will not appear. \
+                                 For Codex, enable `features.multi_agent_v2`."
+                                    .to_string(),
+                            ));
+                        }
                         forward_session_update(*update, &notif_mode_tracker, &notif_tx);
                     }
                     Routed::Normalized(updates) => {

@@ -371,3 +371,50 @@ fn a_child_that_has_reported_is_still_a_child() {
     assert!(r.is_child(CHILD));
     assert!(!r.is_child(ROOT));
 }
+
+/// Codex marks its legacy delegation on the update itself, so the router
+/// can say the subagent's calls will never arrive without knowing anything
+/// about how the agent is configured. Once per session: one run emits
+/// `spawnAgent`, `wait` and `closeAgent`, and three copies of the same
+/// notice would be noise.
+#[test]
+fn legacy_delegation_is_reported_once_and_only_for_the_spawn() {
+    let mut router = router();
+    let spawn = serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "t1",
+        "title": "spawnAgent",
+        "_meta": {"codex": {"collaboration": {"tool": "spawnAgent"}}},
+    });
+    let wait = serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "t2",
+        "title": "wait",
+        "_meta": {"codex": {"collaboration": {"tool": "wait"}}},
+    });
+    let plain = serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "t3",
+        "title": "Read main.rs",
+    });
+
+    assert!(router.first_legacy_delegation(&spawn));
+    assert!(!router.first_legacy_delegation(&spawn), "reported once");
+    assert!(
+        !router.first_legacy_delegation(&wait),
+        "only the spawn marks it"
+    );
+    assert!(
+        !router.first_legacy_delegation(&plain),
+        "native traffic is silent"
+    );
+}
+
+/// A native run must not trip the legacy notice — that is the whole point
+/// of keying off the collaboration marker rather than off "a subagent
+/// appeared".
+#[test]
+fn a_native_spawn_is_not_reported_as_legacy() {
+    let mut router = router();
+    assert!(!router.first_legacy_delegation(&spawned("kid", "Lorentz", "Probe the UI")));
+}

@@ -61,6 +61,14 @@ pub const AIR_META_KEY: &str = "air";
 /// The extension version both adapters compare against with `>=`.
 pub const AIR_EXTENSION_VERSION: u64 = 1;
 
+/// The tool name codex stamps on `_meta.codex.collaboration` when it delegates
+/// through its legacy collaboration tools instead of a native child session.
+const COLLABORATION_SPAWN_TOOL: &str = "spawnAgent";
+
+/// Key the once-only notice is filed under, alongside unknown update kinds.
+/// Not an update kind, so it cannot collide with one.
+const LEGACY_DELEGATION_NOTICE: &str = "\0legacy-delegation";
+
 /// The one capability daruda claims from this extension.
 pub const NATIVE_SUBAGENT_SESSIONS_CAPABILITY: &str = "nativeSubagentSessions";
 
@@ -195,6 +203,22 @@ impl NativeSubagentRouter {
                 Routed::Normalized(self.rewrite_child(session_id, standard))
             }
         }
+    }
+
+    /// Whether this update is the first sign that the agent delegated through
+    /// its **legacy** path, so the subagent's own tool calls will never arrive.
+    ///
+    /// Read off the update rather than the agent's configuration: codex stamps
+    /// `_meta.codex.collaboration` on exactly that path and the native path
+    /// carries no such marker, so this needs no knowledge of how the agent is
+    /// set up. Reported once per session — the same run emits several
+    /// collaboration calls (`spawnAgent`, `wait`, `closeAgent`).
+    pub fn first_legacy_delegation(&mut self, update: &Value) -> bool {
+        let delegated = update
+            .pointer("/_meta/codex/collaboration/tool")
+            .and_then(Value::as_str)
+            == Some(COLLABORATION_SPAWN_TOOL);
+        delegated && self.noticed.insert(LEGACY_DELEGATION_NOTICE.to_owned())
     }
 
     /// Report `kind` the first time it is seen; stay silent afterwards.
