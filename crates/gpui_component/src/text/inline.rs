@@ -30,9 +30,12 @@ pub(super) struct Inline {
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    debug_bounds_observer: Option<Arc<DebugInlineBoundsFn>>,
 
     state: Arc<Mutex<InlineState>>,
 }
+
+pub(super) type DebugInlineBoundsFn = dyn Fn(Bounds<Pixels>) + Send + Sync;
 
 /// The inline text state, used RefCell to keep the selection state.
 #[derive(Debug, Default, PartialEq)]
@@ -70,8 +73,17 @@ impl Inline {
             text: text.clone(),
             styled_text: StyledText::new(text),
             link_click_handler,
+            debug_bounds_observer: None,
             state,
         }
+    }
+
+    pub(super) fn debug_bounds_observer(
+        mut self,
+        observer: Option<Arc<DebugInlineBoundsFn>>,
+    ) -> Self {
+        self.debug_bounds_observer = observer;
+        self
     }
 
     /// Get link at given mouse position.
@@ -418,6 +430,10 @@ impl Element for Inline {
         let text_layout = self.styled_text.layout().clone();
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
+
+        if let Some(observer) = &self.debug_bounds_observer {
+            observer(bounds);
+        }
 
         // layout selections
         let (is_selectable, is_selection, selection) =

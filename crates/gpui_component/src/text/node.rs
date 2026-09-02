@@ -18,7 +18,7 @@ use crate::{
     highlighter::{HighlightTheme, SyntaxHighlighter},
     text::{
         CodeBlockActionsFn, CodeBlockRenderFn, LinkClickHandlerFn,
-        inline::{Inline, InlineState},
+        inline::{DebugInlineBoundsFn, Inline, InlineState},
     },
     tooltip::Tooltip,
     v_flex,
@@ -439,6 +439,7 @@ pub(crate) struct NodeContext {
     pub(crate) style: TextViewStyle,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) code_block_render: Option<Arc<CodeBlockRenderFn>>,
+    pub(crate) debug_inline_bounds: Option<Arc<DebugInlineBoundsFn>>,
 }
 
 impl NodeContext {
@@ -636,6 +637,7 @@ impl Paragraph {
                             highlights.clone(),
                             link_click_handler.cloned(),
                         )
+                        .debug_bounds_observer(node_cx.debug_inline_bounds.clone())
                         .into_any_element(),
                     );
                 }
@@ -738,6 +740,7 @@ impl Paragraph {
                     highlights,
                     link_click_handler.cloned(),
                 )
+                .debug_bounds_observer(node_cx.debug_inline_bounds.clone())
                 .into_any_element(),
             );
         }
@@ -1139,6 +1142,9 @@ impl Node {
                                             this.child(
                                                 div()
                                                     .flex()
+                                                    .debug_selector(|| {
+                                                        "markdown-task-checkbox".into()
+                                                    })
                                                     .mt(rems(0.4))
                                                     .mr_1p5()
                                                     .size(rems(0.875))

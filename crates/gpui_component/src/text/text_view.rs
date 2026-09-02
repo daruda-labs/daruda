@@ -24,6 +24,7 @@ use crate::{
     input::{self},
     text::{
         TextViewStyle,
+        inline::DebugInlineBoundsFn,
         node::{self, NodeContext},
     },
 };
@@ -46,6 +47,7 @@ struct TextViewElement {
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     muted_color: Option<Hsla>,
     surface: Option<Hsla>,
+    debug_inline_bounds: Option<Arc<DebugInlineBoundsFn>>,
 }
 
 impl RenderOnce for TextViewElement {
@@ -58,17 +60,20 @@ impl RenderOnce for TextViewElement {
                     // one inherited line height, so prose, code, table cells and
                     // a list item's bullet all sit on the same pitch and follow
                     // the host's text size.
-                    Some(Ok(content)) => this.line_height(content.node_cx.style.line_height).child(
-                        content.root_node.render_root(
-                            self.list_state.clone(),
-                            &content.node_cx,
-                            self.link_click_handler.clone(),
-                            self.muted_color,
-                            self.surface,
-                            window,
-                            cx,
-                        ),
-                    ),
+                    Some(Ok(content)) => {
+                        content.node_cx.debug_inline_bounds = self.debug_inline_bounds.clone();
+                        this.line_height(content.node_cx.style.line_height).child(
+                            content.root_node.render_root(
+                                self.list_state.clone(),
+                                &content.node_cx,
+                                self.link_click_handler.clone(),
+                                self.muted_color,
+                                self.surface,
+                                window,
+                                cx,
+                            ),
+                        )
+                    }
                     Some(Err(err)) => this.child(
                         v_flex()
                             .gap_1()
@@ -124,6 +129,7 @@ pub struct TextView {
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     muted_color: Option<Hsla>,
     surface: Option<Hsla>,
+    debug_inline_bounds: Option<Arc<DebugInlineBoundsFn>>,
 }
 
 #[derive(PartialEq)]
@@ -540,6 +546,7 @@ impl TextView {
             link_click_handler: None,
             muted_color: None,
             surface: None,
+            debug_inline_bounds: None,
         }
     }
 
@@ -575,6 +582,7 @@ impl TextView {
             link_click_handler: None,
             muted_color: None,
             surface: None,
+            debug_inline_bounds: None,
         }
     }
 
@@ -611,6 +619,7 @@ impl TextView {
             link_click_handler: None,
             muted_color: None,
             surface: None,
+            debug_inline_bounds: None,
         }
     }
 
@@ -708,6 +717,17 @@ impl TextView {
         F: Fn(&str, &mut Window, &mut App) -> bool + 'static,
     {
         self.link_click_handler = Some(Arc::new(f));
+        self
+    }
+
+    /// Observe the exact layout bounds assigned to each painted prose run.
+    /// Intended for rendered-conformance tests; unset in production hosts.
+    #[doc(hidden)]
+    pub fn debug_inline_bounds<F>(mut self, observer: F) -> Self
+    where
+        F: Fn(Bounds<Pixels>) + Send + Sync + 'static,
+    {
+        self.debug_inline_bounds = Some(Arc::new(observer));
         self
     }
 
@@ -877,6 +897,7 @@ impl Element for TextView {
                 link_click_handler: self.link_click_handler.clone(),
                 muted_color: self.muted_color,
                 surface: self.surface,
+                debug_inline_bounds: self.debug_inline_bounds.clone(),
             })
             .refine_style(&self.style)
             .vertical_scrollbar(list_state)

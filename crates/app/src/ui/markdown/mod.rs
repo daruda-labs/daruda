@@ -22,6 +22,8 @@ use crate::ui::theme;
 type CodeBlockRender =
     Arc<dyn Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync>;
 type LinkClickHandler = Arc<dyn Fn(&str, &mut Window, &mut App) -> bool>;
+#[cfg(test)]
+type DebugInlineBounds = Arc<dyn Fn(gpui::Bounds<Pixels>) + Send + Sync>;
 
 #[derive(IntoElement)]
 pub struct Markdown {
@@ -34,6 +36,8 @@ pub struct Markdown {
     surface: Option<Hsla>,
     code_block_render: Option<CodeBlockRender>,
     link_click_handler: Option<LinkClickHandler>,
+    #[cfg(test)]
+    debug_inline_bounds: Option<DebugInlineBounds>,
 }
 
 impl Markdown {
@@ -97,6 +101,15 @@ impl Markdown {
         self.link_click_handler = Some(Arc::new(f));
         self
     }
+
+    #[cfg(test)]
+    pub(crate) fn debug_inline_bounds<F>(mut self, observer: F) -> Self
+    where
+        F: Fn(gpui::Bounds<Pixels>) + Send + Sync + 'static,
+    {
+        self.debug_inline_bounds = Some(Arc::new(observer));
+        self
+    }
 }
 
 impl RenderOnce for Markdown {
@@ -154,6 +167,10 @@ impl RenderOnce for Markdown {
         if let Some(handler) = self.link_click_handler {
             view = view.link_click_handler(move |url, window, cx| handler(url, window, cx));
         }
+        #[cfg(test)]
+        if let Some(observer) = self.debug_inline_bounds {
+            view = view.debug_inline_bounds(move |bounds| observer(bounds));
+        }
         // A hover-revealed copy button on every rendered code block, on for all
         // markdown. Mermaid fences take the separate `code_block_render`
         // replace-path above, which fully replaces the block's rendering (and
@@ -186,6 +203,8 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
         surface: None,
         code_block_render: None,
         link_click_handler: None,
+        #[cfg(test)]
+        debug_inline_bounds: None,
     }
 }
 

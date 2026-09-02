@@ -129,6 +129,20 @@ pub(super) fn render_md_body(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = MdColors::for_pane(cx);
+    render_md_body_layout(blocks, char_selection, &t, |block, block_idx| {
+        block_with_selection(block, block_idx, cx)
+    })
+}
+
+/// Layout half of [`render_md_body`]. Selection listeners are supplied by the
+/// host so layout probes can exercise this exact path without constructing a
+/// `Workspace` merely to obtain its `Context`.
+fn render_md_body_layout(
+    blocks: &[MdBlock],
+    char_selection: Option<&CharSelection>,
+    t: &MdColors,
+    mut decorate_block: impl FnMut(gpui::Div, usize) -> gpui::Div,
+) -> gpui::Div {
     let body_text = t.text;
     let block_sel_bg = theme::SELECTION_BG;
     let mut col = div()
@@ -145,8 +159,8 @@ pub(super) fn render_md_body(
         let block_el = div()
             .rounded(px(theme::MD_BLOCK_RADIUS))
             .when(is_sel, |d| d.bg(block_sel_bg))
-            .child(render_md_block(block, &t));
-        col = col.child(block_with_selection(block_el, i, cx));
+            .child(render_md_block(block, t));
+        col = col.child(decorate_block(block_el, i));
     }
     col
 }
@@ -209,7 +223,13 @@ fn render_list(items: &[ListItem], loose: bool, marker: ListMarker, t: &MdColors
                     Some(false) => ("☐", t.muted),
                     None => ("•", t.muted),
                 };
-                div().flex_none().text_color(color).child(glyph)
+                div()
+                    .flex_none()
+                    .text_color(color)
+                    .when(cfg!(test) && item.checked.is_some(), |d| {
+                        d.debug_selector(|| "markdown-task-checkbox".into())
+                    })
+                    .child(glyph)
             }
             ListMarker::Ordered(start) => div()
                 .flex_none()
@@ -430,6 +450,13 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
 }
 
 fn render_md_spans(spans: &[MdSpan], t: &MdColors) -> Vec<AnyElement> {
+    debug_assert!(
+        !spans
+            .iter()
+            .any(|span| matches!(span, MdSpan::ParagraphBreak)),
+        "paragraph breaks must be split by render_md_prose"
+    );
+
     let mut els: Vec<AnyElement> = Vec::new();
     let mut plain_text = String::new();
 
@@ -705,7 +732,8 @@ fn block_with_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::code_block_text;
+    use super::{MdColors, code_block_text, render_md_spans};
+    use crate::workspace::main_area::file_view_pane::markdown_viewer::MdSpan;
     use crate::workspace::main_area::file_view_pane::{HighlightedSpan, VisualRow, VisualRowKind};
 
     fn row(content: &str, spans: Vec<HighlightedSpan>) -> VisualRow {
@@ -734,6 +762,22 @@ mod tests {
         l: 0.5,
         a: 1.0,
     };
+
+    #[test]
+    #[should_panic(expected = "paragraph breaks must be split by render_md_prose")]
+    fn a_direct_span_run_rejects_paragraph_breaks() {
+        let colors = MdColors {
+            text: RED,
+            muted: RED,
+            subtle: RED,
+            link: RED,
+            fill: RED,
+            raised: RED,
+            line: RED,
+        };
+
+        let _ = render_md_spans(&[MdSpan::ParagraphBreak], &colors);
+    }
 
     #[test]
     fn rows_join_with_newlines_so_one_element_covers_the_block() {
@@ -783,7 +827,6 @@ mod tests {
         }
     }
 
-    use super::MdColors;
     use crate::ui::theme::{
         apply_ui_theme, contrast_ratio, current, file_viewer_pane_bg, init_if_missing,
         set_agent_chat_bg, set_agent_chat_fg,
@@ -855,7 +898,9 @@ mod tests {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::{MdColors, render_md_block};
+    use std::sync::{Arc, Mutex};
+
+    use super::{MdColors, render_md_body_layout};
     use crate::ui::theme;
     use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
     use gpui::{
@@ -864,75 +909,148 @@ mod layout_tests {
         VisualTestContext, Window, WindowBounds, WindowOptions, div, point, px, size,
     };
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Engine {
+        FileViewer,
+        AgentChat,
+    }
+
+    impl Engine {
+        const ALL: [Self; 2] = [Self::FileViewer, Self::AgentChat];
+
+        fn label(self) -> &'static str {
+            match self {
+                Self::FileViewer => "file viewer",
+                Self::AgentChat => "agent chat",
+            }
+        }
+    }
+
     struct Probe {
         md: String,
+        engine: Engine,
+        first_inline_bounds: Arc<Mutex<Option<Bounds<Pixels>>>>,
     }
 
     impl Render for Probe {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let colors = MdColors::for_pane(cx);
-            let blocks = parse_markdown(&self.md, "default", false);
-            // Mirrors `render_md_body`: a flex column of blocks, each in the
-            // selection shell `div()` the real body wraps them in.
-            let body = div()
-                .id("md-probe")
-                .debug_selector(|| "md-probe".into())
-                .flex()
-                .flex_col()
-                .w_full()
-                .px(px(theme::MD_BODY_PAD_X))
-                .py(px(theme::MD_BODY_PAD_Y))
-                .gap(px(theme::MD_BLOCK_GAP))
-                .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-                .children(blocks.iter().map(|b| {
-                    div()
-                        .rounded(px(theme::MD_BLOCK_RADIUS))
-                        .child(render_md_block(b, &colors))
-                }));
-            // Faithful to the real pane, outermost first: the walker's
-            // `flex_1().min_h(0).overflow_hidden()` slot in a column, the pane
-            // root (`relative().size_full()` + the configured font), the
-            // toolbar-offset absolute frame, then `body.rs`'s scroll container.
-            div().flex().flex_col().size_full().child(
-                div().flex_1().min_h(px(0.)).overflow_hidden().child(
-                    div().relative().size_full().font_family("Menlo").child(
+            match self.engine {
+                Engine::FileViewer => {
+                    let colors = MdColors::for_pane(cx);
+                    let blocks = parse_markdown(&self.md, "default", false);
+                    let body = render_md_body_layout(&blocks, None, &colors, |block, _| block)
+                        .id("md-probe")
+                        .debug_selector(|| "md-probe".into());
+                    // Faithful to the real pane, outermost first: the walker's
+                    // `flex_1().min_h(0).overflow_hidden()` slot in a column, the pane
+                    // root (`relative().size_full()` + the configured font), the
+                    // toolbar-offset absolute frame, then `body.rs`'s scroll container.
+                    div().flex().flex_col().size_full().child(
+                        div().flex_1().min_h(px(0.)).overflow_hidden().child(
+                            div().relative().size_full().font_family("Menlo").child(
+                                div()
+                                    .absolute()
+                                    .top(px(theme::FILE_VIEWER_HEADER_H))
+                                    .left_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .id("probe-scroll")
+                                    .overflow_y_scroll()
+                                    .child(body),
+                            ),
+                        ),
+                    )
+                }
+                Engine::AgentChat => {
+                    let first_inline_bounds = self.first_inline_bounds.clone();
+                    div().size_full().font_family("Menlo").child(
                         div()
-                            .absolute()
-                            .top(px(theme::FILE_VIEWER_HEADER_H))
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .id("probe-scroll")
-                            .overflow_y_scroll()
-                            .child(body),
-                    ),
-                ),
-            )
+                            .id("md-probe")
+                            .debug_selector(|| "md-probe".into())
+                            .w_full()
+                            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                            .child(
+                                crate::ui::markdown::markdown("conformance", self.md.clone())
+                                    .debug_inline_bounds(move |bounds| {
+                                        let mut first = first_inline_bounds.lock().unwrap();
+                                        if first.is_none() {
+                                            *first = Some(bounds);
+                                        }
+                                    }),
+                            ),
+                    )
+                }
+            }
         }
     }
 
-    /// Painted size of the first element matching `selector`, with the probe
-    /// laid out in a `width`-wide window.
-    fn bounds_of(
+    struct ProbeMeasurement {
+        selected: Option<gpui::Size<Pixels>>,
+        first_inline: Option<gpui::Size<Pixels>>,
+    }
+
+    /// Painted sizes from a `width`-wide probe: the requested div and the
+    /// agent renderer's first actual `Inline` prose run, when it has one.
+    fn measure_engine(
         cx: &mut TestAppContext,
+        engine: Engine,
         md: &str,
         width: Pixels,
         selector: &'static str,
-    ) -> gpui::Size<Pixels> {
+    ) -> ProbeMeasurement {
         let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
         let opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         };
         let md = md.to_string();
+        let first_inline_bounds = Arc::new(Mutex::new(None));
         let window = cx
-            .update(|cx| cx.open_window(opts, |_w, cx| cx.new(|_cx| Probe { md })))
+            .update(|cx| {
+                let first_inline_bounds = first_inline_bounds.clone();
+                cx.open_window(opts, |_w, cx| {
+                    cx.new(|_cx| Probe {
+                        md,
+                        engine,
+                        first_inline_bounds,
+                    })
+                })
+            })
             .expect("window opens");
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
+        *first_inline_bounds.lock().unwrap() = None;
         vcx.update(|w, _| w.refresh());
         vcx.run_until_parked();
-        vcx.debug_bounds(selector).expect("painted").size
+        let selected = vcx.debug_bounds(selector).map(|bounds| bounds.size);
+        let first_inline = first_inline_bounds
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|bounds| bounds.size);
+        ProbeMeasurement {
+            selected,
+            first_inline,
+        }
+    }
+
+    fn bounds_for_engine(
+        cx: &mut TestAppContext,
+        engine: Engine,
+        md: &str,
+        width: Pixels,
+        selector: &'static str,
+    ) -> Option<gpui::Size<Pixels>> {
+        measure_engine(cx, engine, md, width, selector).selected
+    }
+
+    fn bounds_of(
+        cx: &mut TestAppContext,
+        md: &str,
+        width: Pixels,
+        selector: &'static str,
+    ) -> gpui::Size<Pixels> {
+        bounds_for_engine(cx, Engine::FileViewer, md, width, selector).expect("painted")
     }
 
     fn height(cx: &mut TestAppContext, md: &str, width: Pixels) -> Pixels {
@@ -958,23 +1076,90 @@ mod layout_tests {
         crate::test_support::init_gpui_component(cx);
         let step = px(theme::MD_BLOCK_GAP - theme::MD_LIST_ITEM_GAP);
 
-        for (label, tight, loose) in [
-            (
-                "bullet",
-                "- AAAA\n- BBBB\n- CCCC",
-                "- AAAA\n\n- BBBB\n\n- CCCC",
-            ),
-            (
-                "ordered",
-                "1. AAAA\n2. BBBB\n3. CCCC",
-                "1. AAAA\n\n2. BBBB\n\n3. CCCC",
-            ),
-        ] {
-            let (tight, loose) = (height(cx, tight, px(430.)), height(cx, loose, px(430.)));
-            assert_eq!(
-                loose - tight,
-                step * 2.,
-                "{label}: loose={loose:?} tight={tight:?}"
+        for engine in Engine::ALL {
+            for (label, tight, loose) in [
+                (
+                    "bullet",
+                    "- AAAA\n- BBBB\n- CCCC",
+                    "- AAAA\n\n- BBBB\n\n- CCCC",
+                ),
+                (
+                    "ordered",
+                    "1. AAAA\n2. BBBB\n3. CCCC",
+                    "1. AAAA\n\n2. BBBB\n\n3. CCCC",
+                ),
+            ] {
+                let tight = bounds_for_engine(cx, engine, tight, px(430.), "md-probe")
+                    .expect("body painted")
+                    .height;
+                let loose = bounds_for_engine(cx, engine, loose, px(430.), "md-probe")
+                    .expect("body painted")
+                    .height;
+                assert!(
+                    loose > tight,
+                    "{} {label}: loose={loose:?} tight={tight:?}",
+                    engine.label()
+                );
+                if engine == Engine::FileViewer {
+                    assert_eq!(loose - tight, step * 2., "{label}");
+                }
+            }
+        }
+    }
+
+    /// CommonMark has two loose-list spellings. Both renderers must treat an
+    /// item containing two blocks like the equivalent list whose following
+    /// item is also separated by a blank line.
+    #[gpui::test]
+    fn both_engines_recognize_a_multi_block_item_as_loose(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+
+        for engine in Engine::ALL {
+            for (label, multi_block, blank_between) in [
+                (
+                    "bullet",
+                    "- AAAA\n\n  cont\n- BBBB",
+                    "- AAAA\n\n  cont\n\n- BBBB",
+                ),
+                (
+                    "ordered",
+                    "1. AAAA\n\n   cont\n2. BBBB",
+                    "1. AAAA\n\n   cont\n\n2. BBBB",
+                ),
+            ] {
+                let multi = bounds_for_engine(cx, engine, multi_block, px(430.), "md-probe")
+                    .expect("body painted")
+                    .height;
+                let blank = bounds_for_engine(cx, engine, blank_between, px(430.), "md-probe")
+                    .expect("body painted")
+                    .height;
+                assert_eq!(
+                    multi,
+                    blank,
+                    "{} {label}: multi-block={multi:?} blank-line={blank:?}",
+                    engine.label()
+                );
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn both_engines_render_task_markers_as_checkboxes(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+
+        for engine in Engine::ALL {
+            for md in ["- [ ] unchecked", "- [x] checked"] {
+                assert!(
+                    bounds_for_engine(cx, engine, md, px(430.), "markdown-task-checkbox").is_some(),
+                    "{} did not paint a checkbox for {md:?}",
+                    engine.label()
+                );
+            }
+            assert!(
+                bounds_for_engine(cx, engine, "- plain", px(430.), "markdown-task-checkbox")
+                    .is_none(),
+                "{} painted a checkbox for a plain item",
+                engine.label()
             );
         }
     }
@@ -995,16 +1180,26 @@ mod layout_tests {
         let long = "the quick brown fox jumps over the lazy dog and keeps running far";
         let w = px(635.);
 
-        for (label, two) in [
-            ("list item", format!("- {long}\n\n  {long}")),
-            ("blockquote", format!("> {long}\n>\n> {long}")),
-            ("footnote", format!("[^a]: {long}\n\n    {long}")),
-        ] {
-            let first = bounds_of(cx, &two, w, "md-plain").width;
-            assert!(
-                first > px(0.),
-                "{label}: a second paragraph squeezed the first to {first:?}"
-            );
+        for engine in Engine::ALL {
+            for (label, two) in [
+                ("list item", format!("- {long}\n\n  {long}")),
+                ("blockquote", format!("> {long}\n>\n> {long}")),
+                ("footnote", format!("[^a]: {long}\n\n    {long}")),
+            ] {
+                let first = match engine {
+                    Engine::FileViewer => bounds_for_engine(cx, engine, &two, w, "md-plain"),
+                    Engine::AgentChat => {
+                        measure_engine(cx, engine, &two, w, "md-probe").first_inline
+                    }
+                }
+                .unwrap_or_else(|| panic!("{} {label}: no prose painted", engine.label()))
+                .width;
+                assert!(
+                    first > px(0.),
+                    "{} {label}: a second paragraph squeezed the first to {first:?}",
+                    engine.label()
+                );
+            }
         }
     }
 }

@@ -1038,6 +1038,7 @@ fn build_code_rows(text: &str) -> Vec<VisualRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn parse_heading() {
@@ -1208,6 +1209,212 @@ mod tests {
 
         assert_eq!(copy("- [ ] one\n- [x] two\n"), "- [ ] one\n- [x] two");
         assert_eq!(copy("- [ ] one\n\n- [x] two\n"), "- [ ] one\n\n- [x] two");
+    }
+
+    fn observe_spans(spans: &[MdSpan], observed: &mut BTreeSet<&'static str>) {
+        for span in spans {
+            match span {
+                MdSpan::Text(_) => {
+                    observed.insert("span.text");
+                }
+                MdSpan::Bold(inner) => {
+                    observed.insert("span.bold");
+                    observe_spans(inner, observed);
+                }
+                MdSpan::Italic(inner) => {
+                    observed.insert("span.italic");
+                    observe_spans(inner, observed);
+                }
+                MdSpan::Code(_) => {
+                    observed.insert("span.code");
+                }
+                MdSpan::Link { .. } => {
+                    observed.insert("span.link");
+                }
+                MdSpan::Strikethrough(inner) => {
+                    observed.insert("span.strikethrough");
+                    observe_spans(inner, observed);
+                }
+                MdSpan::SoftBreak => {
+                    observed.insert("span.soft_break");
+                }
+                MdSpan::HardBreak => {
+                    observed.insert("span.hard_break");
+                }
+                MdSpan::ParagraphBreak => {
+                    observed.insert("span.paragraph_break");
+                }
+                MdSpan::Footnote(_) => {
+                    observed.insert("span.footnote");
+                }
+                MdSpan::Html(_) => {
+                    observed.insert("span.html");
+                }
+                MdSpan::Image { .. } => {
+                    observed.insert("span.image");
+                }
+            }
+        }
+    }
+
+    fn observe_items(items: &[ListItem], observed: &mut BTreeSet<&'static str>) {
+        for item in items {
+            observed.insert(match item.checked {
+                Some(true) => "list.task.checked",
+                Some(false) => "list.task.unchecked",
+                None => "list.plain",
+            });
+            observe_spans(&item.spans, observed);
+            observe_blocks(&item.children, observed);
+        }
+    }
+
+    fn observe_blocks(blocks: &[MdBlock], observed: &mut BTreeSet<&'static str>) {
+        for block in blocks {
+            match block {
+                MdBlock::Heading { spans, .. } => {
+                    observed.insert("block.heading");
+                    observe_spans(spans, observed);
+                }
+                MdBlock::Paragraph(spans) => {
+                    observed.insert("block.paragraph");
+                    observe_spans(spans, observed);
+                }
+                MdBlock::CodeBlock { lang, .. } => {
+                    observed.insert("block.code");
+                    if lang.is_some() {
+                        observed.insert("code.language");
+                    }
+                }
+                MdBlock::BulletList { items, loose } => {
+                    observed.insert("block.bullet_list");
+                    observed.insert(if *loose { "list.loose" } else { "list.tight" });
+                    observe_items(items, observed);
+                }
+                MdBlock::OrderedList {
+                    start,
+                    items,
+                    loose,
+                } => {
+                    observed.insert("block.ordered_list");
+                    observed.insert(if *loose { "list.loose" } else { "list.tight" });
+                    if *start != 1 {
+                        observed.insert("ordered.custom_start");
+                    }
+                    observe_items(items, observed);
+                }
+                MdBlock::Blockquote(spans) => {
+                    observed.insert("block.blockquote");
+                    observe_spans(spans, observed);
+                }
+                MdBlock::Rule => {
+                    observed.insert("block.rule");
+                }
+                MdBlock::Table { header, rows } => {
+                    observed.insert("block.table");
+                    for cell in header.iter().chain(rows.iter().flatten()) {
+                        observe_spans(cell, observed);
+                    }
+                }
+                MdBlock::FootnoteDefinition { spans, .. } => {
+                    observed.insert("block.footnote_definition");
+                    observe_spans(spans, observed);
+                }
+                MdBlock::HtmlBlock(_) => {
+                    observed.insert("block.html");
+                }
+                MdBlock::Mermaid { .. } => {
+                    observed.insert("block.mermaid");
+                }
+            }
+        }
+    }
+
+    /// Every parser feature that the renderer handles must be produced by at
+    /// least one fixture. The exhaustive visitors make a new IR variant update
+    /// this inventory at compile time; the semantic entries cover states such
+    /// as task markers and looseness that are fields rather than variants.
+    #[test]
+    fn fixtures_cover_every_markdown_ir_variant_and_semantic_state() {
+        const FIXTURES: &[&str] = &[
+            r#"# heading
+
+paragraph **bold** *italic* `code` [link](https://example.invalid) ~~strike~~ [^note] <span>html</span> ![alt](missing.png)
+soft
+break\
+hard
+
+> quote one
+>
+> quote two
+
+---
+
+| head |
+| --- |
+| cell |
+
+```rust
+let value = 1;
+```
+
+```mermaid
+graph TD
+A-->B
+```
+
+<div>block html</div>
+
+[^note]: footnote one
+
+    footnote two
+"#,
+            "- plain\n- [ ] open\n- [x] done\n",
+            "- loose one\n\n- loose two\n",
+            "3. ordered\n4. next\n",
+        ];
+        const EXPECTED: &[&str] = &[
+            "block.blockquote",
+            "block.bullet_list",
+            "block.code",
+            "block.footnote_definition",
+            "block.heading",
+            "block.html",
+            "block.mermaid",
+            "block.ordered_list",
+            "block.paragraph",
+            "block.rule",
+            "block.table",
+            "code.language",
+            "list.loose",
+            "list.plain",
+            "list.task.checked",
+            "list.task.unchecked",
+            "list.tight",
+            "ordered.custom_start",
+            "span.bold",
+            "span.code",
+            "span.footnote",
+            "span.hard_break",
+            "span.html",
+            "span.image",
+            "span.italic",
+            "span.link",
+            "span.paragraph_break",
+            "span.soft_break",
+            "span.strikethrough",
+            "span.text",
+        ];
+
+        let mut observed = BTreeSet::new();
+        for fixture in FIXTURES {
+            observe_blocks(
+                &parse_markdown(fixture, "base16-ocean.dark", false),
+                &mut observed,
+            );
+        }
+
+        assert_eq!(observed, EXPECTED.iter().copied().collect());
     }
 
     #[test]
