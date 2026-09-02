@@ -33,6 +33,7 @@ pub(super) struct CompiledText {
 pub(super) struct InlineImage<'a> {
     pub alt: &'a str,
     pub raster: Option<&'a RasterImage>,
+    pub link_url: Option<&'a str>,
 }
 
 pub(super) enum ProsePart<'a> {
@@ -114,6 +115,7 @@ impl<'a> Compiler<'a> {
                     self.parts.push(ProsePart::Image(InlineImage {
                         alt: if alt.is_empty() { url } else { alt },
                         raster: raster.as_ref(),
+                        link_url: active.link.map(|(_, url)| url),
                     }));
                 }
             }
@@ -303,9 +305,27 @@ mod tests {
         assert_eq!(parts.len(), 3);
         assert!(matches!(&parts[0], ProsePart::Text(text) if text.text == "before"));
         assert!(
-            matches!(&parts[1], ProsePart::Image(image) if image.alt == "fallback" && image.raster.is_none())
+            matches!(&parts[1], ProsePart::Image(image) if image.alt == "fallback" && image.raster.is_none() && image.link_url.is_none())
         );
         assert!(matches!(&parts[2], ProsePart::Text(text) if text.text == "after"));
+    }
+
+    #[test]
+    fn images_preserve_the_surrounding_link() {
+        let spans = vec![MdSpan::Link {
+            children: vec![MdSpan::Image {
+                url: "thumb.png".into(),
+                alt: "thumbnail".into(),
+                raster: None,
+            }],
+            url: "https://example.com/full".into(),
+        }];
+
+        let parts = compile_prose(&spans);
+        let [ProsePart::Image(image)] = parts.as_slice() else {
+            panic!("expected one image part");
+        };
+        assert_eq!(image.link_url, Some("https://example.com/full"));
     }
 
     #[test]

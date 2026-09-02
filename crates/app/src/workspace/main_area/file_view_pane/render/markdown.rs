@@ -6,9 +6,9 @@ use std::rc::Rc;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use gpui::{
-    AnyElement, App, Context, FontStyle, FontWeight, HighlightStyle, ImageSource, InteractiveText,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, RenderImage, StrikethroughStyle,
-    StyledText, Window, div, img, prelude::*, px,
+    AnyElement, App, Context, FontStyle, FontWeight, Global, HighlightStyle, ImageSource,
+    InteractiveText, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, RenderImage,
+    StrikethroughStyle, StyledText, Window, div, img, prelude::*, px,
 };
 
 use crate::workspace::Workspace;
@@ -62,6 +62,63 @@ struct TableCellPosition {
     is_header: bool,
     is_first: bool,
     is_last: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PendingBlockSelection {
+    block_idx: usize,
+    shift: bool,
+}
+
+/// Input state that must survive the repaint `InteractiveText` requests on
+/// mouse-down. A link consumes the queued block selection on mouse-up.
+#[derive(Default)]
+struct MarkdownPointerState {
+    pressed_button: Option<MouseButton>,
+    pending_block_selection: Option<PendingBlockSelection>,
+}
+
+impl Global for MarkdownPointerState {}
+
+fn record_markdown_mouse_button(button: MouseButton, cx: &mut App) {
+    cx.default_global::<MarkdownPointerState>().pressed_button = Some(button);
+}
+
+fn take_markdown_mouse_button(cx: &mut App) -> Option<MouseButton> {
+    cx.default_global::<MarkdownPointerState>()
+        .pressed_button
+        .take()
+}
+
+fn queue_block_selection(block_idx: usize, shift: bool, cx: &mut App) {
+    cx.default_global::<MarkdownPointerState>()
+        .pending_block_selection = Some(PendingBlockSelection { block_idx, shift });
+}
+
+fn take_pending_block_selection(cx: &mut App) -> Option<PendingBlockSelection> {
+    cx.default_global::<MarkdownPointerState>()
+        .pending_block_selection
+        .take()
+}
+
+fn take_pending_block_selection_for_drag(
+    active_block_idx: usize,
+    cx: &mut App,
+) -> Option<PendingBlockSelection> {
+    let pointer = cx.default_global::<MarkdownPointerState>();
+    if pointer
+        .pending_block_selection
+        .is_some_and(|pending| pending.block_idx != active_block_idx)
+    {
+        pointer.pending_block_selection.take()
+    } else {
+        None
+    }
+}
+
+fn cancel_pending_block_selection(cx: &mut App) {
+    cx.default_global::<MarkdownPointerState>()
+        .pending_block_selection = None;
 }
 
 impl MdColors {
@@ -254,24 +311,28 @@ fn render_prose_run(
         .min_w_0()
         .items_center()
         .whitespace_normal();
-    for part in compile_prose(spans) {
+    let parts = compile_prose(spans);
+    let text_fills_row = matches!(parts.as_slice(), [ProsePart::Text(_)]);
+    for part in parts {
+        let part_idx = *next_part_idx;
+        *next_part_idx += 1;
         row = match part {
-            ProsePart::Text(text) => {
-                let part_idx = *next_part_idx;
-                *next_part_idx += 1;
-                row.child(render_compiled_text(
-                    text,
-                    t,
-                    block_idx,
-                    part_idx,
-                    on_open_url,
-                ))
-            }
-            ProsePart::Image(image) => row.child(render_md_image(
+            ProsePart::Text(text) => row.child(render_compiled_text(
+                text,
+                t,
+                block_idx,
+                part_idx,
+                text_fills_row,
+                on_open_url,
+            )),
+            ProsePart::Image(image) => row.child(render_inline_md_image(
                 image.raster,
                 image.alt,
-                ImageLayout::Inline,
+                image.link_url,
                 t,
+                block_idx,
+                part_idx,
+                on_open_url,
             )),
         };
     }
@@ -283,6 +344,7 @@ fn render_compiled_text(
     t: &MdColors,
     block_idx: usize,
     part_idx: usize,
+    fill_width: bool,
     on_open_url: &OpenUrl,
 ) -> AnyElement {
     let CompiledText {
@@ -308,22 +370,62 @@ fn render_compiled_text(
         styled.into_any_element()
     } else {
         let on_open_url = on_open_url.clone();
-        InteractiveText::new(format!("markdown-prose-{block_idx}-{part_idx}"), styled)
-            .on_click(link_ranges, move |range_idx, window, cx| {
-                if let Some(url) = link_urls.get(range_idx) {
-                    on_open_url(url, window, cx);
-                }
+        let interactive =
+            InteractiveText::new(format!("markdown-prose-{block_idx}-{part_idx}"), styled)
+                .on_click(link_ranges, move |range_idx, window, cx| {
+                    let is_primary = take_markdown_mouse_button(cx) == Some(MouseButton::Left);
+                    if !is_primary {
+                        return;
+                    }
+                    cancel_pending_block_selection(cx);
+                    if let Some(url) = link_urls.get(range_idx) {
+                        on_open_url(url, window, cx);
+                    }
+                });
+        div()
+            .capture_any_mouse_down(|event, _, cx| {
+                record_markdown_mouse_button(event.button, cx);
             })
+            .child(interactive)
             .into_any_element()
     };
 
     div()
-        .flex_1()
-        .w_0()
+        .when(fill_width, |d| d.flex_1().w_0())
         .min_w_0()
         .whitespace_normal()
         .when(cfg!(test), |d| d.debug_selector(|| "md-plain".into()))
         .child(text)
+        .into_any_element()
+}
+
+fn render_inline_md_image(
+    raster: Option<&RasterImage>,
+    alt: &str,
+    link_url: Option<&str>,
+    t: &MdColors,
+    block_idx: usize,
+    part_idx: usize,
+    on_open_url: &OpenUrl,
+) -> AnyElement {
+    let image = render_md_image(raster, alt, ImageLayout::Inline, t);
+    let Some(url) = link_url else {
+        return image;
+    };
+
+    let url = url.to_owned();
+    let on_open_url = on_open_url.clone();
+    div()
+        .id(format!("markdown-image-link-{block_idx}-{part_idx}"))
+        .cursor_pointer()
+        .when(cfg!(test), |d| {
+            d.debug_selector(|| "markdown-linked-image".into())
+        })
+        .on_click(move |_, window, cx| {
+            cancel_pending_block_selection(cx);
+            on_open_url(&url, window, cx);
+        })
+        .child(image)
         .into_any_element()
 }
 
@@ -344,7 +446,7 @@ fn highlight_for(style: InlineStyle, t: &MdColors) -> HighlightStyle {
         background_color: style.code.then_some(t.fill),
         underline: None,
         strikethrough: style.strikethrough.then_some(StrikethroughStyle {
-            thickness: px(1.),
+            thickness: px(theme::MD_STRIKETHROUGH_H),
             color: None,
         }),
         fade_out: None,
@@ -802,21 +904,49 @@ fn is_block_selected(char_selection: Option<&CharSelection>, block_idx: usize) -
 }
 
 /// Attach block-level click/drag selection handlers to a Markdown block div.
+/// Selection waits until mouse-up or until the pointer enters another block,
+/// giving a link in the original block a chance to consume an ordinary click.
 fn block_with_selection(
     block_div: gpui::Div,
     block_idx: usize,
     cx: &mut Context<Workspace>,
 ) -> gpui::Div {
-    let down_handler = cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
-        if let Some(fv) = this.focused_file_view_mut() {
-            fv.handle_block_mouse_down(block_idx, ev.modifiers.shift);
-            cx.notify();
-        }
+    let down_handler = cx.listener(move |_this, ev: &MouseDownEvent, _window, cx| {
+        queue_block_selection(block_idx, ev.modifiers.shift, cx);
     });
     let move_handler = cx.listener(move |this, ev: &MouseMoveEvent, _window, cx| {
+        let left_pressed = ev.pressed_button == Some(MouseButton::Left);
+        let pending = if left_pressed {
+            take_pending_block_selection_for_drag(block_idx, cx)
+        } else {
+            cancel_pending_block_selection(cx);
+            None
+        };
         if let Some(fv) = this.focused_file_view_mut() {
-            let left_pressed = ev.pressed_button == Some(MouseButton::Left);
-            if fv.handle_block_mouse_move(block_idx, left_pressed) {
+            let mut changed = false;
+            if let Some(pending) = pending {
+                fv.handle_block_mouse_down(pending.block_idx, pending.shift);
+                changed = true;
+            }
+            changed |= fv.handle_block_mouse_move(block_idx, left_pressed);
+            if changed {
+                cx.notify();
+            }
+        }
+    });
+    let up_handler = cx.listener(move |this, _ev, _window, cx| {
+        let pending = take_pending_block_selection(cx);
+        if let Some(fv) = this.focused_file_view_mut() {
+            let mut changed = false;
+            if let Some(pending) = pending {
+                fv.handle_block_mouse_down(pending.block_idx, pending.shift);
+                if !pending.shift && pending.block_idx != block_idx {
+                    fv.handle_block_mouse_move(block_idx, true);
+                }
+                changed = true;
+            }
+            changed |= fv.end_selection_drag();
+            if changed {
                 cx.notify();
             }
         }
@@ -824,6 +954,7 @@ fn block_with_selection(
     block_div
         .cursor_default()
         .on_mouse_down(MouseButton::Left, down_handler)
+        .on_mouse_up(MouseButton::Left, up_handler)
         .on_mouse_move(move_handler)
 }
 
@@ -1048,7 +1179,10 @@ mod layout_tests {
     use std::rc::Rc;
     use std::sync::{Arc, Mutex};
 
-    use super::{MdColors, OpenUrl, render_md_body_layout};
+    use super::{
+        MdColors, OpenUrl, queue_block_selection, render_md_body_layout,
+        take_pending_block_selection, take_pending_block_selection_for_drag,
+    };
     use crate::ui::theme;
     use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
     use gpui::{
@@ -1096,15 +1230,34 @@ mod layout_tests {
                 opened.lock().unwrap().push(url.to_owned());
             });
             let block_mouse_downs = self.block_mouse_downs.clone();
-            let body =
-                render_md_body_layout(&blocks, None, &colors, on_open_url, move |block, _| {
-                    let block_mouse_downs = block_mouse_downs.clone();
-                    block.on_mouse_down(MouseButton::Left, move |_, _, _| {
-                        *block_mouse_downs.lock().unwrap() += 1;
-                    })
-                })
-                .id("md-link-probe")
-                .debug_selector(|| "md-link-probe".into());
+            let body = render_md_body_layout(
+                &blocks,
+                None,
+                &colors,
+                on_open_url,
+                move |block, block_idx| {
+                    let committed = block_mouse_downs.clone();
+                    let dragged = block_mouse_downs.clone();
+                    block
+                        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                            queue_block_selection(block_idx, event.modifiers.shift, cx);
+                        })
+                        .on_mouse_move(move |event, _, cx| {
+                            if event.pressed_button == Some(MouseButton::Left)
+                                && take_pending_block_selection_for_drag(block_idx, cx).is_some()
+                            {
+                                *dragged.lock().unwrap() += 1;
+                            }
+                        })
+                        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                            if take_pending_block_selection(cx).is_some() {
+                                *committed.lock().unwrap() += 1;
+                            }
+                        })
+                },
+            )
+            .id("md-link-probe")
+            .debug_selector(|| "md-link-probe".into());
 
             div()
                 .size_full()
@@ -1309,6 +1462,16 @@ mod layout_tests {
     }
 
     #[gpui::test]
+    fn inline_images_do_not_split_surrounding_text_into_equal_columns(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let plain = "alpha beta gamma delta epsilon zeta eta theta iota kappa [thumbnail] tail";
+        let image = "alpha beta gamma delta epsilon zeta eta theta iota kappa \
+                     ![thumbnail](missing.png) tail";
+
+        assert_eq!(height(cx, plain, px(635.)), height(cx, image, px(635.)));
+    }
+
+    #[gpui::test]
     fn interactive_text_opens_only_a_pressed_link_range(cx: &mut TestAppContext) {
         crate::test_support::init_gpui_component(cx);
         let bounds = Bounds::new(point(px(0.), px(0.)), size(px(430.), px(220.)));
@@ -1324,7 +1487,7 @@ mod layout_tests {
                 let block_mouse_downs = block_mouse_downs.clone();
                 cx.open_window(options, |_window, cx| {
                     cx.new(|_| LinkProbe {
-                        md: "[open](https://example.com/right)".into(),
+                        md: "[open](https://example.com/right) tail".into(),
                         opened,
                         block_mouse_downs,
                     })
@@ -1342,6 +1505,7 @@ mod layout_tests {
             opened.lock().unwrap().as_slice(),
             ["https://example.com/right"]
         );
+        assert_eq!(*block_mouse_downs.lock().unwrap(), 0);
 
         let prior_block_downs = *block_mouse_downs.lock().unwrap();
         vcx.simulate_click(outside_link, Modifiers::none());
@@ -1350,6 +1514,65 @@ mod layout_tests {
 
         vcx.simulate_mouse_down(inside_link, MouseButton::Left, Modifiers::none());
         vcx.simulate_mouse_up(outside_link, MouseButton::Left, Modifiers::none());
+        assert_eq!(opened.lock().unwrap().len(), 1);
+
+        let prior_block_downs = *block_mouse_downs.lock().unwrap();
+        let moved_inside_link = point(inside_link.x + px(1.), inside_link.y);
+        vcx.simulate_mouse_down(inside_link, MouseButton::Left, Modifiers::none());
+        vcx.simulate_mouse_move(
+            moved_inside_link,
+            Some(MouseButton::Left),
+            Modifiers::none(),
+        );
+        vcx.simulate_mouse_up(moved_inside_link, MouseButton::Left, Modifiers::none());
+        assert_eq!(opened.lock().unwrap().len(), 2);
+        assert_eq!(*block_mouse_downs.lock().unwrap(), prior_block_downs);
+
+        let prior_block_downs = *block_mouse_downs.lock().unwrap();
+        vcx.simulate_mouse_down(inside_link, MouseButton::Right, Modifiers::none());
+        vcx.simulate_mouse_up(inside_link, MouseButton::Right, Modifiers::none());
+        assert_eq!(opened.lock().unwrap().len(), 2);
+        assert_eq!(*block_mouse_downs.lock().unwrap(), prior_block_downs);
+    }
+
+    #[gpui::test]
+    fn linked_images_open_without_committing_block_selection(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(430.), px(220.)));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let block_mouse_downs = Arc::new(Mutex::new(0));
+        let window = cx
+            .update(|cx| {
+                let opened = opened.clone();
+                let block_mouse_downs = block_mouse_downs.clone();
+                cx.open_window(options, |_window, cx| {
+                    cx.new(|_| LinkProbe {
+                        md: "[![thumbnail](missing.png)](https://example.com/full)".into(),
+                        opened,
+                        block_mouse_downs,
+                    })
+                })
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let image = vcx
+            .debug_bounds("markdown-linked-image")
+            .expect("linked image painted");
+
+        vcx.simulate_click(image.center(), Modifiers::none());
+        assert_eq!(
+            opened.lock().unwrap().as_slice(),
+            ["https://example.com/full"]
+        );
+        assert_eq!(*block_mouse_downs.lock().unwrap(), 0);
+
+        vcx.simulate_mouse_down(image.center(), MouseButton::Right, Modifiers::none());
+        vcx.simulate_mouse_up(image.center(), MouseButton::Right, Modifiers::none());
         assert_eq!(opened.lock().unwrap().len(), 1);
     }
 

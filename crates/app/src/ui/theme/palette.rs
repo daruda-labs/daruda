@@ -1911,6 +1911,9 @@ pub const MD_BLOCKQUOTE_BORDER_W: f32 = 3.0;
 pub const MD_BLOCKQUOTE_PAD_L: f32 = 12.0;
 /// Horizontal rule height (px).
 pub const MD_RULE_H: f32 = 1.0;
+/// Strikethrough line thickness (px). Independent of [`MD_RULE_H`] — one is a
+/// line through prose, the other a block separator.
+pub const MD_STRIKETHROUGH_H: f32 = 1.0;
 /// List item indentation (px).
 pub const MD_LIST_INDENT: f32 = 16.0;
 /// Outer horizontal padding for the Markdown viewer body (px).
