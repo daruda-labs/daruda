@@ -41,24 +41,6 @@ impl TailWindow {
     }
 }
 
-/// Whether a subagent card's own boundary is holding this child back.
-///
-/// `pos`/`count` are the child's place among the calls the card collected. A
-/// subagent contributes only tool calls to the conversation, so there is no
-/// prose to split them into steps and the card's children are one group of
-/// calls — the axis counts them the way a tool group counts its own. A revealed
-/// boundary and a running call both escape it, the latter exactly as a live
-/// call escapes its tool group's boundary one level up.
-pub(in crate::workspace) fn subagent_child_withheld(
-    pos: usize,
-    count: usize,
-    tail: TailWindow,
-    revealed: bool,
-    live: bool,
-) -> bool {
-    !revealed && !live && tail.hides(pos, count)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,50 +83,6 @@ mod tests {
     fn the_zero_sentinel_is_the_no_window_state() {
         assert_eq!(TailWindow::last(TAIL_WINDOW_ALL), TailWindow::All);
         assert_eq!(TailWindow::last(5), TailWindow::Last(5));
-    }
-
-    /// The card's boundary keeps the last `n` of its children, and both
-    /// escapes work: opening it, and a child that is still running.
-    #[test]
-    fn a_subagent_cards_boundary_holds_back_all_but_the_last_calls() {
-        let tail = TailWindow::Last(2);
-        let held: Vec<bool> = (0..5)
-            .map(|pos| subagent_child_withheld(pos, 5, tail, false, false))
-            .collect();
-        assert_eq!(held, vec![true, true, true, false, false]);
-
-        assert!(
-            (0..5).all(|pos| !subagent_child_withheld(pos, 5, tail, true, false)),
-            "opening the boundary releases every child"
-        );
-        assert!(
-            !subagent_child_withheld(0, 5, tail, false, true),
-            "a running child stays surfaced through a shut boundary"
-        );
-    }
-
-    #[test]
-    fn a_card_with_no_window_holds_back_nothing() {
-        for count in [0usize, 1, 9] {
-            assert!(
-                (0..count).all(|pos| !subagent_child_withheld(
-                    pos,
-                    count,
-                    TailWindow::All,
-                    false,
-                    false
-                )),
-                "count={count}"
-            );
-        }
-        // A window at or above the child count is the same answer.
-        assert!((0..3).all(|pos| !subagent_child_withheld(
-            pos,
-            3,
-            TailWindow::Last(3),
-            false,
-            false
-        )));
     }
 
     #[test]

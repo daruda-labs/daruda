@@ -18,7 +18,9 @@ use super::RenderAssets;
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
 use super::embed::bounded_editor_embed;
-use super::fold_header::{FoldHeader, FoldRow, SummaryLine, window_boundary_row};
+use super::fold_header::{
+    FoldHeader, FoldRow, SummaryLine, outside_window_rail, window_boundary_row,
+};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use super::tail_row::call_boundary_label;
@@ -33,13 +35,13 @@ use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, F
 use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
-use crate::workspace::main_area::agent_chat_pane::rows::tail::{
-    TailWindow, subagent_child_withheld,
+use crate::workspace::main_area::agent_chat_pane::rows::subagent::{
+    SubagentChildren, SubagentLens,
 };
+use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    FilterMatchIndex, LiveSubagentUnits, effective_tool_status, tool_or_subtree_live,
+    FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
-use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -339,34 +341,25 @@ pub(super) fn tool_card(
         // flow; render them nested here (recursively — a child may itself spawn one)
         // so the subagent reads as one unit that folds with its parent card.
         //
-        // The filter's unit is a projected row, and these children have none, so
-        // `FilterMatchIndex` keeps every descendant of a kept tool. Opening the
-        // per-run filter disclosure admits the whole card again, including the
-        // nested children that own no projected row of their own.
-        //
-        // `depth` bounds the recursion: real `parentToolUseId`s are unique and
-        // acyclic (a parent always precedes its children), but this id comes from a
-        // subprocess pipe, so a malformed / cyclic ref (a self-parent, or A→B→A)
-        // would otherwise recurse until the stack overflows — an uncatchable abort
-        // that takes the whole window down. Past the cap the children are simply not
-        // nested (the parent card still renders), which no real conversation hits.
-        let children: Vec<(usize, &ToolCallItem)> = if depth < SUBAGENT_NEST_DEPTH_CAP {
-            items
-                .iter()
-                .enumerate()
-                .filter_map(|(cix, it)| match it {
-                    ChatItem::ToolCall(c)
-                        if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) =>
-                    {
-                        (filter_revealed || filter_matches.keeps_tool(c)).then_some((cix, c))
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        if !children.is_empty() {
+        // Which of them the card shows — the filter's admission, the step
+        // window, the live escape and the nesting cap together — is decided by
+        // `SubagentChildren`, so this loop only iterates the answer.
+        let tail_key = FoldKey::SubagentTail(tc.id.clone());
+        let tail_revealed =
+            fold.is_expanded(&tail_key, fold_context_at(&tail_key, ix, items, boundary));
+        let children = SubagentChildren::of(
+            items,
+            tc.id.as_str(),
+            depth,
+            SubagentLens {
+                filter: filter_matches,
+                filter_revealed,
+                live_units,
+                tail,
+                revealed: tail_revealed,
+            },
+        );
+        if !children.shown.is_empty() {
             // Name the spawned subagent when the Task input carries its type
             // (`subagent_type`); fall back to the generic label otherwise.
             let subagent_label = match tc.subagent_type() {
@@ -381,65 +374,61 @@ pub(super) fn tool_card(
             );
             // The card's own step-axis boundary. These children own no row, so
             // it renders here rather than in the list — the same place the
-            // raw-input disclosure lives. No slot to keep stable, so unlike the
-            // row-level boundaries it is built only when it holds something.
-            let count = children.len();
-            let hidden = tail.hidden_steps(count);
-            let tail_key = FoldKey::SubagentTail(tc.id.clone());
-            let tail_revealed =
-                fold.is_expanded(&tail_key, fold_context_at(&tail_key, ix, items, boundary));
-            if hidden > 0 {
+            // raw-input disclosure lives.
+            if children.offers_reveal() {
                 body = body.child(window_boundary_row(
                     SharedString::from(format!("agent-chat-subagent-tail-{}", tc.id)),
                     tail_key,
                     tail_revealed,
-                    SharedString::from(call_boundary_label(hidden, count - hidden, !tail_revealed)),
+                    SharedString::from(call_boundary_label(
+                        children.hidden,
+                        children.kept,
+                        !tail_revealed,
+                    )),
                     dim,
                     cx,
                 ));
             }
-            for (pos, (child_ix, child)) in children.into_iter().enumerate() {
-                if subagent_child_withheld(
-                    pos,
-                    count,
-                    tail,
-                    tail_revealed,
-                    tool_or_subtree_live(child, live_units),
-                ) {
-                    continue;
-                }
+            for child in children.shown {
                 // A nested child may itself be a subagent launch (a subagent that
                 // spawns its own subagent), so key it the same way as a top-level
                 // card — collapsed by default when it is one.
-                let child_key = tool_fold_key(child);
+                let child_key = tool_fold_key(child.call);
                 let child_expanded = fold.is_expanded(
                     &child_key,
-                    fold_context_at(&child_key, child_ix, items, boundary),
+                    fold_context_at(&child_key, child.ix, items, boundary),
                 );
-                body = body.child(
-                    tool_card(
-                        child_key,
-                        child_expanded,
-                        child_ix,
-                        child,
-                        items,
-                        live_units,
-                        filter_matches,
-                        filter_revealed,
-                        boundary,
-                        assets,
-                        fold,
-                        tail,
-                        t,
-                        dim,
-                        depth + 1,
-                        pane_id,
-                        window_handle,
-                        window,
-                        cx,
-                    )
-                    .into_any_element(),
-                );
+                let card = tool_card(
+                    child_key,
+                    child_expanded,
+                    child.ix,
+                    child.call,
+                    items,
+                    live_units,
+                    filter_matches,
+                    filter_revealed,
+                    boundary,
+                    assets,
+                    fold,
+                    tail,
+                    t,
+                    dim,
+                    depth + 1,
+                    pane_id,
+                    window_handle,
+                    window,
+                    cx,
+                )
+                .into_any_element();
+                // A covered child is on screen only because the boundary above
+                // it released it — or because it is still running. The rail says
+                // so; without it the reveal just appends cards that read as part
+                // of the window.
+                body = body.child(if child.covered {
+                    outside_window_rail(card, dim, cx)
+                } else {
+                    card
+                });
             }
         }
         body.into_any_element()

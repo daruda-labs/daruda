@@ -1,6 +1,7 @@
 //! Projects the flat chat model into stable virtual-list rows. Folding changes
 //! `hidden` flags instead of removing rows so scroll positions remain stable.
 
+pub(in crate::workspace) mod subagent;
 pub(in crate::workspace) mod tail;
 
 use std::collections::HashSet;
@@ -554,9 +555,14 @@ impl LastProse {
 }
 
 /// What the tail window makes of one sequence of units — a response's top-level
-/// tool runs, or the calls of a single tool group. Both levels ask the same
+/// tool runs, or the calls of a single tool group. Both row levels ask the same
 /// question of the same axis, so they share the arithmetic rather than each
 /// deciding what "the last N" means.
+///
+/// The third level — a subagent card's children ([`super::subagent`]) —
+/// deliberately does not come through here: its children own no row, so there
+/// is no `window_start` item index to hand back and no filter cut to tally, and
+/// it reads [`TailWindow`] directly instead.
 ///
 /// `kept` is the window's population: counting every unit let one the filter
 /// emptied spend a slot, so `Recent steps: 3` put however many of the last three

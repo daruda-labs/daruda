@@ -34,7 +34,7 @@ const SHOT_TAIL_WINDOW: usize = 3;
 /// The window the in-group boundary capture runs under — one narrower than the
 /// seed's longest tool group, so that group has a call to hold back.
 #[cfg(feature = "screenshot")]
-const SHOT_GROUP_TAIL_WINDOW: usize = 2;
+pub(super) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
 
 /// The catalog's default agent id — the first entry, or the built-in Claude id
 /// if the catalog is somehow empty (the config layer guarantees non-empty, so
@@ -903,9 +903,6 @@ impl Workspace {
         };
         view.update(cx, |v, cx| {
             v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
-            if !reveal {
-                return;
-            }
             // The boundary's own key, taken from the projection that just ran —
             // the run start is a property of the seed, not a constant.
             let run_start = v.rows.iter().find_map(|r| match r.kind {
@@ -913,7 +910,7 @@ impl Workspace {
                 _ => None,
             });
             if let Some(run_start) = run_start {
-                v.toggle_fold(FoldKey::Tail(run_start), window, cx);
+                v.set_fold_for_shot(FoldKey::Tail(run_start), reveal, window, cx);
             }
         });
     }
@@ -948,21 +945,8 @@ impl Workspace {
                 _ => None,
             });
             let Some(gid) = target else { return };
-            // Only expand what the seed left folded: `toggle_fold` flips the
-            // visible state, so calling it unconditionally would shut a group
-            // the configured mode already opened.
-            let collapsed = v.rows.iter().any(|r| {
-                matches!(
-                    &r.kind,
-                    RowKind::ToolGroupHeader { gid: g, collapsed, .. } if *g == gid && *collapsed
-                )
-            });
-            if collapsed {
-                v.toggle_fold(FoldKey::ToolGroup(gid.clone()), window, cx);
-            }
-            if reveal {
-                v.toggle_fold(FoldKey::ToolGroupTail(gid), window, cx);
-            }
+            v.set_fold_for_shot(FoldKey::ToolGroup(gid.clone()), true, window, cx);
+            v.set_fold_for_shot(FoldKey::ToolGroupTail(gid), reveal, window, cx);
         });
     }
 
@@ -996,18 +980,18 @@ impl Workspace {
             v.set_tail_window(TailWindow::Last(SHOT_GROUP_TAIL_WINDOW), cx);
             // A launch card defaults collapsed, and its children are only on
             // screen once it is open — the boundary lives among them.
-            v.toggle_fold(
+            v.set_fold_for_shot(
                 FoldKey::Subagent(SUBAGENT_PARENT_ID.to_string()),
+                true,
                 window,
                 cx,
             );
-            if reveal {
-                v.toggle_fold(
-                    FoldKey::SubagentTail(SUBAGENT_PARENT_ID.to_string()),
-                    window,
-                    cx,
-                );
-            }
+            v.set_fold_for_shot(
+                FoldKey::SubagentTail(SUBAGENT_PARENT_ID.to_string()),
+                reveal,
+                window,
+                cx,
+            );
         });
     }
 

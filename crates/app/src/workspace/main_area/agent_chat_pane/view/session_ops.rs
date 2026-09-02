@@ -134,9 +134,26 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Toggle the fold state of one block. Resolves the `active` flag the same
-    /// way `render` derives it, so the first click flips the *visible* state
-    /// rather than re-deriving from a stale default.
+    /// Put `key` in a known state instead of flipping whatever it is in.
+    ///
+    /// `toggle_fold` reads the *visible* state, so a capture that toggles
+    /// blindly shoots the inverse whenever a user's fold matrix already put the
+    /// block the other way — and a screenshot has no way to report that it did.
+    /// Reads the same source `toggle_fold` reads, so it is exact rather than a
+    /// guess about the configured default.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn set_fold_for_shot(
+        &mut self,
+        key: FoldKey,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.fold.is_expanded(&key, fold_context(&key, &self.items)) != expanded {
+            self.toggle_fold(key, window, cx);
+        }
+    }
+
     pub(in crate::workspace) fn toggle_fold(
         &mut self,
         key: FoldKey,
@@ -161,12 +178,7 @@ impl AgentChatView {
         // response and group folds only flip row visibility, leaving each card's
         // own state (and its embeds) untouched.
         let embed_scope = match &key {
-            // A subagent's own boundary decides which child cards render, and
-            // each of those owns embeds, so it scopes to the parent card just
-            // as the card's own fold does.
-            FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::SubagentTail(id) => {
-                Some(ReconcileScope::Tool(id.clone()))
-            }
+            FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
             FoldKey::Assistant(_)
             | FoldKey::Thinking(_)
             | FoldKey::Response(_)
@@ -176,6 +188,13 @@ impl AgentChatView {
             | FoldKey::ToolGroupTail(_)
             | FoldKey::Filtered(_)
             | FoldKey::Diff(_)
+            // A card's step boundary changes which children render, but every
+            // child's embeds are judged by that child's own fold key alone
+            // (`tool_body_on_screen`), so a withheld child's editors already
+            // exist and nothing has to be rebuilt. Same shape as the raw-input
+            // disclosure: an in-place body height change, which is what makes
+            // `fold_key_item_index`'s targeted remeasure the operative fix.
+            | FoldKey::SubagentTail(_)
             | FoldKey::ToolRawInput(_) => None,
         };
         self.fold.toggle(key, ctx);

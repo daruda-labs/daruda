@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 use daruda_acp::{ChatItem, DiffView, MessagePhase, ToolCallItem, ToolKindView, ToolStatusView};
 
+use super::agent_chat_ops::SHOT_GROUP_TAIL_WINDOW;
+
 /// A file modification a sample call reports.
 struct SampleDiff {
     path: &'static str,
@@ -329,12 +331,6 @@ mod tests {
             assert!(cycle.tools.len() >= 2);
             assert!(!cycle.prose.is_empty());
         }
-        // The subagent capture needs more flattened children than that window
-        // keeps, or the card's own boundary has nothing to hold back.
-        assert!(
-            SUBAGENT_CHILDREN.len() > 2,
-            "no subagent card long enough for the in-card boundary capture"
-        );
         // The in-group boundary capture engages a window one narrower than the
         // longest group, so the seed has to hold a group of more than two —
         // otherwise `open_agent_chat_group_tail_boundary_for_shot` finds no
@@ -370,6 +366,13 @@ mod tests {
             })
             .count();
         assert_eq!(children, SUBAGENT_CHILDREN.len());
+        // The capture engages a window narrower than the child count, or the
+        // card's own boundary has nothing to hold back and the capture shows a
+        // state the feature does not have.
+        assert!(
+            SUBAGENT_CHILDREN.len() > SHOT_GROUP_TAIL_WINDOW,
+            "no subagent card long enough for the in-card boundary capture"
+        );
     }
 
     #[test]
