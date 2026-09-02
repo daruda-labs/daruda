@@ -2245,9 +2245,11 @@ pub fn agent_chat_tail_more_collapse(count: usize) -> String {
     }
 }
 
-/// The same row one level in, inside a tool group. The unit there is a call,
-/// not a step, so the copy names calls — the group itself is the step the axis
-/// counted.
+/// The same boundary where the unit is a call rather than a step: inside a tool
+/// group, and inside a subagent card, whose flattened children are one group of
+/// calls. The group is itself the step the axis counted, so what the boundary
+/// holds back are the calls it is made of. Shared by both hosts — a third one
+/// wants this copy too, not a new key.
 pub fn agent_chat_tail_more_show_calls(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.tail_more_show_calls_one").into_owned()
@@ -2256,8 +2258,8 @@ pub fn agent_chat_tail_more_show_calls(count: usize) -> String {
     }
 }
 
-/// The in-group boundary while it is open. Names the kept calls, for the same
-/// reason [`agent_chat_tail_more_collapse`] names the kept steps.
+/// A call-unit boundary while it is open — either host. Names the kept calls,
+/// for the same reason [`agent_chat_tail_more_collapse`] names the kept steps.
 pub fn agent_chat_tail_more_collapse_calls(count: usize) -> String {
     if count == 1 {
         rust_i18n::t!("agent_chat.tail_more_collapse_calls_one").into_owned()

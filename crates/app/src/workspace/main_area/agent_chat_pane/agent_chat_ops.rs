@@ -31,8 +31,10 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 /// and small enough against the seed that the tail-more row has a real count.
 #[cfg(feature = "screenshot")]
 const SHOT_TAIL_WINDOW: usize = 3;
-/// The window the in-group boundary capture runs under — one narrower than the
-/// seed's longest tool group, so that group has a call to hold back.
+/// The window both call-unit boundary captures run under. It has to be narrower
+/// than the sample seed's longest tool group *and* than the subagent seed's
+/// child count, so each capture has something to hold back; `shot_transcript`'s
+/// tests assert both sides.
 #[cfg(feature = "screenshot")]
 pub(super) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
 
