@@ -20,18 +20,19 @@ use gpui::{
 
 use super::super::filter::display_filter_chip_label;
 use super::super::fold_mode::fold_mode_chip_label;
-use super::super::options_panel::{fixed_region, panel_root};
 use super::super::tail_window::tail_window_chip_label;
 use crate::surface::strings as s;
 use crate::surface::timestamp;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::editor::state::FoldEditorState;
+use crate::transcript::editor::{fixed_region, panel_root};
+use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
     Disableable as _, Icon, IconName, Popover, Selectable as _, Sizable as _,
     button_bare_on_surface, button_group,
 };
-use crate::workspace::main_area::agent_chat_pane::display_filter::DisplayFilter;
-use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, TurnPosition};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
@@ -60,9 +61,8 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub tail: PaneChoice<TailWindow>,
     pub display_filter: PaneChoice<DisplayFilter>,
     pub fold_mode: PaneChoice<FoldMode>,
-    pub fold_editor_turn: TurnPosition,
-    /// The fold editor's `Custom` segment target — see `AgentChatView`.
-    pub custom_fold_mode: Option<FoldMode>,
+    /// The fold editor's own state — see `AgentChatView`.
+    pub fold_editor: FoldEditorState,
     pub activity_options_tab: ActivityOptionsTab,
     pub compact_options: bool,
     pub filter_popover_open: bool,
@@ -116,8 +116,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
             super::super::fold_mode::fold_mode_chip(
                 props.pane_id,
                 props.fold_mode,
-                props.fold_editor_turn,
-                props.custom_fold_mode,
+                props.fold_editor,
                 props.fold_popover_open,
                 &surface,
                 cx,
@@ -268,8 +267,7 @@ fn view_options_chip(
 ) -> impl IntoElement + use<> {
     let pane_id = props.pane_id;
     let mode = props.fold_mode;
-    let editor_turn = props.fold_editor_turn;
-    let custom_mode = props.custom_fold_mode;
+    let fold_editor = props.fold_editor;
     let filter = props.display_filter;
     let tail = props.tail;
     let active_tab = props.activity_options_tab;
@@ -293,8 +291,7 @@ fn view_options_chip(
             &view,
             pane_id,
             mode,
-            editor_turn,
-            custom_mode,
+            fold_editor,
             filter,
             tail,
             active_tab,
@@ -309,8 +306,7 @@ fn activity_options_panel(
     view: &gpui::WeakEntity<AgentChatView>,
     pane_id: PaneId,
     mode: PaneChoice<FoldMode>,
-    editor_turn: TurnPosition,
-    custom_mode: Option<FoldMode>,
+    fold_editor: FoldEditorState,
     filter: PaneChoice<DisplayFilter>,
     tail: PaneChoice<TailWindow>,
     active_tab: ActivityOptionsTab,
@@ -318,14 +314,9 @@ fn activity_options_panel(
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
     let panel = match active_tab {
-        ActivityOptionsTab::Fold => super::super::fold_mode::fold_mode_panel(
-            view,
-            mode,
-            editor_turn,
-            custom_mode,
-            pane_id,
-            cx,
-        ),
+        ActivityOptionsTab::Fold => {
+            super::super::fold_mode::fold_mode_panel(view, mode, fold_editor, pane_id, cx)
+        }
         ActivityOptionsTab::Filter => super::super::filter::filter_panel(view, filter, pane_id, cx),
         ActivityOptionsTab::RecentSteps => {
             super::super::tail_window::tail_window_panel(view, tail, pane_id, cx)

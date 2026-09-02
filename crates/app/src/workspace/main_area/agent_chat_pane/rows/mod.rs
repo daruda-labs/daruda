@@ -8,9 +8,9 @@ use std::collections::HashSet;
 use daruda_acp::{ChatItem, ToolCallItem, ToolStatusView};
 
 use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at};
-use super::display_filter::DisplayFilter;
 use super::fold::{FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
+use crate::transcript::display_filter::DisplayFilter;
 use tail::TailWindow;
 
 /// Minimum consecutive same-kind items that earn a group header. Governs tool

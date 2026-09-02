@@ -2,14 +2,14 @@
 
 use daruda_acp::{ChatItem, MessagePhase, ToolCallItem};
 
-use super::tool_category::{ToolCategory, ToolCategorySet, classify_tool};
+use crate::transcript::tool_category::{ToolCategory, ToolCategorySet, classify_tool};
 
 /// How the panel groups facets into labelled sections. Each axis renders one
 /// heading, an optional parent toggle standing for the whole section, and the
 /// rows [`FilterAxis::rows`] derives from [`FilterFacet::axis`] — so a facet
 /// cannot be listed under a heading its own axis disagrees with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum FilterAxis {
+pub(crate) enum FilterAxis {
     Kind,
     Reply,
     Tool,
@@ -17,13 +17,13 @@ pub(in crate::workspace) enum FilterAxis {
 
 impl FilterAxis {
     /// Render order of the panel's sections.
-    pub(in crate::workspace) const ALL: [FilterAxis; 3] = [Self::Kind, Self::Reply, Self::Tool];
+    pub(crate) const ALL: [FilterAxis; 3] = [Self::Kind, Self::Reply, Self::Tool];
 
     /// The section-wide toggle drawn above this axis's own rows, if it has one.
     /// Reply and Tool each have one — `Prose` and `Tools` gate their whole
     /// section, so those rows nest under them. Kind's facet is independent and
     /// sits flat under the heading.
-    pub(in crate::workspace) fn parent(self) -> Option<FilterFacet> {
+    pub(crate) fn parent(self) -> Option<FilterFacet> {
         match self {
             Self::Kind => None,
             Self::Reply => Some(FilterFacet::Prose),
@@ -33,7 +33,7 @@ impl FilterAxis {
 
     /// The rows listed under this heading, in [`FilterFacet::ALL`] order —
     /// every facet on the axis except the section's own parent toggle.
-    pub(in crate::workspace) fn rows(self) -> Vec<FilterFacet> {
+    pub(crate) fn rows(self) -> Vec<FilterFacet> {
         FilterFacet::ALL
             .into_iter()
             .filter(|facet| facet.axis() == self && Some(*facet) != self.parent())
@@ -42,7 +42,7 @@ impl FilterAxis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum FilterFacet {
+pub(crate) enum FilterFacet {
     Thinking,
     Prose,
     ProseAnswer,
@@ -56,7 +56,7 @@ pub(in crate::workspace) enum FilterFacet {
 }
 
 impl FilterFacet {
-    pub(in crate::workspace) const ALL: [FilterFacet; 10] = [
+    pub(crate) const ALL: [FilterFacet; 10] = [
         Self::Thinking,
         Self::Prose,
         Self::ProseAnswer,
@@ -72,7 +72,7 @@ impl FilterFacet {
     /// Which panel section lists this facet. `Prose` and `Tools` sit on the
     /// axis they parent even though neither names a single kind under it: each
     /// is that section's parent toggle, not a row of its own.
-    pub(in crate::workspace) fn axis(self) -> FilterAxis {
+    pub(crate) fn axis(self) -> FilterAxis {
         match self {
             Self::Thinking => FilterAxis::Kind,
             Self::Prose | Self::ProseAnswer | Self::ProsePreamble => FilterAxis::Reply,
@@ -86,7 +86,7 @@ impl FilterFacet {
     }
 
     /// The prose kind this facet names, for the two rows under `Prose`.
-    pub(in crate::workspace) fn prose_kind(self) -> Option<ProseKind> {
+    pub(crate) fn prose_kind(self) -> Option<ProseKind> {
         match self {
             Self::ProseAnswer => Some(ProseKind::Answer),
             Self::ProsePreamble => Some(ProseKind::Preamble),
@@ -94,7 +94,7 @@ impl FilterFacet {
         }
     }
 
-    pub(in crate::workspace) fn category(self) -> Option<ToolCategory> {
+    pub(crate) fn category(self) -> Option<ToolCategory> {
         match self {
             Self::Thinking
             | Self::Prose
@@ -110,7 +110,7 @@ impl FilterFacet {
     }
 
     /// Stable config and persistence token.
-    pub(in crate::workspace) fn token(self) -> &'static str {
+    pub(crate) fn token(self) -> &'static str {
         match self {
             Self::Thinking => "thinking",
             Self::Prose => "prose",
@@ -125,7 +125,7 @@ impl FilterFacet {
         }
     }
 
-    pub(in crate::workspace) fn from_token(token: &str) -> Option<Self> {
+    pub(crate) fn from_token(token: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|f| f.token() == token)
     }
 }
@@ -134,7 +134,7 @@ impl FilterFacet {
 /// does not label its messages emits only [`Self::Answer`], so a filter aimed at
 /// preambles is inert there rather than wrong.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum ProseKind {
+pub(crate) enum ProseKind {
     /// The reply itself — what every unlabelled message is.
     Answer,
     /// A preamble the agent wrote before the work it is about — prose the agent
@@ -160,7 +160,7 @@ impl ProseKind {
 /// a partial selection is one of them — [`Self::Only`] rather than a set that
 /// could hold none and have to mean [`Self::Excluded`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum ProseSelection {
+pub(crate) enum ProseSelection {
     Excluded,
     All,
     Only(ProseKind),
@@ -169,14 +169,14 @@ pub(in crate::workspace) enum ProseSelection {
 /// Whether a parented section is fully on, partly on, or off — what its
 /// tri-state parent checkbox draws.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum SectionState {
+pub(crate) enum SectionState {
     Off,
     Partial,
     On,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum ToolSelection {
+pub(crate) enum ToolSelection {
     #[default]
     Excluded,
     All,
@@ -188,7 +188,7 @@ pub(in crate::workspace) enum ToolSelection {
 ///
 /// Tool selection distinguishes no tools, all tools, and a partial category set.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) struct DisplayFilter {
+pub(crate) struct DisplayFilter {
     thinking: bool,
     prose: ProseSelection,
     tools: ToolSelection,
@@ -208,7 +208,7 @@ impl Default for DisplayFilter {
 impl DisplayFilter {
     /// Read the pane's stored visible set. Unlike [`Self::default`], an empty
     /// list is a real value here — the pane the user unchecked entirely.
-    pub(in crate::workspace) fn from_stored(tokens: &[String]) -> Self {
+    pub(crate) fn from_stored(tokens: &[String]) -> Self {
         Self::from_tokens(tokens.iter().map(String::as_str))
     }
 
@@ -221,7 +221,7 @@ impl DisplayFilter {
     /// current reading has no such short-circuit, so a pane storing a facet this
     /// build has since removed would come back showing nothing. The condition is
     /// "no facet parsed", not "no token present".
-    pub(in crate::workspace) fn from_legacy_tokens(tokens: &[String]) -> Self {
+    pub(crate) fn from_legacy_tokens(tokens: &[String]) -> Self {
         if !tokens
             .iter()
             .any(|token| FilterFacet::from_token(token).is_some())
@@ -234,7 +234,7 @@ impl DisplayFilter {
     /// Build from a stored visible set. Starts from nothing visible and adds
     /// what the list names, so the empty list is "nothing on screen" — the
     /// state [`Self::default`] is the opposite of.
-    pub(in crate::workspace) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
+    pub(crate) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
         let mut filter = Self {
             thinking: false,
             prose: ProseSelection::Excluded,
@@ -277,7 +277,7 @@ impl DisplayFilter {
         filter
     }
 
-    pub(in crate::workspace) fn tokens(self) -> Vec<&'static str> {
+    pub(crate) fn tokens(self) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.thinking {
             out.push(FilterFacet::Thinking.token());
@@ -309,7 +309,7 @@ impl DisplayFilter {
         out
     }
 
-    pub(in crate::workspace) fn contains(self, facet: FilterFacet) -> bool {
+    pub(crate) fn contains(self, facet: FilterFacet) -> bool {
         match facet {
             FilterFacet::Thinking => self.thinking,
             FilterFacet::Prose => !matches!(self.prose, ProseSelection::Excluded),
@@ -327,7 +327,7 @@ impl DisplayFilter {
         }
     }
 
-    pub(in crate::workspace) fn toggled(mut self, facet: FilterFacet) -> Self {
+    pub(crate) fn toggled(mut self, facet: FilterFacet) -> Self {
         match facet {
             FilterFacet::Thinking => self.thinking = !self.thinking,
             FilterFacet::Prose => {
@@ -382,7 +382,7 @@ impl DisplayFilter {
     /// How full the section `parent` stands for is — what its tri-state
     /// checkbox draws. Keyed off the parent facet so a second parented axis
     /// cannot silently read another axis's selection.
-    pub(in crate::workspace) fn section_state(self, parent: FilterFacet) -> SectionState {
+    pub(crate) fn section_state(self, parent: FilterFacet) -> SectionState {
         match parent {
             FilterFacet::Prose => match self.prose {
                 ProseSelection::Excluded => SectionState::Off,
@@ -407,7 +407,7 @@ impl DisplayFilter {
     }
 
     /// Turn a whole parented section on or off in one move.
-    pub(in crate::workspace) fn with_section(mut self, parent: FilterFacet, on: bool) -> Self {
+    pub(crate) fn with_section(mut self, parent: FilterFacet, on: bool) -> Self {
         match parent {
             FilterFacet::Prose => {
                 self.prose = if on {
@@ -433,13 +433,13 @@ impl DisplayFilter {
     /// value only: whether the pane still *follows* config is `PaneChoice`'s
     /// question, and the UI asks that one, so this is left to assertions.
     #[cfg(test)]
-    pub(in crate::workspace) fn shows_everything(self) -> bool {
+    pub(crate) fn shows_everything(self) -> bool {
         self == Self::default()
     }
 
     /// The facets the user unchecked, in panel order. What the chip names: it
     /// is the shorter list, and it is what the user did.
-    pub(in crate::workspace) fn hidden(self) -> Vec<FilterFacet> {
+    pub(crate) fn hidden(self) -> Vec<FilterFacet> {
         FilterFacet::ALL
             .into_iter()
             .filter(|facet| !self.contains(*facet))
@@ -455,7 +455,7 @@ impl DisplayFilter {
     }
 
     /// Prompts, permissions, and failures are never filtered.
-    pub(in crate::workspace) fn matches(self, item: &ChatItem) -> bool {
+    pub(crate) fn matches(self, item: &ChatItem) -> bool {
         match item {
             ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => true,
             ChatItem::Thinking { .. } => self.thinking,
@@ -468,21 +468,13 @@ impl DisplayFilter {
         }
     }
 
-    pub(in crate::workspace) fn matches_tool(self, tc: &ToolCallItem) -> bool {
+    pub(crate) fn matches_tool(self, tc: &ToolCallItem) -> bool {
         match self.tools {
             ToolSelection::Excluded => false,
             ToolSelection::All => true,
             ToolSelection::Some(categories) => categories.contains(classify_tool(tc)),
         }
     }
-}
-
-/// The stored visible set that names every kind. Re-exported as
-/// `crate::workspace::show_everything_tokens` for the Settings agent catalog:
-/// a per-agent `display_filter` needs this list to state "unfiltered", since
-/// its `None` means "follow `[agent]`", which may itself be narrowed.
-pub(crate) fn show_everything_tokens() -> Vec<&'static str> {
-    DisplayFilter::default().tokens()
 }
 
 #[cfg(test)]

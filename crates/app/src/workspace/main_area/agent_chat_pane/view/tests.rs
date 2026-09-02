@@ -1,6 +1,6 @@
 use super::super::fold::{FoldContext, FoldKey};
-use super::super::fold_mode::FoldPreset;
 use super::super::rows::RowKind;
+use crate::transcript::fold_mode::FoldPreset;
 
 fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
     daruda_acp::ChatItem::AssistantText {
@@ -75,8 +75,8 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             None,
             super::super::transcript_defaults::TranscriptDefaults {
                 tail: super::super::rows::tail::TailWindow::All,
-                fold_mode: super::super::fold_mode::FoldMode::default(),
-                filter: super::super::display_filter::DisplayFilter::default(),
+                fold_mode: crate::transcript::fold_mode::FoldMode::default(),
+                filter: crate::transcript::display_filter::DisplayFilter::default(),
             },
             daruda_config::file_viewer::DEFAULT_SYNTAX_THEME.to_owned(),
             cx,
@@ -1530,10 +1530,10 @@ fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContex
 // Returning an axis to the configured default
 // ---------------------------------------------------------------------------
 
-use super::super::display_filter::{DisplayFilter, FilterFacet};
 use super::super::pane_choice::PaneChoice;
 use super::super::rows::tail::TailWindow;
 use super::super::transcript_defaults::TranscriptDefaults;
+use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 
 /// A config state distinct from the built-in one on every axis, so a reset
 /// that lands on the *built-in* default instead of the one in force is caught.
@@ -1658,7 +1658,7 @@ fn resetting_the_display_filter_hands_the_axis_back(cx: &mut gpui::TestAppContex
 /// away a hand-edited matrix.
 #[gpui::test]
 fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppContext) {
-    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -1685,7 +1685,7 @@ fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppC
 /// two adjacent controls lose the same work differently.
 #[gpui::test]
 fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::TestAppContext) {
-    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -1715,7 +1715,7 @@ fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::Tes
 /// be a preset — otherwise resetting onto a custom default loses it silently.
 #[gpui::test]
 fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppContext) {
-    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -1758,7 +1758,7 @@ fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppCon
 /// older matrix.
 #[gpui::test]
 fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppContext) {
-    use super::super::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -1770,10 +1770,10 @@ fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppCont
             );
             let second = first.with_rule(TurnPosition::Last, FoldBlock::Diff, BlockRule::Expanded);
             view.set_fold_mode(first, cx);
-            assert_eq!(view.custom_fold_mode, Some(first));
+            assert_eq!(view.fold_editor.custom(), Some(first));
             view.set_fold_mode(second, cx);
             assert_eq!(
-                view.custom_fold_mode,
+                view.fold_editor.custom(),
                 Some(second),
                 "custom→custom must keep the segment target on the latest edit"
             );
@@ -1786,7 +1786,7 @@ fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppCont
             );
 
             view.select_fold_preset(Some(FoldPreset::Expanded), cx);
-            assert_eq!(view.custom_fold_mode, Some(second));
+            assert_eq!(view.fold_editor.custom(), Some(second));
 
             view.select_fold_preset(None, cx);
             assert_eq!(view.fold.mode(), second, "the final edit, not the first");
@@ -1803,7 +1803,7 @@ fn the_custom_segment_is_inert_with_nothing_remembered(cx: &mut gpui::TestAppCon
         .update(cx, |view, _window, cx| {
             view.select_fold_preset(Some(FoldPreset::Summary), cx);
             view.select_fold_preset(None, cx);
-            assert_eq!(view.custom_fold_mode, None);
+            assert_eq!(view.fold_editor.custom(), None);
             assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
         })
         .expect("view update");

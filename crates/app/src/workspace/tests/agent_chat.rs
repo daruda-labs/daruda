@@ -7,9 +7,9 @@ use daruda_store::project::PaneCwd;
 use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
+use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::display_filter::{DisplayFilter, FilterFacet};
-use crate::workspace::main_area::agent_chat_pane::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{

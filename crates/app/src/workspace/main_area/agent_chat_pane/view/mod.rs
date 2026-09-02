@@ -26,9 +26,7 @@ use gpui::{
     ListState, Pixels, ScrollHandle, Subscription, Task, Window, prelude::*, px,
 };
 
-use super::display_filter::DisplayFilter;
 use super::fold::FoldState;
-use super::fold_mode::{FoldMode, TurnPosition};
 use super::pane_choice::PaneChoice;
 use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 use super::rows::tail::TailWindow;
@@ -36,6 +34,8 @@ use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use super::transcript_defaults::TranscriptDefaults;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::editor::state::FoldEditorState;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// How long a subagent's run stays "active" after its last child tool event
@@ -535,13 +535,10 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) activity: ActivityTracker,
     /// Persisted pane mode plus session-only block overrides.
     pub(in crate::workspace) fold: FoldState,
-    /// Transient tab selected in the fold-rule editor.
-    pub(in crate::workspace) fold_editor_turn: TurnPosition,
-    /// The hand-edited matrix the fold editor's `Custom` segment restores.
-    /// Kept current while editing so the selected segment cannot revive an
-    /// older matrix. Session-only: the mode itself is persisted, so only "press
-    /// a preset then come back" is scoped here.
-    pub(in crate::workspace) custom_fold_mode: Option<FoldMode>,
+    /// The fold editor's own state — the turn column it shows and the matrix
+    /// its `Custom` segment restores. Session-only: the mode itself is
+    /// persisted, so only "press a preset then come back" is scoped here.
+    pub(in crate::workspace) fold_editor: FoldEditorState,
     /// Active section in the compact Activity Bar's combined options popover.
     pub(in crate::workspace) activity_options_tab: ActivityOptionsTab,
     #[cfg(feature = "screenshot")]
@@ -721,8 +718,7 @@ impl AgentChatView {
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
             fold: FoldState::with_mode(defaults.fold_mode),
-            fold_editor_turn: TurnPosition::Last,
-            custom_fold_mode: None,
+            fold_editor: FoldEditorState::default(),
             activity_options_tab: ActivityOptionsTab::Fold,
             #[cfg(feature = "screenshot")]
             screenshot_filter_open: false,

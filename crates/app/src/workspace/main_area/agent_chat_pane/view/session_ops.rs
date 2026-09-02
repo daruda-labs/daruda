@@ -13,9 +13,7 @@ use super::super::agent_chat_helpers::{
     permission_card_mut,
 };
 use super::super::agent_chat_ops::model_select;
-use super::super::display_filter::{DisplayFilter, FilterFacet};
 use super::super::fold::FoldKey;
-use super::super::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
@@ -25,6 +23,8 @@ use super::super::transcript_defaults::TranscriptDefaults;
 #[cfg(feature = "devtools")]
 use super::super::window_access::WindowAccess;
 use super::{ActivityOptionsTab, AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
+use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 impl AgentChatView {
     /// Stop the active turn: send `session/cancel` *and* end the turn locally
@@ -380,15 +380,7 @@ impl AgentChatView {
         if self.fold.chosen_mode() == Some(mode) {
             return;
         }
-        let current = self.fold.mode();
-        match (current.preset(), mode.preset()) {
-            // Keep the segment's target equal to the latest hand-edited matrix.
-            // Then pressing the already-selected Custom segment applies the
-            // same value instead of resurrecting an older edit.
-            (_, None) => self.custom_fold_mode = Some(mode),
-            (None, Some(_)) => self.custom_fold_mode = Some(current),
-            (Some(_), Some(_)) => {}
-        }
+        self.fold_editor.remember(self.fold.mode(), mode);
         self.fold.set_mode(mode);
         self.reproject(cx);
         self.persist_pane_prefs(cx);
@@ -402,12 +394,8 @@ impl AgentChatView {
         preset: Option<FoldPreset>,
         cx: &mut Context<Self>,
     ) {
-        let mode = match preset {
-            Some(preset) => preset.mode(),
-            None => match self.custom_fold_mode {
-                Some(mode) => mode,
-                None => return,
-            },
+        let Some(mode) = self.fold_editor.segment_target(preset) else {
+            return;
         };
         self.set_fold_mode(mode, cx);
     }
@@ -417,13 +405,9 @@ impl AgentChatView {
         let before = self.fold.mode_choice();
         // Leaving a hand-edited matrix, same as picking a preset does — the two
         // sit side by side in the panel, so only one of them keeping the work
-        // would be a surprise. Keyed on actually moving away from it rather than
-        // on where it lands: a configured default is a token list, so it can be
-        // a matrix of its own, and the edit would be just as gone.
-        let current = self.fold.mode();
-        if current.preset().is_none() && current != self.defaults.fold_mode {
-            self.custom_fold_mode = Some(current);
-        }
+        // would be a surprise.
+        self.fold_editor
+            .remember_before_reset(self.fold.mode(), self.defaults.fold_mode);
         self.fold.reset_mode(self.defaults.fold_mode);
         if before == self.fold.mode_choice() {
             return;
@@ -458,8 +442,7 @@ impl AgentChatView {
         turn: TurnPosition,
         cx: &mut Context<Self>,
     ) {
-        if self.fold_editor_turn != turn {
-            self.fold_editor_turn = turn;
+        if self.fold_editor.set_turn(turn) {
             cx.notify();
         }
     }

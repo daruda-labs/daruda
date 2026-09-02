@@ -4297,9 +4297,10 @@ pub fn settings_agent_transcript_custom() -> String {
     rust_i18n::t!("settings.agent_transcript_custom").into_owned()
 }
 
-/// The display-filter picker's one stated value: nothing hidden.
-pub fn settings_agent_display_filter_everything() -> String {
-    rust_i18n::t!("settings.agent_display_filter_everything").into_owned()
+/// A transcript axis a row leaves to the built-in: the value it resolves to,
+/// marked so it does not read as a value this row states.
+pub fn settings_agent_transcript_built_in(value: &str) -> String {
+    rust_i18n::t!("settings.agent_transcript_built_in", value = value).into_owned()
 }
 
 /// Hint line shown under the host/container field for an `ssh`/`docker`

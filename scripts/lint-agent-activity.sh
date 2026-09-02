@@ -58,9 +58,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-VIEW_DIR="crates/app/src/workspace/main_area/agent_chat_pane/view"
+PANE_DIR="crates/app/src/workspace/main_area/agent_chat_pane"
+VIEW_DIR="$PANE_DIR/view"
 APPLY_EVENT_RS="$VIEW_DIR/apply_event.rs"
-SCAN_DIR="crates/app/src"
+SCAN_DIR="$PANE_DIR"
 
 if [[ ! -f "$VIEW_DIR/mod.rs" ]]; then
     echo "lint-agent-activity: $VIEW_DIR/mod.rs not found — run from the repo root." >&2
@@ -71,16 +72,19 @@ FAIL=0
 
 # ── Check (a): no raw `Turn` reads/construction outside view/ ───────────────
 #
-# Scope: production `.rs` under crates/app/src, excluding the view/ module
+# Scope: production `.rs` under agent_chat_pane/, excluding the view/ module
 # tree (the owner — `Turn` is private to view/mod.rs's `PromptQueue`, and
 # view/{apply_event,queue_ops,session_ops,tests}.rs reach it only as view's
 # own descendants) and test files (which use the sanctioned #[cfg(test)]
 # hooks). Comments are stripped (both a full-line `// …` and a trailing
 # `// …` on a code line) before the match, so a doc-comment reference (e.g.
 # pane.rs mentioning `turn.is_in_flight()`) or a trailing comment mentioning
-# `turn`/`Turn::` does not false-positive. `Turn::` targets the agent enum
-# specifically, so the unrelated `is_in_flight` boolean in settings_window is
-# not matched.
+# `turn`/`Turn::` does not false-positive.
+#
+# The pane tree is the whole risk zone, and scanning wider costs precision
+# rather than buying reach: `Turn` is module-private to view/, so code outside
+# the pane cannot name it and a hit there is always an unrelated `turn` — the
+# fold editor's turn *column* (`FoldEditorState::turn`) is one such name.
 
 HITS_A=$(
     grep -rEn '\.turn\b|Turn::(InFlight|Idle)\b' "$SCAN_DIR" \

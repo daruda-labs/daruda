@@ -3,6 +3,8 @@ use daruda_config::BuiltinSection;
 use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
 use crate::test_support::init_gpui_component;
+use crate::transcript::display_filter::FilterFacet;
+use crate::transcript::fold_mode::FoldPreset;
 
 /// Construct a Settings window wrapped in `gpui_component::Root` —
 /// matches the production windowing path so `gpui_component::Input`'s
@@ -760,9 +762,9 @@ fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppCon
 }
 
 /// A hand-written fold matrix, an off-list step count and a partial visible
-/// set: three values the transcript pickers cannot state. Each is offered as
-/// its own selected entry and written back verbatim, so an unrelated edit
-/// cannot flatten them.
+/// set. Fold and Filter load onto their editors, which can state every value
+/// those keys hold; the off-list step count is the one the tail picker cannot
+/// state, so it alone is offered as its own entry and kept verbatim.
 fn hand_tuned_transcript_config() -> (Vec<String>, Vec<String>, daruda_config::Config) {
     let fold_mode = vec!["summary".to_string(), "last.thinking=expanded".to_string()];
     let display_filter = vec!["prose".to_string(), "tool_read".to_string()];
@@ -785,8 +787,11 @@ fn hand_tuned_transcript_config() -> (Vec<String>, Vec<String>, daruda_config::C
     (fold_mode, display_filter, config)
 }
 
-/// The save path rebuilds the whole definition from the row, so a value the
-/// pickers render but cannot state has to survive an edit to another field.
+/// The save path rebuilds the whole definition from the row, so a hand-tuned
+/// value has to survive an edit to another field. Fold and Filter survive by
+/// round-tripping through their editor's own value — the tokens are rewritten
+/// in canonical form, which reads back as the same matrix and the same visible
+/// set.
 #[gpui::test]
 fn transcript_defaults_survive_a_catalog_save_that_does_not_edit_them(cx: &mut TestAppContext) {
     let (fold_mode, display_filter, config) = hand_tuned_transcript_config();
@@ -806,80 +811,115 @@ fn transcript_defaults_survive_a_catalog_save_that_does_not_edit_them(cx: &mut T
         let cfg = w.validate(cx).expect("a renamed row must validate");
         let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
         assert_eq!(saved.name, "Renamed");
-        assert_eq!(saved.fold_mode, Some(fold_mode));
-        assert_eq!(saved.tail_window, Some(12));
-        assert_eq!(saved.display_filter, Some(display_filter));
+        assert_eq!(saved.tail_window, Some(12), "kept verbatim, off the list");
+        let saved_fold = saved.fold_mode.expect("the matrix is still written");
+        assert_eq!(
+            FoldMode::from_tokens(saved_fold.iter().map(String::as_str)),
+            FoldMode::from_tokens(fold_mode.iter().map(String::as_str)),
+            "the same matrix, however it is spelled"
+        );
+        let saved_filter = saved
+            .display_filter
+            .expect("the visible set is still written");
+        assert_eq!(
+            DisplayFilter::from_stored(&saved_filter),
+            DisplayFilter::from_stored(&display_filter),
+            "the same visible set, however it is spelled"
+        );
     });
 }
 
-/// Each picker states such a value with its own extra entry rather than
+/// The off-list step count is stated by its own extra entry rather than
 /// silently snapping to a neighbouring choice — the visible half of the
 /// preservation the test above asserts on the save path.
 #[gpui::test]
-fn a_transcript_value_no_picker_states_gets_its_own_entry(cx: &mut TestAppContext) {
+fn an_off_list_step_count_gets_its_own_entry(cx: &mut TestAppContext) {
     let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
     let (wh, win) = build_window_with_config(cx, config);
-    for field in [
-        |r: &AgentCatalogRow| r.fold_mode_select.clone(),
-        |r: &AgentCatalogRow| r.tail_window_select.clone(),
-        |r: &AgentCatalogRow| r.display_filter_select.clone(),
-    ] {
-        let selected = win.read_with(cx, |w, cx| {
-            field(w.agent_editable_row(0).unwrap())
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string())
-        });
-        assert_eq!(
-            selected.as_deref(),
-            Some(sections::agent_transcript::CUSTOM),
-            "the stored value must stay selected, not fall back to Default"
-        );
-        assert!(
-            agent_row_select_offers(&wh, &win, cx, 0, field, sections::agent_transcript::CUSTOM),
-            "the entry standing for the stored value has to be in the list"
-        );
-    }
+    let field = |r: &AgentCatalogRow| r.tail_window_select.clone();
+    let selected = win.read_with(cx, |w, cx| {
+        field(w.agent_editable_row(0).unwrap())
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string())
+    });
+    assert_eq!(
+        selected.as_deref(),
+        Some(sections::agent_transcript::CUSTOM),
+        "the stored value must stay selected, not fall back to Default"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, field, sections::agent_transcript::CUSTOM),
+        "the entry standing for the stored value has to be in the list"
+    );
 }
 
-/// Picking a different entry is the user replacing the value, so the preserved
-/// one stops being written — on every axis, including the one whose stored
-/// value was off-list. The filter's replacement is the unfiltered set, which is
-/// the built-in value, so that axis stops writing a key at all.
+/// Fold and Filter need no such entry: their editors state every value those
+/// keys can hold, so a hand-tuned one loads onto the editor itself.
 #[gpui::test]
-fn picking_another_transcript_entry_replaces_the_preserved_value(cx: &mut TestAppContext) {
-    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
-    let (wh, win) = build_window_with_config(cx, config);
-    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.fold_mode_select.clone(), "expanded");
-    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
-    confirm_agent_row_select(
-        &wh,
-        &win,
-        cx,
-        0,
-        |r| r.display_filter_select.clone(),
-        sections::agent_transcript::FILTER_EVERYTHING,
+fn a_hand_tuned_fold_and_filter_load_onto_their_editors(cx: &mut TestAppContext) {
+    let (fold_mode, display_filter, config) = hand_tuned_transcript_config();
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, _cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(
+            row.fold_mode_value(),
+            FoldMode::from_tokens(fold_mode.iter().map(String::as_str))
+        );
+        assert_eq!(
+            row.fold_mode_value().preset(),
+            None,
+            "the fixture is a matrix no preset states"
+        );
+        assert_eq!(
+            row.display_filter_value(),
+            DisplayFilter::from_stored(&display_filter)
+        );
+        assert!(!row.display_filter_value().shows_everything());
+    });
+}
+
+/// Editing an axis is the user replacing the value, so the loaded one stops
+/// being written — on every axis, including the one whose stored value was
+/// off-list.
+#[gpui::test]
+fn editing_a_transcript_axis_replaces_the_loaded_value(cx: &mut TestAppContext) {
+    let (_fold_mode, display_filter, config) = hand_tuned_transcript_config();
+    let loaded = DisplayFilter::from_stored(&display_filter);
+    assert!(
+        !loaded.contains(FilterFacet::Thinking),
+        "the fixture starts with thinking hidden, so the toggle below shows it"
     );
+    let (wh, win) = build_window_with_config(cx, config);
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Expanded), cx);
+        w.set_agent_row_filter_section(0, FilterFacet::Tools, true, cx);
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+    });
 
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("the edited row must validate");
         let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
         assert_eq!(saved.fold_mode, Some(vec!["expanded".to_string()]));
         assert_eq!(saved.tail_window, Some(3));
-        assert_eq!(
-            saved.display_filter, None,
-            "the unfiltered set is the built-in value, so no key is written"
+        let filter =
+            DisplayFilter::from_stored(&saved.display_filter.expect("an edited filter is written"));
+        assert!(filter.contains(FilterFacet::Tools), "the section went on");
+        assert!(
+            filter.contains(FilterFacet::Thinking),
+            "the toggle flipped the loaded value rather than restating it"
         );
     });
 }
 
 /// The built-in value writes no key: an absent key and a key stating that value
-/// resolve alike, so the row keeps the file clean rather than restating it.
+/// resolve alike, so the row keeps the file clean rather than restating it. The
+/// editors reach it through their reset footer, which drops the key outright.
 #[gpui::test]
-fn picking_the_built_in_value_writes_no_key(cx: &mut TestAppContext) {
+fn handing_an_axis_back_writes_no_key(cx: &mut TestAppContext) {
     let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
     let (wh, win) = build_window_with_config(cx, config);
-    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.fold_mode_select.clone(), "auto");
     confirm_agent_row_select(
         &wh,
         &win,
@@ -888,14 +928,10 @@ fn picking_the_built_in_value_writes_no_key(cx: &mut TestAppContext) {
         |r| r.tail_window_select.clone(),
         &daruda_config::TAIL_WINDOW_DEFAULT.to_string(),
     );
-    confirm_agent_row_select(
-        &wh,
-        &win,
-        cx,
-        0,
-        |r| r.display_filter_select.clone(),
-        sections::agent_transcript::FILTER_EVERYTHING,
-    );
+    win.update(cx, |w, cx| {
+        w.reset_agent_row_fold_mode(0, cx);
+        w.reset_agent_row_display_filter(0, cx);
+    });
 
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("the edited row must validate");
@@ -907,9 +943,9 @@ fn picking_the_built_in_value_writes_no_key(cx: &mut TestAppContext) {
 }
 
 /// The round trip the rule above depends on: a row that wrote nothing reopens
-/// on the built-in entry, not on a blank or a stale selection.
+/// on the built-in value, not on a blank or a stale selection.
 #[gpui::test]
-fn a_row_that_wrote_no_key_reopens_on_the_built_in_entry(cx: &mut TestAppContext) {
+fn a_row_that_wrote_no_key_reopens_on_the_built_in_value(cx: &mut TestAppContext) {
     let config = daruda_config::Config {
         agents: vec![daruda_config::AgentEntry::Custom(
             daruda_config::AgentDefinition::claude_default(),
@@ -920,40 +956,28 @@ fn a_row_that_wrote_no_key_reopens_on_the_built_in_entry(cx: &mut TestAppContext
     win.read_with(cx, |w, cx| {
         let row = w.agent_editable_row(0).expect("a custom row");
         assert_eq!(
-            row.fold_mode_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string()),
-            Some("auto".to_string())
-        );
-        assert_eq!(
             row.tail_window_select
                 .read(cx)
                 .selected_value()
                 .map(|v| v.to_string()),
             Some(daruda_config::TAIL_WINDOW_DEFAULT.to_string())
         );
-        assert_eq!(
-            row.display_filter_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string()),
-            Some(sections::agent_transcript::FILTER_EVERYTHING.to_string())
-        );
+        assert_eq!(row.fold_mode_value(), FoldMode::default());
+        assert_eq!(row.display_filter_value(), DisplayFilter::default());
         // And reading them back writes nothing, so an untouched row cannot
         // grow three keys just by being rendered.
-        assert_eq!(row.fold_mode(cx), None);
+        assert_eq!(row.fold_mode(), None);
         assert_eq!(row.tail_window(cx), None);
-        assert_eq!(row.display_filter(cx), None);
+        assert_eq!(row.display_filter(), None);
     });
 }
 
-/// Once a picker replaces a preserved value, the still-open Settings window has
-/// to forget the old configured-elsewhere entry. Otherwise selecting it again
-/// would write back a value that is no longer in the live config.
+/// Once the tail picker replaces a preserved value, the still-open Settings
+/// window has to forget the old configured-elsewhere entry. Otherwise selecting
+/// it again would write back a value that is no longer in the live config.
 #[gpui::test]
-fn replacing_a_custom_transcript_value_rebases_the_row(cx: &mut TestAppContext) {
-    let (fold_mode, _display_filter, config) = hand_tuned_transcript_config();
+fn replacing_a_custom_step_count_rebases_the_row(cx: &mut TestAppContext) {
+    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
     let (wh, win) = build_window_with_config(cx, config);
     assert!(
         agent_row_select_offers(
@@ -961,30 +985,26 @@ fn replacing_a_custom_transcript_value_rebases_the_row(cx: &mut TestAppContext) 
             &win,
             cx,
             0,
-            |r| r.fold_mode_select.clone(),
+            |r| r.tail_window_select.clone(),
             sections::agent_transcript::CUSTOM,
         ),
-        "the fixture starts on a preserved fold matrix"
+        "the fixture starts on a preserved step count"
     );
     win.read_with(cx, |w, _cx| {
         assert_eq!(
-            w.agent_editable_row(0)
-                .unwrap()
-                .transcript
-                .fold_mode
-                .clone(),
-            Some(fold_mode)
+            w.agent_editable_row(0).unwrap().transcript.tail_window,
+            Some(12)
         );
     });
 
-    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.fold_mode_select.clone(), "expanded");
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
 
     win.read_with(cx, |w, cx| {
         let row = w.agent_editable_row(0).unwrap();
-        assert_eq!(row.fold_mode(cx), Some(vec!["expanded".to_string()]));
+        assert_eq!(row.tail_window(cx), Some(3));
         assert_eq!(
-            row.transcript.fold_mode, None,
-            "the old matrix must not remain hidden behind the picker"
+            row.transcript.tail_window, None,
+            "the old count must not remain hidden behind the picker"
         );
     });
     win.read_with(cx, |_w, cx| {
@@ -993,7 +1013,7 @@ fn replacing_a_custom_transcript_value_rebases_the_row(cx: &mut TestAppContext) 
             .agents[0]
             .resolve()
             .expect("the row remains runnable");
-        assert_eq!(saved.fold_mode, Some(vec!["expanded".to_string()]));
+        assert_eq!(saved.tail_window, Some(3));
     });
     assert!(
         !agent_row_select_offers(
@@ -1001,7 +1021,7 @@ fn replacing_a_custom_transcript_value_rebases_the_row(cx: &mut TestAppContext) 
             &win,
             cx,
             0,
-            |r| r.fold_mode_select.clone(),
+            |r| r.tail_window_select.clone(),
             sections::agent_transcript::CUSTOM,
         ),
         "the old configured-elsewhere choice is no longer present"
@@ -1015,9 +1035,9 @@ fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.read_with(cx, |w, cx| {
         let row = w.agent_editable_row(0).unwrap();
-        assert_eq!(row.fold_mode(cx), None);
+        assert_eq!(row.fold_mode(), None);
         assert_eq!(row.tail_window(cx), None);
-        assert_eq!(row.display_filter(cx), None);
+        assert_eq!(row.display_filter(), None);
         let cfg = w.validate(cx).expect("the default catalog must validate");
         let saved = cfg.agents[0].resolve().expect("the default entry resolves");
         assert_eq!(saved.fold_mode, None);
@@ -1026,7 +1046,7 @@ fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
     });
 }
 
-/// A preset states none of the transcript axes, so picking a value on one is
+/// A preset states none of the transcript axes, so stating a value on one is
 /// an override and the row shows the preset's own "not set" beneath it —
 /// exactly how Session mode and Model already read.
 #[gpui::test]
@@ -1040,7 +1060,9 @@ fn a_transcript_pick_on_a_preset_row_reports_the_preset_value(cx: &mut TestAppCo
         assert!(!provenance.is_overridden());
     });
 
-    confirm_agent_row_select(&wh, &win, cx, 1, |r| r.fold_mode_select.clone(), "summary");
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(1, Some(FoldPreset::Summary), cx)
+    });
 
     win.read_with(cx, |w, cx| {
         let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
@@ -1072,10 +1094,10 @@ fn a_transcript_pick_on_a_preset_row_reports_the_preset_value(cx: &mut TestAppCo
     });
 }
 
-/// A value the pickers *can* state loads onto the picker itself, not onto the
-/// configured-elsewhere entry — otherwise every row would read as custom.
+/// A step count the picker *can* state loads onto the picker itself, not onto
+/// the configured-elsewhere entry — otherwise every row would read as custom.
 #[gpui::test]
-fn a_transcript_value_the_pickers_state_loads_onto_them(cx: &mut TestAppContext) {
+fn a_transcript_value_the_controls_state_loads_onto_them(cx: &mut TestAppContext) {
     let stated = daruda_config::AgentDefinition {
         id: "stated".to_string(),
         name: "Stated".to_string(),
@@ -1093,21 +1115,22 @@ fn a_transcript_value_the_pickers_state_loads_onto_them(cx: &mut TestAppContext)
     let (wh, win) = build_window_with_config(cx, config);
     win.read_with(cx, |w, cx| {
         let row = w.agent_editable_row(0).unwrap();
-        assert_eq!(row.fold_mode(cx), Some(vec!["summary".to_string()]));
+        assert_eq!(row.fold_mode(), Some(vec!["summary".to_string()]));
         assert_eq!(row.tail_window(cx), Some(5));
-        assert_eq!(row.display_filter(cx), None);
+        assert_eq!(row.display_filter(), None);
     });
     // No stored value needed preserving, so no extra entry was added.
-    for field in [
-        |r: &AgentCatalogRow| r.fold_mode_select.clone(),
-        |r: &AgentCatalogRow| r.tail_window_select.clone(),
-        |r: &AgentCatalogRow| r.display_filter_select.clone(),
-    ] {
-        assert!(
-            !agent_row_select_offers(&wh, &win, cx, 0, field, sections::agent_transcript::CUSTOM),
-            "a row with nothing to preserve must not offer the custom entry"
-        );
-    }
+    assert!(
+        !agent_row_select_offers(
+            &wh,
+            &win,
+            cx,
+            0,
+            |r: &AgentCatalogRow| r.tail_window_select.clone(),
+            sections::agent_transcript::CUSTOM,
+        ),
+        "a row with nothing to preserve must not offer the custom entry"
+    );
 }
 
 /// A freshly added custom row defaults to the `Raw` transport — remote-ness

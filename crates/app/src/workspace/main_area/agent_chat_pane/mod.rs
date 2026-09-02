@@ -22,10 +22,8 @@ pub(in crate::workspace) mod agent_chat_queue_ops;
 pub(in crate::workspace) mod autoscroll_ops;
 pub(in crate::workspace) mod config_chip;
 /// Which conversation items a pane shows — the GPUI-free filter decision.
-pub(in crate::workspace) mod display_filter;
 pub(in crate::workspace) mod fold;
 /// How much of a turn a pane opens by default — the GPUI-free mode matrix.
-pub(in crate::workspace) mod fold_mode;
 pub(in crate::workspace) mod mode_chip;
 pub(in crate::workspace) mod output_editor;
 /// A pane-local view preference plus whether the user or config set it.
@@ -39,7 +37,6 @@ pub(in crate::workspace) mod session_config;
 pub(in crate::workspace) mod shot_transcript;
 pub(in crate::workspace) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
-pub(in crate::workspace) mod tool_category;
 /// Parent/child structure of a conversation's tool calls — the one place the
 /// nesting rules live.
 pub(in crate::workspace) mod tool_hierarchy;

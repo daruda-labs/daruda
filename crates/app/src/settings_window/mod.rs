@@ -22,6 +22,9 @@ use gpui::{
 
 use crate::lane::session_host;
 use crate::surface::strings as s;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::editor::state::FoldEditorState;
+use crate::transcript::fold_mode::FoldMode;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
 use crate::window_registry::WindowRegistry;
@@ -322,33 +325,32 @@ pub(super) struct AgentCatalogRow {
     /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
-    /// Fold rules a fresh chat pane under this agent starts on. The empty
-    /// value is the "follow `[agent]`" sentinel that means no override; a
-    /// stored matrix the presets cannot state gets its own entry, backed by
-    /// `transcript` — see [`sections::agent_transcript`].
-    pub(super) fold_mode_select: Entity<SelectState>,
-    /// Trailing-step window a fresh chat pane starts on. Same sentinel and
-    /// same preservation rule as `fold_mode_select`.
+    /// Fold rules a fresh chat pane under this agent starts on, or `None` to
+    /// write no key — which resolves to the built-in. Edited through the same
+    /// editor the chat pane opens; see [`sections::agent_transcript`].
+    pub(super) fold_mode: Option<FoldMode>,
+    /// Where this row's fold editor is looking. Not part of the value: the pane
+    /// editing the same agent keeps its own — see [`FoldEditorState`].
+    pub(super) fold_editor: FoldEditorState,
+    /// Visible row kinds a fresh chat pane starts on. Same `None`-is-built-in
+    /// rule as `fold_mode`.
+    pub(super) display_filter: Option<DisplayFilter>,
+    /// Trailing-step window a fresh chat pane starts on. Still a dropdown, and
+    /// so still able to load a size it cannot offer.
     pub(super) tail_window_select: Entity<SelectState>,
-    /// Visible row kinds a fresh chat pane starts on. Same sentinel and same
-    /// preservation rule as `fold_mode_select`.
-    pub(super) display_filter_select: Entity<SelectState>,
-    /// The per-agent transcript-presentation keys this row loaded that its
-    /// three pickers cannot state. Each backs that picker's
-    /// configured-elsewhere entry and is written back verbatim while it stays
-    /// picked, so an unrelated edit cannot flatten a hand-written value.
+    /// The one transcript key this row loaded that its dropdown cannot state.
+    /// It backs that picker's configured-elsewhere entry and is written back
+    /// verbatim while it stays picked, so an unrelated edit cannot flatten a
+    /// hand-written value.
     pub(super) transcript: AgentRowTranscript,
 }
 
 /// The per-agent transcript-presentation values an [`AgentCatalogRow`] carries
-/// verbatim because no picker can state them. `None` on an axis means the
-/// picker holds the whole value. See [`daruda_config::AgentDefinition`] for
-/// what each key means.
+/// verbatim because no picker can state them. `None` means the picker holds the
+/// whole value. See [`daruda_config::AgentDefinition`] for what the key means.
 #[derive(Clone, Default)]
 pub(super) struct AgentRowTranscript {
-    pub(super) fold_mode: Option<Vec<String>>,
     pub(super) tail_window: Option<u8>,
-    pub(super) display_filter: Option<Vec<String>>,
 }
 
 /// One row of the session host registry editor. Unlike [`AgentCatalogRow`],
@@ -579,9 +581,10 @@ impl SettingsWindow {
         AgentCatalogRow {
             preset,
             transcript: transcript.preserved,
-            fold_mode_select: transcript.fold_mode_select,
+            fold_mode: transcript.fold_mode,
+            fold_editor: FoldEditorState::default(),
+            display_filter: transcript.display_filter,
             tail_window_select: transcript.tail_window_select,
-            display_filter_select: transcript.display_filter_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
                     .placeholder("agent-id")
@@ -662,27 +665,19 @@ impl SettingsWindow {
                 },
             ));
         }
-        // A transcript picker may shed a "Custom (from config)" entry by
-        // choosing one of the stated values. Rebuild the catalog from the
-        // committed config after a successful save so the hidden preserved value
-        // cannot be picked again later in the same Settings window.
-        for state in [
-            &row.fold_mode_select,
+        // The tail picker may shed a "Custom (from config)" entry by choosing
+        // one of the stated values. Rebuild the catalog from the committed
+        // config after a successful save so the hidden preserved value cannot
+        // be picked again later in the same Settings window.
+        subs.push(cx.subscribe_in(
             &row.tail_window_select,
-            &row.display_filter_select,
-        ] {
-            subs.push(cx.subscribe_in(
-                state,
-                window,
-                |this, _state, ev: &select::ConfirmEvent, window, cx| {
-                    if matches!(ev, select::SelectEvent::Confirm(_))
-                        && this.persist_agent_catalog(cx)
-                    {
-                        this.reload_agent_catalog_from_live(window, cx);
-                    }
-                },
-            ));
-        }
+            window,
+            |this, _state, ev: &select::ConfirmEvent, window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) && this.persist_agent_catalog(cx) {
+                    this.reload_agent_catalog_from_live(window, cx);
+                }
+            },
+        ));
         // The row's id keys the cached vocabulary, so retyping it switches
         // both pickers to that agent's option lists.
         subs.push(cx.subscribe_in(
@@ -751,6 +746,16 @@ impl SettingsWindow {
                 AgentCatalogItem::Editable(row) => Some((index, row)),
                 AgentCatalogItem::Unresolved(_) => None,
             })
+    }
+
+    /// The editable row at a catalog index, for the ops that write one field of
+    /// it. `None` covers both an index past the end and an unresolved entry,
+    /// which has no row to edit.
+    pub(super) fn agent_editable_row_mut(&mut self, index: usize) -> Option<&mut AgentCatalogRow> {
+        match self.agent_catalog.get_mut(index)? {
+            AgentCatalogItem::Editable(row) => Some(row),
+            AgentCatalogItem::Unresolved(_) => None,
+        }
     }
 
     /// Non-editable entries paired with their catalog index.
@@ -2257,9 +2262,9 @@ impl SettingsWindow {
                     launch,
                     default_mode: row.default_mode(cx),
                     default_model: row.default_model(cx),
-                    fold_mode: row.fold_mode(cx),
+                    fold_mode: row.fold_mode(),
                     tail_window: row.tail_window(cx),
-                    display_filter: row.display_filter(cx),
+                    display_filter: row.display_filter(),
                 },
                 row.preset.as_deref(),
             ));

@@ -3,9 +3,9 @@
 
 use daruda_config::{AgentDefinition, TAIL_WINDOW_DEFAULT};
 
-use super::display_filter::DisplayFilter;
-use super::fold_mode::FoldMode;
 use super::rows::tail::TailWindow;
+use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::fold_mode::FoldMode;
 
 /// Tail window, fold mode and display filter as the resolved config states
 /// them. One type because the three are always derived together and always
@@ -50,8 +50,8 @@ impl TranscriptDefaults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::main_area::agent_chat_pane::display_filter::FilterFacet;
-    use crate::workspace::main_area::agent_chat_pane::fold_mode::FoldPreset;
+    use crate::transcript::display_filter::FilterFacet;
+    use crate::transcript::fold_mode::FoldPreset;
 
     fn definition() -> AgentDefinition {
         AgentDefinition::claude_default()
@@ -155,10 +155,10 @@ mod tests {
         assert_eq!(mode.preset(), None, "a matrix, not a preset");
         assert_eq!(
             mode.rule(
-                crate::workspace::main_area::agent_chat_pane::fold_mode::TurnPosition::Past,
-                crate::workspace::main_area::agent_chat_pane::fold_mode::FoldBlock::Thinking,
+                crate::transcript::fold_mode::TurnPosition::Past,
+                crate::transcript::fold_mode::FoldBlock::Thinking,
             ),
-            crate::workspace::main_area::agent_chat_pane::fold_mode::BlockRule::Collapsed
+            crate::transcript::fold_mode::BlockRule::Collapsed
         );
     }
 
