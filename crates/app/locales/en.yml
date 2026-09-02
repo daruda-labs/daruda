@@ -434,7 +434,7 @@ agent_chat:
   fold_block_diff: "Diff"
   fold_block_raw_input: "Raw input"
   tail_window_chip: "Recent steps: %{value}"
-  tail_window_tooltip: "How many recent steps stay on screen"
+  tail_window_tooltip: "How many recent steps stay on screen, and how many calls inside each"
   tail_window_all: "All"
   tail_window_default: "Default"
   tail_window_last: "%{count}"

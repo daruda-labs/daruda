@@ -433,7 +433,7 @@ agent_chat:
   fold_block_diff: "변경 내용"
   fold_block_raw_input: "원시 입력"
   tail_window_chip: "최근 단계: %{value}"
-  tail_window_tooltip: "화면에 남길 최근 단계 수"
+  tail_window_tooltip: "화면에 남길 최근 단계 수, 그리고 각 단계 안에서 보일 호출 수"
   tail_window_all: "전체"
   tail_window_default: "기본값"
   tail_window_last: "%{count}개"
