@@ -575,6 +575,16 @@ fn client_capabilities() -> ClientCapabilities {
         TERMINAL_AUTH_META_KEY.to_owned(),
         serde_json::Value::Bool(true),
     );
+    // Switches a supporting adapter out of flattening a spawned subagent's work
+    // into this session and into announcing it as a child session instead. Safe
+    // to claim only because `crate::native_subagents` normalizes that traffic
+    // back into the flat tool hierarchy — without the router the child's whole
+    // run would arrive as updates this schema version cannot parse, which the
+    // SDK logs and drops.
+    meta.insert(
+        crate::native_subagents::JETBRAINS_META_KEY.to_owned(),
+        crate::native_subagents::air_capabilities_meta(),
+    );
     ClientCapabilities::new()
         .meta(meta)
         .auth(AuthCapabilities::new().terminal(true))
@@ -1579,6 +1589,21 @@ mod tests {
     /// that landed the flag anywhere else would read as "not advertised" and
     /// silently return an empty `authMethods`, which is exactly the failure
     /// this advertisement exists to end.
+    #[test]
+    fn client_capabilities_claim_native_subagent_sessions_in_the_shape_the_gate_reads() {
+        // Pinned against the adapters' own check: an integer `version` of at
+        // least 1 and an array `capabilities` containing the key. A shape that
+        // merely looks right is silently ignored, and the symptom is an
+        // invisible subagent rather than an error.
+        let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+        let air = &json["_meta"]["jetbrains"]["air"];
+        assert_eq!(air["version"], serde_json::json!(1));
+        assert_eq!(
+            air["capabilities"],
+            serde_json::json!(["nativeSubagentSessions"])
+        );
+    }
+
     #[test]
     fn client_capabilities_claim_terminal_auth_without_claiming_terminal_methods() {
         let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
