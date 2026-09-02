@@ -81,10 +81,17 @@ pub(in crate::workspace) enum MdBlock {
         lang: Option<String>,
         rows: Vec<VisualRow>,
     },
-    BulletList(Vec<ListItem>),
+    BulletList {
+        items: Vec<ListItem>,
+        /// A loose list — blank lines separate its items, so they are spaced
+        /// like paragraphs instead of stacked flush.
+        loose: bool,
+    },
     OrderedList {
         start: u64,
         items: Vec<ListItem>,
+        /// See [`MdBlock::BulletList::loose`].
+        loose: bool,
     },
     Blockquote(Vec<MdSpan>),
     Rule,
@@ -125,6 +132,7 @@ pub(in crate::workspace) fn parse_markdown(
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_GFM);
+    opts.insert(Options::ENABLE_TASKLISTS);
 
     let events: Vec<Event<'_>> = Parser::new_ext(text, opts).collect();
     let mut pos = 0;
@@ -215,10 +223,12 @@ fn parse_block(
             let ordered = start_num.is_some();
             let start = start_num.unwrap_or(1);
             let mut items: Vec<ListItem> = Vec::new();
+            let mut loose = false;
             let mut i = pos + 1;
             while i < events.len() {
                 match &events[i] {
                     Event::Start(Tag::Item) => {
+                        loose |= item_is_paragraph_wrapped(events, i + 1);
                         let (item, consumed) = parse_item(events, i + 1, syntax_theme, is_light);
                         items.push(item);
                         i += consumed + 2;
@@ -232,9 +242,13 @@ fn parse_block(
             }
             let consumed = i - pos;
             let block = if ordered {
-                MdBlock::OrderedList { start, items }
+                MdBlock::OrderedList {
+                    start,
+                    items,
+                    loose,
+                }
             } else {
-                MdBlock::BulletList(items)
+                MdBlock::BulletList { items, loose }
             };
             Some((block, consumed))
         }
@@ -343,6 +357,35 @@ fn parse_block(
 // List item parser
 // ----------------------------------------------------------------
 
+/// Whether an item's content is paragraph-wrapped — how pulldown-cmark reports
+/// a loose list, which it wraps and a tight one it does not. `pos` is the
+/// item's first event, the index [`parse_item`] is given.
+///
+/// Blind spot: an item whose blocks are all non-paragraphs (a fence, a quote)
+/// is unwrapped either way, so a list of only those reads tight — 0.13's
+/// `Tag::List` carries no looseness flag to fall back on.
+fn item_is_paragraph_wrapped(events: &[Event<'_>], pos: usize) -> bool {
+    matches!(events.get(pos), Some(Event::Start(Tag::Paragraph)))
+}
+
+/// The checkbox state of a task item, or `None` for a plain one. `pos` is the
+/// item's first event.
+///
+/// pulldown-cmark puts the marker *inside* the leading paragraph when the list
+/// is loose, so looking only at the item's own first event drops the checkbox
+/// from every blank-line-separated task list.
+fn task_marker(events: &[Event<'_>], pos: usize) -> Option<bool> {
+    let at = if item_is_paragraph_wrapped(events, pos) {
+        pos + 1
+    } else {
+        pos
+    };
+    match events.get(at) {
+        Some(Event::TaskListMarker(checked)) => Some(*checked),
+        _ => None,
+    }
+}
+
 /// Parse one list item starting at `pos` (just after `Start(Item)`).
 /// Returns the item and the number of events consumed (NOT including `End(Item)`).
 fn parse_item(
@@ -352,15 +395,7 @@ fn parse_item(
     is_light: bool,
 ) -> (ListItem, usize) {
     let mut i = pos;
-
-    // Task list marker is always the first event in task list items.
-    let checked = if let Some(Event::TaskListMarker(c)) = events.get(i) {
-        let c = *c;
-        i += 1;
-        Some(c)
-    } else {
-        None
-    };
+    let checked = task_marker(events, pos);
 
     let mut spans: Vec<MdSpan> = Vec::new();
     let mut children: Vec<MdBlock> = Vec::new();
@@ -368,6 +403,9 @@ fn parse_item(
     while i < events.len() {
         match &events[i] {
             Event::End(TagEnd::Item) => break,
+
+            // Already read into `checked`; it is state, not prose.
+            Event::TaskListMarker(_) => i += 1,
 
             // Loose lists wrap item content in a paragraph. A second one
             // starts a new line rather than continuing the first.
@@ -435,6 +473,12 @@ where
             continue;
         }
         if matches!(events[i], Event::End(TagEnd::Paragraph)) {
+            i += 1;
+            continue;
+        }
+        // A loose task item's checkbox lands here. `parse_item` has already
+        // read it into the item's `checked`.
+        if matches!(events[i], Event::TaskListMarker(_)) {
             i += 1;
             continue;
         }
@@ -529,6 +573,13 @@ where
     (text, i - start)
 }
 
+/// What joins two items of a list in its plain-text form. A loose list is
+/// blank-line separated in the source, so a copy that flattened it to single
+/// newlines would paste back as a tight one.
+fn item_separator(loose: bool) -> &'static str {
+    if loose { "\n\n" } else { "\n" }
+}
+
 /// Plain-text representation of a block for clipboard copy.
 pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
     match block {
@@ -547,7 +598,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
             format!("```{fence}\n{body}\n```")
         }
         MdBlock::Mermaid { source, .. } => format!("```mermaid\n{source}\n```"),
-        MdBlock::BulletList(items) => items
+        MdBlock::BulletList { items, loose } => items
             .iter()
             .map(|item| {
                 let prefix = match item.checked {
@@ -566,8 +617,12 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
                 text
             })
             .collect::<Vec<_>>()
-            .join("\n"),
-        MdBlock::OrderedList { start, items } => items
+            .join(item_separator(*loose)),
+        MdBlock::OrderedList {
+            start,
+            items,
+            loose,
+        } => items
             .iter()
             .enumerate()
             .map(|(i, item)| {
@@ -586,7 +641,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
                 text
             })
             .collect::<Vec<_>>()
-            .join("\n"),
+            .join(item_separator(*loose)),
         MdBlock::Blockquote(spans) => format!("> {}", flatten_spans_to_text(spans)),
         MdBlock::Rule => "---".to_owned(),
         MdBlock::FootnoteDefinition { label, spans } => {
@@ -654,7 +709,7 @@ pub(in crate::workspace) fn resolve_images(
             | MdBlock::FootnoteDefinition { spans, .. } => {
                 resolve_images_in_spans(spans, resolve);
             }
-            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+            MdBlock::BulletList { items, .. } | MdBlock::OrderedList { items, .. } => {
                 for item in items {
                     resolve_images_in_spans(&mut item.spans, resolve);
                     resolve_images(&mut item.children, resolve);
@@ -907,7 +962,7 @@ pub(in crate::workspace) fn resolve_mermaid(
                     *raster = resolve(source);
                 }
             }
-            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+            MdBlock::BulletList { items, .. } | MdBlock::OrderedList { items, .. } => {
                 for item in items {
                     resolve_mermaid(&mut item.children, resolve);
                 }
@@ -1042,10 +1097,117 @@ mod tests {
     #[test]
     fn parse_bullet_list() {
         let blocks = parse_markdown("- item one\n- item two\n", "base16-ocean.dark", false);
-        assert!(matches!(blocks[0], MdBlock::BulletList(_)));
-        if let MdBlock::BulletList(items) = &blocks[0] {
+        assert!(matches!(blocks[0], MdBlock::BulletList { .. }));
+        if let MdBlock::BulletList { items, .. } = &blocks[0] {
             assert_eq!(items.len(), 2);
         }
+    }
+
+    /// A shared `loose_of` for the looseness tests: the flag the renderer
+    /// reads, off the document's first block.
+    fn loose_of(md: &str) -> bool {
+        match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+            MdBlock::BulletList { loose, .. } | MdBlock::OrderedList { loose, .. } => *loose,
+            other => panic!("expected a list, got {}", md_block_plain_text(other)),
+        }
+    }
+
+    /// Looseness decides whether items are spaced like paragraphs, and the IR
+    /// is the only place it can travel: `Tag::List` reports the marker and
+    /// start number, nothing else.
+    #[test]
+    fn a_blank_line_between_items_makes_the_list_loose() {
+        assert!(!loose_of("- one\n- two\n"), "flush items are tight");
+        assert!(loose_of("- one\n\n- two\n"), "blank-line items are loose");
+        assert!(
+            !loose_of("1. one\n2. two\n"),
+            "flush ordered items are tight"
+        );
+        assert!(
+            loose_of("1. one\n\n2. two\n"),
+            "blank-line ordered items are loose"
+        );
+    }
+
+    /// CommonMark calls a list loose when any item holds more than one block,
+    /// blank line between the items or not — and a nested sublist alone does
+    /// not make one.
+    #[test]
+    fn a_multi_block_item_is_loose_but_a_nested_sublist_is_not() {
+        assert!(loose_of("- one\n\n  continued\n- two\n"));
+        assert!(!loose_of("- one\n  - nested\n- two\n"));
+    }
+
+    /// Only the list the blank line is in goes loose. Each nesting level is
+    /// parsed by its own `Tag::List` arm, so neither can reach the other's
+    /// tally.
+    #[test]
+    fn looseness_does_not_leak_between_nesting_levels() {
+        let outer_inner = |md: &str| match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+            MdBlock::BulletList { items, loose } => {
+                let inner = items.iter().find_map(|i| match i.children.first() {
+                    Some(MdBlock::BulletList { loose, .. }) => Some(*loose),
+                    _ => None,
+                });
+                (*loose, inner.expect("a nested list"))
+            }
+            _ => panic!("expected a bullet list"),
+        };
+
+        assert_eq!(outer_inner("- one\n  - a\n\n  - b\n- two\n"), (false, true));
+        assert_eq!(outer_inner("- one\n  - a\n  - b\n\n- two\n"), (true, false));
+    }
+
+    /// One paragraph-wrapped item anywhere is enough. A list whose first item
+    /// opens with a fence has no wrapper to read there, and a check that only
+    /// looked at the first item would call the whole list tight.
+    #[test]
+    fn a_later_item_can_be_what_marks_the_list_loose() {
+        assert!(loose_of("- ```\n  a\n  ```\n\n- two\n"));
+        assert!(loose_of("-\n\n- two\n"), "an empty first item");
+    }
+
+    /// A copy has to paste back as the same list. Flattening a loose list to
+    /// single newlines turned it tight on the round trip.
+    #[test]
+    fn copied_text_keeps_a_list_as_loose_or_tight_as_it_was() {
+        let copy =
+            |md: &str| md_block_plain_text(&parse_markdown(md, "base16-ocean.dark", false)[0]);
+
+        assert_eq!(copy("- one\n- two\n"), "- one\n- two");
+        assert_eq!(copy("- one\n\n- two\n"), "- one\n\n- two");
+        assert_eq!(copy("1. one\n2. two\n"), "1. one\n2. two");
+        assert_eq!(copy("1. one\n\n2. two\n"), "1. one\n\n2. two");
+    }
+
+    /// The checkbox has to survive a loose list. pulldown-cmark moves the
+    /// marker inside the item's leading paragraph there, so a lookup fixed on
+    /// the item's own first event returned `None` and the box fell back to a
+    /// plain bullet.
+    #[test]
+    fn a_task_item_keeps_its_checkbox_tight_or_loose() {
+        let checks = |md: &str| match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+            MdBlock::BulletList { items, .. } => {
+                items.iter().map(|i| i.checked).collect::<Vec<_>>()
+            }
+            _ => panic!("expected a bullet list"),
+        };
+
+        let both = vec![Some(false), Some(true)];
+        assert_eq!(checks("- [ ] one\n- [x] two\n"), both, "tight");
+        assert_eq!(checks("- [ ] one\n\n- [x] two\n"), both, "loose");
+        assert_eq!(checks("- one\n- two\n"), vec![None, None], "plain bullets");
+    }
+
+    /// The marker is the checkbox, not prose — it must not leave a stray span
+    /// in the item's text on either shape.
+    #[test]
+    fn a_task_items_text_excludes_its_marker() {
+        let copy =
+            |md: &str| md_block_plain_text(&parse_markdown(md, "base16-ocean.dark", false)[0]);
+
+        assert_eq!(copy("- [ ] one\n- [x] two\n"), "- [ ] one\n- [x] two");
+        assert_eq!(copy("- [ ] one\n\n- [x] two\n"), "- [ ] one\n\n- [x] two");
     }
 
     #[test]

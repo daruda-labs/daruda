@@ -240,6 +240,25 @@ fn a_loose_list_spaces_its_items(cx: &mut TestAppContext) {
     );
 }
 
+/// CommonMark calls a list loose two ways, and mdast reports them on different
+/// nodes: an item holding two blocks with a blank line between them sets that
+/// *item*'s spread, not the list's. Reading only the list's left this shape
+/// stacked flush while the blank-line-between-items shape spaced correctly.
+#[gpui::test]
+fn an_item_holding_two_blocks_makes_its_list_loose(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+
+    // Item 0 is identical in all three; only what separates the items differs.
+    let tight = sized_probe_height(cx, "- AAAA\n\n  cont\n- BBBB", PROBE_W, BODY);
+    let blank = sized_probe_height(cx, "- AAAA\n\n  cont\n\n- BBBB", PROBE_W, BODY);
+
+    assert_eq!(
+        tight, blank,
+        "a multi-block item is as loose as a blank line between items: \
+         multi-block={tight:?} blank-line={blank:?}"
+    );
+}
+
 /// Every vertical metric follows the configured body size. Each was anchored to
 /// the 16px rem instead — an absolute 20.8px line and a 1rem paragraph gap — so
 /// raising `font.agent_chat_size` grew the glyphs while the leading around them

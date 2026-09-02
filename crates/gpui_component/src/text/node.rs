@@ -472,8 +472,9 @@ pub(crate) enum Node {
         /// Only contains ListItem, others will be ignored
         children: Vec<Node>,
         ordered: bool,
-        /// A loose list — its items are separated by a blank line, so they are
-        /// spaced like paragraphs instead of stacked flush.
+        /// mdast's own flag: the items are separated by blank lines. Only half
+        /// of CommonMark's looseness — see the `Node::List` render arm, which
+        /// reads the other half off the items.
         spread: bool,
     },
     ListItem {
@@ -1053,16 +1054,13 @@ impl Node {
     ) -> AnyElement {
         match item {
             Node::ListItem {
-                children,
-                spread,
-                checked,
+                children, checked, ..
             } => v_flex()
                 .id("li")
-                // A loose item is spaced from the one above it like a
-                // paragraph. Upstream pushed an empty `div()` here, which in a
-                // gap-less flex column added no height at all — a
-                // blank-line-separated list rendered exactly like a tight one.
-                .when((options.loose || *spread) && ix > 0, |this| {
+                // Looseness is a property of the whole list, so every item but
+                // the first takes the gap. Upstream pushed an empty `div()`
+                // here, which in a gap-less flex column added no height at all.
+                .when(options.loose && ix > 0, |this| {
                     this.pt(node_cx.style.paragraph_gap)
                 })
                 .children({
@@ -1502,6 +1500,14 @@ impl Node {
                 .id(if *ordered { "ol" } else { "ul" })
                 .pb(mb)
                 .children({
+                    // CommonMark calls a list loose two ways, and mdast splits
+                    // them: blank lines *between* items land on the list's own
+                    // `spread`, an item holding two blocks with a blank line
+                    // between them lands on that item's.
+                    let loose = *spread
+                        || children
+                            .iter()
+                            .any(|c| matches!(c, Node::ListItem { spread: true, .. }));
                     let mut items = Vec::with_capacity(children.len());
                     let mut ix = 0;
                     for item in children.into_iter() {
@@ -1512,7 +1518,7 @@ impl Node {
                             ix,
                             NodeRenderOptions {
                                 ordered: *ordered,
-                                loose: *spread,
+                                loose,
                                 ..options
                             },
                             node_cx,

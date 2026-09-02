@@ -9,7 +9,9 @@ use gpui::{
 };
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan, lone_image};
+use crate::workspace::main_area::file_view_pane::markdown_viewer::{
+    ListItem, MdBlock, MdSpan, lone_image,
+};
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 use crate::workspace::main_area::file_view_pane::{CharSelection, VisualRow};
 
@@ -149,6 +151,93 @@ pub(super) fn render_md_body(
     col
 }
 
+/// Vertical gap between the items of a list. A loose list is made of
+/// paragraphs, so its items take the gap this renderer puts between blocks —
+/// the same step [`MdSpan::ParagraphBreak`] already opens *inside* one item.
+fn list_item_gap(loose: bool) -> f32 {
+    if loose {
+        theme::MD_BLOCK_GAP
+    } else {
+        theme::MD_LIST_ITEM_GAP
+    }
+}
+
+/// A run of spans as a column of wrapping rows, one per paragraph.
+///
+/// The split is what makes a multi-paragraph item work. A break rendered as a
+/// full-width flex item *inside* the wrapping row left the text before it laid
+/// out at zero width, wrapping a character at a time over the item below.
+/// `flex_1().w_0()` is the shape zed gives prose beside a bullet cell
+/// (`push_markdown_list_item`); measured here it ties with `w_full().min_w_0()`.
+fn render_md_prose(spans: &[MdSpan], t: &MdColors) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .w_0()
+        .gap(px(theme::MD_BLOCK_GAP))
+        .children(
+            spans
+                .split(|s| matches!(s, MdSpan::ParagraphBreak))
+                .map(|run| {
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .children(render_md_spans(run, t))
+                }),
+        )
+}
+
+/// What fills a list item's marker cell.
+enum ListMarker {
+    /// A checkbox when the item is a task, a dot otherwise.
+    Bullet,
+    /// Counting from the list's start number.
+    Ordered(u64),
+}
+
+/// One list. Both kinds share the row, its wrap and the nested-block indent —
+/// only the marker cell differs, so that is all `marker` decides.
+fn render_list(items: &[ListItem], loose: bool, marker: ListMarker, t: &MdColors) -> AnyElement {
+    let mut list = div().flex().flex_col().gap(px(list_item_gap(loose)));
+    for (i, item) in items.iter().enumerate() {
+        let cell = match marker {
+            ListMarker::Bullet => {
+                let (glyph, color) = match item.checked {
+                    Some(true) => ("☑", theme::SUCCESS),
+                    Some(false) => ("☐", t.muted),
+                    None => ("•", t.muted),
+                };
+                div().flex_none().text_color(color).child(glyph)
+            }
+            ListMarker::Ordered(start) => div()
+                .flex_none()
+                .min_w(px(theme::MD_LIST_INDENT))
+                .text_color(t.muted)
+                .child(format!("{}.", start + i as u64)),
+        };
+
+        let mut item_col = div().flex().flex_col().child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(theme::MD_LIST_ROW_GAP))
+                .child(cell)
+                .child(render_md_prose(&item.spans, t)),
+        );
+        for child in &item.children {
+            item_col = item_col.child(
+                div()
+                    .pl(px(theme::MD_LIST_INDENT))
+                    .child(render_md_block(child, t)),
+            );
+        }
+        list = list.child(item_col);
+    }
+    list.into_any_element()
+}
+
 fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
     match block {
         MdBlock::Heading { level, spans } => {
@@ -206,79 +295,13 @@ fn render_md_block(block: &MdBlock, t: &MdColors) -> AnyElement {
                 .into_any_element(),
         },
 
-        MdBlock::BulletList(items) => {
-            let mut list = div().flex().flex_col().gap(px(theme::MD_LIST_ITEM_GAP));
-            for item in items {
-                let (bullet, bullet_color) = match item.checked {
-                    Some(true) => ("☑", theme::SUCCESS),
-                    Some(false) => ("☐", t.muted),
-                    None => ("•", t.muted),
-                };
-                let mut item_col = div().flex().flex_col();
-                let row = div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(theme::MD_LIST_ROW_GAP))
-                    .child(div().flex_none().text_color(bullet_color).child(bullet))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .w_full()
-                            .min_w_0()
-                            .children(render_md_spans(&item.spans, t)),
-                    );
-                item_col = item_col.child(row);
-                for child in &item.children {
-                    item_col = item_col.child(
-                        div()
-                            .pl(px(theme::MD_LIST_INDENT))
-                            .child(render_md_block(child, t)),
-                    );
-                }
-                list = list.child(item_col);
-            }
-            list.into_any_element()
-        }
+        MdBlock::BulletList { items, loose } => render_list(items, *loose, ListMarker::Bullet, t),
 
-        MdBlock::OrderedList { start, items } => {
-            let mut list = div().flex().flex_col().gap(px(theme::MD_LIST_ITEM_GAP));
-            for (i, item) in items.iter().enumerate() {
-                let num = format!("{}.", start + i as u64);
-                let mut item_col = div().flex().flex_col();
-                let row = div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(theme::MD_LIST_ROW_GAP))
-                    .child(
-                        div()
-                            .flex_none()
-                            .min_w(px(theme::MD_LIST_INDENT))
-                            .text_color(t.muted)
-                            .child(num),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .w_full()
-                            .min_w_0()
-                            .children(render_md_spans(&item.spans, t)),
-                    );
-                item_col = item_col.child(row);
-                for child in &item.children {
-                    item_col = item_col.child(
-                        div()
-                            .pl(px(theme::MD_LIST_INDENT))
-                            .child(render_md_block(child, t)),
-                    );
-                }
-                list = list.child(item_col);
-            }
-            list.into_any_element()
-        }
+        MdBlock::OrderedList {
+            start,
+            items,
+            loose,
+        } => render_list(items, *loose, ListMarker::Ordered(*start), t),
 
         MdBlock::Blockquote(spans) => div()
             .flex()
@@ -453,6 +476,7 @@ fn render_plain_text(text: String) -> AnyElement {
     div()
         .min_w_0()
         .whitespace_normal()
+        .when(cfg!(test), |d| d.debug_selector(|| "md-plain".into()))
         .child(text)
         .into_any_element()
 }
@@ -852,8 +876,8 @@ mod layout_tests {
     use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
     use gpui::{
         AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-        Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window, WindowBounds,
-        WindowOptions, div, point, px, size,
+        Pixels, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
+        VisualTestContext, Window, WindowBounds, WindowOptions, div, point, px, size,
     };
 
     struct Probe {
@@ -864,9 +888,9 @@ mod layout_tests {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let colors = MdColors::for_pane(cx);
             let blocks = parse_markdown(&self.md, "default", false);
-            // Mirrors `render_md_body`: a flex *column*, so each block gets the
-            // container's width instead of its own max-content width.
-            div()
+            // Mirrors `render_md_body`: a flex column of blocks, each in the
+            // selection shell `div()` the real body wraps them in.
+            let body = div()
                 .id("md-probe")
                 .debug_selector(|| "md-probe".into())
                 .flex()
@@ -876,11 +900,41 @@ mod layout_tests {
                 .py(px(theme::MD_BODY_PAD_Y))
                 .gap(px(theme::MD_BLOCK_GAP))
                 .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-                .children(blocks.iter().map(|b| render_md_block(b, &colors)))
+                .children(blocks.iter().map(|b| {
+                    div()
+                        .rounded(px(theme::MD_BLOCK_RADIUS))
+                        .child(render_md_block(b, &colors))
+                }));
+            // Faithful to the real pane, outermost first: the walker's
+            // `flex_1().min_h(0).overflow_hidden()` slot in a column, the pane
+            // root (`relative().size_full()` + the configured font), the
+            // toolbar-offset absolute frame, then `body.rs`'s scroll container.
+            div().flex().flex_col().size_full().child(
+                div().flex_1().min_h(px(0.)).overflow_hidden().child(
+                    div().relative().size_full().font_family("Menlo").child(
+                        div()
+                            .absolute()
+                            .top(px(theme::FILE_VIEWER_HEADER_H))
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .id("probe-scroll")
+                            .overflow_y_scroll()
+                            .child(body),
+                    ),
+                ),
+            )
         }
     }
 
-    fn height(cx: &mut TestAppContext, md: &str, width: Pixels) -> Pixels {
+    /// Painted size of the first element matching `selector`, with the probe
+    /// laid out in a `width`-wide window.
+    fn bounds_of(
+        cx: &mut TestAppContext,
+        md: &str,
+        width: Pixels,
+        selector: &'static str,
+    ) -> gpui::Size<Pixels> {
         let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
         let opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -894,7 +948,11 @@ mod layout_tests {
         vcx.run_until_parked();
         vcx.update(|w, _| w.refresh());
         vcx.run_until_parked();
-        vcx.debug_bounds("md-probe").expect("painted").size.height
+        vcx.debug_bounds(selector).expect("painted").size
+    }
+
+    fn height(cx: &mut TestAppContext, md: &str, width: Pixels) -> Pixels {
+        bounds_of(cx, md, width, "md-probe").height
     }
 
     #[gpui::test]
@@ -906,5 +964,55 @@ mod layout_tests {
                       marked with. It must stay legible on the pane background.";
 
         assert_eq!(height(cx, split, px(430.)), height(cx, joined, px(430.)));
+    }
+
+    /// The gap a loose list takes is the one between blocks, so three items
+    /// grow by exactly two steps. Asserting the step and not just `>` is what
+    /// catches the gap being swapped for some other constant.
+    #[gpui::test]
+    fn a_loose_list_spaces_its_items(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let step = px(theme::MD_BLOCK_GAP - theme::MD_LIST_ITEM_GAP);
+
+        for (label, tight, loose) in [
+            (
+                "bullet",
+                "- AAAA\n- BBBB\n- CCCC",
+                "- AAAA\n\n- BBBB\n\n- CCCC",
+            ),
+            (
+                "ordered",
+                "1. AAAA\n2. BBBB\n3. CCCC",
+                "1. AAAA\n\n2. BBBB\n\n3. CCCC",
+            ),
+        ] {
+            let (tight, loose) = (height(cx, tight, px(430.)), height(cx, loose, px(430.)));
+            assert_eq!(
+                loose - tight,
+                step * 2.,
+                "{label}: loose={loose:?} tight={tight:?}"
+            );
+        }
+    }
+
+    /// A paragraph break is block-level. Left inside the item's wrapping row
+    /// as a full-width flex item, it collapsed the *preceding* text element to
+    /// zero width — the prose then wrapped one character per line and ran over
+    /// the item below. Block height never moved, so only the text element's own
+    /// painted width catches it.
+    #[gpui::test]
+    fn a_second_paragraph_does_not_squeeze_the_first(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let long = "the quick brown fox jumps over the lazy dog and keeps running far";
+        let w = px(635.);
+
+        let alone = bounds_of(cx, &format!("- {long}"), w, "md-plain").width;
+        let followed = bounds_of(cx, &format!("- {long}\n\n  {long}"), w, "md-plain").width;
+
+        assert!(alone > px(0.), "the probe found no prose: {alone:?}");
+        assert_eq!(
+            followed, alone,
+            "a second paragraph squeezed the first: followed={followed:?} alone={alone:?}"
+        );
     }
 }
