@@ -655,6 +655,7 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
             daruda_acp::ToolOutputBlock::ResourceLink {
                 uri: "file:///x".into(),
                 name: "x".into(),
+                mime: None,
             },
         ],
         raw_input: None,

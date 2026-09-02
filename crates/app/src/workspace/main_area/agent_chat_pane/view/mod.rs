@@ -15,7 +15,7 @@
 //! Workspace state; self-notifying pane entities are the sanctioned CLAUDE.md
 //! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use daruda_acp::{
     AcpSessionHandle, ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView,
@@ -28,7 +28,9 @@ use gpui::{
 
 use super::fold::FoldState;
 use super::pane_choice::PaneChoice;
-use super::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
+use super::render::{
+    DiffEditors, DiffStats, MermaidImages, OutputEditors, ResourceImages, ToolImages,
+};
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
@@ -342,12 +344,25 @@ pub(in crate::workspace) struct AssetCache {
     /// Content hashes with a decode currently spawned, so
     /// `reconcile_tool_images` doesn't re-spawn one still decoding.
     pub(in crate::workspace) tool_image_inflight: HashSet<u64>,
+    /// Decoded local image resources by `"{tool_call_id}#{block_index}"`.
+    pub(in crate::workspace) resource_images: ResourceImages,
+    /// Fingerprint of the resource URI + MIME currently represented by each
+    /// cache entry, so a replaced streamed block invalidates the old bitmap.
+    pub(in crate::workspace) resource_image_sources: HashMap<String, u64>,
+    /// Least-recently reconciled to most-recently reconciled resource keys.
+    /// Keeps the decoded cache bounded even when a transcript contains many
+    /// expanded image-producing tools.
+    pub(in crate::workspace) resource_image_order: VecDeque<String>,
+    /// Fingerprint currently being read for each resource block. Storing the
+    /// value as well as the key prevents a late old task overwriting a newer
+    /// source at the same block index.
+    pub(in crate::workspace) resource_image_inflight: HashMap<String, u64>,
 }
 
 impl AssetCache {
     /// Wipe every cache in place — same `Arc`s, contents cleared — so a live
-    /// render-side clone of `mermaid_images` / `tool_images` (cloned fresh per
-    /// render; see `render/blocks.rs`) stays attached rather than orphaned.
+    /// render-side clone of the shared image caches (cloned fresh per render;
+    /// see `render/blocks.rs`) stays attached rather than orphaned.
     fn clear(&mut self) {
         self.diff_editors.clear();
         self.diff_editor_sources.clear();
@@ -357,6 +372,12 @@ impl AssetCache {
         self.clear_mermaid();
         self.tool_image_inflight.clear();
         if let Ok(mut m) = self.tool_images.lock() {
+            m.clear();
+        }
+        self.resource_image_sources.clear();
+        self.resource_image_order.clear();
+        self.resource_image_inflight.clear();
+        if let Ok(mut m) = self.resource_images.lock() {
             m.clear();
         }
     }

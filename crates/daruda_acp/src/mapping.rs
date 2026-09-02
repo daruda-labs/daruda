@@ -721,6 +721,7 @@ fn output_block_of(block: &ContentBlock) -> Option<ToolOutputBlock> {
             uri: rl.uri.clone(),
             // Prefer the human title; the `name` field is always present.
             name: rl.title.clone().unwrap_or_else(|| rl.name.clone()),
+            mime: rl.mime_type.clone(),
         }),
         ContentBlock::Resource(er) => match &er.resource {
             EmbeddedResourceResource::TextResourceContents(t) if !t.text.trim().is_empty() => {
@@ -979,10 +980,9 @@ mod tests {
             ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new("hello")))),
             // Empty text is dropped, not carried as an empty block.
             ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new("")))),
-            ToolCallContent::Content(Content::new(ContentBlock::ResourceLink(ResourceLink::new(
-                "file.rs",
-                "file:///tmp/file.rs",
-            )))),
+            ToolCallContent::Content(Content::new(ContentBlock::ResourceLink(
+                ResourceLink::new("file.rs", "file:///tmp/file.rs").mime_type("image/png"),
+            ))),
             ToolCallContent::Diff(Diff::new("/tmp/x.txt", "hi\n")),
         ];
         let (diffs, output) = split(&content);
@@ -997,6 +997,7 @@ mod tests {
                 ToolOutputBlock::ResourceLink {
                     uri: "file:///tmp/file.rs".to_string(),
                     name: "file.rs".to_string(),
+                    mime: Some("image/png".to_string()),
                 },
             ]
         );

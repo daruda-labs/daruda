@@ -75,8 +75,21 @@ pub(in crate::workspace) type ToolImages = std::sync::Arc<
     >,
 >;
 
+/// Decoded local-image `ResourceLink`s keyed by tool output block identity.
+/// `Some` = decoded & GPU-ready; `None` = a cached read/decode failure. Kept
+/// separate from `ToolImages` because the source is a mutable path rather than
+/// immutable inline base64 content.
+pub(in crate::workspace) type ResourceImages = std::sync::Arc<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            Option<crate::workspace::main_area::file_view_pane::render::CachedImage>,
+        >,
+    >,
+>;
+
 /// The `AgentChatView::assets` caches the render pass reads, borrowed as one
-/// parameter instead of five threaded through `render_item` → `tool_card` →
+/// parameter instead of six threaded through `render_item` → `tool_card` →
 /// `output_block_view` (and `tool_card`'s recursion into flattened subagent
 /// children). Read-only here: entries are built in the reconcile layer.
 #[derive(Clone, Copy)]
@@ -85,6 +98,7 @@ pub(super) struct RenderAssets<'a> {
     pub(super) diff_stats: &'a DiffStats,
     pub(super) output_editors: &'a OutputEditors,
     pub(super) tool_images: &'a ToolImages,
+    pub(super) resource_images: &'a ResourceImages,
     pub(super) mermaid_images: &'a MermaidImages,
 }
 
@@ -95,6 +109,7 @@ impl<'a> RenderAssets<'a> {
             diff_stats: &assets.diff_stats,
             output_editors: &assets.output_editors,
             tool_images: &assets.tool_images,
+            resource_images: &assets.resource_images,
             mermaid_images: &assets.mermaid_images,
         }
     }

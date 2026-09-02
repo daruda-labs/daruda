@@ -453,6 +453,13 @@ impl AgentChatView {
             // images above, so the same gate applies.
             self.reconcile_output_editors(&reconcile_scope, &mut access, cx);
         }
+        // A turn may finish without a final tool update. That settle changes
+        // Pending/InProgress calls to terminal, making their resource images
+        // eligible for the first time, so revisit them even though this event
+        // did not set `touched_tool`.
+        if turn_settled {
+            self.reconcile_tool_images(&ReconcileScope::All, cx);
+        }
         // Mermaid fences arrive in message text AND in tool `Text` output blocks
         // (a tool writing/reading a .md file), so both flags trigger the scan.
         // `dark` must be `host_is_dark` — the same source the theme observer and

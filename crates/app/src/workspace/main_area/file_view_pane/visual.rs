@@ -5,6 +5,7 @@
 //! `RenderImage` happens at the render boundary, not here.
 
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -334,6 +335,30 @@ pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterI
     })
 }
 
+/// Decode untrusted image bytes with caller-selected allocation and dimension
+/// limits. Kept separate from [`decode_image`] so a host-specific safety policy
+/// does not silently narrow existing Markdown and file-viewer behavior.
+pub(in crate::workspace) fn decode_image_bounded(
+    bytes: &[u8],
+    max_dimension: u32,
+    max_alloc: u64,
+) -> anyhow::Result<RasterImage> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(max_dimension);
+    limits.max_image_height = Some(max_dimension);
+    limits.max_alloc = Some(max_alloc);
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    reader.limits(limits);
+    let img = reader.decode()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    Ok(RasterImage {
+        width,
+        height,
+        rgba: img.into_raw(),
+        scale: 1.0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +509,13 @@ mod tests {
         let img = decode_image(&png).expect("decode should succeed");
         assert_eq!((img.width, img.height), (3, 2));
         assert_eq!(img.rgba.len(), (3 * 2 * 4) as usize);
+    }
+
+    #[test]
+    fn bounded_decode_does_not_narrow_the_existing_decoder() {
+        let png = encode_png(3, 2, [10, 20, 30, 255]);
+        assert!(decode_image_bounded(&png, 2, 1024).is_err());
+        assert_eq!(decode_image(&png).unwrap().width, 3);
     }
 
     #[test]

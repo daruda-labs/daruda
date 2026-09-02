@@ -201,8 +201,14 @@ pub enum ToolOutputBlock {
     /// A non-rendered binary payload (audio, embedded blob). Carries only a
     /// descriptor; `byte_len` is the estimated decoded size for a label.
     Media { mime: String, byte_len: usize },
-    /// A resource the tool produced or referenced — rendered as an open button.
-    ResourceLink { uri: String, name: String },
+    /// A resource the tool produced or referenced. `mime` is optional protocol
+    /// metadata that lets hosts offer richer rendering without guessing every
+    /// arbitrary resource URI's content kind.
+    ResourceLink {
+        uri: String,
+        name: String,
+        mime: Option<String>,
+    },
 }
 
 /// A file modification carried by a tool call.

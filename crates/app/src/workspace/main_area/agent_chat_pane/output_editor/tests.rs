@@ -143,6 +143,7 @@ fn blocks_that_must_stay_on_markdown_or_media_path() {
         ToolOutputBlock::ResourceLink {
             uri: "file:///tmp/a".into(),
             name: "a".into(),
+            mime: None,
         },
     ] {
         assert!(output_editor_source(&block).is_none());

@@ -15,6 +15,10 @@
 //! on `touched_tool` / `touched_text`.
 
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
 
 use daruda_acp::{ChatItem, ToolOutputBlock};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -77,6 +81,119 @@ impl ReconcileScope {
     }
 }
 
+/// Local resource previews are a fallback for adapter-emitted file links, not
+/// a general URI fetcher. Keep reads bounded before bytes reach an image
+/// decoder; decoded allocations are bounded separately in
+/// `visual::decode_image_bounded`.
+const MAX_RESOURCE_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+/// Bound both retained textures and work spawned by an expand-all/replay. The
+/// latest expanded previews win; older resources remain usable as links.
+const MAX_RESOURCE_IMAGE_PREVIEWS: usize = 4;
+const MAX_RESOURCE_IMAGE_INFLIGHT: usize = 2;
+const MAX_RESOURCE_IMAGE_DIMENSION: u32 = 4096;
+const MAX_RESOURCE_IMAGE_ALLOC_BYTES: u64 = 64 * 1024 * 1024;
+
+fn resource_image_path(uri: &str, mime: Option<&str>, cwd: &Path) -> Option<PathBuf> {
+    let path = match url::Url::parse(uri) {
+        Ok(url) if url.scheme() == "file" => url.to_file_path().ok()?,
+        Ok(_) => return None,
+        Err(_) => {
+            let path = Path::new(uri);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            }
+        }
+    };
+
+    let declared_mime = mime.map(str::trim).filter(|mime| !mime.is_empty());
+    let is_image = declared_mime.map_or_else(
+        || {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(supported_resource_image_extension)
+        },
+        supported_resource_image_mime,
+    );
+    is_image.then_some(path)
+}
+
+fn supported_resource_image_mime(mime: &str) -> bool {
+    matches!(
+        mime.split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/gif"
+            | "image/webp"
+            | "image/bmp"
+            | "image/x-ms-bmp"
+    )
+}
+
+fn supported_resource_image_extension(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    )
+}
+
+fn resource_image_source(uri: &str, mime: Option<&str>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    uri.hash(&mut hasher);
+    mime.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Canonicalization closes symlink escapes. Restricting reads to the pane cwd
+/// and OS temp roots keeps an untrusted resource link from turning the GUI into
+/// an arbitrary local-file reader; Codex `view_image` outputs live in temp.
+fn authorized_resource_image_path(path: &Path, cwd: &Path) -> Option<PathBuf> {
+    let path = path.canonicalize().ok()?;
+    let cwd = cwd.canonicalize().ok()?;
+    if path.starts_with(cwd) {
+        return Some(path);
+    }
+
+    let mut temp_roots = vec![std::env::temp_dir()];
+    #[cfg(unix)]
+    temp_roots.push(PathBuf::from("/tmp"));
+    temp_roots
+        .into_iter()
+        .filter_map(|root| root.canonicalize().ok())
+        .any(|root| path.starts_with(root))
+        .then_some(path)
+}
+
+fn load_resource_image(path: &Path, cwd: &Path) -> Option<visual::RasterImage> {
+    let path = authorized_resource_image_path(path, cwd)?;
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_RESOURCE_IMAGE_BYTES {
+        return None;
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_RESOURCE_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_RESOURCE_IMAGE_BYTES {
+        return None;
+    }
+    visual::decode_image_bounded(
+        &bytes,
+        MAX_RESOURCE_IMAGE_DIMENSION,
+        MAX_RESOURCE_IMAGE_ALLOC_BYTES,
+    )
+    .ok()
+}
+
 impl AgentChatView {
     /// Whether `tc`'s card body is on screen, and so whether its embed editors
     /// need to exist at all.
@@ -133,6 +250,7 @@ impl AgentChatView {
         access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
     ) {
+        self.reconcile_tool_images(scope, cx);
         self.reconcile_output_editors(scope, access, cx);
         let theme = self.syntax_theme().to_owned();
         let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
@@ -473,17 +591,15 @@ impl AgentChatView {
         }
     }
 
-    /// Decode every tool-output `Image` block in the conversation that does not
-    /// yet have a cached bitmap (and isn't already being decoded). Mirrors
+    /// Decode every inline `Image` block and eligible local-image
+    /// `ResourceLink` that does not yet have a cached bitmap. Mirrors
     /// [`Self::reconcile_mermaid`]'s collect-then-spawn shape, minus the `dark`
-    /// theming (tool images are rendered as-is, not re-themed) — collect the
-    /// pure work first, then decode each on the background executor
-    /// (`image::load_from_memory` can be costly for a large screenshot), and
-    /// re-enter the view to fill the cache + `cx.notify()` when it lands.
+    /// theming (tool images are rendered as-is, not re-themed). Local resource
+    /// files are read only after the call settles, on the background executor.
     ///
     /// A decode failure caches `None` under the key rather than leaving it
-    /// absent, so a malformed payload renders a failure label once instead of
-    /// retrying forever.
+    /// absent, so malformed content is not retried forever. Inline images show
+    /// their media descriptor; resource images retain their original link.
     pub(in crate::workspace) fn reconcile_tool_images(
         &mut self,
         scope: &ReconcileScope,
@@ -514,8 +630,94 @@ impl AgentChatView {
                 pending.push((key, data.clone()));
             }
         }
-        if pending.is_empty() {
-            return;
+
+        let local_cwd = self
+            .cwd
+            .as_ref()
+            .and_then(daruda_store::project::PaneCwd::as_local)
+            .map(Path::to_path_buf);
+        let mut resource_live = HashSet::new();
+        let mut resource_candidates: Vec<(String, u64, PathBuf, PathBuf)> = Vec::new();
+        if let Some(cwd) = local_cwd.as_ref() {
+            let boundary = TurnBoundary::of(&self.items);
+            for (item_ix, item) in self.items.iter().enumerate() {
+                let ChatItem::ToolCall(tc) = item else {
+                    continue;
+                };
+                if !scope.covers(&tc.id)
+                    || tc.status.is_live()
+                    || !self.tool_body_on_screen(item_ix, item, boundary)
+                {
+                    continue;
+                }
+                for (ix, block) in tc.output.iter().enumerate() {
+                    let ToolOutputBlock::ResourceLink { uri, mime, .. } = block else {
+                        continue;
+                    };
+                    let Some(path) = resource_image_path(uri, mime.as_deref(), cwd) else {
+                        continue;
+                    };
+                    let key = output_editor_key(&tc.id, ix);
+                    let source = resource_image_source(uri, mime.as_deref());
+                    resource_candidates.push((key, source, path, cwd.clone()));
+                }
+            }
+        }
+
+        // Preserve the most recent expanded resources deterministically. In a
+        // full pass this also keeps the LRU walk below from briefly evicting and
+        // re-adding every retained key when the transcript has more candidates
+        // than the cache can hold.
+        if resource_candidates.len() > MAX_RESOURCE_IMAGE_PREVIEWS {
+            resource_candidates.drain(..resource_candidates.len() - MAX_RESOURCE_IMAGE_PREVIEWS);
+        }
+        resource_live.extend(resource_candidates.iter().map(|(key, ..)| key.clone()));
+
+        let stale = stale_keys(
+            self.assets.resource_image_sources.keys(),
+            &resource_live,
+            scope,
+        );
+        for key in stale {
+            self.assets.resource_image_sources.remove(&key);
+            self.assets
+                .resource_image_order
+                .retain(|cached| cached != &key);
+            self.assets.resource_images.lock().unwrap().remove(&key);
+        }
+
+        let mut resource_pending: Vec<(String, u64, PathBuf, PathBuf)> = Vec::new();
+        for (key, source, path, cwd) in resource_candidates {
+            let source_changed = self.assets.resource_image_sources.get(&key) != Some(&source);
+            if source_changed {
+                self.assets
+                    .resource_image_sources
+                    .insert(key.clone(), source);
+                self.assets.resource_images.lock().unwrap().remove(&key);
+            }
+
+            self.assets
+                .resource_image_order
+                .retain(|cached| cached != &key);
+            self.assets.resource_image_order.push_back(key.clone());
+            while self.assets.resource_image_order.len() > MAX_RESOURCE_IMAGE_PREVIEWS {
+                let Some(evicted) = self.assets.resource_image_order.pop_front() else {
+                    break;
+                };
+                self.assets.resource_image_sources.remove(&evicted);
+                self.assets.resource_images.lock().unwrap().remove(&evicted);
+            }
+
+            let cached = self
+                .assets
+                .resource_images
+                .lock()
+                .unwrap()
+                .contains_key(&key);
+            let in_flight = self.assets.resource_image_inflight.get(&key);
+            if !cached && in_flight.is_none() {
+                resource_pending.push((key, source, path, cwd));
+            }
         }
 
         // Mark all pending keys in-flight before spawning so a second event
@@ -567,6 +769,57 @@ impl AgentChatView {
             })
             .detach();
         }
+
+        let available =
+            MAX_RESOURCE_IMAGE_INFLIGHT.saturating_sub(self.assets.resource_image_inflight.len());
+        let to_spawn: Vec<_> = resource_pending
+            .into_iter()
+            .filter(|(key, source, ..)| self.assets.resource_image_sources.get(key) == Some(source))
+            .take(available)
+            .collect();
+        for (key, source, path, cwd) in to_spawn {
+            self.assets
+                .resource_image_inflight
+                .insert(key.clone(), source);
+
+            cx.spawn(async move |this, cx| {
+                let raster = cx
+                    .background_executor()
+                    .spawn(async move {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            load_resource_image(&path, &cwd)
+                        }))
+                        .ok()
+                        .flatten()
+                    })
+                    .await;
+                // SILENT-OK: view/window dropped before the read resolved.
+                let _ = this.update(cx, |view, cx| {
+                    // Only the task that owns this slot may clear it. A newer
+                    // source at the same block index waits until this read
+                    // finishes, keeping the global concurrency bound honest.
+                    if view.assets.resource_image_inflight.get(&key) != Some(&source) {
+                        return;
+                    }
+                    view.assets.resource_image_inflight.remove(&key);
+                    if view.assets.resource_image_sources.get(&key) == Some(&source) {
+                        let cached = raster.and_then(|r| CachedImage::from_raster(&r));
+                        view.assets
+                            .resource_images
+                            .lock()
+                            .unwrap()
+                            .insert(key, cached);
+                        view.list_state.remeasure();
+                        cx.notify();
+                    }
+                    // Fill the next queued preview now that one of the bounded
+                    // decoder slots is free. The pass is idempotent for every
+                    // cached/in-flight entry.
+                    view.reconcile_tool_images(&ReconcileScope::All, cx);
+                });
+            })
+            .detach();
+        }
     }
 }
 
@@ -591,11 +844,15 @@ mod tests {
     use daruda_acp::{
         ChatItem, DiffView, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
     };
+    use daruda_store::project::PaneCwd;
     use gpui::TestAppContext;
 
     use super::super::view::tests::make_test_view;
     use super::super::window_access::WindowAccess;
-    use super::{ReconcileScope, mermaid_key};
+    use super::{
+        MAX_RESOURCE_IMAGE_BYTES, MAX_RESOURCE_IMAGE_PREVIEWS, ReconcileScope,
+        authorized_resource_image_path, load_resource_image, mermaid_key, resource_image_path,
+    };
     use crate::transcript::fold_mode::{FoldMode, FoldPreset};
     use crate::workspace::main_area::file_view_pane::diff_editor::DiffColors;
 
@@ -750,6 +1007,211 @@ mod tests {
             text: text.to_string(),
             truncated_from: None,
         }
+    }
+
+    fn write_test_png(path: &std::path::Path) {
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([16, 32, 48, 255]))
+            .save(path)
+            .expect("write test PNG");
+    }
+
+    #[test]
+    fn resource_image_candidates_are_local_rasters_only() {
+        let cwd = std::path::Path::new("/work/project");
+        assert_eq!(
+            resource_image_path("shots/result.PNG", None, cwd),
+            Some(cwd.join("shots/result.PNG"))
+        );
+        assert_eq!(
+            resource_image_path("artifact", Some("image/png"), cwd),
+            Some(cwd.join("artifact"))
+        );
+        assert!(resource_image_path("notes.txt", None, cwd).is_none());
+        assert!(resource_image_path("picture.png", Some("text/plain"), cwd).is_none());
+        assert!(
+            resource_image_path("https://example.com/picture.png", Some("image/png"), cwd)
+                .is_none()
+        );
+        assert!(resource_image_path("mcp://server/picture.png", Some("image/png"), cwd).is_none());
+    }
+
+    #[test]
+    fn resource_image_loader_authorizes_and_bounds_local_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("preview.png");
+        write_test_png(&image_path);
+
+        let loaded = load_resource_image(&image_path, dir.path()).expect("valid local PNG");
+        assert_eq!((loaded.width, loaded.height), (2, 1));
+
+        let too_large = dir.path().join("large.png");
+        std::fs::File::create(&too_large)
+            .unwrap()
+            .set_len(MAX_RESOURCE_IMAGE_BYTES + 1)
+            .unwrap();
+        assert!(load_resource_image(&too_large, dir.path()).is_none());
+
+        #[cfg(unix)]
+        assert!(
+            authorized_resource_image_path(std::path::Path::new("/etc/hosts"), dir.path())
+                .is_none()
+        );
+    }
+
+    #[gpui::test]
+    fn settled_local_resource_link_is_loaded_into_the_render_cache(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("agent screenshot.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.items = vec![settled_tool(
+                "call_1",
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: image_path.to_string_lossy().into_owned(),
+                    name: "agent screenshot.png".into(),
+                    mime: None,
+                }],
+            )];
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            assert!(
+                v.assets.resource_image_sources.is_empty(),
+                "a collapsed card must not allocate a preview"
+            );
+        });
+        window
+            .update(cx, |v, window, cx| {
+                v.set_fold_mode(all_tools_expanded(), window, cx);
+            })
+            .expect("the window is open");
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(
+                matches!(
+                    v.assets.resource_images.lock().unwrap().get(KEY),
+                    Some(Some(_))
+                ),
+                "the background file read must land a GPU-ready preview"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn turn_settle_revisits_a_resource_link_that_arrived_live(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("live.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.items = vec![tool_named(
+                "call_1",
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: image_path.to_string_lossy().into_owned(),
+                    name: "live.png".into(),
+                    mime: Some("image/png".into()),
+                }],
+            )];
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            assert!(v.assets.resource_image_sources.is_empty());
+
+            v.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: true,
+                    stop_reason: "EndTurn".into(),
+                },
+                SYNTAX_THEME,
+                false,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(matches!(
+                v.assets.resource_images.lock().unwrap().get(KEY),
+                Some(Some(_))
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn stop_revisits_a_resource_link_without_waiting_for_an_ack(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("stopped.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.items = vec![tool_named(
+                "call_1",
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: image_path.to_string_lossy().into_owned(),
+                    name: "stopped.png".into(),
+                    mime: None,
+                }],
+            )];
+            v.set_turn_in_flight();
+            v.cancel_turn(cx);
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(matches!(
+                v.assets.resource_images.lock().unwrap().get(KEY),
+                Some(Some(_))
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn expanded_resource_preview_cache_stays_bounded(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut items = Vec::new();
+        for ix in 0..MAX_RESOURCE_IMAGE_PREVIEWS + 2 {
+            let path = dir.path().join(format!("preview-{ix}.png"));
+            write_test_png(&path);
+            items.push(settled_tool(
+                &format!("call_{ix}"),
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: path.to_string_lossy().into_owned(),
+                    name: format!("preview-{ix}.png"),
+                    mime: None,
+                }],
+            ));
+        }
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.items = items;
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(v.assets.resource_image_inflight.is_empty());
+            assert_eq!(
+                v.assets.resource_image_sources.len(),
+                MAX_RESOURCE_IMAGE_PREVIEWS
+            );
+            assert_eq!(
+                v.assets.resource_images.lock().unwrap().len(),
+                MAX_RESOURCE_IMAGE_PREVIEWS
+            );
+        });
     }
 
     /// Seeding replaces `items` outside the ACP pump, so it owes the same embed

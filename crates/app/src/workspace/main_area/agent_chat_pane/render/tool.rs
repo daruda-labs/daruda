@@ -533,9 +533,10 @@ fn output_truncated_from(block: &ToolOutputBlock) -> Option<usize> {
 /// Render one tool-output block: a height-capped read-only editor when the
 /// reconciler built one for this block (verbatim, non-markdown content), else
 /// rendered markdown (drag-selectable, keyed per block for stable selection
-/// state), verbatim monospace for raw shell output, or a resource link as an open
-/// button. The ACP spec says clients SHOULD render tool text as Markdown; code
-/// blocks keep their own monospace + syntax highlight.
+/// state), verbatim monospace for raw shell output, or a resource link as an
+/// optional local image preview plus open button. The ACP spec says clients
+/// SHOULD render tool text as Markdown; code blocks keep their own monospace +
+/// syntax highlight.
 fn output_block_view(
     tool_id: &str,
     ix: usize,
@@ -563,6 +564,7 @@ fn output_block_view(
     let dim = context.dim;
     let mermaid_images = context.assets.mermaid_images;
     let tool_images = context.assets.tool_images;
+    let resource_images = context.assets.resource_images;
     match block {
         ToolOutputBlock::Text {
             text,
@@ -669,14 +671,26 @@ fn output_block_view(
                 mime, *byte_len,
             )))
             .into_any_element(),
-        ToolOutputBlock::ResourceLink { uri, name } => {
+        ToolOutputBlock::ResourceLink { uri, name, .. } => {
+            let cached = resource_images.lock().unwrap().get(&key).cloned();
             let uri = uri.clone();
-            crate::ui::button(
+            let link = crate::ui::button(
                 SharedString::from(format!("agent-chat-tool-link-{tool_id}-{ix}")),
                 SharedString::from(name.clone()),
             )
-            .on_click(move |_, _, cx| cx.open_url(&uri))
-            .into_any_element()
+            .on_click(move |_, _, cx| cx.open_url(&uri));
+            match cached {
+                Some(Some(image)) => div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::GAP_SM))
+                    .child(image.block())
+                    .child(link)
+                    .into_any_element(),
+                // Missing, still loading, or failed: the original resource
+                // link remains usable and no permanent placeholder is shown.
+                Some(None) | None => link.into_any_element(),
+            }
         }
     }
 }
