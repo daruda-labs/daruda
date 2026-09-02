@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use daruda_acp::{ChatItem, DiffView, MessagePhase, ToolCallItem, ToolKindView, ToolStatusView};
 
+#[cfg(test)]
 use super::agent_chat_ops::SHOT_GROUP_TAIL_WINDOW;
 
 /// A file modification a sample call reports.
