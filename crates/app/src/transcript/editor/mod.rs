@@ -16,6 +16,9 @@ pub(crate) mod filter;
 pub(crate) mod fold;
 pub(crate) mod state;
 
+/// What the reset button runs.
+pub(crate) type ResetPress = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// The footer button that hands the axis back to what it departed from.
 ///
 /// The wording is the same in both hosts and correct in both: a pane returns to
@@ -24,7 +27,7 @@ pub(crate) mod state;
 /// still be an override worth undoing, so the editor never derives it.
 pub(crate) struct ResetSpec {
     pub disabled: bool,
-    pub on_reset: Rc<dyn Fn(&mut Window, &mut App)>,
+    pub on_reset: ResetPress,
 }
 
 /// The popover shell an editor sits in: the design size on both axes, each
