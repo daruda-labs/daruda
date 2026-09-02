@@ -20,10 +20,16 @@ fn tail_more_label(hidden_steps: usize, kept_steps: usize, collapsed: bool) -> S
     }
 }
 
-/// The in-group boundary's copy. Same two readings as [`tail_more_label`],
-/// counting calls: inside a group the axis's step is the group, and the rows
-/// this row holds back are the calls it is made of.
-fn tool_group_tail_more_label(hidden_calls: usize, kept_calls: usize, collapsed: bool) -> String {
+/// The copy for a boundary whose unit is a call rather than a step. Same two
+/// readings as [`tail_more_label`]: inside a group — or inside a subagent card,
+/// whose children are one group of calls — the axis's step is the group itself,
+/// and what the boundary holds back are the calls it is made of. Shared by both
+/// so the two cannot drift.
+pub(super) fn call_boundary_label(
+    hidden_calls: usize,
+    kept_calls: usize,
+    collapsed: bool,
+) -> String {
     if collapsed {
         s::agent_chat_tail_more_show_calls(hidden_calls)
     } else {
@@ -64,11 +70,7 @@ pub(super) fn tool_group_tail_more_bar(
         SharedString::from(format!("agent-chat-group-tail-{gid}")),
         FoldKey::ToolGroupTail(gid.to_owned()),
         !collapsed,
-        SharedString::from(tool_group_tail_more_label(
-            hidden_calls,
-            kept_calls,
-            collapsed,
-        )),
+        SharedString::from(call_boundary_label(hidden_calls, kept_calls, collapsed)),
         this.dim_amount,
         cx,
     )
@@ -108,9 +110,9 @@ mod tests {
     /// row holds back are calls. Reusing the step copy one level in would have
     /// the two boundaries claim the same thing about different amounts.
     #[test]
-    fn the_in_group_label_counts_calls_rather_than_steps() {
-        let closed = tool_group_tail_more_label(6, 5, true);
-        let open = tool_group_tail_more_label(6, 5, false);
+    fn the_call_unit_label_counts_calls_rather_than_steps() {
+        let closed = call_boundary_label(6, 5, true);
+        let open = call_boundary_label(6, 5, false);
         assert_ne!(
             closed, open,
             "an open boundary must not repeat the closed promise"
@@ -134,12 +136,12 @@ mod tests {
             "the two levels do not share their copy"
         );
         assert_ne!(
-            tool_group_tail_more_label(1, 5, true),
-            tool_group_tail_more_label(2, 5, true)
+            call_boundary_label(1, 5, true),
+            call_boundary_label(2, 5, true)
         );
         assert_ne!(
-            tool_group_tail_more_label(6, 1, false),
-            tool_group_tail_more_label(6, 2, false)
+            call_boundary_label(6, 1, false),
+            call_boundary_label(6, 2, false)
         );
     }
 }

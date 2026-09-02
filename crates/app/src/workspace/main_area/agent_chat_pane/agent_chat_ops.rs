@@ -966,6 +966,51 @@ impl Workspace {
         });
     }
 
+    /// Open the subagent seed with a window narrower than the card's child
+    /// count and the card expanded, so the boundary the card's own window puts
+    /// among its children is what the capture shows. `reveal` opens it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_subagent_tail_boundary_for_shot(
+        &mut self,
+        reveal: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold::FoldKey;
+        use super::rows::tail::TailWindow;
+        use super::shot_transcript::SUBAGENT_PARENT_ID;
+
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::subagent_transcript(), window, cx)
+            },
+            window,
+            cx,
+        );
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            v.set_tail_window(TailWindow::Last(SHOT_GROUP_TAIL_WINDOW), cx);
+            // A launch card defaults collapsed, and its children are only on
+            // screen once it is open — the boundary lives among them.
+            v.toggle_fold(
+                FoldKey::Subagent(SUBAGENT_PARENT_ID.to_string()),
+                window,
+                cx,
+            );
+            if reveal {
+                v.toggle_fold(
+                    FoldKey::SubagentTail(SUBAGENT_PARENT_ID.to_string()),
+                    window,
+                    cx,
+                );
+            }
+        });
+    }
+
     /// Open the seeded transcript with a custom fold matrix and editor.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_fold_editor_for_shot(

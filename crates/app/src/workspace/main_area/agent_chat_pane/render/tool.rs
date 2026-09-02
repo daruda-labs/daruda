@@ -18,9 +18,10 @@ use super::RenderAssets;
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
 use super::embed::bounded_editor_embed;
-use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine, window_boundary_row};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
+use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
@@ -32,8 +33,11 @@ use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, F
 use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
+use crate::workspace::main_area::agent_chat_pane::rows::tail::{
+    TailWindow, subagent_child_withheld,
+};
 use crate::workspace::main_area::agent_chat_pane::rows::{
-    FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
+    FilterMatchIndex, LiveSubagentUnits, effective_tool_status, tool_or_subtree_live,
 };
 use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -68,6 +72,7 @@ pub(super) fn tool_card(
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
+    tail: TailWindow,
     t: &theme::DarudaTheme,
     dim: f32,
     depth: usize,
@@ -374,7 +379,35 @@ pub(super) fn tool_card(
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(subagent_label)),
             );
-            for (child_ix, child) in children {
+            // The card's own step-axis boundary. These children own no row, so
+            // it renders here rather than in the list — the same place the
+            // raw-input disclosure lives. No slot to keep stable, so unlike the
+            // row-level boundaries it is built only when it holds something.
+            let count = children.len();
+            let hidden = tail.hidden_steps(count);
+            let tail_key = FoldKey::SubagentTail(tc.id.clone());
+            let tail_revealed =
+                fold.is_expanded(&tail_key, fold_context_at(&tail_key, ix, items, boundary));
+            if hidden > 0 {
+                body = body.child(window_boundary_row(
+                    SharedString::from(format!("agent-chat-subagent-tail-{}", tc.id)),
+                    tail_key,
+                    tail_revealed,
+                    SharedString::from(call_boundary_label(hidden, count - hidden, !tail_revealed)),
+                    dim,
+                    cx,
+                ));
+            }
+            for (pos, (child_ix, child)) in children.into_iter().enumerate() {
+                if subagent_child_withheld(
+                    pos,
+                    count,
+                    tail,
+                    tail_revealed,
+                    tool_or_subtree_live(child, live_units),
+                ) {
+                    continue;
+                }
                 // A nested child may itself be a subagent launch (a subagent that
                 // spawns its own subagent), so key it the same way as a top-level
                 // card — collapsed by default when it is one.
@@ -396,6 +429,7 @@ pub(super) fn tool_card(
                         boundary,
                         assets,
                         fold,
+                        tail,
                         t,
                         dim,
                         depth + 1,

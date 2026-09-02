@@ -756,7 +756,8 @@ fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize
         | FoldKey::Subagent(id)
         | FoldKey::ToolRawInput(id)
         | FoldKey::ToolGroup(id)
-        | FoldKey::ToolGroupTail(id) => tool_item_index(items, id),
+        | FoldKey::ToolGroupTail(id)
+        | FoldKey::SubagentTail(id) => tool_item_index(items, id),
         FoldKey::Diff(diff_key) => {
             let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
             tool_item_index(items, tool_id)
@@ -825,6 +826,7 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         | FoldKey::Subagent(_)
         | FoldKey::Tail(_)
         | FoldKey::ToolGroupTail(_)
+        | FoldKey::SubagentTail(_)
         | FoldKey::Filtered(_) => false,
     }
 }
@@ -849,7 +851,13 @@ pub(in crate::workspace) fn fold_key_item_index(
     let owner = |id: &str| ToolHierarchy::build(items).owning_row_index(id);
     match key {
         FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
-        FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::ToolRawInput(id) => owner(id),
+        // `SubagentTail` belongs with these: its reveal changes which child
+        // cards the parent's body holds — a height change in place, with no
+        // `RenderRow::hidden` flip for the diff to see.
+        FoldKey::Tool(id)
+        | FoldKey::Subagent(id)
+        | FoldKey::ToolRawInput(id)
+        | FoldKey::SubagentTail(id) => owner(id),
         FoldKey::Diff(diff_key) => owner(diff_key.split('#').next().unwrap_or(diff_key.as_str())),
         FoldKey::Response(_)
         | FoldKey::ToolGroup(_)

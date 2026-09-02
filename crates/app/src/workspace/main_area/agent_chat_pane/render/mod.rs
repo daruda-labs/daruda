@@ -119,6 +119,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, FilteredAway, LiveSubagentUnits, RenderRow, RowKind,
 };
@@ -763,6 +764,7 @@ fn render_agent_item(
             this.turn_boundary,
             RenderAssets::of(&this.assets),
             &this.fold,
+            this.tail.value(),
             t,
             this.dim_amount,
             agent_display_name(this),
@@ -792,6 +794,7 @@ fn render_item(
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
+    tail: TailWindow,
     t: &theme::DarudaTheme,
     dim: f32,
     agent_label: &str,
@@ -839,6 +842,7 @@ fn render_item(
                 boundary,
                 assets,
                 fold,
+                tail,
                 t,
                 dim,
                 0,

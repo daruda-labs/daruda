@@ -188,6 +188,77 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// The parent call every [`subagent_transcript`] child names.
+pub(in crate::workspace) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
+/// More children than the capture's window keeps, so the card's own boundary
+/// has something to hold back.
+const SUBAGENT_CHILDREN: [(&str, ToolKindView); 7] = [
+    ("Read crates/app/src/workspace/mod.rs", ToolKindView::Read),
+    ("rg -n \"LaneRef\" crates/app/src", ToolKindView::Search),
+    ("Read crates/app/src/lane/mod.rs", ToolKindView::Read),
+    ("rg -n \"last_active_lane_id\" crates", ToolKindView::Search),
+    (
+        "Read crates/daruda_store/src/project/lane.rs",
+        ToolKindView::Read,
+    ),
+    ("cargo test -p daruda lane", ToolKindView::Execute),
+    (
+        "Read crates/app/src/workspace/persistence.rs",
+        ToolKindView::Read,
+    ),
+];
+
+/// A conversation whose one turn delegates to a subagent: the `Task` launch and
+/// the calls the adapter flattened under it, linked by `parent_tool_id`.
+///
+/// Its own seed rather than another cycle in [`sample_transcript`]: those
+/// children own no row, so they would change nothing in the transcript's list —
+/// the parent's card is the only place they appear.
+pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
+    let mut items = vec![
+        ChatItem::UserText("how does a lane get its last active session back?".to_string()),
+        assistant(
+            "Delegating the survey so the answer comes back with the call sites attached.",
+            MessagePhase::Commentary,
+        ),
+        ChatItem::ToolCall(ToolCallItem {
+            id: SUBAGENT_PARENT_ID.to_string(),
+            title: "Explore how a lane restores its last active session".to_string(),
+            kind: ToolKindView::Think,
+            tool_name: Some("Task".to_string()),
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: Some(serde_json::json!({
+                "subagent_type": "general-purpose",
+                "prompt": "Trace how a lane's last active session is persisted and restored.",
+            })),
+            parent_tool_id: None,
+            exit: None,
+        }),
+    ];
+    for (i, (title, kind)) in SUBAGENT_CHILDREN.into_iter().enumerate() {
+        items.push(ChatItem::ToolCall(ToolCallItem {
+            id: format!("{SUBAGENT_PARENT_ID}-child-{i}"),
+            title: title.to_string(),
+            kind,
+            tool_name: None,
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: Some(SUBAGENT_PARENT_ID.to_string()),
+            exit: None,
+        }));
+    }
+    items.push(assistant(
+        "`SerializedLane::last_active_lane_id` is the snap target: `restore_workspace` \
+         reads it back and `activate_lane` writes it on every switch.",
+        MessagePhase::Answer,
+    ));
+    items
+}
+
 /// [`sample_transcript`] as it stands mid-turn: the agent has not written its
 /// answer yet, so the run's last prose is a preamble rather than a conclusion.
 /// Derived from the settled seed rather than assembled again, so the two cannot
@@ -258,6 +329,12 @@ mod tests {
             assert!(cycle.tools.len() >= 2);
             assert!(!cycle.prose.is_empty());
         }
+        // The subagent capture needs more flattened children than that window
+        // keeps, or the card's own boundary has nothing to hold back.
+        assert!(
+            SUBAGENT_CHILDREN.len() > 2,
+            "no subagent card long enough for the in-card boundary capture"
+        );
         // The in-group boundary capture engages a window one narrower than the
         // longest group, so the seed has to hold a group of more than two —
         // otherwise `open_agent_chat_group_tail_boundary_for_shot` finds no
@@ -266,6 +343,33 @@ mod tests {
             cycles().iter().any(|c| c.tools.len() > 2),
             "no group long enough for the in-group boundary capture"
         );
+    }
+
+    /// The card's children have to be recognized as its children, and the
+    /// parent as a subagent launch — both are what put them inside the card
+    /// instead of in the transcript's own list.
+    #[test]
+    fn the_subagent_seed_links_its_children_to_a_recognized_launch() {
+        let items = subagent_transcript();
+        let launch = items
+            .iter()
+            .find_map(|i| match i {
+                ChatItem::ToolCall(tc) if tc.id == SUBAGENT_PARENT_ID => Some(tc),
+                _ => None,
+            })
+            .expect("the seed carries its Task launch");
+        assert!(
+            launch.is_subagent_launch(),
+            "raw_input must name the subagent"
+        );
+        let children = items
+            .iter()
+            .filter(|i| {
+                matches!(i, ChatItem::ToolCall(tc)
+                    if tc.parent_tool_id.as_deref() == Some(SUBAGENT_PARENT_ID))
+            })
+            .count();
+        assert_eq!(children, SUBAGENT_CHILDREN.len());
     }
 
     #[test]

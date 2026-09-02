@@ -161,7 +161,12 @@ impl AgentChatView {
         // response and group folds only flip row visibility, leaving each card's
         // own state (and its embeds) untouched.
         let embed_scope = match &key {
-            FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
+            // A subagent's own boundary decides which child cards render, and
+            // each of those owns embeds, so it scopes to the parent card just
+            // as the card's own fold does.
+            FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::SubagentTail(id) => {
+                Some(ReconcileScope::Tool(id.clone()))
+            }
             FoldKey::Assistant(_)
             | FoldKey::Thinking(_)
             | FoldKey::Response(_)
