@@ -55,7 +55,7 @@ cargo build -p daruda
 cargo test
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update --all-targets -- -D warnings
+  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
 scripts/lint-reentrant-reads.sh
@@ -74,7 +74,7 @@ scripts/lint-acp-air-gate.sh
 cargo run -p gen_acp_presets -- --check
 ```
 
-Note: `.github/workflows/ci.yml` gates only a subset of the above (fmt, the clippy list, and the 7 lints through `lint-viewport-row-scroll.sh`); `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI, and neither the CI clippy/test `-p` list nor the commands above include `daruda_acp`.
+Note: `.github/workflows/ci.yml` gates only a subset of the above (fmt, the clippy list, and the 7 lints through `lint-viewport-row-scroll.sh`); `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI. `daruda_acp` is in the CI clippy and test lists as of `d8af2425`.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 
