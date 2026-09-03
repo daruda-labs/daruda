@@ -61,6 +61,14 @@ pub const AIR_META_KEY: &str = "air";
 /// The extension version both adapters compare against with `>=`.
 pub const AIR_EXTENSION_VERSION: u64 = 1;
 
+/// The two field names inside the AIR block. Named rather than inlined so
+/// `scripts/lint-acp-air-gate.sh` can compare them against the adapters' own
+/// constants — a rename here closes the gate as silently as a version bump.
+pub const AIR_EXTENSION_VERSION_KEY: &str = "version";
+
+/// See [`AIR_EXTENSION_VERSION_KEY`].
+pub const AIR_EXTENSION_CAPABILITIES_KEY: &str = "capabilities";
+
 /// The tool name codex stamps on `_meta.codex.collaboration` when it delegates
 /// through its legacy collaboration tools instead of a native child session.
 const COLLABORATION_SPAWN_TOOL: &str = "spawnAgent";
@@ -78,8 +86,8 @@ pub const NATIVE_SUBAGENT_SESSIONS_CAPABILITY: &str = "nativeSubagentSessions";
 pub fn air_capabilities_meta() -> Value {
     serde_json::json!({
         AIR_META_KEY: {
-            "version": AIR_EXTENSION_VERSION,
-            "capabilities": [NATIVE_SUBAGENT_SESSIONS_CAPABILITY],
+            AIR_EXTENSION_VERSION_KEY: AIR_EXTENSION_VERSION,
+            AIR_EXTENSION_CAPABILITIES_KEY: [NATIVE_SUBAGENT_SESSIONS_CAPABILITY],
         }
     })
 }
