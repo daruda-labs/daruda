@@ -24,14 +24,10 @@ use super::{MdColors, MdRenderAssets, OpenUrl};
 /// The split is what makes a multi-paragraph item work. `flex_1().w_0()` is the
 /// shape zed gives prose beside a bullet cell (`push_markdown_list_item`).
 ///
-// WORKAROUND: gpui's text-measure cache (`elements/text.rs`, the
-// `wrap_width.is_none() || ..` arm) returns a size measured at a *definite*
-// wrap width for an unconstrained measure, against its own documented rule, so
-// a zero-width probe poisons every later max-content query. A flex column here
-// makes that probe decide the layout — text beside an inline image collapsed to
-// one character per line. Block layout stacks the runs the same way without
-// making the probe decisive; fixing the cache belongs in a `patches/` gpui
-// patch, whose blast radius is every text element in the app.
+/// A flex column here would make a zero-width measure probe decide the layout
+/// of a shrink-to-fit child below it. `patches/gpui-text-wrap-cache.patch` is
+/// what stops that probe from sticking; block layout stacks the runs the same
+/// way and does not depend on the patch being applied.
 pub(super) fn render_md_prose(
     spans: &[MdSpan],
     assets: MdRenderAssets<'_>,

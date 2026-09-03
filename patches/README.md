@@ -63,6 +63,46 @@ the risk here is daruda's own.
 Guarded by `an_auto_repeat_does_not_flip_the_input_modality`
 (`workspace/tests/flow/graph.rs`), which fails with the patch reverted.
 
+## `gpui-text-wrap-cache.patch`
+
+Targets the **cargo git checkout** of GPUI, on the same terms as the
+patches above: auto-applied by `scripts/apply-gpui-patch.sh`,
+idempotent on the marker `Condition 2 is an exact match on purpose`.
+
+One condition in `TextLayout::layout`'s measure closure
+(`crates/gpui/src/elements/text.rs`): **a max-content measure no longer
+answers from a size that was measured at a definite wrap width.**
+
+```rust
+- && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
++ && wrap_width == text_layout.wrap_width
+```
+
+The comment three lines above the condition already states the intended
+rule — *"wrap_width matches (or both are None)"* — which the code did not
+implement: the leading `wrap_width.is_none() ||` returned the cached size
+for **any** unconstrained measure, whatever width that size came from.
+
+Taffy legitimately probes a shrink-to-fit box at zero width while
+computing its content contribution. Under the old condition that probe's
+wrapped result became the answer to every later max-content query for
+the element, so the box settled at its minimum and the text laid out one
+character per line. Measured in the file viewer's markdown preview, a
+list item or blockquote holding an inline image collapsed to
+`0px × 136.5px` where the same content in a paragraph measured
+`51px × 19.5px`.
+
+The cost is bounded: `layout_wrapped_line` keys its own cache on
+`wrap_width` and checks the current *and* previous frame
+(`text_system/line_layout.rs`), so the extra work is one re-shape per
+genuinely new `(text, wrap_width)` pair rather than per query.
+
+`render_md_prose` (`file_view_pane/render/markdown/inline.rs`) stacks its
+runs with block layout rather than a flex column, which keeps that probe
+from being decisive even on an unpatched checkout. Both are wanted: the
+patch fixes the cause, the block column means a developer who skipped
+`apply-gpui-patch.sh` does not see a collapsed list item.
+
 ## `gpui-component-input-state-ime-selection.patch`
 
 Targets the **vendored `crates/gpui_component/src/input/state.rs`**

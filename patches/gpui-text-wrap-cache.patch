@@ -1,0 +1,21 @@
+--- a/crates/gpui/src/elements/text.rs
++++ b/crates/gpui/src/elements/text.rs
+@@ -446,9 +446,17 @@ impl TextLayout {
+                 // 2. wrap_width matches (or both are None)
+                 // 3. truncate_width is None (if truncate_width is Some, we need to re-layout
+                 //    because the previous layout may have been computed without truncation)
++                //
++                // Condition 2 is an exact match on purpose. Accepting any
++                // unconstrained measure (`wrap_width.is_none() || ..`) hands a
++                // max-content query a size measured at a *definite* width, so
++                // one zero-width probe — which taffy legitimately makes while
++                // sizing a shrink-to-fit box — poisons every later max-content
++                // query for that element and its text lays out one character
++                // per line.
+                 if let Some(text_layout) = element_state.0.borrow().as_ref()
+                     && let Some(size) = text_layout.size
+-                    && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
++                    && wrap_width == text_layout.wrap_width
+                     && truncate_width.is_none()
+                 {
+                     return size;

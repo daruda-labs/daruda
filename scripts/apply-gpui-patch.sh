@@ -16,6 +16,10 @@
 #                                   keyboard input, so holding one through a
 #                                   mouse drag stops flipping the input modality
 #                                   and refresh()ing the window on every tick.
+#   gpui-text-wrap-cache.patch    — a text element's measure cache no longer
+#                                   answers a max-content query with a size
+#                                   measured at a definite wrap width, so a
+#                                   zero-width probe stops poisoning it.
 #
 # Usage:
 #   ./scripts/apply-gpui-patch.sh          # auto-detect checkout path
@@ -28,6 +32,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 IME_PATCH="$REPO_DIR/patches/gpui-ime-cjk-path-a.patch"
 NOTIFY_PATCH="$REPO_DIR/patches/gpui-notify-lost-wakeup.patch"
 MODALITY_PATCH="$REPO_DIR/patches/gpui-held-key-keeps-modality.patch"
+TEXT_CACHE_PATCH="$REPO_DIR/patches/gpui-text-wrap-cache.patch"
 
 # Resolve the GPUI source checkout path from Cargo.lock
 find_gpui_checkout() {
@@ -143,6 +148,22 @@ else
         echo "✓ GPUI held-key-keeps-modality patch applied successfully."
     else
         echo "ERROR: Failed to apply held-key-keeps-modality patch." >&2
+        exit 1
+    fi
+fi
+
+# ---- gpui-text-wrap-cache.patch ----
+TEXT_CACHE_TARGET="$CHECKOUT/crates/gpui/src/elements/text.rs"
+if grep -q 'Condition 2 is an exact match on purpose' "$TEXT_CACHE_TARGET" 2>/dev/null; then
+    echo "✓ GPUI text-wrap-cache patch already applied."
+else
+    echo "Applying GPUI text-wrap-cache patch…"
+    if git apply --check "$TEXT_CACHE_PATCH" 2>/dev/null; then
+        git apply "$TEXT_CACHE_PATCH"
+        CHANGED=1
+        echo "✓ GPUI text-wrap-cache patch applied successfully."
+    else
+        echo "ERROR: Failed to apply text-wrap-cache patch." >&2
         exit 1
     fi
 fi
