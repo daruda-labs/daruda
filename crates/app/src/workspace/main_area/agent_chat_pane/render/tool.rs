@@ -61,28 +61,55 @@ struct OutputBlockContext<'a> {
 /// body — full untruncated title, then diffs + plain-text output — shows only
 /// when expanded; the card's border / bg chrome wraps the fold assembly either
 /// way. The nested diffs are independently foldable.
-#[allow(clippy::too_many_arguments)]
+/// Everything a card reads that does not change as it recurses into a
+/// subagent's flattened children. Bundled because both call paths — the row
+/// renderer and the recursion itself — otherwise restate the same twelve
+/// arguments in the same order, which is the copy CLAUDE.md's extraction rule
+/// is about.
+#[derive(Clone, Copy)]
+pub(super) struct CardContext<'a> {
+    pub(super) items: &'a [ChatItem],
+    pub(super) live_units: &'a LiveSubagentUnits,
+    pub(super) filter_matches: &'a FilterMatchIndex,
+    pub(super) filter_revealed: bool,
+    pub(super) boundary: TurnBoundary,
+    pub(super) assets: RenderAssets<'a>,
+    pub(super) fold: &'a FoldState,
+    pub(super) tail: TailWindow,
+    pub(super) t: &'a theme::DarudaTheme,
+    pub(super) dim: f32,
+    pub(super) pane_id: PaneId,
+    pub(super) window_handle: AnyWindowHandle,
+}
+
 pub(super) fn tool_card(
-    key: FoldKey,
-    expanded: bool,
     ix: usize,
     tc: &ToolCallItem,
-    items: &[ChatItem],
-    live_units: &LiveSubagentUnits,
-    filter_matches: &FilterMatchIndex,
-    filter_revealed: bool,
-    boundary: TurnBoundary,
-    assets: RenderAssets<'_>,
-    fold: &FoldState,
-    tail: TailWindow,
-    t: &theme::DarudaTheme,
-    dim: f32,
     depth: usize,
-    pane_id: PaneId,
-    window_handle: AnyWindowHandle,
+    ctx: CardContext<'_>,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
+    let CardContext {
+        items,
+        live_units,
+        filter_matches,
+        filter_revealed,
+        boundary,
+        assets,
+        fold,
+        tail,
+        t,
+        dim,
+        pane_id,
+        window_handle,
+    } = ctx;
+    // Derived here rather than by each caller: a subagent launch takes
+    // `FoldKey::Subagent` and every other call takes `FoldKey::Tool`, and a
+    // caller that got that pair wrong would give the card a key its own toggle
+    // never reads. Both call paths used to restate this.
+    let key = tool_fold_key(tc);
+    let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
     let markdown_links = AgentChatMarkdownLinks::new(pane_id, window_handle);
     let turn = boundary.at(ix);
     // A subagent parent (Task/Agent) whose flattened children keep running past
@@ -391,35 +418,10 @@ pub(super) fn tool_card(
             }
             for child in children.shown {
                 // A nested child may itself be a subagent launch (a subagent that
-                // spawns its own subagent), so key it the same way as a top-level
-                // card — collapsed by default when it is one.
-                let child_key = tool_fold_key(child.call);
-                let child_expanded = fold.is_expanded(
-                    &child_key,
-                    fold_context_at(&child_key, child.ix, items, boundary),
-                );
-                let card = tool_card(
-                    child_key,
-                    child_expanded,
-                    child.ix,
-                    child.call,
-                    items,
-                    live_units,
-                    filter_matches,
-                    filter_revealed,
-                    boundary,
-                    assets,
-                    fold,
-                    tail,
-                    t,
-                    dim,
-                    depth + 1,
-                    pane_id,
-                    window_handle,
-                    window,
-                    cx,
-                )
-                .into_any_element();
+                // spawns its own subagent); `tool_card` keys it the same way as a
+                // top-level card, so it is collapsed by default when it is one.
+                let card =
+                    tool_card(child.ix, child.call, depth + 1, ctx, window, cx).into_any_element();
                 // A covered child is on screen only because the boundary above
                 // it released it — or because it is still running. The rail says
                 // so; without it the reveal just appends cards that read as part

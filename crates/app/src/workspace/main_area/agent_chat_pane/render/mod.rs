@@ -124,14 +124,14 @@ use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use tail_row::{tail_more_bar, tool_group_tail_more_bar};
-use tool::{permission_card, tool_card};
+use tool::{CardContext, permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{IconName, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at, tool_fold_key,
+    DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
@@ -842,14 +842,11 @@ fn render_item(
             let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
             thinking_block(ix, key, expanded, text, markdown, cx).into_any_element()
         }
-        ChatItem::ToolCall(tc) => {
-            let key = tool_fold_key(tc);
-            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
-            tool_card(
-                key,
-                expanded,
-                ix,
-                tc,
+        ChatItem::ToolCall(tc) => tool_card(
+            ix,
+            tc,
+            0,
+            CardContext {
                 items,
                 live_units,
                 filter_matches,
@@ -860,14 +857,13 @@ fn render_item(
                 tail,
                 t,
                 dim,
-                0,
                 pane_id,
                 window_handle,
-                window,
-                cx,
-            )
-            .into_any_element()
-        }
+            },
+            window,
+            cx,
+        )
+        .into_any_element(),
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Failure(failure) => {
             failure_block(ix, failure, pane_id, window_handle, t, cx).into_any_element()
