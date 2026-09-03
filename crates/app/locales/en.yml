@@ -308,6 +308,7 @@ file_viewer:
 # Agent chat pane (ACP)
 agent_chat:
   session_notice: "The session continued, but not as configured"
+  legacy_delegation_notice: "This agent delegated to a subagent without native subagent sessions, so the subagent's own tool calls will not appear. For Codex, enable `features.multi_agent_v2`."
   diff_fallback_truncated: "%{n} more lines — open the file to see the rest"
   sign_in_again: "Sign in again"
   diagram_zoom: "Enlarge diagram"

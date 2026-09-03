@@ -155,6 +155,30 @@ async fn a_session_notice_surfaces_as_a_toast(cx: &mut TestAppContext) {
     });
 }
 
+/// The one advisory daruda writes itself carries no text on the wire — the
+/// wording is a locale key, so the host has to supply it. An arm that forwards
+/// the event without doing so drops the notice silently: the session stays
+/// live, nothing errors, and the user simply never learns why the subagent's
+/// work is missing.
+#[gpui::test]
+async fn a_legacy_delegation_surfaces_its_localized_wording(cx: &mut TestAppContext) {
+    let (_window, workspace) = build_workspace(cx);
+
+    workspace.update(cx, |ws, cx| {
+        ws.report_agent_notice(1, &daruda_acp::AcpEvent::LegacyDelegation, cx);
+    });
+
+    workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+        assert_eq!(toasts.len(), 1, "the advisory reaches the user");
+        assert_eq!(
+            toasts[0].report.message,
+            crate::surface::strings::agent_chat_legacy_delegation_notice(),
+            "the body is the locale entry, not an empty string or adapter text"
+        );
+    });
+}
+
 /// The pump hands every event through this, so anything that is not an
 /// advisory has to pass straight through — a toast per streamed chunk would
 /// bury the app.

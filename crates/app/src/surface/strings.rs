@@ -2530,6 +2530,11 @@ pub fn agent_chat_awaiting_permission() -> String {
 pub fn agent_chat_session_notice() -> String {
     rust_i18n::t!("agent_chat.session_notice").into_owned()
 }
+/// Body for the one notice daruda authors itself: the agent delegated through
+/// its legacy path, so the subagent's work can never be shown.
+pub fn agent_chat_legacy_delegation_notice() -> String {
+    rust_i18n::t!("agent_chat.legacy_delegation_notice").into_owned()
+}
 pub fn agent_chat_permission_title() -> String {
     rust_i18n::t!("agent_chat.permission_title").into_owned()
 }

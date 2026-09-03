@@ -379,7 +379,7 @@ fn a_child_that_has_reported_is_still_a_child() {
 /// notice would be noise.
 #[test]
 fn legacy_delegation_is_reported_once_and_only_for_the_spawn() {
-    let mut router = router();
+    let mut spawn_router = router();
     let spawn = serde_json::json!({
         "sessionUpdate": "tool_call",
         "toolCallId": "t1",
@@ -398,14 +398,22 @@ fn legacy_delegation_is_reported_once_and_only_for_the_spawn() {
         "title": "Read main.rs",
     });
 
-    assert!(router.first_legacy_delegation(&spawn));
-    assert!(!router.first_legacy_delegation(&spawn), "reported once");
+    assert!(spawn_router.first_legacy_delegation(&spawn));
     assert!(
-        !router.first_legacy_delegation(&wait),
+        !spawn_router.first_legacy_delegation(&spawn),
+        "reported once"
+    );
+
+    // Each of these gets its own router: on the one above, the spawn has
+    // already spent the once-only slot, so every later call returns `false`
+    // whatever the predicate says — the assertion would pass even if the
+    // marker were matched loosely.
+    assert!(
+        !router().first_legacy_delegation(&wait),
         "only the spawn marks it"
     );
     assert!(
-        !router.first_legacy_delegation(&plain),
+        !router().first_legacy_delegation(&plain),
         "native traffic is silent"
     );
 }

@@ -48,6 +48,9 @@ fn main() {
                 AcpEvent::ConfigOptionRejected { config_id, reason } => {
                     eprintln!("[config-rejected] {config_id}: {reason}");
                 }
+                AcpEvent::LegacyDelegation => {
+                    eprintln!("[notice] legacy delegation — subagent calls will not arrive");
+                }
                 AcpEvent::AgentIdentified { program } => {
                     eprintln!("[identified] {program:?}");
                 }

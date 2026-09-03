@@ -218,17 +218,19 @@ impl Workspace {
         event: &daruda_acp::AcpEvent,
         cx: &mut Context<Self>,
     ) {
-        let daruda_acp::AcpEvent::Notice(message) = event else {
-            return;
+        let message = match event {
+            // The adapter's own diagnostic, not authored copy — the same
+            // treatment a captured login failure gets.
+            daruda_acp::AcpEvent::Notice(message) => message.clone(),
+            daruda_acp::AcpEvent::LegacyDelegation => s::agent_chat_legacy_delegation_notice(),
+            _ => return,
         };
-        // The body is the adapter's own diagnostic, not authored copy — the
-        // same treatment a captured login failure gets.
         self.report_error(
             ErrorReport::new(s::agent_chat_session_notice())
                 .message(message.clone())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
-                .dedup(notice_dedup_key(pane_id, message))
+                .dedup(notice_dedup_key(pane_id, &message))
                 .build(),
             cx,
         );

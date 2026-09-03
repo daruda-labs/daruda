@@ -307,6 +307,7 @@ file_viewer:
 # Agent chat pane (ACP)
 agent_chat:
   session_notice: "세션은 계속되지만 설정대로는 아닙니다"
+  legacy_delegation_notice: "이 에이전트는 네이티브 서브에이전트 세션 없이 위임했기 때문에, 서브에이전트 자신의 도구 호출은 표시되지 않습니다. Codex라면 `features.multi_agent_v2`를 켜세요."
   diff_fallback_truncated: "%{n}줄 더 있음 — 나머지는 파일을 열어 확인하세요"
   sign_in_again: "다시 로그인"
   diagram_zoom: "다이어그램 확대"

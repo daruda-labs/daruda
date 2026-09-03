@@ -276,7 +276,16 @@ pub enum AcpEvent {
     /// A non-fatal advisory message (e.g. set_mode on connect was rejected
     /// by the adapter). The session remains live; the host should log this
     /// at Warning severity without changing the session status.
+    ///
+    /// The body is the adapter's own diagnostic, passed through verbatim.
+    /// daruda-authored advice is its own variant so the host can translate
+    /// it — see [`AcpEvent::LegacyDelegation`].
     Notice(String),
+    /// The agent delegated through its legacy collaboration tools, so the
+    /// subagent's own tool calls will never be sent and its work cannot
+    /// appear. Advisory, like [`AcpEvent::Notice`], but carries no text: the
+    /// wording is daruda's own and belongs in the host's locale files.
+    LegacyDelegation,
     /// A connection or protocol failure. Terminal: the connection task is
     /// ending (or has ended) when this is emitted.
     ///
@@ -778,26 +787,26 @@ async fn run_connection(
                 // update has no variant in this schema version, and the SDK
                 // drops what it cannot parse (logged, never surfaced), so the
                 // child's whole run would vanish without this hop.
-                let routed = notif_router
-                    .lock()
-                    .expect("native subagent router mutex poisoned")
-                    .route(&notification.session_id.0, &notification.update);
-                let legacy_delegation = notif_router
-                    .lock()
-                    .expect("native subagent router mutex poisoned")
-                    .first_legacy_delegation(&notification.update);
+                // One lock for both questions, and the advisory is only
+                // asked for on the arm that emits it: `first_legacy_delegation`
+                // spends a once-per-session slot, so asking anywhere else
+                // costs the notice without reporting it.
+                let (routed, legacy_delegation) = {
+                    let mut router = notif_router
+                        .lock()
+                        .expect("native subagent router mutex poisoned");
+                    let routed = router.route(&notification.session_id.0, &notification.update);
+                    let legacy = matches!(routed, Routed::Standard(_))
+                        && router.first_legacy_delegation(&notification.update);
+                    (routed, legacy)
+                };
                 match routed {
                     Routed::Standard(update) => {
                         // The agent delegated the old way, so the subagent's own
                         // calls are never sent — the transcript would just show
                         // an opaque `spawnAgent` and nothing about what ran.
                         if legacy_delegation {
-                            let _ = notif_tx.unbounded_send(AcpEvent::Notice(
-                                "This agent delegated to a subagent without native subagent \
-                                 sessions, so the subagent's own tool calls will not appear. \
-                                 For Codex, enable `features.multi_agent_v2`."
-                                    .to_string(),
-                            ));
+                            let _ = notif_tx.unbounded_send(AcpEvent::LegacyDelegation);
                         }
                         forward_session_update(*update, &notif_mode_tracker, &notif_tx);
                     }
@@ -2288,6 +2297,123 @@ mod tests {
                 "the child renders inside its launch, not as a top-level row"
             );
             assert_eq!(notices, 1, "the unknown kind is reported exactly once");
+
+            drop(command_tx);
+            let _ = connection.await;
+        });
+    }
+
+    /// An agent that delegates the legacy way, and stamps the collaboration
+    /// marker on an update this build cannot type *before* the one it can.
+    /// That order is the point: only the typable one reaches the arm that
+    /// emits, so the notice has to survive the one ahead of it.
+    fn legacy_delegation_agent() -> impl ConnectTo<Client> + 'static {
+        use agent_client_protocol::schema::v1::{
+            InitializeResponse, NewSessionResponse, PromptResponse,
+        };
+        Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(InitializeResponse::new(ProtocolVersion::V1))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: NewSessionRequest, responder, _conn| {
+                    responder.respond(NewSessionResponse::new("sess-root"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |req: PromptRequest, responder, conn| {
+                    let root = req.session_id.clone();
+                    let marker = |tool: &str| {
+                        serde_json::json!({ "codex": { "collaboration": { "tool": tool } } })
+                    };
+                    let updates = [
+                        serde_json::json!({
+                            "sessionUpdate": "quantum_update",
+                            "_meta": marker("spawnAgent"),
+                        }),
+                        serde_json::json!({
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": "t1",
+                            "title": "spawnAgent",
+                            "_meta": marker("spawnAgent"),
+                        }),
+                        serde_json::json!({
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": "t2",
+                            "title": "wait",
+                            "_meta": marker("wait"),
+                        }),
+                    ];
+                    for update in updates {
+                        conn.send_notification(CompatSessionNotification {
+                            session_id: root.clone(),
+                            update,
+                            meta: None,
+                        })?;
+                    }
+                    responder.respond(PromptResponse::new(StopReason::EndTurn))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }
+
+    /// The legacy-delegation advisory has to survive an update the router
+    /// cannot type. The slot it spends is once-per-session, so asking for it
+    /// on an update that will not report it costs the notice permanently —
+    /// the user is left with "Ignoring an unrecognized session update" alone.
+    #[test]
+    fn a_legacy_delegation_is_reported_once_even_behind_an_untypable_update() {
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+
+        smol::block_on(async move {
+            let connection = smol::spawn(run_connection(
+                legacy_delegation_agent(),
+                PathBuf::from("."),
+                None,
+                Vec::new(),
+                None,
+                None,
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            }
+            command_tx
+                .unbounded_send(Command::Prompt("go".to_string()))
+                .unwrap();
+
+            let mut legacy = 0usize;
+            let mut notices = 0usize;
+            loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::LegacyDelegation) => legacy += 1,
+                    Some(AcpEvent::Notice(_)) => notices += 1,
+                    Some(AcpEvent::TurnEnded { .. }) => break,
+                    Some(_) => {}
+                    None => panic!("turn never ended"),
+                }
+            }
+
+            assert_eq!(
+                legacy, 1,
+                "the spawn reports it once — not zero because an untypable \
+                 update went first, and not twice because `wait` followed"
+            );
+            assert_eq!(notices, 1, "the unknown kind is still reported");
 
             drop(command_tx);
             let _ = connection.await;

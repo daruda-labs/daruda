@@ -73,10 +73,6 @@ pub const AIR_EXTENSION_CAPABILITIES_KEY: &str = "capabilities";
 /// through its legacy collaboration tools instead of a native child session.
 const COLLABORATION_SPAWN_TOOL: &str = "spawnAgent";
 
-/// Key the once-only notice is filed under, alongside unknown update kinds.
-/// Not an update kind, so it cannot collide with one.
-const LEGACY_DELEGATION_NOTICE: &str = "\0legacy-delegation";
-
 /// The one capability daruda claims from this extension.
 pub const NATIVE_SUBAGENT_SESSIONS_CAPABILITY: &str = "nativeSubagentSessions";
 
@@ -152,6 +148,10 @@ pub struct NativeSubagentRouter {
     children: HashMap<String, ChildSession>,
     /// Update kinds already reported through [`Routed::Unknown`].
     noticed: HashSet<String>,
+    /// Whether [`Self::first_legacy_delegation`] has already fired. Its own
+    /// field rather than a sentinel in `noticed`: that set is keyed by update
+    /// kind, and a value that is not one does not belong in it.
+    legacy_delegation_noticed: bool,
 }
 
 impl Default for NativeSubagentRouter {
@@ -166,6 +166,7 @@ impl NativeSubagentRouter {
             adapter,
             children: HashMap::new(),
             noticed: HashSet::new(),
+            legacy_delegation_noticed: false,
         }
     }
 
@@ -221,12 +222,19 @@ impl NativeSubagentRouter {
     /// carries no such marker, so this needs no knowledge of how the agent is
     /// set up. Reported once per session — the same run emits several
     /// collaboration calls (`spawnAgent`, `wait`, `closeAgent`).
+    ///
+    /// The tool match is exact, not "any collaboration marker": codex's own
+    /// router forwards `resumeAgent` and `sendInput` to the client *even in
+    /// native mode* (it handles them, then returns `false`), so a loose match
+    /// would tell a correctly-configured user to go configure it.
     pub fn first_legacy_delegation(&mut self, update: &Value) -> bool {
         let delegated = update
             .pointer("/_meta/codex/collaboration/tool")
             .and_then(Value::as_str)
             == Some(COLLABORATION_SPAWN_TOOL);
-        delegated && self.noticed.insert(LEGACY_DELEGATION_NOTICE.to_owned())
+        let first = delegated && !self.legacy_delegation_noticed;
+        self.legacy_delegation_noticed |= delegated;
+        first
     }
 
     /// Report `kind` the first time it is seen; stay silent afterwards.

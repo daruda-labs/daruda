@@ -314,7 +314,7 @@ impl AgentChatView {
                 apply_info_field(&mut self.session_title, title);
                 apply_info_field(&mut self.session_updated_at, updated_at);
             }
-            AcpEvent::Notice(_) => {
+            AcpEvent::Notice(_) | AcpEvent::LegacyDelegation => {
                 // Advisory only: the session stays live, so nothing here
                 // changes. `Workspace::report_agent_notice` is what puts it
                 // in front of the user.
