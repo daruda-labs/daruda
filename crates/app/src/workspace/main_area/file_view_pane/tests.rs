@@ -237,7 +237,7 @@ fn mermaid_renderer_sizes_east_asian_labels_wider_than_latin() {
 #[test]
 fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
     let palette = mermaid_theme::MermaidPalette::default();
-    let profile = markdown_viewer::mermaid_host_theme_profile(&palette);
+    let profile = mermaid_host_theme::mermaid_host_theme_profile(&palette);
     for source in [
         "flowchart TD\n  A[hello]\n",
         "sequenceDiagram\n  A->>B: hi\n",
@@ -271,7 +271,7 @@ fn right_edge_is_transparent(img: &visual::RasterImage) -> bool {
 #[test]
 fn wide_mermaid_samples_keep_clear_right_edge_after_rasterize() {
     let palette = mermaid_theme::MermaidPalette::default();
-    let profile = markdown_viewer::mermaid_host_theme_profile(&palette);
+    let profile = mermaid_host_theme::mermaid_host_theme_profile(&palette);
     for (name, source) in [
         (
             "er",
@@ -337,7 +337,7 @@ fn wide_mermaid_samples_keep_clear_right_edge_after_rasterize() {
         ),
     ] {
         let svg = merman::render::HeadlessRenderer::new()
-            .with_svg_options(markdown_viewer::mermaid_svg_render_options())
+            .with_svg_options(mermaid_host_theme::mermaid_svg_render_options())
             .with_host_theme(&profile)
             .render_svg_sync(source)
             .expect("merman should render")

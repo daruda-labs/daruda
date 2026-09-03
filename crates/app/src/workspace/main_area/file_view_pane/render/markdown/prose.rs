@@ -1,9 +1,29 @@
 //! Pure compilation of Markdown inline spans into shaped-text parts.
+//!
+//! Also the home of [`is_openable_markdown_url`], the host's link policy: the
+//! compiler is where a link becomes a clickable range *and* a coloured run, so
+//! deciding here is what keeps those two from disagreeing.
 
 use std::ops::Range;
 
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdSpan;
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
+
+/// Whether this host will actually open `url` when the link is clicked.
+///
+/// The one place that decision is made. It feeds both the clickable range
+/// *and* the link colouring, because the two disagreeing is what produces a
+/// false affordance: `underline` is off by design (DESIGN.md), so colour is
+/// the only cue a span is a link, and colouring one that cannot be opened
+/// promises a click that does nothing.
+///
+/// Relative links (`[`CLAUDE.md`](./CLAUDE.md)`, the common form in this
+/// repo's own docs) are therefore rendered as ordinary prose. Resolving them
+/// against the viewed file and opening them in the file viewer would be the
+/// better answer, but that is a feature, not a rendering rule.
+pub(super) fn is_openable_markdown_url(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "mailto"))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct InlineStyle {
@@ -83,9 +103,14 @@ impl<'a> Compiler<'a> {
                 }
                 MdSpan::Link { children, url } => {
                     let mut nested = active;
-                    nested.inline.link = true;
-                    nested.link = Some((self.next_link_id, url));
-                    self.next_link_id += 1;
+                    // A link this host cannot open carries neither the colour
+                    // nor the click — see [`is_openable_markdown_url`]. Its
+                    // children still render, as the plain text they are.
+                    if is_openable_markdown_url(url) {
+                        nested.inline.link = true;
+                        nested.link = Some((self.next_link_id, url));
+                        self.next_link_id += 1;
+                    }
                     self.walk(children, nested);
                 }
                 MdSpan::Strikethrough(children) => {
@@ -336,6 +361,54 @@ mod tests {
         assert!(matches!(&parts[2], ProsePart::Text(text) if text.text == "after"));
     }
 
+    /// The colour and the click come from the same decision, so a link this
+    /// host cannot open loses both. Only the colour tells the reader a span is
+    /// a link — underline is off by design — so keeping it on an unopenable
+    /// link would promise a click that goes nowhere.
+    #[test]
+    fn an_unopenable_link_is_neither_coloured_nor_clickable() {
+        let spans = vec![
+            MdSpan::Link {
+                children: vec![MdSpan::Code("CLAUDE.md".into())],
+                url: "./CLAUDE.md".into(),
+            },
+            MdSpan::Text(" and ".into()),
+            MdSpan::Link {
+                children: vec![MdSpan::Text("docs".into())],
+                url: "https://example.com".into(),
+            },
+        ];
+        let parts = compile_prose(&spans);
+        let compiled = text_part(&parts);
+
+        let relative = style_for(compiled, "CLAUDE.md");
+        assert!(!relative.link, "a relative link is not a link to this host");
+        assert!(relative.code, "it still renders as the code span it is");
+        assert!(style_for(compiled, "docs").link);
+        assert_eq!(compiled.link_urls, vec!["https://example.com"]);
+        assert_eq!(compiled.link_ranges, vec![14..18]);
+    }
+
+    /// The same decision reaches the image path, which builds its own click
+    /// target from `link_url` rather than from a text range.
+    #[test]
+    fn an_unopenable_link_around_an_image_is_dropped() {
+        let spans = vec![MdSpan::Link {
+            children: vec![MdSpan::Image {
+                url: "thumb.png".into(),
+                alt: "thumbnail".into(),
+                raster: None,
+            }],
+            url: "./doc.md".into(),
+        }];
+
+        let parts = compile_prose(&spans);
+        let [ProsePart::Image(image)] = parts.as_slice() else {
+            panic!("expected one image part");
+        };
+        assert_eq!(image.link_url, None);
+    }
+
     #[test]
     fn images_preserve_the_surrounding_link() {
         let spans = vec![MdSpan::Link {
@@ -372,9 +445,28 @@ mod tests {
         assert_eq!(end, compiled.text.len());
     }
 
+    /// Debug builds catch the caller; the assertion is all there is to check,
+    /// since it fires before the separator the release build falls back to.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "paragraph breaks must be split before compile_prose")]
     fn paragraph_breaks_are_rejected() {
         let _ = compile_prose(&[MdSpan::ParagraphBreak]);
+    }
+
+    /// The other half, reachable only under `cargo test --release`: with the
+    /// assertion compiled out the separator is what stops the two paragraphs'
+    /// words from running together, so it needs a test of its own rather than
+    /// sitting behind a `should_panic` that never reaches it.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_paragraph_break_still_separates_words_in_release() {
+        let spans = [
+            MdSpan::Text("before".into()),
+            MdSpan::ParagraphBreak,
+            MdSpan::Text("after".into()),
+        ];
+        let parts = compile_prose(&spans);
+        assert_eq!(text_part(&parts).text, "before\nafter");
     }
 }

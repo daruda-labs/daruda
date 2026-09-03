@@ -268,7 +268,7 @@ pub(in crate::workspace) fn render_mermaid_svg(
     source: &str,
     palette: &super::mermaid_theme::MermaidPalette,
 ) -> Option<String> {
-    use super::markdown_viewer::{
+    use super::mermaid_host_theme::{
         mermaid_host_theme_profile, mermaid_svg_render_options, source_has_own_theme_directive,
     };
 

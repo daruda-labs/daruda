@@ -7,7 +7,7 @@ use gpui::Hsla;
 use crate::ui::theme::{self, DarudaTheme};
 
 /// Plain-data palette snapshot threaded down to the GPUI-free mermaid
-/// renderer (`markdown_viewer::mermaid_host_theme_profile`). Resolved once
+/// renderer (`mermaid_host_theme::mermaid_host_theme_profile`). Resolved once
 /// here, at the GPUI boundary, so background-thread code never touches
 /// `Hsla`. Field set mirrors merman's `HostThemeRoles` — a diagram-type-
 /// agnostic role palette, not per-diagram-type `themeVariables` — so every
