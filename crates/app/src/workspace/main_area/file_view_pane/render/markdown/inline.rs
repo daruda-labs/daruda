@@ -11,50 +11,52 @@ use gpui::{
 
 use crate::ui::theme;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdSpan;
-use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 
 use super::image::{ImageLayout, render_md_image};
-use super::prose::{CompiledText, InlineStyle, ProsePart, compile_prose};
+use super::prose::{CompiledText, InlineImage, InlineStyle, ProsePart, compile_prose};
 use super::selection::{
     cancel_pending_block_selection, record_markdown_mouse_button, take_markdown_mouse_button,
 };
-use super::{MdColors, OpenUrl};
+use super::{MdColors, MdRenderAssets, OpenUrl};
 
-/// A run of spans as a column of wrapping rows, one per paragraph.
+/// A run of spans as a block column of wrapping rows, one per paragraph.
 ///
-/// The split is what makes a multi-paragraph item work. A break rendered as a
-/// full-width flex item *inside* the wrapping row left the text before it laid
-/// out at zero width, wrapping a character at a time over the item below.
-/// `flex_1().w_0()` is the shape zed gives prose beside a bullet cell
-/// (`push_markdown_list_item`); measured here it ties with `w_full().min_w_0()`.
+/// The split is what makes a multi-paragraph item work. `flex_1().w_0()` is the
+/// shape zed gives prose beside a bullet cell (`push_markdown_list_item`).
+///
+// WORKAROUND: gpui's text-measure cache (`elements/text.rs`, the
+// `wrap_width.is_none() || ..` arm) returns a size measured at a *definite*
+// wrap width for an unconstrained measure, against its own documented rule, so
+// a zero-width probe poisons every later max-content query. A flex column here
+// makes that probe decide the layout — text beside an inline image collapsed to
+// one character per line. Block layout stacks the runs the same way without
+// making the probe decisive; fixing the cache belongs in a `patches/` gpui
+// patch, whose blast radius is every text element in the app.
 pub(super) fn render_md_prose(
     spans: &[MdSpan],
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     next_part_idx: &mut usize,
     on_open_url: &OpenUrl,
 ) -> gpui::Div {
-    let mut prose = div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .w_0()
-        .gap(px(theme::MD_BLOCK_GAP));
-    for run in spans.split(|span| matches!(span, MdSpan::ParagraphBreak)) {
-        prose = prose.child(render_prose_run(
-            run,
-            t,
-            block_idx,
-            next_part_idx,
-            on_open_url,
-        ));
+    let mut prose = div().flex_1().w_0();
+    for (i, run) in spans
+        .split(|span| matches!(span, MdSpan::ParagraphBreak))
+        .enumerate()
+    {
+        // Block layout has no `gap`; a leading margin spaces every run but the
+        // first without needing to know which one is last.
+        prose = prose.child(
+            render_prose_run(run, assets, block_idx, next_part_idx, on_open_url)
+                .when(i > 0, |d| d.mt(px(theme::MD_BLOCK_GAP))),
+        );
     }
     prose
 }
 
 pub(super) fn render_prose_run(
     spans: &[MdSpan],
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     next_part_idx: &mut usize,
     on_open_url: &OpenUrl,
@@ -75,17 +77,15 @@ pub(super) fn render_prose_run(
         row = match part {
             ProsePart::Text(text) => row.child(render_compiled_text(
                 text,
-                t,
+                assets.t,
                 block_idx,
                 part_idx,
                 text_fills_row,
                 on_open_url,
             )),
             ProsePart::Image(image) => row.child(render_inline_md_image(
-                image.raster,
-                image.alt,
-                image.link_url,
-                t,
+                image,
+                assets,
                 block_idx,
                 part_idx,
                 on_open_url,
@@ -156,16 +156,19 @@ fn render_compiled_text(
 }
 
 fn render_inline_md_image(
-    raster: Option<&RasterImage>,
-    alt: &str,
-    link_url: Option<&str>,
-    t: &MdColors,
+    inline: InlineImage<'_>,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     part_idx: usize,
     on_open_url: &OpenUrl,
 ) -> AnyElement {
-    let image = render_md_image(raster, alt, ImageLayout::Inline, t);
-    let Some(url) = link_url else {
+    let image = render_md_image(
+        assets.images.get(inline.slot),
+        inline.alt,
+        ImageLayout::Inline,
+        assets.t,
+    );
+    let Some(url) = inline.link_url else {
         return image;
     };
 

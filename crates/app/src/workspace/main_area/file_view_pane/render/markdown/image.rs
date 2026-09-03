@@ -1,8 +1,9 @@
-//! Markdown images: how they are sized, and the one-time raster → GPU
-//! conversion agent chat reuses.
+//! Markdown images: how they are sized, and the raster → GPU conversion both
+//! the file viewer's load pass and agent chat reuse.
 
 use gpui::{AnyElement, ImageSource, IntoElement, RenderImage, div, img, prelude::*, px};
 
+use crate::surface::strings;
 use crate::ui::theme;
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 
@@ -14,59 +15,39 @@ pub(super) enum ImageLayout {
     /// Standalone decorative image (photo/screenshot): fits the pane width,
     /// height capped so one large embedded photo can't dominate the document.
     Block,
-    /// Mermaid diagram: fits the pane width, height uncapped. A diagram is
-    /// structured information to be read, not decorative — capping its
-    /// height shrinks a tall flowchart (e.g. many vertical steps) until its
-    /// text is unreadable. The containing document already scrolls, so a
-    /// tall diagram just takes more scroll room instead of being squeezed.
-    Diagram,
     /// Image embedded in a text run: sized to the line so it flows with text.
     Inline,
 }
 
-/// Render a resolved image bitmap, or fall back to `[alt]` text when the image
-/// was not loaded (remote/missing/decode-failed). `object_fit` defaults to
-/// `Contain`, preserving aspect ratio; gpui derives the unset dimension from it.
+/// Render an image the load pass already converted for the GPU, or fall back
+/// to `[alt]` text when there is none (remote/missing/decode-failed).
+/// `object_fit` defaults to `Contain`, preserving aspect ratio; gpui derives
+/// the unset dimension from it.
 pub(super) fn render_md_image(
-    raster: Option<&RasterImage>,
+    image: Option<&CachedImage>,
     alt: &str,
     layout: ImageLayout,
     t: &MdColors,
 ) -> AnyElement {
-    let Some(raster) = raster else {
+    let Some(image) = image else {
         return div()
             .text_color(t.subtle)
-            .child(format!("[{alt}]"))
+            .child(strings::file_viewer_image_alt(alt))
             .into_any_element();
     };
     match layout {
         // Block-sized, height-capped: decorative images only.
-        ImageLayout::Block => raster_block_image(raster)
-            .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
-        // Width-capped only: shared with the agent-chat mermaid renderer.
-        ImageLayout::Diagram => raster_diagram_image(raster)
-            .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
+        ImageLayout::Block => image.block(),
         // Sized to the text line; gpui derives width from the aspect ratio.
-        ImageLayout::Inline => {
-            let mut bgra = raster.rgba.clone();
-            for pixel in bgra.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-            match image::RgbaImage::from_raw(raster.width, raster.height, bgra)
-                .map(|buf| std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
-            {
-                Some(render_image) => img(ImageSource::Render(render_image))
-                    .h(px(theme::MD_INLINE_IMAGE_HEIGHT))
-                    .into_any_element(),
-                None => div().child(format!("[{alt}]")).into_any_element(),
-            }
-        }
+        ImageLayout::Inline => image.inline(),
     }
 }
 
 /// Rasterized image converted once so GPUI can reuse the same texture id.
-/// Agent chat caches this for image-heavy markdown; rebuilding per render would
-/// force repeated GPU uploads.
+/// Both hosts hold one of these per image — the file viewer in `MdImages`,
+/// agent chat in its own tables — because rebuilding per render re-uploads the
+/// texture. Exactly one table owns each instance: the owner releases its
+/// sprite-atlas tile, so a clone that outlives that table paints a freed tile.
 #[derive(Clone)]
 pub(in crate::workspace) struct CachedImage {
     image: std::sync::Arc<RenderImage>,
@@ -74,15 +55,13 @@ pub(in crate::workspace) struct CachedImage {
 }
 
 impl CachedImage {
-    /// Convert a raster once, swapping RGBA to GPUI's BGRA byte order.
-    pub(in crate::workspace) fn from_raster(raster: &RasterImage) -> Option<Self> {
-        let mut bgra = raster.rgba.clone();
-        for pixel in bgra.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-        let buffer = image::RgbaImage::from_raw(raster.width, raster.height, bgra)?;
-        let image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+    /// Wrap a raster into a cached GPU image, moving its buffer in. The
+    /// producer (`visual.rs`) already emits GPUI's byte order, so there is
+    /// nothing to copy or swap here.
+    pub(in crate::workspace) fn from_raster(raster: RasterImage) -> Option<Self> {
         let (logical_w, _) = raster.logical_size();
+        let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
+        let image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
         Some(Self { image, logical_w })
     }
 
@@ -108,6 +87,14 @@ impl CachedImage {
             .into_any_element()
     }
 
+    /// Inline-layout element sized to the text line: height fixed, width
+    /// derived from the image's own aspect ratio so it flows with the text.
+    pub(in crate::workspace) fn inline(&self) -> AnyElement {
+        img(ImageSource::Render(self.image.clone()))
+            .h(px(theme::MD_INLINE_IMAGE_HEIGHT))
+            .into_any_element()
+    }
+
     /// Logical (point) width the diagram lays out at — the lightbox uses it to
     /// size the dialog to the content.
     pub(in crate::workspace) fn logical_width(&self) -> f32 {
@@ -123,17 +110,12 @@ impl CachedImage {
             .w(px(self.logical_w))
             .into_any_element()
     }
-}
 
-/// Block-layout element for a raster, converting fresh for Markdown preview.
-/// Agent chat caches [`CachedImage`] instead. Decorative images only — see
-/// [`raster_diagram_image`] for diagrams.
-fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
-    Some(CachedImage::from_raster(raster)?.block())
-}
-
-/// Diagram-layout element for a raster, converting fresh for Markdown
-/// preview. Agent chat caches [`CachedImage`] instead.
-fn raster_diagram_image(raster: &RasterImage) -> Option<AnyElement> {
-    Some(CachedImage::from_raster(raster)?.block_diagram())
+    /// The atlas key the upload was made under, for the owning table's
+    /// release path only — see the single-owner rule on [`CachedImage`].
+    pub(in crate::workspace::main_area::file_view_pane) fn render_image(
+        &self,
+    ) -> std::sync::Arc<RenderImage> {
+        self.image.clone()
+    }
 }

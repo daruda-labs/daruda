@@ -152,9 +152,9 @@ fn mode_button_group(
                 // segment's, matching the diff-context toggle's active state.
                 .when(is_active, |b| b.text_color(colors.active_text))
         }))
-        .on_click(cx.listener(move |this, ixs: &Vec<usize>, _window, cx| {
+        .on_click(cx.listener(move |this, ixs: &Vec<usize>, window, cx| {
             if let Some(&ix) = ixs.first() {
-                this.set_file_view_mode_for_pane(pane_id, values[ix], cx);
+                this.set_file_view_mode_for_pane(pane_id, values[ix], window, cx);
             }
         }))
 }

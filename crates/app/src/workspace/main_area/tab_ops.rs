@@ -8,6 +8,7 @@ use super::pane_tree::{
 };
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
 /// What content a newly split-off pane should hold. Keeps the split entry
 /// point free of a `bool`/`Option` flag pair (an invalid state would be
@@ -263,7 +264,11 @@ impl Workspace {
     /// state). Releases PTY tracking, activity counters, zoom, and drafts for
     /// the removed panes first (same cleanup as `close_tab_at`). The lane
     /// stays in the sidebar.
-    pub(in crate::workspace) fn empty_active_lane_runtime(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn empty_active_lane_runtime(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let pane_ids: Vec<PaneId> = self.active_runtime().panes.iter().map(|p| p.id).collect();
         if pane_ids
             .iter()
@@ -273,6 +278,7 @@ impl Workspace {
         }
         self.main_area.pane_drop_hover = None;
         self.release_pane_tracking(&pane_ids, cx);
+        release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
         for id in &pane_ids {
             self.main_area.activity_counter.remove(id);
             self.forget_pane_input_draft(*id);
@@ -303,7 +309,7 @@ impl Workspace {
                 window.remove_window();
                 return;
             }
-            self.empty_active_lane_runtime(cx);
+            self.empty_active_lane_runtime(window, cx);
             return;
         }
 
@@ -316,6 +322,7 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
         }
         self.release_pane_tracking(&pane_ids, cx);
+        release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
         self.active_runtime_mut()
             .panes
             .retain(|p| !pane_ids.contains(&p.id));
@@ -810,6 +817,7 @@ impl Workspace {
             pane_id,
         );
         self.release_pane_tracking(&[pane_id], cx);
+        release_pane_images(&mut self.active_runtime_mut().panes, &[pane_id], window, cx);
         self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
         self.main_area.activity_counter.remove(&pane_id);
         self.forget_pane_input_draft(pane_id);

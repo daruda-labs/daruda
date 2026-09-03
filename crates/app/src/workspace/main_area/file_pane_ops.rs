@@ -191,6 +191,7 @@ impl Workspace {
                 cached_title,
                 editor_state,
                 saved_text: String::new(),
+                images: Default::default(),
             }),
         }
     }

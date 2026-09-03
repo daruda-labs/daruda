@@ -299,6 +299,8 @@ impl Workspace {
                 && let Some(fc) = pane.file_content_mut()
             {
                 let new_title = title_for_file_path(&path);
+                // The reused pane's images belong to the file it is leaving.
+                fc.release_images(Some(&mut *window), cx);
                 fc.view.replace_with_loading(
                     lane_id,
                     path.clone(),
@@ -458,16 +460,20 @@ impl Workspace {
     pub(in crate::workspace) fn set_file_view_mode(
         &mut self,
         mode: FileViewMode,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         let pane_id = self.active_runtime().focused_pane_id;
-        self.set_file_view_mode_for_pane(pane_id, mode, cx);
+        self.set_file_view_mode_for_pane(pane_id, mode, window, cx);
     }
 
+    /// `window` is only here to release the outgoing mode's GPU images — see
+    /// [`crate::workspace::main_area::pane::FileContent::release_images`].
     pub(in crate::workspace) fn set_file_view_mode_for_pane(
         &mut self,
         pane_id: PaneId,
         mode: FileViewMode,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         // Apply the mutation in an inner scope so the focused-pane borrow
@@ -479,7 +485,7 @@ impl Workspace {
             let Some(fc) = self.file_content_mut_for_pane(pane_id) else {
                 return;
             };
-            let Some(needs_reload) = fc.view.begin_mode_change(mode) else {
+            let Some(needs_reload) = fc.begin_mode_change(mode, Some(&mut *window), cx) else {
                 return;
             };
             fc.scroll_handle = gpui::ScrollHandle::new();
@@ -785,7 +791,7 @@ impl Workspace {
                     return;
                 };
                 match outcome {
-                    LoadOutcome::Plain(content) => {
+                    LoadOutcome::Plain { content, rasters } => {
                         // A diff renders through the shared editor too (one
                         // renderer for raw and diff): convert the rows into a
                         // synthetic buffer + decorations + injected highlight
@@ -803,7 +809,7 @@ impl Workspace {
                             None
                         };
                         let pending_scroll_line = fc.view.pending_scroll_line();
-                        fc.view.set_content(content);
+                        fc.install_content(content, rasters, None, cx);
                         if let Some(model) = diff_model {
                             let editor = fc.editor_state.clone();
                             configure_file_editor(cx, editor, move |state, window, cx_s| {
@@ -829,7 +835,7 @@ impl Workspace {
                         // feed it exactly once and clear any diff config left
                         // over from a previous mode (read-only + decorations).
                         fc.saved_text = text.clone();
-                        fc.view.set_content(PaneFileContent::LoadedRaw);
+                        fc.install_content(PaneFileContent::LoadedRaw, Vec::new(), None, cx);
                         let pending_scroll_line = fc.view.take_pending_scroll_line();
                         let editor = fc.editor_state.clone();
                         configure_file_editor(cx, editor, move |state, window, cx_s| {

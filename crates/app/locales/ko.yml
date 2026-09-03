@@ -291,6 +291,7 @@ file_viewer:
   byte_truncated_short: "파일이 %{size}를 초과합니다 — 처음 %{shown}줄만 표시합니다"
   deleted: "파일이 삭제되었습니다"
   empty_diff: "변경 사항 없음"
+  image_alt: "[%{alt}]"
   more_lines: "… (%{count}줄 더 있음)"
   staged_badge: " (스테이지됨)"
   tab_raw: "원본"

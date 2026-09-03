@@ -470,7 +470,7 @@ fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
     let Some(raster) = render_mermaid_raster(MERMAID_LIGHTBOX_SAMPLE, &palette) else {
         return;
     };
-    let Some(image) = CachedImage::from_raster(&raster) else {
+    let Some(image) = CachedImage::from_raster(raster) else {
         return;
     };
     mermaid_lightbox::open(&image, window, cx);

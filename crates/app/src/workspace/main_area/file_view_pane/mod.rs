@@ -10,6 +10,7 @@ pub(in crate::workspace) mod diff_editor;
 mod diff_parser;
 pub(in crate::workspace) mod file_content;
 pub(in crate::workspace) mod highlighter;
+pub(in crate::workspace) mod images;
 pub(in crate::workspace) mod line_diff;
 pub(in crate::workspace) mod markdown_viewer;
 mod mermaid_contrast;
@@ -395,7 +396,10 @@ impl PaneFileView {
         self.clear_transient_state();
     }
 
-    pub(in crate::workspace) fn begin_mode_change(&mut self, mode: FileViewMode) -> Option<bool> {
+    /// Sealed to `main_area`: outside callers go through
+    /// [`crate::workspace::main_area::pane::FileContent::begin_mode_change`],
+    /// which releases the GPU images this wipe orphans.
+    pub(super) fn begin_mode_change(&mut self, mode: FileViewMode) -> Option<bool> {
         if self.view_mode == mode {
             return None;
         }
@@ -419,7 +423,11 @@ impl PaneFileView {
         self.content.is_loaded_diff()
     }
 
-    pub(in crate::workspace) fn set_content(&mut self, content: PaneFileContent) {
+    /// Sealed to `main_area`: outside callers go through
+    /// [`crate::workspace::main_area::pane::FileContent::install_content`],
+    /// which pairs the content with the GPU image table its slots index and
+    /// releases the previous one.
+    pub(super) fn set_content(&mut self, content: PaneFileContent) {
         self.content = content;
     }
 

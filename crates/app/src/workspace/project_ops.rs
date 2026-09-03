@@ -10,6 +10,8 @@ use daruda_store::project::{LaneKind, LaneRef, ProjectId, ProjectUuid, WindowOpe
 use gpui::{AppContext as _, Context, Window};
 
 use super::Workspace;
+use crate::workspace::main_area::file_view_pane::images::release_pane_images;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Scan the on-disk `projects/` pool for a `ProjectState` whose `root`
 /// matches `root`. If found, return its UUID so a new workspace can
@@ -37,7 +39,15 @@ impl Workspace {
     /// Clear all main-area runtime state and reset the active ref.
     /// Called from `close_active_project` when no project (or no usable
     /// lane) remains.
-    fn reset_to_empty_workspace(&mut self, cx: &mut Context<Self>) {
+    fn reset_to_empty_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Every runtime drops below, so release the Markdown GPU images first
+        // — the no-usable-lane caller still has surviving projects whose panes
+        // were never released. Already-released tables are empty, so the panes
+        // of the project that just closed cost one no-op pass.
+        for runtime in self.main_area.runtimes.values_mut() {
+            let pane_ids: Vec<PaneId> = runtime.panes.iter().map(|p| p.id).collect();
+            release_pane_images(&mut runtime.panes, &pane_ids, window, cx);
+        }
         // Drop every lane's runtime — no project remains — and re-seed the
         // default-ref entry so the "active runtime always present"
         // invariant holds for the Welcome state that `render` paints next.
@@ -265,6 +275,17 @@ impl Workspace {
             .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
             .collect();
         self.release_pane_tracking(&owned_pane_ids, cx);
+        // Same reason, for the GPU images a Markdown preview holds: the
+        // sprite atlas never evicts on its own, so a pane that drops without
+        // this keeps its textures for the process's lifetime.
+        for (_, runtime) in self
+            .main_area
+            .runtimes
+            .iter_mut()
+            .filter(|(key, _)| key.project == project_id)
+        {
+            release_pane_images(&mut runtime.panes, &owned_pane_ids, window, cx);
+        }
         // Bottom-dock drafts are keyed per pane, not per lane, so drop the
         // entry for every pane the closing project owned; clear
         // `input_owner` if it pointed at one of them.
@@ -311,7 +332,7 @@ impl Workspace {
         // point and the natural shutdown save can't resurrect the closed
         // project from a stale on-disk snapshot.
         if self.projects.is_empty() {
-            self.reset_to_empty_workspace(cx);
+            self.reset_to_empty_workspace(window, cx);
             return false;
         }
 
@@ -326,7 +347,7 @@ impl Workspace {
             // workspace — same outcome as the no-projects case above — so
             // the caller closes the window and the user lands on Welcome
             // rather than a blank viewport.
-            self.reset_to_empty_workspace(cx);
+            self.reset_to_empty_workspace(window, cx);
             return false;
         };
         // `self.active` is intentionally left pointing at the deleted

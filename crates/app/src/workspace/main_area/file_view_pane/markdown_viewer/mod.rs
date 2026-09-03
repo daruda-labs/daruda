@@ -5,8 +5,9 @@
 //! in-place using the existing `highlighter` infrastructure.
 //!
 //! This module is the source → IR half. [`plain_text`] flattens the IR back to
-//! text for copy, [`resolve`] fills in the images and diagrams a block only
-//! names, and the rendering lives in `file_view_pane/render/markdown/`.
+//! text for copy, [`resolve`] loads the images and diagrams a block only names
+//! and stamps each one's table slot, and the rendering lives in
+//! `file_view_pane/render/markdown/`.
 
 mod plain_text;
 mod resolve;
@@ -17,11 +18,10 @@ mod tests;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::highlighter::{LanguageHint, highlight_raw_rows};
-use super::visual::RasterImage;
 use super::{VisualRow, VisualRowKind};
 
 pub(in crate::workspace) use self::plain_text::md_block_plain_text;
-pub(in crate::workspace) use self::resolve::{lone_image, resolve_images, resolve_mermaid};
+pub(in crate::workspace) use self::resolve::{lone_image, resolve_all};
 
 // ----------------------------------------------------------------
 // Inline IR
@@ -50,12 +50,13 @@ pub(in crate::workspace) enum MdSpan {
     Footnote(String),
     /// Inline HTML shown verbatim in dim monospace.
     Html(String),
-    /// Image reference. `raster` is filled by `resolve_images` after parsing
-    /// (local files + data URIs only); `None` falls back to the alt text.
+    /// Image reference. `slot` indexes the pane's GPU image table and is
+    /// stamped by [`resolve_images`]; a slot with no image behind it falls
+    /// back to the alt text. `0` until that pass runs.
     Image {
         url: String,
         alt: String,
-        raster: Option<RasterImage>,
+        slot: u32,
     },
 }
 
@@ -64,9 +65,9 @@ pub(in crate::workspace) enum MdSpan {
 pub(in crate::workspace) struct ListItem {
     /// `Some(true)` = [x] checked, `Some(false)` = [ ] unchecked, `None` = plain bullet.
     pub checked: Option<bool>,
-    pub spans: Vec<MdSpan>,
-    /// Nested sublists (parsed recursively).
-    pub children: Vec<MdBlock>,
+    /// The item's content in document order — its prose is a `Paragraph` like
+    /// any other block, so a fence between two paragraphs stays between them.
+    pub blocks: Vec<MdBlock>,
 }
 
 #[derive(Clone)]
@@ -109,11 +110,13 @@ pub(in crate::workspace) enum MdBlock {
     },
     /// Raw HTML block (dim monospace passthrough).
     HtmlBlock(String),
-    /// Mermaid diagram (```mermaid fence). `raster` is filled by the loader
-    /// (merman → SVG → rasterize); `None` falls back to the raw source.
+    /// Mermaid diagram (```mermaid fence). `slot` indexes the pane's GPU
+    /// image table and is stamped by [`resolve_mermaid`]; a slot with no
+    /// diagram behind it falls back to the raw source. `0` until that pass
+    /// runs.
     Mermaid {
         source: String,
-        raster: Option<RasterImage>,
+        slot: u32,
     },
 }
 
@@ -188,7 +191,7 @@ fn parse_block(
                 return Some((
                     MdBlock::Mermaid {
                         source: text,
-                        raster: None,
+                        slot: 0,
                     },
                     consumed + 2,
                 ));
@@ -386,8 +389,16 @@ fn parse_item(
     let mut i = pos;
     let checked = task_marker(events, pos);
 
-    let mut spans: Vec<MdSpan> = Vec::new();
-    let mut children: Vec<MdBlock> = Vec::new();
+    let mut blocks: Vec<MdBlock> = Vec::new();
+    // A tight item's prose arrives as bare inline events with no paragraph
+    // wrapper (a loose item's comes wrapped, and `parse_block` takes it whole).
+    // Bare spans gather here and close into a paragraph when a block follows.
+    let mut bare: Vec<MdSpan> = Vec::new();
+    fn close_bare(bare: &mut Vec<MdSpan>, blocks: &mut Vec<MdBlock>) {
+        if !bare.is_empty() {
+            blocks.push(MdBlock::Paragraph(std::mem::take(bare)));
+        }
+    }
 
     while i < events.len() {
         match &events[i] {
@@ -396,45 +407,22 @@ fn parse_item(
             // Already read into `checked`; it is state, not prose.
             Event::TaskListMarker(_) => i += 1,
 
-            // Loose lists wrap item content in a paragraph. A second one
-            // starts a new line rather than continuing the first.
-            Event::Start(Tag::Paragraph) => {
-                let (ps, consumed) = collect_inline_until(events, i + 1, |e| {
-                    matches!(e, Event::End(TagEnd::Paragraph))
-                });
-                if !spans.is_empty() {
-                    spans.push(MdSpan::ParagraphBreak);
-                }
-                spans.extend(ps);
-                i += consumed + 2;
-            }
-
-            // Nested list — recurse via parse_block.
-            Event::Start(Tag::List(_)) => {
+            _ => {
                 if let Some((block, consumed)) = parse_block(events, i, syntax_theme, is_light) {
-                    children.push(block);
+                    close_bare(&mut bare, &mut blocks);
+                    blocks.push(block);
                     i += consumed;
                 } else {
-                    i += 1;
+                    let (span, consumed) = parse_inline(events, i);
+                    bare.push(span);
+                    i += consumed;
                 }
-            }
-
-            _ => {
-                let (span, consumed) = parse_inline(events, i);
-                spans.push(span);
-                i += consumed;
             }
         }
     }
+    close_bare(&mut bare, &mut blocks);
 
-    (
-        ListItem {
-            checked,
-            spans,
-            children,
-        },
-        i - pos,
-    )
+    (ListItem { checked, blocks }, i - pos)
 }
 
 fn collect_inline_until<F>(events: &[Event<'_>], start: usize, stop: F) -> (Vec<MdSpan>, usize)
@@ -527,7 +515,7 @@ fn parse_inline(events: &[Event<'_>], pos: usize) -> (MdSpan, usize) {
                 MdSpan::Image {
                     url: dest_url.to_string(),
                     alt: alt_text,
-                    raster: None,
+                    slot: 0,
                 },
                 consumed + 2,
             )

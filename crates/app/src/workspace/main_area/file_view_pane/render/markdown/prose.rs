@@ -7,7 +7,6 @@
 use std::ops::Range;
 
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdSpan;
-use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 
 /// Whether this host will actually open `url` when the link is clicked.
 ///
@@ -52,7 +51,8 @@ pub(super) struct CompiledText {
 
 pub(super) struct InlineImage<'a> {
     pub alt: &'a str,
-    pub raster: Option<&'a RasterImage>,
+    /// Slot in the pane's GPU image table (see `file_view_pane/images.rs`).
+    pub slot: u32,
     pub link_url: Option<&'a str>,
 }
 
@@ -138,13 +138,11 @@ impl<'a> Compiler<'a> {
                     nested.inline.html = true;
                     self.append(html, nested);
                 }
-                MdSpan::Image {
-                    url, alt, raster, ..
-                } => {
+                MdSpan::Image { url, alt, slot } => {
                     self.flush_text();
                     self.parts.push(ProsePart::Image(InlineImage {
                         alt: if alt.is_empty() { url } else { alt },
-                        raster: raster.as_ref(),
+                        slot: *slot,
                         link_url: active.link.map(|(_, url)| url),
                     }));
                 }
@@ -347,7 +345,7 @@ mod tests {
             MdSpan::Image {
                 url: "missing.png".into(),
                 alt: "fallback".into(),
-                raster: None,
+                slot: 0,
             },
             MdSpan::Bold(vec![MdSpan::Text("after".into())]),
         ];
@@ -356,7 +354,7 @@ mod tests {
         assert_eq!(parts.len(), 3);
         assert!(matches!(&parts[0], ProsePart::Text(text) if text.text == "before"));
         assert!(
-            matches!(&parts[1], ProsePart::Image(image) if image.alt == "fallback" && image.raster.is_none() && image.link_url.is_none())
+            matches!(&parts[1], ProsePart::Image(image) if image.alt == "fallback" && image.slot == 0 && image.link_url.is_none())
         );
         assert!(matches!(&parts[2], ProsePart::Text(text) if text.text == "after"));
     }
@@ -397,7 +395,7 @@ mod tests {
             children: vec![MdSpan::Image {
                 url: "thumb.png".into(),
                 alt: "thumbnail".into(),
-                raster: None,
+                slot: 0,
             }],
             url: "./doc.md".into(),
         }];
@@ -415,7 +413,7 @@ mod tests {
             children: vec![MdSpan::Image {
                 url: "thumb.png".into(),
                 alt: "thumbnail".into(),
-                raster: None,
+                slot: 0,
             }],
             url: "https://example.com/full".into(),
         }];

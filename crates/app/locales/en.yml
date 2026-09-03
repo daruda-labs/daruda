@@ -292,6 +292,7 @@ file_viewer:
   byte_truncated_short: "File exceeds %{size} — showing first %{shown} lines"
   deleted: "File deleted"
   empty_diff: "No changes"
+  image_alt: "[%{alt}]"
   more_lines: "… (%{count} more lines)"
   staged_badge: " (staged)"
   tab_raw: "Raw"

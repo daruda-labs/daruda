@@ -12,6 +12,7 @@ use super::markdown::render_md_body;
 use super::virtual_list::virtual_range;
 use crate::surface::strings;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::images::MdImages;
 use crate::workspace::main_area::file_view_pane::{
     CharSelection, FileViewMode, PaneFileContent, PaneFileView, VisualRow,
 };
@@ -21,6 +22,7 @@ use crate::workspace::main_area::file_view_pane::{
 /// definite, bounded height — required for overflow_y_scroll to compute scroll_max > 0.
 pub(super) fn render_file_viewer_body(
     fv: &PaneFileView,
+    images: &MdImages,
     editor_state: &gpui::Entity<gpui_component::input::InputState>,
     scroll_handle: &gpui::ScrollHandle,
     top_offset: gpui::Pixels,
@@ -152,7 +154,7 @@ pub(super) fn render_file_viewer_body(
             .id("file-viewer-body")
             .overflow_y_scroll()
             .track_scroll(scroll_handle)
-            .child(render_md_body(blocks, char_selection.as_ref(), cx))
+            .child(render_md_body(blocks, images, char_selection.as_ref(), cx))
             .into_any_element(),
     }
 }

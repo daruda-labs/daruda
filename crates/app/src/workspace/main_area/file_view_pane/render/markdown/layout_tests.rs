@@ -4,9 +4,12 @@ use std::sync::{Arc, Mutex};
 use super::selection::{
     queue_block_selection, take_pending_block_selection, take_pending_block_selection_for_drag,
 };
-use super::{MdColors, OpenUrl, render_md_body_layout};
+use super::{MdColors, MdRenderAssets, OpenUrl, render_md_body_layout};
 use crate::ui::theme;
-use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
+use crate::workspace::main_area::file_view_pane::images::MdImages;
+use crate::workspace::main_area::file_view_pane::markdown_viewer::{
+    MdBlock, parse_markdown, resolve_all,
+};
 use gpui::{
     AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
     ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _,
@@ -30,6 +33,16 @@ impl Engine {
     }
 }
 
+/// Parse, then run the resolve passes with loaders that never produce pixels.
+/// The probes assert on layout, not on bitmaps, but the slots still have to be
+/// stamped: the renderer resolves each image through the table those passes
+/// number, and a span left unresolved would index past its end.
+fn parse_and_resolve(md: &str) -> (Vec<MdBlock>, MdImages) {
+    let mut blocks = parse_markdown(md, "default", false);
+    let rasters = resolve_all(&mut blocks, &mut |_| None, &mut |_| None);
+    (blocks, MdImages::from_rasters(rasters))
+}
+
 struct Probe {
     md: String,
     engine: Engine,
@@ -45,7 +58,7 @@ struct LinkProbe {
 impl Render for LinkProbe {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = MdColors::for_pane(cx);
-        let blocks = parse_markdown(&self.md, "default", false);
+        let (blocks, images) = parse_and_resolve(&self.md);
         let opened = self.opened.clone();
         let on_open_url: OpenUrl = Rc::new(move |url, _, _| {
             opened.lock().unwrap().push(url.to_owned());
@@ -54,7 +67,10 @@ impl Render for LinkProbe {
         let body = render_md_body_layout(
             &blocks,
             None,
-            &colors,
+            MdRenderAssets {
+                t: &colors,
+                images: &images,
+            },
             on_open_url,
             move |block, block_idx| {
                 let committed = block_mouse_downs.clone();
@@ -93,11 +109,14 @@ impl Render for Probe {
         match self.engine {
             Engine::FileViewer => {
                 let colors = MdColors::for_pane(cx);
-                let blocks = parse_markdown(&self.md, "default", false);
+                let (blocks, images) = parse_and_resolve(&self.md);
                 let body = render_md_body_layout(
                     &blocks,
                     None,
-                    &colors,
+                    MdRenderAssets {
+                        t: &colors,
+                        images: &images,
+                    },
                     Rc::new(|_, _, _| {}),
                     |block, _| block,
                 )
@@ -567,5 +586,85 @@ fn a_second_paragraph_does_not_squeeze_the_first(cx: &mut TestAppContext) {
                 engine.label()
             );
         }
+    }
+}
+
+/// Every host that puts its prose in a column beside a cell — a list item, a
+/// blockquote, a footnote definition — must lay text out like the paragraph
+/// that has no such column. An inline image is what exposes a difference: it
+/// is the only span that splits a run, so the text loses its `flex_1().w_0()`
+/// fill shape and becomes the shrink-to-fit part the column's layout decides.
+#[gpui::test]
+fn an_inline_image_does_not_collapse_the_text_beside_it(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    let width = px(800.);
+    let inline_image = "item with ![red](p.png) inline";
+    let reference = bounds_of(cx, &format!("{inline_image}\n"), width, "md-plain");
+    // A collapsed reference would make every comparison below vacuous.
+    let line = height(cx, "x\n", width) - height(cx, "", width);
+    assert_eq!(
+        reference.height, line,
+        "the reference paragraph must be one line, got {reference:?}"
+    );
+
+    for (host, md) in [
+        ("list item", format!("- {inline_image}\n")),
+        ("blockquote", format!("> {inline_image}\n")),
+        ("footnote definition", format!("[^a]: {inline_image}\n")),
+    ] {
+        let measured = bounds_of(cx, &md, width, "md-plain");
+        assert_eq!(
+            measured, reference,
+            "a {host} must lay its text out like the paragraph mirroring it"
+        );
+    }
+}
+
+/// The prose column stacks a multi-paragraph item's runs with a margin rather
+/// than flex `gap` (see `render_md_prose`); this pins that spacing.
+#[gpui::test]
+fn a_multi_paragraph_item_keeps_the_gap_between_its_runs(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    let width = px(300.);
+    // One line, measured against a body that holds nothing but its padding.
+    let line = height(cx, "x\n", width) - height(cx, "", width);
+    let one_run = height(cx, "- first para\n", width);
+    let two_runs = height(cx, "- first para\n\n  second para\n", width);
+
+    assert_eq!(
+        two_runs - one_run,
+        line + px(theme::MD_BLOCK_GAP),
+        "a second run costs its own line plus one block gap"
+    );
+}
+
+/// Text sharing a wrapping row with an inline image keeps no flex basis, so
+/// only `min_w_0` plus the default shrink lets it wrap instead of running past
+/// the pane. Guards `render_prose_run` for every host: the same text without an
+/// image is the reference.
+#[gpui::test]
+fn text_beside_an_inline_image_wraps_like_text_without_one(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    const LONG: &str = "alpha beta gamma delta epsilon zeta eta theta iota kappa \
+                        lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega";
+    let width = px(300.);
+    // The image comes first so the long text is the last `md-plain` measured.
+    for (host, prefix) in [("paragraph", ""), ("list item", "- "), ("blockquote", "> ")] {
+        let beside_image = bounds_of(
+            cx,
+            &format!("{prefix}![red](p.png) {LONG}\n"),
+            width,
+            "md-plain",
+        );
+        let alone = bounds_of(cx, &format!("{prefix}{LONG}\n"), width, "md-plain");
+
+        assert!(
+            beside_image.width <= width,
+            "a {host}'s text must stay inside the pane, got {beside_image:?} in {width:?}"
+        );
+        assert_eq!(
+            beside_image, alone,
+            "an inline image must not change how a {host}'s text wraps"
+        );
     }
 }

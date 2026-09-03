@@ -1613,3 +1613,65 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
         );
     });
 }
+
+/// Installing new content must release the GPU images the previous content's
+/// slots indexed. `RenderImage` has no `Drop` and the Metal atlas never
+/// evicts, so a table that is replaced without a release leaks its textures
+/// for the process's lifetime — the defect `install_content` exists to close.
+#[gpui::test]
+async fn installing_content_releases_the_previous_image_table(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::PaneFileContent;
+    use crate::workspace::main_area::file_view_pane::images::MdImages;
+    use crate::workspace::main_area::file_view_pane::visual::RasterImage;
+
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let pane_id = ws.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.file_view().is_some())
+            .expect("a file pane is open")
+            .id
+    });
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let fc = ws
+                .active_runtime_mut()
+                .panes
+                .iter_mut()
+                .find(|p| p.id == pane_id)
+                .and_then(|p| p.file_content_mut())
+                .expect("file content");
+            *fc.images_for_test() = MdImages::from_rasters(vec![Some(RasterImage {
+                width: 1,
+                height: 1,
+                bgra: vec![0, 0, 0, 255],
+                scale: 1.0,
+            })]);
+            assert!(
+                fc.images_for_test().get(0).is_some(),
+                "seeded table has slot 0"
+            );
+
+            fc.install_content(PaneFileContent::LoadedRaw, Vec::new(), Some(window), cx);
+            assert!(
+                fc.images_for_test().get(0).is_none(),
+                "install_content must release the previous table, not leave it behind"
+            );
+        });
+    })
+    .unwrap();
+}

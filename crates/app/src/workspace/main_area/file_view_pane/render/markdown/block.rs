@@ -13,7 +13,7 @@ use crate::workspace::main_area::file_view_pane::markdown_viewer::{
 
 use super::image::{ImageLayout, render_md_image};
 use super::inline::{render_md_prose, render_prose_run};
-use super::{MdColors, OpenUrl};
+use super::{MdColors, MdRenderAssets, OpenUrl};
 
 #[derive(Clone, Copy)]
 struct TableCellPosition {
@@ -106,11 +106,12 @@ fn render_list(
     items: &[ListItem],
     loose: bool,
     marker: ListMarker,
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     next_part_idx: &mut usize,
     on_open_url: &OpenUrl,
 ) -> AnyElement {
+    let t = assets.t;
     let mut list = div().flex().flex_col().gap(px(list_item_gap(loose)));
     for (i, item) in items.iter().enumerate() {
         let cell = match marker {
@@ -135,41 +136,44 @@ fn render_list(
                 .child(format!("{}.", start + i as u64)),
         };
 
-        let mut item_col = div().flex().flex_col().child(
+        // The marker sits beside the item's whole content, so every block —
+        // a second paragraph, a fence, a nested list — lines up under the
+        // first and keeps its document order. Blocks space out only in a
+        // loose list; a tight one keeps a nested sublist flush.
+        let mut content = div().flex_1().w_0();
+        for (j, block) in item.blocks.iter().enumerate() {
+            content = content.child(
+                div()
+                    .when(j > 0 && loose, |d| d.mt(px(theme::MD_BLOCK_GAP)))
+                    .child(render_md_block(
+                        block,
+                        assets,
+                        block_idx,
+                        next_part_idx,
+                        on_open_url,
+                    )),
+            );
+        }
+        list = list.child(
             div()
                 .flex()
                 .flex_row()
                 .gap(px(theme::MD_LIST_ROW_GAP))
                 .child(cell)
-                .child(render_md_prose(
-                    &item.spans,
-                    t,
-                    block_idx,
-                    next_part_idx,
-                    on_open_url,
-                )),
+                .child(content),
         );
-        for child in &item.children {
-            item_col = item_col.child(div().pl(px(theme::MD_LIST_INDENT)).child(render_md_block(
-                child,
-                t,
-                block_idx,
-                next_part_idx,
-                on_open_url,
-            )));
-        }
-        list = list.child(item_col);
     }
     list.into_any_element()
 }
 
 pub(super) fn render_md_block(
     block: &MdBlock,
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     next_part_idx: &mut usize,
     on_open_url: &OpenUrl,
 ) -> AnyElement {
+    let t = assets.t;
     match block {
         MdBlock::Heading { level, spans } => {
             let (size, color, mt) = match level {
@@ -187,7 +191,7 @@ pub(super) fn render_md_block(
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(render_prose_run(
                     spans,
-                    t,
+                    assets,
                     block_idx,
                     next_part_idx,
                     on_open_url,
@@ -198,15 +202,15 @@ pub(super) fn render_md_block(
         MdBlock::Paragraph(spans) => {
             // A paragraph that is just an image renders it block-style (large);
             // an image mixed with text renders inline, sized to the line.
-            if let Some((alt, raster)) = lone_image(spans) {
-                render_md_image(raster, alt, ImageLayout::Block, t)
+            if let Some((alt, slot)) = lone_image(spans) {
+                render_md_image(assets.images.get(slot), alt, ImageLayout::Block, t)
             } else {
                 div()
                     .w_full()
                     .min_w_0()
                     .child(render_prose_run(
                         spans,
-                        t,
+                        assets,
                         block_idx,
                         next_part_idx,
                         on_open_url,
@@ -222,8 +226,8 @@ pub(super) fn render_md_block(
                 .into_any_element()
         }
 
-        MdBlock::Mermaid { source, raster } => match raster {
-            Some(raster) => render_md_image(Some(raster), "", ImageLayout::Diagram, t),
+        MdBlock::Mermaid { source, slot } => match assets.images.get(*slot) {
+            Some(image) => image.block_diagram(),
             // Rendering failed/pending: fall back to the raw source, styled
             // like a code block.
             None => code_surface(t)
@@ -235,7 +239,7 @@ pub(super) fn render_md_block(
             items,
             *loose,
             ListMarker::Bullet,
-            t,
+            assets,
             block_idx,
             next_part_idx,
             on_open_url,
@@ -249,7 +253,7 @@ pub(super) fn render_md_block(
             items,
             *loose,
             ListMarker::Ordered(*start),
-            t,
+            assets,
             block_idx,
             next_part_idx,
             on_open_url,
@@ -267,7 +271,7 @@ pub(super) fn render_md_block(
                     .rounded(px(theme::MD_BLOCKQUOTE_BORDER_W / 2.0)),
             )
             .child(
-                render_md_prose(spans, t, block_idx, next_part_idx, on_open_url)
+                render_md_prose(spans, assets, block_idx, next_part_idx, on_open_url)
                     .italic()
                     .text_color(t.muted),
             )
@@ -291,7 +295,7 @@ pub(super) fn render_md_block(
             .child(div().flex_none().child(format!("[^{label}]:")))
             .child(render_md_prose(
                 spans,
-                t,
+                assets,
                 block_idx,
                 next_part_idx,
                 on_open_url,
@@ -323,7 +327,7 @@ pub(super) fn render_md_block(
                         is_first: cell_idx == 0,
                         is_last: cell_idx + 1 == col_count,
                     },
-                    t,
+                    assets,
                     block_idx,
                     next_part_idx,
                     on_open_url,
@@ -347,7 +351,7 @@ pub(super) fn render_md_block(
                             is_first: false,
                             is_last: cell_idx + 1 == row.len(),
                         },
-                        t,
+                        assets,
                         block_idx,
                         next_part_idx,
                         on_open_url,
@@ -373,11 +377,12 @@ pub(super) fn render_md_block(
 fn render_table_cell(
     cell: &[MdSpan],
     position: TableCellPosition,
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     block_idx: usize,
     next_part_idx: &mut usize,
     on_open_url: &OpenUrl,
 ) -> gpui::Div {
+    let t = assets.t;
     div()
         .flex_1()
         .min_w(px(theme::MD_TABLE_CELL_MIN_W))
@@ -395,7 +400,7 @@ fn render_table_cell(
         })
         .child(render_prose_run(
             cell,
-            t,
+            assets,
             block_idx,
             next_part_idx,
             on_open_url,

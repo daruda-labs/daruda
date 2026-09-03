@@ -23,20 +23,29 @@ use self::scrollbar::file_viewer_scrollbar;
 use self::search_panel::render_search_panel;
 use self::toolbar::render_file_viewer_toolbar;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent};
+use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Top-level file-viewer element.
 /// Absolute positioning gives the body a bounded height for scrolling.
+///
 pub(in crate::workspace) fn render_pane_file_viewer(
     pane_id: PaneId,
-    fv: &PaneFileView,
-    editor_state: gpui::Entity<gpui_component::input::InputState>,
-    scroll_handle: &gpui::ScrollHandle,
-    search_input: gpui::Entity<crate::ui::InputState>,
+    fc: &FileContent,
     font_family: SharedString,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
+    let FileContent {
+        view: fv,
+        images,
+        editor_state,
+        scroll_handle,
+        search_input,
+        ..
+    } = fc;
+    let editor_state = editor_state.clone();
+    let search_input = search_input.clone();
     let toolbar_h = px(theme::FILE_VIEWER_HEADER_H);
     // Raw and diff both render through the shared editor.
     let is_editor_mode = matches!(
@@ -97,6 +106,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         )
         .child(render_file_viewer_body(
             fv,
+            images,
             &editor_state,
             scroll_handle,
             toolbar_h,

@@ -1684,6 +1684,11 @@ pub fn file_viewer_deleted() -> String {
 pub fn file_viewer_empty_diff() -> String {
     rust_i18n::t!("file_viewer.empty_diff").into_owned()
 }
+/// Stand-in for a Markdown image that has no bitmap (remote, missing, or
+/// failed to decode).
+pub fn file_viewer_image_alt(alt: &str) -> String {
+    rust_i18n::t!("file_viewer.image_alt", alt = alt).into_owned()
+}
 pub fn file_viewer_staged_badge() -> String {
     rust_i18n::t!("file_viewer.staged_badge").into_owned()
 }

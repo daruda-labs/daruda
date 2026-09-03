@@ -1407,6 +1407,7 @@ impl Workspace {
         if let Some(line) = target.line {
             self.set_file_view_mode(
                 crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                window,
                 cx,
             );
             self.scroll_focused_file_viewer_to_line(line, window, cx);

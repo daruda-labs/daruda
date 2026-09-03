@@ -2,7 +2,7 @@
 //! yields. Structural markers a reader would expect (list bullets, a table's
 //! cell separators) are re-emitted; inline styling is dropped.
 
-use super::{MdBlock, MdSpan};
+use super::{ListItem, MdBlock, MdSpan};
 
 /// What joins two items of a list in its plain-text form. A loose list is
 /// blank-line separated in the source, so a copy that flattened it to single
@@ -37,15 +37,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
                     Some(false) => "- [ ] ",
                     None => "- ",
                 };
-                let mut text = format!("{}{}", prefix, flatten_spans_to_text(&item.spans));
-                for child in &item.children {
-                    for line in md_block_plain_text(child).lines() {
-                        text.push('\n');
-                        text.push_str("  ");
-                        text.push_str(line);
-                    }
-                }
-                text
+                item_plain_text(prefix, item)
             })
             .collect::<Vec<_>>()
             .join(item_separator(*loose)),
@@ -56,21 +48,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
         } => items
             .iter()
             .enumerate()
-            .map(|(i, item)| {
-                let mut text = format!(
-                    "{}. {}",
-                    start + i as u64,
-                    flatten_spans_to_text(&item.spans)
-                );
-                for child in &item.children {
-                    for line in md_block_plain_text(child).lines() {
-                        text.push('\n');
-                        text.push_str("  ");
-                        text.push_str(line);
-                    }
-                }
-                text
-            })
+            .map(|(i, item)| item_plain_text(&format!("{}. ", start + i as u64), item))
             .collect::<Vec<_>>()
             .join(item_separator(*loose)),
         MdBlock::Blockquote(spans) => format!("> {}", flatten_spans_to_text(spans)),
@@ -128,4 +106,22 @@ fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
         }
     }
     out
+}
+
+/// The marker leads the item's first line; every later line, whichever block
+/// it comes from, sits under it at the continuation indent.
+fn item_plain_text(prefix: &str, item: &ListItem) -> String {
+    let mut text = prefix.to_owned();
+    let mut first = true;
+    for block in &item.blocks {
+        for line in md_block_plain_text(block).lines() {
+            if first {
+                first = false;
+            } else {
+                text.push_str("\n  ");
+            }
+            text.push_str(line);
+        }
+    }
+    text
 }

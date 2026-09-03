@@ -1,4 +1,8 @@
 use super::*;
+// The individual passes stay inside `markdown_viewer`; production callers go
+// through `resolve_all`, which is what keeps one slot space across both.
+use super::resolve::{ImageSlots, resolve_images, resolve_mermaid};
+use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 use std::collections::BTreeSet;
 
 #[test]
@@ -171,9 +175,11 @@ fn a_multi_block_item_is_loose_but_a_nested_sublist_is_not() {
 fn looseness_does_not_leak_between_nesting_levels() {
     let outer_inner = |md: &str| match &parse_markdown(md, "base16-ocean.dark", false)[0] {
         MdBlock::BulletList { items, loose } => {
-            let inner = items.iter().find_map(|i| match i.children.first() {
-                Some(MdBlock::BulletList { loose, .. }) => Some(*loose),
-                _ => None,
+            let inner = items.iter().find_map(|i| {
+                i.blocks.iter().find_map(|b| match b {
+                    MdBlock::BulletList { loose, .. } => Some(*loose),
+                    _ => None,
+                })
             });
             (*loose, inner.expect("a nested list"))
         }
@@ -286,8 +292,7 @@ fn observe_items(items: &[ListItem], observed: &mut BTreeSet<&'static str>) {
             Some(false) => "list.task.unchecked",
             None => "list.plain",
         });
-        observe_spans(&item.spans, observed);
-        observe_blocks(&item.children, observed);
+        observe_blocks(&item.blocks, observed);
     }
 }
 
@@ -446,29 +451,97 @@ fn parse_horizontal_rule() {
 }
 
 #[test]
-fn resolve_images_fills_raster_for_each_image() {
+fn resolve_images_stamps_a_slot_and_collects_its_raster() {
     let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Image {
         url: "pic.png".to_owned(),
         alt: "a".to_owned(),
-        raster: None,
+        slot: 0,
     }])];
-    let dummy = RasterImage {
-        width: 1,
-        height: 1,
-        rgba: vec![0, 0, 0, 255],
-        scale: 1.0,
-    };
-    resolve_images(&mut blocks, &mut |url| {
+    let mut slots = ImageSlots::default();
+    resolve_images(&mut blocks, &mut slots, &mut |url| {
         assert_eq!(url, "pic.png");
-        Some(dummy.clone())
+        Some(dummy_raster())
     });
     let MdBlock::Paragraph(spans) = &blocks[0] else {
         panic!("expected paragraph");
     };
-    let MdSpan::Image { raster, .. } = &spans[0] else {
+    let MdSpan::Image { slot, .. } = &spans[0] else {
         panic!("expected image span");
     };
-    assert!(raster.is_some());
+    assert_eq!(*slot, 0);
+    let rasters = slots.into_rasters();
+    assert_eq!(rasters.len(), 1);
+    assert!(rasters[0].is_some());
+}
+
+/// Two occurrences of one url share a slot, so the decode happens once.
+#[test]
+fn repeated_image_urls_share_one_slot() {
+    let image = |url: &str| MdSpan::Image {
+        url: url.to_owned(),
+        alt: String::new(),
+        slot: 0,
+    };
+    let mut blocks = vec![
+        MdBlock::Paragraph(vec![image("pic.png")]),
+        MdBlock::Paragraph(vec![image("other.png"), image("pic.png")]),
+    ];
+    let mut slots = ImageSlots::default();
+    let mut loads = Vec::new();
+    resolve_images(&mut blocks, &mut slots, &mut |url| {
+        loads.push(url.to_owned());
+        Some(dummy_raster())
+    });
+
+    let slot_of = |block: &MdBlock, idx: usize| {
+        let MdBlock::Paragraph(spans) = block else {
+            panic!("expected paragraph");
+        };
+        let MdSpan::Image { slot, .. } = &spans[idx] else {
+            panic!("expected image span");
+        };
+        *slot
+    };
+    assert_eq!(loads, vec!["pic.png", "other.png"]);
+    assert_eq!(slot_of(&blocks[0], 0), 0);
+    assert_eq!(slot_of(&blocks[1], 0), 1);
+    assert_eq!(slot_of(&blocks[1], 1), 0);
+    assert_eq!(slots.into_rasters().len(), 2);
+}
+
+/// Both passes hand out slots from the same table, because the renderer looks
+/// an image span and a diagram block up in one per-pane list.
+#[test]
+fn images_and_diagrams_number_into_one_table() {
+    let mut blocks = vec![
+        MdBlock::Paragraph(vec![MdSpan::Image {
+            url: "pic.png".to_owned(),
+            alt: String::new(),
+            slot: 0,
+        }]),
+        MdBlock::Mermaid {
+            source: "graph TD\nA-->B".to_owned(),
+            slot: 0,
+        },
+    ];
+    let mut slots = ImageSlots::default();
+    resolve_images(&mut blocks, &mut slots, &mut |_| Some(dummy_raster()));
+    resolve_mermaid(&mut blocks, &mut slots, &mut |_| Some(dummy_raster()));
+
+    let MdBlock::Mermaid { slot, .. } = &blocks[1] else {
+        panic!("expected mermaid block");
+    };
+    assert_eq!(*slot, 1);
+    assert_eq!(slots.into_rasters().len(), 2);
+}
+
+fn dummy_raster() -> RasterImage {
+    RasterImage {
+        width: 1,
+        height: 1,
+        bgra: vec![0, 0, 0, 255],
+        scale: 1.0,
+    }
 }
 
 #[test]
@@ -476,7 +549,7 @@ fn lone_image_detects_standalone_image_paragraphs() {
     let img = || MdSpan::Image {
         url: "x".to_owned(),
         alt: "a".to_owned(),
-        raster: None,
+        slot: 0,
     };
     // single image → standalone
     assert!(lone_image(&[img()]).is_some());
@@ -489,25 +562,23 @@ fn lone_image_detects_standalone_image_paragraphs() {
 }
 
 #[test]
-fn resolve_mermaid_fills_raster() {
+fn resolve_mermaid_stamps_a_slot_and_collects_its_raster() {
     let mut blocks = vec![MdBlock::Mermaid {
         source: "graph TD\nA-->B".to_owned(),
-        raster: None,
+        slot: 0,
     }];
-    let dummy = RasterImage {
-        width: 1,
-        height: 1,
-        rgba: vec![0, 0, 0, 255],
-        scale: 1.0,
-    };
-    resolve_mermaid(&mut blocks, &mut |src| {
+    let mut slots = ImageSlots::default();
+    resolve_mermaid(&mut blocks, &mut slots, &mut |src| {
         assert!(src.contains("graph"));
-        Some(dummy.clone())
+        Some(dummy_raster())
     });
-    let MdBlock::Mermaid { raster, .. } = &blocks[0] else {
+    let MdBlock::Mermaid { slot, .. } = &blocks[0] else {
         panic!("expected mermaid block");
     };
-    assert!(raster.is_some());
+    assert_eq!(*slot, 0);
+    let rasters = slots.into_rasters();
+    assert_eq!(rasters.len(), 1);
+    assert!(rasters[0].is_some());
 }
 
 #[test]
@@ -516,14 +587,115 @@ fn resolve_images_recurses_into_nested_spans() {
         children: vec![MdSpan::Bold(vec![MdSpan::Image {
             url: "n.png".to_owned(),
             alt: String::new(),
-            raster: None,
+            slot: 0,
         }])],
         url: "https://example.com".to_owned(),
     }])];
     let mut count = 0;
-    resolve_images(&mut blocks, &mut |_| {
+    resolve_images(&mut blocks, &mut ImageSlots::default(), &mut |_| {
         count += 1;
         None
     });
     assert_eq!(count, 1);
+}
+
+/// A block inside a list item is a block, not prose. `parse_item` once split an
+/// item into prose spans plus trailing children, so everything but a nested
+/// list fell to the inline catch-all and its source leaked into the item's own
+/// text — a diagram inside an item could never render, and a fence lost its
+/// highlighting.
+#[test]
+fn a_block_inside_a_list_item_stays_a_block() {
+    let blocks_of = |md: &str| {
+        let blocks = parse_markdown(md, "base16-ocean.dark", false);
+        assert_eq!(
+            blocks.len(),
+            1,
+            "the block must stay inside the item, not escape to the top level: {}",
+            md_block_plain_text(&blocks[0])
+        );
+        let (MdBlock::BulletList { items, .. } | MdBlock::OrderedList { items, .. }) = &blocks[0]
+        else {
+            panic!("expected a list, got {}", md_block_plain_text(&blocks[0]));
+        };
+        (items[0].checked, items[0].blocks.clone())
+    };
+    let prose = |block: &MdBlock| md_block_plain_text(block);
+
+    let (_, mermaid) = blocks_of("- item\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```\n");
+    // The item's prose is its own paragraph; the source is the diagram's, not
+    // spliced into that line.
+    assert!(
+        matches!(
+            mermaid.as_slice(),
+            [MdBlock::Paragraph(_), MdBlock::Mermaid { source, .. }]
+                if prose(&mermaid[0]) == "item" && source.contains("flowchart LR")
+        ),
+        "expected [Paragraph(item), Mermaid(flowchart)], got {:?}",
+        mermaid.iter().map(prose).collect::<Vec<_>>()
+    );
+
+    // Every other kind the block parser recognises routes the same way.
+    let (_, code) = blocks_of("- item\n\n  ```rust\n  fn kept() {}\n  ```\n");
+    assert!(
+        matches!(code.as_slice(), [_, MdBlock::CodeBlock { lang, .. }] if lang.as_deref() == Some("rust")),
+        "a non-mermaid fence keeps its language"
+    );
+    let (_, quote) = blocks_of("- item\n\n  > quoted\n");
+    assert!(matches!(quote.as_slice(), [_, MdBlock::Blockquote(_)]));
+    let (_, table) = blocks_of("- item\n\n  | a |\n  |---|\n  | b |\n");
+    assert!(matches!(table.as_slice(), [_, MdBlock::Table { .. }]));
+    let (checked, task) = blocks_of("- [x] done\n\n  ```sh\n  run\n  ```\n");
+    assert_eq!(checked, Some(true), "the checkbox survives the routing");
+    assert!(matches!(task.as_slice(), [_, MdBlock::CodeBlock { .. }]));
+    let (_, two) = blocks_of("- item\n\n  ```sh\n  one\n  ```\n\n  ```sh\n  two\n  ```\n");
+    assert!(
+        matches!(
+            two.as_slice(),
+            [_, MdBlock::CodeBlock { .. }, MdBlock::CodeBlock { .. }]
+        ),
+        "both fences route"
+    );
+    let (_, nested) = blocks_of("- outer\n  - inner\n\n    ```sh\n    deep\n    ```\n");
+    let [_, MdBlock::BulletList { items: inner, .. }] = nested.as_slice() else {
+        panic!("expected [Paragraph, BulletList]");
+    };
+    assert!(matches!(
+        inner[0].blocks.as_slice(),
+        [MdBlock::Paragraph(_), MdBlock::CodeBlock { .. }]
+    ));
+}
+
+/// An item's blocks keep their document order. Sorting them by kind — prose
+/// first, everything else after — put the sentence that follows a command
+/// above it, in both the render and the copy.
+#[test]
+fn an_items_blocks_keep_their_document_order() {
+    let md = "1. Verify:\n\n   ```sh\n   foo --version\n   ```\n\n   You should see a version.\n";
+    let blocks = parse_markdown(md, "base16-ocean.dark", false);
+    let MdBlock::OrderedList { items, .. } = &blocks[0] else {
+        panic!(
+            "expected an ordered list, got {}",
+            md_block_plain_text(&blocks[0])
+        );
+    };
+    assert!(
+        matches!(
+            items[0].blocks.as_slice(),
+            [
+                MdBlock::Paragraph(_),
+                MdBlock::CodeBlock { .. },
+                MdBlock::Paragraph(_)
+            ]
+        ),
+        "expected [Paragraph, CodeBlock, Paragraph]"
+    );
+
+    let copy = md_block_plain_text(&blocks[0]);
+    let command = copy.find("foo --version").expect("the command is copied");
+    let sentence = copy.find("You should see").expect("the sentence is copied");
+    assert!(
+        command < sentence,
+        "the command must precede the sentence that follows it:\n{copy}"
+    );
 }

@@ -14,6 +14,7 @@ use super::Workspace;
 use super::command::lane_switcher::LaneCandidate;
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -242,6 +243,9 @@ impl Workspace {
             .unwrap_or_default();
         if target != self.active {
             self.release_pane_tracking(&removed_pane_ids, cx);
+            if let Some(runtime) = self.main_area.runtimes.get_mut(&target) {
+                release_pane_images(&mut runtime.panes, &removed_pane_ids, window, cx);
+            }
             self.main_area.runtimes.remove(&target);
         }
         // Clear per-lane state too — else the notify watcher keeps

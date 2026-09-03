@@ -572,7 +572,7 @@ impl AgentChatView {
                     // Convert the raster to a GPU-ready image once, here, so the
                     // render hook clones the same `CachedImage` each frame and
                     // gpui reuses the uploaded texture.
-                    if let Some(image) = raster.and_then(|r| CachedImage::from_raster(&r)) {
+                    if let Some(image) = raster.and_then(CachedImage::from_raster) {
                         view.assets
                             .mermaid_images
                             .lock()
@@ -756,7 +756,7 @@ impl AgentChatView {
                     // `None` (decode failed, or the conversion itself failed)
                     // is cached too, so a malformed payload renders a failure
                     // label once instead of retrying forever.
-                    let cached = raster.and_then(|r| CachedImage::from_raster(&r));
+                    let cached = raster.and_then(CachedImage::from_raster);
                     view.assets.tool_images.lock().unwrap().insert(key, cached);
                     // The block just resolved from a pending placeholder to a
                     // decoded image (or a failure label), so its cached height
@@ -803,7 +803,7 @@ impl AgentChatView {
                     }
                     view.assets.resource_image_inflight.remove(&key);
                     if view.assets.resource_image_sources.get(&key) == Some(&source) {
-                        let cached = raster.and_then(|r| CachedImage::from_raster(&r));
+                        let cached = raster.and_then(CachedImage::from_raster);
                         view.assets
                             .resource_images
                             .lock()

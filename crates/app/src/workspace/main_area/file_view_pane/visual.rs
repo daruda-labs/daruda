@@ -1,8 +1,9 @@
 //! Shared visual rasterization for the markdown preview: turns an SVG string
-//! (from a mermaid renderer, or any source) into an in-memory RGBA bitmap.
+//! (from a mermaid renderer, or any source) into an in-memory BGRA bitmap
+//! already in GPUI's byte order.
 //!
-//! GPUI-free: produces plain [`RasterImage`] data. Wrapping into a GPUI
-//! `RenderImage` happens at the render boundary, not here.
+//! GPUI-free: produces plain [`RasterImage`] data. Wrapping the buffer into a
+//! GPUI `RenderImage` happens at the render boundary, not here.
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -17,14 +18,14 @@ const RASTER_SCALE: f32 = 2.0;
 /// requesting a multi-gigabyte pixmap.
 const MAX_DIM: u32 = 8000;
 
-/// Decoded bitmap in RGBA8888, row-major top-to-bottom (`width * height * 4`
-/// bytes). The render boundary converts to GPUI's BGRA `RenderImage` format;
-/// alpha handling is normalized there (verified against live rendering).
+/// Decoded bitmap in BGRA8888, row-major top-to-bottom (`width * height * 4`
+/// bytes) — already in GPUI's `RenderImage` byte order, so the render
+/// boundary moves this buffer into a `RenderImage` without copying it.
 #[derive(Clone)]
 pub(in crate::workspace) struct RasterImage {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    pub bgra: Vec<u8>,
     /// Device-pixel scale the bitmap was rendered at: 2.0 for HiDPI-crisp SVG
     /// raster, 1.0 for a natively-sized decoded image. The render layer divides
     /// by this to get the logical (point) display size, so a 2× bitmap shows at
@@ -58,12 +59,15 @@ pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterIma
         &mut pixmap.as_mut(),
     );
 
-    let mut rgba = pixmap.data().to_vec();
-    unpremultiply(&mut rgba);
+    let mut pixels = pixmap.data().to_vec();
+    // Straight-alpha conversion reads/writes R and B uniformly, so it does
+    // not matter whether it runs before or after the channel swap.
+    unpremultiply(&mut pixels);
+    swap_rb_in_place(&mut pixels);
     Ok(RasterImage {
         width,
         height,
-        rgba,
+        bgra: pixels,
         scale: RASTER_SCALE,
     })
 }
@@ -236,6 +240,15 @@ fn unpremultiply(rgba: &mut [u8]) {
     }
 }
 
+/// Swap the R and B channels of a BGRA/RGBA8888 buffer in place, converting
+/// between the two. Shared by every [`RasterImage`] producer so the swap runs
+/// once, on the background thread that decodes or rasterizes the bitmap.
+fn swap_rb_in_place(bytes: &mut [u8]) {
+    for px in bytes.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+}
+
 /// Render a ` ```mermaid ` source to a [`RasterImage`]: merman SVG → label
 /// background alignment → raster.
 ///
@@ -327,10 +340,12 @@ pub(in crate::workspace) fn load_image_source(
 pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterImage> {
     let img = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = img.dimensions();
+    let mut bgra = img.into_raw();
+    swap_rb_in_place(&mut bgra);
     Ok(RasterImage {
         width,
         height,
-        rgba: img.into_raw(),
+        bgra,
         scale: 1.0,
     })
 }
@@ -351,10 +366,12 @@ pub(in crate::workspace) fn decode_image_bounded(
     reader.limits(limits);
     let img = reader.decode()?.to_rgba8();
     let (width, height) = img.dimensions();
+    let mut bgra = img.into_raw();
+    swap_rb_in_place(&mut bgra);
     Ok(RasterImage {
         width,
         height,
-        rgba: img.into_raw(),
+        bgra,
         scale: 1.0,
     })
 }
@@ -444,16 +461,29 @@ mod tests {
 
     #[test]
     fn rasterizes_svg_at_scaled_dimensions() {
-        // 10×20 SVG, RASTER_SCALE = 2 → 20×40 px, RGBA = 20*40*4 bytes.
+        // 10×20 SVG, RASTER_SCALE = 2 → 20×40 px, BGRA = 20*40*4 bytes.
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"><rect width="10" height="20" fill="#000000"/></svg>"##;
         let img = rasterize_svg(svg).expect("rasterize should succeed");
         assert_eq!((img.width, img.height), (20, 40));
-        assert_eq!(img.rgba.len(), (img.width * img.height * 4) as usize);
+        assert_eq!(img.bgra.len(), (img.width * img.height * 4) as usize);
     }
 
     #[test]
     fn rejects_non_svg_input() {
         assert!(rasterize_svg("this is not svg at all").is_err());
+    }
+
+    /// Regression guard: `rasterize_svg` must hand back GPUI's BGRA byte
+    /// order, not RGBA. A red fill (R≠B) makes a silent channel swap visible.
+    #[test]
+    fn rasterize_svg_produces_bgra_byte_order() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#ff0000"/></svg>"##;
+        let img = rasterize_svg(svg).expect("rasterize should succeed");
+        assert_eq!(
+            &img.bgra[..4],
+            &[0, 0, 255, 255],
+            "opaque red must land as B=0, G=0, R=255 in BGRA order"
+        );
     }
 
     #[test]
@@ -471,7 +501,7 @@ mod tests {
         let hidpi = RasterImage {
             width: 40,
             height: 80,
-            rgba: vec![],
+            bgra: vec![],
             scale: 2.0,
         };
         assert_eq!(hidpi.logical_size(), (20.0, 40.0));
@@ -479,7 +509,7 @@ mod tests {
         let native = RasterImage {
             width: 30,
             height: 30,
-            rgba: vec![],
+            bgra: vec![],
             scale: 1.0,
         };
         assert_eq!(native.logical_size(), (30.0, 30.0));
@@ -508,7 +538,9 @@ mod tests {
         let png = encode_png(3, 2, [10, 20, 30, 255]);
         let img = decode_image(&png).expect("decode should succeed");
         assert_eq!((img.width, img.height), (3, 2));
-        assert_eq!(img.rgba.len(), (3 * 2 * 4) as usize);
+        assert_eq!(img.bgra.len(), (3 * 2 * 4) as usize);
+        // Encoded RGBA 10,20,30 must come back as BGRA.
+        assert_eq!(&img.bgra[..4], &[30, 20, 10, 255]);
     }
 
     #[test]

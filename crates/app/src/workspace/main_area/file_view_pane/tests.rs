@@ -252,12 +252,12 @@ fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
         let img = visual::rasterize_svg(&svg).expect("rasterize should succeed");
         // Corner pixel sits on the canvas, outside any node.
         assert_eq!(
-            img.rgba[3], 0,
+            img.bgra[3], 0,
             "canvas corner must be fully transparent for {source:?}"
         );
         // The raster still contains opaque content (node fill / text).
         assert!(
-            img.rgba.chunks_exact(4).any(|px| px[3] == 255),
+            img.bgra.chunks_exact(4).any(|px| px[3] == 255),
             "diagram content must remain opaque for {source:?}"
         );
     }
@@ -265,7 +265,7 @@ fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
 
 fn right_edge_is_transparent(img: &visual::RasterImage) -> bool {
     let width = img.width as usize;
-    (0..img.height as usize).all(|y| img.rgba[(y * width + width - 1) * 4 + 3] == 0)
+    (0..img.height as usize).all(|y| img.bgra[(y * width + width - 1) * 4 + 3] == 0)
 }
 
 #[test]

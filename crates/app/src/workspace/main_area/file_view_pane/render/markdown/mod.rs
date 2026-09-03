@@ -27,6 +27,7 @@ use gpui::{App, Context, IntoElement, Window, div, prelude::*, px};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::CharSelection;
+use crate::workspace::main_area::file_view_pane::images::MdImages;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock;
 
 use self::block::render_md_block;
@@ -70,6 +71,18 @@ struct MdColors {
 
 type OpenUrl = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
+/// What every level of the walk needs and neither level decides: the colours,
+/// and the pane's GPU image table an `MdSpan::Image` / `MdBlock::Mermaid`
+/// slot indexes into. Borrowed as one parameter instead of threaded through
+/// `render_md_block` → `render_list` → `render_md_prose` → `render_prose_run`
+/// → `render_inline_md_image` twice over. Read-only here: the table is built
+/// by the load funnel in `file_view_pane/images.rs`.
+#[derive(Clone, Copy)]
+struct MdRenderAssets<'a> {
+    t: &'a MdColors,
+    images: &'a MdImages,
+}
+
 impl MdColors {
     fn for_pane(cx: &App) -> Self {
         let tokens = PaneSurfaceTokens::file_viewer(cx);
@@ -88,6 +101,7 @@ impl MdColors {
 /// Top-level Markdown body: a padded column of selectable blocks.
 pub(super) fn render_md_body(
     blocks: &[MdBlock],
+    images: &MdImages,
     char_selection: Option<&CharSelection>,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -100,9 +114,13 @@ pub(super) fn render_md_body(
             cx.open_url(url);
         }
     });
-    render_md_body_layout(blocks, char_selection, &t, open_url, |block, block_idx| {
-        block_with_selection(block, block_idx, cx)
-    })
+    render_md_body_layout(
+        blocks,
+        char_selection,
+        MdRenderAssets { t: &t, images },
+        open_url,
+        |block, block_idx| block_with_selection(block, block_idx, cx),
+    )
 }
 
 /// Layout half of [`render_md_body`]. Selection listeners are supplied by the
@@ -111,11 +129,11 @@ pub(super) fn render_md_body(
 fn render_md_body_layout(
     blocks: &[MdBlock],
     char_selection: Option<&CharSelection>,
-    t: &MdColors,
+    assets: MdRenderAssets<'_>,
     on_open_url: OpenUrl,
     mut decorate_block: impl FnMut(gpui::Div, usize) -> gpui::Div,
 ) -> gpui::Div {
-    let body_text = t.text;
+    let body_text = assets.t.text;
     let block_sel_bg = theme::SELECTION_BG;
     let mut col = div()
         .flex()
@@ -134,7 +152,7 @@ fn render_md_body_layout(
             .when(is_sel, |d| d.bg(block_sel_bg))
             .child(render_md_block(
                 block,
-                t,
+                assets,
                 i,
                 &mut next_part_idx,
                 &on_open_url,

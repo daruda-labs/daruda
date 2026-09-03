@@ -135,6 +135,12 @@ pub(in crate::workspace) struct FileContent {
     pub(in crate::workspace) editor_state: Entity<gpui_component::input::InputState>,
     /// Text that was last saved to disk — for dirty comparison.
     pub(in crate::workspace) saved_text: String,
+    /// GPU images for the Markdown preview, indexed by the slot the load's
+    /// resolve pass stamped into the blocks. Seeded empty at construction;
+    /// after that, `install_content` / `release_images`
+    /// (`file_view_pane/images.rs`) are by convention the only writers — the
+    /// visibility below narrows who *could* write it, it does not enforce that.
+    pub(in crate::workspace::main_area) images: super::file_view_pane::images::MdImages,
 }
 
 /// Markdown-form editor pane for a single Task. Lives at the same

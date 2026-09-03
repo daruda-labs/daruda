@@ -11,6 +11,7 @@
 
 use super::highlighter::{LanguageHint, highlight_hunks, highlight_raw_rows};
 use super::mermaid_theme::MermaidPalette;
+use super::visual::RasterImage;
 use super::word_diff::apply_word_diff;
 use super::{
     FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
@@ -25,10 +26,26 @@ use crate::path_ext::PathExt;
 /// carries no data, so the text travels in this transport enum and is
 /// fed into the editor exactly once by the load-completion handler.
 pub(in crate::workspace) enum LoadOutcome {
-    /// Content the viewer stores as-is (diff, markdown, error states).
-    Plain(PaneFileContent),
+    /// Content the viewer stores as-is (diff, markdown, error states),
+    /// together with the Markdown bitmaps the resolve pass loaded — one per
+    /// slot, in slot order, for the GPUI side to convert. Empty for every
+    /// outcome but a successfully parsed Markdown file.
+    Plain {
+        content: PaneFileContent,
+        rasters: Vec<Option<RasterImage>>,
+    },
     /// Raw file text for the editor. Stored content becomes `LoadedRaw`.
     Raw { text: String },
+}
+
+impl LoadOutcome {
+    /// A `Plain` outcome with no Markdown bitmaps behind it.
+    fn plain(content: PaneFileContent) -> Self {
+        Self::Plain {
+            content,
+            rasters: Vec::new(),
+        }
+    }
 }
 
 /// Load file content for the pane-area file viewer. Called from a background task.
@@ -52,7 +69,7 @@ pub(in crate::workspace) fn load_file_content(
             syntax_theme,
             mermaid_palette,
         ),
-        FileViewMode::Changes => LoadOutcome::Plain(load_diff(
+        FileViewMode::Changes => LoadOutcome::plain(load_diff(
             repo_root,
             path,
             staged,
@@ -75,7 +92,7 @@ fn load_raw(
 
     let bytes: Result<Vec<u8>, String> = if staged {
         if repo_root.is_none() {
-            return LoadOutcome::Plain(PaneFileContent::Error("No git repository root".to_owned()));
+            return LoadOutcome::plain(PaneFileContent::Error("No git repository root".to_owned()));
         }
         // git show :path requires a repo-root-relative path.
         // `path` is absolute (set at the left-dock entry point); strip the repo root
@@ -85,7 +102,7 @@ fn load_raw(
             match path.strip_prefix(r) {
                 Ok(rel) => rel.to_path_buf(),
                 Err(_) => {
-                    return LoadOutcome::Plain(PaneFileContent::Error(format!(
+                    return LoadOutcome::plain(PaneFileContent::Error(format!(
                         "staged path {} is not inside repo root {}",
                         path.display(),
                         r.display()
@@ -106,23 +123,23 @@ fn load_raw(
             std::borrow::Cow::Owned(wp.from_git_status(path))
         };
         if !full.exists() {
-            return LoadOutcome::Plain(PaneFileContent::Deleted);
+            return LoadOutcome::plain(PaneFileContent::Deleted);
         }
         std::fs::read(full.as_ref()).map_err(|e| e.to_string())
     };
 
     match bytes {
-        Err(e) => LoadOutcome::Plain(PaneFileContent::Error(e)),
+        Err(e) => LoadOutcome::plain(PaneFileContent::Error(e)),
         Ok(b) => {
             if b.contains(&0u8) {
-                return LoadOutcome::Plain(PaneFileContent::Binary);
+                return LoadOutcome::plain(PaneFileContent::Binary);
             }
             let (text, byte_truncated) = if b.len() > theme::FILE_VIEWER_MAX_BYTES {
                 let s = String::from_utf8_lossy(&b[..theme::FILE_VIEWER_MAX_BYTES]).into_owned();
                 (s, true)
             } else {
                 match String::from_utf8(b) {
-                    Err(_) => return LoadOutcome::Plain(PaneFileContent::Binary),
+                    Err(_) => return LoadOutcome::plain(PaneFileContent::Binary),
                     Ok(s) => (s, false),
                 }
             };
@@ -134,16 +151,17 @@ fn load_raw(
                     syntax_theme,
                     !mermaid_palette.dark,
                 );
-                if let Some(base_dir) = path.parent().map(std::path::Path::to_path_buf) {
-                    super::markdown_viewer::resolve_images(&mut blocks, &mut |url| {
-                        super::visual::load_image_source(url, &base_dir)
+                let base_dir = path.parent().map(std::path::Path::to_path_buf);
+                let rasters = super::markdown_viewer::resolve_all(
+                    &mut blocks,
+                    &mut |url| {
+                        let base_dir = base_dir.as_ref()?;
+                        super::visual::load_image_source(url, base_dir)
                             .and_then(|bytes| super::visual::decode_image(&bytes))
                             .ok()
-                    });
-                }
-                super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
-                    super::visual::render_mermaid_raster(source, mermaid_palette)
-                });
+                    },
+                    &mut |source| super::visual::render_mermaid_raster(source, mermaid_palette),
+                );
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);
@@ -153,12 +171,15 @@ fn load_raw(
                     syntax_theme,
                     !mermaid_palette.dark,
                 );
-                return LoadOutcome::Plain(PaneFileContent::LoadedMarkdown {
-                    blocks,
-                    raw_rows,
-                    total_count,
-                    byte_truncated,
-                });
+                return LoadOutcome::Plain {
+                    content: PaneFileContent::LoadedMarkdown {
+                        blocks,
+                        raw_rows,
+                        total_count,
+                        byte_truncated,
+                    },
+                    rasters,
+                };
             }
 
             LoadOutcome::Raw { text }

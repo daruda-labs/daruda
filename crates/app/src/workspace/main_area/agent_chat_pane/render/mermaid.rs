@@ -202,10 +202,10 @@ mod tests {
         let raster = RasterImage {
             width: 200,
             height: 100,
-            rgba: vec![255; 200 * 100 * 4],
+            bgra: vec![255; 200 * 100 * 4],
             scale: 2.0,
         };
-        let image = CachedImage::from_raster(&raster).expect("probe image converts");
+        let image = CachedImage::from_raster(raster).expect("probe image converts");
         let window = cx.add_window(|window, cx| {
             let probe = cx.new(|_| CardProbe { image });
             gpui_component::Root::new(probe, window, cx)
