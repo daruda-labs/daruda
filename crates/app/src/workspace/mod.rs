@@ -1119,7 +1119,7 @@ impl Workspace {
             dock_drag: None,
             inherit_cwd: true,
             terminal_config: config_ops::terminal_config_from(config),
-            font_family: config.font.family.clone(),
+            font_family: config.font.terminal.family.clone(),
             left_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {

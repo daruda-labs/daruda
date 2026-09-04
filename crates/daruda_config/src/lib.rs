@@ -59,7 +59,7 @@ pub use editor::{
     preset as external_editor_preset,
 };
 pub use file_viewer::FileViewerConfig;
-pub use font::FontConfig;
+pub use font::{FontConfig, SYSTEM_UI_FONT_FAMILY};
 pub use general::{GeneralConfig, SUPPORTED_LOCALES};
 pub use keybindings::KeybindingConfig;
 pub use left_dock::{IconColorMode, LeftDockConfig};
@@ -564,28 +564,7 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         );
     });
 
-    patch_section(&mut doc, "font", |t| {
-        t.insert("family", toml_edit::value(config.font.family.clone()));
-        t.insert("size", toml_edit::value(f64::from(config.font.size)));
-        t.insert(
-            "editor_size",
-            toml_edit::value(f64::from(config.font.editor_size)),
-        );
-        t.insert(
-            "agent_chat_size",
-            toml_edit::value(f64::from(config.font.agent_chat_size)),
-        );
-        t.insert(
-            "vertical_spacing",
-            toml_edit::value(f64::from(config.font.vertical_spacing)),
-        );
-        t.insert(
-            "horizontal_spacing",
-            toml_edit::value(f64::from(config.font.horizontal_spacing)),
-        );
-        t.insert("inset_x", toml_edit::value(f64::from(config.font.inset_x)));
-        t.insert("inset_y", toml_edit::value(f64::from(config.font.inset_y)));
-    });
+    patch_font_config(&mut doc, &config.font);
 
     patch_section(&mut doc, "cursor", |t| {
         let style_str = match config.cursor.style {
@@ -758,6 +737,90 @@ fn patch_section(
     }
 }
 
+/// Write the domain-based font schema and remove the legacy flat keys. Font
+/// changes rewrite this small section as a unit so partially migrated files
+/// cannot end up with two competing values for the same surface.
+fn patch_font_config(doc: &mut toml_edit::DocumentMut, font: &FontConfig) {
+    patch_section(doc, "font", |table| {
+        for key in [
+            "family",
+            "size",
+            "editor_size",
+            "agent_chat_size",
+            "vertical_spacing",
+            "horizontal_spacing",
+            "inset_x",
+            "inset_y",
+        ] {
+            table.remove(key);
+        }
+    });
+
+    patch_font_domain(doc, "terminal", |table| {
+        table.insert("family", toml_edit::value(font.terminal.family.clone()));
+        table.insert("size", toml_edit::value(f64::from(font.terminal.size)));
+        table.insert(
+            "line_height",
+            toml_edit::value(f64::from(font.terminal.line_height)),
+        );
+        table.insert(
+            "cell_width",
+            toml_edit::value(f64::from(font.terminal.cell_width)),
+        );
+        table.insert(
+            "inset_x",
+            toml_edit::value(f64::from(font.terminal.inset_x)),
+        );
+        table.insert(
+            "inset_y",
+            toml_edit::value(f64::from(font.terminal.inset_y)),
+        );
+    });
+    patch_font_domain(doc, "editor", |table| {
+        table.insert("family", toml_edit::value(font.editor.family.clone()));
+        table.insert("size", toml_edit::value(f64::from(font.editor.size)));
+        table.insert(
+            "line_height",
+            toml_edit::value(f64::from(font.editor.line_height)),
+        );
+    });
+    patch_font_domain(doc, "agent_chat", |table| {
+        table.insert("family", toml_edit::value(font.agent_chat.family.clone()));
+        table.insert("size", toml_edit::value(f64::from(font.agent_chat.size)));
+        table.insert(
+            "line_height",
+            toml_edit::value(f64::from(font.agent_chat.line_height)),
+        );
+    });
+}
+
+fn patch_font_domain(
+    doc: &mut toml_edit::DocumentMut,
+    domain: &str,
+    patch: impl FnOnce(&mut dyn toml_edit::TableLike),
+) {
+    let parent_is_inline = doc
+        .get("font")
+        .and_then(toml_edit::Item::as_inline_table)
+        .is_some();
+    patch_section(doc, "font", |font| {
+        if !font.contains_key(domain) {
+            let item = if parent_is_inline {
+                toml_edit::Item::Value(toml_edit::Value::InlineTable(toml_edit::InlineTable::new()))
+            } else {
+                toml_edit::Item::Table(toml_edit::Table::new())
+            };
+            font.insert(domain, item);
+        }
+        if let Some(table) = font
+            .get_mut(domain)
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            patch(table);
+        }
+    });
+}
+
 fn read_config_text(path: &std::path::Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
@@ -852,36 +915,18 @@ fn patch_settings_document(
                 toml_edit::value(config.theme.ui_preset.clone()),
             );
         }),
-        SettingsPatch::FontFamily(_) => patch_section(doc, "font", |t| {
-            t.insert("family", toml_edit::value(config.font.family.clone()));
-        }),
-        SettingsPatch::FontSize(_) => patch_section(doc, "font", |t| {
-            t.insert("size", toml_edit::value(f64::from(config.font.size)));
-        }),
-        SettingsPatch::EditorFontSize(_) => patch_section(doc, "font", |t| {
-            t.insert(
-                "editor_size",
-                toml_edit::value(f64::from(config.font.editor_size)),
-            );
-        }),
-        SettingsPatch::AgentChatFontSize(_) => patch_section(doc, "font", |t| {
-            t.insert(
-                "agent_chat_size",
-                toml_edit::value(f64::from(config.font.agent_chat_size)),
-            );
-        }),
-        SettingsPatch::VerticalSpacing(_) => patch_section(doc, "font", |t| {
-            t.insert(
-                "vertical_spacing",
-                toml_edit::value(f64::from(config.font.vertical_spacing)),
-            );
-        }),
-        SettingsPatch::HorizontalSpacing(_) => patch_section(doc, "font", |t| {
-            t.insert(
-                "horizontal_spacing",
-                toml_edit::value(f64::from(config.font.horizontal_spacing)),
-            );
-        }),
+        SettingsPatch::TerminalFontFamily(_)
+        | SettingsPatch::TerminalFontSize(_)
+        | SettingsPatch::TerminalLineHeight(_)
+        | SettingsPatch::TerminalCellWidth(_)
+        | SettingsPatch::EditorFontFamily(_)
+        | SettingsPatch::EditorFontSize(_)
+        | SettingsPatch::EditorLineHeight(_)
+        | SettingsPatch::AgentChatFontFamily(_)
+        | SettingsPatch::AgentChatFontSize(_)
+        | SettingsPatch::AgentChatLineHeight(_)
+        | SettingsPatch::TerminalInsetX(_)
+        | SettingsPatch::TerminalInsetY(_) => patch_font_config(doc, &config.font),
         SettingsPatch::CursorStyle(_) => patch_section(doc, "cursor", |t| {
             let value = match config.cursor.style {
                 CursorStyle::Block => "block",
@@ -929,12 +974,6 @@ fn patch_settings_document(
                 "max_rows",
                 toml_edit::value(config.scrollback.max_rows as i64),
             );
-        }),
-        SettingsPatch::TerminalInsetX(_) => patch_section(doc, "font", |t| {
-            t.insert("inset_x", toml_edit::value(f64::from(config.font.inset_x)));
-        }),
-        SettingsPatch::TerminalInsetY(_) => patch_section(doc, "font", |t| {
-            t.insert("inset_y", toml_edit::value(f64::from(config.font.inset_y)));
         }),
         SettingsPatch::FilesShowHidden(_) => patch_section(doc, "left_dock", |t| {
             t.insert(

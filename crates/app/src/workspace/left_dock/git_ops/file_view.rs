@@ -96,7 +96,7 @@ fn title_for_file_path(path: &std::path::Path) -> gpui::SharedString {
 
 fn markdown_raw_line_scroll_offset(line: usize, cx: &gpui::App) -> gpui::Point<gpui::Pixels> {
     let row = line.saturating_sub(1);
-    let row_h = crate::ui::theme::editor_font_size(cx) * crate::ui::theme::FILE_VIEWER_LINE_H_RATIO;
+    let row_h = crate::ui::theme::editor_font_size(cx) * crate::ui::theme::editor_line_height(cx);
     point(
         px(crate::ui::theme::FILE_VIEWER_SCROLL_ORIGIN_X),
         px(-(row as f32 * row_h)),
@@ -579,7 +579,7 @@ impl Workspace {
     /// search match is visible. Does nothing when no match is focused,
     /// the focused pane is not a file viewer, or the viewer is in
     /// Preview mode (blocks have variable heights).
-    pub(in crate::workspace) fn scroll_file_viewer_to_focused_match(&mut self) {
+    pub(in crate::workspace) fn scroll_file_viewer_to_focused_match(&mut self, cx: &gpui::App) {
         let Some(fc) = self.focused_file_content() else {
             return;
         };
@@ -590,7 +590,8 @@ impl Workspace {
         let Some(row) = fv.search_focused_row() else {
             return;
         };
-        let line_h = crate::ui::theme::FILE_VIEWER_LINE_H;
+        let line_h =
+            crate::ui::theme::editor_font_size(cx) * crate::ui::theme::editor_line_height(cx);
         let target_y = row as f32 * line_h;
         let viewport_h: f32 = fc.scroll_handle.bounds().size.height.into();
         let current_y: f32 = (-fc.scroll_handle.offset().y).into();

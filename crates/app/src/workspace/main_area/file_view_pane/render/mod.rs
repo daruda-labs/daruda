@@ -16,7 +16,7 @@ mod virtual_list;
 pub(in crate::workspace) use self::markdown::CachedImage;
 
 use crate::ui::theme;
-use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{Context, IntoElement, div, prelude::*, px, relative};
 
 use self::body::render_file_viewer_body;
 use self::scrollbar::file_viewer_scrollbar;
@@ -33,7 +33,6 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(in crate::workspace) fn render_pane_file_viewer(
     pane_id: PaneId,
     fc: &FileContent,
-    font_family: SharedString,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let FileContent {
@@ -76,7 +75,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
             viewport_h + scroll_handle.max_offset().y
         } else {
             let total_rows = fv.visible_row_count();
-            px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)
+            px(total_rows as f32 * theme::editor_font_size(cx) * theme::editor_line_height(cx))
         };
         file_viewer_scrollbar(scroll_handle, toolbar_h, viewport_h, content_h, cx)
     };
@@ -93,7 +92,8 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     div()
         .relative()
         .size_full()
-        .font_family(font_family)
+        .font_family(theme::editor_font_family(cx))
+        .line_height(relative(theme::editor_line_height(cx)))
         .bg(viewer_bg)
         .child(
             div()

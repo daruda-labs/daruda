@@ -42,7 +42,7 @@ fn test_save_state_with_project(cx: &mut TestAppContext) {
         // Tabs live inside the active lane.
         assert_eq!(state.primary_project().unwrap().lanes.len(), 1);
         assert!(!state.primary_project().unwrap().lanes[0].tabs.is_empty());
-        assert_eq!(state.font_size, config.font.size);
+        assert_eq!(state.font_size, config.font.terminal.size);
     });
 }
 

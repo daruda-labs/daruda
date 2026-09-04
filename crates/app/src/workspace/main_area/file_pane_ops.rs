@@ -152,7 +152,7 @@ impl Workspace {
                     {
                         fv.search_update_query(&query);
                     }
-                    this.scroll_file_viewer_to_focused_match();
+                    this.scroll_file_viewer_to_focused_match(cx);
                     cx.notify();
                 }
                 crate::ui::InputEvent::PressEnter { .. } => {
@@ -165,7 +165,7 @@ impl Workspace {
                     {
                         fv.search_next_match();
                     }
-                    this.scroll_file_viewer_to_focused_match();
+                    this.scroll_file_viewer_to_focused_match(cx);
                     cx.notify();
                 }
                 _ => {}

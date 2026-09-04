@@ -82,7 +82,7 @@ mod tests {
         drop(f);
 
         let cfg = daruda_config::Config::load_from(&path);
-        assert_eq!(cfg.font.size, 18.0);
+        assert_eq!(cfg.font.terminal.size, 18.0);
 
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "[font]").unwrap();
@@ -90,7 +90,7 @@ mod tests {
         drop(f);
 
         let cfg2 = daruda_config::Config::load_from(&path);
-        assert_eq!(cfg2.font.size, 22.0);
+        assert_eq!(cfg2.font.terminal.size, 22.0);
 
         let _ = std::fs::remove_dir_all(dir);
     }

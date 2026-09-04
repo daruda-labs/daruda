@@ -13,7 +13,7 @@ use crate::workspace::main_area::file_view_pane::markdown_viewer::{
 
 use super::image::{ImageLayout, render_md_image};
 use super::inline::{render_md_prose, render_prose_run};
-use super::{MdColors, MdRenderAssets, OpenUrl};
+use super::{MdRenderAssets, OpenUrl};
 
 #[derive(Clone, Copy)]
 struct TableCellPosition {
@@ -24,7 +24,8 @@ struct TableCellPosition {
 
 /// The monospace card both a fenced code block and an unrendered mermaid fence
 /// sit in.
-fn code_surface(t: &MdColors) -> gpui::Div {
+fn code_surface(assets: MdRenderAssets<'_>) -> gpui::Div {
+    let t = assets.t;
     div()
         .flex()
         .flex_col()
@@ -34,7 +35,7 @@ fn code_surface(t: &MdColors) -> gpui::Div {
         .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
         .px(px(theme::MD_CODE_BLOCK_PAD_X))
         .py(px(theme::MD_CODE_BLOCK_PAD_Y))
-        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_size(px(assets.font_size))
         .font(gpui::font("monospace"))
         .text_color(t.text)
 }
@@ -176,17 +177,29 @@ pub(super) fn render_md_block(
     let t = assets.t;
     match block {
         MdBlock::Heading { level, spans } => {
-            let (size, color, mt) = match level {
-                1 => (theme::MD_H1_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
-                2 => (theme::MD_H2_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
-                3 => (theme::MD_H3_FONT_SIZE, t.text, theme::MD_HEADING_MARGIN_TOP),
-                _ => (theme::MD_H4_FONT_SIZE, t.text, 0.0),
+            let (scale, color, mt) = match level {
+                1 => (
+                    theme::MD_H1_FONT_SCALE,
+                    t.text,
+                    theme::MD_HEADING_MARGIN_TOP,
+                ),
+                2 => (
+                    theme::MD_H2_FONT_SCALE,
+                    t.text,
+                    theme::MD_HEADING_MARGIN_TOP,
+                ),
+                3 => (
+                    theme::MD_H3_FONT_SCALE,
+                    t.text,
+                    theme::MD_HEADING_MARGIN_TOP,
+                ),
+                _ => (theme::MD_H4_FONT_SCALE, t.text, 0.0),
             };
             div()
                 .w_full()
                 .min_w_0()
                 .mt(px(mt))
-                .text_size(px(size))
+                .text_size(px(assets.font_size * scale))
                 .text_color(color)
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(render_prose_run(
@@ -221,7 +234,7 @@ pub(super) fn render_md_block(
 
         MdBlock::CodeBlock { rows, .. } => {
             let (text, highlights) = code_block_text(rows);
-            code_surface(t)
+            code_surface(assets)
                 .child(StyledText::new(text).with_highlights(highlights))
                 .into_any_element()
         }
@@ -230,7 +243,7 @@ pub(super) fn render_md_block(
             Some(image) => image.block_diagram(),
             // Rendering failed/pending: fall back to the raw source, styled
             // like a code block.
-            None => code_surface(t)
+            None => code_surface(assets)
                 .child(StyledText::new(source.clone()))
                 .into_any_element(),
         },
@@ -390,7 +403,7 @@ fn render_table_cell(
         .px(px(theme::MD_TABLE_CELL_PAD_X))
         .py(px(theme::MD_TABLE_CELL_PAD_Y))
         .when(!position.is_last, |d| d.border_r_1().border_color(t.line))
-        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_size(px(assets.font_size))
         .text_color(t.text)
         .when(position.is_header, |d| {
             d.font_weight(gpui::FontWeight::BOLD)

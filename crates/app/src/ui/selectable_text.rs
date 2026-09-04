@@ -15,7 +15,9 @@
 //! (and the live selection) resets. Callers key by a stable per-block id
 //! (e.g. tool-call id + block index).
 
-use gpui::{ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _, Window};
+use gpui::{
+    ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _, Window, relative,
+};
 use gpui_component::ActiveTheme as _;
 use gpui_component::text::TextView;
 
@@ -25,7 +27,9 @@ pub struct SelectableText {
     text: SharedString,
     selectable: bool,
     color: Option<Hsla>,
+    font_family: Option<SharedString>,
     text_size: Option<Pixels>,
+    line_height: Option<f32>,
     full_width: bool,
 }
 
@@ -49,9 +53,19 @@ impl SelectableText {
         self
     }
 
+    pub fn font_family(mut self, family: impl Into<SharedString>) -> Self {
+        self.font_family = Some(family.into());
+        self
+    }
+
     /// Set the text size. Unset = inherit the ambient size.
     pub fn text_size(mut self, size: Pixels) -> Self {
         self.text_size = Some(size);
+        self
+    }
+
+    pub fn line_height(mut self, line_height: f32) -> Self {
+        self.line_height = Some(line_height);
         self
     }
 }
@@ -65,6 +79,9 @@ impl RenderOnce for SelectableText {
         let mut view = TextView::plain(self.id, self.text, window, cx)
             .selectable(self.selectable)
             .text_color(color);
+        if let Some(family) = self.font_family {
+            view = view.font_family(family);
+        }
         // Without a width constraint TextView lays out at its intrinsic
         // max-content width, overflowing the container. Fill + min_w_0 so it
         // wraps to the container.
@@ -73,6 +90,9 @@ impl RenderOnce for SelectableText {
         }
         if let Some(size) = self.text_size {
             view = view.text_size(size);
+        }
+        if let Some(line_height) = self.line_height {
+            view = view.line_height(relative(line_height));
         }
         view
     }
@@ -86,7 +106,9 @@ pub fn selectable_text(id: impl Into<ElementId>, text: impl Into<SharedString>) 
         text: text.into(),
         selectable: true,
         color: None,
+        font_family: None,
         text_size: None,
+        line_height: None,
         full_width: true,
     }
 }

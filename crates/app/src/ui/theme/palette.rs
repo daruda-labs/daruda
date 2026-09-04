@@ -777,7 +777,7 @@ pub const STATUS_BAR_USAGE_ROW_WIDTH: f32 = 180.0;
 pub const STATUS_BAR_USAGE_ROW_GAP: f32 = GAP_XS;
 /// Agent chat font size (px) — the whole conversation pane (message bodies,
 /// headers, tool titles, chrome) shares this one size. Compile-time default
-/// for the config-driven `font.agent_chat_size`; the render path resolves the
+/// for the config-driven `font.agent_chat.size`; the render path resolves the
 /// live value via `theme::agent_chat_font_size(cx)`.
 pub const AGENT_CHAT_MSG_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Lightness lift applied to the terminal-mirrored agent-chat foreground so
@@ -822,30 +822,21 @@ pub const AGENT_CHAT_AUTOSCROLL_POLL_MS: u64 = 50;
 /// scrolls smoothly (~3 chat lines per tick) instead of jumping pages. Read
 /// by `autoscroll_step`.
 pub const AGENT_CHAT_AUTOSCROLL_MAX_STEP_PX: f32 = 48.0;
-/// Per-row height of any editor embedded in a tool card — the diff view and the
-/// verbatim tool-output view (px). Equal to gpui's window `line_height`
-/// (`Rems(1.25)` × the 16 px `rem_size` = 20 px, font-size independent — same
-/// value the bottom-input auto-grow relies on). An embedded `CodeEditor` (not
-/// `AutoGrow`) sizes to `relative(1.)` of its parent, which collapses to a
-/// single line without a definite-height parent; a tool-card body has none, so
-/// it sets an explicit `rows × this` height.
-pub const AGENT_CHAT_EMBED_ROW_H: f32 = 20.0;
-/// Max height (px) of an editor embedded in a tool card before it scrolls
+/// Maximum visible rows in an editor embedded in a tool card before it scrolls
 /// internally. Load-bearing, not cosmetic: `InputState` shapes and paints only
 /// the rows inside its own bounds height, so without a bound every row is
-/// "visible" and the paint cost is linear in output size. 12 rows keeps a shell
-/// failure unit (assert + backtrace) readable while leaving a split pane's card
-/// header and the neighbouring conversation on screen.
-pub const AGENT_CHAT_EMBED_MAX_H: f32 = 240.0;
-/// Max height (px) of the diff embed — 300 rows. A diff is bounded by the edit
+/// "visible" and the paint cost is linear in output size. The pixel height is
+/// derived from the configured agent-chat font metrics at render time.
+pub const AGENT_CHAT_EMBED_MAX_ROWS: usize = 12;
+/// Maximum visible rows in a diff embed. A diff is bounded by the edit
 /// that produced it, so it is worth showing whole; verbatim tool output is not,
-/// which is why it keeps the smaller [`AGENT_CHAT_EMBED_MAX_H`].
+/// which is why it keeps the smaller [`AGENT_CHAT_EMBED_MAX_ROWS`].
 ///
 /// `calculate_visible_range` (`gpui_component/src/input/element.rs`) derives the
 /// shaped row range from the element's own bounds and never clips against the
 /// ancestor content mask, so this is also the per-paint row ceiling — an embed
 /// this tall lays out all 300 rows even when the list shows a fraction.
-pub const AGENT_CHAT_DIFF_EMBED_MAX_H: f32 = 300.0 * AGENT_CHAT_EMBED_ROW_H;
+pub const AGENT_CHAT_DIFF_EMBED_MAX_ROWS: usize = 300;
 /// Max lines the inline diff fallback renders before it cuts and names the
 /// remainder. Separate from the embed heights above because those bound a
 /// scrollable viewport while this drops content outright — the header's
@@ -1066,11 +1057,8 @@ pub const FILE_VIEWER_MAX_BYTES: usize = 5 * 1024 * 1024; // 5 MB
 
 /// Row-height multiple over the body font size (≈ phi). Applied to the
 /// config-driven editor font so the raw virtual-list row height scales
-/// with `font.editor_size` instead of the fixed const.
+/// with `font.editor.size` instead of the fixed const.
 pub const FILE_VIEWER_LINE_H_RATIO: f32 = 1.7;
-/// Fixed row height for the virtual-list renderer (px).
-/// Derived so it is always ≥ FILE_VIEWER_FONT_SIZE * phi() without manual sync.
-pub const FILE_VIEWER_LINE_H: f32 = FILE_VIEWER_FONT_SIZE * FILE_VIEWER_LINE_H_RATIO;
 /// Rows rendered above and below the visible viewport (overscan).
 pub const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Gap between toolbar button group items (px).
@@ -1889,14 +1877,11 @@ pub const FILE_VIEWER_SEARCH_BTN_PAD_X: f32 = PAD_SM;
 pub const FILE_VIEWER_SEARCH_BTN_ML: f32 = PAD_XS;
 /// Horizontal scroll origin for file viewer scroll-to-match (always 0, px).
 pub const FILE_VIEWER_SCROLL_ORIGIN_X: f32 = 0.0;
-/// H1 heading font size (px) — DESIGN §Markdown Viewer.
-pub const MD_H1_FONT_SIZE: f32 = 18.0;
-/// H2 heading font size (px) — DESIGN §Markdown Viewer.
-pub const MD_H2_FONT_SIZE: f32 = 15.0;
-/// H3 heading font size (px) — DESIGN §Markdown Viewer.
-pub const MD_H3_FONT_SIZE: f32 = 13.0;
-/// H4–H6 heading font size (same as body).
-pub const MD_H4_FONT_SIZE: f32 = FILE_VIEWER_FONT_SIZE;
+/// Markdown heading scales relative to the configured editor font size.
+pub const MD_H1_FONT_SCALE: f32 = 18.0 / FILE_VIEWER_FONT_SIZE;
+pub const MD_H2_FONT_SCALE: f32 = 15.0 / FILE_VIEWER_FONT_SIZE;
+pub const MD_H3_FONT_SCALE: f32 = 13.0 / FILE_VIEWER_FONT_SIZE;
+pub const MD_H4_FONT_SCALE: f32 = 1.0;
 /// H2 heading text color.
 pub const MD_H2_COLOR: Hsla = hsla(0.0, 0.0, 0.92, 1.0);
 /// Code block corner radius (px).
@@ -1951,7 +1936,7 @@ pub const MD_INLINE_IMAGE_HEIGHT: f32 = FILE_VIEWER_FONT_SIZE * 1.3;
 // over `gpui_component::text::TextView`) that agent chat renders with, not the
 // file viewer's own `MdBlock` renderer the `MD_*` constants above serve. Both
 // are multiples of the caller's text size, so the vertical rhythm follows a
-// configured `font.agent_chat_size` instead of the vendored rem-based defaults.
+// configured `font.agent_chat.size` instead of the vendored rem-based defaults.
 /// Line height of every rendered markdown line, as a multiple of the text size.
 /// Matches the 1.6 ratio the 13 px default body had, and gpui's own `phi()`
 /// default that code blocks and table cells already sat on.

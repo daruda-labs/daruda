@@ -261,7 +261,7 @@ fn an_item_holding_two_blocks_makes_its_list_loose(cx: &mut TestAppContext) {
 
 /// Every vertical metric follows the configured body size. Each was anchored to
 /// the 16px rem instead — an absolute 20.8px line and a 1rem paragraph gap — so
-/// raising `font.agent_chat_size` grew the glyphs while the leading around them
+/// raising `font.agent_chat.size` grew the glyphs while the leading around them
 /// stayed put, crowding the prose.
 #[gpui::test]
 fn the_vertical_metrics_follow_the_text_size(cx: &mut TestAppContext) {

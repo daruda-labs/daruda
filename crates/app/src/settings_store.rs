@@ -305,14 +305,14 @@ mod tests {
                 .expect("external edit");
 
                 store
-                    .apply_patch(SettingsPatch::FontSize(16.0))
+                    .apply_patch(SettingsPatch::TerminalFontSize(16.0))
                     .expect("settings edit");
 
-                assert_eq!(store.user().font.size, 16.0);
-                assert_eq!(store.user().font.editor_size, 17.0);
+                assert_eq!(store.user().font.terminal.size, 16.0);
+                assert_eq!(store.user().font.editor.size, 17.0);
                 let disk = Config::load_from(&store.writer.path);
-                assert_eq!(disk.font.size, 16.0);
-                assert_eq!(disk.font.editor_size, 17.0);
+                assert_eq!(disk.font.terminal.size, 16.0);
+                assert_eq!(disk.font.editor.size, 17.0);
             });
         });
     }
@@ -327,17 +327,20 @@ mod tests {
                 std::fs::write(&store.writer.path, "[font]\nsize = 20.0\n").expect("external edit");
 
                 let error = store
-                    .apply_patch_if_unchanged(SettingsPatch::FontSize(16.0), &baseline)
+                    .apply_patch_if_unchanged(SettingsPatch::TerminalFontSize(16.0), &baseline)
                     .expect_err("stale cache must not hide the disk conflict");
 
                 assert_eq!(
                     error,
                     daruda_config::SettingsPatchApplyError::Conflict(
-                        daruda_config::SettingsFieldId::FontSize
+                        daruda_config::SettingsFieldId::TerminalFontSize
                     )
                 );
-                assert_eq!(store.user().font.size, 20.0);
-                assert_eq!(Config::load_from(&store.writer.path).font.size, 20.0);
+                assert_eq!(store.user().font.terminal.size, 20.0);
+                assert_eq!(
+                    Config::load_from(&store.writer.path).font.terminal.size,
+                    20.0
+                );
             });
         });
     }

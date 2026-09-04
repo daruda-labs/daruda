@@ -31,7 +31,9 @@ pub struct Markdown {
     text: SharedString,
     selectable: bool,
     color: Option<Hsla>,
+    font_family: Option<SharedString>,
     text_size: Option<Pixels>,
+    line_height: Option<f32>,
     full_width: bool,
     surface: Option<Hsla>,
     code_block_render: Option<CodeBlockRender>,
@@ -60,11 +62,23 @@ impl Markdown {
         self
     }
 
+    /// Override the prose font family. Fenced code keeps its monospace font.
+    pub fn font_family(mut self, family: impl Into<SharedString>) -> Self {
+        self.font_family = Some(family.into());
+        self
+    }
+
     /// Set the body font size so the markdown follows the host's configured
     /// text size instead of the `TextView` default. Headings still scale
     /// relative to their own base. Unset = inherit the ambient size.
     pub fn text_size(mut self, size: Pixels) -> Self {
         self.text_size = Some(size);
+        self
+    }
+
+    /// Set line height as a multiple of the configured body size.
+    pub fn line_height(mut self, line_height: f32) -> Self {
+        self.line_height = Some(line_height);
         self
     }
 
@@ -124,6 +138,9 @@ impl RenderOnce for Markdown {
         let mut view = TextView::markdown(self.id, self.text, window, cx)
             .selectable(self.selectable)
             .text_color(color);
+        if let Some(family) = self.font_family {
+            view = view.font_family(family);
+        }
         // Without a width constraint TextView lays out at its intrinsic
         // max-content width, overflowing the container (no wrap; content
         // clipped off-screen). Fill + min_w_0 so it wraps to the container.
@@ -148,7 +165,7 @@ impl RenderOnce for Markdown {
         // gap between paragraphs stays 16px however large the text gets.
         if let Some(size) = self.text_size {
             view = view.text_size(size).style(TextViewStyle {
-                line_height: relative(theme::MD_VIEW_LINE_HEIGHT),
+                line_height: relative(self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT)),
                 paragraph_gap: (size * theme::MD_VIEW_PARAGRAPH_GAP).into(),
                 heading_base_font_size: size,
                 ..TextViewStyle::default()
@@ -198,7 +215,9 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
         text: text.into(),
         selectable: true,
         color: None,
+        font_family: None,
         text_size: None,
+        line_height: None,
         full_width: true,
         surface: None,
         code_block_render: None,

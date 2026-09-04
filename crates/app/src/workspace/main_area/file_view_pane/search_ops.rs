@@ -42,7 +42,7 @@ impl Workspace {
         if let Some(fv) = self.focused_file_view_mut() {
             fv.search_prev_match();
         }
-        self.scroll_file_viewer_to_focused_match();
+        self.scroll_file_viewer_to_focused_match(cx);
         cx.notify();
     }
 
@@ -50,7 +50,7 @@ impl Workspace {
         if let Some(fv) = self.focused_file_view_mut() {
             fv.search_next_match();
         }
-        self.scroll_file_viewer_to_focused_match();
+        self.scroll_file_viewer_to_focused_match(cx);
         cx.notify();
     }
 }

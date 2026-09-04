@@ -51,7 +51,9 @@ pub(super) fn user_bubble(
 ) -> impl IntoElement + use<> {
     let body = crate::ui::selectable_text(("agent-chat-user", ix), text.to_string())
         .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+        .font_family(theme::agent_chat_font_family(cx))
         .text_size(px(theme::agent_chat_font_size(cx)))
+        .line_height(theme::agent_chat_line_height(cx))
         .full_width(false);
     let inner = div()
         .max_w(relative(0.85))
@@ -89,7 +91,9 @@ pub(super) fn pane_markdown(
     crate::ui::markdown(id, text)
         .color(color)
         .surface(theme::agent_chat_bg(cx))
+        .font_family(theme::agent_chat_font_family(cx))
         .text_size(px(theme::agent_chat_font_size(cx)))
+        .line_height(theme::agent_chat_line_height(cx))
 }
 
 /// The assistant prose body — drag-selectable rendered markdown with mermaid

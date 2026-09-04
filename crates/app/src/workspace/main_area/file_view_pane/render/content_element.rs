@@ -31,6 +31,7 @@ pub(super) struct FileViewerContentElement {
     row_kind: VisualRowKind,
     char_selection: Option<CharSelection>,
     default_text_color: gpui::Hsla,
+    font_size: Pixels,
     line_h: Pixels,
 }
 
@@ -41,6 +42,7 @@ impl FileViewerContentElement {
         row: &VisualRow,
         char_selection: Option<&CharSelection>,
         default_text_color: gpui::Hsla,
+        font_size: Pixels,
         line_h: Pixels,
     ) -> Self {
         Self {
@@ -52,6 +54,7 @@ impl FileViewerContentElement {
             row_kind: row.kind,
             char_selection: char_selection.cloned(),
             default_text_color,
+            font_size,
             line_h,
         }
     }
@@ -118,7 +121,6 @@ impl gpui::Element for FileViewerContentElement {
         let selection_bg = theme::SELECTION_BG;
         let word_del_bg = t.file_diff_word_del_bg;
         let word_add_bg = t.file_diff_word_add_bg;
-        let font_size = px(theme::FILE_VIEWER_FONT_SIZE);
         let font = window.text_style().font();
 
         // Build TextRun array. Prefer syntax-highlighted spans when present and
@@ -159,7 +161,7 @@ impl gpui::Element for FileViewerContentElement {
             Some(
                 window
                     .text_system()
-                    .shape_line(text, font_size, &runs, None),
+                    .shape_line(text, self.font_size, &runs, None),
             )
         };
 

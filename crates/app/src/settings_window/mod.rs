@@ -70,12 +70,16 @@ pub struct SettingsWindow {
     terminal_preset_select: Entity<SelectState>,
     ui_preset_select: Entity<SelectState>,
     // Font
-    font_family_select: Entity<SelectState>,
-    font_size_input: Entity<InputState>,
+    terminal_font_family_select: Entity<SelectState>,
+    terminal_font_size_input: Entity<InputState>,
+    terminal_line_height_input: Entity<InputState>,
+    terminal_cell_width_input: Entity<InputState>,
+    editor_font_family_select: Entity<SelectState>,
     editor_font_size_input: Entity<InputState>,
+    editor_line_height_input: Entity<InputState>,
+    agent_chat_font_family_select: Entity<SelectState>,
     agent_chat_font_size_input: Entity<InputState>,
-    vertical_spacing_input: Entity<InputState>,
-    horizontal_spacing_input: Entity<InputState>,
+    agent_chat_line_height_input: Entity<InputState>,
     // Cursor
     cursor_style_select: Entity<SelectState>,
     cursor_blinking: bool,
@@ -249,11 +253,13 @@ pub(super) enum AgentCatalogItem {
 
 #[derive(Clone, Copy)]
 enum TextSetting {
-    FontSize,
+    TerminalFontSize,
+    TerminalLineHeight,
+    TerminalCellWidth,
     EditorFontSize,
+    EditorLineHeight,
     AgentChatFontSize,
-    VerticalSpacing,
-    HorizontalSpacing,
+    AgentChatLineHeight,
     WindowOpacity,
     ScrollbackMaxRows,
     TerminalInsetX,
@@ -267,7 +273,9 @@ enum SelectSetting {
     Language,
     TerminalPreset,
     UiPreset,
-    FontFamily,
+    TerminalFontFamily,
+    EditorFontFamily,
+    AgentChatFontFamily,
     CursorStyle,
     RenderMaxFps,
     SyntaxTheme,
@@ -1070,14 +1078,30 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&ui_preset), window, cx)
         });
 
-        let font_names = all_font_names(cx, &config.font.family);
-        let font_family = SharedString::from(config.font.family.clone());
-        let font_family_select = cx.new(|cx| {
-            let opts = font_names
-                .iter()
-                .map(|n| SelectOption::simple(n.clone()))
-                .collect();
-            select::state_with_options(opts, Some(&font_family), window, cx)
+        let terminal_font_options = font_select_options(cx, &[&config.font.terminal.family]);
+        let editor_font_options = font_select_options(cx, &[&config.font.editor.family]);
+        let agent_chat_font_options = font_select_options(cx, &[&config.font.agent_chat.family]);
+        let terminal_font_family = SharedString::from(config.font.terminal.family.clone());
+        let terminal_font_family_select = cx.new(|cx| {
+            select::state_with_options(
+                terminal_font_options,
+                Some(&terminal_font_family),
+                window,
+                cx,
+            )
+        });
+        let editor_font_family = SharedString::from(config.font.editor.family.clone());
+        let editor_font_family_select = cx.new(|cx| {
+            select::state_with_options(editor_font_options, Some(&editor_font_family), window, cx)
+        });
+        let agent_chat_font_family = SharedString::from(config.font.agent_chat.family.clone());
+        let agent_chat_font_family_select = cx.new(|cx| {
+            select::state_with_options(
+                agent_chat_font_options,
+                Some(&agent_chat_font_family),
+                window,
+                cx,
+            )
         });
 
         // Collected as each field below is built, instead of assembled in one
@@ -1093,10 +1117,10 @@ impl SettingsWindow {
         ));
         let mut section_focus_targets: HashMap<BuiltinSection, Vec<FocusHandle>> = HashMap::new();
 
-        let (font_size_input, font_size_fh) = Self::new_text_field(
+        let (terminal_font_size_input, font_size_fh) = Self::new_text_field(
             "e.g. 13",
-            format!("{}", config.font.size),
-            TextSetting::FontSize,
+            format!("{}", config.font.terminal.size),
+            TextSetting::TerminalFontSize,
             window,
             cx,
             &mut input_subscriptions,
@@ -1105,29 +1129,70 @@ impl SettingsWindow {
             .entry(BuiltinSection::Font)
             .or_default()
             .push(font_size_fh);
-        // Not wired into the Font tab cycle (kept out of
-        // `section_focus_targets`) — only font_size/vertical/horizontal
-        // spacing are, matching the pre-existing cycle order.
-        let (editor_font_size_input, _) = Self::new_text_field(
+        let (terminal_line_height_input, terminal_line_height_fh) = Self::new_text_field(
+            "e.g. 1.0",
+            format!("{}", config.font.terminal.line_height),
+            TextSetting::TerminalLineHeight,
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(terminal_line_height_fh);
+        let (terminal_cell_width_input, terminal_cell_width_fh) = Self::new_text_field(
+            "e.g. 1.0",
+            format!("{}", config.font.terminal.cell_width),
+            TextSetting::TerminalCellWidth,
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(terminal_cell_width_fh);
+        let (editor_font_size_input, editor_font_size_fh) = Self::new_text_field(
             "e.g. 13",
-            format!("{}", config.font.editor_size),
+            format!("{}", config.font.editor.size),
             TextSetting::EditorFontSize,
             window,
             cx,
             &mut input_subscriptions,
         );
-        let (agent_chat_font_size_input, _) = Self::new_text_field(
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(editor_font_size_fh);
+        let (editor_line_height_input, editor_line_height_fh) = Self::new_text_field(
+            "e.g. 1.7",
+            format!("{}", config.font.editor.line_height),
+            TextSetting::EditorLineHeight,
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(editor_line_height_fh);
+        let (agent_chat_font_size_input, agent_chat_font_size_fh) = Self::new_text_field(
             "e.g. 13",
-            format!("{}", config.font.agent_chat_size),
+            format!("{}", config.font.agent_chat.size),
             TextSetting::AgentChatFontSize,
             window,
             cx,
             &mut input_subscriptions,
         );
-        let (vertical_spacing_input, vertical_spacing_fh) = Self::new_text_field(
-            "e.g. 1.0",
-            format!("{}", config.font.vertical_spacing),
-            TextSetting::VerticalSpacing,
+        section_focus_targets
+            .entry(BuiltinSection::Font)
+            .or_default()
+            .push(agent_chat_font_size_fh);
+        let (agent_chat_line_height_input, agent_chat_line_height_fh) = Self::new_text_field(
+            "e.g. 1.6",
+            format!("{}", config.font.agent_chat.line_height),
+            TextSetting::AgentChatLineHeight,
             window,
             cx,
             &mut input_subscriptions,
@@ -1135,19 +1200,7 @@ impl SettingsWindow {
         section_focus_targets
             .entry(BuiltinSection::Font)
             .or_default()
-            .push(vertical_spacing_fh);
-        let (horizontal_spacing_input, horizontal_spacing_fh) = Self::new_text_field(
-            "e.g. 1.0",
-            format!("{}", config.font.horizontal_spacing),
-            TextSetting::HorizontalSpacing,
-            window,
-            cx,
-            &mut input_subscriptions,
-        );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(horizontal_spacing_fh);
+            .push(agent_chat_line_height_fh);
         let (opacity_input, opacity_fh) = Self::new_text_field(
             "0.1 – 1.0",
             format!("{}", config.window.opacity),
@@ -1174,7 +1227,7 @@ impl SettingsWindow {
             .push(scrollback_fh);
         let (inset_x_input, inset_x_fh) = Self::new_text_field(
             "e.g. 4",
-            format!("{}", config.font.inset_x),
+            format!("{}", config.font.terminal.inset_x),
             TextSetting::TerminalInsetX,
             window,
             cx,
@@ -1186,7 +1239,7 @@ impl SettingsWindow {
             .push(inset_x_fh);
         let (inset_y_input, inset_y_fh) = Self::new_text_field(
             "e.g. 2",
-            format!("{}", config.font.inset_y),
+            format!("{}", config.font.terminal.inset_y),
             TextSetting::TerminalInsetY,
             window,
             cx,
@@ -1366,7 +1419,15 @@ impl SettingsWindow {
             (&language_select, SelectSetting::Language),
             (&terminal_preset_select, SelectSetting::TerminalPreset),
             (&ui_preset_select, SelectSetting::UiPreset),
-            (&font_family_select, SelectSetting::FontFamily),
+            (
+                &terminal_font_family_select,
+                SelectSetting::TerminalFontFamily,
+            ),
+            (&editor_font_family_select, SelectSetting::EditorFontFamily),
+            (
+                &agent_chat_font_family_select,
+                SelectSetting::AgentChatFontFamily,
+            ),
             (&cursor_style_select, SelectSetting::CursorStyle),
             (&max_fps_select, SelectSetting::RenderMaxFps),
             (&syntax_theme_select, SelectSetting::SyntaxTheme),
@@ -1471,12 +1532,16 @@ impl SettingsWindow {
             language_select,
             terminal_preset_select,
             ui_preset_select,
-            font_family_select,
-            font_size_input,
+            terminal_font_family_select,
+            terminal_font_size_input,
+            terminal_line_height_input,
+            terminal_cell_width_input,
+            editor_font_family_select,
             editor_font_size_input,
+            editor_line_height_input,
+            agent_chat_font_family_select,
             agent_chat_font_size_input,
-            vertical_spacing_input,
-            horizontal_spacing_input,
+            agent_chat_line_height_input,
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
             agent_preset_select,
@@ -1795,36 +1860,66 @@ impl SettingsWindow {
                 window,
                 cx,
             ),
-            daruda_config::SettingsPatch::FontFamily(_) => Self::set_select_value(
-                &self.font_family_select,
-                live.font.family.clone(),
+            daruda_config::SettingsPatch::TerminalFontFamily(_) => Self::set_font_select_value(
+                &self.terminal_font_family_select,
+                live.font.terminal.family.clone(),
+                &[&live.font.terminal.family],
                 window,
                 cx,
             ),
-            daruda_config::SettingsPatch::FontSize(_) => {
-                Self::set_input_value(&self.font_size_input, live.font.size, window, cx)
-            }
+            daruda_config::SettingsPatch::TerminalFontSize(_) => Self::set_input_value(
+                &self.terminal_font_size_input,
+                live.font.terminal.size,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::TerminalLineHeight(_) => Self::set_input_value(
+                &self.terminal_line_height_input,
+                live.font.terminal.line_height,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::TerminalCellWidth(_) => Self::set_input_value(
+                &self.terminal_cell_width_input,
+                live.font.terminal.cell_width,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::EditorFontFamily(_) => Self::set_font_select_value(
+                &self.editor_font_family_select,
+                live.font.editor.family.clone(),
+                &[&live.font.editor.family],
+                window,
+                cx,
+            ),
             daruda_config::SettingsPatch::EditorFontSize(_) => Self::set_input_value(
                 &self.editor_font_size_input,
-                live.font.editor_size,
+                live.font.editor.size,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::EditorLineHeight(_) => Self::set_input_value(
+                &self.editor_line_height_input,
+                live.font.editor.line_height,
+                window,
+                cx,
+            ),
+            daruda_config::SettingsPatch::AgentChatFontFamily(_) => Self::set_font_select_value(
+                &self.agent_chat_font_family_select,
+                live.font.agent_chat.family.clone(),
+                &[&live.font.agent_chat.family],
                 window,
                 cx,
             ),
             daruda_config::SettingsPatch::AgentChatFontSize(_) => Self::set_input_value(
                 &self.agent_chat_font_size_input,
-                live.font.agent_chat_size,
+                live.font.agent_chat.size,
                 window,
                 cx,
             ),
-            daruda_config::SettingsPatch::VerticalSpacing(_) => Self::set_input_value(
-                &self.vertical_spacing_input,
-                live.font.vertical_spacing,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::HorizontalSpacing(_) => Self::set_input_value(
-                &self.horizontal_spacing_input,
-                live.font.horizontal_spacing,
+            daruda_config::SettingsPatch::AgentChatLineHeight(_) => Self::set_input_value(
+                &self.agent_chat_line_height_input,
+                live.font.agent_chat.line_height,
                 window,
                 cx,
             ),
@@ -1888,10 +1983,10 @@ impl SettingsWindow {
                 Self::set_input_value(&self.scrollback_input, live.scrollback.max_rows, window, cx)
             }
             daruda_config::SettingsPatch::TerminalInsetX(_) => {
-                Self::set_input_value(&self.inset_x_input, live.font.inset_x, window, cx)
+                Self::set_input_value(&self.inset_x_input, live.font.terminal.inset_x, window, cx)
             }
             daruda_config::SettingsPatch::TerminalInsetY(_) => {
-                Self::set_input_value(&self.inset_y_input, live.font.inset_y, window, cx)
+                Self::set_input_value(&self.inset_y_input, live.font.terminal.inset_y, window, cx)
             }
             daruda_config::SettingsPatch::FilesShowHidden(_) => {
                 self.files_show_hidden = live.left_dock.files_show_hidden;
@@ -1948,6 +2043,21 @@ impl SettingsWindow {
         });
     }
 
+    fn set_font_select_value(
+        select: &Entity<SelectState>,
+        value: impl Into<SharedString>,
+        current: &[&str],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = value.into();
+        let options = font_select_options(cx, current);
+        select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
+            select.set_selected_value(&value, window, cx);
+        });
+    }
+
     fn set_input_value(
         input: &Entity<InputState>,
         value: impl ToString,
@@ -1963,12 +2073,18 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::GeneralLanguage(config.general.language.clone()),
             daruda_config::SettingsPatch::TerminalPreset(config.theme.terminal_preset.clone()),
             daruda_config::SettingsPatch::UiPreset(config.theme.ui_preset.clone()),
-            daruda_config::SettingsPatch::FontFamily(config.font.family.clone()),
-            daruda_config::SettingsPatch::FontSize(config.font.size),
-            daruda_config::SettingsPatch::EditorFontSize(config.font.editor_size),
-            daruda_config::SettingsPatch::AgentChatFontSize(config.font.agent_chat_size),
-            daruda_config::SettingsPatch::VerticalSpacing(config.font.vertical_spacing),
-            daruda_config::SettingsPatch::HorizontalSpacing(config.font.horizontal_spacing),
+            daruda_config::SettingsPatch::TerminalFontFamily(config.font.terminal.family.clone()),
+            daruda_config::SettingsPatch::TerminalFontSize(config.font.terminal.size),
+            daruda_config::SettingsPatch::TerminalLineHeight(config.font.terminal.line_height),
+            daruda_config::SettingsPatch::TerminalCellWidth(config.font.terminal.cell_width),
+            daruda_config::SettingsPatch::EditorFontFamily(config.font.editor.family.clone()),
+            daruda_config::SettingsPatch::EditorFontSize(config.font.editor.size),
+            daruda_config::SettingsPatch::EditorLineHeight(config.font.editor.line_height),
+            daruda_config::SettingsPatch::AgentChatFontFamily(
+                config.font.agent_chat.family.clone(),
+            ),
+            daruda_config::SettingsPatch::AgentChatFontSize(config.font.agent_chat.size),
+            daruda_config::SettingsPatch::AgentChatLineHeight(config.font.agent_chat.line_height),
             daruda_config::SettingsPatch::CursorStyle(config.cursor.style),
             daruda_config::SettingsPatch::CursorBlinking(config.cursor.blinking),
             daruda_config::SettingsPatch::AgentUseModifierToSend(config.agent.use_modifier_to_send),
@@ -1982,8 +2098,8 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::WindowOpacity(config.window.opacity),
             daruda_config::SettingsPatch::WindowBlur(config.window.blur),
             daruda_config::SettingsPatch::ScrollbackMaxRows(config.scrollback.max_rows),
-            daruda_config::SettingsPatch::TerminalInsetX(config.font.inset_x),
-            daruda_config::SettingsPatch::TerminalInsetY(config.font.inset_y),
+            daruda_config::SettingsPatch::TerminalInsetX(config.font.terminal.inset_x),
+            daruda_config::SettingsPatch::TerminalInsetY(config.font.terminal.inset_y),
             daruda_config::SettingsPatch::FilesShowHidden(config.left_dock.files_show_hidden),
             daruda_config::SettingsPatch::FilesUseGitignore(config.left_dock.files_use_gitignore),
             daruda_config::SettingsPatch::SyntaxTheme(config.file_viewer.syntax_theme.clone()),
@@ -2051,7 +2167,15 @@ impl SettingsWindow {
             SelectSetting::Language => daruda_config::SettingsPatch::GeneralLanguage(value),
             SelectSetting::TerminalPreset => daruda_config::SettingsPatch::TerminalPreset(value),
             SelectSetting::UiPreset => daruda_config::SettingsPatch::UiPreset(value),
-            SelectSetting::FontFamily => daruda_config::SettingsPatch::FontFamily(value),
+            SelectSetting::TerminalFontFamily => {
+                daruda_config::SettingsPatch::TerminalFontFamily(value)
+            }
+            SelectSetting::EditorFontFamily => {
+                daruda_config::SettingsPatch::EditorFontFamily(value)
+            }
+            SelectSetting::AgentChatFontFamily => {
+                daruda_config::SettingsPatch::AgentChatFontFamily(value)
+            }
             SelectSetting::CursorStyle => {
                 let style = match value.as_str() {
                     "underline" => daruda_config::CursorStyle::Underline,
@@ -2106,13 +2230,27 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) {
         let patch = match setting {
-            TextSetting::FontSize => Self::parse_bounded_field(
+            TextSetting::TerminalFontSize => Self::parse_bounded_field(
                 input,
                 6.0..=72.0,
                 || SharedString::from(s::settings_err_font_size()),
                 cx,
             )
-            .map(daruda_config::SettingsPatch::FontSize),
+            .map(daruda_config::SettingsPatch::TerminalFontSize),
+            TextSetting::TerminalLineHeight => Self::parse_bounded_field(
+                input,
+                0.5..=2.0,
+                || SharedString::from(s::settings_err_spacing()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::TerminalLineHeight),
+            TextSetting::TerminalCellWidth => Self::parse_bounded_field(
+                input,
+                0.5..=2.0,
+                || SharedString::from(s::settings_err_spacing()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::TerminalCellWidth),
             TextSetting::EditorFontSize => Self::parse_bounded_field(
                 input,
                 6.0..=72.0,
@@ -2120,6 +2258,13 @@ impl SettingsWindow {
                 cx,
             )
             .map(daruda_config::SettingsPatch::EditorFontSize),
+            TextSetting::EditorLineHeight => Self::parse_bounded_field(
+                input,
+                0.5..=2.0,
+                || SharedString::from(s::settings_err_spacing()),
+                cx,
+            )
+            .map(daruda_config::SettingsPatch::EditorLineHeight),
             TextSetting::AgentChatFontSize => Self::parse_bounded_field(
                 input,
                 6.0..=72.0,
@@ -2127,20 +2272,13 @@ impl SettingsWindow {
                 cx,
             )
             .map(daruda_config::SettingsPatch::AgentChatFontSize),
-            TextSetting::VerticalSpacing => Self::parse_bounded_field(
+            TextSetting::AgentChatLineHeight => Self::parse_bounded_field(
                 input,
                 0.5..=2.0,
                 || SharedString::from(s::settings_err_spacing()),
                 cx,
             )
-            .map(daruda_config::SettingsPatch::VerticalSpacing),
-            TextSetting::HorizontalSpacing => Self::parse_bounded_field(
-                input,
-                0.5..=2.0,
-                || SharedString::from(s::settings_err_spacing()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::HorizontalSpacing),
+            .map(daruda_config::SettingsPatch::AgentChatLineHeight),
             TextSetting::WindowOpacity => Self::parse_bounded_field(
                 input,
                 0.1..=1.0,
@@ -2404,39 +2542,63 @@ impl SettingsWindow {
             .map(|s| s.to_string())
             .unwrap_or_else(|| daruda_config::ui_theme_presets::DEFAULT.to_owned());
 
-        config.font.family = self
-            .font_family_select
+        config.font.terminal.family = self
+            .terminal_font_family_select
             .read(cx)
             .selected_value()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::FontConfig::default().family);
+            .unwrap_or_else(|| daruda_config::FontConfig::default().terminal.family);
 
-        config.font.size = Self::parse_bounded_field(
-            &self.font_size_input,
+        config.font.terminal.size = Self::parse_bounded_field(
+            &self.terminal_font_size_input,
             6.0..=72.0,
             || SharedString::from(s::settings_err_font_size()),
             cx,
         )?;
-        config.font.editor_size = Self::parse_bounded_field(
+        config.font.terminal.line_height = Self::parse_bounded_field(
+            &self.terminal_line_height_input,
+            0.5..=2.0,
+            || SharedString::from(s::settings_err_spacing()),
+            cx,
+        )?;
+        config.font.terminal.cell_width = Self::parse_bounded_field(
+            &self.terminal_cell_width_input,
+            0.5..=2.0,
+            || SharedString::from(s::settings_err_spacing()),
+            cx,
+        )?;
+        config.font.editor.family = self
+            .editor_font_family_select
+            .read(cx)
+            .selected_value()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| daruda_config::FontConfig::default().editor.family);
+        config.font.editor.size = Self::parse_bounded_field(
             &self.editor_font_size_input,
             6.0..=72.0,
             || SharedString::from(s::settings_err_editor_font_size()),
             cx,
         )?;
-        config.font.agent_chat_size = Self::parse_bounded_field(
+        config.font.editor.line_height = Self::parse_bounded_field(
+            &self.editor_line_height_input,
+            0.5..=2.0,
+            || SharedString::from(s::settings_err_spacing()),
+            cx,
+        )?;
+        config.font.agent_chat.family = self
+            .agent_chat_font_family_select
+            .read(cx)
+            .selected_value()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| daruda_config::FontConfig::default().agent_chat.family);
+        config.font.agent_chat.size = Self::parse_bounded_field(
             &self.agent_chat_font_size_input,
             6.0..=72.0,
             || SharedString::from(s::settings_err_agent_chat_font_size()),
             cx,
         )?;
-        config.font.vertical_spacing = Self::parse_bounded_field(
-            &self.vertical_spacing_input,
-            0.5..=2.0,
-            || SharedString::from(s::settings_err_spacing()),
-            cx,
-        )?;
-        config.font.horizontal_spacing = Self::parse_bounded_field(
-            &self.horizontal_spacing_input,
+        config.font.agent_chat.line_height = Self::parse_bounded_field(
+            &self.agent_chat_line_height_input,
             0.5..=2.0,
             || SharedString::from(s::settings_err_spacing()),
             cx,
@@ -2498,13 +2660,13 @@ impl SettingsWindow {
             cx,
         )?;
 
-        config.font.inset_x = Self::parse_bounded_field(
+        config.font.terminal.inset_x = Self::parse_bounded_field(
             &self.inset_x_input,
             0.0..=32.0,
             || SharedString::from(s::settings_err_inset()),
             cx,
         )?;
-        config.font.inset_y = Self::parse_bounded_field(
+        config.font.terminal.inset_y = Self::parse_bounded_field(
             &self.inset_y_input,
             0.0..=32.0,
             || SharedString::from(s::settings_err_inset()),
@@ -2832,16 +2994,35 @@ fn agent_command_path_warning(command: &str) -> Option<String> {
 }
 
 /// Return all font family names available on this system, sorted alphabetically.
-/// The `current` family is always included as the first entry so the select
-/// can show the currently-configured font even if it is not yet installed.
-fn all_font_names(cx: &gpui::App, current: &str) -> Vec<String> {
+/// Every configured family remains selectable even if it is no longer installed.
+fn all_font_names(cx: &gpui::App, current: &[&str]) -> Vec<String> {
     let mut names = cx.text_system().all_font_names();
     names.sort();
     names.dedup();
-    if !current.is_empty() && !names.iter().any(|n| n == current) {
-        names.insert(0, current.to_owned());
+    let include_system_ui = current.contains(&daruda_config::SYSTEM_UI_FONT_FAMILY);
+    names.retain(|name| name != daruda_config::SYSTEM_UI_FONT_FAMILY || include_system_ui);
+    for family in current.iter().rev().filter(|family| !family.is_empty()) {
+        if !names.iter().any(|name| name == *family) {
+            names.insert(0, (*family).to_owned());
+        }
     }
     names
+}
+
+fn font_select_option(name: &str) -> SelectOption {
+    let label = if name == daruda_config::SYSTEM_UI_FONT_FAMILY {
+        s::settings_font_system_ui()
+    } else {
+        name.to_owned()
+    };
+    SelectOption::new(name.to_owned(), label)
+}
+
+fn font_select_options(cx: &gpui::App, current: &[&str]) -> Vec<SelectOption> {
+    all_font_names(cx, current)
+        .iter()
+        .map(|name| font_select_option(name))
+        .collect()
 }
 
 // `render::*` is just the `impl Render for SettingsWindow` block —

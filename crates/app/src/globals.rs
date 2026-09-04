@@ -28,8 +28,8 @@ pub(crate) fn init_all(cx: &mut App) {
         let preset = user.theme.ui_preset.clone();
         let lang = user.general.language.clone();
         let syntax = user.file_viewer.syntax_theme.clone();
-        let editor_font_size = user.font.editor_size;
-        let agent_chat_font_size = user.font.agent_chat_size;
+        let editor_font = user.font.editor.clone();
+        let agent_chat_font = user.font.agent_chat.clone();
         let agent_chat_reading_width = user.agent.reading_width;
         let window_opacity = user.window.opacity;
         let term_colors = user.effective_colors();
@@ -43,12 +43,15 @@ pub(crate) fn init_all(cx: &mut App) {
             cx,
             ui::theme::SyntaxPalette::from_config_name(&syntax),
         );
-        // Seed the file-viewer editor font size so raw / diff / markdown
-        // rows render at the configured size from the first paint.
-        ui::theme::set_editor_font_size(cx, editor_font_size);
-        // Seed the agent-chat font size so the conversation pane renders at the
-        // configured size from the first paint.
-        ui::theme::set_agent_chat_font_size(cx, agent_chat_font_size);
+        // Seed file-viewer font metrics so raw, diff, and markdown content
+        // renders from the configured values on the first paint.
+        ui::theme::set_editor_font_family(cx, editor_font.family);
+        ui::theme::set_editor_font_size(cx, editor_font.size);
+        ui::theme::set_editor_line_height(cx, editor_font.line_height);
+        // Seed agent-chat font metrics before the conversation's first paint.
+        ui::theme::set_agent_chat_font_family(cx, agent_chat_font.family);
+        ui::theme::set_agent_chat_font_size(cx, agent_chat_font.size);
+        ui::theme::set_agent_chat_line_height(cx, agent_chat_font.line_height);
         // Seed the reading-mode content width for AgentChat panes from the
         // first paint.
         ui::theme::set_agent_chat_reading_width(cx, agent_chat_reading_width);

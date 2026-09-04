@@ -70,6 +70,8 @@ impl Render for LinkProbe {
             MdRenderAssets {
                 t: &colors,
                 images: &images,
+                font_size: theme::FILE_VIEWER_FONT_SIZE,
+                line_height: theme::FILE_VIEWER_LINE_H_RATIO,
             },
             on_open_url,
             move |block, block_idx| {
@@ -116,6 +118,8 @@ impl Render for Probe {
                     MdRenderAssets {
                         t: &colors,
                         images: &images,
+                        font_size: theme::FILE_VIEWER_FONT_SIZE,
+                        line_height: theme::FILE_VIEWER_LINE_H_RATIO,
                     },
                     Rc::new(|_, _, _| {}),
                     |block, _| block,

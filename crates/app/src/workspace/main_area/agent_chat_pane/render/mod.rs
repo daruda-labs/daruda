@@ -321,6 +321,8 @@ pub(in crate::workspace) fn render(
         .relative()
         .flex()
         .flex_col()
+        .font_family(theme::agent_chat_font_family(cx))
+        .line_height(gpui::relative(theme::agent_chat_line_height(cx)))
         .child(width_capture)
         // The view owns its focus handle and tracks it here (like
         // `TerminalView`), so the pane walker embeds it as a plain cached

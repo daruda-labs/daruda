@@ -400,11 +400,7 @@ pub fn set_active_syntax_palette(cx: &mut App, palette: p::SyntaxPalette) {
     apply_daruda_palette(cx);
 }
 
-/// File-viewer / editor font size in points, mirrored from config
-/// `font.editor_size`. Drives the raw + diff editor body, the markdown
-/// raw rows, and the line-number gutter so they share one size that is
-/// independent of the terminal font. Single update site:
-/// [`set_editor_font_size`], called from the config-reload path.
+/// File-viewer / editor font size in points, mirrored from config.
 #[derive(Clone, Copy)]
 struct EditorFontSize(f32);
 
@@ -418,18 +414,41 @@ pub fn editor_font_size(cx: &App) -> f32 {
         .unwrap_or(p::FILE_VIEWER_FONT_SIZE)
 }
 
-/// Mirror the resolved config `font.editor_size` for the GPUI side. The
-/// config string stays the single source; this caches the value for the
-/// file-viewer render path.
 pub fn set_editor_font_size(cx: &mut App, size: f32) {
     cx.set_global(EditorFontSize(size));
 }
 
-/// Agent-chat font size in points, mirrored from config `font.agent_chat_size`.
-/// Drives the entire conversation pane — message bodies, headers, tool titles,
-/// and chrome share one size (body and label unified) that is independent of
-/// the terminal and editor fonts. Single update site:
-/// [`set_agent_chat_font_size`], called from the config-reload path.
+#[derive(Clone)]
+struct EditorFontFamily(gpui::SharedString);
+
+impl gpui::Global for EditorFontFamily {}
+
+pub fn editor_font_family(cx: &App) -> gpui::SharedString {
+    cx.try_global::<EditorFontFamily>()
+        .map(|font| font.0.clone())
+        .unwrap_or_else(|| daruda_config::FontConfig::default().editor.family.into())
+}
+
+pub fn set_editor_font_family(cx: &mut App, family: impl Into<gpui::SharedString>) {
+    cx.set_global(EditorFontFamily(family.into()));
+}
+
+#[derive(Clone, Copy)]
+struct EditorLineHeight(f32);
+
+impl gpui::Global for EditorLineHeight {}
+
+pub fn editor_line_height(cx: &App) -> f32 {
+    cx.try_global::<EditorLineHeight>()
+        .map(|height| height.0)
+        .unwrap_or(p::FILE_VIEWER_LINE_H_RATIO)
+}
+
+pub fn set_editor_line_height(cx: &mut App, line_height: f32) {
+    cx.set_global(EditorLineHeight(line_height));
+}
+
+/// Agent-chat font size in points, mirrored from config.
 #[derive(Clone, Copy)]
 struct AgentChatFontSize(f32);
 
@@ -445,11 +464,52 @@ pub fn agent_chat_font_size(cx: &App) -> f32 {
         .unwrap_or(p::AGENT_CHAT_MSG_FONT_SIZE)
 }
 
-/// Mirror the resolved config `font.agent_chat_size` for the GPUI side. The
-/// config string stays the single source; this caches the value for the
-/// agent-chat render path.
 pub fn set_agent_chat_font_size(cx: &mut App, size: f32) {
     cx.set_global(AgentChatFontSize(size));
+}
+
+#[derive(Clone)]
+struct AgentChatFontFamily(gpui::SharedString);
+
+impl gpui::Global for AgentChatFontFamily {}
+
+pub fn agent_chat_font_family(cx: &App) -> gpui::SharedString {
+    cx.try_global::<AgentChatFontFamily>()
+        .map(|font| font.0.clone())
+        .unwrap_or_else(|| {
+            daruda_config::FontConfig::default()
+                .agent_chat
+                .family
+                .into()
+        })
+}
+
+pub fn set_agent_chat_font_family(cx: &mut App, family: impl Into<gpui::SharedString>) {
+    cx.set_global(AgentChatFontFamily(family.into()));
+}
+
+#[derive(Clone, Copy)]
+struct AgentChatLineHeight(f32);
+
+impl gpui::Global for AgentChatLineHeight {}
+
+pub fn agent_chat_line_height(cx: &App) -> f32 {
+    cx.try_global::<AgentChatLineHeight>()
+        .map(|height| height.0)
+        .unwrap_or(p::MD_VIEW_LINE_HEIGHT)
+}
+
+pub fn set_agent_chat_line_height(cx: &mut App, line_height: f32) {
+    cx.set_global(AgentChatLineHeight(line_height));
+}
+
+/// Painted row height for code editors embedded in agent-chat cards.
+/// GPUI snaps relative line heights to whole logical pixels, so the reserved
+/// viewport uses the same ceiling and never loses a row at the configured cap.
+pub fn agent_chat_embed_row_height(cx: &App) -> f32 {
+    (agent_chat_font_size(cx) * agent_chat_line_height(cx))
+        .ceil()
+        .max(1.0)
 }
 
 /// Pane width at or below which the Activity Bar's three transcript chips
@@ -457,7 +517,7 @@ pub fn set_agent_chat_font_size(cx: &mut App, size: f32) {
 ///
 /// The two parts are text widths measured at
 /// [`AGENT_CHAT_MSG_FONT_SIZE`](p::AGENT_CHAT_MSG_FONT_SIZE), and the pane's
-/// size is user-configurable (`font.agent_chat_size`, clamped 6–72), so the
+/// size is user-configurable (`font.agent_chat.size`, clamped 6-72), so the
 /// threshold has to scale with it. A fixed breakpoint reads as derived while
 /// silently assuming one font: at 20px the spelled-out chips outgrow the budget,
 /// the bar stays wide, and the cluster ellipsizes them instead of collapsing —
@@ -1117,6 +1177,20 @@ mod tests {
                 agent_chat_compact_options_w(cx) < default,
                 "the smallest configurable font lets a narrower pane keep the chips"
             );
+        });
+    }
+
+    #[gpui::test]
+    fn an_embedded_editor_row_tracks_agent_chat_font_metrics(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            assert_eq!(
+                agent_chat_embed_row_height(cx),
+                (p::AGENT_CHAT_MSG_FONT_SIZE * p::MD_VIEW_LINE_HEIGHT).ceil()
+            );
+
+            set_agent_chat_font_size(cx, 20.0);
+            set_agent_chat_line_height(cx, 1.5);
+            assert_eq!(agent_chat_embed_row_height(cx), 30.0);
         });
     }
 

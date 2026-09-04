@@ -39,6 +39,7 @@ pub(super) fn render_file_viewer_body(
     let t = theme::current(cx);
     let ctx_text = t.text_muted;
     let del_text = t.file_diff_del_text;
+    let editor_font_size = theme::editor_font_size(cx);
 
     let frame = div()
         .absolute()
@@ -53,7 +54,7 @@ pub(super) fn render_file_viewer_body(
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+            .text_size(px(editor_font_size))
             .text_color(ctx_text)
             .child(strings::file_viewer_loading())
             .into_any_element(),
@@ -63,7 +64,7 @@ pub(super) fn render_file_viewer_body(
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+            .text_size(px(editor_font_size))
             .text_color(del_text)
             .child(msg.clone())
             .into_any_element(),
@@ -73,7 +74,7 @@ pub(super) fn render_file_viewer_body(
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+            .text_size(px(editor_font_size))
             .text_color(ctx_text)
             .child(strings::file_viewer_binary())
             .into_any_element(),
@@ -83,7 +84,7 @@ pub(super) fn render_file_viewer_body(
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+            .text_size(px(editor_font_size))
             .text_color(del_text)
             .child(strings::file_viewer_deleted())
             .into_any_element(),
@@ -113,7 +114,7 @@ pub(super) fn render_file_viewer_body(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                    .text_size(px(editor_font_size))
                     .text_color(ctx_text)
                     .child(strings::file_viewer_empty_diff())
                     .into_any_element()
@@ -175,9 +176,9 @@ fn render_raw_body(
     let focused_bg = t.file_viewer_search_focused_bg;
     let match_bg = t.file_viewer_search_match_bg;
     // Config-driven editor font + matching row height, so the markdown raw
-    // view shares one size with the raw/diff editor (`font.editor_size`).
+    // view shares one size with the raw/diff editor (`font.editor.size`).
     let editor_font = theme::editor_font_size(cx);
-    let row_h = editor_font * theme::FILE_VIEWER_LINE_H_RATIO;
+    let row_h = editor_font * theme::editor_line_height(cx);
     let line_h = px(row_h);
     let overscan = theme::FILE_VIEWER_VIRTUAL_OVERSCAN;
 
@@ -233,6 +234,7 @@ fn render_raw_body(
                 row,
                 char_selection,
                 body_text,
+                px(editor_font),
                 line_h,
             ));
         col = col.child(el);

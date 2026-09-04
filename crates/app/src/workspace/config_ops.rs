@@ -38,7 +38,7 @@ impl Workspace {
             .terminal_config
             .palette
             .expect("terminal_config_from always sets palette");
-        self.font_family = config.font.family.clone();
+        self.font_family = config.font.terminal.family.clone();
         self.shell_program = config.shell.program.clone();
         let syntax_theme_changed = self.syntax_theme != config.file_viewer.syntax_theme;
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
@@ -140,13 +140,13 @@ impl Workspace {
             view.update(cx, |view, _cx| {
                 view.set_font(font.clone());
                 view.apply_font_settings(
-                    config.font.size,
-                    config.font.vertical_spacing,
-                    config.font.horizontal_spacing,
+                    config.font.terminal.size,
+                    config.font.terminal.line_height,
+                    config.font.terminal.cell_width,
                 );
                 view.apply_colors(fg, bg, &pal);
                 view.set_background_alpha(config.window.opacity);
-                view.apply_inset(config.font.inset_x, config.font.inset_y);
+                view.apply_inset(config.font.terminal.inset_x, config.font.terminal.inset_y);
             });
         }
         let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);
@@ -171,21 +171,30 @@ impl Workspace {
             // staging diff on the next render, so a plain `cx.notify()` suffices.
             cx.notify();
         }
-        // File-viewer editor font size, independent of the terminal font.
-        // Mirror to the GPUI-side global *before* any file-pane reload so a
-        // re-bake reads the fresh size; the render path reads it directly.
-        let editor_font_changed =
-            (crate::ui::theme::editor_font_size(cx) - config.font.editor_size).abs() > f32::EPSILON;
-        crate::ui::theme::set_editor_font_size(cx, config.font.editor_size);
-
-        // Agent-chat font size, independent of terminal/editor fonts. Mirror
-        // to the GPUI-side global the agent-chat render path reads directly; on
-        // change, cached `AgentChatView`s are dirtied below (a bare workspace
-        // `cx.notify()` would not reach a cached child — render-cost rule §10).
-        let agent_chat_font_changed =
-            (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat_size).abs()
+        // Mirror editor metrics before a file-pane reload so both raw and
+        // preview renderers read one fresh domain configuration.
+        let editor_font_changed = crate::ui::theme::editor_font_family(cx).as_ref()
+            != config.font.editor.family.as_str()
+            || (crate::ui::theme::editor_font_size(cx) - config.font.editor.size).abs()
+                > f32::EPSILON
+            || (crate::ui::theme::editor_line_height(cx) - config.font.editor.line_height).abs()
                 > f32::EPSILON;
-        crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat_size);
+        crate::ui::theme::set_editor_font_family(cx, config.font.editor.family.clone());
+        crate::ui::theme::set_editor_font_size(cx, config.font.editor.size);
+        crate::ui::theme::set_editor_line_height(cx, config.font.editor.line_height);
+
+        // Agent-chat views are cached child entities, so any prose metric
+        // change must explicitly dirty them below.
+        let agent_chat_font_changed = crate::ui::theme::agent_chat_font_family(cx).as_ref()
+            != config.font.agent_chat.family.as_str()
+            || (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat.size).abs()
+                > f32::EPSILON
+            || (crate::ui::theme::agent_chat_line_height(cx) - config.font.agent_chat.line_height)
+                .abs()
+                > f32::EPSILON;
+        crate::ui::theme::set_agent_chat_font_family(cx, config.font.agent_chat.family.clone());
+        crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat.size);
+        crate::ui::theme::set_agent_chat_line_height(cx, config.font.agent_chat.line_height);
         let agent_chat_reading_width_changed =
             (crate::ui::theme::agent_chat_reading_width(cx) - config.agent.reading_width).abs()
                 > f32::EPSILON;
@@ -491,11 +500,11 @@ pub(in crate::workspace) fn terminal_config_from(
             b: colors.background.b,
         },
         palette: Some(colors.to_ansi_palette()),
-        font_size: config.font.size,
-        vertical_spacing: config.font.vertical_spacing,
-        horizontal_spacing: config.font.horizontal_spacing,
-        inset_x: config.font.inset_x,
-        inset_y: config.font.inset_y,
+        font_size: config.font.terminal.size,
+        vertical_spacing: config.font.terminal.line_height,
+        horizontal_spacing: config.font.terminal.cell_width,
+        inset_x: config.font.terminal.inset_x,
+        inset_y: config.font.terminal.inset_y,
         max_scrollback: config.scrollback.max_rows,
         background_alpha: config.window.opacity,
         osc1337_max_bytes: config.clipboard.streaming_max_bytes,
@@ -526,7 +535,7 @@ mod tests {
     #[test]
     fn terminal_config_clamps_font_size() {
         let mut c = daruda_config::Config::default();
-        c.font.size = 1000.0;
+        c.font.terminal.size = 1000.0;
         assert_eq!(
             terminal_config_from(&c).font_size,
             daruda_terminal::FONT_SIZE_MAX

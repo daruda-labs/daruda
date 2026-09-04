@@ -91,6 +91,19 @@ fn path_to_file_url(path: &std::path::Path) -> String {
     format!("file://{encoded}")
 }
 
+fn font_domain_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
+    let t = theme::current(cx);
+    div()
+        .mt(px(theme::PAD_SM))
+        .pb(px(theme::PAD_XS))
+        .border_b_1()
+        .border_color(t.border)
+        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(t.text_primary)
+        .child(label.into())
+}
+
 impl SettingsWindow {
     /// Copy `/pair <code>` to the clipboard so the user can paste it
     /// straight into the Telegram app on their phone instead of retyping
@@ -149,29 +162,48 @@ impl SettingsWindow {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_font(), cx))
+            .child(font_domain_label(s::settings_font_domain_terminal(), cx))
             .child(field_row(
                 s::settings_label_font_family(),
-                crate::ui::select::select(&self.font_family_select, cx, 0),
+                crate::ui::select::select(&self.terminal_font_family_select, cx, 0),
             ))
             .child(field_row(
                 s::settings_label_font_size(),
-                crate::ui::input(&self.font_size_input, cx, 0),
+                crate::ui::input(&self.terminal_font_size_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_label_editor_font_size(),
+                s::settings_label_line_height(),
+                crate::ui::input(&self.terminal_line_height_input, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_label_cell_width(),
+                crate::ui::input(&self.terminal_cell_width_input, cx, 0),
+            ))
+            .child(font_domain_label(s::settings_font_domain_editor(), cx))
+            .child(field_row(
+                s::settings_label_font_family(),
+                crate::ui::select::select(&self.editor_font_family_select, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_label_font_size(),
                 crate::ui::input(&self.editor_font_size_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_label_agent_chat_font_size(),
+                s::settings_label_line_height(),
+                crate::ui::input(&self.editor_line_height_input, cx, 0),
+            ))
+            .child(font_domain_label(s::settings_font_domain_agent_chat(), cx))
+            .child(field_row(
+                s::settings_label_font_family(),
+                crate::ui::select::select(&self.agent_chat_font_family_select, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_label_font_size(),
                 crate::ui::input(&self.agent_chat_font_size_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_label_vertical_spacing(),
-                crate::ui::input(&self.vertical_spacing_input, cx, 0),
-            ))
-            .child(field_row(
-                s::settings_label_horizontal_spacing(),
-                crate::ui::input(&self.horizontal_spacing_input, cx, 0),
+                s::settings_label_line_height(),
+                crate::ui::input(&self.agent_chat_line_height_input, cx, 0),
             ))
             .into_any_element()
     }

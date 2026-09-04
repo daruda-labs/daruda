@@ -556,7 +556,7 @@ fn output_block_view(
             &key,
             editor,
             copy,
-            theme::AGENT_CHAT_EMBED_MAX_H,
+            theme::AGENT_CHAT_EMBED_MAX_ROWS,
             context.t,
             context.dim,
             cx,

@@ -3832,23 +3832,29 @@ pub fn settings_section_shell() -> String {
 pub fn settings_section_window() -> String {
     rust_i18n::t!("settings.section_window").into_owned()
 }
+pub fn settings_font_domain_terminal() -> String {
+    rust_i18n::t!("settings.font_domain_terminal").into_owned()
+}
+pub fn settings_font_domain_editor() -> String {
+    rust_i18n::t!("settings.font_domain_editor").into_owned()
+}
+pub fn settings_font_domain_agent_chat() -> String {
+    rust_i18n::t!("settings.font_domain_agent_chat").into_owned()
+}
+pub fn settings_font_system_ui() -> String {
+    rust_i18n::t!("settings.font_system_ui").into_owned()
+}
 pub fn settings_label_font_family() -> String {
     rust_i18n::t!("settings.label_font_family").into_owned()
 }
 pub fn settings_label_font_size() -> String {
     rust_i18n::t!("settings.label_font_size").into_owned()
 }
-pub fn settings_label_editor_font_size() -> String {
-    rust_i18n::t!("settings.label_editor_font_size").into_owned()
+pub fn settings_label_line_height() -> String {
+    rust_i18n::t!("settings.label_line_height").into_owned()
 }
-pub fn settings_label_agent_chat_font_size() -> String {
-    rust_i18n::t!("settings.label_agent_chat_font_size").into_owned()
-}
-pub fn settings_label_vertical_spacing() -> String {
-    rust_i18n::t!("settings.label_vertical_spacing").into_owned()
-}
-pub fn settings_label_horizontal_spacing() -> String {
-    rust_i18n::t!("settings.label_horizontal_spacing").into_owned()
+pub fn settings_label_cell_width() -> String {
+    rust_i18n::t!("settings.label_cell_width").into_owned()
 }
 pub fn settings_label_cursor_style() -> String {
     rust_i18n::t!("settings.label_cursor_style").into_owned()

@@ -24,7 +24,7 @@ pub(in crate::workspace) fn bounded_editor_embed(
     id: &str,
     editor: &Entity<crate::ui::InputState>,
     copy_source: Option<SharedString>,
-    max_h: f32,
+    max_rows: usize,
     t: &theme::DarudaTheme,
     dim: f32,
     cx: &App,
@@ -33,7 +33,8 @@ pub(in crate::workspace) fn bounded_editor_embed(
     // The bound is the whole point: `calculate_visible_range`
     // (`gpui_component/src/input/element.rs`) derives the shaped row range from
     // the painted height, so an unbounded embed shapes every row on every paint.
-    let height = bounded_embed_height(rows, max_h);
+    let row_height = theme::agent_chat_embed_row_height(cx);
+    let height = bounded_embed_height(rows, max_rows, row_height);
     // `scroll_handle().bounds()` / `.max_offset()` are permanently zero for this
     // element (see `InputState::scroll_size`'s doc comment), so the viewport
     // extent comes from `last_bounds()` — the same pairing the File viewer's
@@ -50,7 +51,7 @@ pub(in crate::workspace) fn bounded_editor_embed(
     // in code-editor mode `gpui_component`'s `element.rs` pads the scrollable
     // height by half a viewport, so that value always overflows and would draw a
     // thumb even when the cap hid nothing. The width carries no such pad.
-    let content_h = embed_text_height(rows);
+    let content_h = embed_text_height(rows, row_height);
     // The text element owns wheel gestures in capture while its offset changes,
     // then lets them bubble at the extremes so the transcript can keep chaining.
     let group = SharedString::from(format!("agent-chat-out-{id}"));

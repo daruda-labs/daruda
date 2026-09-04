@@ -158,21 +158,27 @@ pub(in crate::workspace) fn output_source_fingerprint(src: &OutputEditorSource<'
 /// the value [`bounded_embed_height`] caps and the content extent the embed's
 /// vertical thumb measures against, so the thumb appears exactly when the cap
 /// engaged.
-pub(in crate::workspace) fn embed_text_height(rows: usize) -> Pixels {
-    px(rows.max(1) as f32 * theme::AGENT_CHAT_EMBED_ROW_H)
+pub(in crate::workspace) fn embed_text_height(rows: usize, row_height: f32) -> Pixels {
+    px(rows.max(1) as f32 * row_height)
 }
 
-/// Height of a `rows`-row embed: its text extent or `max_h`, whichever is
-/// smaller, plus a strip for the custom horizontal thumb — `SCROLLBAR_W` (its
-/// height) plus `SCROLLBAR_MARGIN_R` (`horizontal_thumb`'s `.bottom()` inset).
+/// Height of a `rows`-row embed: its text extent or the configured-row cap,
+/// whichever is smaller, plus a strip for the custom horizontal thumb —
+/// `SCROLLBAR_W` (its height) plus `SCROLLBAR_MARGIN_R`
+/// (`horizontal_thumb`'s `.bottom()` inset).
 /// Below the cap that strip is empty, so the thumb clears the last text row;
 /// once the cap engages the editor fills the whole box and whatever row the
 /// strip lands on shows through beneath the thumb.
 ///
-/// `max_h` is the caller's: a diff and a verbatim output are worth different
-/// budgets (see [`theme::AGENT_CHAT_DIFF_EMBED_MAX_H`]).
-pub(in crate::workspace) fn bounded_embed_height(rows: usize, max_h: f32) -> Pixels {
-    let text_h = f32::from(embed_text_height(rows));
+/// `max_rows` is the caller's: a diff and a verbatim output are worth different
+/// budgets (see [`theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS`]).
+pub(in crate::workspace) fn bounded_embed_height(
+    rows: usize,
+    max_rows: usize,
+    row_height: f32,
+) -> Pixels {
+    let text_h = f32::from(embed_text_height(rows, row_height));
+    let max_h = max_rows.max(1) as f32 * row_height;
     px(text_h.min(max_h) + theme::SCROLLBAR_W + theme::SCROLLBAR_MARGIN_R)
 }
 

@@ -23,7 +23,7 @@ use std::rc::Rc;
 
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use gpui::{App, Context, IntoElement, Window, div, prelude::*, px};
+use gpui::{App, Context, IntoElement, Window, div, prelude::*, px, relative};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::CharSelection;
@@ -81,6 +81,8 @@ type OpenUrl = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 struct MdRenderAssets<'a> {
     t: &'a MdColors,
     images: &'a MdImages,
+    font_size: f32,
+    line_height: f32,
 }
 
 impl MdColors {
@@ -117,7 +119,12 @@ pub(super) fn render_md_body(
     render_md_body_layout(
         blocks,
         char_selection,
-        MdRenderAssets { t: &t, images },
+        MdRenderAssets {
+            t: &t,
+            images,
+            font_size: theme::editor_font_size(cx),
+            line_height: theme::editor_line_height(cx),
+        },
         open_url,
         |block, block_idx| block_with_selection(block, block_idx, cx),
     )
@@ -141,7 +148,8 @@ fn render_md_body_layout(
         .px(px(theme::MD_BODY_PAD_X))
         .py(px(theme::MD_BODY_PAD_Y))
         .gap(px(theme::MD_BLOCK_GAP))
-        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_size(px(assets.font_size))
+        .line_height(relative(assets.line_height))
         .text_color(body_text);
 
     for (i, block) in blocks.iter().enumerate() {

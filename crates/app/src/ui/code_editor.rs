@@ -12,7 +12,7 @@
 //!   minimum). The task-edit prompt + notes use this.
 
 use crate::ui::theme;
-use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px};
+use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px, relative};
 use gpui_component::Sizable as _;
 use gpui_component::input::{CodeEditorSurface, Input, InputState};
 
@@ -32,10 +32,12 @@ pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
         .small()
         .bordered(true)
         .bg(theme::current(cx).modal_input_bg)
-        // Follow the config-driven editor font (`font.editor_size`) like the
+        // Follow the config-driven editor font (`font.editor.size`) like the
         // file-viewer editor; `.small()` still owns the padding/height, this
         // overrides only the text size via `refine_style`.
+        .font_family(theme::editor_font_family(cx))
         .text_size(px(theme::editor_font_size(cx)))
+        .line_height(relative(theme::editor_line_height(cx)))
 }
 
 /// Build an `Entity<InputState>` configured for markdown editing in
@@ -111,13 +113,22 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 /// vanish on a dark theme; `fg` is the host's slot for it — each caller picks
 /// it to match whatever background it actually paints on (see
 /// [`file_viewer_editor`] vs [`embedded_code_viewer`]).
-fn code_editor_chrome(state: &Entity<InputState>, fg: Hsla, cx: &App) -> Input {
+fn code_editor_chrome(
+    state: &Entity<InputState>,
+    fg: Hsla,
+    family: SharedString,
+    size: f32,
+    line_height: f32,
+    cx: &App,
+) -> Input {
     Input::new(state)
         .appearance(false)
         .input_padding(false)
         .show_scrollbar(false)
         .disabled(state.read(cx).is_disabled())
-        .text_size(px(theme::editor_font_size(cx)))
+        .font_family(family)
+        .text_size(px(size))
+        .line_height(relative(line_height))
         .text_color(fg)
 }
 
@@ -134,7 +145,15 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
         theme::file_viewer_pane_syntax_is_light(cx),
     )
     .default;
-    code_editor_chrome(state, fg, cx).code_editor_surface(CodeEditorSurface::background(bg))
+    code_editor_chrome(
+        state,
+        fg,
+        theme::editor_font_family(cx),
+        theme::editor_font_size(cx),
+        theme::editor_line_height(cx),
+        cx,
+    )
+    .code_editor_surface(CodeEditorSurface::background(bg))
 }
 
 /// Render `state` as a read-only viewer **embedded, height-capped, in the
@@ -159,5 +178,13 @@ pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &A
         theme::agent_chat_syntax_is_light(cx),
     )
     .default;
-    code_editor_chrome(state, fg, cx).code_editor_surface(CodeEditorSurface::background(background))
+    code_editor_chrome(
+        state,
+        fg,
+        theme::FONT_FAMILY_MONOSPACE.into(),
+        theme::agent_chat_font_size(cx),
+        theme::agent_chat_line_height(cx),
+        cx,
+    )
+    .code_editor_surface(CodeEditorSurface::background(background))
 }

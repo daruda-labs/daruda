@@ -4,7 +4,7 @@ use theme_presets::colors_for_preset;
 #[test]
 fn default_config_is_valid() {
     let cfg = Config::default();
-    assert_eq!(cfg.font.size, 13.0);
+    assert_eq!(cfg.font.terminal.size, 13.0);
     assert_eq!(cfg.cursor.style, CursorStyle::Block);
     assert!(cfg.cursor.blinking);
     assert_eq!(cfg.window.opacity, 1.0);
@@ -61,7 +61,7 @@ fn left_dock_width_clamps_to_range() {
 #[test]
 fn empty_toml_produces_defaults() {
     let cfg: Config = toml::from_str("").unwrap();
-    assert_eq!(cfg.font.size, 13.0);
+    assert_eq!(cfg.font.terminal.size, 13.0);
     assert_eq!(cfg.colors.foreground, HexColor::new(0xD4, 0xD4, 0xD4));
 }
 
@@ -181,8 +181,8 @@ fn explicitly_empty_agents_normalizes_to_claude_default() {
 #[test]
 fn font_inset_defaults_to_4_and_2() {
     let cfg = Config::default();
-    assert_eq!(cfg.font.inset_x, 4.0);
-    assert_eq!(cfg.font.inset_y, 2.0);
+    assert_eq!(cfg.font.terminal.inset_x, 4.0);
+    assert_eq!(cfg.font.terminal.inset_y, 2.0);
 }
 
 #[test]
@@ -190,8 +190,8 @@ fn font_inset_clamps_to_range() {
     let input = "[font]\ninset_x = 100.0\ninset_y = -5.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.font.inset_x, 32.0);
-    assert_eq!(cfg.font.inset_y, 0.0);
+    assert_eq!(cfg.font.terminal.inset_x, 32.0);
+    assert_eq!(cfg.font.terminal.inset_y, 0.0);
 }
 
 #[test]
@@ -200,9 +200,83 @@ fn partial_toml_fills_missing_with_defaults() {
 [font]\n\
 size = 16.0\n";
     let cfg: Config = toml::from_str(input).unwrap();
-    assert_eq!(cfg.font.size, 16.0);
-    assert_eq!(cfg.font.family, FontConfig::default().family);
+    assert_eq!(cfg.font.terminal.size, 16.0);
+    assert_eq!(
+        cfg.font.terminal.family,
+        FontConfig::default().terminal.family
+    );
     assert_eq!(cfg.cursor.style, CursorStyle::Block);
+}
+
+#[test]
+fn font_domains_parse_independently() {
+    let input = r#"
+[font.terminal]
+family = "JetBrains Mono"
+size = 14.0
+line_height = 1.1
+cell_width = 0.95
+
+[font.editor]
+family = "Iosevka"
+size = 16.0
+line_height = 1.8
+
+[font.agent_chat]
+family = ".SystemUIFont"
+size = 15.0
+line_height = 1.5
+"#;
+    let cfg: Config = toml::from_str(input).unwrap();
+
+    assert_eq!(cfg.font.terminal.family, "JetBrains Mono");
+    assert_eq!(cfg.font.terminal.size, 14.0);
+    assert_eq!(cfg.font.terminal.line_height, 1.1);
+    assert_eq!(cfg.font.terminal.cell_width, 0.95);
+    assert_eq!(cfg.font.editor.family, "Iosevka");
+    assert_eq!(cfg.font.editor.size, 16.0);
+    assert_eq!(cfg.font.editor.line_height, 1.8);
+    assert_eq!(cfg.font.agent_chat.family, ".SystemUIFont");
+    assert_eq!(cfg.font.agent_chat.size, 15.0);
+    assert_eq!(cfg.font.agent_chat.line_height, 1.5);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn terminal_default_family_is_monaco_on_macos() {
+    let cfg = Config::default();
+    assert_eq!(cfg.font.terminal.family, "Monaco");
+    assert_eq!(cfg.font.editor.family, "Monaco");
+    assert_eq!(cfg.font.agent_chat.family, crate::SYSTEM_UI_FONT_FAMILY);
+    assert_ne!(cfg.font.terminal.family, cfg.font.agent_chat.family);
+}
+
+#[test]
+fn partially_migrated_font_config_falls_back_to_legacy_fields() {
+    let input = r#"
+[font]
+family = "Legacy Mono"
+size = 14.0
+editor_size = 17.0
+agent_chat_size = 15.0
+vertical_spacing = 1.2
+
+[font.editor]
+line_height = 1.9
+"#;
+    let cfg: Config = toml::from_str(input).unwrap();
+
+    assert_eq!(cfg.font.terminal.family, "Legacy Mono");
+    assert_eq!(cfg.font.terminal.size, 14.0);
+    assert_eq!(cfg.font.terminal.line_height, 1.2);
+    assert_eq!(cfg.font.editor.family, "Legacy Mono");
+    assert_eq!(cfg.font.editor.size, 17.0);
+    assert_eq!(cfg.font.editor.line_height, 1.9);
+    assert_eq!(cfg.font.agent_chat.size, 15.0);
+    assert_eq!(
+        cfg.font.agent_chat.family,
+        FontConfig::default().agent_chat.family
+    );
 }
 
 #[test]
@@ -243,12 +317,12 @@ fn font_size_clamps_to_range() {
     let input = "[font]\nsize = 200.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.font.size, 72.0);
+    assert_eq!(cfg.font.terminal.size, 72.0);
 
     let input = "[font]\nsize = 1.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.font.size, 6.0);
+    assert_eq!(cfg.font.terminal.size, 6.0);
 }
 
 #[test]
@@ -256,12 +330,12 @@ fn editor_font_size_clamps_to_range() {
     let input = "[font]\neditor_size = 200.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.font.editor_size, 72.0);
+    assert_eq!(cfg.font.editor.size, 72.0);
 
     let input = "[font]\neditor_size = 1.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.font.editor_size, 6.0);
+    assert_eq!(cfg.font.editor.size, 6.0);
 }
 
 #[test]
@@ -295,7 +369,7 @@ fn ansi_palette_as_array_returns_8_entries() {
 #[test]
 fn load_from_missing_file_returns_defaults() {
     let cfg = Config::load_from(std::path::Path::new("/nonexistent/path/config.toml"));
-    assert_eq!(cfg.font.size, 13.0);
+    assert_eq!(cfg.font.terminal.size, 13.0);
 }
 
 #[test]
@@ -353,8 +427,8 @@ lines = 50000\n\
 
     let cfg: Config = toml::from_str(input).unwrap();
 
-    assert_eq!(cfg.font.family, "JetBrains Mono");
-    assert_eq!(cfg.font.size, 14.0);
+    assert_eq!(cfg.font.terminal.family, "JetBrains Mono");
+    assert_eq!(cfg.font.terminal.size, 14.0);
     assert_eq!(cfg.cursor.style, CursorStyle::Underline);
     assert!(!cfg.cursor.blinking);
     assert_eq!(cfg.window.opacity, 0.85);
@@ -472,20 +546,20 @@ fn patch_config_file_preserves_unmanaged_sections() {
 
     // Simulate Settings saving a font size change.
     let mut updated = cfg.clone();
-    updated.font.size = 16.0;
+    updated.font.terminal.size = 16.0;
 
     // Call a path-aware variant so we don't write to the real config location.
     patch_config_file_to(&updated, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     // The font size change must be applied.
-    assert_eq!(reloaded.font.size, 16.0);
+    assert_eq!(reloaded.font.terminal.size, 16.0);
     // The keybinding must be preserved.
     assert_eq!(reloaded.keybindings.bindings["cmd-t"], "new_tab");
 }
 
 #[test]
-fn settings_patch_only_rewrites_the_addressed_field() {
+fn settings_patch_migrates_legacy_font_fields_without_losing_values() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(
@@ -494,17 +568,18 @@ fn settings_patch_only_rewrites_the_addressed_field() {
     )
     .unwrap();
 
-    let written = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
-        .expect("field patch");
+    let written =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
+            .expect("field patch");
 
-    assert_eq!(written.font.size, 16.0);
-    assert_eq!(written.font.editor_size, 17.0);
+    assert_eq!(written.font.terminal.size, 16.0);
+    assert_eq!(written.font.editor.size, 17.0);
     let text = std::fs::read_to_string(path).unwrap();
     assert!(text.contains("# keep this comment"), "{text}");
-    assert!(
-        text.contains("editor_size = 17.0 # external value"),
-        "{text}"
-    );
+    assert!(text.contains("[font.terminal]"), "{text}");
+    assert!(text.contains("[font.editor]"), "{text}");
+    assert!(text.contains("size = 17.0"), "{text}");
+    assert!(!text.contains("editor_size"), "{text}");
 }
 
 #[test]
@@ -517,11 +592,12 @@ fn settings_patch_updates_an_inline_table_in_place() {
     )
     .unwrap();
 
-    let written = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
-        .expect("inline field patch");
+    let written =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
+            .expect("inline field patch");
 
-    assert_eq!(written.font.size, 16.0);
-    assert_eq!(written.font.editor_size, 17.0);
+    assert_eq!(written.font.terminal.size, 16.0);
+    assert_eq!(written.font.editor.size, 17.0);
     let text = std::fs::read_to_string(path).unwrap();
     assert!(text.contains("font = {"), "{text}");
     assert!(text.contains("# keep inline"), "{text}");
@@ -536,7 +612,7 @@ fn checked_settings_patch_rejects_a_same_field_disk_change() {
     std::fs::write(&path, "[font]\nsize = 20.0\n").unwrap();
 
     let error = crate::apply_settings_patch_to_if_unchanged(
-        &crate::SettingsPatch::FontSize(16.0),
+        &crate::SettingsPatch::TerminalFontSize(16.0),
         &expected,
         &path,
     )
@@ -544,9 +620,9 @@ fn checked_settings_patch_rejects_a_same_field_disk_change() {
 
     assert_eq!(
         error,
-        crate::SettingsPatchApplyError::Conflict(crate::SettingsFieldId::FontSize)
+        crate::SettingsPatchApplyError::Conflict(crate::SettingsFieldId::TerminalFontSize)
     );
-    assert_eq!(Config::load_from(&path).font.size, 20.0);
+    assert_eq!(Config::load_from(&path).font.terminal.size, 20.0);
 }
 
 #[test]
@@ -558,14 +634,14 @@ fn checked_settings_patch_keeps_an_unrelated_disk_change() {
     std::fs::write(&path, "[font]\nsize = 14.0\neditor_size = 17.0\n").unwrap();
 
     let written = crate::apply_settings_patch_to_if_unchanged(
-        &crate::SettingsPatch::FontSize(16.0),
+        &crate::SettingsPatch::TerminalFontSize(16.0),
         &expected,
         &path,
     )
     .expect("unrelated external edit");
 
-    assert_eq!(written.font.size, 16.0);
-    assert_eq!(written.font.editor_size, 17.0);
+    assert_eq!(written.font.terminal.size, 16.0);
+    assert_eq!(written.font.editor.size, 17.0);
 }
 
 #[cfg(unix)]
@@ -579,7 +655,7 @@ fn settings_patch_preserves_a_config_symlink() {
     std::fs::write(&target, "[font]\nsize = 14.0\n").unwrap();
     symlink(&target, &path).unwrap();
 
-    crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
+    crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
         .expect("symlinked config patch");
 
     assert!(
@@ -588,7 +664,7 @@ fn settings_patch_preserves_a_config_symlink() {
             .file_type()
             .is_symlink()
     );
-    assert_eq!(Config::load_from(&target).font.size, 16.0);
+    assert_eq!(Config::load_from(&target).font.terminal.size, 16.0);
 }
 
 #[test]
@@ -598,8 +674,9 @@ fn settings_patch_refuses_to_replace_a_corrupt_document() {
     let corrupt = "[font\nsize = 14";
     std::fs::write(&path, corrupt).unwrap();
 
-    let error = crate::apply_settings_patch_to(&crate::SettingsPatch::FontSize(16.0), &path)
-        .expect_err("corrupt config must block the write");
+    let error =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
+            .expect_err("corrupt config must block the write");
 
     assert!(error.contains("parse error"), "{error}");
     assert_eq!(std::fs::read_to_string(path).unwrap(), corrupt);
@@ -658,12 +735,12 @@ fn patch_config_file_creates_missing_file() {
     let path = dir.path().join("config.toml");
 
     let mut cfg = Config::default();
-    cfg.font.size = 18.0;
+    cfg.font.terminal.size = 18.0;
     patch_config_file_to(&cfg, &path).unwrap();
 
     assert!(path.exists());
     let reloaded = Config::load_from(&path);
-    assert_eq!(reloaded.font.size, 18.0);
+    assert_eq!(reloaded.font.terminal.size, 18.0);
 }
 
 #[test]
@@ -812,9 +889,9 @@ fn settings_patch_migrates_and_removes_a_stale_permission_mode_key() {
     )
     .unwrap();
 
-    let reloaded =
-        apply_settings_patch_to(&SettingsPatch::FontSize(15.0), &path).expect("patch applies");
-    assert_eq!(reloaded.font.size, 15.0);
+    let reloaded = apply_settings_patch_to(&SettingsPatch::TerminalFontSize(15.0), &path)
+        .expect("patch applies");
+    assert_eq!(reloaded.font.terminal.size, 15.0);
     assert_eq!(
         reloaded.resolved_agents()[0].default_mode.as_deref(),
         Some("acceptEdits")
@@ -839,8 +916,8 @@ fn settings_patch_migrates_and_removes_stale_transcript_keys() {
     )
     .unwrap();
 
-    let reloaded =
-        apply_settings_patch_to(&SettingsPatch::FontSize(15.0), &path).expect("patch applies");
+    let reloaded = apply_settings_patch_to(&SettingsPatch::TerminalFontSize(15.0), &path)
+        .expect("patch applies");
     let agent = &reloaded.resolved_agents()[0];
     assert_eq!(
         agent.fold_mode.as_deref(),
@@ -873,7 +950,8 @@ fn a_transcript_axis_reset_after_the_legacy_lift_stays_reset() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "[agent]\nfold_mode = [\"expanded\"]\n").unwrap();
 
-    let lifted = apply_settings_patch_to(&SettingsPatch::FontSize(15.0), &path).expect("patch");
+    let lifted =
+        apply_settings_patch_to(&SettingsPatch::TerminalFontSize(15.0), &path).expect("patch");
     assert!(
         lifted.resolved_agents()[0].fold_mode.is_some(),
         "the legacy value reached the catalog"
@@ -1027,7 +1105,7 @@ fn patch_config_file_clamps_out_of_range_values() {
     let path = dir.path().join("config.toml");
 
     let mut cfg = Config::default();
-    cfg.font.size = 999.0; // way over the 72.0 ceiling
+    cfg.font.terminal.size = 999.0; // way over the 72.0 ceiling
     cfg.window.opacity = 5.0; // over 1.0
     patch_config_file_to(&cfg, &path).unwrap();
 
@@ -1038,7 +1116,7 @@ fn patch_config_file_clamps_out_of_range_values() {
     );
 
     let reloaded = Config::load_from(&path);
-    assert!(reloaded.font.size <= 72.0);
+    assert!(reloaded.font.terminal.size <= 72.0);
     assert!(reloaded.window.opacity <= 1.0);
 }
 
@@ -1054,13 +1132,13 @@ fn resolve_with_empty_project_returns_user_unchanged() {
         effective.shell.close_pane_on_exit,
         user.shell.close_pane_on_exit
     );
-    assert_eq!(effective.font.size, user.font.size);
+    assert_eq!(effective.font.terminal.size, user.font.terminal.size);
 }
 
 #[test]
 fn resolve_overrides_shell_section_only() {
     let mut user = Config::default();
-    user.font.size = 17.0;
+    user.font.terminal.size = 17.0;
     user.shell.program = Some("/bin/bash".into());
 
     let project_shell = ShellConfig {
@@ -1080,7 +1158,7 @@ fn resolve_overrides_shell_section_only() {
     );
     assert!(!effective.shell.close_pane_on_exit);
     // Other sections unchanged.
-    assert_eq!(effective.font.size, 17.0);
+    assert_eq!(effective.font.terminal.size, 17.0);
 }
 
 #[test]

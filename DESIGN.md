@@ -496,13 +496,13 @@ these numbers.
 background:    pane-bg (inherited — the bar is not a card)
 height:        28px at the default chrome size (content 20px + xs padding, top
                and bottom), + the 1px border. Not fixed like TitleBar/TabBar —
-               it grows with `font.agent_chat_size`.
+               it grows with `font.agent_chat.size`.
 border-bottom: 1px pane-border-tint    ← not hairline; see above
 padding:       xs md (4px 8px)
 gap:           xxs (2px) between the bar's three zones;
                xs (4px) between controls inside the right zone — bordered chips
                two pixels apart read as one segmented strip, not three controls
-text:          agent-chat size (config `font.agent_chat_size`, default 13px = ui-lg)
+text:          agent-chat size (config `font.agent_chat.size`, default 13px = ui-lg)
 ```
 
 | Zone | Content | Style |
@@ -580,7 +580,7 @@ transcript list, so an empty conversation lands in the same layout as a full
 one):
 
 Both parts are *text* widths, so the threshold scales with
-`font.agent_chat_size`; 596px is its value at the 13px default. Widths below are
+`font.agent_chat.size`; 596px is its value at the 13px default. Widths below are
 quoted at that size.
 
 | Pane width | Right zone | Where the values are |
@@ -595,7 +595,7 @@ title ellipsizes to a few words and stops identifying the session, which is the
 bar's primary job. Move either part and the breakpoint moves with it — a
 hand-set number drifts away from the thing it is supposed to describe. The two
 parts are text measurements, so they are also scaled by
-`font.agent_chat_size / 13` before the comparison: a fixed pixel breakpoint
+`font.agent_chat.size / 13` before the comparison: a fixed pixel breakpoint
 reads as derived while silently assuming one font size, and at 20px chrome the
 spelled-out chips would outgrow the budget while the bar stayed wide.
 
@@ -635,7 +635,7 @@ footer:        Fold and Filter only — one ghost "Reset to default", which
                the reset; `All` is a value the pane would then be pinned to.
 ```
 
-The panel body scales with `font.agent_chat_size`, not the UI type ladder, even
+The panel body scales with `font.agent_chat.size`, not the UI type ladder, even
 though it is app chrome — it is read alongside the pane it configures. That is a
 deliberate exception to §Typography's 10–13px band, which the pane's own
 user-set size can leave in either direction.
@@ -1275,7 +1275,7 @@ How to apply this doc when changing daruda's UI:
 3. **State colors are off-limits for decoration.** `error`/`warning`/`success`/`claude-*`/`agent-*` mean a genuine state. If you want "a nice color," you don't — use a surface step.
 4. **Syntax ≠ chrome.** Touch the syntax palette only for code legibility, through `palette::syntax_theme_of` + `bucket_for_capture`; never reuse the brand accent there or vice versa.
 5. **Both appearances or none.** Any new chrome surface needs a light-theme value in `daruda_light.json`, cool-tinted (faint blue), not neutral gray. Any new syntax family needs a light variant or a documented fallback.
-6. **Stay in the type ladder** (Inter 400 / 500 / 600 at 10–13px for chrome; `label` is 600 uppercase). No UI label below 10px or above 13px. The agent-chat pane and its option panels are the sanctioned exception — they follow the user's `font.agent_chat_size`.
+6. **Stay in the type ladder** (Inter 400 / 500 / 600 at 10–13px for chrome; `label` is 600 uppercase). No UI label below 10px or above 13px. The agent-chat pane and its option panels are the sanctioned exception — they follow the user's `font.agent_chat.size`.
 7. **A breakpoint names its parts or doesn't exist.** Responsive thresholds are derived from the widths they arbitrate (see AgentChatPane), and a text-derived part scales with its font. A bare pixel constant reads as a decision and behaves as a guess.
 
 ## Known Gaps

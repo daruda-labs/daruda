@@ -188,26 +188,27 @@ fn strip() -> f32 {
 
 #[test]
 fn bounded_embed_height_cases() {
+    let row_height = 20.0;
+    let max_rows = 12;
     assert_eq!(
-        bounded_embed_height(3, theme::AGENT_CHAT_EMBED_MAX_H),
-        px(3.0 * theme::AGENT_CHAT_EMBED_ROW_H + strip())
+        bounded_embed_height(3, max_rows, row_height),
+        px(3.0 * row_height + strip())
     );
 
-    let rows = (theme::AGENT_CHAT_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize;
     assert_eq!(
-        bounded_embed_height(rows, theme::AGENT_CHAT_EMBED_MAX_H),
-        px(theme::AGENT_CHAT_EMBED_MAX_H + strip())
+        bounded_embed_height(max_rows, max_rows, row_height),
+        px(max_rows as f32 * row_height + strip())
     );
     assert_eq!(
-        bounded_embed_height(rows, theme::AGENT_CHAT_EMBED_MAX_H),
-        px(rows as f32 * theme::AGENT_CHAT_EMBED_ROW_H + strip())
+        bounded_embed_height(max_rows, max_rows, row_height),
+        px(max_rows as f32 * row_height + strip())
     );
 
     // The bound is what makes `InputState` shape only the visible rows, so
     // it must not grow with the output.
     assert_eq!(
-        bounded_embed_height(11_000, theme::AGENT_CHAT_EMBED_MAX_H),
-        px(theme::AGENT_CHAT_EMBED_MAX_H + strip())
+        bounded_embed_height(11_000, max_rows, row_height),
+        px(max_rows as f32 * row_height + strip())
     );
 }
 

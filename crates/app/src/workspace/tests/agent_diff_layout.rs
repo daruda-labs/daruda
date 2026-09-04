@@ -29,7 +29,11 @@ const LARGE_ROWS: usize = 400;
 
 /// How many rows the cap can actually show.
 fn capped_rows() -> usize {
-    (theme::AGENT_CHAT_DIFF_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize
+    theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS
+}
+
+fn default_row_height() -> f32 {
+    (theme::AGENT_CHAT_MSG_FONT_SIZE * theme::MD_VIEW_LINE_HEIGHT).ceil()
 }
 
 /// The row count `calculate_visible_range` may report at most: a full viewport
@@ -79,7 +83,11 @@ impl Render for DiffProbe {
         // `render/diff.rs::diff_body` embeds the diff through: the capped height
         // goes on both the wrapper and the `Input`.
         let rows = self.editor.read(cx).display_rows().max(1);
-        let height = bounded_embed_height(rows, theme::AGENT_CHAT_DIFF_EMBED_MAX_H);
+        let height = bounded_embed_height(
+            rows,
+            theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
+            theme::agent_chat_embed_row_height(cx),
+        );
         let surface = crate::ui::theme::agent_chat_bg(cx);
         div().flex().flex_col().w_full().child(
             div()
@@ -135,7 +143,11 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
         DIFF_ROWS < capped_rows(),
         "the six-row case must stay under the cap"
     );
-    let expected = bounded_embed_height(DIFF_ROWS, theme::AGENT_CHAT_DIFF_EMBED_MAX_H);
+    let expected = bounded_embed_height(
+        DIFF_ROWS,
+        theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
+        default_row_height(),
+    );
     assert_eq!(
         wrapper.size.height, expected,
         "an uncapped diff measures its content plus the thumb strip"
@@ -287,7 +299,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
         rows, 6,
         "rebuilt editor reports the full content's display rows"
     );
-    let expected = px(6.0 * theme::AGENT_CHAT_EMBED_ROW_H);
+    let expected = px(6.0 * default_row_height());
     let painted = bounds.expect("editor painted after the final update").size;
     assert!(
         painted.height >= expected,
@@ -359,7 +371,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     // The collapsed block is exactly the header row: chevron + path on the
     // hunk-bg chrome. It must be at least one text row tall — the clipped
     // repro painted it at roughly half a row.
-    let min_header = px(theme::AGENT_CHAT_EMBED_ROW_H);
+    let min_header = px(default_row_height());
     assert!(
         container.size.height >= min_header,
         "collapsed diff header is {:?} tall — clipped below one row ({min_header:?})",
@@ -464,7 +476,11 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
     );
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(rows, theme::AGENT_CHAT_DIFF_EMBED_MAX_H),
+        bounded_embed_height(
+            rows,
+            theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
+            default_row_height(),
+        ),
         "the diff embed in a real card is capped"
     );
     let visible = visible.expect("the embedded editor painted");
@@ -481,7 +497,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
         capped_rows()
     );
     assert!(
-        scroll_h >= px(rows as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        scroll_h >= px(rows as f32 * default_row_height()),
         "scroll extent {scroll_h:?} does not cover the full diff — rows lost"
     );
 }

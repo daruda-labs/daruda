@@ -189,11 +189,21 @@ cargo run -p daruda
 daruda is configured with TOML at `~/.config/daruda/config.toml`. All changes are applied live — no restart required.
 
 ```toml
-[font]
-family = "Zed Mono"     # any monospace font installed on the system
+[font.terminal]
+family = "Monaco"
 size = 14.0
-vertical_spacing = 1.0
-horizontal_spacing = 1.0
+line_height = 1.0
+cell_width = 1.0     # terminal-only cell width multiplier
+
+[font.editor]
+family = "Zed Mono"
+size = 14.0
+line_height = 1.7
+
+[font.agent_chat]
+family = ".SystemUIFont"
+size = 14.0
+line_height = 1.6
 
 [cursor]
 style = "block"         # block | beam | underline

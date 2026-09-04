@@ -32,7 +32,15 @@ const PROBE_EMBED: &str = "agent-chat-out-embed-probe";
 
 /// How many rows the cap can actually show.
 fn capped_rows() -> usize {
-    (theme::AGENT_CHAT_EMBED_MAX_H / theme::AGENT_CHAT_EMBED_ROW_H) as usize
+    theme::AGENT_CHAT_EMBED_MAX_ROWS
+}
+
+fn default_row_height() -> f32 {
+    (theme::AGENT_CHAT_MSG_FONT_SIZE * theme::MD_VIEW_LINE_HEIGHT).ceil()
+}
+
+fn default_max_height() -> f32 {
+    capped_rows() as f32 * default_row_height()
 }
 
 /// The row count `calculate_visible_range` may report at most: a full viewport
@@ -90,7 +98,7 @@ impl Render for OutputProbe {
             PROBE_ID,
             &self.editor,
             None,
-            theme::AGENT_CHAT_EMBED_MAX_H,
+            theme::AGENT_CHAT_EMBED_MAX_ROWS,
             &t,
             0.,
             cx,
@@ -136,17 +144,17 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
     // grow with the output.
     assert_eq!(
         wrapper.size.height,
-        bounded_embed_height(LARGE_ROWS, theme::AGENT_CHAT_EMBED_MAX_H),
+        bounded_embed_height(LARGE_ROWS, capped_rows(), default_row_height()),
         "the embed is pinned at the cap plus the thumb strip"
     );
     assert!(
-        wrapper.size.height < px(LARGE_ROWS as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        wrapper.size.height < px(LARGE_ROWS as f32 * default_row_height()),
         "a capped embed must be far shorter than its uncapped content height"
     );
 
     let editor_h = editor_h.expect("the editor text element painted at least once");
     assert!(
-        editor_h >= px(theme::AGENT_CHAT_EMBED_MAX_H),
+        editor_h >= px(default_max_height()),
         "editor paints only {editor_h:?} inside a {:?} embed — collapsed",
         wrapper.size.height
     );
@@ -167,7 +175,7 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
     );
     // The hidden rows are reachable by scrolling, not dropped.
     assert!(
-        scroll_h >= px(LARGE_ROWS as f32 * theme::AGENT_CHAT_EMBED_ROW_H),
+        scroll_h >= px(LARGE_ROWS as f32 * default_row_height()),
         "scroll extent {scroll_h:?} does not cover the full content — rows lost"
     );
 
@@ -195,11 +203,11 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
 
     assert_eq!(
         wrapper.size.height,
-        bounded_embed_height(LARGE_ROWS, theme::AGENT_CHAT_EMBED_MAX_H),
+        bounded_embed_height(LARGE_ROWS, capped_rows(), default_row_height()),
         "wrapper keeps the capped height under min-content"
     );
     assert!(
-        editor_h >= px(theme::AGENT_CHAT_EMBED_MAX_H),
+        editor_h >= px(default_max_height()),
         "editor paints {editor_h:?} inside a {:?} embed under min-content — collapsed",
         wrapper.size.height
     );
@@ -409,7 +417,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     );
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(LARGE_ROWS, theme::AGENT_CHAT_EMBED_MAX_H),
+        bounded_embed_height(LARGE_ROWS, capped_rows(), default_row_height()),
         "a capped shell output embed is pinned to the cap"
     );
     let visible = visible.expect("the embedded editor painted");
@@ -547,7 +555,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         .expect("the bounded embed painted");
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(SHORT_ROWS, theme::AGENT_CHAT_EMBED_MAX_H),
+        bounded_embed_height(SHORT_ROWS, capped_rows(), default_row_height()),
         "an uncapped embed measures its output, not its output plus a blank row"
     );
     assert!(
@@ -739,7 +747,7 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
         .expect("the bounded embed painted — the read fell back to markdown");
     assert_eq!(
         embed.size.height,
-        bounded_embed_height(ROWS, theme::AGENT_CHAT_EMBED_MAX_H),
+        bounded_embed_height(ROWS, capped_rows(), default_row_height()),
         "a read's embed is capped exactly like a shell command's"
     );
     let visible = visible.expect("the embedded editor painted");

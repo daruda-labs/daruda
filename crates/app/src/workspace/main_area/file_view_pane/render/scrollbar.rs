@@ -18,7 +18,7 @@ use gpui::App;
 /// one, whose `.bounds()` this vendored fork's text element never populates
 /// (it never calls `div().track_scroll(&handle)` — see `InputState::scroll_size`'s
 /// doc comment) and would silently draw no thumb. `content_h`:
-/// - Raw/Changes: `total_rows * FILE_VIEWER_LINE_H` (stable across virtual-list shifts).
+/// - Raw/Changes: `total_rows * configured row height` (stable across virtual-list shifts).
 /// - Preview: `viewport_h + max_offset().y` (measured after layout; variable blocks).
 /// - Raw/Diff editor: `InputState::scroll_size().height`.
 pub(super) fn file_viewer_scrollbar(

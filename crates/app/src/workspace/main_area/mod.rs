@@ -288,7 +288,7 @@ pub(in crate::workspace) fn render_layout(
                     .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
                         d.track_focus(fh)
                     })
-                    .child(render_pane_file_viewer(id, f, font_family.clone(), cx)),
+                    .child(render_pane_file_viewer(id, f, cx)),
                 self::pane::PaneContent::TaskEditPane(te) => div()
                     .flex_1()
                     .min_h(px(0.))

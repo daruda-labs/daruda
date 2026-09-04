@@ -234,7 +234,7 @@ fn diff_body(
             &format!("diff-{diff_key}"),
             editor,
             None,
-            theme::AGENT_CHAT_DIFF_EMBED_MAX_H,
+            theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
             t,
             dim,
             cx,
