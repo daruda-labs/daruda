@@ -326,10 +326,39 @@ fn append_user_chunk(items: &mut Vec<ChatItem>, text: &str) {
     if text.trim_start().starts_with("<task-notification>") {
         return;
     }
+    if is_interrupt_marker(text.trim()) {
+        // Structure, not a prompt — see [`ChatItem::Interrupted`]. The host
+        // pushes the same marker live, so collapse a repeat rather than
+        // stacking two rows for one stop.
+        if !matches!(items.last(), Some(ChatItem::Interrupted)) {
+            items.push(ChatItem::Interrupted);
+        }
+        return;
+    }
     if matches!(items.last(), Some(ChatItem::UserText(prev)) if prev == text) {
         return;
     }
     items.push(ChatItem::UserText(text.to_string()));
+}
+
+/// Whether `text` is one of the Claude Agent SDK's synthetic interrupt entries.
+///
+/// The SDK interns exactly two today (`[Request interrupted by user]` and
+/// `[… for tool use]`), but recognizes its own with a *shape* rather than a
+/// list — `/\[Request interrupted by user[^\]]*\]/` in `cli.js`
+/// (claude-agent-sdk 2.1.44). This mirrors that shape, so a third variant lands
+/// as a marker instead of silently regressing to the user bubble this whole
+/// path exists to remove.
+///
+/// Whole-string on purpose: prose that merely quotes a marker is a real prompt.
+fn is_interrupt_marker(text: &str) -> bool {
+    const PREFIX: &str = "[Request interrupted by user";
+    let Some(rest) = text.strip_prefix(PREFIX) else {
+        return false;
+    };
+    // The upstream character class stops at the first `]`, so the closing
+    // bracket must be the last character and the only one.
+    matches!(rest.strip_suffix(']'), Some(inner) if !inner.contains(']'))
 }
 
 #[derive(Clone, Copy)]
@@ -2060,6 +2089,105 @@ mod tests {
             &SessionUpdate::UserMessageChunk(text_chunk("what does <task-notification> mean?")),
         );
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn replayed_interrupt_marker_becomes_an_interrupted_item() {
+        // session/load replays the SDK's synthetic interrupt entry as a user
+        // chunk. It is not something the user typed, so it must not render as
+        // a user bubble — it folds into the structural marker the host also
+        // pushes live on Stop, so both paths show the same row.
+        for marker in [
+            "[Request interrupted by user]",
+            "[Request interrupted by user for tool use]",
+        ] {
+            let mut items = vec![ChatItem::AssistantText {
+                text: "working".to_string(),
+                streaming: false,
+                message_id: None,
+                phase: Default::default(),
+            }];
+            apply_update(
+                &mut items,
+                &SessionUpdate::UserMessageChunk(text_chunk(marker)),
+            );
+            assert_eq!(
+                items,
+                vec![
+                    ChatItem::AssistantText {
+                        text: "working".to_string(),
+                        streaming: false,
+                        message_id: None,
+                        phase: Default::default(),
+                    },
+                    ChatItem::Interrupted
+                ],
+                "{marker} must map to the structural marker"
+            );
+        }
+    }
+
+    #[test]
+    fn replayed_interrupt_marker_does_not_double_the_local_one() {
+        // The host already pushed the marker on Stop. A restored pane rebuilds
+        // its items from the replay, so this only bites if the adapter ever
+        // starts emitting the chunk live too — then the two must collapse.
+        let mut items = vec![ChatItem::Interrupted];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk("[Request interrupted by user]")),
+        );
+        assert_eq!(items, vec![ChatItem::Interrupted]);
+    }
+
+    #[test]
+    fn text_merely_quoting_the_interrupt_marker_stays_a_user_message() {
+        // Only a chunk that *is* the marker is folded; prose about it is a real
+        // prompt. Same rule as the task-notification guard above.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk(
+                "why does [Request interrupted by user] show up?",
+            )),
+        );
+        assert_eq!(
+            items,
+            vec![ChatItem::UserText(
+                "why does [Request interrupted by user] show up?".to_string()
+            )]
+        );
+    }
+
+    /// The SDK recognizes its own entries by shape, not by a list of two, so a
+    /// variant it adds later must not fall back to a user bubble.
+    #[test]
+    fn an_unseen_interrupt_variant_still_reads_as_the_marker() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk(
+                "[Request interrupted by user for something new]",
+            )),
+        );
+        assert_eq!(items, vec![ChatItem::Interrupted]);
+    }
+
+    /// The shape is whole-string and the bracket closes it, so a marker with a
+    /// sentence hanging off it is prose, not structure.
+    #[test]
+    fn marker_shaped_text_with_a_tail_stays_a_user_message() {
+        for text in [
+            "[Request interrupted by user] and then what?",
+            "[Request interrupted by user] [again]",
+        ] {
+            let mut items = Vec::new();
+            apply_update(
+                &mut items,
+                &SessionUpdate::UserMessageChunk(text_chunk(text)),
+            );
+            assert_eq!(items, vec![ChatItem::UserText(text.to_string())], "{text}");
+        }
     }
 
     #[test]

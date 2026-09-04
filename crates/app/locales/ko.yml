@@ -404,6 +404,7 @@ agent_chat:
   filter_tool_search: "검색"
   filter_tool_run: "명령 실행"
   filter_tool_other: "기타 도구"
+  interrupted: "사용자가 중단함"
   tail_more_show_one: "이전 단계 1개 펼치기"
   tail_more_show: "이전 단계 %{count}개 펼치기"
   tail_more_collapse_one: "최근 1개만 보기"

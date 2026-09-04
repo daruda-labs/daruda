@@ -50,6 +50,27 @@ pub enum ChatItem {
     /// classification so the renderer can offer the matching remedy rather
     /// than only printing text. See [`crate::failure`].
     Failure(AcpFailure),
+    /// The user stopped the turn here. Structure, not conversation: it marks
+    /// where a run was cut, so it carries no text of its own — the host owns
+    /// the wording and localizes it.
+    ///
+    /// Two sources produce it and must agree. Live, the host pushes it on Stop;
+    /// the adapter cannot, because its `session/update` loop drops the SDK's
+    /// interrupt entry twice over — a `cancelled` session short-circuits the
+    /// `user`/`assistant` arm, and a single-text-block `user` message is
+    /// skipped as feed noise. On `session/load` neither guard exists, so the
+    /// same entry arrives as a `UserMessageChunk` and [`crate::mapping`] folds
+    /// it back into this variant rather than a `UserText` bubble the user never
+    /// typed. (Verified in `@agentclientprotocol/claude-agent-acp`'s
+    /// `dist/acp-agent.js` — the guards at the `session.cancelled` break and the
+    /// "messages we don't want in the feed" skip, against `replaySessionHistory`
+    /// running only `stripLocalCommandMetadata`. Re-check on an adapter bump.)
+    ///
+    /// One divergence is unreachable from here: a prompt whose text *is* the
+    /// marker stays a user bubble live (the local echo bypasses the mapper) and
+    /// folds into this variant after restore. ACP carries no `isMeta` flag to
+    /// tell the two apart.
+    Interrupted,
 }
 
 /// A tool call, updated in place as `ToolCallUpdate`s arrive.

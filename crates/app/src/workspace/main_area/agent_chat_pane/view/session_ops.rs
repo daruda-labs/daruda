@@ -4,7 +4,7 @@
 //! settle/teardown core.
 
 use daruda_acp::{
-    PermissionDecision, PermissionKindView, cancel_pending_tools, finalize_streaming,
+    ChatItem, PermissionDecision, PermissionKindView, cancel_pending_tools, finalize_streaming,
 };
 use gpui::{Context, Window};
 
@@ -49,6 +49,23 @@ impl AgentChatView {
         if self.queue.turn.is_in_flight() {
             self.activity.pending_completion = Some(TurnOutcome::Stopped);
             self.activity.cancel_in_flight = true;
+            // Mark where the run was cut — the adapter's live path drops the
+            // SDK's own interrupt entry while its replay lets it through, so
+            // without this push a stop is invisible until restore. See
+            // `daruda_acp::ChatItem::Interrupted`.
+            //
+            // Gated on a live turn to match when the SDK actually records one:
+            // every writer is reached only while a request is being processed —
+            // four inside the query generator (abort, query error, pre-stop
+            // hook) plus the slash-command expansion's `AbortError` catch
+            // (`cli.js`, claude-agent-sdk 2.1.44). An interrupt with nothing in
+            // progress writes nothing.
+            //
+            // `handle.cancel()` above is deliberately *not* gated the same way:
+            // Escape's third branch cancels a trailing background subagent with
+            // the turn already idle, and that is a real cancel that records no
+            // entry. Marking it would invent a row the replay cannot reproduce.
+            self.items.push(ChatItem::Interrupted);
         }
         self.settle_turn();
         // Stop can be the only terminal transition a live resource link gets;
@@ -75,6 +92,42 @@ impl AgentChatView {
         self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();
+    }
+
+    /// Drop the stop marker back to the end of the transcript if anything landed
+    /// behind it. Called on the cancel ack — the point after which no further
+    /// chunk for the cancelled turn can arrive.
+    ///
+    /// Stop pushes the marker immediately (it has to: the ack may never come),
+    /// but a chunk already on the wire still lands after it — nothing gates
+    /// `AcpEvent::Update` on the open cancel window, and the adapter's stream
+    /// path has no cancelled check of its own. Left in place that text reads as
+    /// a promptless turn under the marker, since [`agent_run`] treats the marker
+    /// as a run boundary; and the SDK persists the assistant message *before*
+    /// its interrupt entry, so a restored pane would order it the other way.
+    ///
+    /// This is the one structural removal in the pane besides `items.clear()`,
+    /// so it shifts item indices — but only for items *after* the marker, which
+    /// by construction arrived in the window between Stop and its ack. The one
+    /// thing that can already point there is a fold the user opened on that
+    /// content while the ack was outstanding; it lands on the neighbouring key
+    /// and self-corrects on the next toggle. Everything else is keyed by id
+    /// (permissions, subagents) or recomputed by `rebuild_rows`.
+    ///
+    /// [`agent_run`]: super::super::agent_chat_helpers::agent_run
+    pub(super) fn settle_stop_marker(&mut self) {
+        if matches!(self.items.last(), Some(ChatItem::Interrupted)) {
+            return;
+        }
+        let Some(ix) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, ChatItem::Interrupted))
+        else {
+            return;
+        };
+        self.items.remove(ix);
+        self.items.push(ChatItem::Interrupted);
     }
 
     /// End the current turn locally and settle every still-live item. Model-only

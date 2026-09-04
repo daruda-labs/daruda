@@ -707,3 +707,23 @@ fn a_partly_on_section_reads_indeterminate() {
     );
     assert_eq!(partial.hidden(), vec![FilterFacet::ProsePreamble]);
 }
+
+/// The stop marker is structure, not content the filter chooses between: a
+/// filter that hid it would leave the run it cut looking like one that simply
+/// ended. Holds for every facet the user can pick, not just the default.
+#[test]
+fn no_filter_can_hide_a_stop_marker() {
+    for tokens in [
+        vec![],
+        vec!["tool_edit"],
+        vec!["thinking"],
+        vec!["prose_answer"],
+        vec!["tool_read", "tool_run"],
+    ] {
+        let f = filter(&tokens);
+        assert!(
+            f.matches(&daruda_acp::ChatItem::Interrupted),
+            "the marker survives {tokens:?}"
+        );
+    }
+}

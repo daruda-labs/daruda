@@ -405,6 +405,7 @@ agent_chat:
   filter_tool_search: "Searches"
   filter_tool_run: "Commands"
   filter_tool_other: "Other tools"
+  interrupted: "Stopped by user"
   tail_more_show_one: "Show 1 earlier step"
   tail_more_show: "Show %{count} earlier steps"
   tail_more_collapse_one: "Collapse to the last step"

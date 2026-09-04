@@ -454,10 +454,15 @@ impl DisplayFilter {
             .collect()
     }
 
-    /// Prompts, permissions, and failures are never filtered.
+    /// Prompts, permissions, failures, and stop markers are never filtered.
     pub(crate) fn matches(self, item: &ChatItem) -> bool {
         match item {
-            ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => true,
+            // A stop marker is structure, like a prompt: hiding it would leave
+            // the run it cuts looking like one that simply ended.
+            ChatItem::UserText(_)
+            | ChatItem::Permission(_)
+            | ChatItem::Failure(_)
+            | ChatItem::Interrupted => true,
             ChatItem::Thinking { .. } => self.thinking,
             ChatItem::AssistantText { phase, .. } => match self.prose {
                 ProseSelection::Excluded => false,

@@ -731,6 +731,38 @@ The boundary is the one row in the transcript that is not a `FoldRow`; both
 shapes live in `render/fold_header.rs` so the chevron stays in one file
 (`scripts/lint-fold-header.sh`).
 
+**The stop marker** is the third member of this vocabulary and the only one that
+is purely a statement:
+
+```
+────────────────  Stopped by user  ────────────────
+
+rule:     1px pane-border-tint      # the boundary row's rule, verbatim
+label:    agent-chat size, pane-fg-muted
+chevron:  none
+click:    none
+```
+
+It marks where a Stop cut a run, so it is a **full-width row — conversation
+structure**, by the same rule that makes the response bar one. It borrows the
+boundary row's geometry deliberately: both say "this is an edge in the
+transcript, not a message in it", and sharing the assembly keeps the rule colour
+and label tone from drifting apart.
+
+What it drops is the chevron, and that is the whole distinction. **A chevron is a
+promise that something is behind the row**, and nothing is behind this one —
+folding is what the boundary row and the group bars offer, and offering it here
+would open onto nothing. So the marker is inert: no hover, no cursor change, no
+press. Its two neighbours in the vocabulary are collapsible and it is not, which
+is why it must not merely *look* like them.
+
+It also never carries the agent's own wording. The Claude SDK writes
+`[Request interrupted by user]` into its transcript, and the adapter's replay
+hands that string over verbatim as a user message — which rendered as a user
+bubble, i.e. as something the person typed. The host owns this copy and
+localizes it (`agent_chat.interrupted`), and it names the actor because the
+reading worth ruling out is "the agent stopped on its own".
+
 **BottomDock chip row (session controls, for reference)**
 
 The mode / model / effort chips under an agent pane live in the BottomDock, not

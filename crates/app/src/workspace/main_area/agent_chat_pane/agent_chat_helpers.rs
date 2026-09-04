@@ -91,6 +91,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             }
             RowKind::TailMore { .. } | RowKind::ToolGroupTailMore { .. } => {}
             RowKind::User(_)
+            | RowKind::Interrupted(_)
             | RowKind::AgentItem(_)
             | RowKind::ConclusionItem(_)
             | RowKind::WorkingIndicator => {}
@@ -117,7 +118,8 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             }
             daruda_acp::ChatItem::UserText(_)
             | daruda_acp::ChatItem::Permission(_)
-            | daruda_acp::ChatItem::Failure(_) => {}
+            | daruda_acp::ChatItem::Failure(_)
+            | daruda_acp::ChatItem::Interrupted => {}
         }
     }
     keys
@@ -235,7 +237,15 @@ pub(in crate::workspace) fn agent_run(
     let end = items
         .iter()
         .skip(start)
-        .position(|item| matches!(item, daruda_acp::ChatItem::UserText(_)))
+        .position(|item| {
+            matches!(
+                item,
+                // A stop marker closes the run it cut, so the response bar
+                // summarizes what actually ran and the marker stays a
+                // top-level row instead of folding away with the response.
+                daruda_acp::ChatItem::UserText(_) | daruda_acp::ChatItem::Interrupted
+            )
+        })
         .map_or(items.len(), |offset| start + offset);
     start.min(end)..end
 }
@@ -314,8 +324,10 @@ impl Rollup {
                 }
                 ChatItem::Failure(_) => any_failed |= counts,
                 // A user message never belongs to a run; a permission card is
-                // neither an outcome nor progress.
-                ChatItem::UserText(_) | ChatItem::Permission(_) => {}
+                // neither an outcome nor progress. A stop marker ends the run
+                // rather than sitting in it (`agent_run`), so it reaches here
+                // only through a whole-conversation scan.
+                ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Interrupted => {}
             }
         }
         if running {
@@ -455,7 +467,9 @@ pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem)
             })
             .chain(tc.subagent_prompt())
             .collect(),
-        daruda_acp::ChatItem::Permission(_) | daruda_acp::ChatItem::Failure(_) => Vec::new(),
+        daruda_acp::ChatItem::Permission(_)
+        | daruda_acp::ChatItem::Failure(_)
+        | daruda_acp::ChatItem::Interrupted => Vec::new(),
     }
 }
 
@@ -676,7 +690,10 @@ pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
             *streaming
         }
         ChatItem::ToolCall(tc) => tc.status.is_live(),
-        ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Failure(_) => false,
+        ChatItem::UserText(_)
+        | ChatItem::Permission(_)
+        | ChatItem::Failure(_)
+        | ChatItem::Interrupted => false,
     }
 }
 

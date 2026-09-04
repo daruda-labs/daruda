@@ -2227,6 +2227,15 @@ pub fn agent_chat_filter_tool_other() -> String {
     rust_i18n::t!("agent_chat.filter_tool_other").into_owned()
 }
 
+/// The marker row where a Stop cut a run. Deliberately not the agent's own
+/// wording: the Claude SDK writes `[Request interrupted by user]` into its
+/// transcript, which is protocol text in one language that also reads as
+/// something the user typed. Names the actor, because the alternative reading
+/// — the agent stopped on its own — is the one worth ruling out.
+pub fn agent_chat_interrupted() -> String {
+    rust_i18n::t!("agent_chat.interrupted").into_owned()
+}
+
 /// The tail window's boundary row while it is closed: `count` is how many
 /// earlier steps opening it brings back.
 pub fn agent_chat_tail_more_show(count: usize) -> String {

@@ -45,6 +45,7 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
         .map(|r| {
             let k = match r.kind {
                 RowKind::User(_) => "user",
+                RowKind::Interrupted(_) => "interrupted",
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
                 RowKind::TailMore { .. } => "tail",
@@ -2001,6 +2002,7 @@ fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool, bool)> {
         .map(|r| {
             let kind = match r.kind {
                 RowKind::User(_) => "user",
+                RowKind::Interrupted(_) => "interrupted",
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
                 RowKind::TailMore { .. } => "tail",
@@ -3575,6 +3577,7 @@ fn diag_tail_population() {
             }
             let k = match &r.kind {
                 RowKind::User(i) => format!("User({i})"),
+                RowKind::Interrupted(i) => format!("Interrupted({i})"),
                 RowKind::ResponseHeader {
                     run_start,
                     collapsed,
@@ -3629,5 +3632,90 @@ fn label(it: &ChatItem) -> &'static str {
         ChatItem::ToolCall(_) => "tool",
         ChatItem::Permission(_) => "perm",
         _ => "other",
+    }
+}
+
+/// A Stop leaves the marker as the last item, but the pane can still be busy —
+/// a trailing background subagent keeps `activity_state()` on `Working` for the
+/// quiescence window after the cut. The progress row must survive that, or the
+/// transcript contradicts every other activity readout in the pane.
+#[test]
+fn the_working_indicator_survives_a_trailing_stop_marker() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        ChatItem::Interrupted,
+    ];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        true,
+        &LiveSubagentUnits::of(&items),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    let projected = kinds(&rows);
+    assert!(
+        projected.iter().any(|(k, _)| *k == "working"),
+        "the marker must not swallow the progress row: {projected:?}"
+    );
+    assert_eq!(
+        projected.last().map(|(k, _)| *k),
+        Some("working"),
+        "and it stays pinned to the tail, below the marker: {projected:?}"
+    );
+
+    // The emission is one post-loop site, so it no longer depends on a run
+    // having been walked. Not reachable today (a prompt is echoed into `items`
+    // before the pane reports Working), but pin it so a change at either end
+    // is a test failure rather than a surprise.
+    let rows = project(
+        &[],
+        &FoldState::default(),
+        true,
+        &LiveSubagentUnits::default(),
+        TailWindow::All,
+        &DisplayFilter::default(),
+    );
+    assert_eq!(kinds(&rows), vec![("working", false)]);
+}
+
+/// The marker never sits inside a run, at any position.
+#[test]
+fn the_stop_marker_is_always_a_top_level_row() {
+    for items in [
+        vec![ChatItem::Interrupted],
+        vec![ChatItem::UserText("q".into()), ChatItem::Interrupted],
+        vec![ChatItem::Interrupted, ChatItem::Interrupted],
+        vec![
+            ChatItem::UserText("q".into()),
+            ChatItem::Interrupted,
+            ChatItem::UserText("again".into()),
+        ],
+    ] {
+        let rows = project(
+            &items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(&items),
+            TailWindow::All,
+            &DisplayFilter::default(),
+        );
+        let markers: Vec<_> = rows
+            .iter()
+            .filter(|r| matches!(r.kind, RowKind::Interrupted(_)))
+            .collect();
+        assert_eq!(
+            markers.len(),
+            items
+                .iter()
+                .filter(|i| matches!(i, ChatItem::Interrupted))
+                .count(),
+            "one row per marker, no more and no fewer"
+        );
+        assert!(
+            markers.iter().all(|r| r.indent == 0 && !r.hidden),
+            "a marker is never nested and never folded away"
+        );
     }
 }

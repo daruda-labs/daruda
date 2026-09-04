@@ -23,6 +23,7 @@ use gpui::{
 };
 
 use super::pulse_opacity;
+use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, DisclosureAxis, disclosure};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
@@ -517,6 +518,34 @@ pub(super) fn window_boundary_row(
         .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
         .child(rule())
         .child(label)
+        .child(rule())
+        .into_any_element()
+}
+
+/// The row marking where a Stop cut a run. Shares the boundary row's shape —
+/// label centred between two rules — because both say the same kind of thing:
+/// this is an edge in the transcript, not a message in it. It differs in
+/// carrying no chevron and no click: nothing is folded away here, so there is
+/// nothing to open. Lives beside [`window_boundary_row`] so the two cannot
+/// drift apart on rule colour or label tone.
+pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {
+    let rule_color = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
+    let rule = move || div().flex_1().border_t_1().border_color(rule_color);
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_BOUNDARY_GAP))
+        .child(rule())
+        .child(
+            div()
+                .flex_none()
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(SharedString::from(s::agent_chat_interrupted())),
+        )
         .child(rule())
         .into_any_element()
 }

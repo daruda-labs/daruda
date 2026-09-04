@@ -260,6 +260,9 @@ impl AgentChatView {
                 // `cancel_in_flight` guard), so nothing raced this ack and a
                 // second Stop could still have cleared it.
                 self.activity.cancel_in_flight = false;
+                // No further chunk for this turn can arrive, so the marker Stop
+                // pushed can take its final position.
+                self.settle_stop_marker();
                 telegram_watch_action = TelegramWatchAction::Clear;
                 self.pump_pending_prompt(cx);
             }

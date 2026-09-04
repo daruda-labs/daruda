@@ -120,7 +120,9 @@ use blocks::{
     thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
-use fold_header::{FoldHeader, FoldRow, SummaryLine, outside_window_rail, rollup_glyph};
+use fold_header::{
+    FoldHeader, FoldRow, SummaryLine, interrupted_row, outside_window_rail, rollup_glyph,
+};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use tail_row::{tail_more_bar, tool_group_tail_more_bar};
@@ -404,6 +406,7 @@ fn render_row(
             }
             _ => gpui::Empty.into_any_element(),
         },
+        RowKind::Interrupted(_) => interrupted_row(this.dim_amount, cx),
         RowKind::ResponseHeader {
             run_start,
             collapsed,
@@ -870,6 +873,9 @@ fn render_item(
         ChatItem::Failure(failure) => {
             failure_block(ix, failure, pane_id, window_handle, t, cx).into_any_element()
         }
+        // Owns a top-level row (`RowKind::Interrupted`), so it never reaches
+        // the per-item dispatch.
+        ChatItem::Interrupted => gpui::Empty.into_any_element(),
     }
 }
 

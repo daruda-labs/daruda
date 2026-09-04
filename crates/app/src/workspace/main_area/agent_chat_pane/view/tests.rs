@@ -791,10 +791,18 @@ fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui
             view.set_turn_in_flight();
             view.cancel_turn(cx);
 
-            for item in &view.items {
-                let ChatItem::Permission(card) = item else {
-                    panic!("expected a permission card");
-                };
+            // Stop also appends its marker, so match the cards by variant
+            // rather than asserting every item is one.
+            let cards: Vec<_> = view
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    ChatItem::Permission(card) => Some(card),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(cards.len(), 3, "expected the three permission cards");
+            for card in cards {
                 assert_eq!(
                     card.resolved,
                     Some(PermissionResolution::Cancelled),
@@ -1805,6 +1813,125 @@ fn the_custom_segment_is_inert_with_nothing_remembered(cx: &mut gpui::TestAppCon
             view.select_fold_preset(None, window, cx);
             assert_eq!(view.fold_editor.custom(), None);
             assert_eq!(view.fold.mode(), FoldPreset::Summary.mode());
+        })
+        .expect("view update");
+}
+
+/// Stop leaves the same marker the adapter replays on `session/load`, so a live
+/// pane and a restored one show the run cut in the same place. Gated on a live
+/// turn: the SDK only writes its interrupt entry when a request was in flight,
+/// and a marker the replay cannot reproduce would diverge on restore.
+#[gpui::test]
+fn stop_marks_the_transcript_only_when_a_turn_was_in_flight(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![assistant_text_item("working on it")];
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.items.last(),
+                Some(&daruda_acp::ChatItem::Interrupted),
+                "a stopped turn is marked where it was cut"
+            );
+
+            // Idle already (the trailing-subagent Stop): nothing was
+            // interrupted, so the transcript gains nothing.
+            let before = view.items.len();
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.items.len(),
+                before,
+                "a stop with no live turn adds no marker"
+            );
+        })
+        .expect("view update");
+}
+
+/// The marker ends the run it cut: it is a top-level row, not an item folded
+/// away with the response, and the next run starts after it.
+#[gpui::test]
+fn the_stop_marker_projects_as_its_own_top_level_row(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![
+                daruda_acp::ChatItem::UserText("go".into()),
+                assistant_text_item("half an answer"),
+                daruda_acp::ChatItem::Interrupted,
+                daruda_acp::ChatItem::UserText("try again".into()),
+            ];
+            view.rebuild_rows();
+            let kinds: Vec<&str> = view
+                .rows
+                .iter()
+                .map(|r| match r.kind {
+                    RowKind::User(_) => "user",
+                    RowKind::Interrupted(_) => "interrupted",
+                    RowKind::ResponseHeader { .. } => "response",
+                    _ => "other",
+                })
+                .collect();
+            let stop = kinds
+                .iter()
+                .position(|k| *k == "interrupted")
+                .expect("the marker owns a row");
+            assert!(
+                kinds[stop + 1..].contains(&"user"),
+                "the run after the marker starts a fresh turn: {kinds:?}"
+            );
+            assert!(
+                view.rows[stop].indent == 0 && !view.rows[stop].hidden,
+                "the marker is top-level and visible"
+            );
+            let _ = cx;
+        })
+        .expect("view update");
+}
+
+/// A chunk already on the wire when Stop is pressed lands *after* the marker,
+/// because nothing gates `AcpEvent::Update` on the open cancel window and the
+/// adapter's stream path has no cancelled check either. Left there it reads as
+/// a promptless turn under "Stopped by user" — and the SDK persists the
+/// assistant message *before* its interrupt entry, so a restored pane would
+/// order the same conversation the other way. The cancel ack is the point
+/// after which no more chunks for that turn can arrive, so the marker settles
+/// to the end there.
+#[gpui::test]
+fn late_content_does_not_strand_the_stop_marker_above_it(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![daruda_acp::ChatItem::UserText("go".into())];
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert_eq!(view.items.last(), Some(&daruda_acp::ChatItem::Interrupted));
+
+            // A chunk that was already in flight when the cancel went out.
+            view.items.push(assistant_text_item("half a sentence"));
+            view.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: false,
+                    stop_reason: "Cancelled".into(),
+                },
+                "",
+                false,
+                cx,
+            );
+
+            assert_eq!(
+                view.items.last(),
+                Some(&daruda_acp::ChatItem::Interrupted),
+                "the marker settles below the text that beat it"
+            );
+            assert_eq!(
+                view.items
+                    .iter()
+                    .filter(|i| matches!(i, daruda_acp::ChatItem::Interrupted))
+                    .count(),
+                1,
+                "moved, not duplicated"
+            );
         })
         .expect("view update");
 }

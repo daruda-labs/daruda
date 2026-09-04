@@ -51,6 +51,7 @@ const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
 const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
+const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
 /// CLI token for the tail window's boundary row, closed.
 const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
 /// CLI token for the same boundary row, open.
@@ -177,6 +178,11 @@ pub(crate) enum ScreenshotScenario {
     AgentChatNarrowed,
     /// The same transcript with a custom fold matrix and its editor open.
     AgentChatFold,
+    /// A seeded transcript whose run a Stop cut. The marker is pushed by the
+    /// Stop path, not by anything the agent sends, so no settled seed reaches
+    /// it — and it is the one row whose whole job is to read as an edge rather
+    /// than a message, which only a capture can confirm.
+    AgentChatInterrupted,
     /// The tail window's boundary row with nothing floating over it. The pair
     /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
     /// the row exists to say — whether its two states are distinguishable —
@@ -255,6 +261,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_WORKING => Some(Self::AgentChatWorking),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
+            NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
             NAME_AGENT_CHAT_GROUP_TAIL => Some(Self::AgentChatGroupTail),
@@ -413,6 +420,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatNarrowed => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_narrowed_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatInterrupted => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
             });
         }
         ScreenshotScenario::AgentChatFold => {

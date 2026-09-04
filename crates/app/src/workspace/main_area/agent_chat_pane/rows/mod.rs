@@ -74,6 +74,11 @@ impl GroupFilter {
 /// Projected row kinds keyed by stable item or group identity.
 pub(in crate::workspace) enum RowKind {
     User(usize),
+    /// The marker where a Stop cut the run above it. Top-level like
+    /// [`RowKind::User`] rather than an item inside the response: it is the
+    /// edge between two turns, so collapsing the response it ended must not
+    /// take it off screen.
+    Interrupted(usize),
     ResponseHeader {
         /// First item of the response this bar heads. Keyed off the run rather
         /// than the user turn: a restored pane can open with a run whose user
@@ -224,6 +229,7 @@ impl FilterMatchIndex {
 #[derive(PartialEq, Eq)]
 pub(in crate::workspace) enum RowSlot<'a> {
     User(usize),
+    Interrupted(usize),
     Response(usize),
     AgentItem(usize),
     TailMore(usize),
@@ -242,6 +248,7 @@ impl RowKind {
     fn slot(&self) -> RowSlot<'_> {
         match self {
             RowKind::User(ix) => RowSlot::User(*ix),
+            RowKind::Interrupted(ix) => RowSlot::Interrupted(*ix),
             RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
             RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
@@ -306,7 +313,19 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
     };
     let mut rows = Vec::with_capacity(items.len() + 4);
     let mut i = 0;
+    // Indent of whatever row the projection ended on, so the working indicator
+    // pins to the tail without asking which branch put it there.
+    let mut tail_indent = 0u8;
     while i < items.len() {
+        // The marker ends a run (`agent_run`), so it is never inside one and
+        // gets its own top-level row. Handled before the user check because
+        // the run that follows it starts at the next item, not at this one.
+        if matches!(&items[i], ChatItem::Interrupted) {
+            rows.push(RenderRow::at(RowKind::Interrupted(i), false, 0));
+            i += 1;
+            tail_indent = 0;
+            continue;
+        }
         if matches!(&items[i], ChatItem::UserText(_)) {
             rows.push(RenderRow::at(RowKind::User(i), false, 0));
             i += 1;
@@ -314,7 +333,6 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
 
         let run = agent_run(items, i);
         i = run.end;
-        let is_last_turn = i >= items.len();
 
         let tools = run
             .clone()
@@ -383,9 +401,14 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
             0u8
         };
 
-        if awaiting_response && is_last_turn {
-            rows.push(RenderRow::at(RowKind::WorkingIndicator, false, run_indent));
-        }
+        tail_indent = run_indent;
+    }
+    // One emission site, after the walk: the indicator marks the live tail of
+    // the conversation whatever kind of row ended it. Gating it on "this run
+    // consumed the last item" instead lost the row entirely once a trailing
+    // Stop marker could follow the run.
+    if awaiting_response {
+        rows.push(RenderRow::at(RowKind::WorkingIndicator, false, tail_indent));
     }
     rows
 }

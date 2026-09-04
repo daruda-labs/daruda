@@ -191,6 +191,22 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// The seeded conversation cut by a Stop: the run loses its conclusion and is
+/// closed by the marker, then the user asks again. Shows the marker between two
+/// turns, which is the only place it ever appears.
+pub(in crate::workspace) fn interrupted_transcript() -> Vec<ChatItem> {
+    let mut items = sample_transcript();
+    // Drop the conclusion — a stopped run never reached one.
+    items.pop();
+    items.push(ChatItem::Interrupted);
+    items.push(ChatItem::UserText(REPROMPT.to_string()));
+    items
+}
+
+/// The prompt after the stop. Phrased as a correction, because that is what a
+/// user who just pressed Stop is doing.
+const REPROMPT: &str = "Stop there — just show me the lane lookup, not the whole module.";
+
 /// The parent call every [`subagent_transcript`] child names.
 pub(in crate::workspace) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
 /// More children than the capture's window keeps, so the card's own boundary

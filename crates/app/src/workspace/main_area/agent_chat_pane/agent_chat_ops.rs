@@ -829,6 +829,25 @@ impl Workspace {
         );
     }
 
+    /// Open the seeded transcript with a Stop marker closing its run — the one
+    /// shape no settled seed reaches, since the marker is pushed by the Stop
+    /// path rather than by anything the agent sends.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_interrupted_transcript_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::interrupted_transcript(), window, cx)
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the seeded transcript mid-turn — the agent's answer not yet
     /// written, so its last prose is a preamble rather than a conclusion.
     #[cfg(feature = "screenshot")]

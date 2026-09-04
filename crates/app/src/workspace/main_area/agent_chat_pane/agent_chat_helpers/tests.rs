@@ -1059,6 +1059,27 @@ fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
     assert_eq!(agent_run(&items, 9), 1..1);
 }
 
+/// A stop marker closes the run it cut, exactly like the next prompt does —
+/// so the response bar summarizes what actually ran, and the marker is left
+/// outside every run for the projection to place at top level.
+#[test]
+fn agent_run_stops_at_a_stop_marker() {
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        asst("half"),
+        ChatItem::Interrupted,
+        ChatItem::UserText("again".to_owned()),
+        asst("done"),
+    ];
+    assert_eq!(agent_run(&items, 1), 1..2, "the cut run ends at the marker");
+    assert_eq!(
+        agent_run(&items, 2),
+        2..2,
+        "a run starting on the marker is empty, not the whole tail"
+    );
+    assert_eq!(agent_run(&items, 4), 4..5, "the next turn is unaffected");
+}
+
 /// A header glyph sits on a disclosure, so it must summarize what expanding
 /// the row shows. The shipped bug: an Edits filter hid a failed shell command
 /// but its ✗ stayed on the header, marking a run whose every visible card
