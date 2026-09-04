@@ -24,6 +24,7 @@ mod replay;
 mod tap;
 
 pub use replay::{Replay, ReplayError, replay_log};
+pub use tap::PREVIOUS_GENERATION_DIR;
 pub(crate) use tap::attach;
 
 /// Opening of a spilled-payload marker. Ends with `:`, so the id follows it directly.

@@ -106,4 +106,15 @@ jq 'select(.id == 4821)' acp-wire-codex-acp.payload.jsonl
 
 `DARUDA_ACP_WIRE_LOG_MAX_FIELD=0` restores unelided raw lines;
 `DARUDA_ACP_WIRE_LOG_PAYLOADS=0` drops payloads instead of writing the sidecar.
-Both files truncate on the first session of each process run.
+On the first session of each process run both files rotate into a `prev/`
+sibling directory under the same file names, so a rotated capture stays
+replayable (`agent_id_from_path` and the sidecar both derive from the name).
+Exactly one generation is kept, so an unrelated launch (a `--screenshot` run is
+enough — it restores a workspace whose chat pane connects on focus) costs you an
+undo rather than the capture.
+
+Two caveats. Replaying straight out of `prev/` is self-destructive — the next
+launch rotates onto it — so copy the file elsewhere first. And under concurrent
+daruda processes sharing one log dir, `prev/` may hold a *still-running* run's
+log rather than a finished one; isolate with `DARUDA_PROFILE` when that
+matters.

@@ -91,9 +91,9 @@ fn settle_delay_from(var: Option<&str>) -> Duration {
 ///
 /// Must run **before the first window opens**. A debug build points the wire tap
 /// at this same directory, and a restored agent-chat pane connects lazily on
-/// focus — at which point the tap truncates the capture. Reading first is what
-/// makes that unlosable, so this is deliberately not deferred to the settle
-/// timer alongside the seeding.
+/// focus — at which point the tap rotates the capture out from under this path.
+/// Reading first is what makes that unlosable, so this is deliberately not
+/// deferred to the settle timer alongside the seeding.
 pub(crate) fn load(path: &Path, explicit_agent: Option<String>) -> Option<Loaded> {
     warn_if_the_tap_writes_here(path);
     // The tap splices the agent id into the file name, so a capture usually
@@ -145,23 +145,33 @@ pub(crate) fn schedule_seed(loaded: Loaded, cx: &mut App) {
     .detach();
 }
 
-/// Warn when the capture being replayed sits where this process's own wire tap
-/// writes. The tap truncates on its first open, so a session starting in this
-/// run would destroy the capture — and in a debug build the tap is on by
-/// default. Losing a capture that way is silent and unrecoverable, so it is
-/// worth saying loudly even though the load above has already read the file.
+/// Warn when a session started in this run would move the capture being
+/// replayed. The tap rotates on its first open, and in a debug build it is on
+/// by default — so a capture in the tap's own directory is moved into `prev/`,
+/// and one *already* in `prev/` is overwritten by that move. The second case is
+/// the destructive one and is easy to walk into, since `prev/` is exactly where
+/// the recovery copy lives. The move is silent, so say it loudly even though
+/// the load above has already read the file.
 fn warn_if_the_tap_writes_here(path: &Path) {
     let Some(tap) = std::env::var_os(WIRE_LOG_ENV) else {
         return;
     };
     let tap = PathBuf::from(tap);
-    if tap.parent() != path.parent() {
+    let Some(tap_dir) = tap.parent() else {
         return;
-    }
+    };
+    let fate = match path.parent() {
+        Some(dir) if dir == tap_dir => "moved into prev/",
+        Some(dir) if dir == tap_dir.join(daruda_acp::wire_log::PREVIOUS_GENERATION_DIR) => {
+            "overwritten — it is the slot the rotation moves into"
+        }
+        _ => return,
+    };
     println!(
-        "replay: WARNING — the wire tap ({WIRE_LOG_ENV}) writes to {}, the same \
-         directory as this capture. Any session started in this run truncates \
-         its log there. Point {WIRE_LOG_ENV} somewhere else to keep the capture.",
+        "replay: WARNING — the wire tap ({WIRE_LOG_ENV}) writes to {}. Any \
+         session started in this run rotates its log there, so this capture is \
+         {fate}. Copy it elsewhere, or point {WIRE_LOG_ENV} at another \
+         directory, to keep it.",
         tap.display()
     );
 }

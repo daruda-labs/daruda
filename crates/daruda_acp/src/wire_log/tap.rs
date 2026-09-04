@@ -23,6 +23,9 @@ use super::{DEFAULT_BASE_STEM, UNRECORDED_ID, payload_marker, payload_sidecar_pa
 /// payload fields.
 const DEFAULT_MAX_FIELD: usize = 512;
 
+/// Sibling directory holding the one retained generation of each capture.
+pub const PREVIOUS_GENERATION_DIR: &str = "prev";
+
 /// How much of a spilled string stays inline, so the slim log still shows what
 /// the payload was.
 const PREVIEW_BYTES: usize = 96;
@@ -222,11 +225,15 @@ fn sidecar_enabled(var: Option<&OsStr>) -> bool {
 }
 
 fn open_log(path: &Path) -> Option<Mutex<File>> {
-    // `attach` runs per ACP session, not per app launch, so a plain
-    // `.truncate(true)` would wipe earlier sessions of the same run. Open once
-    // (append) and share the handle; a per-line reopen would thrash under
-    // streaming turns.
-    let truncate = first_open(path);
+    // `attach` runs per ACP session, not per app launch, so only the first open
+    // of a process starts a generation; later sessions share the file. Open once
+    // and share the handle — a per-line reopen would thrash under streaming
+    // turns.
+    //
+    // Append unless rotation left the old bytes in place: two sessions hold two
+    // handles, and a non-append writer keeps its own offset, so it overwrites
+    // whatever its sibling appended past it.
+    let truncate = first_open(path) && !rotate(path);
     std::fs::OpenOptions::new()
         .create(true)
         .append(!truncate)
@@ -235,6 +242,37 @@ fn open_log(path: &Path) -> Option<Mutex<File>> {
         .open(path)
         .ok()
         .map(Mutex::new)
+}
+
+/// Move the previous run's capture aside, keeping one generation. Returns
+/// whether `path` is now clear.
+///
+/// The file name is fixed and a capture cannot be reproduced — no rerun replays
+/// a session that already happened — so one generation turns an unrelated
+/// launch into an undo rather than a loss. Best-effort: a failed move leaves
+/// the caller to truncate, since a tap that refuses to open is worse than one
+/// that loses history.
+fn rotate(path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+    let target = previous_generation_path(path);
+    target.parent().is_some_and(|dir| {
+        std::fs::create_dir_all(dir).is_ok() && std::fs::rename(path, &target).is_ok()
+    })
+}
+
+/// Where [`rotate`] parks the previous run's file: a `prev/` sibling directory,
+/// under the **same file name**. The name is what the reader parses — the agent
+/// id (`agent_id_from_path`) and the sidecar (`payload_sidecar_path`) are both
+/// derived from it — so decorating it would make a rotated capture unreadable
+/// by the replay path that exists to consume it.
+fn previous_generation_path(path: &Path) -> PathBuf {
+    let dir = path.parent().unwrap_or(Path::new(""));
+    match path.file_name() {
+        Some(name) => dir.join(PREVIOUS_GENERATION_DIR).join(name),
+        None => dir.join(PREVIOUS_GENERATION_DIR),
+    }
 }
 
 /// Whether `path` is being opened for the first time in this process — tracked
@@ -323,7 +361,111 @@ mod tests {
     }
 
     #[test]
-    fn first_open_truncates_once_then_appends() {
+    fn a_new_run_keeps_the_previous_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("acp-wire-rotate-test.log");
+        std::fs::write(&path, "run one\n").unwrap();
+
+        drop(open_log(&path).expect("the log opens"));
+
+        assert_eq!(
+            std::fs::read_to_string(previous_generation_path(&path)).unwrap(),
+            "run one\n",
+            "the earlier run is moved aside, not overwritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "",
+            "the new run starts empty under the stable name"
+        );
+    }
+
+    /// The rotated copy keeps its file name, so the reader's two naming
+    /// conventions still apply: the agent id parses, and its sidecar sits beside
+    /// it under the name [`payload_sidecar_path`] derives.
+    #[test]
+    fn a_rotated_capture_is_still_readable_by_the_replay_naming() {
+        let dir = tempfile::tempdir().unwrap();
+        let slim = dir.path().join("acp-wire-claude.log");
+        let sidecar = crate::wire_log::payload_sidecar_path(&slim);
+        std::fs::write(&slim, "slim\n").unwrap();
+        std::fs::write(&sidecar, "payload\n").unwrap();
+
+        drop(open_log(&slim).expect("slim opens"));
+        drop(open_log(&sidecar).expect("sidecar opens"));
+
+        let rotated = previous_generation_path(&slim);
+        assert_eq!(
+            crate::wire_log::agent_id_from_path(&rotated).as_deref(),
+            Some("claude"),
+            "the agent id still parses out of the rotated name"
+        );
+        assert_eq!(
+            std::fs::read_to_string(crate::wire_log::payload_sidecar_path(&rotated)).unwrap(),
+            "payload\n",
+            "and its sidecar is where the reader derives it"
+        );
+    }
+
+    /// `attach` runs per ACP session, so only the first open of a process
+    /// rotates — a second session must not push its sibling's log out of the
+    /// one slot, and both must land in the file intact — a non-append handle
+    /// keeps its own offset and overwrites whatever its sibling appended.
+    #[test]
+    fn two_sessions_in_one_run_interleave_without_losing_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("acp-wire-rotate-twice-test.log");
+        std::fs::write(&path, "run one\n").unwrap();
+
+        let first = open_log(&path).expect("first session");
+        let second = open_log(&path).expect("second session");
+        writeln!(first.lock().unwrap(), "a1").unwrap();
+        writeln!(second.lock().unwrap(), "b1").unwrap();
+        writeln!(first.lock().unwrap(), "a2").unwrap();
+        writeln!(second.lock().unwrap(), "b2").unwrap();
+        drop((first, second));
+
+        assert_eq!(
+            std::fs::read_to_string(previous_generation_path(&path)).unwrap(),
+            "run one\n",
+            "the rotated copy is the previous *run*, not the first session"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "a1\nb1\na2\nb2\n",
+            "neither session's lines are overwritten by the other's offset"
+        );
+    }
+
+    /// Nothing to move aside is the normal first-ever run, not an error.
+    #[test]
+    fn a_first_ever_run_rotates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("acp-wire-rotate-fresh-test.log");
+
+        open_log(&path).expect("the log opens");
+
+        assert!(path.exists(), "the live log is created");
+        assert!(
+            !previous_generation_path(&path).exists(),
+            "no phantom previous generation"
+        );
+    }
+
+    #[test]
+    fn previous_generation_keeps_the_file_name_and_changes_the_directory() {
+        assert_eq!(
+            previous_generation_path(Path::new("/logs/acp-wire-claude.log")),
+            PathBuf::from("/logs/prev/acp-wire-claude.log")
+        );
+        assert_eq!(
+            previous_generation_path(Path::new("/logs/acp-wire-claude.payload.jsonl")),
+            PathBuf::from("/logs/prev/acp-wire-claude.payload.jsonl")
+        );
+    }
+
+    #[test]
+    fn first_open_is_once_per_path_per_process() {
         let path_a = PathBuf::from("/logs/acp-wire-first-open-test-a.log");
         let path_b = PathBuf::from("/logs/acp-wire-first-open-test-b.log");
         assert!(first_open(&path_a), "first open truncates");
