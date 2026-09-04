@@ -11,11 +11,13 @@
 //! blocks extend the same type through the standard sibling-module pattern.
 //! [`agent_vocabulary`] and [`agent_transcript`] are the Agent section's
 //! option-sourcing halves — where a catalog row's mode / model pickers and its
-//! Fold / Recent steps / Filter pickers get their choices.
+//! Fold / Recent steps / Filter pickers get their choices. [`agent_env`] is
+//! the pure text ↔ value mapping behind its Environment field.
 
 mod about;
 mod accounts;
 mod agent;
+pub(super) mod agent_env;
 pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
 pub(super) mod plugin;

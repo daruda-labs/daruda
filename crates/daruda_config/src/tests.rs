@@ -109,6 +109,7 @@ fn agents_round_trip_through_toml() {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             }),
             AgentEntry::Preset {
                 preset: "codex-acp".to_string(),
@@ -1025,6 +1026,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
             AgentEntry::Preset {
                 preset: "gemini".to_string(),
                 overrides: PresetOverrides {
+                    env: Some(vec![("RUST_LOG".to_string(), "debug".to_string())]),
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
@@ -1048,8 +1050,16 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 fold_mode: Some(vec!["expanded".to_string()]),
                 tail_window: Some(10),
                 display_filter: Some(vec!["prose".to_string(), "tools".to_string()]),
+                env: None,
             }),
             AgentEntry::Custom(AgentDefinition {
+                // A table key, like the `ssh` sub-table below it — TOML
+                // forbids a value after a table, so the writer has to emit
+                // both after every scalar.
+                env: Some(vec![(
+                    "CODEX_CONFIG".to_string(),
+                    r#"{"features":{"multi_agent_v2":true}}"#.to_string(),
+                )]),
                 id: "remote".to_string(),
                 name: "Remote".to_string(),
                 launch: AgentLaunch::Ssh {
@@ -1076,8 +1086,33 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
     );
     assert!(on_disk.contains("preset = \"retired-agent\""), "{on_disk}");
     assert!(on_disk.contains("display_filter = []"), "{on_disk}");
+    assert!(on_disk.contains("RUST_LOG = \"debug\""), "{on_disk}");
 
     assert_eq!(Config::load_from(&path).agents, cfg.agents);
+}
+
+/// A row that clears its preset's environment states an empty table, which is
+/// a different answer from stating nothing — the latter follows the preset.
+/// The writer has to keep them apart on disk, or the clear is undone by the
+/// next reload.
+#[test]
+fn patch_config_file_keeps_a_cleared_env_override_apart_from_an_absent_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let cleared = AgentEntry::Preset {
+        preset: "codex-acp".to_string(),
+        overrides: PresetOverrides {
+            env: Some(Vec::new()),
+            ..PresetOverrides::default()
+        },
+    };
+    let cfg = Config {
+        agents: vec![cleared.clone()],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+    assert_eq!(Config::load_from(&path).agents, vec![cleared]);
 }
 
 #[test]

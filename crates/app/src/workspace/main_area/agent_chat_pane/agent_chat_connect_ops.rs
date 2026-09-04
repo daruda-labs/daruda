@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 
 use daruda_acp::{NodeProgress, connect_agent_session_with_model};
-use daruda_config::AgentLaunch;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use futures::StreamExt as _;
@@ -20,7 +19,7 @@ use super::transcript_defaults::TranscriptDefaults;
 use super::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::agent::account::PreparedAccount;
 use crate::agent::launch_resolve::{
-    ConnectCommandError, account_recipe_for_connect, resolve_launch,
+    AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -304,11 +303,11 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         cx: &mut Context<Self>,
-    ) -> Option<AgentLaunch> {
+    ) -> Option<AgentLaunchSpec> {
         let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
         // Happy path: the view's agent is still in the catalog.
-        if let Some(launch) = self.agent_launch_for(&agent_id) {
-            return Some(launch);
+        if let Some(spec) = self.agent_launch_for(&agent_id) {
+            return Some(spec);
         }
         // Stale id — reconcile so the chip / persisted state stop lying, then
         // launch the effective agent (a catalog entry, or the Claude id when the
@@ -330,10 +329,9 @@ impl Workspace {
             });
             self.mutate_durable(cx, |_, _| {});
         }
-        Some(
-            self.agent_launch_for(&effective_id)
-                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch),
-        )
+        Some(self.agent_launch_for(&effective_id).unwrap_or_else(|| {
+            AgentLaunchSpec::of(&daruda_config::AgentDefinition::claude_default())
+        }))
     }
 
     #[cfg(test)]
@@ -341,7 +339,7 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         cx: &mut Context<Self>,
-    ) -> Option<AgentLaunch> {
+    ) -> Option<AgentLaunchSpec> {
         self.resolve_pane_launch(pane_id, cx)
     }
 
@@ -353,7 +351,10 @@ impl Workspace {
     ) -> Option<AgentChatConnectionPlan> {
         // Resolve the pane's agent_id -> launch spec, reconciling a stale
         // agent_id. `None` only when the pane is gone.
-        let launch = self.resolve_pane_launch(pane_id, cx)?;
+        let AgentLaunchSpec {
+            launch,
+            env: agent_env,
+        } = self.resolve_pane_launch(pane_id, cx)?;
         // Read back after `resolve_pane_launch` so any stale-id reconcile it did
         // is picked up. Only keys the dev-build wire-tap file name — never
         // affects the launch itself.
@@ -389,9 +390,24 @@ impl Workspace {
         // names.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
         let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        let resolved_host = owning_lane.map(|lane| {
+        let resolved_host = match owning_lane.map(|lane| {
             lane.effective_session_host(&launch, &self.session_hosts, &self.session_host_tombstones)
-        });
+        }) {
+            None => None,
+            Some(Ok(host)) => Some(host),
+            // The same surface a launch that cannot produce a command gets
+            // below: the pane says why, and nothing connects.
+            Some(Err(unusable)) => {
+                if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                    let message = s::agent_chat_session_host_unusable(&unusable.reason.localized());
+                    view.update(cx, |v, cx| {
+                        v.set_error(message, daruda_acp::Remedy::Configure, cx);
+                    });
+                    self.notify_status_docks(cx);
+                }
+                return None;
+            }
+        };
         let cached_host = owning_lane.and_then(|lane| lane.session_host.clone());
         let is_remote = resolved_host
             .as_ref()
@@ -421,6 +437,7 @@ impl Workspace {
         }
         let resolved = resolve_launch(
             &launch,
+            &agent_env,
             owning_lane,
             cwd,
             prepared.as_ref(),
@@ -459,6 +476,7 @@ impl Workspace {
                     ConnectCommandError::JsonStdioRemote => {
                         s::agent_chat_json_stdio_remote_unsupported()
                     }
+                    ConnectCommandError::JsonStdioEnv => s::agent_chat_json_stdio_env_unsupported(),
                 };
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                     view.update(cx, |v, cx| {
@@ -512,16 +530,23 @@ impl Workspace {
         // DIAG: an ACP adapter spawn that fails with `os error 2` means the
         // launcher (`docker` / `npx` / `ssh`) was not on this process's PATH —
         // a GUI launch whose `hydrate_path_from_login_shell` was skipped or
-        // bailed leaves only the minimal launchd PATH. Log the exact command +
+        // bailed leaves only the minimal launchd PATH. Log the launcher +
         // effective PATH once per connect so the failure has ground truth
         // instead of a bare `-32603`. Info severity: no toast, NDJSON only.
+        //
+        // `command_diagnostic` rather than the command itself: an agent's
+        // declared environment is folded into that string as `KEY='value'`,
+        // and those values are whatever the user typed into Settings.
         {
             let path = std::env::var("PATH").unwrap_or_else(|_| "<unset>".to_string());
             let report = daruda_store::observability::error_report::ErrorReport::new(
                 "ACP connect: resolved launch command",
             )
             .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
-            .with_context("command", launch_spec.command.clone())
+            .with_context(
+                "launcher",
+                daruda_acp::command_diagnostic(&launch_spec.command),
+            )
             .with_context("PATH", path)
             .at(file!(), line!())
             .dedup("agent_chat.connect.command")
@@ -1128,6 +1153,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1156,6 +1182,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             AgentDefinition::claude_default(),
         ];

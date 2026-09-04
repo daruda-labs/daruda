@@ -449,6 +449,13 @@ pub const BANNER_SUCCESS_TEXT: Hsla = with_lightness(SUCCESS, 0.65);
 /// Fixed width of the label column in settings form rows (px).
 pub const SETTINGS_LABEL_W: f32 = 120.0;
 
+/// Rows an agent catalog row's Environment box shows before it scrolls. Two
+/// so a one-variable environment (the common case) still reads as a block,
+/// six so a longer one stays scannable without pushing the rest of the row
+/// off-screen.
+pub const SETTINGS_AGENT_ENV_ROWS_MIN: usize = 2;
+pub const SETTINGS_AGENT_ENV_ROWS_MAX: usize = 6;
+
 /// Width of the section-nav sidebar (px). Sized to fit `Claude Status`
 /// (the longest builtin nav label) at the body font size with comfort.
 pub const SETTINGS_SIDEBAR_W: f32 = 168.0;

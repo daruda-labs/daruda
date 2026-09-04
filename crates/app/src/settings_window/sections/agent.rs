@@ -376,6 +376,39 @@ impl SettingsWindow {
                     cx,
                 )
             })
+            .map(|body| {
+                Self::field_with_base(
+                    body,
+                    s::settings_agent_field_env(),
+                    crate::ui::input(&row.env_input, cx, 0),
+                    provenance.env_base.clone(),
+                    cx,
+                )
+            })
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(s::settings_agent_env_description()),
+            )
+            // What the overlay does, and what it does not do. Its own banner
+            // rather than a trailing clause of the muted paragraph above: the
+            // reader this exists for is the one who turned it on, saw no
+            // subagents, and needs to be told the setting is not the thing
+            // that spawns them. `info`, not `warning` — nothing is wrong here,
+            // it is a default-on state whose scope is easy to misread.
+            .when(row.ships_codex_subagent_overlay(cx), |body| {
+                body.child(
+                    div()
+                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(s::settings_agent_env_codex_note()),
+                )
+                .child(crate::ui::alert::info(
+                    SharedString::from(format!("settings-agent-env-codex-{catalog_index}")),
+                    s::settings_agent_env_codex_caveat(),
+                ))
+            })
             .child(Self::section_label(
                 s::settings_agent_section_transcript(),
                 cx,
@@ -461,7 +494,7 @@ impl SettingsWindow {
     }
 
     /// A labelled control plus the value it inherits when the row states none.
-    /// Seven fields render this trio; the base line is what tells an override
+    /// Eight fields render this trio; the base line is what tells an override
     /// from a row that is simply following its preset.
     fn field_with_base(
         body: gpui::Div,
@@ -540,6 +573,7 @@ impl SettingsWindow {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             None,
             window,
@@ -562,6 +596,7 @@ pub(in crate::settings_window) struct RowProvenance {
     pub(in crate::settings_window) fold_mode_base: Option<String>,
     pub(in crate::settings_window) tail_window_base: Option<String>,
     pub(in crate::settings_window) display_filter_base: Option<String>,
+    pub(in crate::settings_window) env_base: Option<String>,
 }
 
 impl RowProvenance {
@@ -577,6 +612,7 @@ impl RowProvenance {
             || self.fold_mode_base.is_some()
             || self.tail_window_base.is_some()
             || self.display_filter_base.is_some()
+            || self.env_base.is_some()
     }
 
     fn source_label(&self) -> String {
@@ -600,6 +636,7 @@ impl AgentCatalogRow {
                 fold_mode_base: None,
                 tail_window_base: None,
                 display_filter_base: None,
+                env_base: None,
             };
         };
         // A row only carries a preset id it resolved from, so the lookup holds.
@@ -608,6 +645,10 @@ impl AgentCatalogRow {
             Some(daruda_config::AgentLaunch::Raw(command)) => command.clone(),
             _ => String::new(),
         };
+        let base_env = base
+            .as_ref()
+            .and_then(|b| b.env.clone())
+            .unwrap_or_default();
         let base_name = base.map(|b| b.name).unwrap_or_default();
         // Presets state none of the mode, model or transcript axes, so any
         // value on one of them is an override — labelled "not set" rather than
@@ -633,6 +674,67 @@ impl AgentCatalogRow {
             display_filter_base: self
                 .display_filter()
                 .map(|_| s::settings_agent_override_preset_value_unset()),
+            // Diffed on parsed pairs rather than on the raw text, so
+            // reformatting a line is not reported as an override — and a
+            // preset that ships no environment shows "not set" like the
+            // other stateless axes rather than an empty value.
+            env_base: (!super::agent_env::env_follows_base(
+                &self.env_input.read(cx).value(),
+                &base_env,
+            ))
+            .then(|| {
+                if base_env.is_empty() {
+                    s::settings_agent_override_preset_value_unset()
+                } else {
+                    s::settings_agent_override_preset_value(&super::agent_env::env_base_summary(
+                        &base_env,
+                    ))
+                }
+            }),
+        }
+    }
+
+    /// The environment this row writes — `Err` naming what the user has to
+    /// fix first. Resolved against the preset's own environment, since that
+    /// is what decides whether an emptied field clears it or simply states
+    /// none (see [`super::agent_env::stated_env`]).
+    pub(in crate::settings_window) fn stated_env(
+        &self,
+        cx: &gpui::App,
+    ) -> Result<Option<Vec<(String, String)>>, super::agent_env::EnvFieldError> {
+        super::agent_env::stated_env(
+            &self.env_input.read(cx).value(),
+            self.preset_env().as_deref(),
+        )
+    }
+
+    /// The environment this row's preset ships, `None` for a custom row or a
+    /// preset that ships none.
+    fn preset_env(&self) -> Option<Vec<(String, String)>> {
+        self.preset
+            .as_deref()
+            .and_then(daruda_config::AgentDefinition::registry_preset)
+            .and_then(|preset| preset.env)
+    }
+
+    /// Whether the adapter this row launches gets codex's native-subagent
+    /// overlay — the row's own environment when it states one, its preset's
+    /// otherwise.
+    ///
+    /// Keyed on the variable, not on a preset id: a `claude` row must not be
+    /// told what the Codex preset ships, a hand-built codex row should be,
+    /// and a second preset carrying the same overlay needs no second
+    /// condition here.
+    pub(in crate::settings_window) fn ships_codex_subagent_overlay(&self, cx: &gpui::App) -> bool {
+        fn carries(env: &[(String, String)]) -> bool {
+            env.iter()
+                .any(|(name, _)| name == daruda_config::CODEX_CONFIG_ENV)
+        }
+        match self.stated_env(cx) {
+            Ok(Some(env)) => carries(&env),
+            // The field states nothing, or is mid-edit and does not parse; the
+            // launch falls back to the preset's own environment either way.
+            Ok(None) | Err(_) => self.preset_env().is_some_and(|env| carries(&env)),
         }
     }
 }

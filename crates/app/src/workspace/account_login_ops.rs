@@ -1799,6 +1799,7 @@ mod tests {
             fold_mode: None,
             tail_window: None,
             display_filter: None,
+            env: None,
         }
     }
 
@@ -1863,6 +1864,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             daruda_config::AgentDefinition {
                 id: "remote-docker".to_string(),
@@ -1877,6 +1879,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             agent(
                 "remote-cwd",

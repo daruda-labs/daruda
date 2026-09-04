@@ -101,6 +101,40 @@ pub fn first_command_token(command: &str) -> Option<String> {
     launcher_after_env_prefix(command)
 }
 
+/// A launch command reduced to what a spawn failure needs to be diagnosed:
+/// the launcher that actually gets exec'd, plus the names of the variables
+/// injected ahead of it.
+///
+/// Values never appear. A declared environment carries whatever the user
+/// typed into Settings — an API key, a company token — so neither the shell
+/// text nor a JSON config's own `env` map may reach a log. The remote forms
+/// keep their assignments inside a quoted `sh -c` script, so only the
+/// transport token (`ssh` / `docker`) is echoed there.
+#[must_use]
+pub fn command_diagnostic(command: &str) -> String {
+    let trimmed = command.trim_start();
+    if trimmed.starts_with('{') {
+        return JSON_STDIO_DIAGNOSTIC.to_string();
+    }
+    let (assignments, tokens) = split_env_prefixed_tokens(trimmed);
+    let launcher = tokens
+        .first()
+        .map_or(NO_LAUNCHER_DIAGNOSTIC, String::as_str);
+    if assignments.is_empty() {
+        return launcher.to_string();
+    }
+    let names: Vec<&str> = assignments.iter().map(|(name, _)| name.as_str()).collect();
+    format!("{launcher} (env: {})", names.join(", "))
+}
+
+/// Stand-in for a JSON stdio config in [`command_diagnostic`]: that shape
+/// carries command, args and env as structured fields, and the env half is
+/// exactly what must not be logged.
+const JSON_STDIO_DIAGNOSTIC: &str = "<json stdio config>";
+
+/// Stand-in in [`command_diagnostic`] for a command that tokenized to nothing.
+const NO_LAUNCHER_DIAGNOSTIC: &str = "<empty>";
+
 fn launcher_after_env_prefix(command: &str) -> Option<String> {
     let (_, tokens) = split_env_prefixed_tokens(command);
     tokens.into_iter().next()
@@ -657,6 +691,37 @@ mod tests {
     use crate::connection::ADAPTER_NPM_PACKAGE;
     use agent_client_protocol::AcpAgent;
     use std::str::FromStr;
+
+    /// The diagnostic exists so a failed spawn names its launcher. An agent's
+    /// declared environment rides in the same string, so the one thing it must
+    /// never carry is a value.
+    #[test]
+    fn command_diagnostic_keeps_the_launcher_and_drops_every_value() {
+        let secret = "sk-live-do-not-log";
+
+        let local = format!("OPENAI_API_KEY='{secret}' CODEX_HOME='/tmp/a' npx -y some-acp");
+        let got = command_diagnostic(&local);
+        assert!(!got.contains(secret), "{got}");
+        assert!(!got.contains("/tmp/a"), "{got}");
+        assert_eq!(got, "npx (env: OPENAI_API_KEY, CODEX_HOME)");
+
+        // The remote forms hide their assignments inside the quoted script,
+        // so nothing past the transport token may be echoed.
+        let remote =
+            format!("ssh vm sh -c 'cd \"/w\" && export OPENAI_API_KEY='\\''{secret}'\\''; acp'");
+        let got = command_diagnostic(&remote);
+        assert!(!got.contains(secret), "{got}");
+        assert_eq!(got, "ssh");
+
+        // A JSON stdio config carries its env as a structured field.
+        let json = format!(r#"{{"command":"/opt/acp","env":{{"TOKEN":"{secret}"}}}}"#);
+        let got = command_diagnostic(&json);
+        assert!(!got.contains(secret), "{got}");
+        assert_eq!(got, JSON_STDIO_DIAGNOSTIC);
+
+        assert_eq!(command_diagnostic("npx -y some-acp"), "npx");
+        assert_eq!(command_diagnostic("   "), NO_LAUNCHER_DIAGNOSTIC);
+    }
 
     #[test]
     fn command_needs_node_only_for_npx_and_node_launchers() {

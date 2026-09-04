@@ -45,10 +45,11 @@ use std::{io::Write as _, path::PathBuf};
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
-    AgentPreset, AgentVocabularySeed, PresetLaunchability, PresetOverrides, READING_WIDTH_DEFAULT,
-    READING_WIDTH_MAX, READING_WIDTH_MIN, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
-    TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset, agent_presets,
-    agent_vocabulary_seed,
+    AgentPreset, AgentVocabularySeed, CODEX_CONFIG_ENV, LaunchTransport, PresetLaunchability,
+    PresetOverrides, READING_WIDTH_DEFAULT, READING_WIDTH_MAX, READING_WIDTH_MIN, TAIL_WINDOW_ALL,
+    TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset,
+    agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
+    is_valid_env_name,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -1140,6 +1141,17 @@ fn write_transcript_defaults(
     }
 }
 
+/// An `env` sub-table for an `[[agents]]` row. Emitted after every scalar key
+/// and beside the `ssh` / `docker` sub-table: TOML forbids a value after a
+/// table within the same entry.
+fn env_table(env: &[(String, String)]) -> toml_edit::Item {
+    let mut table = toml_edit::Table::new();
+    for (key, value) in env {
+        table[key.as_str()] = toml_edit::value(value.clone());
+    }
+    toml_edit::Item::Table(table)
+}
+
 fn string_array(values: &[String]) -> toml_edit::Item {
     toml_edit::value(
         values
@@ -1182,6 +1194,12 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 overrides.tail_window,
                 overrides.display_filter.as_deref(),
             );
+            // Written whenever the row states one at all: an empty table is
+            // the preset's environment cleared, not the absence of an
+            // override (see `PresetOverrides::env`).
+            if let Some(env) = &overrides.env {
+                table["env"] = env_table(env);
+            }
         }
         AgentEntry::Custom(agent) => {
             table["id"] = toml_edit::value(agent.id.clone());
@@ -1224,6 +1242,12 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 agent.tail_window,
                 agent.display_filter.as_deref(),
             );
+            // Same rule as a preset override above: written whenever the
+            // definition states one at all, so an empty table survives as
+            // "stated, and empty".
+            if let Some(env) = &agent.env {
+                table["env"] = env_table(env);
+            }
             if let Some((key, sub_table)) = remote {
                 table[key] = toml_edit::Item::Table(sub_table);
             }

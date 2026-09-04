@@ -53,6 +53,11 @@ impl AgentPreset {
             fold_mode: None,
             tail_window: None,
             display_filter: None,
+            // Nor an environment, as a rule: what a given adapter needs to be
+            // told is adapter-specific, so a preset states one only where
+            // daruda knows the answer — looked up from the hand-maintained
+            // table below the generated block.
+            env: preset_env_default(self.id),
         })
     }
 }
@@ -370,9 +375,173 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
 /// registry with no signal that anything was missing.
 pub const CURATED_PRESETS: &[AgentPreset] = &[];
 
+/// The variable `codex-acp` reads its per-session config overlay from.
+///
+/// Public so a caller can ask whether a launch environment actually carries
+/// the overlay, rather than matching on the preset id that happens to ship it
+/// — the two coincide only because [`PRESET_ENV_DEFAULTS`] says so today.
+pub const CODEX_CONFIG_ENV: &str = "CODEX_CONFIG";
+
+/// The [`CODEX_CONFIG_ENV`] overlay `codex-acp` reads as a per-session config
+/// object (`threadStart`/`threadResume`/`threadFork`), turning on codex's
+/// native subagent reporting so a child tool call reaches the wire instead of
+/// going out through legacy `spawnAgent` delegation, which daruda cannot show.
+const CODEX_MULTI_AGENT_V2_CONFIG: &str = r#"{"features":{"multi_agent_v2":true}}"#;
+
+/// Per-preset env defaults, hand-maintained beside [`CURATED_PRESETS`]: the
+/// registry snapshot has no field for a daruda-side default and would drop it
+/// on the next `gen_acp_presets` regeneration, so it cannot live in the
+/// generated block above.
+const PRESET_ENV_DEFAULTS: &[(&str, &[(&str, &str)])] = &[(
+    "codex-acp",
+    &[(CODEX_CONFIG_ENV, CODEX_MULTI_AGENT_V2_CONFIG)],
+)];
+
+/// The env `id` ships by default, or `None` when it names none — which is
+/// what leaves a row referencing it free to state one of its own.
+///
+/// Canonicalized through [`super::canonical_env`], so the order the table
+/// above happens to be written in never matters. A value read back from
+/// `config.toml` is always key-sorted (`env` persists as a TOML table), and
+/// `AgentEntry::reference` diffs a row's `env` against this one as a `Vec`:
+/// were this side left in source order, two entries in non-alphabetical order
+/// would compare unequal to a disk round trip that agrees with them in
+/// content, and the row would freeze as an override.
+fn preset_env_default(id: &str) -> Option<Vec<(String, String)>> {
+    env_default_from(PRESET_ENV_DEFAULTS, id)
+}
+
+/// [`preset_env_default`] over an arbitrary table, so the canonicalization
+/// can be tested on a multi-key entry — [`PRESET_ENV_DEFAULTS`] carries one
+/// key today, which is exactly the case source order cannot get wrong.
+fn env_default_from(table: &[(&str, &[(&str, &str)])], id: &str) -> Option<Vec<(String, String)>> {
+    table
+        .iter()
+        .find(|(preset_id, _)| *preset_id == id)
+        .map(|(_, env)| {
+            super::canonical_env(
+                env.iter()
+                    .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `codex-acp` is the only preset with a daruda-stated env default today:
+    /// turning on codex's native subagent reporting so a child tool call
+    /// reaches daruda's agent chat instead of vanishing into legacy
+    /// delegation. This is what makes an existing `codex-acp` catalog row
+    /// pick the flag up with no config edit.
+    #[test]
+    fn codex_acp_preset_ships_the_multi_agent_v2_env_default() {
+        let definition =
+            AgentDefinition::registry_preset("codex-acp").expect("codex-acp is runnable");
+        assert_eq!(
+            definition.env,
+            Some(vec![(
+                "CODEX_CONFIG".to_string(),
+                CODEX_MULTI_AGENT_V2_CONFIG.to_string(),
+            )])
+        );
+    }
+
+    /// The flag's whole effect lives in this one string, and codex reads it
+    /// as JSON: a typo in the key, a wrong nesting or a stray brace makes the
+    /// feature silently do nothing while every other test stays green.
+    ///
+    /// Pinned twice on purpose — the literal text (so a typo in the const has
+    /// to be typed twice to pass) *and* the parsed structure (so a
+    /// well-formed but wrongly-shaped overlay is caught even if both copies
+    /// agree).
+    #[test]
+    fn the_multi_agent_v2_overlay_is_the_exact_json_codex_reads() {
+        assert_eq!(
+            CODEX_MULTI_AGENT_V2_CONFIG,
+            r#"{"features":{"multi_agent_v2":true}}"#
+        );
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(CODEX_MULTI_AGENT_V2_CONFIG).expect("codex parses this as JSON");
+        let root = parsed.as_object().expect("a JSON object");
+        assert_eq!(
+            root.keys().collect::<Vec<_>>(),
+            vec!["features"],
+            "an unexpected top-level key would be a different overlay"
+        );
+        let features = root["features"]
+            .as_object()
+            .expect("`features` is an object");
+        assert_eq!(features.keys().collect::<Vec<_>>(), vec!["multi_agent_v2"]);
+        assert_eq!(
+            features["multi_agent_v2"],
+            serde_json::Value::Bool(true),
+            "the flag has to be the JSON boolean, not the string \"true\""
+        );
+    }
+
+    /// The default stays "states none" — not "states an empty one" — for
+    /// every preset not named in [`PRESET_ENV_DEFAULTS`]. The difference is
+    /// what keeps such a row free to pick up a default added later.
+    #[test]
+    fn a_preset_without_an_env_default_states_none() {
+        let definition = AgentDefinition::registry_preset("gemini").expect("gemini is runnable");
+        assert_eq!(definition.env, None);
+    }
+
+    /// A typo'd id in [`PRESET_ENV_DEFAULTS`] would otherwise silently name no
+    /// preset and do nothing — this fails loudly instead.
+    ///
+    /// Checked against [`AgentDefinition::registry_preset`], not [`preset`]:
+    /// the latter also finds a `NeedsManualInstall` preset, whose
+    /// [`AgentPreset::definition`] returns `None` before ever reading the env
+    /// table — so a default parked on one of those is dead code that would
+    /// still pass the looser check.
+    #[test]
+    fn every_preset_env_default_id_names_a_launchable_preset() {
+        for (id, _) in PRESET_ENV_DEFAULTS {
+            assert!(
+                AgentDefinition::registry_preset(id).is_some(),
+                "{id} in PRESET_ENV_DEFAULTS is not a launchable preset"
+            );
+        }
+    }
+
+    /// Every default is key-sorted, whatever order the table above is written
+    /// in — the ordering `AgentEntry::reference`'s `Vec` diff needs to agree
+    /// with what a disk round trip produces (`env` persists as a TOML table,
+    /// so read-back is always key-ordered). Asserted on the whole table
+    /// rather than on the one entry that exists today, so a second key added
+    /// later is covered without anyone remembering to sort it.
+    #[test]
+    fn every_preset_env_default_is_canonically_ordered() {
+        for (id, _) in PRESET_ENV_DEFAULTS {
+            let env = preset_env_default(id).expect("the table names it");
+            let mut sorted = env.clone();
+            sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
+            assert_eq!(env, sorted, "{id}'s env default is not key-sorted");
+        }
+    }
+
+    /// The case the real table cannot exercise yet: two keys written in
+    /// non-alphabetical order. Left in source order, a row that agrees with
+    /// the preset in *content* would compare unequal after a disk round trip
+    /// and freeze as an override — the exact thing the promotion diff exists
+    /// to prevent.
+    #[test]
+    fn a_multi_key_default_is_sorted_regardless_of_how_it_is_written() {
+        const TABLE: &[(&str, &[(&str, &str)])] = &[("some-agent", &[("ZED", "3"), ("ABLE", "1")])];
+        assert_eq!(
+            env_default_from(TABLE, "some-agent"),
+            Some(vec![
+                ("ABLE".to_string(), "1".to_string()),
+                ("ZED".to_string(), "3".to_string()),
+            ])
+        );
+        assert_eq!(env_default_from(TABLE, "other-agent"), None);
+    }
 
     /// `definition()` is what decides whether a preset can become a catalog row
     /// at all, so the Add button's behaviour rides on this being exactly

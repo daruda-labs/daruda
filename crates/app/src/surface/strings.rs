@@ -1896,6 +1896,23 @@ pub fn agent_chat_json_stdio_remote_unsupported() -> String {
     rust_i18n::t!("agent_chat.json_stdio_remote_unsupported").into_owned()
 }
 
+/// Status-line reason shown when the pane's launch is a JSON stdio config and
+/// its agent (or account) declares an environment. Every transport applies an
+/// environment as shell text, which would stop the command being JSON; the
+/// config's own `env` field is the lossless place for it, so the message
+/// names that rather than just refusing. See
+/// `agent::launch_resolve::json_stdio_refusal`.
+pub fn agent_chat_json_stdio_env_unsupported() -> String {
+    rust_i18n::t!("agent_chat.json_stdio_env_unsupported").into_owned()
+}
+
+/// Connect refused because the worktree's session host holds a value the
+/// launch quoting cannot carry. `reason` is the session-host validator's own
+/// wording, so the pane says the same thing the form would have.
+pub fn agent_chat_session_host_unusable(reason: &str) -> String {
+    rust_i18n::t!("agent_chat.session_host_unusable", reason => reason).into_owned()
+}
+
 /// Connect aborted because the pane's managed account config dir could not
 /// be prepared. The connect does not silently fall back to another account,
 /// so this names a real blocker rather than a warning.
@@ -4311,6 +4328,33 @@ pub fn settings_agent_vocabulary_agent_default_named(name: &str) -> String {
     rust_i18n::t!("settings.agent_vocabulary_agent_default_named", name = name).into_owned()
 }
 
+/// Label for an agent catalog row's launch environment field.
+pub fn settings_agent_field_env() -> String {
+    rust_i18n::t!("settings.agent_field_env").into_owned()
+}
+
+/// Placeholder inside the empty environment field, showing its line form.
+pub fn settings_agent_env_placeholder() -> String {
+    rust_i18n::t!("settings.agent_env_placeholder").into_owned()
+}
+
+/// What the environment field sets, for any agent.
+pub fn settings_agent_env_description() -> String {
+    rust_i18n::t!("settings.agent_env_description").into_owned()
+}
+
+/// What the `CODEX_CONFIG` overlay buys, shown only on a row that launches
+/// with it.
+pub fn settings_agent_env_codex_note() -> String {
+    rust_i18n::t!("settings.agent_env_codex_note").into_owned()
+}
+
+/// The expectation the overlay does not meet: it reports delegation, it does
+/// not cause it. Shown beside [`settings_agent_env_codex_note`].
+pub fn settings_agent_env_codex_caveat() -> String {
+    rust_i18n::t!("settings.agent_env_codex_caveat").into_owned()
+}
+
 /// Heading for the per-agent transcript-presentation group inside a catalog
 /// row.
 pub fn settings_agent_section_transcript() -> String {
@@ -4461,8 +4505,34 @@ pub fn settings_err_agent_catalog_id(id: &str) -> String {
 pub fn settings_err_agent_catalog_duplicate(id: &str) -> String {
     rust_i18n::t!("settings.err_agent_catalog_duplicate", id = id).into_owned()
 }
+pub fn settings_err_agent_catalog_env(index: usize, line: &str) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_env", index = index, line = line).into_owned()
+}
+/// A well-formed `KEY=value` line whose name daruda cannot put into a launch
+/// command. Separate from `settings_err_agent_catalog_env` because the fix is
+/// different — rename the variable, not reshape the line — and because the
+/// charset is the reason, not the syntax. See
+/// `daruda_config::is_valid_env_name`.
+pub fn settings_err_agent_catalog_env_name(index: usize, name: &str) -> String {
+    rust_i18n::t!(
+        "settings.err_agent_catalog_env_name",
+        index = index,
+        name = name
+    )
+    .into_owned()
+}
 pub fn settings_err_agent_catalog_host(index: usize) -> String {
     rust_i18n::t!("settings.err_agent_catalog_host", index = index).into_owned()
+}
+/// A host/container that is present but could not be a bare word in the
+/// launch command. Separate from the two "needs a value" strings above
+/// because the fix is different — retype the value, not fill the field in.
+/// See `lane::session_host::checked_bare_word`.
+pub fn settings_err_agent_catalog_host_unsafe(index: usize) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_host_unsafe", index = index).into_owned()
+}
+pub fn settings_err_agent_catalog_container_unsafe(index: usize) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_container_unsafe", index = index).into_owned()
 }
 pub fn settings_err_agent_catalog_container(index: usize) -> String {
     rust_i18n::t!("settings.err_agent_catalog_container", index = index).into_owned()
@@ -5286,8 +5356,11 @@ pub fn mcp_url_required() -> String {
 pub fn mcp_url_invalid() -> String {
     rust_i18n::t!("mcp.url_invalid").into_owned()
 }
-pub fn mcp_env_invalid() -> String {
-    rust_i18n::t!("mcp.env_invalid").into_owned()
+/// Names the offending line, the way the agent catalog's Environment field
+/// does — "one of these lines is wrong" leaves the user to find it themselves
+/// in a block they may well have pasted.
+pub fn mcp_env_invalid(line: &str) -> String {
+    rust_i18n::t!("mcp.env_invalid", line = line).into_owned()
 }
 
 /// Transport option labels for the dropdown.
@@ -5808,6 +5881,16 @@ pub fn flow_no_lane() -> String {
 }
 pub fn flow_remote_lane(agent: &str) -> String {
     rust_i18n::t!("flow.remote_lane", agent => agent).into_owned()
+}
+/// Title for a flow that names an agent whose launch could not be built.
+/// The reason itself is one of the connect-command strings, shown as detail.
+pub fn flow_agent_launch_refused(agent: &str) -> String {
+    rust_i18n::t!("flow.agent_launch_refused", agent => agent).into_owned()
+}
+/// Title for a flow that names an agent whose worktree host cannot be used.
+/// The reason is the session-host validator's own wording, shown as detail.
+pub fn flow_session_host_unusable(agent: &str) -> String {
+    rust_i18n::t!("flow.session_host_unusable", agent => agent).into_owned()
 }
 pub fn flow_lock_held(pid: u32) -> String {
     rust_i18n::t!("flow.lock_held", pid => pid).into_owned()

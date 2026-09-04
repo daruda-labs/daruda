@@ -179,6 +179,35 @@ async fn a_legacy_delegation_surfaces_its_localized_wording(cx: &mut TestAppCont
     });
 }
 
+/// What the notice has to *say*. The test above compares the toast against
+/// the same expression the production arm builds, so it holds for any wording
+/// at all. Two substance rules, checked per locale so a translation cannot
+/// drift off them, and stated as properties rather than as the full text so a
+/// reasonable rewrite does not have to touch this test:
+///
+/// - It must not send the user after `multi_agent_v2`. daruda injects that
+///   overlay itself, so anyone reading this notice already has it set and
+///   the advice points at the one thing that is not wrong.
+/// - It must name the field they can inspect, in the words their own UI uses
+///   — hence the labels are read from the settings keys that render them,
+///   not spelled out here.
+#[test]
+fn the_legacy_delegation_notice_names_something_the_user_can_check() {
+    for locale in ["en", "ko"] {
+        let notice = rust_i18n::t!("agent_chat.legacy_delegation_notice", locale = locale);
+        assert!(
+            !notice.contains("multi_agent_v2"),
+            "{locale}: daruda ships the overlay, so telling the user to enable it is wrong: {notice}"
+        );
+        let section = rust_i18n::t!("settings.nav_agent", locale = locale);
+        let field = rust_i18n::t!("settings.agent_field_env", locale = locale);
+        assert!(
+            notice.contains(section.as_ref()) && notice.contains(field.as_ref()),
+            "{locale}: the notice must point at {section} → {field}: {notice}"
+        );
+    }
+}
+
 /// The pump hands every event through this, so anything that is not an
 /// advisory has to pass straight through — a toast per streamed chunk would
 /// bury the app.

@@ -49,7 +49,7 @@ pub use model::{
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
-pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
+pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
 pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision,
     connect_agent_session, connect_agent_session_with_model, connect_session,

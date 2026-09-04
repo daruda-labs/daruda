@@ -36,6 +36,127 @@ fn workspace_with_a_flow(
     (lane, ws, flow_path, wh)
 }
 
+/// The same fixture, with the agent catalog the workspace boots on chosen
+/// by the caller — for the cases that are about *which* agent a flow names.
+fn workspace_with_a_flow_and_agents(
+    cx: &mut TestAppContext,
+    flow: &str,
+    agents: Vec<daruda_config::AgentEntry>,
+) -> (
+    tempfile::TempDir,
+    gpui::Entity<Workspace>,
+    std::path::PathBuf,
+    gpui::WindowHandle<gpui_component::Root>,
+) {
+    let lane = tempfile::tempdir().expect("tempdir");
+    let flows = crate::workspace::flow_paths::flows_dir(lane.path());
+    std::fs::create_dir_all(&flows).expect("create flows dir");
+    let flow_path = flows.join("ship.yaml");
+    std::fs::write(&flow_path, flow).expect("write flow");
+
+    let config = daruda_config::Config {
+        agents,
+        ..daruda_config::Config::default()
+    };
+    let project = daruda_store::project::Project::from_path(lane.path());
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    (lane, ws, flow_path, wh)
+}
+
+/// A lane whose persisted host the launch quoting cannot carry refuses the
+/// flow with the reason — never resolving to `Local`, which would run the
+/// flow's agents on this machine instead of where the lane says.
+#[gpui::test]
+async fn a_flow_on_a_lane_with_an_unusable_host_is_refused_not_run_locally(
+    cx: &mut TestAppContext,
+) {
+    let (_lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    ws.update(cx, |ws, cx| {
+        let target = ws.active;
+        ws.set_lane_session_host(
+            target,
+            daruda_store::project::LaneSessionHost::Ssh {
+                target: "vm -o ProxyCommand=touch /tmp/pwned".into(),
+                session_path: "/srv/app".into(),
+                registry_id: None,
+            },
+            cx,
+        );
+    });
+
+    ws.update(cx, |ws, cx| {
+        match ws.build_flow_request(
+            &flow_path,
+            None,
+            &crate::workspace::flow_request::FlowSelection::default(),
+            cx,
+        ) {
+            Err(crate::workspace::flow_request::FlowSubmitError::UnusableSessionHost {
+                agent,
+                reason,
+            }) => {
+                assert_eq!(agent, "claude", "the refusal names the agent the flow uses");
+                assert_eq!(
+                    reason,
+                    crate::lane::session_host::SessionHostError::Unsafe(
+                        crate::lane::session_host::SessionHostField::Target
+                    )
+                );
+            }
+            Err(other) => panic!("refused, but not for the reason under test: {other:?}"),
+            Ok(_) => panic!("a flow on an unusable host was accepted"),
+        }
+    });
+}
+
+/// A flow naming an agent whose launch cannot produce a command is refused
+/// with the reason, not by quietly leaving the agent out of the catalog —
+/// omitting it surfaces as `UnknownAgent`, which blames the flow file for a
+/// launch problem. A JSON stdio config carrying an environment is the shape
+/// that reaches this today: `codex-acp` ships one by default, so a row whose
+/// command is overridden with raw JSON hits it.
+#[gpui::test]
+async fn a_flow_naming_an_unlaunchable_agent_is_refused_with_the_reason(cx: &mut TestAppContext) {
+    let json_stdio_with_env = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+        id: "claude".to_string(),
+        name: "Claude".to_string(),
+        launch: daruda_config::AgentLaunch::Raw(
+            r#"{"command":"/opt/adapters/acp","args":[]}"#.to_string(),
+        ),
+        default_mode: None,
+        default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
+        env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
+    });
+    let (_lane, ws, flow_path, _wh) =
+        workspace_with_a_flow_and_agents(cx, ONE_AGENT, vec![json_stdio_with_env]);
+
+    let reason = ws.update(cx, |ws, cx| {
+        match ws.build_flow_request(
+            &flow_path,
+            None,
+            &crate::workspace::flow_request::FlowSelection::default(),
+            cx,
+        ) {
+            Err(crate::workspace::flow_request::FlowSubmitError::AgentLaunchRefused {
+                agent,
+                reason,
+            }) => {
+                assert_eq!(agent, "claude", "the refusal names the agent the flow uses");
+                reason
+            }
+            Err(other) => panic!("refused, but not for the reason under test: {other:?}"),
+            Ok(_) => panic!("a flow naming an unlaunchable agent was accepted"),
+        }
+    });
+    assert_eq!(
+        reason,
+        crate::agent::launch_resolve::ConnectCommandError::JsonStdioEnv
+    );
+}
+
 const ONE_AGENT: &str = "\
 version: 1
 defaults:

@@ -659,7 +659,7 @@ impl Workspace {
                         let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
                         let pane_recipe = self
                             .agent_launch_for(&agent_id)
-                            .and_then(|l| account_recipe_for_connect(&l, is_remote));
+                            .and_then(|l| account_recipe_for_connect(&l.launch, is_remote));
                         let mut restored = self.create_agent_chat_pane(
                             ac.cwd.clone(),
                             if keep_session {

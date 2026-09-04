@@ -7,7 +7,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AgentDefinition, AgentDefinitionRepr, AgentLaunch, DockerLaunchRepr, SshLaunchRepr};
+use super::{
+    AgentDefinition, AgentDefinitionRepr, AgentLaunch, DockerLaunchRepr, EnvRepr, SshLaunchRepr,
+};
 
 /// A persisted catalog entry. The `preset` key decides the shape, so the two
 /// are mutually exclusive by construction: a reference cannot also carry its
@@ -41,6 +43,11 @@ pub struct PresetOverrides {
     pub fold_mode: Option<Vec<String>>,
     pub tail_window: Option<u8>,
     pub display_filter: Option<Vec<String>>,
+    /// Replaces the preset's environment wholesale — an empty list is a real
+    /// value (the preset's own environment, cleared), so it cannot collapse
+    /// to "follow the preset". Same three states as
+    /// [`AgentDefinition::env`], one level down.
+    pub env: Option<Vec<(String, String)>>,
 }
 
 impl AgentEntry {
@@ -72,6 +79,9 @@ impl AgentEntry {
                 }
                 if let Some(display_filter) = &overrides.display_filter {
                     definition.display_filter = Some(display_filter.clone());
+                }
+                if let Some(env) = &overrides.env {
+                    definition.env = Some(env.clone());
                 }
                 Some(definition)
             }
@@ -126,6 +136,14 @@ impl AgentEntry {
         if base.id != definition.id {
             return None;
         }
+        // A definition that states no environment adopts the preset's — that
+        // is what `None` means, and it is what lets a row written before its
+        // preset gained an env default pick that default up. Resolved once,
+        // here, so every field below is diffed and compared the same way.
+        let definition = &AgentDefinition {
+            env: definition.env.clone().or_else(|| base.env.clone()),
+            ..definition.clone()
+        };
         let entry = Self::Preset {
             preset: preset.to_string(),
             overrides: PresetOverrides {
@@ -143,12 +161,22 @@ impl AgentEntry {
                 fold_mode: definition.fold_mode.clone(),
                 tail_window: definition.tail_window,
                 display_filter: definition.display_filter.clone(),
+                // Diffed like `name` and `command`, not copied whole: a
+                // preset may state an environment of its own, and a row that
+                // agrees with it has to keep following it. An empty one is a
+                // difference like any other — the preset's environment,
+                // cleared.
+                env: definition
+                    .env
+                    .clone()
+                    .filter(|env| base.env.as_ref() != Some(env)),
             },
         };
         // The reference stands in for `definition` only if it resolves back to
-        // it exactly — the one check that keeps every promotion lossless as
+        // it — the check that keeps every promotion lossless as
         // `PresetOverrides` and the preset table evolve independently.
-        (entry.resolve().as_ref() == Some(definition)).then_some(entry)
+        let equivalent = entry.resolve().as_ref() == Some(definition);
+        equivalent.then_some(entry)
     }
 }
 
@@ -185,6 +213,8 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    env: Option<EnvRepr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
@@ -205,6 +235,11 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
                     fold_mode: v.fold_mode,
                     tail_window: v.tail_window,
                     display_filter: v.display_filter,
+                    // Sanitized like a definition's own `env` (see
+                    // `super::sanitized_env`): an override reaches the very
+                    // same launch assembly, so it cannot be the one env entry
+                    // point that skips the name check.
+                    env: v.env.map(super::sanitized_env),
                 },
             });
         }
@@ -224,6 +259,7 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
             display_filter: v.display_filter,
+            env: v.env,
         });
         Ok(Self::for_definition(definition, None))
     }
@@ -242,6 +278,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                 fold_mode: overrides.fold_mode,
                 tail_window: overrides.tail_window,
                 display_filter: overrides.display_filter,
+                env: overrides.env.map(|env| env.into_iter().collect()),
                 ssh: None,
                 docker: None,
             },
@@ -257,6 +294,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                     fold_mode: repr.fold_mode,
                     tail_window: repr.tail_window,
                     display_filter: repr.display_filter,
+                    env: repr.env,
                     ssh: repr.ssh,
                     docker: repr.docker,
                 }
@@ -284,6 +322,7 @@ mod tests {
             fold_mode: None,
             tail_window: None,
             display_filter: None,
+            env: None,
         }
     }
 
@@ -332,6 +371,7 @@ mod tests {
             AgentEntry::Preset {
                 preset: "gemini".to_string(),
                 overrides: PresetOverrides {
+                    env: None,
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
@@ -354,6 +394,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             }),
         ] {
             let toml_str = toml::to_string(&entry).expect("serialize");
@@ -427,6 +468,7 @@ mod tests {
             AgentEntry::Preset {
                 preset: "codex-acp".to_string(),
                 overrides: PresetOverrides {
+                    env: None,
                     name: Some("My Codex".to_string()),
                     command: None,
                     default_mode: Some("plan".to_string()),
@@ -455,6 +497,7 @@ mod tests {
             AgentEntry::Preset {
                 preset: "codex-acp".to_string(),
                 overrides: PresetOverrides {
+                    env: None,
                     name: None,
                     command: None,
                     default_mode: None,
@@ -525,6 +568,7 @@ mod tests {
             AgentEntry::Preset {
                 preset: "gemini".to_string(),
                 overrides: PresetOverrides {
+                    env: None,
                     name: None,
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: None,
@@ -586,6 +630,199 @@ mod tests {
             overrides: PresetOverrides::default(),
         };
         assert_eq!(entry.resolve(), None);
+    }
+
+    /// A row follows its preset's `env` until it states one of its own, and
+    /// the override survives the promotion path Settings saves through.
+    #[test]
+    fn a_row_follows_its_presets_env_until_it_states_one() {
+        let preset = codex_preset();
+        let follower = AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides::default(),
+        };
+        assert_eq!(
+            follower.resolve().expect("codex-acp is runnable").env,
+            preset.env,
+            "a bare reference follows the preset"
+        );
+
+        // Deliberately differs from the preset's own env default (which turns
+        // `multi_agent_v2` on) — a user explicitly opting back out.
+        let stated = AgentDefinition {
+            env: Some(vec![(
+                "CODEX_CONFIG".to_string(),
+                r#"{"features":{"multi_agent_v2":false}}"#.to_string(),
+            )]),
+            ..preset.clone()
+        };
+        let entry = AgentEntry::for_definition(stated.clone(), Some("codex-acp"));
+        assert_eq!(
+            entry,
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides {
+                    env: stated.env.clone(),
+                    ..PresetOverrides::default()
+                },
+            }
+        );
+        assert_eq!(entry.resolve(), Some(stated));
+    }
+
+    /// A pre-`env`, flat `[[agents]]` row for `codex-acp` (`id`/`name`/`command`
+    /// only, no `preset` key, no `env` key) must still promote to a bare
+    /// preset reference — not a `Custom` copy that pins the empty env it
+    /// happened to be read with. Pinning it would freeze the row out of the
+    /// preset's own `multi_agent_v2` default forever, exactly what the `env`
+    /// diff in `reference` is meant to prevent.
+    #[test]
+    fn a_legacy_flat_codex_row_picks_up_the_presets_env_default() {
+        let preset = codex_preset();
+        let legacy = AgentDefinition {
+            env: None,
+            ..preset.clone()
+        };
+        let entry = AgentEntry::for_definition(legacy, None);
+        assert_eq!(
+            entry,
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides::default(),
+            },
+            "a flat row with no env key must promote to a bare reference"
+        );
+        assert_eq!(
+            entry.resolve().expect("codex-acp is runnable").env,
+            preset.env,
+            "the promoted row must carry the preset's env, not stay empty"
+        );
+        assert!(
+            entry
+                .resolve()
+                .unwrap()
+                .env
+                .is_some_and(|env| !env.is_empty())
+        );
+    }
+
+    /// The hand-written form of the same row: an `[env]` table under a
+    /// `preset` key overrides only that field.
+    #[test]
+    fn an_env_table_on_a_preset_row_overrides_only_env() {
+        let entry: AgentEntry =
+            toml::from_str("preset = \"codex-acp\"\n[env]\nCODEX_CONFIG = \"{}\"\n")
+                .expect("deserialize");
+        let resolved = entry.resolve().expect("codex-acp is runnable");
+        assert_eq!(
+            resolved.env,
+            Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())])
+        );
+        let preset = codex_preset();
+        assert_eq!(resolved.id, preset.id);
+        assert_eq!(resolved.launch, preset.launch);
+    }
+
+    /// Clearing a preset-shipping environment must survive the save path:
+    /// the row states an environment of its own — an empty one — and must not
+    /// fall back to following the preset again. This is the state the plain
+    /// `Vec` could not express.
+    #[test]
+    fn an_env_cleared_against_a_shipping_preset_stays_cleared() {
+        let cleared = AgentDefinition {
+            env: Some(Vec::new()),
+            ..codex_preset()
+        };
+        let entry = AgentEntry::for_definition(cleared.clone(), Some("codex-acp"));
+        assert_eq!(
+            entry,
+            AgentEntry::Preset {
+                preset: "codex-acp".to_string(),
+                overrides: PresetOverrides {
+                    env: Some(Vec::new()),
+                    ..PresetOverrides::default()
+                },
+            },
+            "clearing a shipping env is an override, not a return to the preset"
+        );
+        assert_eq!(entry.resolve(), Some(cleared));
+    }
+
+    /// The three `env` states, end to end through TOML: no key at all, an
+    /// empty table, and a stated one. The middle case is the whole point of
+    /// the distinction — on disk, the empty table is all that separates it
+    /// from the first.
+    #[test]
+    fn every_env_state_round_trips_through_toml() {
+        let preset = codex_preset();
+        for (entry, expected) in [
+            (
+                AgentEntry::Preset {
+                    preset: "codex-acp".to_string(),
+                    overrides: PresetOverrides::default(),
+                },
+                preset.env.clone(),
+            ),
+            (
+                AgentEntry::Preset {
+                    preset: "codex-acp".to_string(),
+                    overrides: PresetOverrides {
+                        env: Some(Vec::new()),
+                        ..PresetOverrides::default()
+                    },
+                },
+                Some(Vec::new()),
+            ),
+            (
+                AgentEntry::Preset {
+                    preset: "codex-acp".to_string(),
+                    overrides: PresetOverrides {
+                        env: Some(vec![("K".to_string(), "v".to_string())]),
+                        ..PresetOverrides::default()
+                    },
+                },
+                Some(vec![("K".to_string(), "v".to_string())]),
+            ),
+            (
+                AgentEntry::Custom(AgentDefinition {
+                    env: Some(Vec::new()),
+                    ..custom("hermes", "hermes acp")
+                }),
+                Some(Vec::new()),
+            ),
+        ] {
+            let toml_str = toml::to_string(&entry).expect("serialize");
+            let back: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
+            assert_eq!(back, entry, "{toml_str}");
+            assert_eq!(
+                back.resolve().expect("runnable").env,
+                expected,
+                "{toml_str}"
+            );
+        }
+    }
+
+    /// A bare reference writes no `env` key at all, so a preset that gains an
+    /// env default later still reaches the row. The explicit-empty override
+    /// above writes the table that opts out of exactly that.
+    #[test]
+    fn an_unstated_env_writes_no_key_and_an_empty_one_writes_a_table() {
+        let bare = toml::to_string(&AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides::default(),
+        })
+        .expect("serialize");
+        assert!(!bare.contains("env"), "{bare}");
+
+        let cleared = toml::to_string(&AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides {
+                env: Some(Vec::new()),
+                ..PresetOverrides::default()
+            },
+        })
+        .expect("serialize");
+        assert!(cleared.contains("[env]"), "{cleared}");
     }
 
     #[test]

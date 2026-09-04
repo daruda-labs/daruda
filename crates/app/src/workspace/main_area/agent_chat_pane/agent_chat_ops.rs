@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use super::telegram_ops::DeferKind;
 use super::transcript_defaults::TranscriptDefaults;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
-use crate::agent::launch_resolve::account_recipe_for_connect;
+use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
@@ -149,6 +149,16 @@ enum PaneCwdOutcome {
     Blocked(String),
 }
 
+/// Why a fresh pane has nowhere to attach. Two variants because they are
+/// fixed in different places, and the blocked pane has to say which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum PaneCwdBlocked {
+    /// A legacy `Raw` + `{{cwd}}` launch with no remote path to substitute.
+    NoRemotePath,
+    /// The lane's session host holds a value the launch quoting cannot carry.
+    UnusableSessionHost(crate::lane::session_host::SessionHostError),
+}
+
 /// Pure core of [`Workspace::resolve_new_pane_cwd`]: decide `Local` vs.
 /// `Remote` cwd for a fresh pane, mirroring what its first connect will
 /// resolve (`resolve_session_command` in `crate::agent::launch_resolve`) so a
@@ -156,14 +166,12 @@ enum PaneCwdOutcome {
 /// `PaneCwd::as_local`/`into_local` — already agrees with where the session
 /// actually attaches.
 ///
-/// The legacy `Raw` + `{{cwd}}` token escape hatch is the one shape that
-/// still needs a non-blank `remote_cwd` up front — `Err(())` (nowhere to
-/// attach, caller must not connect) when it has none, exactly as before this
-/// axis moved to the lane. Every other launch shape (`Ssh`/`Docker`/a
-/// host-agnostic `Raw`) now resolves through `session_host` and always
-/// succeeds — `session_host` grew a session path or it didn't, and either
-/// way there's a valid place to attach (remote path, or the lane's own
-/// local one).
+/// Two shapes have nowhere to attach and block the pane rather than guess:
+/// the legacy `Raw` + `{{cwd}}` escape hatch with no non-blank `remote_cwd`
+/// to substitute, and a lane whose resolved host the launch quoting cannot
+/// carry (see `session_host::effective_session_host`). Every other launch
+/// resolves through `session_host` to a remote path or the lane's own local
+/// one.
 fn resolve_new_pane_cwd_core(
     launch: &AgentLaunch,
     local_cwd: Option<PathBuf>,
@@ -171,7 +179,7 @@ fn resolve_new_pane_cwd_core(
     session_host: Option<&LaneSessionHost>,
     session_host_catalog: &[daruda_config::SessionHostEntry],
     session_host_tombstones: &[daruda_config::SessionHostTombstone],
-) -> Result<Option<PaneCwd>, ()> {
+) -> Result<Option<PaneCwd>, PaneCwdBlocked> {
     if matches!(launch, AgentLaunch::Raw(command) if command.contains(daruda_config::agent::CWD_TOKEN))
     {
         // A blank remote_cwd has nothing to substitute for the remote path
@@ -181,7 +189,7 @@ fn resolve_new_pane_cwd_core(
             .filter(|cwd| !cwd.trim().is_empty())
             .map(PaneCwd::Remote)
             .map(Some)
-            .ok_or(());
+            .ok_or(PaneCwdBlocked::NoRemotePath);
     }
     let Some(local_cwd) = local_cwd else {
         return Ok(None); // no active lane at all
@@ -192,7 +200,8 @@ fn resolve_new_pane_cwd_core(
         launch,
         session_host_catalog,
         session_host_tombstones,
-    );
+    )
+    .map_err(|unusable| PaneCwdBlocked::UnusableSessionHost(unusable.reason))?;
     Ok(Some(match host.session_path() {
         Some(remote_path) => PaneCwd::Remote(remote_path.to_string()),
         None => PaneCwd::Local(local_cwd),
@@ -598,7 +607,7 @@ impl Workspace {
         let is_remote = matches!(cwd, Some(PaneCwd::Remote(_)));
         let account = self.default_account_selection_for_new_pane(
             self.agent_launch_for(&agent_id)
-                .and_then(|l| account_recipe_for_connect(&l, is_remote)),
+                .and_then(|l| account_recipe_for_connect(&l.launch, is_remote)),
         );
         // `title` seeds the view's `session_title` below (restored dormant
         // panes show their persisted label before the session loads);
@@ -652,9 +661,10 @@ impl Workspace {
         local_cwd: Option<PathBuf>,
         remote_cwd: Option<String>,
         session_host: Option<&LaneSessionHost>,
-    ) -> Result<Option<PaneCwd>, ()> {
+    ) -> Result<Option<PaneCwd>, PaneCwdBlocked> {
         let launch = self
             .agent_launch_for(agent_id)
+            .map(|spec| spec.launch)
             .unwrap_or_else(|| AgentLaunch::Raw(String::new()));
         resolve_new_pane_cwd_core(
             &launch,
@@ -686,7 +696,12 @@ impl Workspace {
             session_host.as_ref(),
         ) {
             Ok(cwd) => PaneCwdOutcome::Ready(cwd),
-            Err(()) => PaneCwdOutcome::Blocked(s::agent_chat_no_remote_cwd()),
+            Err(PaneCwdBlocked::NoRemotePath) => {
+                PaneCwdOutcome::Blocked(s::agent_chat_no_remote_cwd())
+            }
+            Err(PaneCwdBlocked::UnusableSessionHost(reason)) => {
+                PaneCwdOutcome::Blocked(s::agent_chat_session_host_unusable(&reason.localized()))
+            }
         };
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
     }
@@ -707,13 +722,14 @@ impl Workspace {
         }
     }
 
-    /// The launch spec for `agent_id`, looked up in the catalog. `None` when
-    /// the id is not in the catalog (e.g. a persisted id whose agent was removed).
-    pub(in crate::workspace) fn agent_launch_for(&self, agent_id: &str) -> Option<AgentLaunch> {
+    /// How `agent_id` launches — adapter command plus the environment its
+    /// entry declares — looked up in the catalog. `None` when the id is not in
+    /// the catalog (e.g. a persisted id whose agent was removed).
+    pub(in crate::workspace) fn agent_launch_for(&self, agent_id: &str) -> Option<AgentLaunchSpec> {
         self.agents
             .iter()
             .find(|a| a.id == agent_id)
-            .map(|a| a.launch.clone())
+            .map(AgentLaunchSpec::of)
     }
 
     /// Resolve the agent a restored pane launches under, and whether its
@@ -1481,8 +1497,9 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        MarkdownFileLinkTarget, markdown_file_link_target, resolve_new_pane_cwd_core,
-        resolve_open_agent_id, resolve_restored_agent, should_notify_agent_event,
+        MarkdownFileLinkTarget, PaneCwdBlocked, markdown_file_link_target,
+        resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
+        should_notify_agent_event,
     };
     use daruda_config::{AgentDefinition, AgentLaunch};
     use daruda_store::project::{LaneSessionHost, PaneCwd};
@@ -1658,7 +1675,35 @@ mod tests {
             &[],
             &[],
         );
-        assert_eq!(result, Err(()));
+        assert_eq!(result, Err(PaneCwdBlocked::NoRemotePath));
+    }
+
+    /// A lane whose persisted host the launch quoting cannot carry blocks the
+    /// pane with that reason — not the `{{cwd}}` one, and never `Local`, which
+    /// would open the pane on this machine instead of where the lane says.
+    #[test]
+    fn resolve_new_pane_cwd_unusable_host_blocks_with_its_own_reason() {
+        let host = LaneSessionHost::Ssh {
+            target: "vm -o ProxyCommand=touch /tmp/pwned".into(),
+            session_path: "/srv/app".into(),
+            registry_id: None,
+        };
+        let result = resolve_new_pane_cwd_core(
+            &local_launch(),
+            Some(PathBuf::from("/local/lane")),
+            None,
+            Some(&host),
+            &[],
+            &[],
+        );
+        assert_eq!(
+            result,
+            Err(PaneCwdBlocked::UnusableSessionHost(
+                crate::lane::session_host::SessionHostError::Unsafe(
+                    crate::lane::session_host::SessionHostField::Target
+                )
+            ))
+        );
     }
 
     #[test]
@@ -1750,6 +1795,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1776,6 +1822,7 @@ mod tests {
                 fold_mode: None,
                 tail_window: None,
                 display_filter: None,
+                env: None,
             },
             AgentDefinition::claude_default(),
         ]

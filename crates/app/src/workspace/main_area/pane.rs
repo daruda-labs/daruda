@@ -1249,7 +1249,7 @@ impl Workspace {
                 let v = view.read(cx);
                 let is_remote = matches!(v.cwd, Some(PaneCwd::Remote(_)));
                 AccountPane::AgentChat {
-                    launch: self.agent_launch_for(&v.agent_id),
+                    launch: self.agent_launch_for(&v.agent_id).map(|spec| spec.launch),
                     is_remote,
                 }
             }

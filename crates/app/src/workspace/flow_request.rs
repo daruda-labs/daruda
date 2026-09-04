@@ -17,7 +17,7 @@ use gpui::Context;
 
 use super::Workspace;
 use super::command::flow_picker::FlowPurpose;
-use crate::agent::launch_resolve::{account_recipe_for_connect, resolve_launch};
+use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect, resolve_launch};
 use crate::workspace::main_area::pane::{AccountDomain, resolve_pane_account};
 
 /// Why a flow could not be submitted. These are refusals, not failures —
@@ -39,6 +39,22 @@ pub(in crate::workspace) enum FlowSubmitError {
     /// A live process — not this one — already holds the lane.
     LockHeld {
         pid: u32,
+    },
+    /// An agent the flow names resolved to a launch shape that cannot
+    /// produce a command. Reported rather than dropped: omitting the agent
+    /// surfaces as `UnknownAgent`, which points at the flow file instead of
+    /// at the launch that was actually refused.
+    AgentLaunchRefused {
+        agent: String,
+        reason: crate::agent::launch_resolve::ConnectCommandError,
+    },
+    /// An agent the flow names would attach to a host whose value the launch
+    /// quoting cannot carry. Reported for the same reason as
+    /// `AgentLaunchRefused` — and never resolved to `Local`, which would run
+    /// the flow's agents on this machine instead of where the lane says.
+    UnusableSessionHost {
+        agent: String,
+        reason: crate::lane::session_host::SessionHostError,
     },
     /// The rules that need the request's own context — a node naming an
     /// agent the catalog lacks, a `prompt_file` that is not there.
@@ -370,21 +386,32 @@ impl Workspace {
     ) -> Result<HashMap<String, LaunchSpec>, FlowSubmitError> {
         let pane_cwd = PaneCwd::Local(cwd.to_path_buf());
         let lane = self.lane_for(lane_ref).cloned();
-        let definitions: Vec<(String, daruda_config::AgentLaunch)> = self
+        let definitions: Vec<(String, AgentLaunchSpec)> = self
             .agents
             .iter()
-            .map(|a| (a.id.clone(), a.launch.clone()))
+            .map(|a| (a.id.clone(), AgentLaunchSpec::of(a)))
             .collect();
 
         let mut catalog = HashMap::new();
-        for (id, launch) in definitions {
-            let resolved_host = lane.as_ref().map(|lane| {
+        for (id, AgentLaunchSpec { launch, env }) in definitions {
+            let resolved_host = match lane.as_ref().map(|lane| {
                 lane.effective_session_host(
                     &launch,
                     &self.session_hosts,
                     &self.session_host_tombstones,
                 )
-            });
+            }) {
+                None => None,
+                Some(Ok(host)) => Some(host),
+                Some(Err(unusable)) if referenced.contains(&id) => {
+                    return Err(FlowSubmitError::UnusableSessionHost {
+                        agent: id,
+                        reason: unusable.reason,
+                    });
+                }
+                // Not named by this flow: leaving it out changes nothing.
+                Some(Err(_)) => continue,
+            };
             // A flow's `cwd` means two things at once — the directory
             // `ProcessRunner` runs a gate in, and the one the ACP session
             // opens on. On a remote lane those are different machines, and
@@ -422,6 +449,7 @@ impl Workspace {
             let cached_host = lane.as_ref().and_then(|lane| lane.session_host.clone());
             let resolved = resolve_launch(
                 &launch,
+                &env,
                 lane.as_ref(),
                 &pane_cwd,
                 prepared.as_ref(),
@@ -430,11 +458,18 @@ impl Workspace {
                 &self.session_hosts,
                 &self.session_host_tombstones,
             );
-            // A launch shape that cannot produce a command is left out of
-            // the catalog: a flow that names it then fails validation with
-            // `UnknownAgent`, and one that does not is unaffected.
-            if let Ok(spec) = resolved.spec {
-                catalog.insert(id, spec);
+            // A launch shape that cannot produce a command is only fatal
+            // for an agent this flow actually names — the same scope the
+            // remote-lane refusal above uses. An unnamed one is left out of
+            // the catalog and changes nothing.
+            match resolved.spec {
+                Ok(spec) => {
+                    catalog.insert(id, spec);
+                }
+                Err(reason) if referenced.contains(&id) => {
+                    return Err(FlowSubmitError::AgentLaunchRefused { agent: id, reason });
+                }
+                Err(_) => {}
             }
         }
         Ok(catalog)

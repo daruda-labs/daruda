@@ -350,13 +350,14 @@ impl Lane {
     /// and the live registry catalog/tombstones. `launch` only matters while
     /// the lane has never answered; `catalog`/`tombstones` only matter while
     /// the resolved host carries a `registry_id` — see
-    /// [`session_host::effective_session_host`].
+    /// [`session_host::effective_session_host`]. `Err` is a host the launch
+    /// quoting cannot carry; the caller refuses rather than running locally.
     pub fn effective_session_host(
         &self,
         launch: &daruda_config::AgentLaunch,
         catalog: &[daruda_config::SessionHostEntry],
         tombstones: &[daruda_config::SessionHostTombstone],
-    ) -> daruda_store::project::LaneSessionHost {
+    ) -> Result<daruda_store::project::LaneSessionHost, session_host::UnusableSessionHost> {
         session_host::effective_session_host(
             self.session_host.as_ref(),
             self.remote_cwd.as_deref(),

@@ -140,6 +140,7 @@ fn agent_definition_field_round_trip() {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -160,6 +161,7 @@ fn per_agent_transcript_defaults_round_trip() {
         // it has to survive the trip as `Some([])` rather than collapse to
         // `None` — see the field's doc.
         display_filter: Some(Vec::new()),
+        env: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -181,6 +183,7 @@ fn per_agent_transcript_defaults_round_trip_through_a_catalog_entry() {
             fold_mode: Some(vec!["expanded".to_string()]),
             tail_window: Some(10),
             display_filter: Some(vec!["prose".to_string()]),
+            env: None,
         }),
         AgentEntry::Preset {
             preset: "codex-acp".to_string(),
@@ -262,6 +265,7 @@ fn default_model_round_trips_alongside_a_launch_sub_table() {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -303,6 +307,7 @@ fn ssh_launch_toml_round_trips() {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[ssh]"));
@@ -327,6 +332,7 @@ fn docker_launch_toml_round_trips() {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[docker]"));
@@ -539,8 +545,163 @@ fn wrap_with_env_ssh_exports_and_unsets() {
         strip: vec!["ANTHROPIC_API_KEY"],
     };
     let cmd = launch.wrap_with_env(Some("/work"), &env).unwrap();
-    assert!(cmd.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
-    assert!(cmd.contains("unset ANTHROPIC_API_KEY"));
+    // Asserted on the script the remote shell actually receives, not on the
+    // outer command text — the outer layer quotes the script as a whole.
+    let script = sh_c_script(&cmd);
+    assert!(
+        script.contains("export CLAUDE_CONFIG_DIR='/remote/acc'"),
+        "{script}"
+    );
+    assert!(script.contains("unset ANTHROPIC_API_KEY"), "{script}");
+}
+
+/// The script argument of a built `Ssh`/`Docker` command, recovered the way
+/// the launcher gets it: tokenize the **whole** command with POSIX rules and
+/// take the word after `-c`. Passing through that outer split is the point —
+/// it is the first of the two layers an injected value has to survive.
+fn sh_c_script(cmd: &str) -> String {
+    let tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    let dash_c = tokens
+        .iter()
+        .position(|t| t == "-c")
+        .unwrap_or_else(|| panic!("no `-c` in tokens: {tokens:?}"));
+    tokens
+        .get(dash_c + 1)
+        .unwrap_or_else(|| panic!("`-c` carries no script in tokens: {tokens:?}"))
+        .clone()
+}
+
+/// The value `name` is exported to, as the remote shell tokenizes the script
+/// it received — the second layer, applied to `sh_c_script`'s output.
+fn exported_value(cmd: &str, name: &str) -> String {
+    let script = sh_c_script(cmd);
+    let tokens = shell_words::split(&script).expect("remote shell can tokenize the script");
+    let assignment = tokens
+        .iter()
+        .find(|t| t.starts_with(&format!("{name}=")))
+        .unwrap_or_else(|| panic!("no `{name}=...` assignment in tokens: {tokens:?}"));
+    let (_, value) = assignment.split_once('=').expect("assignment has a value");
+    // The emitted `export K='v'; ` has no space between the value and the
+    // statement-separating `;`, so it rides along as part of this word.
+    // Required, not optional: exactly one separator is always there, so
+    // stripping it can never eat a `;` the value itself ends with — and if
+    // the emitted form ever stops carrying it, this says so instead of
+    // silently comparing the wrong string.
+    value
+        .strip_suffix(';')
+        .unwrap_or_else(|| {
+            panic!("`export {name}=…; ` must end its word with the statement separator: {value:?}")
+        })
+        .to_string()
+}
+
+#[test]
+fn wrap_with_env_raw_preserves_a_double_quote_value_as_one_token() {
+    use crate::account_env::AccountEnv;
+    let launch = AgentLaunch::Raw("npx -y some-acp".to_string());
+    let value = r#"{"features":{"multi_agent_v2":true}}"#;
+    let env = AccountEnv {
+        inject: vec![("CODEX_CONFIG".into(), value.to_string())],
+        strip: vec![],
+    };
+    let cmd = launch.wrap_with_env(None, &env).unwrap();
+
+    // The same tokenizer `daruda_acp::node::split_env_prefixed_tokens` and
+    // `AcpAgent::from_str` both use downstream — a value that doesn't
+    // survive this re-split would corrupt or split apart before the
+    // adapter ever sees it.
+    let tokens = shell_words::split(&cmd).expect("Raw prefix stays one shell-parseable command");
+    let assignment = tokens.first().expect("env prefix token present");
+    let (name, got_value) = assignment.split_once('=').expect("assignment has a value");
+    assert_eq!(name, "CODEX_CONFIG");
+    assert_eq!(got_value, value);
+}
+
+#[test]
+fn wrap_with_env_ssh_preserves_a_double_quote_value_intact() {
+    use crate::account_env::AccountEnv;
+    let launch = AgentLaunch::Ssh {
+        adapter_command: "npx -y some-acp".to_string(),
+        host: "vm".to_string(),
+    };
+    let value = r#"{"features":{"multi_agent_v2":true}}"#;
+    let env = AccountEnv {
+        inject: vec![("CODEX_CONFIG".into(), value.to_string())],
+        strip: vec![],
+    };
+    let cmd = launch.wrap_with_env(Some("/work"), &env).unwrap();
+    assert_eq!(exported_value(&cmd, "CODEX_CONFIG"), value);
+}
+
+#[test]
+fn wrap_with_env_docker_preserves_a_double_quote_value_intact() {
+    use crate::account_env::AccountEnv;
+    let launch = AgentLaunch::Docker {
+        adapter_command: "npx -y some-acp".to_string(),
+        container: "ubuntu-dev".to_string(),
+    };
+    let value = r#"{"features":{"multi_agent_v2":true}}"#;
+    let env = AccountEnv {
+        inject: vec![("CODEX_CONFIG".into(), value.to_string())],
+        strip: vec![],
+    };
+    let cmd = launch.wrap_with_env(Some("/work"), &env).unwrap();
+    assert_eq!(exported_value(&cmd, "CODEX_CONFIG"), value);
+}
+
+/// Run the `sh -c` argv a built remote command would exec, and hand back what
+/// the shell printed. Drops the `ssh <host>` / `docker exec -i <container>`
+/// transport prefix, which is the only part a local test cannot run.
+#[cfg(unix)]
+fn run_remote_script(cmd: &str) -> String {
+    let tokens = shell_words::split(cmd).expect("built command tokenizes as one POSIX command");
+    let sh = tokens
+        .iter()
+        .position(|t| t == "sh")
+        .unwrap_or_else(|| panic!("no `sh` in tokens: {tokens:?}"));
+    let out = std::process::Command::new(&tokens[sh])
+        .args(&tokens[sh + 1..])
+        .output()
+        .expect("a POSIX shell runs");
+    assert!(
+        out.status.success(),
+        "shell failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Both layers for real: POSIX-tokenize the built command, then hand the
+/// `sh -c` argv to an actual shell that prints the variable back. A modelled
+/// tokenizer can agree with a wrong implementation; a live shell cannot.
+///
+/// Both remote transports, not just `Ssh`: they share the `remote()` helper,
+/// but "shares a helper today" is an implementation detail a test should not
+/// assume — and the two differ in the transport prefix this has to skip.
+#[cfg(unix)]
+#[test]
+fn wrap_with_env_remote_value_survives_a_real_shell() {
+    use crate::account_env::AccountEnv;
+    const ADAPTER: &str = "printf %s \"$CODEX_CONFIG\"";
+    let value = r#"{"features":{"multi_agent_v2":true}} it's $HOME `pwd` \ "q""#;
+    let env = AccountEnv {
+        inject: vec![("CODEX_CONFIG".into(), value.to_string())],
+        strip: vec![],
+    };
+
+    for launch in [
+        AgentLaunch::Ssh {
+            adapter_command: ADAPTER.to_string(),
+            host: "vm".to_string(),
+        },
+        AgentLaunch::Docker {
+            adapter_command: ADAPTER.to_string(),
+            container: "dev-1".to_string(),
+        },
+    ] {
+        let cmd = launch.wrap_with_env(Some("/tmp"), &env).unwrap();
+        assert_eq!(run_remote_script(&cmd), value, "{cmd}");
+    }
 }
 
 #[test]
@@ -771,4 +932,327 @@ fn reading_width_defaults_round_trips_and_clamps() {
 fn every_offered_tail_window_size_is_a_real_window() {
     assert!(TAIL_WINDOW_CHOICES.iter().all(|&n| n != TAIL_WINDOW_ALL));
     assert!(TAIL_WINDOW_CHOICES.windows(2).all(|w| w[0] < w[1]));
+}
+
+/// The catalog's real persistence boundary is [`AgentEntry`], so `env` is
+/// asserted there as well as on the bare definition: a field reaching only
+/// [`AgentDefinitionRepr`] would still be dropped by every `[[agents]]` read
+/// and write.
+///
+/// The pairs are deliberately written in non-alphabetical order and run
+/// through [`canonical_env`] — the same call every entry point into the model
+/// makes. Writing them alphabetically instead would let this pass on nothing
+/// but luck: `env` persists as a TOML table, so read-back is always
+/// key-sorted, and a source-ordered value would come back reordered.
+#[test]
+fn env_round_trips_through_a_definition_and_a_catalog_entry() {
+    let env = canonical_env([
+        ("RUST_LOG".to_string(), "debug".to_string()),
+        (
+            "CODEX_CONFIG".to_string(),
+            r#"{"features":{"multi_agent_v2":true}}"#.to_string(),
+        ),
+    ]);
+    assert_eq!(
+        env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+        vec!["CODEX_CONFIG", "RUST_LOG"],
+        "canonicalizing is what makes the order independent of the source"
+    );
+    let definition = AgentDefinition {
+        id: "hermes".to_string(),
+        name: "Hermes".to_string(),
+        launch: AgentLaunch::Raw("hermes acp".to_string()),
+        default_mode: None,
+        default_model: None,
+        fold_mode: None,
+        tail_window: None,
+        display_filter: None,
+        env: Some(env.clone()),
+    };
+    let toml_str = toml::to_string(&definition).expect("serialize");
+    let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back, definition, "{toml_str}");
+
+    for entry in [
+        AgentEntry::Custom(definition.clone()),
+        AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides {
+                env: Some(env.clone()),
+                ..PresetOverrides::default()
+            },
+        },
+    ] {
+        let toml_str = toml::to_string(&entry).expect("serialize");
+        let back: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back, entry, "{toml_str}");
+        assert_eq!(
+            back.resolve().expect("both entries are runnable").env,
+            Some(env.clone()),
+            "{toml_str}"
+        );
+    }
+}
+
+#[test]
+fn canonical_env_is_key_sorted_and_one_value_per_name() {
+    assert_eq!(
+        canonical_env([
+            ("ZED".to_string(), "3".to_string()),
+            ("apple".to_string(), "2".to_string()),
+            ("ABLE".to_string(), "1".to_string()),
+        ]),
+        vec![
+            ("ABLE".to_string(), "1".to_string()),
+            ("ZED".to_string(), "3".to_string()),
+            // Byte order, not case-insensitive — the same order a TOML table
+            // read-back produces.
+            ("apple".to_string(), "2".to_string()),
+        ]
+    );
+    // A repeated name collapses to one pair, last one written winning —
+    // matching what the TOML table on disk can express in the first place.
+    assert_eq!(
+        canonical_env([
+            ("K".to_string(), "first".to_string()),
+            ("K".to_string(), "second".to_string()),
+        ]),
+        vec![("K".to_string(), "second".to_string())]
+    );
+    // An unusable name is refused here too: this is the same funnel the
+    // `[[agents]]` load path goes through.
+    assert_eq!(
+        canonical_env([("BAD NAME".to_string(), "1".to_string())]),
+        Vec::new()
+    );
+}
+
+/// The freeze the promotion diff exists to prevent: a row that restates
+/// exactly what its preset ships must come back out of a disk round trip
+/// still following the preset, not frozen as an override.
+///
+/// Content is what has to decide. `PRESET_ENV_DEFAULTS` is canonically
+/// ordered and `env` reads back key-sorted, so the `Vec` comparison in
+/// `AgentEntry::reference` *is* a content comparison — this drives that end
+/// to end through `Config::load_from`.
+#[test]
+fn a_row_restating_its_presets_environment_keeps_following_it_after_a_round_trip() {
+    let preset_env = AgentDefinition::registry_preset("codex-acp")
+        .expect("codex-acp is runnable")
+        .env
+        .expect("codex-acp ships an environment");
+    let table: String = preset_env
+        .iter()
+        .map(|(key, value)| format!("{key} = {}\n", toml::Value::String(value.clone())))
+        .collect();
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        format!("[[agents]]\npreset = \"codex-acp\"\n\n[agents.env]\n{table}"),
+    )
+    .expect("write config");
+
+    let config = crate::Config::load_from(&path);
+    let row = config
+        .agents
+        .iter()
+        .find(|entry| entry.preset_id() == Some("codex-acp"))
+        .expect("the row loads as a reference");
+    // Load keeps a written override verbatim — it does not diff. What it
+    // resolves to is the preset's own environment either way.
+    let resolved = row.resolve().expect("codex-acp resolves");
+    assert_eq!(resolved.env.as_ref(), Some(&preset_env));
+
+    // The promotion is where content has to decide: writing that same row
+    // back must drop the override, or every save freezes the row against a
+    // preset it actually agrees with.
+    assert_eq!(
+        AgentEntry::for_definition(resolved, Some("codex-acp")),
+        AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides::default(),
+        },
+        "restating the preset's own environment is not an override"
+    );
+}
+
+/// `env` is a TOML table, and TOML forbids a value after a table within the
+/// same entry — the ordering constraint [`AgentDefinitionRepr`] already
+/// documents for `ssh` / `docker`.
+#[test]
+fn env_round_trips_alongside_a_launch_sub_table_and_the_scalar_keys() {
+    let definition = AgentDefinition {
+        id: "remote-agent".to_string(),
+        name: "Remote Agent".to_string(),
+        launch: AgentLaunch::Ssh {
+            adapter_command: "npx -y some-acp".to_string(),
+            host: "vm-work".to_string(),
+        },
+        default_mode: Some("plan".to_string()),
+        default_model: Some("claude-opus-4".to_string()),
+        fold_mode: Some(vec!["summary".to_string()]),
+        tail_window: Some(3),
+        display_filter: Some(Vec::new()),
+        env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
+    };
+    let toml_str = toml::to_string(&definition).expect("serialize");
+    let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back, definition, "{toml_str}");
+}
+
+/// A pre-`env` config keeps loading, and daruda must not start writing an
+/// empty key back into it.
+#[test]
+fn a_definition_without_env_stays_absent() {
+    let definition: AgentDefinition =
+        toml::from_str("id = \"codex\"\nname = \"Codex\"\ncommand = \"codex acp\"\n")
+            .expect("deserialize");
+    assert_eq!(definition.env, None);
+    let toml_str = toml::to_string(&definition).expect("serialize");
+    assert!(!toml_str.contains("env"), "{toml_str}");
+    let entry = AgentEntry::Custom(definition);
+    let toml_str = toml::to_string(&entry).expect("serialize");
+    assert!(!toml_str.contains("env"), "{toml_str}");
+}
+
+/// The injection refused end to end through the real `config.toml` load
+/// path: a hand-written `[agents.env]` naming a variable
+/// `K; echo PWNED >&2 ; X` must not produce a remote script that runs it.
+///
+/// Driven from [`crate::Config::load_from`] rather than from the predicate,
+/// and finished on a live `sh` rather than a modelled tokenizer — the two
+/// stages that would each pass while the other is wrong.
+#[cfg(unix)]
+#[test]
+fn a_config_env_name_that_breaks_out_of_the_remote_shell_never_reaches_the_command() {
+    use crate::account_env::AccountEnv;
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        concat!(
+            "[[agents]]\n",
+            "id = \"hostile\"\n",
+            "name = \"Hostile\"\n",
+            "command = \"printf ok\"\n",
+            "\n",
+            "[agents.env]\n",
+            "\"K; echo PWNED >&2 ; X\" = \"1\"\n",
+            "KEPT = \"2\"\n",
+        ),
+    )
+    .expect("write config");
+
+    let config = crate::Config::load_from(&path);
+    let definition = config
+        .resolved_agents()
+        .into_iter()
+        .find(|d| d.id == "hostile")
+        .expect("the row still loads");
+    // The rest of the file survived — refusing the pair must not cost the
+    // user their whole config.
+    assert_eq!(
+        definition.env.as_deref(),
+        Some(&[("KEPT".to_string(), "2".to_string())][..]),
+        "only the unusable name is dropped"
+    );
+
+    let env = AccountEnv {
+        inject: definition.env.clone().unwrap_or_default(),
+        strip: vec![],
+    };
+    let cmd = assemble_launch_command(
+        LaunchTransport::Ssh {
+            target: "vm",
+            session_path: "/tmp",
+        },
+        "printf ok",
+        &env,
+    );
+    assert!(!cmd.contains("PWNED"), "{cmd}");
+
+    // Run the `sh -c` argv the remote host would have been exec'd with.
+    let tokens = shell_words::split(&cmd).expect("built command tokenizes as one POSIX command");
+    let sh = tokens
+        .iter()
+        .position(|t| t == "sh")
+        .unwrap_or_else(|| panic!("no `sh` in tokens: {tokens:?}"));
+    let out = std::process::Command::new(&tokens[sh])
+        .args(&tokens[sh + 1..])
+        .output()
+        .expect("a POSIX shell runs");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("PWNED"), "injected: {stderr}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "ok");
+}
+
+/// The same refusal one level down, on the entry shape a preset reference
+/// persists — an `env` override reaches the identical assembly, so it cannot
+/// be the one entry point that skips the check.
+#[test]
+fn a_preset_overrides_env_name_is_refused_on_load_too() {
+    let entry: AgentEntry = toml::from_str(concat!(
+        "preset = \"codex-acp\"\n",
+        "\n",
+        "[env]\n",
+        "\"K; echo PWNED >&2 ; X\" = \"1\"\n",
+        "CODEX_CONFIG = \"{}\"\n",
+    ))
+    .expect("the entry still loads");
+    assert_eq!(
+        entry,
+        AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: PresetOverrides {
+                env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
+                ..PresetOverrides::default()
+            },
+        }
+    );
+}
+
+#[test]
+fn a_usable_env_name_is_the_posix_portable_charset() {
+    for good in ["A", "_", "_x", "CODEX_CONFIG", "K1", "__a9Z"] {
+        assert!(is_valid_env_name(good), "{good} must be usable");
+    }
+    for bad in [
+        "",
+        "1K",
+        "9",
+        "K; echo PWNED >&2 ; X",
+        "MY VAR",
+        "K-DASH",
+        "K.DOT",
+        "K$X",
+        "K`pwd`",
+        "K'q",
+        "K\nL",
+        "K=V",
+        "Ké",
+    ] {
+        assert!(!is_valid_env_name(bad), "{bad:?} must be refused");
+    }
+}
+
+/// Every environment daruda itself ships must satisfy the same rule the
+/// config-load path enforces — otherwise a preset default would be silently
+/// dropped the moment it round-tripped through disk.
+#[test]
+fn every_preset_env_default_name_is_usable() {
+    for preset in agent_presets() {
+        let Some(env) = preset.definition().and_then(|d| d.env) else {
+            continue;
+        };
+        for (name, _) in &env {
+            assert!(
+                is_valid_env_name(name),
+                "{}'s default env names {name:?}",
+                preset.id
+            );
+        }
+    }
 }

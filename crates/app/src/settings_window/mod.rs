@@ -357,6 +357,12 @@ pub(super) struct AgentCatalogRow {
     /// verbatim while it stays picked, so an unrelated edit cannot flatten a
     /// hand-written value. `None` means the picker holds the whole value.
     pub(super) tail_window_loaded: Option<u8>,
+    /// The environment the adapter process launches with, as one
+    /// `KEY=value` per line. Which of the three
+    /// [`daruda_config::AgentDefinition::env`] states an empty field means
+    /// depends on the preset behind the row, so read it through
+    /// [`AgentCatalogRow::stated_env`] rather than off the text.
+    pub(super) env_input: Entity<InputState>,
 }
 
 /// One row of the session host registry editor. Unlike [`AgentCatalogRow`],
@@ -498,6 +504,36 @@ impl SettingsWindow {
         )
     }
 
+    /// [`Self::subscribe_agent_input`] for a row's multi-line field. Plain
+    /// Enter inserts a newline and *still* emits `PressEnter` (see
+    /// `gpui_component::input::state`'s `enter`), so submitting on it would
+    /// rewrite `config.toml` on every line break and pop the validation
+    /// banner on a line the user has not finished. Only the secondary form
+    /// (Cmd/Ctrl+Enter) submits — the same split the MCP env / headers boxes
+    /// make.
+    fn subscribe_agent_multi_input(
+        state: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            |this, _, ev: &InputEvent, _window, cx| match ev {
+                InputEvent::PressEnter { secondary: true } | InputEvent::Blur => {
+                    this.persist_agent_catalog(cx);
+                }
+                InputEvent::Change => {
+                    if this.error.is_some() {
+                        this.error = None;
+                        cx.notify();
+                    }
+                }
+                InputEvent::PressEnter { secondary: false } | InputEvent::Focus => {}
+            },
+        )
+    }
+
     fn subscribe_session_host_input(
         state: &Entity<InputState>,
         window: &mut Window,
@@ -586,6 +622,17 @@ impl SettingsWindow {
             );
         AgentCatalogRow {
             preset,
+            env_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .auto_grow(
+                        theme::palette::SETTINGS_AGENT_ENV_ROWS_MIN,
+                        theme::palette::SETTINGS_AGENT_ENV_ROWS_MAX,
+                    )
+                    .placeholder(s::settings_agent_env_placeholder())
+                    .default_value(sections::agent_env::env_field_text(
+                        definition.env.as_deref(),
+                    ))
+            }),
             tail_window_loaded: transcript.tail_window_loaded,
             fold_mode: transcript.fold_mode,
             fold_mode_loaded: transcript.fold_mode_loaded,
@@ -652,6 +699,11 @@ impl SettingsWindow {
         subs.push(Self::subscribe_agent_input(&row.id_input, window, cx));
         subs.push(Self::subscribe_agent_input(&row.name_input, window, cx));
         subs.push(Self::subscribe_agent_input(&row.command_input, window, cx));
+        subs.push(Self::subscribe_agent_multi_input(
+            &row.env_input,
+            window,
+            cx,
+        ));
         subs.push(Self::subscribe_agent_input(&row.host_input, window, cx));
         subs.push(Self::subscribe_agent_input(
             &row.container_input,
@@ -2374,13 +2426,8 @@ impl SettingsWindow {
                 .unwrap_or_else(|| "raw".to_string());
             let host = row.host_input.read(cx).value().trim().to_string();
             let container = row.container_input.read(cx).value().trim().to_string();
-            if !agent_row_is_valid(&kind, &host, &container) {
-                let message = if kind == "ssh" {
-                    s::settings_err_agent_catalog_host(ordinal)
-                } else {
-                    s::settings_err_agent_catalog_container(ordinal)
-                };
-                return Err(SharedString::from(message));
+            if let Some(err) = agent_row_transport_error(&kind, &host, &container) {
+                return Err(agent_row_transport_message(ordinal, err));
             }
             let launch = match kind.as_str() {
                 "ssh" => daruda_config::AgentLaunch::Ssh {
@@ -2393,6 +2440,16 @@ impl SettingsWindow {
                 },
                 _ => daruda_config::AgentLaunch::Raw(command),
             };
+            let env = row.stated_env(cx).map_err(|err| {
+                SharedString::from(match err {
+                    sections::agent_env::EnvFieldError::MalformedLine(line) => {
+                        s::settings_err_agent_catalog_env(ordinal, &line)
+                    }
+                    sections::agent_env::EnvFieldError::UnusableName(name) => {
+                        s::settings_err_agent_catalog_env_name(ordinal, &name)
+                    }
+                })
+            })?;
             agents.push(daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
                     id,
@@ -2403,6 +2460,7 @@ impl SettingsWindow {
                     fold_mode: row.fold_mode(),
                     tail_window: row.tail_window(cx),
                     display_filter: row.display_filter(),
+                    env,
                 },
                 row.preset.as_deref(),
             ));
@@ -2797,18 +2855,57 @@ fn is_valid_agent_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Whether an agent catalog row's transport-specific fields are filled in.
-/// `"ssh"` requires a non-blank `host`; `"docker"` requires a non-blank
-/// `container`; any other `kind` (`"raw"`, or an unrecognized/absent select
-/// value) has no extra requirement. Pure and GPUI-free so it is directly
+/// What is wrong with an agent catalog row's transport-specific field, or
+/// `None` when nothing is. `"ssh"` checks `host`, `"docker"` checks
+/// `container`, and any other `kind` (`"raw"`, or an unrecognized/absent
+/// select value) has no extra field to check.
+///
+/// Both go through [`session_host::checked_bare_word`], the same validator
+/// the session-host registry editor and `SessionHostModal` use: the value
+/// lands unquoted in the launch command `daruda_config`'s assembler builds,
+/// so non-emptiness alone would let a typed host carry its own `ssh` flags
+/// or a `;` into that command line. Pure and GPUI-free so it is directly
 /// unit-testable — the save loop in [`SettingsWindow::validate`] is the only
 /// caller.
-fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
-    match kind {
-        "ssh" => !host.trim().is_empty(),
-        "docker" => !container.trim().is_empty(),
-        _ => true,
-    }
+fn agent_row_transport_error(
+    kind: &str,
+    host: &str,
+    container: &str,
+) -> Option<session_host::SessionHostError> {
+    let (value, field) = match kind {
+        "ssh" => (host, session_host::SessionHostField::Target),
+        "docker" => (container, session_host::SessionHostField::Container),
+        _ => return None,
+    };
+    session_host::checked_bare_word(value, field).err()
+}
+
+/// The localized message for an [`agent_row_transport_error`] on agent row
+/// `ordinal` (1-based). `SessionPath` never reaches here — an agent row has
+/// no path field — but is matched rather than left to an `unreachable!()`.
+fn agent_row_transport_message(
+    ordinal: usize,
+    err: session_host::SessionHostError,
+) -> SharedString {
+    use session_host::{SessionHostError, SessionHostField};
+    SharedString::from(match err {
+        SessionHostError::Empty(SessionHostField::Target) => {
+            s::settings_err_agent_catalog_host(ordinal)
+        }
+        SessionHostError::Empty(SessionHostField::Container) => {
+            s::settings_err_agent_catalog_container(ordinal)
+        }
+        SessionHostError::Unsafe(SessionHostField::Target) => {
+            s::settings_err_agent_catalog_host_unsafe(ordinal)
+        }
+        SessionHostError::Unsafe(SessionHostField::Container) => {
+            s::settings_err_agent_catalog_container_unsafe(ordinal)
+        }
+        SessionHostError::Empty(SessionHostField::SessionPath)
+        | SessionHostError::Unsafe(SessionHostField::SessionPath) => {
+            s::settings_err_agent_catalog_host(ordinal)
+        }
+    })
 }
 
 /// Seconds since the Unix epoch, clamped to `0` on a clock error — mirrors
@@ -2823,39 +2920,17 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// `session_host::SessionHostError` names the field by
-/// [`session_host::SessionHostField`], but the registry editor's rows have
-/// no natural field label beyond their position — reuses the same
-/// `session_host.err_*` strings [`SessionHostModal`] shows, wrapped with the
-/// row's 1-based ordinal so a multi-row save can still point at which one
-/// failed.
-///
-/// [`SessionHostModal`]: crate::workspace::left_dock::projects::session_host_modal::SessionHostModal
+/// The registry editor's rows have no natural field label beyond their
+/// position, so the validator's own reason is wrapped with the row's 1-based
+/// ordinal — a multi-row save can still point at which one failed.
 fn session_host_validation_message(
     index: usize,
     err: session_host::SessionHostError,
 ) -> SharedString {
-    use session_host::{SessionHostError, SessionHostField};
-    let reason = match err {
-        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
-        SessionHostError::Empty(SessionHostField::Container) => {
-            s::session_host_err_container_empty()
-        }
-        // Never produced by this editor (it never validates a session path),
-        // but matched explicitly rather than panicking so a future caller
-        // that does can't trigger an `unreachable!()`.
-        SessionHostError::Empty(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_empty()
-        }
-        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
-        SessionHostError::Unsafe(SessionHostField::Container) => {
-            s::session_host_err_container_unsafe()
-        }
-        SessionHostError::Unsafe(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_unsafe()
-        }
-    };
-    SharedString::from(s::settings_err_session_host_field(index + 1, &reason))
+    SharedString::from(s::settings_err_session_host_field(
+        index + 1,
+        &err.localized(),
+    ))
 }
 
 /// The string value carried inside a [`daruda_config::SessionHostKind`] —
@@ -3031,7 +3106,12 @@ fn font_select_options(cx: &gpui::App, current: &[&str]) -> Vec<SelectOption> {
 
 #[cfg(test)]
 mod agent_row_validation_tests {
-    use super::agent_row_is_valid;
+    use super::agent_row_transport_error;
+    use crate::lane::session_host::{SessionHostError, SessionHostField};
+
+    fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
+        agent_row_transport_error(kind, host, container).is_none()
+    }
 
     #[test]
     fn agent_row_validation_cases() {
@@ -3058,6 +3138,44 @@ mod agent_row_validation_tests {
             assert_eq!(
                 agent_row_is_valid(kind, host, container),
                 expected,
+                "{name}"
+            );
+        }
+    }
+
+    /// A host/container is a bare word in the launch command daruda
+    /// assembles, so the field has to reject what `SessionHostModal`'s does —
+    /// non-emptiness alone would let a typed value carry its own `ssh` flags
+    /// or a `;` into that command line.
+    #[test]
+    fn a_host_that_would_break_the_launch_command_is_refused() {
+        let cases = [
+            (
+                "ssh flags",
+                "ssh",
+                "vm -o ProxyCommand=touch /tmp/pwned",
+                "",
+                SessionHostError::Unsafe(SessionHostField::Target),
+            ),
+            (
+                "ssh semicolon",
+                "ssh",
+                "vm; echo PWNED",
+                "",
+                SessionHostError::Unsafe(SessionHostField::Target),
+            ),
+            (
+                "docker flags",
+                "docker",
+                "",
+                "dev --privileged",
+                SessionHostError::Unsafe(SessionHostField::Container),
+            ),
+        ];
+        for (name, kind, host, container, expected) in cases {
+            assert_eq!(
+                agent_row_transport_error(kind, host, container),
+                Some(expected),
                 "{name}"
             );
         }

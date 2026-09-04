@@ -50,6 +50,22 @@ pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {
         FieldError::CommandRequired => strings::mcp_command_required().into(),
         FieldError::UrlRequired => strings::mcp_url_required().into(),
         FieldError::UrlInvalidScheme => strings::mcp_url_invalid().into(),
-        FieldError::EnvInvalidLine { .. } => strings::mcp_env_invalid().into(),
+        FieldError::EnvInvalidLine { line } => strings::mcp_env_invalid(&line).into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The parser records which line it choked on; the banner has to spend it.
+    /// A message that only says "one of these must be KEY=VALUE" leaves the
+    /// user scanning a block they may have pasted from a README.
+    #[test]
+    fn the_env_banner_names_the_line_that_failed() {
+        let msg = field_error_to_msg(FieldError::EnvInvalidLine {
+            line: "OPENAI_API_KEY".to_string(),
+        });
+        assert!(msg.contains("OPENAI_API_KEY"), "{msg}");
     }
 }

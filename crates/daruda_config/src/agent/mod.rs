@@ -1,15 +1,19 @@
+pub mod assemble;
 pub mod entry;
 pub mod preset;
 #[cfg(test)]
 mod tests;
 pub mod vocabulary;
 
+use crate::account_env::AccountEnv;
 use daruda_store::accounts::AccountRecipeId;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
+pub use assemble::{LaunchTransport, assemble_launch_command, is_valid_env_name};
 pub use entry::{AgentEntry, PresetOverrides};
 pub use preset::{
-    ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, PresetLaunchability,
+    ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, CODEX_CONFIG_ENV, PresetLaunchability,
     preset as agent_preset, presets as agent_presets,
 };
 pub use vocabulary::{AgentVocabularySeed, seed_for_command as agent_vocabulary_seed};
@@ -49,6 +53,17 @@ pub struct AgentDefinition {
     /// means the unfiltered set; unlike `fold_mode`, an empty list is a real
     /// value naming an empty visible set, so the two cannot be collapsed.
     pub display_filter: Option<Vec<String>>,
+    /// Environment the adapter process runs with. Merged into the account's
+    /// own injection at launch; the account wins a key collision, since its
+    /// vars scope credentials.
+    ///
+    /// `None` states none, so a preset reference keeps following the preset.
+    /// Unlike `fold_mode`, `Some(vec![])` is a real value — the preset's own
+    /// environment, cleared — so the two cannot be collapsed.
+    ///
+    /// Persisted as a TOML table, so a loaded value is keyed — sorted and
+    /// deduplicated — rather than in the order it was written.
+    pub env: Option<Vec<(String, String)>>,
 }
 
 /// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
@@ -100,10 +115,17 @@ const CODEX_ADAPTER_MARKERS: &[&str] = &["codex-acp"];
 const JSON_STDIO_PREFIX: char = '{';
 
 /// Whether `command` is a JSON stdio config. Such a command carries its
-/// program, args and env as structured fields, so the shell-string edits in
-/// [`AgentLaunch::wrap_with_env`] and [`AgentLaunch::login_command`] would
-/// corrupt it — both are gated on this, and it also bars the launch from
-/// carrying a managed account at all.
+/// program, args and env as structured fields, so any shell-string edit
+/// corrupts it — [`account_recipe_for_local_command`] is gated on this,
+/// which is what bars the launch from carrying a managed account at all.
+///
+/// [`AgentLaunch::wrap_with_env`] is deliberately *not* gated here: it is a
+/// pure assembler with no error channel wide enough to say why it declined,
+/// so the refusal lives one layer up, at the only caller that also knows the
+/// resolved host — the app's `agent::launch_resolve::json_stdio_refusal`.
+/// [`AgentLaunch::login_command`] is not gated either; a JSON stdio config
+/// has no auth domain (`account_recipe` is `None`), so no caller ever asks it
+/// for one.
 fn is_json_stdio_str(command: &str) -> bool {
     command.trim_start().starts_with(JSON_STDIO_PREFIX)
 }
@@ -147,90 +169,71 @@ impl AgentLaunch {
     /// yet") — there is nothing more to report back.
     #[allow(clippy::result_unit_err)]
     pub fn wrap(&self, remote_path: Option<&str>) -> Result<String, ()> {
+        self.wrap_with_env(remote_path, &AccountEnv::ambient())
+    }
+
+    /// The transport this launch's own host describes, paired with the
+    /// adapter command to run through it. `None` for `Raw`, which launches
+    /// locally with no wrapper — so `session_path` is unused there.
+    fn remote_transport<'a>(
+        &'a self,
+        session_path: &'a str,
+    ) -> Option<(LaunchTransport<'a>, &'a str)> {
         match self {
-            AgentLaunch::Raw(command) => {
-                if command.contains(CWD_TOKEN) {
-                    let path = require_remote_path(remote_path)?;
-                    Ok(command.replace(CWD_TOKEN, path))
-                } else {
-                    Ok(command.clone())
-                }
-            }
+            AgentLaunch::Raw(_) => None,
             AgentLaunch::Ssh {
                 adapter_command,
                 host,
-            } => {
-                let path = require_remote_path(remote_path)?;
-                Ok(format!(
-                    "ssh {host} sh -c 'cd \"{path}\" && {adapter_command}'"
-                ))
-            }
+            } => Some((
+                LaunchTransport::Ssh {
+                    target: host,
+                    session_path,
+                },
+                adapter_command,
+            )),
             AgentLaunch::Docker {
                 adapter_command,
                 container,
-            } => {
-                let path = require_remote_path(remote_path)?;
-                Ok(format!(
-                    "docker exec -i {container} sh -c 'cd \"{path}\" && {adapter_command}'"
-                ))
-            }
+            } => Some((
+                LaunchTransport::Docker {
+                    container,
+                    session_path,
+                },
+                adapter_command,
+            )),
         }
     }
 
-    /// Like [`Self::wrap`], but applies `env` for the spawned process.
+    /// Like [`Self::wrap`], but applies `env` for the spawned process. Both
+    /// are the same assembly — [`assemble_launch_command`], which owns the
+    /// quoting and documents both how each transport applies `env` and the
+    /// preconditions it leaves to its callers; `wrap` is this with
+    /// [`AccountEnv::ambient`].
     ///
-    /// `Ssh`/`Docker` fold both halves into the remote shell via
-    /// `unset`/`export`. `Raw` emits **only** the `env.inject` `KEY=value`
-    /// prefix: the string must stay parseable by
-    /// `daruda_acp::node::command_needs_node`, which reads the launcher token
-    /// after the assignments, and an `/usr/bin/env -u …` prefix here would
-    /// hide it and skip Node.js provisioning. `env.strip` is applied instead
-    /// at final launch assembly, in
-    /// `daruda_acp::launch_env::prepare_adapter_command`, once the runtime is
-    /// resolved.
+    /// One of those preconditions bites here: a non-empty `env` on a JSON
+    /// stdio `Raw` command prepends a shell assignment to raw JSON, leaving a
+    /// string that is neither a shell command line nor JSON. This does not
+    /// refuse it — the `Err(())` channel says only "no usable remote path",
+    /// and widening it would make every caller handle a case only one of them
+    /// can act on. The app's
+    /// `agent::launch_resolve::json_stdio_refusal` is the gate; it runs
+    /// before this on both paths that reach it.
     #[allow(clippy::result_unit_err)]
-    pub fn wrap_with_env(
-        &self,
-        remote_path: Option<&str>,
-        env: &crate::account_env::AccountEnv,
-    ) -> Result<String, ()> {
-        let base = self.wrap(remote_path)?;
+    pub fn wrap_with_env(&self, remote_path: Option<&str>, env: &AccountEnv) -> Result<String, ()> {
         match self {
-            AgentLaunch::Raw(_) => {
-                // Single-quoted so a value containing a space (an account
-                // config dir under `default_data_dir()`, which on macOS
-                // sits under `~/Library/Application Support`) survives the
-                // downstream quote-aware re-tokenization in
-                // `daruda_acp::node::split_env_prefixed_tokens` /
-                // `AcpAgent::from_str`'s `shell_words::split` as one value
-                // instead of splitting into two tokens. No inner escaping is
-                // needed: a filesystem config-dir path never contains a
-                // single quote.
-                let mut prefix = String::new();
-                for (k, v) in &env.inject {
-                    prefix.push_str(&format!("{k}='{v}' "));
-                }
-                Ok(format!("{prefix}{base}"))
+            AgentLaunch::Raw(command) => {
+                let base = if command.contains(CWD_TOKEN) {
+                    command.replace(CWD_TOKEN, require_remote_path(remote_path)?)
+                } else {
+                    command.clone()
+                };
+                Ok(assemble_launch_command(LaunchTransport::Local, &base, env))
             }
             AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => {
-                // `base` is `ssh host sh -c 'cd "<p>" && <cmd>'`. Inject
-                // exports inside the inner shell by rewriting the trailing
-                // `&& <cmd>`.
-                let mut env_script = String::new();
-                for s in &env.strip {
-                    env_script.push_str(&format!("unset {s}; "));
-                }
-                for (k, v) in &env.inject {
-                    env_script.push_str(&format!("export {k}=\"{v}\"; "));
-                }
-                // The inner command starts after the last `&& `.
-                match base.rfind("&& ") {
-                    Some(idx) => {
-                        let (head, tail) = base.split_at(idx + 3);
-                        Ok(format!("{head}{env_script}{tail}"))
-                    }
-                    None => Ok(base),
-                }
+                let path = require_remote_path(remote_path)?;
+                // `None` is the `Raw` case, matched above.
+                let (transport, adapter_command) = self.remote_transport(path).ok_or(())?;
+                Ok(assemble_launch_command(transport, adapter_command, env))
             }
         }
     }
@@ -342,9 +345,88 @@ struct AgentDefinitionRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    env: Option<EnvRepr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
+}
+
+/// Wire form of an `env` field: a TOML table, so an entry reads as
+/// `KEY = "value"` on disk. A map rather than a list of pairs because that is
+/// the shape a user writes and an environment actually has — one value per
+/// name — which also makes the loaded order deterministic.
+///
+/// Like the `ssh` / `docker` sub-tables, it must be declared after every
+/// scalar key: TOML forbids a value after a table within the same entry.
+type EnvRepr = BTreeMap<String, String>;
+
+/// `env` in its wire form. A stated-but-empty environment still writes its
+/// (empty) table: that table is the only thing on disk that tells it apart
+/// from a definition stating no environment at all.
+fn env_to_repr(env: Option<Vec<(String, String)>>) -> Option<EnvRepr> {
+    env.map(|env| env.into_iter().collect())
+}
+
+/// `env` read back from its wire form — an absent table states no
+/// environment, which is what every pre-`env` config has.
+fn env_from_repr(repr: Option<EnvRepr>) -> Option<Vec<(String, String)>> {
+    repr.map(sanitized_env)
+}
+
+/// `env` as the model is allowed to hold it: every name satisfying
+/// [`is_valid_env_name`], key-sorted, one value per name.
+///
+/// **Dropping rather than rejecting** is deliberate. `Config::load_from`
+/// turns any deserialization error into `Config::default()`, so failing here
+/// would throw away the user's *entire* `config.toml` over one bad table key.
+/// The pair is dropped and logged instead: the row still launches, just
+/// without a variable daruda could not have passed on safely — a name outside
+/// the POSIX charset is not something any downstream consumer could have
+/// accepted (see [`is_valid_env_name`]), so nothing is lost that would have
+/// worked.
+///
+/// The key sort is not incidental either: [`EnvRepr`] is a map, so a value
+/// read back from disk is always key-ordered, and
+/// [`AgentEntry::reference`](entry::AgentEntry) diffs a row's `env` against
+/// its preset's as a `Vec`. Canonicalizing every entry point is what makes
+/// that diff decide on content instead of on the order someone happened to
+/// write.
+pub(crate) fn sanitized_env(env: EnvRepr) -> Vec<(String, String)> {
+    env.into_iter()
+        .filter(|(name, _)| {
+            let ok = is_valid_env_name(name);
+            if !ok {
+                report_dropped_env_name(name);
+            }
+            ok
+        })
+        .collect()
+}
+
+/// Same canonicalization for a value that arrives as an ordered list rather
+/// than a map — a preset's hand-written default, or an app-side caller.
+pub fn canonical_env(env: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
+    sanitized_env(env.into_iter().collect())
+}
+
+/// The NDJSON-log half of [`sanitized_env`]'s drop: config load has no
+/// toast or modal to reach (it runs before the workspace exists), so the log
+/// is the only surface that can say the variable went missing on purpose.
+fn report_dropped_env_name(name: &str) {
+    use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+    use daruda_store::observability::log_writer::LogWriter;
+    LogWriter::log(
+        ErrorReport::new("Agent environment variable dropped")
+            .severity(ErrorSeverity::Warning)
+            .message(format!(
+                "`{name}` is not a usable environment variable name \
+                 ([A-Za-z_][A-Za-z0-9_]*), so it was left out of the agent's launch environment."
+            ))
+            .with_context("name", name)
+            .at(file!(), line!())
+            .build(),
+    );
 }
 
 #[derive(Serialize, Deserialize)]
@@ -395,6 +477,7 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
             display_filter: v.display_filter,
+            env: env_to_repr(v.env),
             ssh,
             docker,
         }
@@ -430,6 +513,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
             display_filter: v.display_filter,
+            env: env_from_repr(v.env),
         }
     }
 }
@@ -452,6 +536,7 @@ impl AgentDefinition {
             fold_mode: None,
             tail_window: None,
             display_filter: None,
+            env: None,
         }
     }
 

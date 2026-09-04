@@ -18,6 +18,7 @@
 //! by starting a flow: a capture or a test that submitted a real one would
 //! leave a run directory behind in whichever repository was open.
 
+use crate::agent::launch_resolve::ConnectCommandError;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
@@ -573,6 +574,21 @@ impl Workspace {
             FlowSubmitError::NoLane => (s::flow_no_lane(), String::new()),
             FlowSubmitError::RemoteLane { agent } => (s::flow_remote_lane(&agent), String::new()),
             FlowSubmitError::LockHeld { pid } => (s::flow_lock_held(pid), String::new()),
+            // The reason carries its own already-localized wording — the same
+            // one an agent chat pane shows for the identical refusal.
+            FlowSubmitError::AgentLaunchRefused { agent, reason } => (
+                s::flow_agent_launch_refused(&agent),
+                match reason {
+                    ConnectCommandError::NoRemotePath => s::agent_chat_no_remote_cwd(),
+                    ConnectCommandError::JsonStdioRemote => {
+                        s::agent_chat_json_stdio_remote_unsupported()
+                    }
+                    ConnectCommandError::JsonStdioEnv => s::agent_chat_json_stdio_env_unsupported(),
+                },
+            ),
+            FlowSubmitError::UnusableSessionHost { agent, reason } => {
+                (s::flow_session_host_unusable(&agent), reason.localized())
+            }
             FlowSubmitError::Read { path, message } => (
                 s::flow_read_failed_title(),
                 format!("{}: {message}", path.display()),

@@ -181,9 +181,9 @@ impl AddMcpServerModal {
         }
 
         let env_text = self.env_input.read(cx).value().to_string();
-        let env = parse_env_lines(&env_text).map_err(field_error_to_msg)?;
+        let env = parse_env_lines(&env_text).map_err(|e| field_error_to_msg(e.into()))?;
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = parse_env_lines(&headers_text).map_err(field_error_to_msg)?;
+        let headers = parse_env_lines(&headers_text).map_err(|e| field_error_to_msg(e.into()))?;
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {

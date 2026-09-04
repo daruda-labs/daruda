@@ -597,6 +597,7 @@ fn codex_agent() -> daruda_config::AgentDefinition {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     }
 }
 
@@ -853,6 +854,7 @@ fn codex() -> daruda_config::AgentDefinition {
         fold_mode: None,
         tail_window: None,
         display_filter: None,
+        env: None,
     }
 }
 
