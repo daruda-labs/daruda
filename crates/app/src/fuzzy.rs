@@ -58,6 +58,15 @@ mod tests {
         assert!(ranked.contains(&1) && ranked.contains(&2));
     }
 
+    /// The documented tie-break, and the one pickers lean on: a caller
+    /// that pre-sorts its candidates gets that as the secondary sort, so
+    /// equal scores must come back in the order they were passed.
+    #[test]
+    fn equal_scores_keep_the_order_candidates_were_passed() {
+        assert_eq!(fuzzy_match("lane", &["lane-aaa", "lane-bbb"]), vec![0, 1]);
+        assert_eq!(fuzzy_match("lane", &["lane-bbb", "lane-aaa"]), vec![0, 1]);
+    }
+
     #[test]
     fn smart_case_lowercase_query_is_case_insensitive() {
         let candidates = ["Daruda", "daruda-feat"];

@@ -29,6 +29,7 @@ use gpui::{Context, Window};
 use super::Workspace;
 use super::command::flow_picker::{FlowPick, FlowPicker, FlowPurpose};
 use super::command::picker::PickerKey;
+use super::command::picker_key::picker_keystroke;
 use super::flow_request::{FlowSelection, FlowSubmission, FlowSubmitError, union_strip_env};
 use super::flow_runs::RunHandle;
 // Only the seeded runs name a stage outright; a real one gets there through
@@ -141,28 +142,14 @@ impl Workspace {
         if !self.flow_picker.is_open() {
             return;
         }
-        // A shortcut belongs to the action system, not to this overlay:
-        // swallowing `platform`/`function` keystrokes means the key that
-        // opened it can no longer close it, and `Cmd+W` stops reaching the
-        // window. Same early-out the terminal view takes, for the same
-        // reason.
-        if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+        let Some((key, ch)) = picker_keystroke(ev) else {
             return;
-        }
-        let ch = ev
-            .keystroke
-            .key_char
-            .as_deref()
-            .and_then(|s| s.chars().next());
-        match self.flow_picker.on_key(ev.keystroke.key.as_str(), ch) {
+        };
+        match self.flow_picker.on_key(key, ch) {
             PickerKey::Confirm => self.execute_flow_picker_selection(window, cx),
             PickerKey::Dismiss => self.close_flow_picker(cx),
-            PickerKey::Consumed => cx.notify(),
-            // An unmapped keystroke leaves the picker untouched — which is
-            // every list key while the stop prompt is up, since there is no
-            // list to move through — but is still swallowed below: it must
-            // not reach the PTY underneath.
-            PickerKey::Ignored => {}
+            PickerKey::Changed => cx.notify(),
+            PickerKey::Unchanged => {}
         }
         cx.stop_propagation();
     }

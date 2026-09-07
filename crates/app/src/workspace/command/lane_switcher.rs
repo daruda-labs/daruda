@@ -234,9 +234,10 @@ mod tests {
             candidate(1, 0, "daruda / main"),
             candidate(1, 1, "daruda / feat-login"),
         ]);
-        state.picker.append('l');
-        state.picker.append('o');
-        state.picker.append('g');
+        for ch in ['l', 'o', 'g'] {
+            let visible_len = state.visible().len();
+            state.picker.on_key(&ch.to_string(), Some(ch), visible_len);
+        }
         // Only the "feat-login" lane carries the `log` subsequence.
         assert_eq!(state.visible(), vec![1]);
     }
@@ -254,7 +255,7 @@ mod tests {
                 lane: 0
             })
         );
-        state.picker.move_down(state.visible().len());
+        state.picker.on_key("down", None, state.visible().len());
         assert_eq!(
             state.focused_lane_ref(),
             Some(LaneRef {

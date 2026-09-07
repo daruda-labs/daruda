@@ -280,23 +280,23 @@ impl FlowPicker {
     /// Escape and Enter are the overlay's, whichever state it is in: the
     /// stop prompt has no list and still has to answer both — Enter is the
     /// only way to the stop (see `execute_flow_picker_selection`, which
-    /// reads it by `focused_pick` being `None` there). Everything else is a
-    /// list key, so it reaches [`PickerState`] only when there is a list;
-    /// the stop prompt refuses it outright rather than no-opping on a list
-    /// that is not on screen.
+    /// reads it by `focused_pick` being `None` there). That half is
+    /// [`super::picker::overlay_key`], shared so this type does not carry
+    /// a second copy of it. Everything else is a list key, so it reaches
+    /// [`PickerState`] only when there is a list; the stop prompt refuses
+    /// it outright rather than no-opping on a list that is not on screen.
     pub fn on_key(&mut self, key: &str, ch: Option<char>) -> PickerKey {
-        match key {
-            "escape" => PickerKey::Dismiss,
-            "enter" => PickerKey::Confirm,
-            _ => match self.choosing_mut() {
-                Some(c) => {
-                    // Already capped by `visible`, which is where the cap
-                    // lives.
-                    let visible_len = c.visible().len();
-                    c.picker.on_key(key, ch, visible_len)
-                }
-                None => PickerKey::Ignored,
-            },
+        if let Some(k) = super::picker::overlay_key(key) {
+            return k;
+        }
+        match self.choosing_mut() {
+            Some(c) => {
+                // Already capped by `visible`, which is where the cap
+                // lives.
+                let visible_len = c.visible().len();
+                c.picker.on_key(key, ch, visible_len)
+            }
+            None => PickerKey::Unchanged,
         }
     }
 
@@ -469,12 +469,8 @@ impl RenderOnce for FlowPickerOverlay {
             .max_h(px(theme::PALETTE_MAX_HEIGHT))
             .overflow_hidden()
             .children(rows.iter().enumerate().map(|(index, row)| {
-                // `flex_none` because the label slot is `flex_1`: without it
-                // taffy's default `flex_shrink: 1.0` squeezes the tag instead
-                // of ellipsizing the name it belongs to.
                 let tag = row.tag.clone().map(|tag| {
                     div()
-                        .flex_none()
                         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                         .text_color(tag_text)
                         .child(tag)
@@ -694,7 +690,7 @@ mod tests {
             ("backspace", None),
             ("s", Some('s')),
         ] {
-            assert_eq!(picker.on_key(key, ch), PickerKey::Ignored, "{key}");
+            assert_eq!(picker.on_key(key, ch), PickerKey::Unchanged, "{key}");
         }
         // None of it turned the prompt into a list, and Enter still has
         // nothing to pick — the two halves of what makes it a stop.

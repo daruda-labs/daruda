@@ -565,7 +565,10 @@ pub const INPUT_PANEL_MIN_H: f32 = 48.0;
 /// Height of the floating action bar overlaid at the bottom of an InputPanel
 /// with `ActionsFloating` layout (px). Matches Zed git_panel footer_size.
 pub const INPUT_PANEL_FLOATING_BAR_H: f32 = 32.0;
-/// Command palette max visible entries.
+/// Command palette max visible entries. Paired with
+/// [`PALETTE_MAX_HEIGHT`], which is derived from it — the row count the
+/// keyboard can reach and the height the list is clipped to are one
+/// number, not two that can drift.
 pub const PALETTE_MAX_VISIBLE: usize = 12;
 /// Max configured-agent count that renders the `+` menu's agent entries
 /// flat. Above this the menu folds them into a `New Agent Chat` submenu.
@@ -703,12 +706,25 @@ pub const PALETTE_INPUT_PAD_X: f32 = 12.0;
 pub const PALETTE_INPUT_PAD_Y: f32 = PAD_STANDARD;
 /// Command palette query font size (px).
 pub const PALETTE_QUERY_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Command palette max list height (px).
-pub const PALETTE_MAX_HEIGHT: f32 = 360.0;
 /// Command palette entry padding X (px).
 pub const PALETTE_ENTRY_PAD_X: f32 = 12.0;
 /// Command palette entry padding Y (px).
 pub const PALETTE_ENTRY_PAD_Y: f32 = PAD_SM;
+/// Line box of one picker row's text (px). Set explicitly by
+/// `crate::ui::picker_row` instead of inherited from gpui's default
+/// (the golden ratio of the font size, which lands on a fraction and
+/// leaves the row height emergent); 21 is the whole pixel the rows
+/// already painted at for `PALETTE_ENTRY_FONT_SIZE`.
+pub const PALETTE_ROW_LINE_H: f32 = 21.0;
+/// Height of one picker row (px) — its line box plus the vertical
+/// padding above and below it.
+pub const PALETTE_ROW_H: f32 = PALETTE_ROW_LINE_H + 2.0 * PALETTE_ENTRY_PAD_Y;
+/// Command palette max list height (px): exactly the rows
+/// [`PALETTE_MAX_VISIBLE`] admits. Derived rather than chosen, because
+/// a taller cap shows rows the keyboard cannot reach and a shorter one
+/// clips rows it can — the second case ran Enter on an off-screen
+/// command.
+pub const PALETTE_MAX_HEIGHT: f32 = PALETTE_MAX_VISIBLE as f32 * PALETTE_ROW_H;
 /// Command palette entry label font size (px).
 pub const PALETTE_ENTRY_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Command palette shortcut font size (px).

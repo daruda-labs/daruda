@@ -569,12 +569,8 @@ impl RenderOnce for CommandPaletteOverlay {
             .overflow_hidden()
             .children(visible.iter().enumerate().map(|(vis_idx, &entry_idx)| {
                 let entry = &PALETTE_ENTRIES[entry_idx];
-                // `flex_none` because the label slot is `flex_1`: without
-                // it taffy's default `flex_shrink: 1.0` squeezes the
-                // shortcut instead of ellipsizing the label.
                 let shortcut = (!entry.shortcut.is_empty()).then(|| {
                     div()
-                        .flex_none()
                         .text_size(px(theme::PALETTE_SHORTCUT_FONT_SIZE))
                         .text_color(shortcut_text)
                         .child(entry.shortcut)
@@ -630,9 +626,16 @@ mod tests {
         let mut state = CommandPaletteState::default();
         state.open();
         for ch in query.chars() {
-            state.picker.append(ch);
+            let visible_len = state.visible().len();
+            state.picker.on_key(&ch.to_string(), Some(ch), visible_len);
         }
         state
+    }
+
+    /// One arrow-down press, the way the key handler makes it.
+    fn press_down(state: &mut CommandPaletteState) {
+        let visible_len = state.visible().len();
+        state.picker.on_key("down", None, visible_len);
     }
 
     /// Labels + ids in the order the palette must present them, derived
@@ -730,8 +733,8 @@ mod tests {
         // an empty query is the third alphabetical command.
         let alphabetical = alphabetical_entries();
         let mut state = typed("");
-        state.picker.move_down(state.visible().len());
-        state.picker.move_down(state.visible().len());
+        press_down(&mut state);
+        press_down(&mut state);
         assert_eq!(state.focused_action_id(), Some(alphabetical[2].1));
 
         // The same identity holds for a narrowed list, and at every row of
@@ -788,22 +791,24 @@ mod tests {
         let mut state = typed("");
         let visible_len = state.visible().len();
         for _ in 0..100 {
-            state.picker.move_down(visible_len);
+            press_down(&mut state);
         }
         assert_eq!(state.picker.focused_index(), visible_len - 1);
         assert_eq!(visible_len, theme::PALETTE_MAX_VISIBLE);
 
         let mut state = typed("");
-        state.picker.move_up();
+        state.picker.on_key("up", None, state.visible().len());
         assert_eq!(state.picker.focused_index(), 0);
 
         let mut state = typed("ab");
-        state.picker.backspace();
+        state
+            .picker
+            .on_key("backspace", None, state.visible().len());
         assert_eq!(state.picker.query(), "a");
 
         let mut state = typed("");
         state.picker.focus(5);
-        state.picker.append('x');
+        state.picker.on_key("x", Some('x'), state.visible().len());
         assert_eq!(state.picker.focused_index(), 0);
     }
 

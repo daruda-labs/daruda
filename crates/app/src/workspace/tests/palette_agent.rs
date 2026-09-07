@@ -17,7 +17,10 @@ fn command_palette_toggles_and_resolves_core_actions(cx: &mut TestAppContext) {
         ] {
             ws.command_palette.open();
             for ch in query.chars() {
-                ws.command_palette.picker.append(ch);
+                let visible_len = ws.command_palette.visible().len();
+                ws.command_palette
+                    .picker
+                    .on_key(&ch.to_string(), Some(ch), visible_len);
             }
             assert_eq!(
                 ws.command_palette.focused_action_id(),

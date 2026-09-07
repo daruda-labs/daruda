@@ -74,6 +74,7 @@ use std::collections::{HashMap, HashSet};
 use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
 use command::picker::PickerKey;
+use command::picker_key::picker_keystroke;
 
 use daruda_terminal::TerminalConfig;
 
@@ -1960,31 +1961,18 @@ impl Workspace {
         if !self.command_palette.is_open {
             return;
         }
-        // A shortcut belongs to the action system, not to this overlay:
-        // swallowing `platform`/`function` keystrokes means the key that
-        // opened it can no longer close it, and `Cmd+W` stops reaching the
-        // window. Same early-out the terminal view takes, for the same
-        // reason.
-        if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+        let Some((key, ch)) = picker_keystroke(ev) else {
             return;
-        }
-        let ch = ev
-            .keystroke
-            .key_char
-            .as_deref()
-            .and_then(|s| s.chars().next());
+        };
         let visible_len = self.command_palette.visible().len();
-        let key = ev.keystroke.key.as_str();
         match self.command_palette.picker.on_key(key, ch, visible_len) {
             PickerKey::Confirm => self.execute_palette_action(window, cx),
             PickerKey::Dismiss => {
                 self.command_palette.close();
                 cx.notify();
             }
-            PickerKey::Consumed => cx.notify(),
-            // An unmapped keystroke leaves the palette untouched, but is
-            // still swallowed below: it must not reach the PTY underneath.
-            PickerKey::Ignored => {}
+            PickerKey::Changed => cx.notify(),
+            PickerKey::Unchanged => {}
         }
         cx.stop_propagation();
     }

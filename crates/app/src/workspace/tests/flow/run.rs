@@ -475,7 +475,10 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
             ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
             ws.command_palette.open();
             for ch in "Right Panel: Flows".chars() {
-                ws.command_palette.picker.append(ch);
+                let visible_len = ws.command_palette.visible().len();
+                ws.command_palette
+                    .picker
+                    .on_key(&ch.to_string(), Some(ch), visible_len);
             }
             assert_eq!(
                 ws.command_palette.visible().len(),
