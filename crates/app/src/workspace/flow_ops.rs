@@ -154,6 +154,18 @@ impl Workspace {
         cx.stop_propagation();
     }
 
+    /// Act on the row the mouse named. Focusing it first is what makes a
+    /// click the same gesture as arrowing there and pressing Enter.
+    pub(in crate::workspace) fn pick_flow_row(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.flow_picker.focus(ix);
+        self.execute_flow_picker_selection(window, cx);
+    }
+
     /// Act on the focused row and close.
     pub(in crate::workspace) fn execute_flow_picker_selection(
         &mut self,

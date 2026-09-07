@@ -3,7 +3,7 @@
 
 use gpui::{AppContext as _, TestAppContext};
 
-use super::build_workspace;
+use super::{build_workspace, build_workspace_with};
 use crate::ui::WindowExt as _;
 use crate::workspace::screenshot_scenario::{ScreenshotScenario, drive};
 
@@ -112,6 +112,50 @@ async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
         assert!(
             crate::window_registry::WindowRegistry::settings(cx).is_some(),
             "settings scenario should open the Settings window",
+        );
+    });
+}
+
+/// The one hazard in the long-label seed: it must swap the *label* of a real
+/// candidate, not fabricate a row. A synthetic `lane_ref` would render fine
+/// and then activate nothing when the row is picked.
+#[gpui::test]
+async fn drive_lane_switcher_reuses_a_real_lane_ref(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_lane_switcher_shot");
+    let (window_handle, workspace) = build_workspace_with(cx, &config, Some(project));
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::LaneSwitcher, &workspace, window, cx);
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert!(
+            ws.lane_switcher.is_open,
+            "lane-switcher scenario should open the switcher",
+        );
+        let seeded = ws
+            .lane_switcher
+            .candidates
+            .first()
+            .expect("the seeded switcher lists at least one lane");
+        let lane_ref = seeded.lane_ref;
+
+        let project = ws
+            .project_for(lane_ref.project)
+            .expect("the seeded row names a project that exists");
+        assert!(
+            project.lane(lane_ref.lane).is_some(),
+            "the seeded row must reuse a real lane_ref, not a fabricated one",
+        );
+
+        // And the label really was swapped — otherwise the capture shows a
+        // short row and proves nothing about clipping.
+        assert_ne!(
+            seeded.label,
+            ws.lane_label_for(lane_ref),
+            "the seeded row should carry the synthetic long label",
         );
     });
 }

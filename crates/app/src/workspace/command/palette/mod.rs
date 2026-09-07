@@ -5,6 +5,10 @@
 //! focused action; Escape closes. Query and selection live in the shared
 //! [`PickerState`]; the row chrome is [`crate::ui::picker_row`]; the
 //! command table itself is [`entries`].
+//!
+//! Matching is smart-case, via `crate::fuzzy::fuzzy_match`: a lowercase
+//! query is case-insensitive, but a single uppercase letter makes the
+//! whole query case-sensitive against the Title-Case labels.
 
 pub(in crate::workspace) mod entries;
 
@@ -324,8 +328,9 @@ mod tests {
     /// highlighted label and the executed action disagree.
     #[test]
     fn the_highlighted_row_is_the_action_enter_runs() {
-        // Value-based, independent of `sorted_labels`: two rows down from
-        // an empty query is the third alphabetical command.
+        // Expected row derived from `alphabetical_entries`, which restates
+        // the ordering rule independently of `sorted_labels`: two rows down
+        // from an empty query is the third alphabetical command.
         let alphabetical = alphabetical_entries();
         let mut state = typed("");
         press_down(&mut state);
@@ -366,45 +371,22 @@ mod tests {
             "the two Split commands should outrank incidental subsequence hits: {ids:?}"
         );
 
-        // Smart-case: a lowercase query is case-insensitive.
-        let state = typed("quit");
+        // Smart-case: a lowercase query is case-insensitive, but any
+        // uppercase letter makes the whole query case-sensitive — so an
+        // all-caps query finds nothing against the Title-Case labels.
         assert!(
-            state
+            typed("quit")
                 .visible()
                 .iter()
                 .any(|&i| PALETTE_ENTRIES[i].id == "quit")
         );
+        assert!(
+            typed("QUIT").visible().is_empty(),
+            "smart-case went case-insensitive"
+        );
 
         // Nothing matches — the overlay shows its empty row.
         assert!(typed("zzzzzzz").visible().is_empty());
-    }
-
-    #[test]
-    fn palette_editing_and_focus_movement_cases() {
-        // Navigation and editing are `PickerState`'s, including the
-        // visible-row cap; the palette only supplies the row count.
-        let mut state = typed("");
-        let visible_len = state.visible().len();
-        for _ in 0..100 {
-            press_down(&mut state);
-        }
-        assert_eq!(state.picker.focused_index(), visible_len - 1);
-        assert_eq!(visible_len, theme::PALETTE_MAX_VISIBLE);
-
-        let mut state = typed("");
-        state.picker.on_key("up", None, state.visible().len());
-        assert_eq!(state.picker.focused_index(), 0);
-
-        let mut state = typed("ab");
-        state
-            .picker
-            .on_key("backspace", None, state.visible().len());
-        assert_eq!(state.picker.query(), "a");
-
-        let mut state = typed("");
-        state.picker.focus(5);
-        state.picker.on_key("x", Some('x'), state.visible().len());
-        assert_eq!(state.picker.focused_index(), 0);
     }
 
     #[test]

@@ -10,10 +10,19 @@ fn command_palette_toggles_and_resolves_core_actions(cx: &mut TestAppContext) {
         ws.command_palette.open();
         assert!(ws.command_palette.is_open);
 
+        // Both spellings of every query on purpose: matching is smart-case,
+        // so the Title-Case form exercises the case-*sensitive* branch (it
+        // only matches because it mirrors the label's own capitalization)
+        // and the lowercase form the case-insensitive one users actually
+        // type. An all-caps form would match nothing — pinned in
+        // `command::palette`'s own tests.
         for (query, expected) in [
             ("Toggle Left", "toggle_left_dock"),
+            ("toggle left", "toggle_left_dock"),
             ("New Tab", "new_tab"),
+            ("new tab", "new_tab"),
             ("Quit", "quit"),
+            ("quit", "quit"),
         ] {
             ws.command_palette.open();
             for ch in query.chars() {

@@ -1967,21 +1967,35 @@ impl Workspace {
         let visible_len = self.command_palette.visible().len();
         match self.command_palette.picker.on_key(key, ch, visible_len) {
             PickerKey::Confirm => self.execute_palette_action(window, cx),
-            PickerKey::Dismiss => {
-                self.command_palette.close();
-                cx.notify();
-            }
+            PickerKey::Dismiss => self.close_command_palette(cx),
             PickerKey::Changed => cx.notify(),
             PickerKey::Unchanged => {}
         }
         cx.stop_propagation();
     }
 
+    /// Close the palette without running anything — the backdrop click.
+    pub(in crate::workspace) fn close_command_palette(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.close();
+        cx.notify();
+    }
+
+    /// Run the row the mouse named. Focusing it first is what makes a click
+    /// the same gesture as arrowing there and pressing Enter.
+    pub(in crate::workspace) fn pick_palette_row(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_palette.picker.focus(ix);
+        self.execute_palette_action(window, cx);
+    }
+
     /// Execute the currently focused palette action and close.
     pub(super) fn execute_palette_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let action_id = self.command_palette.focused_action_id();
-        self.command_palette.close();
-        cx.notify();
+        self.close_command_palette(cx);
 
         if let Some(id) = action_id {
             match id {

@@ -17,6 +17,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 /// CLI token for the command-palette scenario.
 const NAME_COMMAND_PALETTE: &str = "command-palette";
+/// CLI token for the Lane switcher, seeded with a long clipped label.
+const NAME_LANE_SWITCHER: &str = "lane-switcher";
 /// CLI token for the error-report-modal scenario.
 const NAME_ERROR_MODAL: &str = "error-modal";
 /// CLI token for the error-toast scenario.
@@ -100,9 +102,6 @@ const MERMAID_LIGHTBOX_SAMPLE: &str = concat!(
     "    end\n",
 );
 
-/// CLI token for the Lane switcher, seeded with a long clipped label.
-const NAME_LANE_SWITCHER: &str = "lane-switcher";
-
 const NAME_FLOW_PICKER: &str = "flow-picker";
 const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
 const NAME_FLOW_RESUMABLE: &str = "flow-resumable";
@@ -121,6 +120,12 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 pub(crate) enum ScreenshotScenario {
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
+    /// Open the Lane switcher with a real candidate whose label is
+    /// replaced by a synthetic one long enough to overflow the popup width.
+    /// The only way to eyeball hard-clipping on a long
+    /// `"{project} / {branch}"` label — the real lanes in the test
+    /// workspace are always short enough to fit.
+    LaneSwitcher,
     /// Open the Layer-2 error-report modal with a synthetic report.
     ErrorModal,
     /// Push a synthetic error toast.
@@ -219,12 +224,6 @@ pub(crate) enum ScreenshotScenario {
     /// that bar's chrome at full width and does *not* exercise the breakpoint
     /// itself.
     AgentChatOptions(ActivityOptionsTab),
-    /// Open the Lane switcher with a real candidate whose label is
-    /// replaced by a synthetic one long enough to overflow the popup width.
-    /// The only way to eyeball hard-clipping on a long
-    /// `"{project} / {branch}"` label — the real lanes in the test
-    /// workspace are always short enough to fit.
-    LaneSwitcher,
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -253,6 +252,7 @@ impl ScreenshotScenario {
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
+            NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
@@ -278,7 +278,6 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_SUBAGENT_TAIL => Some(Self::AgentChatSubagentTail),
             NAME_AGENT_CHAT_SUBAGENT_TAIL_OPEN => Some(Self::AgentChatSubagentTailOpen),
             NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
-            NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),

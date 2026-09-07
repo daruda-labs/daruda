@@ -55,10 +55,8 @@ pub(in crate::workspace) fn lane_label(project_name: &str, lane: &crate::lane::L
     format!("{project_name} / {}", lane.display_name())
 }
 
-/// Synthetic `lane-switcher` screenshot-scenario label, wider than the
-/// switcher popup so hard-clipping (mid-glyph, no `…`) is observable in a
-/// "before" capture. Not user-facing — never shown outside a screenshot run,
-/// so it does not go through `surface/strings.rs`.
+/// Synthetic label for the `lane-switcher` screenshot scenario. Not
+/// user-facing, so it does not go through `surface/strings.rs`.
 #[cfg(feature = "screenshot")]
 const LANE_SWITCHER_LONG_LABEL_SAMPLE: &str = "daruda-extremely-long-project-name-for-clipping-verification / feature/an-extremely-long-branch-name-meant-to-overflow-the-popup-width";
 
@@ -145,6 +143,24 @@ impl Workspace {
         }
     }
 
+    /// Close the switcher without activating anything — the backdrop click.
+    pub(in crate::workspace) fn close_lane_switcher(&mut self, cx: &mut Context<Self>) {
+        self.lane_switcher.close();
+        cx.notify();
+    }
+
+    /// Activate the row the mouse named. Focusing it first is what makes a
+    /// click the same gesture as arrowing there and pressing Enter.
+    pub(in crate::workspace) fn pick_lane_switcher_row(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.lane_switcher.picker.focus(ix);
+        self.execute_lane_switcher_selection(window, cx);
+    }
+
     /// Activate the focused lane and close the switcher.
     pub(in crate::workspace) fn execute_lane_switcher_selection(
         &mut self,
@@ -152,8 +168,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let target = self.lane_switcher.focused_lane_ref();
-        self.lane_switcher.close();
-        cx.notify();
+        self.close_lane_switcher(cx);
         if let Some(target) = target {
             self.activate_lane(target, window, cx);
         }
@@ -178,24 +193,19 @@ impl Workspace {
         let visible_len = self.lane_switcher.visible().len();
         match self.lane_switcher.picker.on_key(key, ch, visible_len) {
             PickerKey::Confirm => self.execute_lane_switcher_selection(window, cx),
-            PickerKey::Dismiss => {
-                self.lane_switcher.close();
-                cx.notify();
-            }
+            PickerKey::Dismiss => self.close_lane_switcher(cx),
             PickerKey::Changed => cx.notify(),
             PickerKey::Unchanged => {}
         }
         cx.stop_propagation();
     }
 
-    /// Open the Lane switcher with its real candidates, except the first
-    /// row's label is replaced by a synthetic one deliberately wider than
-    /// [`crate::ui::theme::PALETTE_WIDTH`] — the only way to eyeball
-    /// mid-glyph clipping on a long `"{project} / {branch}"` label, which
-    /// the short lanes in the test workspace never reach. Reuses the real
-    /// candidate's `lane_ref` (never fabricates one, so picking the row
-    /// still activates a lane that exists); no-ops when the workspace has
-    /// no lanes.
+    /// Open the Lane switcher with its real candidates, the first row's
+    /// label swapped for [`LANE_SWITCHER_LONG_LABEL_SAMPLE`] (why, on
+    /// [`crate::workspace::screenshot_scenario::ScreenshotScenario::LaneSwitcher`]).
+    /// Reuses that candidate's real `lane_ref` rather than fabricating one,
+    /// so picking the row still activates a lane that exists; no-ops when
+    /// the workspace has no lanes.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_lane_switcher_long_label_for_shot(
         &mut self,

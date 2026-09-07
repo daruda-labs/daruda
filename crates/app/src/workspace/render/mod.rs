@@ -1177,38 +1177,24 @@ impl Render for Workspace {
                     }
                 }))
             })
-            // Intercept key events when the command palette is open.
+            // The three overlay key interceptors below all capture rather than
+            // bubble: key events dispatch to the focused element first, and
+            // while an overlay is open that is still the terminal — which
+            // forwards every arrow and character to its PTY before the root
+            // ever sees them. Capture runs root → leaf, so these intercept,
+            // and each handler's `stop_propagation` keeps the keystroke out of
+            // the shell.
             .when(self.command_palette.is_open, |el| {
-                // Capture, not bubble: key events dispatch to the focused
-                // element first, and while an overlay is open that is still
-                // the terminal — which forwards every arrow and character to
-                // its PTY before the root ever sees them. Capture runs root →
-                // leaf, so this intercepts, and `stop_propagation` is what
-                // keeps the keystroke out of the shell.
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_palette_key(ev, window, cx)
                 }))
             })
-            // Intercept key events when the Lane switcher is open.
             .when(self.lane_switcher.is_open, |el| {
-                // Capture, not bubble: key events dispatch to the focused
-                // element first, and while an overlay is open that is still
-                // the terminal — which forwards every arrow and character to
-                // its PTY before the root ever sees them. Capture runs root →
-                // leaf, so this intercepts, and `stop_propagation` is what
-                // keeps the keystroke out of the shell.
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_lane_switcher_key(ev, window, cx)
                 }))
             })
-            // Intercept key events when the flow picker is open.
             .when(self.flow_picker.is_open(), |el| {
-                // Capture, not bubble: key events dispatch to the focused
-                // element first, and while an overlay is open that is still
-                // the terminal — which forwards every arrow and character to
-                // its PTY before the root ever sees them. Capture runs root →
-                // leaf, so this intercepts, and `stop_propagation` is what
-                // keeps the keystroke out of the shell.
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_flow_picker_key(ev, window, cx)
                 }))
@@ -1352,24 +1338,16 @@ impl Render for Workspace {
             .child(self.toast_layer.clone())
             .child(command_palette::CommandPaletteOverlay::new(
                 self.command_palette.clone(),
-                cx.listener(|this, _, _, cx| {
-                    this.command_palette.close();
-                    cx.notify();
-                }),
+                cx.listener(|this, _, _, cx| this.close_command_palette(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
-                    this.command_palette.picker.focus(*index);
-                    this.execute_palette_action(window, cx);
+                    this.pick_palette_row(*index, window, cx)
                 }),
             ))
             .child(lane_switcher::LaneSwitcherOverlay::new(
                 self.lane_switcher.clone(),
-                cx.listener(|this, _, _, cx| {
-                    this.lane_switcher.close();
-                    cx.notify();
-                }),
+                cx.listener(|this, _, _, cx| this.close_lane_switcher(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
-                    this.lane_switcher.picker.focus(*index);
-                    this.execute_lane_switcher_selection(window, cx);
+                    this.pick_lane_switcher_row(*index, window, cx)
                 }),
             ))
             .child(flow_picker::FlowPickerOverlay::new(
@@ -1380,8 +1358,7 @@ impl Render for Workspace {
                 crate::surface::strings::flow_stop_action(),
                 cx.listener(|this, _, _, cx| this.close_flow_picker(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
-                    this.flow_picker.focus(*index);
-                    this.execute_flow_picker_selection(window, cx);
+                    this.pick_flow_row(*index, window, cx)
                 }),
             ))
             // Imperative PopupMenu deploy overlay. `PopupMenu` already
