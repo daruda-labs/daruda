@@ -73,6 +73,8 @@ use std::collections::{HashMap, HashSet};
 
 use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
+use command::picker::PickerKey;
+
 use daruda_terminal::TerminalConfig;
 
 use main_area::agent_chat_pane::telegram_ops::partition_deferred;
@@ -1944,6 +1946,47 @@ impl Workspace {
             ws.right_dock_view = view;
         });
         cx.notify();
+    }
+
+    /// Map a keystroke onto the open command palette. The
+    /// `capture_key_down` attachment stays in the render path; the rules
+    /// live here.
+    pub(in crate::workspace) fn on_palette_key(
+        &mut self,
+        ev: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.is_open {
+            return;
+        }
+        // A shortcut belongs to the action system, not to this overlay:
+        // swallowing `platform`/`function` keystrokes means the key that
+        // opened it can no longer close it, and `Cmd+W` stops reaching the
+        // window. Same early-out the terminal view takes, for the same
+        // reason.
+        if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+            return;
+        }
+        let ch = ev
+            .keystroke
+            .key_char
+            .as_deref()
+            .and_then(|s| s.chars().next());
+        let visible_len = self.command_palette.visible().len();
+        let key = ev.keystroke.key.as_str();
+        match self.command_palette.picker.on_key(key, ch, visible_len) {
+            PickerKey::Confirm => self.execute_palette_action(window, cx),
+            PickerKey::Dismiss => {
+                self.command_palette.close();
+                cx.notify();
+            }
+            PickerKey::Consumed => cx.notify(),
+            // An unmapped keystroke leaves the palette untouched, but is
+            // still swallowed below: it must not reach the PTY underneath.
+            PickerKey::Ignored => {}
+        }
+        cx.stop_propagation();
     }
 
     /// Execute the currently focused palette action and close.

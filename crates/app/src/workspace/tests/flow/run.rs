@@ -475,10 +475,10 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
             ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
             ws.command_palette.open();
             for ch in "Right Panel: Flows".chars() {
-                ws.command_palette.append(ch);
+                ws.command_palette.picker.append(ch);
             }
             assert_eq!(
-                ws.command_palette.filtered_entries().len(),
+                ws.command_palette.visible().len(),
                 1,
                 "the palette does not offer the Flows panel"
             );

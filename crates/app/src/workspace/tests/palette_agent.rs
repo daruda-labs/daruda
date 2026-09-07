@@ -15,7 +15,10 @@ fn command_palette_toggles_and_resolves_core_actions(cx: &mut TestAppContext) {
             ("New Tab", "new_tab"),
             ("Quit", "quit"),
         ] {
-            ws.command_palette.query = query.to_string();
+            ws.command_palette.open();
+            for ch in query.chars() {
+                ws.command_palette.picker.append(ch);
+            }
             assert_eq!(
                 ws.command_palette.focused_action_id(),
                 Some(expected),
