@@ -474,6 +474,7 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
             ws.command_palette.open();
+            // Smart-case matching requires the label's capitalization here.
             for ch in "Right Panel: Flows".chars() {
                 let visible_len = ws.command_palette.visible().len();
                 ws.command_palette

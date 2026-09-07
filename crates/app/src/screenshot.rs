@@ -527,6 +527,7 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
             crate::window_registry::WindowRegistry::settings_window(cx)
         }
         ScreenshotScenario::CommandPalette
+        | ScreenshotScenario::LaneSwitcher
         | ScreenshotScenario::ErrorModal
         | ScreenshotScenario::Toast
         | ScreenshotScenario::PaneContextMenu
@@ -537,7 +538,6 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::FlowGraphFormRefused
         | ScreenshotScenario::FlowGraphPinned
         | ScreenshotScenario::FlowGraphAuthoring
-        | ScreenshotScenario::LaneSwitcher
         | ScreenshotScenario::FlowPicker
         | ScreenshotScenario::FlowProfilePicker
         | ScreenshotScenario::FlowResumable

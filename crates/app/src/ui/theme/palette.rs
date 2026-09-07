@@ -710,12 +710,9 @@ pub const PALETTE_QUERY_FONT_SIZE: f32 = FONT_SIZE_LG;
 pub const PALETTE_ENTRY_PAD_X: f32 = 12.0;
 /// Command palette entry padding Y (px).
 pub const PALETTE_ENTRY_PAD_Y: f32 = PAD_SM;
-/// Line box of one picker row's text (px). Set explicitly by
-/// `crate::ui::picker_row` instead of inherited from gpui's default
-/// (the golden ratio of the font size, which lands on a fraction and
-/// leaves the row height emergent); 21 is the whole pixel the rows
-/// already painted at for `PALETTE_ENTRY_FONT_SIZE`.
-pub const PALETTE_ROW_LINE_H: f32 = 21.0;
+/// Picker row line box (px), using GPUI's default ratio truncated to a
+/// whole pixel so the total row height remains deterministic.
+pub const PALETTE_ROW_LINE_H: f32 = (PALETTE_ENTRY_FONT_SIZE * 1.618_034) as i32 as f32;
 /// Height of one picker row (px) — its line box plus the vertical
 /// padding above and below it.
 pub const PALETTE_ROW_H: f32 = PALETTE_ROW_LINE_H + 2.0 * PALETTE_ENTRY_PAD_Y;
@@ -723,7 +720,7 @@ pub const PALETTE_ROW_H: f32 = PALETTE_ROW_LINE_H + 2.0 * PALETTE_ENTRY_PAD_Y;
 /// [`PALETTE_MAX_VISIBLE`] admits. Derived rather than chosen, because
 /// a taller cap shows rows the keyboard cannot reach and a shorter one
 /// clips rows it can — the second case ran Enter on an off-screen
-/// command.
+/// command. Command history reuses this as a scrollable list height.
 pub const PALETTE_MAX_HEIGHT: f32 = PALETTE_MAX_VISIBLE as f32 * PALETTE_ROW_H;
 /// Command palette entry label font size (px).
 pub const PALETTE_ENTRY_FONT_SIZE: f32 = FONT_SIZE_LG;

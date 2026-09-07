@@ -157,5 +157,12 @@ async fn drive_lane_switcher_reuses_a_real_lane_ref(cx: &mut TestAppContext) {
             ws.lane_label_for(lane_ref),
             "the seeded row should carry the synthetic long label",
         );
+        // Guard against shortening the sample until it no longer exercises
+        // popup clipping.
+        assert!(
+            seeded.label.len() > 80,
+            "the synthetic label must overflow the popup: {}",
+            seeded.label,
+        );
     });
 }
