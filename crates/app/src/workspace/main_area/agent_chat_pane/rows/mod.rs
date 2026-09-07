@@ -560,7 +560,7 @@ impl LastProse {
 /// question of the same axis, so they share the arithmetic rather than each
 /// deciding what "the last N" means.
 ///
-/// The third level — a subagent card's children ([`super::subagent`]) —
+/// The third level — a subagent card's children ([`subagent`]) —
 /// deliberately does not come through here: its children own no row, so there
 /// is no `window_start` item index to hand back and no filter cut to tally, and
 /// it reads [`TailWindow`] directly instead.
@@ -697,15 +697,10 @@ fn tool_run_end(
 
 /// Whether this call earns a row of its own.
 ///
-/// This is the transcript's *row* boundary, not the narrowing boundary: a
-/// nested subagent child never becomes a [`RenderRow`], but both axes still
-/// reach inside the card that renders it — the step window through the card's
-/// own boundary row and the filter through each child's category (see
-/// [`super::subagent::SubagentChildren`], which is where both are applied). The
-/// row layer's only remaining duty is the arithmetic those children cannot do
-/// for themselves: [`FilterMatchIndex::cut_inside_cards`] folds their cut into
-/// the run's tally, since the reveal that puts them back is the run's.
-/// `no_axis_narrows_inside_a_tool_card` pins the row half of this.
+/// A *row* boundary, not a narrowing one: both axes still reach inside the card
+/// a nested child renders in — [`subagent::SubagentChildren`] applies them
+/// there. What must never happen is a child climbing out into the list, which
+/// `no_axis_gives_a_card_child_a_row_of_its_own` pins.
 fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
     matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
 }

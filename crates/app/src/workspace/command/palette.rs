@@ -22,7 +22,9 @@ pub(in crate::workspace) struct PaletteEntry {
     pub shortcut: &'static str,
 }
 
-/// All available palette entries. Ordered by usage frequency.
+/// All available palette entries, grouped by domain so a new entry lands next
+/// to its siblings. The order carries no ranking — `label` is an i18n function,
+/// so what the reader sees is resolved at match time and ordered there.
 ///
 /// Per-section settings entries use the dotted form
 /// `open_settings.<slug>` matching the keybinding-override syntax in
@@ -472,9 +474,7 @@ impl CommandPaletteState {
         }
     }
 
-    /// Filter entries by fuzzy substring match. Returns indices into
-    /// `PALETTE_ENTRIES` sorted by match quality (earlier substring
-    /// position wins, then alphabetical).
+    /// Entry indices whose label contains `query`, nearest match first.
     pub fn filtered_entries(&self) -> Vec<usize> {
         if self.query.is_empty() {
             return (0..PALETTE_ENTRIES.len()).collect();
