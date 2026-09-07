@@ -82,10 +82,10 @@ impl PickerState {
         }
     }
 
-    /// Never clamped against the current candidate set: a caller that
-    /// swaps its candidates out from under the picker keeps its index
-    /// (the flow picker relies on that across a profile switch). Safe
-    /// because every read goes through [`Self::visible`], where an
+    /// Never clamped against the current candidate set: no caller today
+    /// swaps candidates under a live picker (`open` and `ask_profile`
+    /// both build a fresh one), so this is defensive, not relied upon.
+    /// Safe because every read goes through [`Self::visible`], where an
     /// out-of-range index resolves to `None` and the action no-ops.
     pub fn focused_index(&self) -> usize {
         self.focused_index
