@@ -537,6 +537,7 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::FlowGraphFormRefused
         | ScreenshotScenario::FlowGraphPinned
         | ScreenshotScenario::FlowGraphAuthoring
+        | ScreenshotScenario::LaneSwitcher
         | ScreenshotScenario::FlowPicker
         | ScreenshotScenario::FlowProfilePicker
         | ScreenshotScenario::FlowResumable

@@ -100,6 +100,9 @@ const MERMAID_LIGHTBOX_SAMPLE: &str = concat!(
     "    end\n",
 );
 
+/// CLI token for the Lane switcher, seeded with a long clipped label.
+const NAME_LANE_SWITCHER: &str = "lane-switcher";
+
 const NAME_FLOW_PICKER: &str = "flow-picker";
 const NAME_FLOW_PROFILE_PICKER: &str = "flow-profile-picker";
 const NAME_FLOW_RESUMABLE: &str = "flow-resumable";
@@ -216,6 +219,12 @@ pub(crate) enum ScreenshotScenario {
     /// that bar's chrome at full width and does *not* exercise the breakpoint
     /// itself.
     AgentChatOptions(ActivityOptionsTab),
+    /// Open the Lane switcher with a real candidate whose label is
+    /// replaced by a synthetic one long enough to overflow the popup width.
+    /// The only way to eyeball hard-clipping on a long
+    /// `"{project} / {branch}"` label — the real lanes in the test
+    /// workspace are always short enough to fit.
+    LaneSwitcher,
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -269,6 +278,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_SUBAGENT_TAIL => Some(Self::AgentChatSubagentTail),
             NAME_AGENT_CHAT_SUBAGENT_TAIL_OPEN => Some(Self::AgentChatSubagentTailOpen),
             NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
+            NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
@@ -304,6 +314,9 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.on_toggle_command_palette(&ToggleCommandPalette, window, cx);
             });
+        }
+        ScreenshotScenario::LaneSwitcher => {
+            workspace.update(cx, |ws, cx| ws.open_lane_switcher_long_label_for_shot(cx));
         }
         ScreenshotScenario::FlowPicker => {
             workspace.update(cx, |ws, cx| {
@@ -631,6 +644,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-options:nope"),
             None
+        );
+    }
+
+    #[test]
+    fn lane_switcher_name_maps_to_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("lane-switcher"),
+            Some(ScreenshotScenario::LaneSwitcher)
         );
     }
 

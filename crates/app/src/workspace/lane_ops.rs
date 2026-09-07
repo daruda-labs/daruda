@@ -53,6 +53,13 @@ pub(in crate::workspace) fn lane_label(project_name: &str, lane: &crate::lane::L
     format!("{project_name} / {}", lane.display_name())
 }
 
+/// Synthetic `lane-switcher` screenshot-scenario label, wider than the
+/// switcher popup so hard-clipping (mid-glyph, no `…`) is observable in a
+/// "before" capture. Not user-facing — never shown outside a screenshot run,
+/// so it does not go through `surface/strings.rs`.
+#[cfg(feature = "screenshot")]
+const LANE_SWITCHER_LONG_LABEL_SAMPLE: &str = "daruda-extremely-long-project-name-for-clipping-verification / feature/an-extremely-long-branch-name-meant-to-overflow-the-popup-width";
+
 impl Workspace {
     /// Switch to the nth lane (0-indexed) of the active project, sorted
     /// by `tab_order` to match the left-dock order. No-ops when `index`
@@ -148,6 +155,28 @@ impl Workspace {
         if let Some(target) = target {
             self.activate_lane(target, window, cx);
         }
+    }
+
+    /// Open the Lane switcher with its real candidates, except the first
+    /// row's label is replaced by a synthetic one deliberately wider than
+    /// [`crate::ui::theme::PALETTE_WIDTH`] — the only way to eyeball
+    /// mid-glyph clipping on a long `"{project} / {branch}"` label, which
+    /// the short lanes in the test workspace never reach. Reuses the real
+    /// candidate's `lane_ref` (never fabricates one, so picking the row
+    /// still activates a lane that exists); no-ops when the workspace has
+    /// no lanes.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_lane_switcher_long_label_for_shot(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let mut candidates = self.lane_switcher_candidates();
+        let Some(first) = candidates.first_mut() else {
+            return;
+        };
+        first.label = LANE_SWITCHER_LONG_LABEL_SAMPLE.to_string();
+        self.lane_switcher.open(candidates);
+        cx.notify();
     }
 
     /// True when the target lane can be removed via `git worktree
