@@ -12,6 +12,7 @@ use super::LaneRuntime;
 use super::ToggleLaneSwitcher;
 use super::Workspace;
 use super::command::lane_switcher::LaneCandidate;
+use super::command::picker::PickerKey;
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
@@ -155,6 +156,48 @@ impl Workspace {
         if let Some(target) = target {
             self.activate_lane(target, window, cx);
         }
+    }
+
+    /// Route one keystroke into the open Lane switcher. The view decides
+    /// *whether* to attach this (its `.when(is_open, …)` wrapper); the
+    /// re-check here covers a listener firing on a frame where the
+    /// switcher has already closed.
+    pub(in crate::workspace) fn on_lane_switcher_key(
+        &mut self,
+        ev: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.lane_switcher.is_open {
+            return;
+        }
+        // A shortcut belongs to the action system, not to this overlay:
+        // swallowing `platform`/`function` keystrokes means the key that
+        // opened it can no longer close it, and `Cmd+W` stops reaching the
+        // window. Same early-out the terminal view takes, for the same
+        // reason.
+        if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
+            return;
+        }
+        let ch = ev
+            .keystroke
+            .key_char
+            .as_deref()
+            .and_then(|s| s.chars().next());
+        let visible_len = self.lane_switcher.visible().len();
+        let key = ev.keystroke.key.as_str();
+        match self.lane_switcher.picker.on_key(key, ch, visible_len) {
+            PickerKey::Confirm => self.execute_lane_switcher_selection(window, cx),
+            PickerKey::Dismiss => {
+                self.lane_switcher.close();
+                cx.notify();
+            }
+            PickerKey::Consumed => cx.notify(),
+            // An unmapped keystroke leaves the switcher untouched, but is
+            // still swallowed below: it must not reach the PTY underneath.
+            PickerKey::Ignored => {}
+        }
+        cx.stop_propagation();
     }
 
     /// Open the Lane switcher with its real candidates, except the first

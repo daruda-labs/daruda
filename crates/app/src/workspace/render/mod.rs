@@ -1244,53 +1244,7 @@ impl Render for Workspace {
                 // leaf, so this intercepts, and `stop_propagation` is what
                 // keeps the keystroke out of the shell.
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                    if !this.lane_switcher.is_open {
-                        return;
-                    }
-                    let key = ev.keystroke.key.as_str();
-                    // A shortcut belongs to the action system, not to this
-                    // overlay: swallowing `platform`/`function` keystrokes
-                    // means the key that opened it can no longer close it,
-                    // and `Cmd+W` stops reaching the window. Same early-out
-                    // the terminal view takes, for the same reason.
-                    if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
-                        return;
-                    }
-                    match key {
-                        "escape" => {
-                            this.lane_switcher.close();
-                            cx.notify();
-                        }
-                        "enter" => {
-                            this.execute_lane_switcher_selection(window, cx);
-                        }
-                        "up" => {
-                            this.lane_switcher.move_up();
-                            cx.notify();
-                        }
-                        "down" => {
-                            let max = this.lane_switcher.filtered().len();
-                            this.lane_switcher.move_down(max);
-                            cx.notify();
-                        }
-                        "backspace" => {
-                            this.lane_switcher.backspace();
-                            cx.notify();
-                        }
-                        _ => {
-                            if let Some(ch) = ev
-                                .keystroke
-                                .key_char
-                                .as_deref()
-                                .and_then(|s| s.chars().next())
-                                && (ch.is_ascii_graphic() || ch == ' ')
-                            {
-                                this.lane_switcher.append(ch);
-                                cx.notify();
-                            }
-                        }
-                    }
-                    cx.stop_propagation();
+                    this.on_lane_switcher_key(ev, window, cx)
                 }))
             })
             // Intercept key events when the flow picker is open.
@@ -1499,7 +1453,7 @@ impl Render for Workspace {
                     cx.notify();
                 }),
                 cx.listener(|this, index: &usize, window, cx| {
-                    this.lane_switcher.focus(*index);
+                    this.lane_switcher.picker.focus(*index);
                     this.execute_lane_switcher_selection(window, cx);
                 }),
             ))

@@ -14,7 +14,8 @@ use gpui::{
     prelude::*, px,
 };
 
-use crate::{fuzzy::fuzzy_match, surface::strings as s, ui::theme};
+use super::picker::PickerState;
+use crate::{surface::strings as s, ui::theme};
 use std::rc::Rc;
 
 /// One selectable lane, captured when the switcher opens so the overlay
@@ -27,73 +28,40 @@ pub(in crate::workspace) struct LaneCandidate {
 }
 
 /// State for the Lane switcher overlay. `candidates` is the snapshot
-/// taken at open time; `query` / `focused_index` drive filtering and
-/// keyboard selection.
+/// taken at open time; `picker` carries the query and the keyboard
+/// selection. `is_open` stays here rather than in [`PickerState`] — it
+/// is this view's own modal flag.
 #[derive(Default, Clone)]
 pub(in crate::workspace) struct LaneSwitcherState {
     pub is_open: bool,
-    pub query: String,
-    pub focused_index: usize,
+    pub picker: PickerState,
     pub candidates: Vec<LaneCandidate>,
 }
 
 impl LaneSwitcherState {
     pub fn open(&mut self, candidates: Vec<LaneCandidate>) {
         self.is_open = true;
-        self.query.clear();
-        self.focused_index = 0;
+        self.picker.reset();
         self.candidates = candidates;
     }
 
     pub fn close(&mut self) {
         self.is_open = false;
-        self.query.clear();
-        self.focused_index = 0;
+        self.picker.reset();
         self.candidates = Vec::new();
     }
 
-    pub fn append(&mut self, ch: char) {
-        self.query.push(ch);
-        self.focused_index = 0;
-    }
-
-    pub fn backspace(&mut self) {
-        self.query.pop();
-        self.focused_index = 0;
-    }
-
-    /// Move the focus to a row the mouse named. Clicking is the same
-    /// gesture as arrowing there and pressing Enter, so it goes through the
-    /// same field rather than a second path to the same decision.
-    pub fn focus(&mut self, index: usize) {
-        self.focused_index = index;
-    }
-
-    pub fn move_up(&mut self) {
-        if self.focused_index > 0 {
-            self.focused_index -= 1;
-        }
-    }
-
-    pub fn move_down(&mut self, max: usize) {
-        let cap = max.min(theme::PALETTE_MAX_VISIBLE);
-        if cap > 0 && self.focused_index < cap - 1 {
-            self.focused_index += 1;
-        }
-    }
-
-    /// Candidate indices matching `query`, best match first. An empty
-    /// query yields every candidate in original order.
-    pub fn filtered(&self) -> Vec<usize> {
+    /// Candidate indices for the rows actually drawn, best match first.
+    /// An empty query yields every candidate in original order.
+    pub fn visible(&self) -> Vec<usize> {
         let labels: Vec<&str> = self.candidates.iter().map(|c| c.label.as_str()).collect();
-        fuzzy_match(&self.query, &labels)
+        self.picker.visible(&labels)
     }
 
     /// The `LaneRef` of the currently focused row, if any.
     pub fn focused_lane_ref(&self) -> Option<LaneRef> {
-        let filtered = self.filtered();
-        filtered
-            .get(self.focused_index)
+        self.visible()
+            .get(self.picker.focused_index())
             .map(|&i| self.candidates[i].lane_ref)
     }
 }
@@ -140,15 +108,11 @@ impl RenderOnce for LaneSwitcherOverlay {
         }
         let state = self.state;
         let on_close = self.on_close;
-        let filtered = state.filtered();
+        let visible = state.visible();
 
         let t = theme::current(cx);
         let input_border = t.border;
         let query_text = t.text_primary;
-        let focused_bg = t.palette_focused_bg;
-        let focused_text = t.text_primary;
-        let entry_text = t.text_body;
-        let empty_text = t.text_subtle;
         let panel_bg = t.palette_bg;
         let panel_border = t.border;
 
@@ -165,10 +129,10 @@ impl RenderOnce for LaneSwitcherOverlay {
                 div()
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
                     .text_color(query_text)
-                    .child(if state.query.is_empty() {
+                    .child(if state.picker.query().is_empty() {
                         SharedString::from(s::command_switch_lane_placeholder())
                     } else {
-                        SharedString::from(state.query.clone())
+                        SharedString::from(state.picker.query().to_string())
                     }),
             );
 
@@ -177,60 +141,21 @@ impl RenderOnce for LaneSwitcherOverlay {
             .flex_col()
             .max_h(px(theme::PALETTE_MAX_HEIGHT))
             .overflow_hidden()
-            .children(
-                filtered
-                    .iter()
-                    .take(theme::PALETTE_MAX_VISIBLE)
-                    .enumerate()
-                    .map(|(vis_idx, &cand_idx)| {
-                        let candidate = &state.candidates[cand_idx];
-                        let is_focused = vis_idx == state.focused_index;
-                        let on_pick = self.on_pick.clone();
-                        div()
-                            .cursor_pointer()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                move |_: &MouseDownEvent, window, cx| {
-                                    cx.stop_propagation();
-                                    on_pick(&vis_idx, window, cx);
-                                },
-                            )
-                            .hover(|d| d.bg(focused_bg))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .w_full()
-                            .px(px(theme::PALETTE_ENTRY_PAD_X))
-                            .py(px(theme::PALETTE_ENTRY_PAD_Y))
-                            .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
-                            // Reserve the same-width transparent border on
-                            // unfocused rows so the label does not shift when
-                            // the accent rule appears — same idiom as the lane
-                            // rows in the left dock.
-                            .border_l(px(theme::PALETTE_FOCUS_BORDER_W))
-                            .border_color(theme::TRANSPARENT)
-                            .when(is_focused, |d| {
-                                d.bg(focused_bg)
-                                    .text_color(focused_text)
-                                    .border_color(theme::PRIMARY)
-                            })
-                            .when(!is_focused, |d| d.text_color(entry_text))
-                            .child(SharedString::from(candidate.label.clone()))
-                    }),
-            );
+            .children(visible.iter().enumerate().map(|(vis_idx, &cand_idx)| {
+                let candidate = &state.candidates[cand_idx];
+                let on_pick = self.on_pick.clone();
+                crate::ui::picker_row(
+                    vis_idx == state.picker.focused_index(),
+                    SharedString::from(candidate.label.clone()),
+                    None,
+                    move |window, cx| on_pick(&vis_idx, window, cx),
+                    cx,
+                )
+            }));
 
-        let no_results = if filtered.is_empty() {
-            Some(
-                div()
-                    .px(px(theme::PALETTE_ENTRY_PAD_X))
-                    .py(px(theme::PALETTE_EMPTY_PAD_Y))
-                    .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
-                    .text_color(empty_text)
-                    .child(s::command_no_matching_lanes()),
-            )
-        } else {
-            None
-        };
+        let no_results = visible
+            .is_empty()
+            .then(|| crate::ui::picker_empty(s::command_no_matching_lanes().into(), cx));
 
         let panel = div()
             .absolute()
@@ -281,8 +206,8 @@ mod tests {
     fn open_seeds_candidates_and_resets() {
         let state = opened(vec![candidate(1, 0, "a / main")]);
         assert!(state.is_open);
-        assert_eq!(state.query, "");
-        assert_eq!(state.focused_index, 0);
+        assert_eq!(state.picker.query(), "");
+        assert_eq!(state.picker.focused_index(), 0);
         assert_eq!(state.candidates.len(), 1);
     }
 
@@ -295,25 +220,25 @@ mod tests {
     }
 
     #[test]
-    fn filtered_empty_query_returns_all() {
+    fn visible_empty_query_returns_all() {
         let state = opened(vec![
             candidate(1, 0, "daruda / main"),
             candidate(1, 1, "daruda / feat"),
         ]);
-        assert_eq!(state.filtered(), vec![0, 1]);
+        assert_eq!(state.visible(), vec![0, 1]);
     }
 
     #[test]
-    fn filtered_narrows_to_query() {
+    fn visible_narrows_to_query() {
         let mut state = opened(vec![
             candidate(1, 0, "daruda / main"),
             candidate(1, 1, "daruda / feat-login"),
         ]);
-        state.append('l');
-        state.append('o');
-        state.append('g');
+        state.picker.append('l');
+        state.picker.append('o');
+        state.picker.append('g');
         // Only the "feat-login" lane carries the `log` subsequence.
-        assert_eq!(state.filtered(), vec![1]);
+        assert_eq!(state.visible(), vec![1]);
     }
 
     #[test]
@@ -329,7 +254,7 @@ mod tests {
                 lane: 0
             })
         );
-        state.move_down(2);
+        state.picker.move_down(state.visible().len());
         assert_eq!(
             state.focused_lane_ref(),
             Some(LaneRef {
