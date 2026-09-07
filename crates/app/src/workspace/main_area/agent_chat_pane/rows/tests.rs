@@ -873,10 +873,11 @@ fn a_filtered_away_parent_takes_its_children_with_it() {
 }
 
 #[test]
-fn a_matching_grandchild_keeps_the_whole_subtree() {
+fn a_matching_grandchild_keeps_its_ancestors_but_not_a_sibling_branch() {
     use ToolStatusView::Completed;
-    // The match is three levels down: the ancestors come along to reach it, and
-    // the sibling branch comes along because its parent card renders.
+    // The match is three levels down. Its ancestors come along so the card that
+    // renders it is on screen; the sibling branch, which holds no match of its
+    // own, is cut like any other call of its category.
     let mut sibling = child_of("sibling", "task", Completed);
     if let ChatItem::ToolCall(tc) = &mut sibling {
         tc.kind = ToolKindView::Read;
@@ -897,9 +898,13 @@ fn a_matching_grandchild_keeps_the_whole_subtree() {
         sibling,
     ];
     let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_edit"]));
-    for id in ["task", "middle", "leaf", "sibling"] {
+    for id in ["task", "middle", "leaf"] {
         assert!(index.keeps_tool(&tool_of(&items, id)), "{id}");
     }
+    assert!(
+        !index.keeps_tool(&tool_of(&items, "sibling")),
+        "a Read branch with no match under it goes with the other reads"
+    );
 }
 
 #[test]
@@ -1850,99 +1855,6 @@ fn the_boundary_row_carries_the_kept_count_beside_the_hidden_one() {
     }
 }
 
-/// The rail marks exactly the runs the window covers, and only those — a row
-/// inside the kept range never carries it, or the mark would say nothing. With
-/// the boundary shut the marked rows are all hidden, so the mark costs nothing
-/// until something surfaces one.
-#[test]
-fn only_rows_outside_the_window_carry_the_rail() {
-    let items = turn_of_cycles(6);
-    let tail = TailWindow::Last(2);
-
-    let shut = project_tail(&items, tail);
-    assert!(
-        shut.iter()
-            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-            .all(|r| r.outside_window == r.hidden),
-        "with the boundary shut, a covered run is marked and hidden while a \
-         kept one is neither"
-    );
-
-    let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Tail(1), FoldContext::past(false));
-    let open = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        tail,
-        &DisplayFilter::default(),
-    );
-    let marked: Vec<bool> = open
-        .iter()
-        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-        .map(|r| r.outside_window)
-        .collect();
-    assert_eq!(
-        marked,
-        vec![true, true, true, true, false, false],
-        "the four runs the window covers are marked; the two it keeps are not"
-    );
-    assert!(
-        !tail_row(&open).outside_window,
-        "the boundary itself is never one of the rows it brackets"
-    );
-    assert!(
-        open.iter().any(|r| r.outside_window && !r.hidden),
-        "the marked rows are the ones the reveal put on screen"
-    );
-}
-
-/// A live run the window covers stays surfaced whether or not the boundary is
-/// open — so the rail has to mark it in *both* states. Keying the mark on the
-/// boundary being open instead made the same row gain and lose its rail as the
-/// boundary flipped, leaving a visible row from outside the range unexplained in
-/// exactly the state where nothing else accounts for it.
-#[test]
-fn a_live_covered_run_carries_the_rail_with_the_boundary_shut() {
-    let mut items = turn_of_cycles(4);
-    items[2] = tool("t0", ToolStatusView::InProgress);
-    let tail = TailWindow::Last(1);
-
-    let shut = project_tail(&items, tail);
-    let surfaced: Vec<(bool, bool)> = shut
-        .iter()
-        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-        .map(|r| (!r.hidden, r.outside_window))
-        .collect();
-    assert_eq!(
-        surfaced,
-        vec![(true, true), (false, true), (false, true), (true, false)],
-        "the live covered run is on screen and marked; the kept run is neither"
-    );
-
-    let mut fold = FoldState::default();
-    fold.toggle(FoldKey::Tail(1), FoldContext::past(false));
-    let open = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        tail,
-        &DisplayFilter::default(),
-    );
-    let marked: Vec<bool> = open
-        .iter()
-        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-        .map(|r| r.outside_window)
-        .collect();
-    assert_eq!(
-        marked,
-        vec![true, true, true, false],
-        "opening the boundary changes which covered rows are visible, not which are outside"
-    );
-}
-
 /// The group's calls only earn rows once the group is open, which is what makes
 /// the in-group window observable at all.
 fn project_open_group(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
@@ -1995,9 +1907,9 @@ fn call_visibility(items: &[ChatItem], rows: &[RenderRow]) -> Vec<bool> {
         .collect()
 }
 
-/// Row identity, visibility and coverage together — the three answers the two
-/// windows decide between them.
-fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool, bool)> {
+/// Row identity and visibility together — what the two windows decide between
+/// them.
+fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
     rows.iter()
         .map(|r| {
             let kind = match r.kind {
@@ -2011,7 +1923,7 @@ fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool, bool)> {
                 RowKind::ThinkingGroupHeader { .. } => "thinkgroup",
                 RowKind::WorkingIndicator => "working",
             };
-            (kind, r.hidden, r.outside_window)
+            (kind, r.hidden)
         })
         .collect()
 }
@@ -2030,20 +1942,20 @@ fn the_response_window_and_a_group_window_compose() {
     assert_eq!(
         marks(&shut),
         vec![
-            ("user", false, false),
-            ("response", false, false),
-            ("tail", false, false),
-            ("item", true, true),      // the covered run's prose
-            ("group", true, true),     // and its group, behind the response's boundary
-            ("grouptail", true, true), // whose own boundary is folded with it
-            ("item", true, true),
-            ("item", true, true),
-            ("item", false, false), // the kept run's prose
-            ("group", false, false),
-            ("grouptail", false, false), // trimming the kept run to its last call
-            ("item", true, true),
-            ("item", false, false),
-            ("item", false, false), // the conclusion
+            ("user", false),
+            ("response", false),
+            ("tail", false),
+            ("item", true),      // the covered run's prose
+            ("group", true),     // and its group, behind the response's boundary
+            ("grouptail", true), // whose own boundary is folded with it
+            ("item", true),
+            ("item", true),
+            ("item", false), // the kept run's prose
+            ("group", false),
+            ("grouptail", false), // trimming the kept run to its last call
+            ("item", true),
+            ("item", false),
+            ("item", false), // the conclusion
         ],
         "a covered run is hidden whole; the kept run is trimmed from inside"
     );
@@ -2054,20 +1966,20 @@ fn the_response_window_and_a_group_window_compose() {
     assert_eq!(
         marks(&open),
         vec![
-            ("user", false, false),
-            ("response", false, false),
-            ("tail", false, false),
-            ("item", false, true),  // the response's reveal surfaces the run
-            ("group", false, true), // its group
-            ("grouptail", false, true), // and the group's own boundary with it
-            ("item", true, true),   // which still holds this call back
-            ("item", false, true),
-            ("item", false, false),
-            ("group", false, false),
-            ("grouptail", false, false),
-            ("item", true, true),
-            ("item", false, false),
-            ("item", false, false),
+            ("user", false),
+            ("response", false),
+            ("tail", false),
+            ("item", false),      // the response's reveal surfaces the run
+            ("group", false),     // its group
+            ("grouptail", false), // and the group's own boundary with it
+            ("item", true),       // which still holds this call back
+            ("item", false),
+            ("item", false),
+            ("group", false),
+            ("grouptail", false),
+            ("item", true),
+            ("item", false),
+            ("item", false),
         ],
         "revealing a run does not reveal what its group's own window covers"
     );
@@ -2155,32 +2067,19 @@ fn an_ungrouped_call_gets_no_group_boundary() {
     );
 }
 
-/// The rail marks exactly the calls the group's window covers, and the reveal
-/// is what puts them on screen — the same two-part answer the response's
-/// boundary gives one level up.
+/// The group's window hides the calls it covers, and the group's own boundary
+/// is what puts them back — the same answer the response's boundary gives one
+/// level up.
 #[test]
-fn opening_a_group_boundary_reveals_its_covered_calls_railed() {
+fn opening_a_group_boundary_reveals_its_covered_calls() {
     let items = turn_of_one_group(5, false);
     let tail = TailWindow::Last(2);
 
     let shut = project_open_group(&items, tail);
-    let covered: Vec<(bool, bool)> = shut
-        .iter()
-        .filter(
-            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::ToolCall(_))),
-        )
-        .map(|r| (!r.hidden, r.outside_window))
-        .collect();
     assert_eq!(
-        covered,
-        vec![
-            (false, true),
-            (false, true),
-            (false, true),
-            (true, false),
-            (true, false)
-        ],
-        "with the boundary shut, a covered call is marked and hidden"
+        call_visibility(&items, &shut),
+        vec![false, false, false, true, true],
+        "with the boundary shut, only the window's last two calls are on screen"
     );
 
     let mut fold = FoldState::with_mode(FoldPreset::Expanded.mode());
@@ -2194,14 +2093,6 @@ fn opening_a_group_boundary_reveals_its_covered_calls_railed() {
         vec![true; 5],
         "the reveal puts the covered calls back"
     );
-    assert!(
-        !group_tail_row(&open).outside_window,
-        "the boundary itself is never one of the rows it brackets"
-    );
-    assert!(
-        open.iter().filter(|r| r.outside_window).count() == 3,
-        "opening the boundary changes which covered calls are visible, not which are outside"
-    );
 }
 
 /// A running call the group's window covers stays surfaced through a shut
@@ -2212,17 +2103,10 @@ fn a_live_covered_call_stays_surfaced_through_a_shut_group_boundary() {
     let mut items = turn_of_one_group(4, false);
     items[2] = tool("g0", ToolStatusView::InProgress);
     let rows = project_open_group(&items, TailWindow::Last(1));
-    let surfaced: Vec<(bool, bool)> = rows
-        .iter()
-        .filter(
-            |r| matches!(r.kind, RowKind::AgentItem(ix) if matches!(items[ix], ChatItem::ToolCall(_))),
-        )
-        .map(|r| (!r.hidden, r.outside_window))
-        .collect();
     assert_eq!(
-        surfaced,
-        vec![(true, true), (false, true), (false, true), (true, false)],
-        "the live covered call is on screen and marked; the kept call is neither"
+        call_visibility(&items, &rows),
+        vec![true, false, false, true],
+        "the live covered call is on screen; the settled covered ones are not"
     );
 }
 
@@ -2588,11 +2472,23 @@ fn only_reads() -> DisplayFilter {
     DisplayFilter::from_tokens(["tool_read"])
 }
 
+/// A launch the way the adapter builds one — `subagent_type` on its input is
+/// what makes it structure rather than one more Edit-kind call.
+fn subagent_launch(id: &str, status: ToolStatusView) -> ChatItem {
+    let mut launch = tool(id, status);
+    if let ChatItem::ToolCall(tc) = &mut launch {
+        tc.tool_name = Some("Task".into());
+        tc.kind = ToolKindView::Think;
+        tc.raw_input = Some(serde_json::json!({ "subagent_type": "general-purpose" }));
+    }
+    launch
+}
+
 /// One turn that delegates: a subagent launch followed by the children the
 /// adapter flattened under it, none of which earns a row.
 fn turn_with_subagent(children: usize, running: bool) -> Vec<ChatItem> {
     let mut items = vec![ChatItem::UserText("q".into()), asst("delegating")];
-    items.push(tool("task", ToolStatusView::Completed));
+    items.push(subagent_launch("task", ToolStatusView::Completed));
     for i in 0..children {
         let last = i + 1 == children;
         let status = if last && running {
@@ -2606,16 +2502,15 @@ fn turn_with_subagent(children: usize, running: bool) -> Vec<ChatItem> {
     items
 }
 
-/// The row boundary both narrowing axes observe — see [`top_level_tool`]. A
-/// nested child owns no row, so no combination of the step window, the display
-/// filter and the fold mode can give it one, and a card's children cannot move
-/// the row layer at all.
+/// The row boundary — see [`top_level_tool`]. A nested child owns no row, so no
+/// combination of the step window, the display filter and the fold mode can
+/// give it one, and a card's children cannot move the row layer at all.
 ///
-/// Stated as a test because the rule lives in two places (`top_level_tool`'s
-/// exclusion and [`FilterMatchIndex::build`]'s descendant keeping) and a change
-/// that narrows one axis into a card while the other stays out is silent.
+/// This is about rows only: both axes *do* narrow what the card renders
+/// ([`super::subagent::SubagentChildren`]). What must not happen is a child
+/// climbing out of its card into the list.
 #[test]
-fn no_axis_narrows_inside_a_tool_card() {
+fn no_axis_gives_a_card_child_a_row_of_its_own() {
     let nested_rows = |items: &[ChatItem], tail, filter: &DisplayFilter, preset: FoldPreset| {
         project(
             items,
@@ -2662,7 +2557,7 @@ fn no_axis_narrows_inside_a_tool_card() {
 }
 
 #[test]
-fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
+fn a_nested_tool_filter_keeps_an_ancestor_chain_and_drops_the_rest() {
     use ToolStatusView::Completed;
 
     let parent = tool("task", Completed);
@@ -2688,8 +2583,8 @@ fn a_nested_tool_filter_keeps_matching_children_and_their_ancestors() {
     let edits = FilterMatchIndex::of(&items, edits);
     assert!(edits.keeps_tool(parent), "the Edit parent matches directly");
     assert!(
-        edits.keeps_tool(child),
-        "a nested child owns no row, so it renders with whatever card survives"
+        !edits.keeps_tool(child),
+        "the card survives, but a Read child inside it answers for its own kind"
     );
 }
 
@@ -3614,12 +3509,7 @@ fn diag_tail_population() {
                 RowKind::ConclusionItem(i) => format!("Conclusion({i})"),
                 RowKind::WorkingIndicator => "Working".into(),
             };
-            println!(
-                "  {}{} outside={}",
-                "  ".repeat(r.indent as usize),
-                k,
-                r.outside_window
-            );
+            println!("  {}{}", "  ".repeat(r.indent as usize), k);
         }
     }
 }
@@ -3718,4 +3608,161 @@ fn the_stop_marker_is_always_a_top_level_row() {
             "a marker is never nested and never folded away"
         );
     }
+}
+
+/// The launch is the card its children render inside, so no *category* choice
+/// can take it off screen — not even one that excludes every child it made.
+/// Turning the whole section off is the other question, pinned next door in
+/// `turning_the_whole_tool_section_off_takes_the_launch_too`.
+#[test]
+fn a_category_narrowing_never_cuts_a_subagent_launch_out_of_the_index() {
+    let items = turn_with_subagent(3, false);
+    let launch = tool_of(&items, "task");
+    for tokens in [
+        vec!["tools", "tool_read"],
+        vec!["tools", "tool_run"],
+        vec!["tools", "tool_search"],
+    ] {
+        let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(tokens.clone()));
+        assert!(index.keeps_tool(&launch), "{tokens:?}");
+    }
+}
+
+/// The other half: what the launch does *not* protect is the work it did. Each
+/// child answers for its own category the way the same call would at the top
+/// level.
+#[test]
+fn a_subagents_own_calls_are_filtered_on_their_own_category() {
+    let items = turn_with_subagent(3, false); // children are Edit-kind
+    let reads = FilterMatchIndex::of(&items, only_reads());
+    for i in 0..3 {
+        assert!(
+            !reads.keeps_tool(&tool_of(&items, &format!("c{i}"))),
+            "c{i}"
+        );
+    }
+    let edits = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_edit"]));
+    for i in 0..3 {
+        assert!(edits.keeps_tool(&tool_of(&items, &format!("c{i}"))), "c{i}");
+    }
+}
+
+/// A card's children own no row, so the row walk cannot tally them — and a cut
+/// nothing counts is a cut with no reveal to undo it. The run's bar carries
+/// their number instead.
+#[test]
+fn the_runs_tally_counts_what_the_filter_took_from_inside_a_card() {
+    // Two prose rows and nothing else: the launch is exempt, so this is the
+    // whole tally a delegating run starts from.
+    let childless = project_filtered(&turn_with_subagent(0, false), &only_reads());
+    assert_eq!(filtered_count(&childless), 2);
+
+    let rows = project_filtered(&turn_with_subagent(3, false), &only_reads());
+    assert_eq!(
+        filtered_count(&rows),
+        5,
+        "the same two rows plus one block per Edit child the card drops"
+    );
+    assert!(
+        filtered_away(&rows).offers_reveal(),
+        "so the reveal that brings them back is on the bar"
+    );
+}
+
+/// A subagent whose calls span two categories and two levels: `c1` holds the
+/// only Read under it, so a Read filter rescues `c1` as an ancestor while
+/// cutting its Edit sibling — the shape that tells "walk through a kept child"
+/// apart from "stop at a rejected one".
+fn turn_with_nested_subagent() -> Vec<ChatItem> {
+    let kinded = |id: &str, parent: &str, kind| {
+        let mut c = child_of(id, parent, ToolStatusView::Completed);
+        if let ChatItem::ToolCall(tc) = &mut c {
+            tc.kind = kind;
+        }
+        c
+    };
+    vec![
+        ChatItem::UserText("q".into()),
+        asst("delegating"),
+        subagent_launch("task", ToolStatusView::Completed),
+        kinded("c0", "task", ToolKindView::Read),
+        kinded("c1", "task", ToolKindView::Edit),
+        kinded("g0", "c1", ToolKindView::Read),
+        kinded("g1", "c1", ToolKindView::Edit),
+        kinded("c2", "task", ToolKindView::Edit),
+        asst("done"),
+    ]
+}
+
+/// The mixed case: `c1` survives as the ancestor of a Read, so the walk goes
+/// *through* it and reports the Edit under it — while `c2`, rejected outright,
+/// is one block whose own subtree is not counted again.
+#[test]
+fn the_tally_walks_through_a_rescued_child_and_stops_at_a_rejected_one() {
+    let items = turn_with_nested_subagent();
+    let index = FilterMatchIndex::of(&items, only_reads());
+    assert!(
+        index.keeps_tool(&tool_of(&items, "c1")),
+        "rescued as g0's ancestor"
+    );
+    assert!(!index.keeps_tool(&tool_of(&items, "c2")));
+
+    let rows = project_filtered(&items, &only_reads());
+    assert_eq!(
+        filtered_count(&rows) - 2, // the run's two prose rows
+        2,
+        "g1 under the rescued c1, and c2 itself"
+    );
+}
+
+/// The chip's number and the card's contents are decided in two places —
+/// `cut_below` here and [`subagent::SubagentChildren::of`] in the renderer —
+/// and each restates the admission rule and the depth cap. If they drift, the
+/// count is wrong in a direction no other test looks at.
+#[test]
+fn the_tally_counts_exactly_the_children_the_card_declines_to_render() {
+    // What the renderer withholds, walked the way `tool_card` walks it.
+    fn dropped_by_card(
+        items: &[ChatItem],
+        parent: &str,
+        depth: usize,
+        index: &FilterMatchIndex,
+        live: &LiveSubagentUnits,
+    ) -> usize {
+        let declared = items
+            .iter()
+            .filter(|it| {
+                matches!(it, ChatItem::ToolCall(tc) if tc.parent_tool_id.as_deref() == Some(parent))
+            })
+            .count();
+        let shown = subagent::SubagentChildren::of(
+            items,
+            parent,
+            depth,
+            subagent::SubagentLens {
+                filter: index,
+                filter_revealed: false,
+                live_units: live,
+                tail: TailWindow::All,
+                revealed: false,
+            },
+        );
+        declared - shown.shown.len()
+            + shown
+                .shown
+                .iter()
+                .map(|c| dropped_by_card(items, c.call.id.as_str(), depth + 1, index, live))
+                .sum::<usize>()
+    }
+
+    let items = turn_with_nested_subagent();
+    let index = FilterMatchIndex::of(&items, only_reads());
+    let live = LiveSubagentUnits::of(&items);
+    let by_card = dropped_by_card(&items, "task", 0, &index, &live);
+    assert!(by_card > 0, "the fixture actually withholds something");
+    assert_eq!(
+        ToolHierarchy::build(&items).cut_below("task", |id| index.keeps_id(id)),
+        by_card,
+        "the count the chip promises is the count the card withheld"
+    );
 }

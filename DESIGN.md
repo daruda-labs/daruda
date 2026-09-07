@@ -721,11 +721,21 @@ Three rules follow from it:
   `Collapse to the last 5 steps` can only be read as an action, and it surfaces
   the number the Activity Bar's `Recent steps` chip is set to — the anchor the
   word "earlier" is relative to and which the row never used to state.
-- **Rows outside the kept range carry a `1px pane-border-tint` left rail**,
-  tying them back to the boundary above them. The rail says "outside the range",
-  not "the boundary revealed me" — a step with a running tool stays surfaced
-  through a *shut* boundary, and that is exactly the row that needs explaining.
-  No dimming: the reader just asked to see these.
+- **A row the boundary revealed carries no mark of its own.** It was tried: a
+  `1px` left rail, on the reasoning that a reader wants to know which rows came
+  from outside the kept range. The rail's width comes out of the row's own box,
+  so marking only the covered rows gave one list *two* left edges — a reveal
+  stepped each returning row a rail-width further in than the kept row beside
+  it. Reserving the width on every row of the list fixes the alignment and
+  buys the mark instead a permanent indent on rows that will never carry it, at
+  all three levels (a response's steps, one tool group's calls, a subagent
+  card's children). Against that, the mark earns little: the boundary sits
+  directly above the rows it released and says how many there are, so what the
+  rail restates per-row is already stated once. **The window's states are
+  therefore distinguished by the boundary row alone** — its two layouts and its
+  two labels — and the rows it reveals render exactly as the kept ones do. The
+  one case with no other explanation is a *live* covered step, which stays
+  surfaced through a shut boundary; it reads as the running step it is.
 
 The boundary is the one row in the transcript that is not a `FoldRow`; both
 shapes live in `render/fold_header.rs` so the chevron stays in one file

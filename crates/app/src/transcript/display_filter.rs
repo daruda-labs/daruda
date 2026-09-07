@@ -477,6 +477,12 @@ impl DisplayFilter {
         match self.tools {
             ToolSelection::Excluded => false,
             ToolSelection::All => true,
+            // A launch is the card its children render inside, and its own kind
+            // says nothing about what the subagent went on to do — so picking
+            // categories picks what shows *within* the card, never whether the
+            // card shows. Turning the section off above still takes it, since
+            // then its whole contents are going too.
+            ToolSelection::Some(_) if tc.is_subagent_launch() => true,
             ToolSelection::Some(categories) => categories.contains(classify_tool(tc)),
         }
     }

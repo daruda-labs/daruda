@@ -120,9 +120,7 @@ use blocks::{
     thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
-use fold_header::{
-    FoldHeader, FoldRow, SummaryLine, interrupted_row, outside_window_rail, rollup_glyph,
-};
+use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use tail_row::{tail_more_bar, tool_group_tail_more_bar};
@@ -488,12 +486,6 @@ fn render_row(
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::WorkingIndicator => working_indicator(this, cx).into_any_element(),
-    };
-    // Rows outside the tail window's kept range, whatever surfaced them.
-    let inner = if row.outside_window {
-        outside_window_rail(inner, this.dim_amount, cx)
-    } else {
-        inner
     };
     let bottom = if ix == visible.last {
         theme::AGENT_CHAT_PAD_Y

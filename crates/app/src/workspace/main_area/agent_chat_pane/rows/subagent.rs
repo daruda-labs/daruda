@@ -36,11 +36,6 @@ pub(in crate::workspace) struct SubagentChild<'a> {
     /// Its index in the conversation — the card keys its fold state off this.
     pub(in crate::workspace) ix: usize,
     pub(in crate::workspace) call: &'a ToolCallItem,
-    /// The window covers this child, so the rail ties it back to the boundary
-    /// above it. Reports coverage, not the boundary's state: a live covered
-    /// child is on screen through a shut boundary and is still outside the
-    /// range the card is showing.
-    pub(in crate::workspace) covered: bool,
 }
 
 /// What a subagent card renders for its children.
@@ -92,7 +87,7 @@ impl<'a> SubagentChildren<'a> {
             .filter_map(|(pos, (ix, call))| {
                 let covered = lens.tail.hides(pos, count);
                 let live = tool_or_subtree_live(call, lens.live_units);
-                (!covered || lens.revealed || live).then_some(SubagentChild { ix, call, covered })
+                (!covered || lens.revealed || live).then_some(SubagentChild { ix, call })
             })
             .collect();
         Self {

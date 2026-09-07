@@ -550,28 +550,6 @@ pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
         .into_any_element()
 }
 
-/// The rail marking a row that is on screen only because a boundary above it is
-/// open. Ties the revealed rows back to the boundary they came from — without
-/// it, opening the boundary just appends rows that look native to the window.
-/// No dimming: the user asked to read these.
-pub(super) fn outside_window_rail(
-    inner: AnyElement,
-    dim: f32,
-    cx: &Context<AgentChatView>,
-) -> AnyElement {
-    div()
-        .w_full()
-        .min_w_0()
-        .border_l_1()
-        .border_color(theme::dim_toward_gray(
-            theme::agent_chat_border_tint(cx),
-            dim,
-        ))
-        .pl(px(theme::AGENT_CHAT_OUTSIDE_RAIL_GAP))
-        .child(inner)
-        .into_any_element()
-}
-
 /// The standard trailing-slot glyph summarizing a run's outcome. Every header
 /// that represents a whole response carries exactly one — the response bar, the
 /// tool-group bar, and a top-level assistant block (which *is* the whole response

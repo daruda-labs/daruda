@@ -727,3 +727,57 @@ fn no_filter_can_hide_a_stop_marker() {
         );
     }
 }
+
+/// A launch the way an adapter builds one — `native_subagents` stamps these
+/// field names precisely because `is_subagent_launch` reads them.
+fn launch() -> ToolCallItem {
+    let ChatItem::ToolCall(mut tc) =
+        call(Some("Task"), ToolKindView::Think, ToolStatusView::Completed)
+    else {
+        unreachable!()
+    };
+    tc.raw_input = Some(serde_json::json!({ "subagent_type": "code-reviewer" }));
+    tc
+}
+
+fn plain_other() -> ToolCallItem {
+    let ChatItem::ToolCall(tc) = call(None, ToolKindView::Think, ToolStatusView::Completed) else {
+        unreachable!()
+    };
+    tc
+}
+
+/// Narrowing the tool axis to a category selects which of the subagent's calls
+/// show; it must not decide whether the subagent shows. The launch classifies
+/// as `Other`, so every one of these would otherwise take the card with it.
+#[test]
+fn a_category_narrowing_never_cuts_a_subagent_launch() {
+    for tokens in [
+        vec!["tools", "tool_read"],
+        vec!["tools", "tool_edit"],
+        vec!["tools", "tool_run"],
+        vec!["tools", "tool_search"],
+    ] {
+        let filter = DisplayFilter::from_tokens(tokens.clone());
+        assert!(filter.matches_tool(&launch()), "{tokens:?}");
+        assert!(
+            !filter.matches_tool(&plain_other()),
+            "an ordinary Other-kind call is still cut: {tokens:?}"
+        );
+    }
+}
+
+/// The exemption is scoped to *narrowing*, not to the section switch. Turning
+/// tool calls off entirely takes the launch with everything else — the card's
+/// whole contents are tool calls, so keeping it would leave an empty card
+/// standing under a chip that says tool calls are hidden.
+#[test]
+fn turning_the_whole_tool_section_off_takes_the_launch_too() {
+    let off = DisplayFilter::from_tokens(["prose"]);
+    assert_eq!(off.section_state(FilterFacet::Tools), SectionState::Off);
+    assert!(!off.matches_tool(&launch()));
+    assert!(
+        DisplayFilter::default().matches_tool(&launch()),
+        "and All keeps it"
+    );
+}

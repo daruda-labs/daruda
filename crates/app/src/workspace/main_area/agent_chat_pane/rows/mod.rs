@@ -142,27 +142,15 @@ pub(in crate::workspace) struct RenderRow {
     /// display filter are visible again. Header counts, rollups, and nested tool
     /// cards must all use this same answer as the row projection.
     pub(in crate::workspace) filter_revealed: bool,
-    /// The row sits outside the tail window's kept range. Distinct from
-    /// `indent`, which is structural nesting: this says the row does not belong
-    /// to the range the pane is showing, and the renderer answers it with the
-    /// rail tying the row back to the boundary above it.
-    ///
-    /// Deliberately *not* "the boundary revealed it": a live covered tool run
-    /// stays surfaced through a shut boundary, and keying the mark on the
-    /// boundary made that row gain and lose its rail as the boundary flipped.
-    pub(in crate::workspace) outside_window: bool,
 }
 
 impl RenderRow {
-    /// A row inside the tail window — the common case. The one default for
-    /// `outside_window` lives here so no construction site restates it.
     pub(in crate::workspace) fn at(kind: RowKind, hidden: bool, indent: u8) -> Self {
         Self {
             kind,
             hidden,
             indent,
             filter_revealed: false,
-            outside_window: false,
         }
     }
 
@@ -172,8 +160,11 @@ impl RenderRow {
     }
 }
 
-/// Filter matches, the ancestors needed to reach a matching nested tool, and
-/// every descendant of a kept tool.
+/// Filter matches, plus the ancestors needed to reach a matching nested tool.
+///
+/// Every call answers for its own category however deeply it nests, so
+/// narrowing to one leaves a subagent card standing with only that category's
+/// calls inside it — the launch itself is exempt in [`DisplayFilter::matches_tool`].
 #[derive(Default)]
 pub(in crate::workspace) struct FilterMatchIndex {
     filter: DisplayFilter,
@@ -195,11 +186,6 @@ impl FilterMatchIndex {
             // through the cards it renders inside.
             tool_ids.extend(hierarchy.with_ancestors(tc.id.as_str()).map(str::to_owned));
         }
-        // A kept tool keeps its whole subtree: nested children render inside
-        // their parent's card and earn no row of their own, so the filter — whose
-        // unit is the row — has no placeholder to count them in and no reveal to
-        // bring them back. Dropping one would delete it silently.
-        hierarchy.extend_with_descendants(&mut tool_ids);
         Self { filter, tool_ids }
     }
 
@@ -218,7 +204,11 @@ impl FilterMatchIndex {
     }
 
     pub(in crate::workspace) fn keeps_tool(&self, tc: &ToolCallItem) -> bool {
-        self.tool_ids.contains(&tc.id)
+        self.keeps_id(&tc.id)
+    }
+
+    pub(in crate::workspace) fn keeps_id(&self, id: &str) -> bool {
+        self.tool_ids.contains(id)
     }
 }
 
@@ -368,7 +358,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                 )
                 .with_filter_revealed(filter_revealed),
             );
-            RunProjector::new(
+            let projector = RunProjector::new(
                 context,
                 RunSpec {
                     bar_ix: Some(bar_ix),
@@ -380,11 +370,11 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     filter_revealed,
                 },
                 &mut rows,
-            )
-            .project();
+            );
+            projector.project();
             1u8
         } else {
-            RunProjector::new(
+            let projector = RunProjector::new(
                 context,
                 RunSpec {
                     bar_ix: None,
@@ -396,8 +386,8 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     filter_revealed,
                 },
                 &mut rows,
-            )
-            .project();
+            );
+            projector.project();
             0u8
         };
 
@@ -446,12 +436,6 @@ struct RunRows<'a> {
     /// Accumulated while the walk runs; written to the bar by `finish`.
     filtered: FilteredAway,
     revealed: bool,
-    /// Applied to every row the walk pushes while it sits before the tail
-    /// window's start — prose and thinking as much as tool calls, since the
-    /// window covers a range rather than testing each row. Pusher state rather
-    /// than a `push` parameter: it changes once per position, not once per row,
-    /// and the call sites below would each have to restate it.
-    outside_window: bool,
 }
 
 impl<'a> RunRows<'a> {
@@ -471,18 +455,15 @@ impl<'a> RunRows<'a> {
     ) {
         let items = context.items;
         let filter = context.filter;
-        let enclosing = self.outside_window;
         for j in run {
             let kind = RowKind::AgentItem(j);
             let filtered = !filter.matches(&items[j]);
             // A running call stays on screen through its group's shut boundary,
-            // the same escape a live run gets from the response's. The rail
-            // still marks it, because coverage is what the rail reports.
+            // the same escape a live run gets from the response's.
             let live = matches!(
                 &items[j],
                 ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, context.live_units)
             );
-            self.outside_window = enclosing || window.covers(j);
             let structural = structural || (window.withholds(j) && !live);
             match group {
                 GroupFilter::Kept => self.push(kind, structural, filtered, indent + 1),
@@ -491,7 +472,6 @@ impl<'a> RunRows<'a> {
                 GroupFilter::Emptied => self.emit(kind, structural, filtered, indent + 1),
             }
         }
-        self.outside_window = enclosing;
     }
 
     fn new(
@@ -506,7 +486,6 @@ impl<'a> RunRows<'a> {
             bar_ix,
             filtered: FilteredAway::default(),
             revealed: filter_revealed,
-            outside_window: false,
         }
     }
 
@@ -526,7 +505,6 @@ impl<'a> RunRows<'a> {
             hidden: structural || (filtered && !self.revealed),
             indent,
             filter_revealed: self.revealed,
-            outside_window: self.outside_window,
         });
     }
 
@@ -689,13 +667,6 @@ enum GroupWindow {
 }
 
 impl GroupWindow {
-    fn covers(self, ix: usize) -> bool {
-        match self {
-            Self::Undivided => false,
-            Self::Divided { cut, .. } => cut.covers(ix),
-        }
-    }
-
     /// A covered child the boundary is still holding back. Liveness is the
     /// caller's term: a running call stays surfaced through a shut boundary,
     /// exactly as a live run does one level up.
@@ -726,17 +697,40 @@ fn tool_run_end(
 
 /// Whether this call earns a row of its own.
 ///
-/// This is the transcript's row boundary, and **both narrowing axes stop at
-/// it**: a nested subagent child never becomes a [`RenderRow`], so neither the
-/// step window nor the display filter — whose unit is a projected row — can
-/// reach inside the card that renders it. The other half of the rule lives in
-/// [`FilterMatchIndex::build`], which keeps every descendant of a kept tool for
-/// the same reason, and the card walks the hierarchy itself
-/// (`render/tool.rs`). Narrowing one axis into a card while the other stays out
-/// is the divergence this states out loud; `no_axis_narrows_inside_a_tool_card`
-/// pins it.
+/// This is the transcript's *row* boundary, not the narrowing boundary: a
+/// nested subagent child never becomes a [`RenderRow`], but both axes still
+/// reach inside the card that renders it — the step window through the card's
+/// own boundary row and the filter through each child's category (see
+/// [`super::subagent::SubagentChildren`], which is where both are applied). The
+/// row layer's only remaining duty is the arithmetic those children cannot do
+/// for themselves: [`FilterMatchIndex::cut_inside_cards`] folds their cut into
+/// the run's tally, since the reveal that puts them back is the run's.
+/// `no_axis_narrows_inside_a_tool_card` pins the row half of this.
 fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
     matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
+}
+
+/// Blocks the filter took from inside the run's tool cards. A nested child
+/// owns no row, so the row walk cannot tally it — but the run's reveal admits
+/// the whole card back, descendants included, so the number that reveal offers
+/// has to name them or the cut is unreachable.
+///
+/// Summed over the run's *kept* top-level calls only: a call the filter dropped
+/// is already one block on the tally and takes its card with it.
+fn cut_inside_cards(context: ProjectionContext<'_>, run: std::ops::Range<usize>) -> usize {
+    run.filter_map(|ix| match &context.items[ix] {
+        ChatItem::ToolCall(tc)
+            if !context.hierarchy.is_nested_child(tc) && context.filter.keeps_tool(tc) =>
+        {
+            Some(
+                context
+                    .hierarchy
+                    .cut_below(tc.id.as_str(), |id| context.filter.keeps_id(id)),
+            )
+        }
+        _ => None,
+    })
+    .sum()
 }
 
 struct RunProjector<'items, 'rows> {
@@ -809,12 +803,10 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 k += 1;
                 continue;
             }
-            // One assignment point, so the flag cannot drift. The rail marks
-            // coverage itself rather than the boundary's state — a live covered
-            // run stays surfaced through a shut boundary, and keying the mark on
-            // the boundary made the row gain and lose it as the boundary flipped.
-            out.outside_window = k < window.window_start;
-            let folded = response_collapsed || (!tail_revealed && out.outside_window);
+            // A live covered run stays surfaced through a shut boundary, so the
+            // window's range decides the fold and the boundary's state gates it.
+            let covered = k < window.window_start;
+            let folded = response_collapsed || (!tail_revealed && covered);
             if top_level_tool(items, k, hierarchy) {
                 let grun = k..tool_run_end(items, k, run.end, hierarchy);
                 k = grun.end;
@@ -947,6 +939,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 k += 1;
             }
         }
+        out.filtered.revealable += cut_inside_cards(context, run.clone());
         out.finish();
     }
 }

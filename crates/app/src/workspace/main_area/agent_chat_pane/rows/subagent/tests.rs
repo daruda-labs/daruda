@@ -100,15 +100,11 @@ fn the_window_keeps_the_last_calls_and_the_boundary_counts_the_rest() {
         );
         assert_eq!((children.hidden, children.kept), (6 - kept, kept));
         assert!(children.offers_reveal());
-        assert!(
-            children.shown.iter().all(|c| !c.covered),
-            "nothing on screen is outside the window while the boundary is shut"
-        );
     }
 }
 
 #[test]
-fn opening_the_boundary_returns_every_child_still_marked_as_covered() {
+fn opening_the_boundary_returns_every_child() {
     let items = card_of(5);
     let filter = FilterMatchIndex::of(&items, DisplayFilter::default());
     let live = LiveSubagentUnits::of(&items);
@@ -119,11 +115,6 @@ fn opening_the_boundary_returns_every_child_still_marked_as_covered() {
         lens(&filter, &live, TailWindow::Last(2), true),
     );
     assert_eq!(ids(&children), vec!["c0", "c1", "c2", "c3", "c4"]);
-    assert_eq!(
-        children.shown.iter().map(|c| c.covered).collect::<Vec<_>>(),
-        vec![true, true, true, false, false],
-        "the reveal does not make a covered child part of the window"
-    );
     assert_eq!(
         (children.hidden, children.kept),
         (3, 2),
@@ -153,15 +144,14 @@ fn a_live_covered_child_is_shown_without_leaving_the_tally() {
         lens(&filter, &live, TailWindow::Last(1), false),
     );
     assert_eq!(ids(&children), vec!["c0", "c3"]);
-    assert!(children.shown[0].covered, "the live child is still outside");
     assert_eq!(children.hidden, 3);
 }
 
 #[test]
 fn a_call_the_filter_drops_is_not_collected_unless_the_run_is_revealed() {
     let mut items = card_of(0);
-    // A kept tool keeps its whole subtree, so narrow by a facet the *launch*
-    // fails: then nothing under it survives either.
+    // The child answers for its own category, so an Edit-only narrowing drops
+    // this Read whatever the call above it is.
     items.push(call(
         "c0",
         Some("task"),

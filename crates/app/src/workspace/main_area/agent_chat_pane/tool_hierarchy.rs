@@ -2,10 +2,11 @@
 //!
 //! Every rule about that structure lives here — a `parent_tool_id` naming a
 //! call absent from `items` leaves the child top-level, an ancestor walk is
-//! bounded so a malformed or cyclic link terminates, and a kept call owns its
-//! whole subtree. Callers ask questions; none of them restate the rules.
+//! bounded so a malformed or cyclic link terminates, and a walk downward stops
+//! at the depth the card stops rendering at. Callers ask questions; none of
+//! them restate the rules.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use daruda_acp::{ChatItem, ToolCallItem};
 
@@ -93,23 +94,32 @@ impl<'a> ToolHierarchy<'a> {
         None
     }
 
-    /// Grow `seen` to every descendant of the ids it already holds. One pass
-    /// over the child map plus an O(n) frontier walk; `seen` doubles as the
-    /// visited set, so a cyclic link terminates.
-    pub(in crate::workspace) fn extend_with_descendants(&self, seen: &mut HashSet<String>) {
-        let mut frontier: Vec<&'a str> = self
-            .children_of
-            .keys()
-            .filter(|id| seen.contains(**id))
-            .copied()
-            .collect();
-        while let Some(id) = frontier.pop() {
+    /// Blocks a reveal puts back inside `root`'s card: each descendant `keeps`
+    /// rejects whose own ancestors all survived it. A rejected node stands for
+    /// its whole subtree, so the walk stops there rather than counting inside.
+    ///
+    /// Bounded by [`SUBAGENT_NEST_DEPTH_CAP`] the way the card's own recursion
+    /// is, so the count names exactly the children that would have rendered.
+    pub(in crate::workspace) fn cut_below(
+        &self,
+        root: &str,
+        keeps: impl Fn(&str) -> bool,
+    ) -> usize {
+        let mut cut = 0;
+        let mut frontier = vec![(root, 0usize)];
+        while let Some((id, depth)) = frontier.pop() {
+            if depth >= SUBAGENT_NEST_DEPTH_CAP {
+                continue;
+            }
             for child in self.children_of.get(id).into_iter().flatten() {
-                if seen.insert((*child).to_owned()) {
-                    frontier.push(child);
+                if keeps(child) {
+                    frontier.push((child, depth + 1));
+                } else {
+                    cut += 1;
                 }
             }
         }
+        cut
     }
 }
 
@@ -178,6 +188,71 @@ mod tests {
         assert_eq!(h.owning_row_index("x"), None);
     }
 
+    /// Everything `keeps` rejects is one block, and the walk does not look
+    /// under it: the card stops rendering there, so its subtree is already
+    /// gone with it and counting inside would report the same cut twice.
+    #[test]
+    fn a_rejected_node_counts_once_and_its_subtree_is_not_walked() {
+        let items = [
+            tool("root", None),
+            tool("cut", Some("root")),
+            tool("under-cut", Some("cut")),
+            tool("deeper", Some("under-cut")),
+        ];
+        let h = ToolHierarchy::build(&items);
+        assert_eq!(h.cut_below("root", |id| id != "cut"), 1);
+    }
+
+    /// The other half: a kept node is walked *through*, so a cut that only
+    /// appears a level down is still reported.
+    #[test]
+    fn a_kept_node_is_walked_through_to_the_cut_below_it() {
+        let items = [
+            tool("root", None),
+            tool("kept", Some("root")),
+            tool("cut-a", Some("kept")),
+            tool("cut-b", Some("kept")),
+        ];
+        let h = ToolHierarchy::build(&items);
+        assert_eq!(h.cut_below("root", |id| !id.starts_with("cut")), 2);
+        assert_eq!(
+            h.cut_below("root", |_| true),
+            0,
+            "nothing rejected, nothing counted"
+        );
+    }
+
+    /// The count must name exactly the children a card would have rendered, and
+    /// the card stops recursing at the cap — so a cut past it is not a cut the
+    /// reveal could put back.
+    #[test]
+    fn the_downward_walk_stops_at_the_same_cap_the_card_does() {
+        let mut items = vec![tool("n0", None)];
+        for d in 1..=(SUBAGENT_NEST_DEPTH_CAP + 2) {
+            items.push(tool(&format!("n{d}"), Some(&format!("n{}", d - 1))));
+        }
+        let h = ToolHierarchy::build(&items);
+        let deepest_rendered = format!("n{SUBAGENT_NEST_DEPTH_CAP}");
+        assert_eq!(h.cut_below("n0", |id| id != deepest_rendered), 1);
+        let past_the_cap = format!("n{}", SUBAGENT_NEST_DEPTH_CAP + 1);
+        assert_eq!(
+            h.cut_below("n0", |id| id != past_the_cap),
+            0,
+            "one level further out is not on screen to begin with"
+        );
+    }
+
+    #[test]
+    fn the_downward_walk_terminates_on_a_cyclic_link() {
+        let items = [tool("x", Some("y")), tool("y", Some("x"))];
+        let h = ToolHierarchy::build(&items);
+        assert_eq!(h.cut_below("x", |_| true), 0);
+        assert!(
+            h.cut_below("x", |id| id != "y") > 0,
+            "and still reports the cut"
+        );
+    }
+
     #[test]
     fn the_ancestor_walk_stops_at_the_depth_cap() {
         let mut items = vec![tool("n0", None)];
@@ -209,32 +284,5 @@ mod tests {
         let items = [tool("a", Some("ghost"))];
         let h = ToolHierarchy::build(&items);
         assert_eq!(h.ancestors("a").collect::<Vec<_>>(), vec!["ghost"]);
-    }
-
-    #[test]
-    fn descendants_sweep_the_whole_subtree_of_every_seed() {
-        let items = [
-            tool("a", None),
-            tool("b", Some("a")),
-            tool("c", Some("b")),
-            tool("other", None),
-            tool("d", Some("other")),
-        ];
-        let h = ToolHierarchy::build(&items);
-        let mut seen: HashSet<String> = ["a".to_owned()].into_iter().collect();
-        h.extend_with_descendants(&mut seen);
-        assert_eq!(
-            seen,
-            ["a", "b", "c"].into_iter().map(str::to_owned).collect()
-        );
-    }
-
-    #[test]
-    fn descendants_terminate_on_a_cyclic_link() {
-        let items = [tool("x", Some("y")), tool("y", Some("x"))];
-        let h = ToolHierarchy::build(&items);
-        let mut seen: HashSet<String> = ["x".to_owned()].into_iter().collect();
-        h.extend_with_descendants(&mut seen);
-        assert_eq!(seen, ["x", "y"].into_iter().map(str::to_owned).collect());
     }
 }

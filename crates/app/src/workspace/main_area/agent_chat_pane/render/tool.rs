@@ -18,9 +18,7 @@ use super::RenderAssets;
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
 use super::embed::bounded_editor_embed;
-use super::fold_header::{
-    FoldHeader, FoldRow, SummaryLine, outside_window_rail, window_boundary_row,
-};
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine, window_boundary_row};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use super::tail_row::call_boundary_label;
@@ -420,17 +418,7 @@ pub(super) fn tool_card(
                 // A nested child may itself be a subagent launch (a subagent that
                 // spawns its own subagent); `tool_card` keys it the same way as a
                 // top-level card, so it is collapsed by default when it is one.
-                let card =
-                    tool_card(child.ix, child.call, depth + 1, ctx, window, cx).into_any_element();
-                // A covered child is on screen only because the boundary above
-                // it released it — or because it is still running. The rail says
-                // so; without it the reveal just appends cards that read as part
-                // of the window.
-                body = body.child(if child.covered {
-                    outside_window_rail(card, dim, cx)
-                } else {
-                    card
-                });
+                body = body.child(tool_card(child.ix, child.call, depth + 1, ctx, window, cx));
             }
         }
         body.into_any_element()
