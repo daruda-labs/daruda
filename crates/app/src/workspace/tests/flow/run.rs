@@ -117,7 +117,7 @@ async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext)
         ws.flow_picker
             .choosing()
             .map(|c| {
-                c.filtered()
+                c.visible()
                     .into_iter()
                     .filter_map(|i| c.stage.row(i))
                     .map(|r| r.label.to_string())
@@ -520,7 +520,7 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
             // The second Enter: the half that actually starts the run under
             // the chosen name. Asserted through `focused_pick` rather than
             // by executing, because executing submits a real run.
-            ws.flow_picker.move_down();
+            ws.flow_picker.on_key("down", None);
             assert_eq!(
                 ws.flow_picker.focused_pick(),
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile(
@@ -552,7 +552,7 @@ async fn answering_the_second_question_runs_under_that_profile(cx: &mut TestAppC
                 cx,
             );
             ws.execute_flow_picker_selection(window, cx);
-            ws.flow_picker.move_down();
+            ws.flow_picker.on_key("down", None);
             ws.execute_flow_picker_selection(window, cx);
             assert!(!ws.flow_picker.is_open(), "the picker is still asking");
         });
@@ -777,7 +777,7 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
             );
             // And the question is about *this* flow — the list of flows was
             // never shown, so nothing else could have named it.
-            ws.flow_picker.move_down();
+            ws.flow_picker.on_key("down", None);
             assert_eq!(
                 ws.flow_picker.focused_pick(),
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile(
@@ -853,6 +853,104 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
                 ),
                 "a second run was started behind the first"
             );
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// And the two keys the stop prompt takes reach the two different answers.
+/// Enter is the only way to the stop itself: the prompt has no list, so
+/// `focused_pick` is `None` there and the stop is what the `None` arm does
+/// when the picker was `Stopping`. Escape must leave the run alone.
+#[gpui::test]
+async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    std::fs::create_dir_all(&runs).expect("runs dir");
+
+    let key = |k: &str| gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke {
+            modifiers: gpui::Modifiers::default(),
+            key: k.to_string(),
+            key_char: None,
+        },
+        is_held: false,
+        prefer_character_input: false,
+    };
+    let canceled = |ws: &crate::workspace::Workspace| {
+        ws.runs
+            .iter()
+            .map(|(_, handle)| handle.cancel.is_canceled())
+            .collect::<Vec<_>>()
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let lane_ref = ws.active_ref();
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+
+            // Escape: the prompt goes away and the run keeps going.
+            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+            ws.on_flow_picker_key(&key("escape"), window, cx);
+            assert!(!ws.flow_picker.is_open(), "Escape left the prompt up");
+            assert_eq!(canceled(ws), vec![false], "Escape stopped the run");
+
+            // Enter: the stop. Nothing else in the prompt can reach it.
+            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+            ws.on_flow_picker_key(&key("enter"), window, cx);
+            assert!(!ws.flow_picker.is_open(), "Enter left the prompt up");
+            assert_eq!(canceled(ws), vec![true], "Enter did not stop the run");
+        });
+    })
+    .expect("the test window is live");
+}
+
+/// A list key is not the stop prompt's to act on. It used to no-op silently
+/// and repaint anyway; the prompt now refuses it, and above all must not
+/// answer it as if it were the Enter that stops the run.
+#[gpui::test]
+async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
+    std::fs::create_dir_all(&runs).expect("runs dir");
+
+    let key = |k: &str, ch: Option<&str>| gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke {
+            modifiers: gpui::Modifiers::default(),
+            key: k.to_string(),
+            key_char: ch.map(|c| c.to_string()),
+        },
+        is_held: false,
+        prefer_character_input: false,
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let lane_ref = ws.active_ref();
+            ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
+            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+
+            for (k, ch) in [
+                ("up", None),
+                ("down", None),
+                ("backspace", None),
+                ("s", Some("s")),
+            ] {
+                ws.on_flow_picker_key(&key(k, ch), window, cx);
+                assert!(
+                    matches!(
+                        ws.flow_picker,
+                        crate::workspace::command::flow_picker::FlowPicker::Stopping
+                    ),
+                    "{k} closed the stop prompt"
+                );
+                assert!(
+                    ws.runs
+                        .iter()
+                        .all(|(_, handle)| !handle.cancel.is_canceled()),
+                    "{k} stopped the run"
+                );
+            }
         });
     })
     .expect("the test window is live");

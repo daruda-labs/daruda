@@ -1210,46 +1210,7 @@ impl Render for Workspace {
                 // leaf, so this intercepts, and `stop_propagation` is what
                 // keeps the keystroke out of the shell.
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                    if !this.flow_picker.is_open() {
-                        return;
-                    }
-                    // A shortcut belongs to the action system, not to this
-                    // overlay: swallowing `platform`/`function` keystrokes
-                    // means the key that opened it can no longer close it,
-                    // and `Cmd+W` stops reaching the window. Same early-out
-                    // the terminal view takes, for the same reason.
-                    if ev.keystroke.modifiers.platform || ev.keystroke.modifiers.function {
-                        return;
-                    }
-                    match ev.keystroke.key.as_str() {
-                        "escape" => this.close_flow_picker(cx),
-                        "enter" => this.execute_flow_picker_selection(window, cx),
-                        "up" => {
-                            this.flow_picker.move_up();
-                            cx.notify();
-                        }
-                        "down" => {
-                            this.flow_picker.move_down();
-                            cx.notify();
-                        }
-                        "backspace" => {
-                            this.flow_picker.backspace();
-                            cx.notify();
-                        }
-                        _ => {
-                            if let Some(ch) = ev
-                                .keystroke
-                                .key_char
-                                .as_deref()
-                                .and_then(|s| s.chars().next())
-                                && (ch.is_ascii_graphic() || ch == ' ')
-                            {
-                                this.flow_picker.append(ch);
-                                cx.notify();
-                            }
-                        }
-                    }
-                    cx.stop_propagation();
+                    this.on_flow_picker_key(ev, window, cx)
                 }))
             })
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {

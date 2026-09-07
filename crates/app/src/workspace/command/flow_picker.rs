@@ -19,7 +19,7 @@ use gpui::{
     prelude::*, px,
 };
 
-use crate::fuzzy::fuzzy_match;
+use super::picker::{PickerKey, PickerState};
 use crate::surface::strings;
 use crate::ui::theme;
 
@@ -179,8 +179,11 @@ impl Stage {
 pub(in crate::workspace) struct Choosing {
     pub purpose: FlowPurpose,
     pub stage: Stage,
-    pub query: String,
-    pub focused_index: usize,
+    /// The typed query and the keyboard selection, shared with the other
+    /// two pickers. Private to this module: a list key reaches it through
+    /// [`FlowPicker::on_key`], which is also the one place that knows the
+    /// stop prompt has no list to key against.
+    picker: PickerState,
 }
 
 /// What Enter acted on. Two stages, so a pick says which question it
@@ -222,8 +225,7 @@ impl FlowPicker {
             stage: Stage::Flows {
                 candidates: found.into_iter().map(FlowCandidate::from_found).collect(),
             },
-            query: String::new(),
-            focused_index: 0,
+            picker: PickerState::default(),
         });
     }
 
@@ -246,8 +248,7 @@ impl FlowPicker {
                     .chain(names.into_iter().map(ProfileCandidate::named))
                     .collect(),
             },
-            query: String::new(),
-            focused_index: 0,
+            picker: PickerState::default(),
         });
     }
 
@@ -273,33 +274,29 @@ impl FlowPicker {
         }
     }
 
-    pub fn append(&mut self, ch: char) {
-        if let Some(c) = self.choosing_mut() {
-            c.query.push(ch);
-            c.focused_index = 0;
-        }
-    }
-
-    pub fn backspace(&mut self) {
-        if let Some(c) = self.choosing_mut() {
-            c.query.pop();
-            c.focused_index = 0;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        if let Some(c) = self.choosing_mut()
-            && c.focused_index > 0
-        {
-            c.focused_index -= 1;
-        }
-    }
-
-    pub fn move_down(&mut self) {
-        let Some(c) = self.choosing_mut() else { return };
-        let cap = c.filtered().len().min(theme::PALETTE_MAX_VISIBLE);
-        if cap > 0 && c.focused_index < cap - 1 {
-            c.focused_index += 1;
+    /// What a keystroke means to the picker, in the two halves the enum
+    /// makes of the question.
+    ///
+    /// Escape and Enter are the overlay's, whichever state it is in: the
+    /// stop prompt has no list and still has to answer both — Enter is the
+    /// only way to the stop (see `execute_flow_picker_selection`, which
+    /// reads it by `focused_pick` being `None` there). Everything else is a
+    /// list key, so it reaches [`PickerState`] only when there is a list;
+    /// the stop prompt refuses it outright rather than no-opping on a list
+    /// that is not on screen.
+    pub fn on_key(&mut self, key: &str, ch: Option<char>) -> PickerKey {
+        match key {
+            "escape" => PickerKey::Dismiss,
+            "enter" => PickerKey::Confirm,
+            _ => match self.choosing_mut() {
+                Some(c) => {
+                    // Already capped by `visible`, which is where the cap
+                    // lives.
+                    let visible_len = c.visible().len();
+                    c.picker.on_key(key, ch, visible_len)
+                }
+                None => PickerKey::Ignored,
+            },
         }
     }
 
@@ -308,7 +305,7 @@ impl FlowPicker {
     /// same field rather than a second path to the same decision.
     pub fn focus(&mut self, index: usize) {
         if let Some(c) = self.choosing_mut() {
-            c.focused_index = index;
+            c.picker.focus(index);
         }
     }
 
@@ -332,7 +329,7 @@ impl FlowPicker {
     /// What Enter acts on, and which of the two questions it answered.
     pub fn focused_pick(&self) -> Option<FlowPick> {
         let c = self.choosing()?;
-        let &index = c.filtered().get(c.focused_index)?;
+        let &index = c.visible().get(c.picker.focused_index())?;
         match &c.stage {
             Stage::Flows { candidates } => Some(FlowPick::Flow(
                 c.purpose,
@@ -353,10 +350,12 @@ impl FlowPicker {
 }
 
 impl Choosing {
-    /// Candidate indices matching `query`, best match first. An empty
-    /// query yields every candidate in original order.
-    pub fn filtered(&self) -> Vec<usize> {
-        fuzzy_match(&self.query, &self.stage.labels())
+    /// Candidate indices for the rows actually drawn, best match first. An
+    /// empty query yields every candidate in original order — the order
+    /// [`Stage::labels`] lists them in, which is the one the flows and the
+    /// profiles are meant to be read in.
+    pub fn visible(&self) -> Vec<usize> {
+        self.picker.visible(&self.stage.labels())
     }
 }
 
@@ -412,6 +411,11 @@ impl RenderOnce for FlowPickerOverlay {
             return div().into_any_element();
         }
         let t = theme::current(cx);
+        let input_border = t.border;
+        let query_text = t.text_primary;
+        let tag_text = t.text_subtle;
+        let panel_bg = t.palette_bg;
+        let panel_border = t.border;
 
         // Both open states are the same panel over a different list: the
         // flows to pick from, or the single thing there is to do about a
@@ -426,20 +430,22 @@ impl RenderOnce for FlowPickerOverlay {
                 }],
             ),
             FlowPicker::Choosing(state) => (
-                if state.query.is_empty() {
+                if state.picker.query().is_empty() {
                     self.prompt.clone()
                 } else {
-                    SharedString::from(state.query.clone())
+                    SharedString::from(state.picker.query().to_string())
                 },
                 state
-                    .filtered()
+                    .visible()
                     .iter()
-                    .take(theme::PALETTE_MAX_VISIBLE)
                     .filter_map(|&i| state.stage.row(i))
                     .collect(),
             ),
         };
-        let focused_index = self.state.choosing().map_or(0, |c| c.focused_index);
+        let focused_index = self
+            .state
+            .choosing()
+            .map_or(0, |c| c.picker.focused_index());
 
         let input = div()
             .flex()
@@ -449,11 +455,11 @@ impl RenderOnce for FlowPickerOverlay {
             .px(px(theme::PALETTE_INPUT_PAD_X))
             .py(px(theme::PALETTE_INPUT_PAD_Y))
             .border_b_1()
-            .border_color(t.border)
+            .border_color(input_border)
             .child(
                 div()
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
-                    .text_color(t.text_primary)
+                    .text_color(query_text)
                     .child(prompt),
             );
 
@@ -463,51 +469,30 @@ impl RenderOnce for FlowPickerOverlay {
             .max_h(px(theme::PALETTE_MAX_HEIGHT))
             .overflow_hidden()
             .children(rows.iter().enumerate().map(|(index, row)| {
-                let is_focused = index == focused_index;
+                // `flex_none` because the label slot is `flex_1`: without it
+                // taffy's default `flex_shrink: 1.0` squeezes the tag instead
+                // of ellipsizing the name it belongs to.
+                let tag = row.tag.clone().map(|tag| {
+                    div()
+                        .flex_none()
+                        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                        .text_color(tag_text)
+                        .child(tag)
+                        .into_any_element()
+                });
                 let on_pick = self.on_pick.clone();
-                div()
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        on_pick(&index, window, cx);
-                    })
-                    .hover(|d| d.bg(t.palette_focused_bg))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .w_full()
-                    .px(px(theme::PALETTE_ENTRY_PAD_X))
-                    .py(px(theme::PALETTE_ENTRY_PAD_Y))
-                    .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
-                    // Reserve the same-width transparent border on unfocused
-                    // rows so the label does not shift when the accent rule
-                    // appears — same idiom as the lane rows in the left dock.
-                    .border_l(px(theme::PALETTE_FOCUS_BORDER_W))
-                    .border_color(theme::TRANSPARENT)
-                    .when(is_focused, |d| {
-                        d.bg(t.palette_focused_bg)
-                            .text_color(t.text_primary)
-                            .border_color(theme::PRIMARY)
-                    })
-                    .when(!is_focused, |d| d.text_color(t.text_body))
-                    .child(div().flex_1().min_w_0().truncate().child(row.label.clone()))
-                    .children(row.tag.clone().map(|tag| {
-                        div()
-                            .flex_none()
-                            .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                            .text_color(t.text_subtle)
-                            .child(tag)
-                    }))
+                crate::ui::picker_row(
+                    index == focused_index,
+                    row.label.clone(),
+                    tag,
+                    move |window, cx| on_pick(&index, window, cx),
+                    cx,
+                )
             }));
 
-        let no_results = rows.is_empty().then(|| {
-            div()
-                .px(px(theme::PALETTE_ENTRY_PAD_X))
-                .py(px(theme::PALETTE_EMPTY_PAD_Y))
-                .text_size(px(theme::PALETTE_ENTRY_FONT_SIZE))
-                .text_color(t.text_subtle)
-                .child(self.empty.clone())
-        });
+        let no_results = rows
+            .is_empty()
+            .then(|| crate::ui::picker_empty(self.empty.clone(), cx));
 
         let panel = div()
             .absolute()
@@ -517,9 +502,9 @@ impl RenderOnce for FlowPickerOverlay {
             .mx_auto()
             .mt(px(theme::PALETTE_TOP_OFFSET))
             .w(px(theme::PALETTE_WIDTH))
-            .bg(t.palette_bg)
+            .bg(panel_bg)
             .border_1()
-            .border_color(t.border)
+            .border_color(panel_border)
             .rounded(px(theme::PALETTE_RADIUS))
             .shadow_lg()
             .overflow_hidden()
@@ -620,7 +605,7 @@ mod tests {
                 "05-notyaml.yaml",
             ],
         );
-        picker.move_down();
+        picker.on_key("down", None);
         let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
@@ -632,7 +617,7 @@ mod tests {
     #[test]
     fn a_closed_picker_holds_nothing() {
         let mut picker = opened(FlowPurpose::Run, &["ship.yaml"]);
-        picker.append('s');
+        picker.on_key("s", Some('s'));
         picker.close();
         assert!(!picker.is_open());
         assert!(picker.choosing().is_none());
@@ -644,20 +629,23 @@ mod tests {
     #[test]
     fn enter_follows_the_filtered_list() {
         let mut picker = opened(FlowPurpose::Run, &["build.yaml", "review.yaml"]);
-        picker.append('r');
-        picker.append('v');
+        picker.on_key("r", Some('r'));
+        picker.on_key("v", Some('v'));
         let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
         assert!(path.ends_with("review.yaml"), "{path:?}");
     }
 
-    /// Moving down cannot walk off the end of what is actually drawn.
+    /// Moving down cannot walk off the end of what is actually drawn. The
+    /// cap itself is [`PickerState`]'s (and tested there); what this pins is
+    /// that the row count handed to it is this picker's own visible list, so
+    /// the delegation cannot be wired to an uncapped or unfiltered length.
     #[test]
     fn the_selection_stays_inside_the_visible_list() {
         let mut picker = opened(FlowPurpose::Run, &["a.yaml", "b.yaml"]);
         for _ in 0..5 {
-            picker.move_down();
+            picker.on_key("down", None);
         }
         let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
@@ -685,5 +673,52 @@ mod tests {
         let picker = opened(FlowPurpose::Run, &[]);
         assert!(picker.is_open());
         assert!(picker.focused_pick().is_none());
+    }
+
+    /// Escape and Enter belong to the overlay, not to a list: the stop
+    /// prompt has none and still has to answer both — Enter is the only way
+    /// to the stop itself (`focused_pick` is `None` there, which is what
+    /// `execute_flow_picker_selection` reads it by).
+    ///
+    /// Every list key is refused outright instead. It used to no-op silently
+    /// — `Ignored` is the same non-effect said out loud, so the handler stops
+    /// repainting for a keystroke that changed nothing.
+    #[test]
+    fn the_stop_prompt_answers_escape_and_enter_and_refuses_the_list_keys() {
+        let mut picker = FlowPicker::Stopping;
+        assert_eq!(picker.on_key("escape", None), PickerKey::Dismiss);
+        assert_eq!(picker.on_key("enter", None), PickerKey::Confirm);
+        for (key, ch) in [
+            ("up", None),
+            ("down", None),
+            ("backspace", None),
+            ("s", Some('s')),
+        ] {
+            assert_eq!(picker.on_key(key, ch), PickerKey::Ignored, "{key}");
+        }
+        // None of it turned the prompt into a list, and Enter still has
+        // nothing to pick — the two halves of what makes it a stop.
+        assert!(matches!(picker, FlowPicker::Stopping));
+        assert!(picker.focused_pick().is_none());
+    }
+
+    /// The second question starts over. Carrying the query would filter
+    /// profile names by whatever was typed to find the file, and carrying the
+    /// selection would point the highlight at a row of the previous list.
+    #[test]
+    fn the_profile_question_starts_the_query_and_the_selection_over() {
+        let mut picker = opened(FlowPurpose::Run, &["ship.yaml", "review.yaml"]);
+        picker.on_key("s", Some('s'));
+        picker.on_key("down", None);
+        picker.ask_profile(
+            FlowPurpose::Run,
+            PathBuf::from("/lane/f/ship.yaml"),
+            crate::workspace::flow_request::FlowSelection::default(),
+            vec!["cheap".to_string()],
+        );
+        let c = picker.choosing().expect("the second question is up");
+        assert_eq!(c.picker.query(), "");
+        assert_eq!(c.picker.focused_index(), 0);
+        assert_eq!(c.visible().len(), 2, "defaults plus the one profile");
     }
 }

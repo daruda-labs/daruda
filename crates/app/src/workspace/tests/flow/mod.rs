@@ -221,7 +221,7 @@ fn picker_rows(ws: &crate::workspace::Workspace) -> Vec<String> {
     ws.flow_picker
         .choosing()
         .map(|c| {
-            c.filtered()
+            c.visible()
                 .into_iter()
                 .filter_map(|i| c.stage.row(i))
                 .map(|r| r.label.to_string())

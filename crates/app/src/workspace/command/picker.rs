@@ -14,7 +14,7 @@ use crate::{fuzzy::fuzzy_match, ui::theme};
 
 /// Query + selection for one picker overlay. Plain data: the view clones
 /// it into its `RenderOnce` overlay every frame.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub(in crate::workspace) struct PickerState {
     query: String,
     focused_index: usize,
