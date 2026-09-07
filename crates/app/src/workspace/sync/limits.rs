@@ -19,11 +19,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use daruda_agent::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
 use daruda_config::PollConfig;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use gpui::{Context, Task, WeakEntity};
 
 use crate::workspace::Workspace;
@@ -34,6 +37,9 @@ use crate::workspace::main_area::pane::FocusedAccount;
 /// [`PollConfig::MIN_POLL_SECS`] (60 s): flipping the toggle on takes effect
 /// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
+const STARTUP_JITTER_MAX_SECS: u64 = 15;
+
+static PUMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Spawn the endpoint pumps: limits, status, and local activity for every
 /// auth domain. Returns the `Task<()>` handles so the caller (Workspace
@@ -164,7 +170,9 @@ pub(in crate::workspace) fn usage_account(
 }
 
 fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
+    let sequence = PUMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     cx.spawn(async move |this: WeakEntity<Workspace>, cx| {
+        let mut first_enabled_tick = true;
         loop {
             // 1. Snapshot the poll cadence. `read_with` returns
             //    `Err(_)` once the entity is gone — that's our
@@ -184,6 +192,14 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
             };
+
+            if first_enabled_tick {
+                first_enabled_tick = false;
+                let jitter = startup_jitter(kind, sequence);
+                if !jitter.is_zero() {
+                    cx.background_executor().timer(jitter).await;
+                }
+            }
 
             // 3. Resolve which account this tick reads — fresh each time (on
             //    the UI thread) so a focus switch is picked up on the *next*
@@ -312,7 +328,11 @@ fn fetch_limits(
     recipe: AccountRecipeId,
     config_dir: Option<&Path>,
 ) -> Result<ProviderUsage, daruda_agent::FetchError> {
-    usage::source_for(recipe).fetch(config_dir)
+    let result = usage::source_for(recipe).fetch(config_dir);
+    if let Err(error) = &result {
+        log_limits_fetch_failure(recipe, config_dir, error);
+    }
+    result
 }
 
 fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_agent::FetchError> {
@@ -359,16 +379,85 @@ fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     }
 }
 
+fn log_limits_fetch_failure(
+    recipe: AccountRecipeId,
+    config_dir: Option<&Path>,
+    error: &daruda_agent::FetchError,
+) {
+    if matches!(error, daruda_agent::FetchError::NoToken) {
+        return;
+    }
+
+    LogWriter::log(
+        ErrorReport::new("Usage limits fetch failed")
+            .severity(ErrorSeverity::Warning)
+            .from_error(error)
+            .at(file!(), line!())
+            .with_context("recipe", recipe_slug(recipe))
+            .with_context(
+                "account_scope",
+                if config_dir.is_some() {
+                    "managed".to_string()
+                } else {
+                    "system".to_string()
+                },
+            )
+            .dedup(format!(
+                "usage.limits.fetch.{}.{}",
+                recipe_slug(recipe),
+                fetch_error_kind(error)
+            ))
+            .build(),
+    );
+}
+
+fn fetch_error_kind(error: &daruda_agent::FetchError) -> &'static str {
+    match error {
+        daruda_agent::FetchError::NoToken => "no_token",
+        daruda_agent::FetchError::Http(_) => "http",
+        daruda_agent::FetchError::Parse(_) => "parse",
+    }
+}
+
+fn recipe_slug(recipe: AccountRecipeId) -> &'static str {
+    match recipe {
+        AccountRecipeId::Claude => "claude",
+        AccountRecipeId::Codex => "codex",
+    }
+}
+
+fn startup_jitter(kind: Endpoint, sequence: u64) -> Duration {
+    let endpoint_seed = match kind {
+        Endpoint::Limits(recipe) => recipe_seed(recipe),
+        Endpoint::Status(recipe) => recipe_seed(recipe) + 11,
+        Endpoint::Activity(recipe) => recipe_seed(recipe) + 23,
+    };
+    let mixed = (std::process::id() as u64)
+        .wrapping_mul(1_103_515_245)
+        .wrapping_add(sequence.wrapping_mul(97))
+        .wrapping_add(endpoint_seed);
+    Duration::from_secs(mixed % STARTUP_JITTER_MAX_SECS)
+}
+
+fn recipe_seed(recipe: AccountRecipeId) -> u64 {
+    match recipe {
+        AccountRecipeId::Claude => 3,
+        AccountRecipeId::Codex => 7,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
 
     use crate::workspace::main_area::pane::AccountDomain;
 
     use super::{
-        Endpoint, FocusedAccount, account_scoped, observe_focus, target_account, usage_account,
+        Endpoint, FocusedAccount, STARTUP_JITTER_MAX_SECS, account_scoped, observe_focus,
+        startup_jitter, target_account, usage_account,
     };
 
     #[test]
@@ -376,6 +465,26 @@ mod tests {
         assert!(account_scoped(Endpoint::Limits(AccountRecipeId::Claude)));
         assert!(account_scoped(Endpoint::Activity(AccountRecipeId::Claude)));
         assert!(!account_scoped(Endpoint::Status(AccountRecipeId::Claude)));
+    }
+
+    #[test]
+    fn startup_jitter_stays_within_the_short_startup_window() {
+        for sequence in 0..32 {
+            for recipe in AccountRecipeId::all() {
+                assert!(
+                    startup_jitter(Endpoint::Limits(recipe), sequence)
+                        < Duration::from_secs(STARTUP_JITTER_MAX_SECS)
+                );
+                assert!(
+                    startup_jitter(Endpoint::Status(recipe), sequence)
+                        < Duration::from_secs(STARTUP_JITTER_MAX_SECS)
+                );
+                assert!(
+                    startup_jitter(Endpoint::Activity(recipe), sequence)
+                        < Duration::from_secs(STARTUP_JITTER_MAX_SECS)
+                );
+            }
+        }
     }
 
     fn managed(recipe: AccountRecipeId) -> FocusedAccount {

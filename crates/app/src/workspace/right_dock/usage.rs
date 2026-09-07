@@ -68,6 +68,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         // reports *its* freshness, not some other, hidden domain's.
         .child(usage_section_header(
             section.outcome.snapshot().and_then(|u| u.fetched_at),
+            section.outcome.is_stale(),
             snap.usage_refresh_in_flight,
             &snap.workspace,
         ));
@@ -274,6 +275,7 @@ fn provider_section(
     activity: Option<&ActivityStats>,
     cx: &gpui::App,
 ) -> impl IntoElement {
+    let stale = section.outcome.is_stale();
     let block = div()
         .flex()
         .flex_col()
@@ -286,7 +288,7 @@ fn provider_section(
             cx,
         ))
         .child(status_pill(section.service_status.as_ref(), cx))
-        .child(gauges_block(section.outcome.snapshot(), cx));
+        .child(gauges_block(section.outcome.snapshot(), stale, cx));
 
     let Some(activity) = activity else {
         return block;
@@ -385,10 +387,11 @@ fn plan_badge(label: String) -> impl IntoElement {
 /// badge. Clicking dispatches `Workspace::refresh_usage_now`.
 fn usage_section_header(
     fetched_at: Option<SystemTime>,
+    stale: bool,
     in_flight: bool,
     workspace: &gpui::WeakEntity<crate::workspace::Workspace>,
 ) -> impl IntoElement {
-    let label = refresh_badge_label(fetched_at, in_flight);
+    let label = refresh_badge_label(fetched_at, stale, in_flight);
     let workspace = workspace.clone();
 
     div()
@@ -417,17 +420,22 @@ fn usage_section_header(
 /// Resolve the refresh-badge label: the in-flight spinner wins; then a
 /// never-fetched state shows the plain "Refresh"; otherwise the cache
 /// age bucket.
-fn refresh_badge_label(fetched_at: Option<SystemTime>, in_flight: bool) -> String {
+fn refresh_badge_label(fetched_at: Option<SystemTime>, stale: bool, in_flight: bool) -> String {
     if in_flight {
         return strings::usage_refreshing();
     }
     let age = fetched_at.and_then(|t| SystemTime::now().duration_since(t).ok());
-    match cache_age_bucket(age) {
+    let label = match cache_age_bucket(age) {
         CacheAge::Never => strings::usage_refresh(),
         CacheAge::JustNow => strings::usage_cache_just_now(),
         CacheAge::Minutes(n) => strings::usage_cache_minutes(n),
         CacheAge::Hours(n) => strings::usage_cache_hours(n),
         CacheAge::Days(n) => strings::usage_cache_days(n),
+    };
+    if stale {
+        format!("{label} {}", strings::usage_stale_marker())
+    } else {
+        label
     }
 }
 
@@ -439,16 +447,22 @@ fn refresh_badge_label(fetched_at: Option<SystemTime>, in_flight: bool) -> Strin
 /// (`ProviderUsage` sorts them). Before the first fetch lands — or when the
 /// provider metered nothing — a single placeholder card holds the space, since
 /// which windows exist is now the provider's answer rather than a fixed set.
-fn gauges_block(usage: Option<&ProviderUsage>, cx: &gpui::App) -> impl IntoElement {
+fn gauges_block(usage: Option<&ProviderUsage>, stale: bool, cx: &gpui::App) -> impl IntoElement {
     let windows = usage.map(|u| u.windows.as_slice()).unwrap_or_default();
     let col = div().flex().flex_col().gap(px(theme::USAGE_CARD_GAP));
     if windows.is_empty() {
-        return col.child(gauge_card(strings::usage_limit_unavailable(), None, cx));
+        return col.child(gauge_card(
+            strings::usage_limit_unavailable(),
+            None,
+            stale,
+            cx,
+        ));
     }
     windows.iter().fold(col, |col, window| {
         col.child(gauge_card(
             crate::workspace::usage_labels::window_label(window),
             Some(window),
+            stale,
             cx,
         ))
     })
@@ -459,6 +473,7 @@ fn gauges_block(usage: Option<&ProviderUsage>, cx: &gpui::App) -> impl IntoEleme
 fn gauge_card(
     label: impl Into<SharedString>,
     window: Option<&UsageWindow>,
+    stale: bool,
     cx: &gpui::App,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -470,7 +485,13 @@ fn gauge_card(
     let Some(win) = window else {
         // Placeholder: label + dim bar + "Unavailable".
         return card
-            .child(gauge_header_row(label, None, t.text_muted, t.text_subtle))
+            .child(gauge_header_row(
+                label,
+                None,
+                stale,
+                t.text_muted,
+                t.text_subtle,
+            ))
             .child(gauge_bar(0.0, t.gauge_track_bg))
             .into_any_element();
     };
@@ -486,6 +507,7 @@ fn gauge_card(
         .child(gauge_header_row(
             label,
             Some(pct),
+            stale,
             t.text_subtle,
             t.text_muted,
         ))
@@ -506,13 +528,11 @@ fn gauge_card(
 fn gauge_header_row(
     label: SharedString,
     pct: Option<f32>,
+    stale: bool,
     label_color: Hsla,
     pct_color: Hsla,
 ) -> impl IntoElement {
-    let value: SharedString = match pct {
-        Some(p) => format!("{:.0}%", p.clamp(0.0, 100.0)).into(),
-        None => strings::usage_limit_unavailable().into(),
-    };
+    let value = SharedString::from(gauge_value_text(pct, stale));
     div()
         .flex()
         .flex_row()
@@ -531,6 +551,18 @@ fn gauge_header_row(
                 .text_color(pct_color)
                 .child(value),
         )
+}
+
+fn gauge_value_text(pct: Option<f32>, stale: bool) -> String {
+    let Some(pct) = pct else {
+        return strings::usage_limit_unavailable();
+    };
+    let value = format!("{:.0}%", pct.clamp(0.0, 100.0));
+    if stale {
+        format!("{value} {}", strings::usage_stale_marker())
+    } else {
+        value
+    }
 }
 
 /// Filled bar via `gpui_component::Progress`. `color` is the fill; the
@@ -983,6 +1015,32 @@ mod tests {
         assert_eq!(
             relative_time_label(now - Duration::from_secs(2 * 86_400)),
             strings::usage_session_days(2)
+        );
+    }
+
+    #[test]
+    fn refresh_badge_marks_stale_cached_values() {
+        let now = SystemTime::now();
+        let fresh = refresh_badge_label(Some(now), false, false);
+        let stale = refresh_badge_label(Some(now), true, false);
+        assert!(!fresh.contains(&strings::usage_stale_marker()));
+        assert!(stale.contains(&strings::usage_stale_marker()));
+        assert_eq!(
+            refresh_badge_label(Some(now), true, true),
+            strings::usage_refreshing()
+        );
+    }
+
+    #[test]
+    fn gauge_value_marks_stale_percentages_only() {
+        assert_eq!(gauge_value_text(Some(99.0), false), "99%");
+        assert_eq!(
+            gauge_value_text(Some(99.0), true),
+            format!("99% {}", strings::usage_stale_marker())
+        );
+        assert_eq!(
+            gauge_value_text(None, true),
+            strings::usage_limit_unavailable()
         );
     }
 
