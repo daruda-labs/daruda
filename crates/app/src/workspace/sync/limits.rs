@@ -199,6 +199,8 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 if !jitter.is_zero() {
                     cx.background_executor().timer(jitter).await;
                 }
+                // Re-read live config after the jitter before fetching.
+                continue;
             }
 
             // 3. Resolve which account this tick reads — fresh each time (on

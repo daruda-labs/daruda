@@ -55,7 +55,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// does not park a background worker for minutes.
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 
-/// Total attempts for retryable status / transport failures.
+/// Total attempts for retryable status or transient transport failures.
 const MAX_JSON_ATTEMPTS: usize = 3;
 
 /// Maximum response body size we'll buffer (1 MiB). Both endpoints
@@ -69,8 +69,8 @@ pub type Header<'a> = (&'a str, &'a str);
 
 /// Issue a GET against `url` with the supplied `headers` and parse
 /// the response body as JSON. Caps the body at 1 MiB and the total
-/// per-attempt wall-clock at 10 s. Short retryable failures (`429` and
-/// `5xx`, plus transport misses) are retried before returning
+/// per-attempt wall-clock at 10 s. Short retryable failures (`429`,
+/// `5xx`, and transient transport failures) are retried before returning
 /// `FetchError::Http`; JSON-decode failures return `FetchError::Parse`.
 pub fn get_json(url: &str, headers: &[Header<'_>]) -> Result<serde_json::Value, FetchError> {
     let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
@@ -113,13 +113,27 @@ fn retry_delay_for_error(error: &ureq::Error, attempt: usize) -> Option<Duration
         ureq::Error::Status(status, response) if retryable_status(*status) => {
             retry_delay(response.header("retry-after"), attempt, chrono::Utc::now())
         }
-        ureq::Error::Transport(_) => fallback_retry_delay(attempt),
+        ureq::Error::Transport(_) if retryable_transport_kind(error.kind()) => {
+            fallback_retry_delay(attempt)
+        }
         _ => None,
     }
 }
 
 fn retryable_status(status: u16) -> bool {
     status == 429 || (500..=599).contains(&status)
+}
+
+fn retryable_transport_kind(kind: ureq::ErrorKind) -> bool {
+    matches!(
+        kind,
+        ureq::ErrorKind::Dns
+            | ureq::ErrorKind::ConnectionFailed
+            | ureq::ErrorKind::BadStatus
+            | ureq::ErrorKind::BadHeader
+            | ureq::ErrorKind::Io
+            | ureq::ErrorKind::ProxyConnect
+    )
 }
 
 fn retry_delay(
@@ -218,5 +232,31 @@ mod tests {
         assert_eq!(retry_delay(Some("0"), 0, now), Some(Duration::from_secs(1)));
         assert_eq!(retry_delay(Some("5"), 0, now), Some(Duration::from_secs(5)));
         assert_eq!(retry_delay(Some("120"), 0, now), None);
+    }
+
+    #[test]
+    fn retries_only_transient_transport_kinds() {
+        for kind in [
+            ureq::ErrorKind::Dns,
+            ureq::ErrorKind::ConnectionFailed,
+            ureq::ErrorKind::BadStatus,
+            ureq::ErrorKind::BadHeader,
+            ureq::ErrorKind::Io,
+            ureq::ErrorKind::ProxyConnect,
+        ] {
+            assert!(retryable_transport_kind(kind), "{kind:?}");
+        }
+
+        for kind in [
+            ureq::ErrorKind::InvalidUrl,
+            ureq::ErrorKind::UnknownScheme,
+            ureq::ErrorKind::InsecureRequestHttpsOnly,
+            ureq::ErrorKind::TooManyRedirects,
+            ureq::ErrorKind::InvalidProxyUrl,
+            ureq::ErrorKind::ProxyUnauthorized,
+            ureq::ErrorKind::HTTP,
+        ] {
+            assert!(!retryable_transport_kind(kind), "{kind:?}");
+        }
     }
 }
