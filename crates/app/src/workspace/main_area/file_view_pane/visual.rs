@@ -281,9 +281,7 @@ pub(in crate::workspace) fn render_mermaid_svg(
     source: &str,
     palette: &super::mermaid_theme::MermaidPalette,
 ) -> Option<String> {
-    use super::mermaid_host_theme::{
-        mermaid_host_theme_profile, mermaid_svg_render_options, source_has_own_theme_directive,
-    };
+    use super::mermaid_host_theme::{mermaid_render_profile, mermaid_svg_render_options};
 
     // Fix up classDef/style/rect declarations merman-render would otherwise
     // leave contrast-unsafe (a light author-declared fill under daruda's
@@ -293,17 +291,18 @@ pub(in crate::workspace) fn render_mermaid_svg(
     let source = source.as_ref();
 
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut renderer = merman::render::HeadlessRenderer::new()
+        // Unconditional: the profile decides the diagram's colours, but it also
+        // carries the settings resvg needs to paint any label at all.
+        let profile = mermaid_render_profile(source, palette);
+        merman::render::HeadlessRenderer::new()
             .with_svg_options(mermaid_svg_render_options())
             // Layout has to reserve the width this app's own text stack paints,
             // not what merman's Trebuchet MS table estimates for Hangul.
-            .with_text_measurer(super::mermaid_text_measurer::host_text_measurer());
-        // Match the diagram theme to the host appearance so every diagram type —
-        // not just flowchart nodes — stays legible (dark UI → dark chrome).
-        if !source_has_own_theme_directive(source) {
-            renderer = renderer.with_host_theme(&mermaid_host_theme_profile(palette));
-        }
-        renderer.render_svg_sync(source).ok().flatten()
+            .with_text_measurer(super::mermaid_text_measurer::host_text_measurer())
+            .with_host_theme(&profile)
+            .render_svg_sync(source)
+            .ok()
+            .flatten()
     }))
     .ok()
     .flatten()

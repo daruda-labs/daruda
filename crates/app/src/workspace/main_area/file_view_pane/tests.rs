@@ -237,18 +237,13 @@ fn mermaid_renderer_sizes_east_asian_labels_wider_than_latin() {
 #[test]
 fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
     let palette = mermaid_theme::MermaidPalette::default();
-    let profile = mermaid_host_theme::mermaid_host_theme_profile(&palette);
     for source in [
         "flowchart TD\n  A[hello]\n",
         "sequenceDiagram\n  A->>B: hi\n",
         "pie\n  \"a\": 1\n  \"b\": 2\n",
         "stateDiagram-v2\n  [*] --> S1\n",
     ] {
-        let svg = merman::render::HeadlessRenderer::new()
-            .with_host_theme(&profile)
-            .render_svg_sync(source)
-            .expect("merman should render")
-            .expect("diagram should be detected");
+        let svg = visual::render_mermaid_svg(source, &palette).expect("diagram should render");
         let img = visual::rasterize_svg(&svg).expect("rasterize should succeed");
         // Corner pixel sits on the canvas, outside any node.
         assert_eq!(
@@ -271,7 +266,6 @@ fn right_edge_is_transparent(img: &visual::RasterImage) -> bool {
 #[test]
 fn wide_mermaid_samples_keep_clear_right_edge_after_rasterize() {
     let palette = mermaid_theme::MermaidPalette::default();
-    let profile = mermaid_host_theme::mermaid_host_theme_profile(&palette);
     for (name, source) in [
         (
             "er",
@@ -336,12 +330,8 @@ fn wide_mermaid_samples_keep_clear_right_edge_after_rasterize() {
 "#,
         ),
     ] {
-        let svg = merman::render::HeadlessRenderer::new()
-            .with_svg_options(mermaid_host_theme::mermaid_svg_render_options())
-            .with_host_theme(&profile)
-            .render_svg_sync(source)
-            .expect("merman should render")
-            .unwrap_or_else(|| panic!("{name} diagram should be detected"));
+        let svg = visual::render_mermaid_svg(source, &palette)
+            .unwrap_or_else(|| panic!("{name} diagram should render"));
         let img = visual::rasterize_svg(&svg).expect("rasterize should succeed");
         assert!(
             right_edge_is_transparent(&img),
