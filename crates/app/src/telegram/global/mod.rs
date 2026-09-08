@@ -21,10 +21,19 @@ use super::bridge::{
 };
 use super::client;
 use super::keychain;
+use crate::control::result::ControlError;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
+
+mod control;
+
+use control::{
+    answer_only, log_unauthorized_inbound, persist_offset, render_outcome, run_command,
+    select_target, send_command_reply,
+};
+use daruda_store::persistence;
 
 /// Telegram long-poll duration per `getUpdates` call. Telegram
 /// recommends keeping this well under typical proxy/firewall idle
@@ -39,6 +48,10 @@ const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 /// Process-wide Telegram bridge state.
 pub struct TelegramBridge {
     core: BridgeCore,
+    /// Last `update_offset` written to disk. Kept beside the core rather than
+    /// read back from the file so the guard against a redundant write costs
+    /// nothing on an idle poll.
+    persisted_offset: i64,
     // `Workspace::relay_to_telegram` sends into this via
     // `cx.try_global::<TelegramBridge>()`.
     outbound_tx: UnboundedSender<BridgePing>,
@@ -68,9 +81,13 @@ pub(crate) fn install_for_test(
         !cx.has_global::<TelegramBridge>(),
         "TelegramBridge test global must be installed once per test app"
     );
-    let core = BridgeCore::new(enabled, authorized_chat_id);
+    let core = BridgeCore::new(enabled, authorized_chat_id, 0);
     let (outbound_tx, outbound_rx) = unbounded();
-    cx.set_global(TelegramBridge { core, outbound_tx });
+    cx.set_global(TelegramBridge {
+        core,
+        persisted_offset: 0,
+        outbound_tx,
+    });
     outbound_rx
 }
 
@@ -86,10 +103,19 @@ pub fn install(cx: &mut App) {
     }
 
     let cfg = SettingsStore::global(cx).user_arc();
-    let core = BridgeCore::new(cfg.telegram.enabled, cfg.telegram.authorized_chat_id);
+    let core = BridgeCore::new(
+        cfg.telegram.enabled,
+        cfg.telegram.authorized_chat_id,
+        daruda_store::telegram::load_telegram_state_in(&persistence::default_data_dir())
+            .update_offset,
+    );
     let (outbound_tx, outbound_rx) = unbounded();
 
-    cx.set_global(TelegramBridge { core, outbound_tx });
+    cx.set_global(TelegramBridge {
+        persisted_offset: core.current_offset(),
+        core,
+        outbound_tx,
+    });
 
     spawn_poll_task(cx);
     spawn_send_task(outbound_rx, cx);
@@ -151,27 +177,21 @@ fn spawn_poll_task(cx: &mut App) {
                 }
             };
 
-            // Route every update while holding the global once, then
-            // release it before running any side effect (HTTP calls,
-            // cross-workspace dispatch) — routing is the only step that
-            // touches `BridgeCore`.
-            let dispatch: Vec<(InboundAction, Option<String>, Option<CallbackEdit>)> =
-                cx.update(|cx| {
-                    let bridge = cx.global_mut::<TelegramBridge>();
-                    updates
-                        .into_iter()
-                        .map(|update| {
-                            let RouteResult {
-                                action,
-                                answer_callback_id,
-                                callback_edit,
-                            } = bridge.core.route(update);
-                            (action, answer_callback_id, callback_edit)
-                        })
-                        .collect()
-                });
+            // One update at a time, routed and then acted on before the next
+            // is routed. A batch can hold `/use 2` and a plain message that
+            // means it: routing them together would resolve the second
+            // against the target the first had not yet moved.
+            //
+            // The global is held only for the routing step and released
+            // before any side effect (HTTP calls, cross-workspace dispatch)
+            // — routing is the only step that touches `BridgeCore` directly.
+            for update in updates {
+                let RouteResult {
+                    action,
+                    answer_callback_id,
+                    callback_edit,
+                } = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.route(update));
 
-            for (action, answer_callback_id, callback_edit) in dispatch {
                 match (answer_callback_id, action) {
                     // A permission button tap: apply the decision FIRST so the
                     // feedback is accurate, then answer the callback (toast) and
@@ -192,6 +212,20 @@ fn spawn_poll_task(cx: &mut App) {
                         let label = permission_feedback(&decision, outcome);
                         answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
                     }
+                    // A listing button tap: point the target at that pane and
+                    // toast which one. The message keeps its buttons — tapping
+                    // another row is ordinary use, not a second decision.
+                    (Some(callback_id), InboundAction::SelectTarget { pane }) => {
+                        let label = cx.update(|cx| select_target(pane, cx));
+                        answer_only(cx, &token, callback_id, &label).await;
+                    }
+                    // A tap on a superseded listing. Answered with its own
+                    // wording and *not* edited — `answer_and_edit` drops the
+                    // message's keyboard, which would strip the rows off a
+                    // listing the user is still reading.
+                    (Some(callback_id), InboundAction::StaleListing) => {
+                        answer_only(cx, &token, callback_id, &s::control_listing_stale()).await;
+                    }
                     // A callback whose token is unknown / already consumed: still
                     // tell the user it was already handled (never leave the tap
                     // silent).
@@ -199,9 +233,32 @@ fn spawn_poll_task(cx: &mut App) {
                         let label = s::telegram_permission_stale();
                         answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
                     }
+                    // A command: resolve, run, fold the outcome back into the
+                    // adapter's ordinal table, answer.
+                    (None, InboundAction::RunCommand { command }) => {
+                        let reply = run_command(command, cx);
+                        send_command_reply(cx, &token, reply).await;
+                    }
+                    // Never swallowed: a mistyped slash command that produced
+                    // silence is the defect this replaces.
+                    (None, InboundAction::ReportParseError { error }) => {
+                        let reply = super::command::render_parse_error(&error);
+                        send_command_reply(cx, &token, reply).await;
+                    }
+                    (None, InboundAction::NoTarget) => {
+                        let reply = cx
+                            .update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx));
+                        send_command_reply(cx, &token, reply).await;
+                    }
                     // A message-origin action (injected reply, pairing, ignore).
                     (None, action) => dispatch_action(action, cx),
                 }
+
+                // After acting, not before: a crash in between re-delivers
+                // this one update rather than losing it, and writing first
+                // would drop the command outright. Per update rather than per
+                // batch so the replay is bounded to one.
+                persist_offset(cx);
             }
 
             // No extra sleep on success — the long-poll `timeout_s` itself
@@ -212,11 +269,17 @@ fn spawn_poll_task(cx: &mut App) {
     .detach();
 }
 
-/// Apply one routed [`InboundAction`]'s side effect. Pure dispatch —
+/// How long one "unauthorized inbound" line suppresses the next.
+///
+/// A bot's username is publicly discoverable, so anyone can send it messages —
+/// and `ErrorReport::dedup` does *not* help here: `LogWriter` writes every
+/// report it is given, and `dedup_key` only merges toasts (see
+/// `workspace::error::toast`). Without a real window, a probing sender writes
+/// one NDJSON line per message and drowns genuine diagnostics./// Apply one routed [`InboundAction`]'s side effect. Pure dispatch —
 /// no routing policy here, `bridge.rs` already decided what to do.
 fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
     match action {
-        InboundAction::Ignore => {}
+        InboundAction::Ignore => log_unauthorized_inbound(),
         InboundAction::Paired { chat_id } => {
             // `BridgeCore::route`'s `Paired` branch already updated the
             // in-memory `authorized_chat_id` — this persists it so pairing
@@ -242,10 +305,18 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
                 ws.inject_bot_reply(pane.pane, text.clone(), cx)
             });
         }
-        InboundAction::RespondPermission { .. } => {
-            // Permission taps always arrive as callbacks and are handled inline
-            // in the poll loop (apply → answer → edit) so their feedback can be
-            // accurate; they never reach this message-origin dispatch path.
+        InboundAction::RespondPermission { .. }
+        | InboundAction::SelectTarget { .. }
+        | InboundAction::StaleListing => {
+            // All three always arrive as callbacks and are handled inline in
+            // the poll loop, where their feedback can be accurate; they never
+            // reach this message-origin dispatch path.
+        }
+        InboundAction::RunCommand { .. }
+        | InboundAction::ReportParseError { .. }
+        | InboundAction::NoTarget => {
+            // Answered inline in the poll loop, which is the only place that
+            // can await the reply's send.
         }
     }
 }

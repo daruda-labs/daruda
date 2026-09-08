@@ -23,6 +23,7 @@ pub(super) mod agent_vocabulary;
 pub(super) mod plugin;
 mod session_hosts;
 
+use super::CopyFeedback;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{checkbox, checkbox_row, field_row};
@@ -107,27 +108,59 @@ fn font_domain_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> im
 }
 
 impl SettingsWindow {
+    /// Put the `/setcommands` block on the clipboard.
+    ///
+    /// The block's own text stays English in every locale: what it registers
+    /// is the command menu Telegram shows, and BotFather parses it as
+    /// `name - description` lines whose names must match the commands
+    /// `control::spec` actually accepts.
+    fn copy_botfather_commands(&mut self, cx: &mut gpui::Context<Self>) {
+        self.copy_with_feedback(
+            s::control_botfather_commands(),
+            |this| &mut this.telegram_botfather_copy,
+            cx,
+        );
+    }
+
     /// Copy `/pair <code>` to the clipboard so the user can paste it
     /// straight into the Telegram app on their phone instead of retyping
     /// it. Mirrors `ErrorReportModal::copy_to_clipboard`'s copied/revert
     /// shape (`workspace/error/modal.rs`).
     fn copy_telegram_pair_command(&mut self, code: &str, cx: &mut gpui::Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(format!("/pair {code}")));
-        self.telegram_pair_command_copied = true;
+        self.copy_with_feedback(
+            format!("/pair {code}"),
+            |this| &mut this.telegram_pair_command_copy,
+            cx,
+        );
+    }
+
+    /// Write `text` to the clipboard and run the Copy → Copied! → Copy label
+    /// swap on the [`CopyFeedback`] `slot` names. The single implementation
+    /// both copy buttons share; `slot` is a field accessor because the revert
+    /// timer has to reach the same field again after awaiting.
+    fn copy_with_feedback(
+        &mut self,
+        text: String,
+        slot: fn(&mut Self) -> &mut CopyFeedback,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        slot(self).copied = true;
         cx.notify();
 
-        self._telegram_pair_copy_revert_task = Some(cx.spawn(async move |this, cx| {
+        let revert = cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(TELEGRAM_PAIR_COPY_LABEL_DURATION)
                 .await;
             // SILENT-OK: settings window may close before the revert timer fires
             let _ = this.update(cx, |this, cx| {
-                if this.telegram_pair_command_copied {
-                    this.telegram_pair_command_copied = false;
+                if slot(this).copied {
+                    slot(this).copied = false;
                     cx.notify();
                 }
             });
-        }));
+        });
+        slot(self)._revert = Some(revert);
     }
 
     pub(super) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -385,7 +418,8 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        let body_color = theme::current(cx).text_primary;
+        let t = theme::current(cx);
+        let body_color = t.text_primary;
         let telegram_enabled = self.telegram_enabled;
         let token_configured = self.telegram_token_configured;
         let authorized_chat_id = crate::settings_store::SettingsStore::global(cx)
@@ -517,7 +551,7 @@ impl SettingsWindow {
                     ),
             )
             .when_some(pair_code, |body, code| {
-                let copy_label = if self.telegram_pair_command_copied {
+                let copy_label = if self.telegram_pair_command_copy.copied() {
                     s::error_modal_button_copied()
                 } else {
                     s::error_modal_button_copy()
@@ -613,6 +647,61 @@ impl SettingsWindow {
                         )
                     }),
             )
+            // The bot's own command menu. Registering it is a manual BotFather
+            // step daruda cannot do for the user, so the block it needs is
+            // here rather than only in the docs.
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(body_color)
+                            .child(s::settings_telegram_botfather_label()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(body_color)
+                            .child(s::settings_telegram_botfather_help()),
+                    )
+                    // A verbatim paste-me payload, so it gets the same
+                    // monospace card a fenced code block does
+                    // (`file_view_pane::render::markdown::block::code_surface`)
+                    // rather than reading as prose.
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .bg(t.md_code_block_bg)
+                            .border_1()
+                            .border_color(t.border)
+                            .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
+                            .px(px(theme::MD_CODE_BLOCK_PAD_X))
+                            .py(px(theme::MD_CODE_BLOCK_PAD_Y))
+                            .font(gpui::font("monospace"))
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(body_color)
+                            .child(s::control_botfather_commands()),
+                    )
+                    .child(
+                        div().flex().flex_row().child(
+                            button(
+                                "settings-telegram-copy-botfather",
+                                if self.telegram_botfather_copy.copied() {
+                                    s::error_modal_button_copied()
+                                } else {
+                                    s::error_modal_button_copy()
+                                },
+                            )
+                            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
+                                this.copy_botfather_commands(cx);
+                            })),
+                        ),
+                    ),
+            )
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -691,7 +780,20 @@ impl SettingsWindow {
 #[allow(dead_code)] // exposed for tests that exercise the section without rendering it.
 impl SettingsWindow {
     pub(in crate::settings_window) fn telegram_pair_command_copied(&self) -> bool {
-        self.telegram_pair_command_copied
+        self.telegram_pair_command_copy.copied()
+    }
+
+    pub(in crate::settings_window) fn telegram_botfather_copied(&self) -> bool {
+        self.telegram_botfather_copy.copied()
+    }
+
+    /// Test-only entry into [`Self::copy_botfather_commands`], for the same
+    /// reason its pairing-code sibling below has one.
+    pub(in crate::settings_window) fn copy_botfather_commands_for_test(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.copy_botfather_commands(cx);
     }
 
     /// Test-only entry into [`Self::copy_telegram_pair_command`] — the

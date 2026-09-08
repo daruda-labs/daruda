@@ -21,3 +21,4 @@ pub mod persistence;
 pub(crate) mod profile;
 pub mod project;
 pub mod tasks;
+pub mod telegram;

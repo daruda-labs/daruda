@@ -42,7 +42,7 @@ const PAIR_CODE_MAX_ATTEMPTS: u32 = 5;
 /// workspace (window) uuid plus that workspace's locally-scoped pane
 /// id. `PaneId` is only unique within a workspace, so routing an
 /// inbound reply needs both halves. Mirrors `LaneRef { project, lane }`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PaneRef {
     pub workspace: WorkspaceUuid,
     pub pane: u64,
@@ -105,6 +105,28 @@ pub enum InboundAction {
         perm_id: u64,
         decision: PermissionDecision,
     },
+    /// A parsed command awaiting execution. Resolution of any ordinal happens
+    /// in the executor, which owns `CommandState`.
+    RunCommand {
+        command: crate::control::spec::ControlCommand,
+    },
+    /// The text started with `/` but is not one of ours. Answered, never
+    /// swallowed — a silently dropped message is the defect this replaces.
+    ReportParseError {
+        error: crate::control::spec::ParseError,
+    },
+    /// A listing button was tapped — make that pane the current target.
+    SelectTarget {
+        pane: PaneRef,
+    },
+    /// A listing button from a superseded listing was tapped. Distinguished
+    /// from an unknown token so the answer can say "send /list again" instead
+    /// of the permission-prompt wording, and so the tapped message keeps its
+    /// buttons — scrolling back to an old listing and tapping is ordinary use,
+    /// not a decision to consume.
+    StaleListing,
+    /// Plain text with no reply-to, no selection, and no prior ping.
+    NoTarget,
 }
 
 /// `BridgeCore::route`'s full result: the action, plus whether
@@ -216,25 +238,35 @@ pub struct BridgeCore {
     sent_pings_order: VecDeque<i64>,
     pending_permissions: HashMap<String, (PaneRef, u64, PermissionDecision)>,
     pending_permissions_order: VecDeque<String>,
+    command_state: crate::telegram::command::CommandState,
 }
 
 impl BridgeCore {
     /// Constructs the routing core from `TelegramConfig`'s persisted
     /// settings — called at startup and again on config reload.
-    /// `update_offset` always starts at `0` (a fresh `getUpdates` from
-    /// zero is safe: Telegram just resends anything still queued).
-    pub fn new(enabled: bool, authorized_chat_id: Option<i64>) -> Self {
+    /// `update_offset` is seeded from the persisted high-water mark so a
+    /// restart does not re-deliver, and re-run, a command that was already
+    /// processed.
+    pub fn new(enabled: bool, authorized_chat_id: Option<i64>, update_offset: i64) -> Self {
         Self {
             enabled,
             authorized_chat_id,
             pending_pair_code: None,
-            update_offset: 0,
+            update_offset,
             last_pinged: None,
             sent_pings: HashMap::new(),
             sent_pings_order: VecDeque::new(),
             pending_permissions: HashMap::new(),
             pending_permissions_order: VecDeque::new(),
+            command_state: crate::telegram::command::CommandState::default(),
         }
+    }
+
+    /// The ordinal table and selected target for the authorized chat. The poll
+    /// loop reaches through this to resolve an ordinal against the listing the
+    /// user actually saw, and to record the next one.
+    pub fn command_state_mut(&mut self) -> &mut crate::telegram::command::CommandState {
+        &mut self.command_state
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -271,6 +303,12 @@ impl BridgeCore {
     /// `client::get_updates` call.
     pub fn current_offset(&self) -> i64 {
         self.update_offset
+    }
+
+    /// The paired chat, if any. The poll loop needs it to address a command
+    /// reply, which — unlike a ping — is not built through `build_ping`.
+    pub fn authorized_chat_id(&self) -> Option<i64> {
+        self.authorized_chat_id
     }
 
     /// Generates a fresh 6-character uppercase hex pairing code,
@@ -406,20 +444,39 @@ impl BridgeCore {
             return InboundAction::Ignore;
         }
 
-        let pane = reply_to_message_id
-            .and_then(|id| self.sent_pings.get(&id))
-            .copied()
-            .or(self.last_pinged);
+        // Parsing sits behind the gate on purpose: a listing names projects,
+        // lanes, and session titles, so an unauthorized chat must not reach it.
+        match crate::control::spec::parse(&text) {
+            Ok(command) => return InboundAction::RunCommand { command },
+            Err(crate::control::spec::ParseError::NotACommand) => {}
+            Err(error) => return InboundAction::ReportParseError { error },
+        }
 
-        match pane {
+        let reply_to = reply_to_message_id
+            .and_then(|id| self.sent_pings.get(&id))
+            .copied();
+
+        match self
+            .command_state
+            .plain_text_target(reply_to, self.last_pinged)
+        {
             Some(pane) => InboundAction::InjectPrompt { pane, text },
-            None => InboundAction::Ignore,
+            None => InboundAction::NoTarget,
         }
     }
 
     fn route_callback(&mut self, chat_id: i64, data: String) -> InboundAction {
         if self.authorized_chat_id != Some(chat_id) {
             return InboundAction::Ignore;
+        }
+
+        // Listing tokens are tried first and are never consumed — tapping the
+        // same row twice is ordinary use. Permission tokens below are.
+        if data.starts_with(crate::telegram::command::LISTING_TOKEN_PREFIX) {
+            return match self.command_state.resolve_token(&data) {
+                Some(pane) => InboundAction::SelectTarget { pane },
+                None => InboundAction::StaleListing,
+            };
         }
 
         match self.pending_permissions.remove(&data) {
@@ -459,7 +516,7 @@ impl BridgeCore {
                 })
                 .collect();
 
-            InlineKeyboard { buttons }
+            InlineKeyboard::single_row(buttons)
         });
 
         OutboundMsg {
@@ -547,6 +604,108 @@ mod tests {
         }
     }
 
+    #[test]
+    fn commands_are_ignored_before_pairing() {
+        let mut core = BridgeCore::new(true, None, 0);
+        let action = core.route(message(1, 999, "/list", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::Ignore,
+            "unauthorized chats must not enumerate"
+        );
+    }
+
+    #[test]
+    fn an_authorized_command_routes_to_run_command() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let action = core.route(message(1, 42, "/list", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::RunCommand {
+                command: crate::control::spec::ControlCommand::List
+            }
+        );
+    }
+
+    #[test]
+    fn a_typo_reports_instead_of_vanishing() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let action = core.route(message(1, 42, "/lst", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::ReportParseError {
+                error: crate::control::spec::ParseError::Unknown {
+                    input: "lst".into(),
+                    suggestion: Some("list"),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn plain_text_with_no_target_reports_instead_of_vanishing() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let action = core.route(message(1, 42, "hello", None)).action;
+        assert_eq!(action, InboundAction::NoTarget);
+    }
+
+    #[test]
+    fn a_selected_target_takes_plain_text_without_a_reply_to() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let target = pane(1, 10);
+        core.command_state_mut().select(Some(target));
+        let action = core.route(message(1, 42, "add tests too", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::InjectPrompt {
+                pane: target,
+                text: "add tests too".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn tapping_a_list_button_selects_that_target() {
+        use crate::control::spec::Ordinal;
+
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let a = pane(1, 10);
+        core.command_state_mut()
+            .record_listing(&crate::telegram::command::tests::listing_of(&[a]));
+        let token = core
+            .command_state_mut()
+            .listing_token(Ordinal(1))
+            .expect("token");
+        let action = core.route(callback(1, 42, "cb", &token)).action;
+        assert_eq!(action, InboundAction::SelectTarget { pane: a });
+    }
+
+    #[test]
+    fn a_seeded_offset_skips_already_processed_updates() {
+        let mut core = BridgeCore::new(true, Some(42), 100);
+        assert_eq!(core.current_offset(), 100);
+        core.route(message(99, 42, "/list", None));
+        assert_eq!(
+            core.current_offset(),
+            100,
+            "an old update must not rewind the offset"
+        );
+    }
+
+    #[test]
+    fn a_fresh_core_starts_at_zero() {
+        let core = BridgeCore::new(true, None, 0);
+        assert_eq!(core.current_offset(), 0);
+    }
+
+    /// A permission prompt is always one horizontal row of options, so the
+    /// assertions below read that row directly — and fail loudly if the
+    /// prompt ever grows a second one.
+    fn only_row(keyboard: &InlineKeyboard) -> &[(String, String)] {
+        assert_eq!(keyboard.rows.len(), 1, "a permission prompt is one row");
+        &keyboard.rows[0]
+    }
+
     /// A fresh (not-yet-expired, zero-attempts) pending pair code, for
     /// tests that seed `pending_pair_code` directly rather than going
     /// through `new_pair_code()`.
@@ -560,7 +719,7 @@ mod tests {
 
     #[test]
     fn unauthorized_message_with_no_pending_pair_is_ignored() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         let result = bridge.route(message(1, 999, "hello", None));
         assert_eq!(result.action, InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, None);
@@ -568,7 +727,7 @@ mod tests {
 
     #[test]
     fn pair_code_exact_match_pairs_and_authorizes_future_messages() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         let code = bridge.new_pair_code();
 
         let result = bridge.route(message(1, 555, &format!("/pair {code}"), None));
@@ -592,7 +751,7 @@ mod tests {
 
     #[test]
     fn pair_code_match_is_case_insensitive() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         bridge.pending_pair_code = Some(fresh_pending_code("AB12CD"));
 
         let result = bridge.route(message(1, 42, "/pair ab12cd", None));
@@ -601,7 +760,7 @@ mod tests {
 
     #[test]
     fn pair_code_mismatch_is_ignored_and_stays_unauthorized() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         bridge.pending_pair_code = Some(fresh_pending_code("AB12CD"));
 
         let result = bridge.route(message(1, 42, "/pair WRONG1", None));
@@ -611,7 +770,7 @@ mod tests {
 
     #[test]
     fn reply_to_found_in_sent_pings_wins_over_last_pinged() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let reply_target = pane(1, 10);
         let different_last = pane(1, 99);
 
@@ -631,7 +790,7 @@ mod tests {
 
     #[test]
     fn reply_to_missing_from_sent_pings_falls_back_to_last_pinged() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let fallback = pane(1, 7);
         bridge.record_sent(1, fallback);
 
@@ -646,15 +805,17 @@ mod tests {
     }
 
     #[test]
-    fn no_reply_to_and_no_last_pinged_is_ignored() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+    fn no_reply_to_and_no_last_pinged_reports_no_target() {
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let result = bridge.route(message(1, 1, "hello", None));
-        assert_eq!(result.action, InboundAction::Ignore);
+        // Not `Ignore`: an authorized message that reaches nothing is answered,
+        // because silence reads as the bot being broken.
+        assert_eq!(result.action, InboundAction::NoTarget);
     }
 
     #[test]
     fn callback_with_known_token_responds_and_consumes_it() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let target = pane(1, 3);
         bridge.pending_permissions.insert(
             "tok-a".to_string(),
@@ -680,7 +841,7 @@ mod tests {
 
     #[test]
     fn callback_with_unknown_token_is_ignored_but_still_acked() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let result = bridge.route(callback(1, 1, "cbq-x", "never-registered"));
         assert_eq!(result.action, InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-x".to_string()));
@@ -688,7 +849,7 @@ mod tests {
 
     #[test]
     fn callback_from_unauthorized_chat_is_ignored_but_still_acked() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let result = bridge.route(callback(1, 2, "cbq-y", "irrelevant"));
         assert_eq!(result.action, InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-y".to_string()));
@@ -696,7 +857,7 @@ mod tests {
 
     #[test]
     fn disabled_bridge_ignores_everything_but_still_acks_callbacks() {
-        let mut bridge = BridgeCore::new(false, Some(1));
+        let mut bridge = BridgeCore::new(false, Some(1), 0);
 
         let msg_result = bridge.route(message(1, 1, "hello", None));
         assert_eq!(msg_result.action, InboundAction::Ignore);
@@ -709,7 +870,7 @@ mod tests {
 
     #[test]
     fn offset_advances_to_max_update_id_plus_one_across_ignored_updates() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         assert_eq!(bridge.current_offset(), 0);
 
         bridge.route(message(5, 999, "unauthorized", None));
@@ -726,7 +887,7 @@ mod tests {
 
     #[test]
     fn sent_pings_bound_evicts_oldest_entries() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let extra = 5;
 
         for i in 0..(SENT_PINGS_CAP + extra) as i64 {
@@ -757,7 +918,7 @@ mod tests {
 
     #[test]
     fn build_ping_plain_completion_has_no_keyboard() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
             header: "Turn finished".to_string(),
@@ -773,7 +934,7 @@ mod tests {
 
     #[test]
     fn build_ping_permission_registers_two_distinct_tokens() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
             header: "Approve this?".to_string(),
@@ -794,14 +955,14 @@ mod tests {
         });
 
         let keyboard = msg.keyboard.expect("keyboard present");
-        assert_eq!(keyboard.buttons.len(), 2);
-        assert_eq!(keyboard.buttons[0].0, "Allow");
-        assert_eq!(keyboard.buttons[1].0, "Reject");
-        assert_ne!(keyboard.buttons[0].1, keyboard.buttons[1].1);
+        assert_eq!(only_row(&keyboard).len(), 2);
+        assert_eq!(only_row(&keyboard)[0].0, "Allow");
+        assert_eq!(only_row(&keyboard)[1].0, "Reject");
+        assert_ne!(only_row(&keyboard)[0].1, only_row(&keyboard)[1].1);
 
         assert_eq!(bridge.pending_permissions.len(), 2);
-        let allow_token = &keyboard.buttons[0].1;
-        let reject_token = &keyboard.buttons[1].1;
+        let allow_token = &only_row(&keyboard)[0].1;
+        let reject_token = &only_row(&keyboard)[1].1;
         assert_eq!(
             bridge.pending_permissions.get(allow_token),
             Some(&(
@@ -827,7 +988,7 @@ mod tests {
         // execpolicy-amendment allow) alongside Reject. Every option the
         // agent offers must become its own button + token, not collapse
         // to a single Allow/Reject pair.
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
             header: "Approve this?".to_string(),
@@ -856,8 +1017,11 @@ mod tests {
         });
 
         let keyboard = msg.keyboard.expect("keyboard present");
-        assert_eq!(keyboard.buttons.len(), 4);
-        let labels: Vec<&str> = keyboard.buttons.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(only_row(&keyboard).len(), 4);
+        let labels: Vec<&str> = only_row(&keyboard)
+            .iter()
+            .map(|(l, _)| l.as_str())
+            .collect();
         assert_eq!(
             labels,
             vec![
@@ -869,11 +1033,11 @@ mod tests {
         );
 
         let tokens: std::collections::HashSet<&String> =
-            keyboard.buttons.iter().map(|(_, t)| t).collect();
+            only_row(&keyboard).iter().map(|(_, t)| t).collect();
         assert_eq!(tokens.len(), 4, "every button gets its own distinct token");
         assert_eq!(bridge.pending_permissions.len(), 4);
 
-        let execpolicy_token = &keyboard.buttons[2].1;
+        let execpolicy_token = &only_row(&keyboard)[2].1;
         assert_eq!(
             bridge.pending_permissions.get(execpolicy_token),
             Some(&(
@@ -886,7 +1050,7 @@ mod tests {
 
     #[test]
     fn pending_permissions_bound_evicts_oldest_entries() {
-        let mut bridge = BridgeCore::new(true, Some(1));
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
         let prompt = || PermissionPromptRef {
             perm_id: 1,
             buttons: vec![
@@ -908,8 +1072,8 @@ mod tests {
             permission: Some(prompt()),
         });
         let first_keyboard = first_msg.keyboard.expect("keyboard present");
-        let first_allow_token = first_keyboard.buttons[0].1.clone();
-        let first_reject_token = first_keyboard.buttons[1].1.clone();
+        let first_allow_token = only_row(&first_keyboard)[0].1.clone();
+        let first_reject_token = only_row(&first_keyboard)[1].1.clone();
 
         // Each call below registers 2 more tokens; enough calls to push
         // well past the cap (mirrors `sent_pings_bound_evicts_oldest_entries`).
@@ -965,7 +1129,7 @@ mod tests {
         // Regression check: a couple of wrong guesses (well under
         // `PAIR_CODE_MAX_ATTEMPTS`) must not invalidate the code — the
         // correct code still pairs afterward.
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         let code = bridge.new_pair_code();
 
         let result = bridge.route(message(1, 42, "/pair WRONG1", None));
@@ -980,7 +1144,7 @@ mod tests {
 
     #[test]
     fn pair_code_exhausted_by_max_attempts_rejects_even_correct_guess() {
-        let mut bridge = BridgeCore::new(true, None);
+        let mut bridge = BridgeCore::new(true, None, 0);
         let code = bridge.new_pair_code();
 
         for i in 0..PAIR_CODE_MAX_ATTEMPTS {

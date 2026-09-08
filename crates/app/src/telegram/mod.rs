@@ -6,6 +6,7 @@
 
 pub mod bridge;
 pub mod client;
+pub(crate) mod command;
 pub mod global;
 pub mod keychain;
 mod markdown;

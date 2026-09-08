@@ -76,13 +76,37 @@ pub enum UpdateKind {
     },
 }
 
-/// A single row of inline buttons attached to a `sendMessage` call.
-/// Kept to one row of `(label, callback_data)` pairs — the only shape
-/// the bridge ever sends (a permission prompt with one button per
-/// option the agent offered, typically Allow/Reject but sometimes more).
+/// Inline keyboard rows attached to a `sendMessage` call, outermost first.
+/// Telegram lays each inner vector out horizontally, so a long list must be
+/// split into rows or it renders as one unreadable strip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineKeyboard {
-    pub buttons: Vec<(String, String)>,
+    pub rows: Vec<Vec<(String, String)>>,
+}
+
+impl InlineKeyboard {
+    /// One horizontal row — what a permission prompt wants.
+    pub fn single_row(buttons: Vec<(String, String)>) -> Self {
+        Self {
+            rows: vec![buttons],
+        }
+    }
+}
+
+/// The `reply_markup` payload for a keyboard. Split out so its shape is
+/// testable without an HTTP call.
+pub(crate) fn inline_keyboard_json(keyboard: &InlineKeyboard) -> serde_json::Value {
+    let rows: Vec<serde_json::Value> = keyboard
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|(label, data)| serde_json::json!({ "text": label, "callback_data": data }))
+                .collect::<Vec<_>>()
+                .into()
+        })
+        .collect();
+    serde_json::json!({ "inline_keyboard": rows })
 }
 
 /// Body read cap, mirroring `daruda_agent::http::MAX_BODY_BYTES`.
@@ -102,6 +126,12 @@ const LONG_POLL_MARGIN: Duration = Duration::from_secs(5);
 /// `answerCallbackQuery`), which are expected to complete in well
 /// under a second on a normal connection.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Truncate a callback toast to Telegram's limit, counting `char`s so a
+/// multi-byte label never splits mid-character.
+fn clamp_callback_text(text: &str) -> String {
+    text.chars().take(ANSWER_CALLBACK_MAX_CHARS).collect()
+}
 
 fn base_url(token: &str, method: &str) -> String {
     format!("https://api.telegram.org/bot{token}/{method}")
@@ -172,12 +202,7 @@ pub fn send_message(
         payload["parse_mode"] = serde_json::json!(parse_mode);
     }
     if let Some(keyboard) = keyboard {
-        let row: Vec<serde_json::Value> = keyboard
-            .buttons
-            .into_iter()
-            .map(|(label, data)| serde_json::json!({ "text": label, "callback_data": data }))
-            .collect();
-        payload["reply_markup"] = serde_json::json!({ "inline_keyboard": [row] });
+        payload["reply_markup"] = inline_keyboard_json(&keyboard);
     }
 
     let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
@@ -190,11 +215,19 @@ pub fn send_message(
     parse_send_message_response(&body)
 }
 
+/// Upper bound Telegram documents for `answerCallbackQuery`'s `text`. A longer
+/// toast is rejected outright, and a rejected ack leaves the button spinning —
+/// so the cap is enforced here, at the one call site every caller goes through,
+/// rather than trusted to each of them.
+const ANSWER_CALLBACK_MAX_CHARS: usize = 200;
+
 /// Acknowledge a callback-query button tap. Telegram requires this call after
 /// handling a tap or the client shows a loading spinner on the button
 /// indefinitely. When `text` is `Some`, Telegram also shows it as a brief toast
 /// notification to the user — this is the immediate "your tap registered"
 /// feedback; without it the spinner just clears silently.
+///
+/// `text` is truncated to [`ANSWER_CALLBACK_MAX_CHARS`] on a char boundary.
 pub fn answer_callback(
     token: &str,
     callback_id: &str,
@@ -202,7 +235,7 @@ pub fn answer_callback(
 ) -> Result<(), ClientError> {
     let mut payload = serde_json::json!({ "callback_query_id": callback_id });
     if let Some(text) = text {
-        payload["text"] = serde_json::json!(text);
+        payload["text"] = serde_json::json!(clamp_callback_text(text));
     }
 
     let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
@@ -436,6 +469,46 @@ fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_callback_toast_is_clamped_on_a_char_boundary() {
+        // The regression: a listing label carries a project/lane/session title,
+        // so it can exceed the limit — and a rejected ack leaves the phone's
+        // button spinning until Telegram times it out.
+        let long = "한".repeat(500);
+        let clamped = clamp_callback_text(&long);
+        assert_eq!(clamped.chars().count(), ANSWER_CALLBACK_MAX_CHARS);
+        assert!(long.starts_with(&clamped), "a prefix, not a re-encoding");
+    }
+
+    #[test]
+    fn a_short_callback_toast_is_untouched() {
+        assert_eq!(clamp_callback_text("Allowed"), "Allowed");
+    }
+
+    #[test]
+    fn a_single_row_keyboard_serializes_as_one_row() {
+        let kb = InlineKeyboard::single_row(vec![("Allow".into(), "a".into())]);
+        assert_eq!(
+            inline_keyboard_json(&kb),
+            serde_json::json!({ "inline_keyboard": [[{ "text": "Allow", "callback_data": "a" }]] })
+        );
+    }
+
+    #[test]
+    fn multiple_rows_serialize_as_nested_arrays() {
+        let kb = InlineKeyboard {
+            rows: vec![
+                vec![("1".into(), "u1".into()), ("2".into(), "u2".into())],
+                vec![("3".into(), "u3".into())],
+            ],
+        };
+        let json = inline_keyboard_json(&kb);
+        let rows = json["inline_keyboard"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2, "two rows, not one flattened row");
+        assert_eq!(rows[0].as_array().expect("row").len(), 2);
+        assert_eq!(rows[1].as_array().expect("row").len(), 1);
+    }
 
     #[test]
     fn a_transport_error_never_carries_the_bot_token() {

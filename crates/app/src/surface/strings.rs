@@ -4229,6 +4229,16 @@ pub fn settings_telegram_generate_code() -> String {
 pub fn settings_telegram_pair_instructions(code: &str) -> String {
     rust_i18n::t!("settings.telegram_pair_instructions", code = code).into_owned()
 }
+/// Label above the copyable `/setcommands` block.
+pub fn settings_telegram_botfather_label() -> String {
+    rust_i18n::t!("settings.telegram_botfather_label").into_owned()
+}
+
+/// What to do with that block.
+pub fn settings_telegram_botfather_help() -> String {
+    rust_i18n::t!("settings.telegram_botfather_help").into_owned()
+}
+
 pub fn settings_telegram_unpair() -> String {
     rust_i18n::t!("settings.telegram_unpair").into_owned()
 }
@@ -4942,6 +4952,249 @@ pub fn telegram_permission_stale() -> String {
 /// Feedback when the target pane/session is gone (closed since the prompt sent).
 pub fn telegram_permission_gone() -> String {
     rust_i18n::t!("notification.telegram_permission_gone").into_owned()
+}
+
+// ── External control surface ────────────────────────────────────────────────
+//
+// The command replies a phone receives. Every one of these is a sentence a
+// person reads on a small screen, so they stay short and never carry the
+// diagnostic wording `ControlError`'s `Display` uses.
+
+/// Heading above a `/list` reply.
+pub fn control_listing_header() -> String {
+    rust_i18n::t!("control.listing_header").into_owned()
+}
+
+/// One `/list` row. `marker` flags the active worktree, `state` is the
+/// activity/health glyph, `ago` is the pre-formatted last-activity suffix
+/// (empty when unknown).
+pub fn control_listing_row(
+    ordinal: u32,
+    marker: &str,
+    state: &str,
+    name: &str,
+    title: &str,
+    ago: &str,
+) -> String {
+    rust_i18n::t!(
+        "control.listing_row",
+        ordinal = ordinal,
+        marker = marker,
+        state = state,
+        name = name,
+        title = title,
+        ago = ago
+    )
+    .into_owned()
+}
+
+/// Prefix marking the row that sits in the active worktree.
+pub fn control_listing_active_marker() -> String {
+    rust_i18n::t!("control.listing_active_marker").into_owned()
+}
+
+/// Stand-in for a session that has not titled itself yet.
+pub fn control_listing_untitled() -> String {
+    rust_i18n::t!("control.listing_untitled").into_owned()
+}
+
+/// How a chosen target is named back to the user: its lane path plus its title.
+/// A separate key from the listing row because the separator is a translator's
+/// call, not a call site's.
+pub fn control_target_label(name: &str, title: &str) -> String {
+    rust_i18n::t!("control.target_label", name = name, title = title).into_owned()
+}
+
+/// How a lane is addressed on a listing row.
+pub fn control_lane_path(project: &str, lane: &str) -> String {
+    rust_i18n::t!("control.lane_path", project = project, lane = lane).into_owned()
+}
+
+/// Last-activity suffix on a `/list` row; `span` comes from
+/// [`format_duration_compact`].
+pub fn control_listing_ago(span: &str) -> String {
+    rust_i18n::t!("control.listing_ago", span = span).into_owned()
+}
+
+/// Trailing line when a listing was cut to fit Telegram's message limit.
+pub fn control_listing_omitted(count: u32) -> String {
+    rust_i18n::t!("control.listing_omitted", count = count).into_owned()
+}
+
+pub fn control_listing_empty() -> String {
+    rust_i18n::t!("control.listing_empty").into_owned()
+}
+
+/// Answer to a button tapped on a listing a newer one has superseded. Distinct
+/// from the permission-prompt's stale wording — the two are different objects
+/// and the phone has no other way to tell them apart.
+pub fn control_listing_stale() -> String {
+    rust_i18n::t!("control.listing_stale").into_owned()
+}
+
+pub fn control_state_idle() -> String {
+    rust_i18n::t!("control.state_idle").into_owned()
+}
+
+pub fn control_state_working() -> String {
+    rust_i18n::t!("control.state_working").into_owned()
+}
+
+pub fn control_state_awaiting_permission() -> String {
+    rust_i18n::t!("control.state_awaiting_permission").into_owned()
+}
+
+pub fn control_state_error() -> String {
+    rust_i18n::t!("control.state_error").into_owned()
+}
+
+pub fn control_state_unavailable() -> String {
+    rust_i18n::t!("control.state_unavailable").into_owned()
+}
+
+/// Label on a `/list` row's inline button.
+pub fn control_button_label(ordinal: u32) -> String {
+    rust_i18n::t!("control.button_label", ordinal = ordinal).into_owned()
+}
+
+pub fn control_selected(name: &str) -> String {
+    rust_i18n::t!("control.selected", name = name).into_owned()
+}
+
+pub fn control_selection_cleared() -> String {
+    rust_i18n::t!("control.selection_cleared").into_owned()
+}
+
+/// Said when the target was cleared *for* the user because the pane vanished,
+/// rather than because they asked. Without it the next plain message goes
+/// somewhere unexpected with no warning.
+pub fn control_selection_dropped() -> String {
+    rust_i18n::t!("control.selection_dropped").into_owned()
+}
+
+pub fn control_sent_delivered() -> String {
+    rust_i18n::t!("control.sent_delivered").into_owned()
+}
+
+pub fn control_sent_queued() -> String {
+    rust_i18n::t!("control.sent_queued").into_owned()
+}
+
+/// Said when the text was a local slash command the pane ran itself instead of
+/// sending. Named rather than folded into "sent", because today's only such
+/// command is `/clear`, which resets the session.
+pub fn control_sent_handled_locally() -> String {
+    rust_i18n::t!("control.sent_handled_locally").into_owned()
+}
+
+pub fn control_stopped() -> String {
+    rust_i18n::t!("control.stopped").into_owned()
+}
+
+pub fn control_stop_already_idle() -> String {
+    rust_i18n::t!("control.stop_already_idle").into_owned()
+}
+
+pub fn control_brief(working: u32, awaiting: u32, error: u32, total: u32) -> String {
+    rust_i18n::t!(
+        "control.brief",
+        working = working,
+        awaiting = awaiting,
+        error = error,
+        total = total
+    )
+    .into_owned()
+}
+
+pub fn control_flow_list_row(name: &str, origin: &str) -> String {
+    rust_i18n::t!("control.flow_list_row", name = name, origin = origin).into_owned()
+}
+
+pub fn control_flow_list_empty() -> String {
+    rust_i18n::t!("control.flow_list_empty").into_owned()
+}
+
+pub fn control_flow_origin_repo() -> String {
+    rust_i18n::t!("control.flow_origin_repo").into_owned()
+}
+
+pub fn control_flow_origin_project() -> String {
+    rust_i18n::t!("control.flow_origin_project").into_owned()
+}
+
+pub fn control_flow_origin_global() -> String {
+    rust_i18n::t!("control.flow_origin_global").into_owned()
+}
+
+pub fn control_flow_started(name: &str) -> String {
+    rust_i18n::t!("control.flow_started", name = name).into_owned()
+}
+
+pub fn control_error_unknown_command(input: &str) -> String {
+    rust_i18n::t!("control.error_unknown_command", input = input).into_owned()
+}
+
+pub fn control_error_unknown_command_did_you_mean(input: &str, suggestion: &str) -> String {
+    rust_i18n::t!(
+        "control.error_unknown_command_did_you_mean",
+        input = input,
+        suggestion = suggestion
+    )
+    .into_owned()
+}
+
+pub fn control_error_missing_argument(usage: &str) -> String {
+    rust_i18n::t!("control.error_missing_argument", usage = usage).into_owned()
+}
+
+pub fn control_error_ordinal_not_found(ordinal: u32) -> String {
+    rust_i18n::t!("control.error_ordinal_not_found", ordinal = ordinal).into_owned()
+}
+
+pub fn control_error_bad_ordinal(input: &str) -> String {
+    rust_i18n::t!("control.error_bad_ordinal", input = input).into_owned()
+}
+
+pub fn control_error_no_target() -> String {
+    rust_i18n::t!("control.error_no_target").into_owned()
+}
+
+pub fn control_error_target_gone() -> String {
+    rust_i18n::t!("control.error_target_gone").into_owned()
+}
+
+pub fn control_error_flow_not_found(name: &str) -> String {
+    rust_i18n::t!("control.error_flow_not_found", name = name).into_owned()
+}
+
+pub fn control_error_flow_locked() -> String {
+    rust_i18n::t!("control.error_flow_locked").into_owned()
+}
+
+pub fn control_error_flow_refused(name: &str) -> String {
+    rust_i18n::t!("control.error_flow_refused", name = name).into_owned()
+}
+
+pub fn control_error_flow_needs_interaction(name: &str) -> String {
+    rust_i18n::t!("control.error_flow_needs_interaction", name = name).into_owned()
+}
+
+pub fn control_error_no_active_lane() -> String {
+    rust_i18n::t!("control.error_no_active_lane").into_owned()
+}
+
+pub fn control_usage_use() -> String {
+    rust_i18n::t!("control.usage_use").into_owned()
+}
+
+pub fn control_usage_say() -> String {
+    rust_i18n::t!("control.usage_say").into_owned()
+}
+
+/// The `/setcommands` block a user pastes into BotFather. Fixed English —
+/// it is registered with Telegram, not shown in daruda's own UI.
+pub fn control_botfather_commands() -> String {
+    rust_i18n::t!("control.botfather_commands").into_owned()
 }
 
 /// Format a `Duration` as a compact, human-friendly span for the
@@ -6129,6 +6382,71 @@ mod tests {
         assert!(
             missing_in_ko.is_empty() && missing_in_en.is_empty(),
             "i18n key drift between en.yml and ko.yml:\n  missing in ko.yml: {missing_in_ko:?}\n  missing in en.yml: {missing_in_en:?}"
+        );
+    }
+
+    /// Recursively collect `dotted.key -> the set of %{placeholder} names it
+    /// interpolates`, for every scalar leaf.
+    fn collect_locale_placeholders(
+        value: &yaml_serde::Value,
+        prefix: &str,
+        out: &mut std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    ) {
+        match value {
+            yaml_serde::Value::Mapping(map) => {
+                for (k, v) in map {
+                    let key = k.as_str().unwrap_or("<non-string-key>");
+                    let path = if prefix.is_empty() {
+                        key.to_string()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    collect_locale_placeholders(v, &path, out);
+                }
+            }
+            yaml_serde::Value::String(text) => {
+                let mut names = std::collections::BTreeSet::new();
+                let mut rest = text.as_str();
+                while let Some(open) = rest.find("%{") {
+                    rest = &rest[open + 2..];
+                    let Some(close) = rest.find('}') else { break };
+                    names.insert(rest[..close].trim().to_string());
+                    rest = &rest[close + 1..];
+                }
+                out.insert(prefix.to_string(), names);
+            }
+            _ => {}
+        }
+    }
+
+    /// A key present in both files but interpolating different placeholders is
+    /// invisible to [`locale_en_ko_key_parity`], compiles, and renders a
+    /// literal `%{name}` to whoever is running that locale. `rust_i18n`
+    /// substitutes by name at the call site, so a translated string that
+    /// renamed or dropped one is a runtime-only defect no other check catches.
+    #[test]
+    fn locale_en_ko_placeholder_parity() {
+        let en: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/en.yml")).unwrap();
+        let ko: yaml_serde::Value =
+            yaml_serde::from_str(include_str!("../../locales/ko.yml")).unwrap();
+
+        let mut en_ph = std::collections::BTreeMap::new();
+        let mut ko_ph = std::collections::BTreeMap::new();
+        collect_locale_placeholders(&en, "", &mut en_ph);
+        collect_locale_placeholders(&ko, "", &mut ko_ph);
+
+        let mismatched: Vec<String> = en_ph
+            .iter()
+            .filter_map(|(key, en_names)| {
+                let ko_names = ko_ph.get(key)?;
+                (en_names != ko_names).then(|| format!("{key}: en {en_names:?} vs ko {ko_names:?}"))
+            })
+            .collect();
+        assert!(
+            mismatched.is_empty(),
+            "i18n placeholder drift between en.yml and ko.yml:\n  {}",
+            mismatched.join("\n  ")
         );
     }
 

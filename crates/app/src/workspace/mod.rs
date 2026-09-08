@@ -18,6 +18,7 @@ mod claude_status_aggregate;
 pub(in crate::workspace) mod command;
 mod config_ops;
 mod config_sync;
+mod control_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;
 mod dnd_ops;

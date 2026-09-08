@@ -1,0 +1,487 @@
+//! `impl Workspace` for the external control surface.
+//!
+//! Two shapes only: a read-only snapshot the app-level dispatcher aggregates
+//! across windows, and targeted actions that delegate to the existing agent
+//! chat ops. Nothing here is a new mutation site — every write goes through a
+//! method that already owned it.
+
+use gpui::{App, Context};
+
+use std::path::Path;
+
+use crate::control::result::{
+    Activity, ChatSummary, ControlError, FlowEntry, FlowOriginKind, Health, SendDisposition,
+    StopDisposition, sanitize_title,
+};
+use crate::telegram::bridge::PaneRef;
+use crate::workspace::Workspace;
+use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
+use crate::workspace::flow_request::FlowSelection;
+use crate::workspace::main_area::agent_chat_pane::view::{
+    ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch,
+};
+use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_store::project::{LaneRef, ProjectId};
+
+impl Workspace {
+    /// Every agent-chat pane in this window, paired with the lane it lives in.
+    ///
+    /// Read-only on purpose: the caller runs this inside
+    /// `WindowRegistry::for_each_workspace`, which is already inside a
+    /// `Workspace::update`. Mutating an entity there, or reading one twice,
+    /// is the re-entrancy panic in CLAUDE.md pitfall 5.
+    pub(crate) fn control_snapshot(&self, cx: &App) -> Vec<(LaneRef, ChatSummary)> {
+        let active = self.active;
+        let uuid = self.uuid();
+        self.main_area
+            .runtimes
+            .iter()
+            .flat_map(|(lane_ref, rt)| {
+                // Lane-scoped, so it is resolved once per lane rather than per
+                // pane: daruda tracks "not looked at yet" on the lane row.
+                let unread = self.lane_for(*lane_ref).is_some_and(|l| l.is_unread);
+                rt.panes.iter().filter_map(move |pane| {
+                    let v = pane.agent_chat_view()?.read(cx);
+                    Some((
+                        *lane_ref,
+                        ChatSummary {
+                            target: PaneRef {
+                                workspace: uuid,
+                                pane: pane.id,
+                            },
+                            is_active_lane: *lane_ref == active,
+                            activity: map_activity(v.activity_state()),
+                            health: map_health(&v.status),
+                            unread,
+                            title: v.activity_title().and_then(sanitize_title),
+                            last_activity: last_activity_unix(v),
+                        },
+                    ))
+                })
+            })
+            .collect()
+    }
+
+    /// This project's display name, or the empty string when the id no longer
+    /// resolves — a listing row is grouped by name, so a missing project must
+    /// not drop the row it owns.
+    pub(crate) fn control_project_name(&self, id: ProjectId) -> String {
+        self.project_for(id)
+            .map(|p| p.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// This lane's display name. Same fallback reasoning as
+    /// [`Self::control_project_name`].
+    pub(crate) fn control_lane_name(&self, target: LaneRef) -> String {
+        self.lane_for(target)
+            .map(|l| l.display_name())
+            .unwrap_or_default()
+    }
+
+    /// This lane's position in its project's tab strip — the listing's sort
+    /// key, so ordinals follow the order the left dock shows.
+    pub(crate) fn control_lane_tab_order(&self, target: LaneRef) -> u32 {
+        self.lane_for(target).map(|l| l.tab_order).unwrap_or(0)
+    }
+
+    /// Send a prompt to one pane. Delegates to the existing Telegram-origin
+    /// prompt path so slash classification and post-turn flush stay on their
+    /// single funnel; only the disposition is surfaced instead of relayed.
+    ///
+    /// The `None` arm is not a connection failure. Having already excluded a
+    /// missing pane, the only way that funnel declines to dispatch is a local
+    /// slash command it handled itself — today `/clear`, which *resets the
+    /// session*. Reporting that as "sent" would hide a destroyed transcript,
+    /// so it gets its own disposition.
+    pub(crate) fn control_say(
+        &mut self,
+        pane: PaneId,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> Result<SendDisposition, ControlError> {
+        if self.agent_chat_view(pane).is_none() {
+            return Err(ControlError::TargetGone);
+        }
+        match self.send_agent_prompt_text_from_telegram(pane, text, cx) {
+            Some(PromptDispatch::SentNow) => Ok(SendDisposition::Delivered),
+            Some(PromptDispatch::Queued) => Ok(SendDisposition::Queued),
+            None => Ok(SendDisposition::HandledLocally),
+        }
+    }
+
+    /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
+    /// owns the settle edge and the completion firing, so nothing here
+    /// duplicates the activity state machine.
+    pub(crate) fn control_stop(
+        &mut self,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Result<StopDisposition, ControlError> {
+        if self.agent_chat_view(pane).is_none() {
+            return Err(ControlError::TargetGone);
+        }
+        if self.cancel_agent_turn_if_active(pane, cx) {
+            Ok(StopDisposition::Stopped)
+        } else {
+            Ok(StopDisposition::AlreadyIdle)
+        }
+    }
+
+    /// Every flow the active lane can run, in the order the flows panel shows
+    /// them (by file name, whatever scope each came from).
+    ///
+    /// `FlowSources::list_flows` already decided which file a name resolves
+    /// to — the repository's copy shadows the person's — so this list holds
+    /// one entry per name and an ambiguous name is unrepresentable.
+    pub(crate) fn control_flow_list(&self) -> Vec<FlowEntry> {
+        self.flow_sources()
+            .map(|sources| {
+                sources
+                    .list_flows()
+                    .into_iter()
+                    .map(|found| FlowEntry {
+                        name: flow_label(&found.path),
+                        origin: map_origin(found.origin),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Start `name` in the active lane.
+    ///
+    /// Every refusal is taken *before* dispatch, because a refusal after it
+    /// surfaces as a desktop toast the caller never sees and would leave a
+    /// phone told a run started that never did. A flow is lane-scoped, so with
+    /// no active lane there is nowhere to put it; one that would open a desktop
+    /// dialog (an `ask` permission policy, or a profile question) would hang a
+    /// caller that cannot answer it; a lane runs one flow at a time, enforced
+    /// by an on-disk lock; and a flow that does not pass its own static checks
+    /// would be refused on submit.
+    pub(crate) fn control_flow_run(
+        &mut self,
+        name: &str,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Result<FlowEntry, ControlError> {
+        let Some(cwd) = self.active_lane_root() else {
+            return Err(ControlError::NoActiveLane);
+        };
+        let found = self
+            .resolve_flow_name(name)
+            .ok_or_else(|| ControlError::FlowNotFound {
+                name: name.to_string(),
+            })?;
+        let label = flow_label(&found.path);
+        if needs_desktop_answer(&found.path) {
+            return Err(ControlError::FlowNeedsInteraction { name: label });
+        }
+        // Both halves of "a run is already going": the on-disk lock catches
+        // another process, and `runs` catches this one. Asking only the lock
+        // leaves the guard inside `run_flow_at` to answer the second case by
+        // opening its "stop it?" picker — a desktop dialog raised by a phone
+        // command, which is the one thing this surface must never do.
+        if self.lane_holder(&cwd).is_some() || self.runs.is_running(self.active) {
+            return Err(ControlError::FlowLocked { name: label });
+        }
+        // Everything the run would refuse *after* dispatch surfaces on the
+        // desktop as a toast, which a phone never sees — so the static verdict
+        // is taken here, where it can still become an answer. Same check
+        // `Validate Flow…` runs: no lock, no run directory.
+        let runnable = matches!(
+            self.check_flow(&found.path, None, cx),
+            Ok(issues) if issues.is_empty()
+        );
+        if !runnable {
+            return Err(ControlError::FlowRefused { name: label });
+        }
+
+        let entry = FlowEntry {
+            name: label,
+            origin: map_origin(found.origin),
+        };
+        // The guard reads the lock again, so a run that took it in between is
+        // still caught — and answered, rather than reported as started.
+        if !self.run_flow_at(
+            &found.path,
+            crate::workspace::command::flow_picker::FlowPurpose::Run,
+            FlowSelection::default(),
+            window,
+            cx,
+        ) {
+            return Err(ControlError::FlowLocked { name: entry.name });
+        }
+        Ok(entry)
+    }
+
+    /// The flow `name` points at, accepting either the file name as written
+    /// on disk or its stem — a phone keyboard should not have to type
+    /// `.yaml`.
+    fn resolve_flow_name(&self, name: &str) -> Option<FoundFlow> {
+        let sources = self.flow_sources()?;
+        sources.list_flows().into_iter().find(|found| {
+            let file = found.path.file_name().map(|n| n.to_string_lossy());
+            let stem = found.path.file_stem().map(|n| n.to_string_lossy());
+            file.as_deref() == Some(name) || stem.as_deref() == Some(name)
+        })
+    }
+}
+
+/// The single conversion between the workspace-private flow origin and the
+/// control surface's own enum, for the same reason [`map_activity`] exists.
+fn map_origin(origin: FlowOrigin) -> FlowOriginKind {
+    match origin {
+        FlowOrigin::Repo => FlowOriginKind::Repo,
+        FlowOrigin::Project => FlowOriginKind::Project,
+        FlowOrigin::Global => FlowOriginKind::Global,
+    }
+}
+
+/// Would running this flow put a dialog on the desktop that only a person at
+/// the machine can answer? Two shapes do: an agent node (or the repair agent)
+/// whose permission policy is `ask`, and a file declaring profiles, which
+/// makes the picker ask which one to run.
+///
+/// A file that cannot be read or parsed answers `false`: the run that follows
+/// fails on the same read and names it properly, and refusing here would
+/// report a parse error as an interaction problem.
+fn needs_desktop_answer(path: &Path) -> bool {
+    use daruda_flow::model::{NodeKind, PermissionPolicy};
+
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if daruda_flow::load::profiles(&text).is_ok_and(|p| !p.is_empty()) {
+        return true;
+    }
+    let Ok(inspected) = daruda_flow::inspect(&text, None) else {
+        return false;
+    };
+    let flow = inspected.loaded.flow();
+    let node_asks = flow.nodes.iter().any(|node| {
+        matches!(&node.kind, NodeKind::Agent(body) if body.agent.permission == PermissionPolicy::Ask)
+    });
+    let repair_asks = flow
+        .default_agent
+        .as_ref()
+        .is_some_and(|agent| agent.permission == PermissionPolicy::Ask);
+    node_asks || repair_asks
+}
+
+/// The single conversion between the workspace-private activity state and the
+/// control surface's own enum. Keeping it here is what lets
+/// `control/result.rs` stay outside `crate::workspace`.
+fn map_activity(state: ActivityState) -> Activity {
+    match state {
+        ActivityState::Idle => Activity::Idle,
+        ActivityState::Working => Activity::Working,
+        ActivityState::AwaitingPermission => Activity::AwaitingPermission,
+    }
+}
+
+/// Whether the pane can be talked to. A dormant `Idle` has no session yet and
+/// a phone prompt would only wake it on the desktop's terms, so it reports
+/// `Unavailable` rather than a healthy idle.
+fn map_health(status: &AgentSessionStatus) -> Health {
+    match status {
+        AgentSessionStatus::Error { .. } => Health::Error,
+        AgentSessionStatus::Idle => Health::Unavailable,
+        AgentSessionStatus::PreparingRuntime(_)
+        | AgentSessionStatus::Connecting
+        | AgentSessionStatus::Handshaking(_)
+        | AgentSessionStatus::Connected => Health::Ok,
+    }
+}
+
+/// The pane's last-activity stamp as unix seconds. The view keeps it as
+/// RFC 3339 for display; a control result is consumed by machines as often as
+/// by people, so it carries the numeric form.
+fn last_activity_unix(view: &AgentChatView) -> Option<u64> {
+    let raw = view.session_updated_at.as_deref()?;
+    let parsed = chrono::DateTime::parse_from_rfc3339(raw).ok()?;
+    u64::try_from(parsed.timestamp()).ok()
+}
+
+/// Scaffolding for the control-surface tests, which need scenarios the pane
+/// ops can reach but `crate::test_support` cannot — everything driven below is
+/// `pub(in crate::workspace)` at its source.
+#[cfg(test)]
+impl Workspace {
+    pub(crate) fn open_agent_chat_pane_for_test(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> PaneId {
+        self.open_agent_chat_pane(window, cx);
+        self.active_runtime().panes.last().expect("pane opened").id
+    }
+
+    /// Add `count` lanes to the active project, each holding one agent-chat
+    /// pane, and return their pane ids. What makes `main_area.runtimes` big
+    /// enough for hash iteration order to diverge from the order a listing
+    /// must report.
+    pub(crate) fn open_agent_chat_panes_in_fresh_lanes_for_test(
+        &mut self,
+        count: u32,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<PaneId> {
+        let project = self.active.project;
+        let root = self
+            .project_for(project)
+            .map(|p| p.root.clone())
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+        (0..count)
+            .map(|i| {
+                let lane_id = self.alloc_id();
+                let mut lane = crate::lane::Lane::default_for_project(lane_id, root.clone());
+                lane.tab_order = i + 1;
+                let target = LaneRef {
+                    project,
+                    lane: lane_id,
+                };
+                self.project_for_mut(project)
+                    .expect("active project")
+                    .lanes
+                    .push(lane);
+                self.activate_lane(target, window, cx);
+                self.open_agent_chat_pane_for_test(window, cx)
+            })
+            .collect()
+    }
+
+    /// Drive one pane into each of the three states `/brief` counts. Each
+    /// writes the field the sanctioned predicate reads — `activity_state`
+    /// folds turn + permissions, and `map_health` reads `status`.
+    pub(crate) fn set_pane_working_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, _| v.set_turn_in_flight());
+    }
+
+    pub(crate) fn set_pane_awaiting_permission_for_test(
+        &mut self,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, _| {
+            v.pending_permissions.insert(1);
+        });
+    }
+
+    pub(crate) fn set_pane_errored_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, cx| {
+            v.set_error("boom".into(), daruda_acp::Remedy::NoneAvailable, cx)
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::workspace_with_agent_chat;
+
+    #[test]
+    fn health_separates_a_dead_session_from_one_that_never_started() {
+        assert_eq!(
+            map_health(&AgentSessionStatus::Error {
+                message: "boom".into(),
+                remedy: daruda_acp::Remedy::NoneAvailable,
+            }),
+            Health::Error
+        );
+        assert_eq!(map_health(&AgentSessionStatus::Idle), Health::Unavailable);
+        assert_eq!(map_health(&AgentSessionStatus::Connected), Health::Ok);
+        assert_eq!(map_health(&AgentSessionStatus::Connecting), Health::Ok);
+    }
+
+    #[test]
+    fn every_activity_state_maps_to_its_own_control_variant() {
+        assert_eq!(map_activity(ActivityState::Idle), Activity::Idle);
+        assert_eq!(map_activity(ActivityState::Working), Activity::Working);
+        assert_eq!(
+            map_activity(ActivityState::AwaitingPermission),
+            Activity::AwaitingPermission
+        );
+    }
+
+    #[gpui::test]
+    async fn snapshot_lists_agent_chat_panes_only(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.read_with(cx, |ws, cx| {
+            let snap = ws.control_snapshot(cx);
+            assert_eq!(
+                snap.len(),
+                1,
+                "one agent chat pane, terminal panes excluded"
+            );
+            assert_eq!(snap[0].1.target.pane, fixture.pane());
+            assert_eq!(snap[0].1.target.workspace, ws.uuid());
+            assert!(
+                snap[0].1.is_active_lane,
+                "the pane opened in the active lane"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn snapshot_carries_the_session_title(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(fixture.pane()).expect("view").clone();
+            view.update(cx, |v, _| {
+                v.set_session_title_for_test("restore invariants")
+            });
+        });
+        fixture.workspace.read_with(cx, |ws, cx| {
+            let snap = ws.control_snapshot(cx);
+            assert_eq!(snap[0].1.title.as_deref(), Some("restore invariants"));
+        });
+    }
+
+    /// The fixture pane has no live session, so the prompt lands in the pane
+    /// queue — which is exactly the branch `Queued` exists to report rather
+    /// than pass off as delivered.
+    #[gpui::test]
+    async fn say_on_a_pane_with_no_live_session_reports_queued(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.control_say(fixture.pane(), "hello".into(), cx),
+                Ok(SendDisposition::Queued)
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn say_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.control_say(9_999, "hello".into(), cx),
+                Err(ControlError::TargetGone)
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn stop_on_an_idle_pane_reports_already_idle(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.control_stop(fixture.pane(), cx),
+                Ok(StopDisposition::AlreadyIdle)
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn stop_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert_eq!(ws.control_stop(9_999, cx), Err(ControlError::TargetGone));
+        });
+    }
+}

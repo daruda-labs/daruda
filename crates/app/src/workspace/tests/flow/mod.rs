@@ -6,6 +6,7 @@
 //! a workspace with a flow in it, and the flow texts — is here.
 
 mod ask;
+mod control;
 mod files;
 mod graph;
 mod inspector;

@@ -2306,6 +2306,31 @@ fn telegram_enabled_toggle_round_trips_through_validate(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+async fn copy_botfather_commands_writes_the_registration_block(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    cx.update(|cx| {
+        win.update(cx, |w, cx| w.copy_botfather_commands_for_test(cx));
+    });
+
+    let text = cx
+        .read_from_clipboard()
+        .expect("clipboard populated")
+        .text()
+        .expect("clipboard item is text");
+    // One line per command daruda answers, in the `name - description` shape
+    // BotFather's /setcommands parses.
+    assert_eq!(text.lines().count(), 6, "one line per command: {text}");
+    for name in ["list", "use", "say", "stop", "flow", "brief"] {
+        assert!(
+            text.lines().any(|l| l.starts_with(&format!("{name} - "))),
+            "/{name} must be registered: {text}"
+        );
+    }
+    win.read_with(cx, |w, _cx| assert!(w.telegram_botfather_copied()));
+}
+
+#[gpui::test]
 async fn copy_telegram_pair_command_writes_clipboard_and_reverts_label(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
 

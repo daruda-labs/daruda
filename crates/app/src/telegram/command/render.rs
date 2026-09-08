@@ -1,0 +1,350 @@
+//! Turning a control outcome into the message a phone shows.
+//!
+//! Separate from the conversation state next door because the two change for
+//! different reasons: what an ordinal points at is a protocol question, and
+//! how a row reads on a small screen is a presentation one. The renderer is
+//! handed [`CommandState`] read-only, for the two things a reply needs from
+//! it — a row's display name, and the callback token behind its button.
+
+use super::{Absorbed, CommandState, ListingRow};
+use crate::control::result::{
+    Activity, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowOriginKind, Health,
+    Listing, SendDisposition, StopDisposition,
+};
+use crate::control::spec::{Ordinal, ParseError};
+use crate::surface::strings as s;
+use crate::telegram::client::InlineKeyboard;
+
+/// Telegram's `sendMessage` text limit.
+const TELEGRAM_MESSAGE_MAX_BYTES: usize = 4096;
+
+/// Room kept for the trailing "and N more" line when a listing overflows.
+const OVERFLOW_RESERVE_BYTES: usize = 128;
+
+/// Buttons per keyboard row. Telegram lays a row out horizontally, so a wider
+/// row shrinks each label past what a thumb can hit.
+const BUTTONS_PER_ROW: usize = 3;
+
+/// Cap on listing buttons. Past this the keyboard is taller than the message
+/// it belongs to; the ordinals still work by typing `/use <n>`.
+const LISTING_BUTTON_MAX: usize = 24;
+
+/// A rendered command reply, ready for the outbound send path.
+pub(crate) struct RenderedReply {
+    pub text: String,
+    pub keyboard: Option<InlineKeyboard>,
+}
+
+/// Render a command outcome for the phone. `state` supplies the ordinals the
+/// listing buttons encode, so it is passed in already updated; `absorbed`
+/// carries anything [`absorb`](super::absorb) changed on the way that the
+/// outcome alone does not say.
+pub(crate) fn render(
+    outcome: &ControlOutcome,
+    absorbed: Absorbed,
+    state: &CommandState,
+) -> RenderedReply {
+    let mut reply = match outcome {
+        Ok(result) => render_result(result, state),
+        Err(error) => RenderedReply {
+            text: render_error(error),
+            keyboard: None,
+        },
+    };
+    if absorbed == Absorbed::SelectionDropped {
+        reply.text.push('\n');
+        reply.text.push_str(&s::control_selection_dropped());
+    }
+    reply
+}
+
+/// Render a parse failure. Separate from [`render_error`] because a parse
+/// failure never reached the executor and so has no `ControlError` form —
+/// mapping it to one would invent a code no executor produced.
+pub(crate) fn render_parse_error(error: &ParseError) -> RenderedReply {
+    let text = match error {
+        // The adapter routes this to plain text and never renders it; a
+        // sentence is still better than an empty message if it ever arrives.
+        ParseError::NotACommand => s::control_error_no_target(),
+        ParseError::Unknown {
+            input,
+            suggestion: Some(suggestion),
+        } => s::control_error_unknown_command_did_you_mean(input, suggestion),
+        ParseError::Unknown {
+            input,
+            suggestion: None,
+        } => s::control_error_unknown_command(input),
+        ParseError::MissingArgument { command } => {
+            s::control_error_missing_argument(&usage_for(command))
+        }
+        ParseError::BadOrdinal { input } => s::control_error_bad_ordinal(input),
+    };
+    RenderedReply {
+        text,
+        keyboard: None,
+    }
+}
+
+fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply {
+    match result {
+        ControlResult::Listing(listing) => render_listing(listing, state),
+        ControlResult::Selected { target: None } => plain(s::control_selection_cleared()),
+        ControlResult::Selected {
+            target: Some(summary),
+        } => plain(s::control_selected(
+            &state
+                .label_for(summary.target)
+                .unwrap_or_else(|| title_of(summary)),
+        )),
+        ControlResult::Sent { disposition, .. } => plain(match disposition {
+            SendDisposition::Delivered => s::control_sent_delivered(),
+            SendDisposition::Queued => s::control_sent_queued(),
+            SendDisposition::HandledLocally => s::control_sent_handled_locally(),
+        }),
+        ControlResult::Stopped { disposition, .. } => plain(match disposition {
+            StopDisposition::Stopped => s::control_stopped(),
+            StopDisposition::AlreadyIdle => s::control_stop_already_idle(),
+        }),
+        ControlResult::FlowList { flows } if flows.is_empty() => {
+            plain(s::control_flow_list_empty())
+        }
+        ControlResult::FlowList { flows } => plain(
+            flows
+                .iter()
+                .map(|e| s::control_flow_list_row(&e.name, &origin_label(e.origin)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+        ControlResult::FlowStarted { name, .. } => plain(s::control_flow_started(name)),
+        ControlResult::Brief(brief) => plain(s::control_brief(
+            brief.working,
+            brief.awaiting_permission,
+            brief.error,
+            brief.total,
+        )),
+    }
+}
+
+fn render_error(error: &ControlError) -> String {
+    match error {
+        ControlError::OrdinalNotFound { ordinal } => s::control_error_ordinal_not_found(*ordinal),
+        ControlError::NoTargetSelected => s::control_error_no_target(),
+        ControlError::TargetGone => s::control_error_target_gone(),
+        ControlError::FlowNotFound { name } => s::control_error_flow_not_found(name),
+        ControlError::FlowLocked { .. } => s::control_error_flow_locked(),
+        ControlError::FlowRefused { name } => s::control_error_flow_refused(name),
+        ControlError::FlowNeedsInteraction { name } => {
+            s::control_error_flow_needs_interaction(name)
+        }
+        ControlError::NoActiveLane => s::control_error_no_active_lane(),
+    }
+}
+
+/// Assemble the listing one row at a time, stopping before the byte budget
+/// rather than truncating mid-row: a half-written row would show an ordinal
+/// the user could then type at a pane it does not name.
+fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
+    // The rows come from `state`, not from `listing`: `absorb` recorded them a
+    // moment ago, and flattening a second time here would be a second answer to
+    // "what is row 3" for the ordinals to disagree with.
+    let rows: Vec<(u32, &ListingRow)> = state
+        .rows()
+        .iter()
+        .enumerate()
+        .map(|(i, row)| (i as u32 + 1, row))
+        .collect();
+    if rows.is_empty() {
+        return plain(s::control_listing_empty());
+    }
+
+    let mut text = s::control_listing_header();
+    let budget = TELEGRAM_MESSAGE_MAX_BYTES - OVERFLOW_RESERVE_BYTES;
+    let mut shown = 0usize;
+    for (ordinal, row) in &rows {
+        let line = format!("\n{}", row_text(*ordinal, row));
+        if text.len() + line.len() > budget {
+            break;
+        }
+        text.push_str(&line);
+        shown += 1;
+    }
+
+    let omitted = rows.len() - shown + listing.omitted as usize;
+    if omitted > 0 {
+        text.push('\n');
+        text.push_str(&s::control_listing_omitted(omitted as u32));
+    }
+
+    let buttons: Vec<(String, String)> = rows
+        .iter()
+        .take(shown.min(LISTING_BUTTON_MAX))
+        .filter_map(|(ordinal, _)| {
+            let token = state.listing_token(Ordinal(*ordinal))?;
+            Some((s::control_button_label(*ordinal), token))
+        })
+        .collect();
+    let keyboard = (!buttons.is_empty()).then(|| InlineKeyboard {
+        rows: buttons
+            .chunks(BUTTONS_PER_ROW)
+            .map(<[(String, String)]>::to_vec)
+            .collect(),
+    });
+
+    RenderedReply { text, keyboard }
+}
+
+fn row_text(ordinal: u32, row: &ListingRow) -> String {
+    let marker = if row.summary.is_active_lane {
+        s::control_listing_active_marker()
+    } else {
+        String::new()
+    };
+    s::control_listing_row(
+        ordinal,
+        &marker,
+        &state_glyph(&row.summary),
+        &row.name,
+        &title_of(&row.summary),
+        &ago_of(&row.summary),
+    )
+}
+
+/// One glyph for the pane's condition. Health wins over activity: a pane that
+/// cannot be talked to is not meaningfully idle.
+fn state_glyph(summary: &ChatSummary) -> String {
+    match summary.health {
+        Health::Error => s::control_state_error(),
+        Health::Unavailable => s::control_state_unavailable(),
+        Health::Ok => match summary.activity {
+            Activity::Idle => s::control_state_idle(),
+            Activity::Working => s::control_state_working(),
+            Activity::AwaitingPermission => s::control_state_awaiting_permission(),
+        },
+    }
+}
+
+/// The title already arrives bounded and single-line — `ChatSummary` caps it at
+/// construction — so this only supplies the stand-in for a session that has
+/// not titled itself yet.
+pub(super) fn title_of(summary: &ChatSummary) -> String {
+    summary
+        .title
+        .clone()
+        .unwrap_or_else(s::control_listing_untitled)
+}
+
+/// How long ago this pane last did anything, or nothing at all when the stamp
+/// is missing or sits in the future (a clock skew must not render as a span).
+fn ago_of(summary: &ChatSummary) -> String {
+    let Some(then) = summary.last_activity else {
+        return String::new();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let Some(elapsed) = now.checked_sub(then) else {
+        return String::new();
+    };
+    s::control_listing_ago(&s::format_duration_compact(std::time::Duration::from_secs(
+        elapsed,
+    )))
+}
+
+fn origin_label(origin: FlowOriginKind) -> String {
+    match origin {
+        FlowOriginKind::Repo => s::control_flow_origin_repo(),
+        FlowOriginKind::Project => s::control_flow_origin_project(),
+        FlowOriginKind::Global => s::control_flow_origin_global(),
+    }
+}
+
+/// The usage line for the command that was called without its argument.
+/// `/stop` and `/flow` both work bare, so they never reach here.
+fn usage_for(command: &str) -> String {
+    match command {
+        "say" => s::control_usage_say(),
+        _ => s::control_usage_use(),
+    }
+}
+
+fn plain(text: String) -> RenderedReply {
+    RenderedReply {
+        text,
+        keyboard: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telegram::bridge::PaneRef;
+    use crate::telegram::command::tests::{listing_of, pane};
+    #[test]
+    fn a_long_listing_is_truncated_under_the_telegram_limit() {
+        let chats: Vec<PaneRef> = (0..400).map(pane).collect();
+        let mut state = CommandState::default();
+        let listing = listing_of(&chats);
+        state.record_listing(&listing);
+        let rendered = render(
+            &Ok(ControlResult::Listing(listing)),
+            Absorbed::Nothing,
+            &state,
+        );
+        assert!(
+            rendered.text.len() <= TELEGRAM_MESSAGE_MAX_BYTES,
+            "rendered {} bytes",
+            rendered.text.len()
+        );
+        let shown = rendered.text.lines().count() - 2; // header + the omitted line
+        assert!(shown > 0 && shown < 400, "some rows shown, not all");
+        assert!(
+            rendered
+                .text
+                .contains(&s::control_listing_omitted((400 - shown) as u32)),
+            "the omitted count must be visible: {}",
+            rendered.text
+        );
+    }
+
+    #[test]
+    fn listing_buttons_are_folded_into_rows_and_capped() {
+        let chats: Vec<PaneRef> = (0..40).map(pane).collect();
+        let mut state = CommandState::default();
+        let listing = listing_of(&chats);
+        state.record_listing(&listing);
+        let keyboard = render(
+            &Ok(ControlResult::Listing(listing)),
+            Absorbed::Nothing,
+            &state,
+        )
+        .keyboard
+        .expect("buttons for a non-empty listing");
+        let total: usize = keyboard.rows.iter().map(Vec::len).sum();
+        assert_eq!(total, LISTING_BUTTON_MAX);
+        assert!(keyboard.rows.iter().all(|r| r.len() <= BUTTONS_PER_ROW));
+    }
+
+    #[test]
+    fn an_empty_listing_says_so_and_offers_no_buttons() {
+        let state = CommandState::default();
+        let rendered = render(
+            &Ok(ControlResult::Listing(listing_of(&[]))),
+            Absorbed::Nothing,
+            &state,
+        );
+        assert_eq!(rendered.text, s::control_listing_empty());
+        assert!(rendered.keyboard.is_none());
+    }
+    #[test]
+    fn a_typo_is_answered_with_the_suggestion() {
+        let rendered = render_parse_error(&ParseError::Unknown {
+            input: "lst".into(),
+            suggestion: Some("list"),
+        });
+        assert_eq!(
+            rendered.text,
+            s::control_error_unknown_command_did_you_mean("lst", "list")
+        );
+    }
+}

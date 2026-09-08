@@ -7,6 +7,7 @@ mod agent_switch_cost;
 mod annotation_ops_tests;
 mod config_mirror;
 mod context_menu_ops;
+mod control_surface;
 mod diag_scroll;
 mod dnd;
 mod dock;

@@ -13,7 +13,7 @@
 
 #![cfg(test)]
 
-use gpui::TestAppContext;
+use gpui::{AppContext as _, TestAppContext};
 
 /// Initialise `gpui_component`'s theme + globals on a `TestAppContext`,
 /// then overlay daruda's palette so tests render with the same colors
@@ -34,4 +34,97 @@ pub(crate) fn init_gpui_component(cx: &mut TestAppContext) {
         crate::agent::mcp::global::init(cx);
         crate::agent::tasks_global::init(cx);
     });
+}
+
+/// A window built for the external control surface: the workspace, its window
+/// handle, and — for the variants that open one — an agent-chat pane.
+///
+/// `pane` is an `Option` rather than a `0` sentinel because pane ids start at
+/// `0`, so the sentinel would also be a legal id.
+pub(crate) struct ControlFixture {
+    pub window: gpui::WindowHandle<gpui_component::Root>,
+    pub workspace: gpui::Entity<crate::workspace::Workspace>,
+    pub pane: Option<u64>,
+    /// Kept alive for the fixture's lifetime: the project root the workspace
+    /// resolves lanes and `.daruda/flows` against. Dropping it deletes the
+    /// directory out from under the running test.
+    _root: tempfile::TempDir,
+}
+
+impl ControlFixture {
+    /// The agent-chat pane this fixture opened. Panics on the variant that
+    /// opens none, which is the point of the `Option`.
+    pub(crate) fn pane(&self) -> u64 {
+        self.pane.expect("this fixture opened an agent chat pane")
+    }
+}
+
+/// A registered workspace window holding one agent-chat pane.
+///
+/// Registered in `WindowRegistry` because the control dispatcher enumerates
+/// through it — the `for_test` constructors deliberately skip registration, so
+/// a fixture that wants to be *found* has to opt back in (the same thing
+/// `workspace::tests::files` does).
+pub(crate) fn workspace_with_agent_chat(cx: &mut TestAppContext) -> ControlFixture {
+    let fixture = workspace_for_control(cx);
+    let pane = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture
+                .workspace
+                .update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .expect("window is live");
+    ControlFixture {
+        pane: Some(pane),
+        ..fixture
+    }
+}
+
+/// The same window with no agent-chat pane in it.
+///
+/// Project-backed on purpose: a workspace with no project has no lane, so
+/// `active_lane_root` is `None` and anything lane-scoped (a flow, a second
+/// lane) is unreachable — which is not the shape the control surface runs in.
+pub(crate) fn workspace_for_control(cx: &mut TestAppContext) -> ControlFixture {
+    init_gpui_component(cx);
+    let config = daruda_config::Config::default();
+    let root = tempfile::tempdir().expect("tempdir");
+    let project = daruda_store::project::Project::from_path(root.path());
+    let holder = std::cell::RefCell::new(None);
+    let window = cx.add_window(|window, cx| {
+        let workspace = cx.new(|cx| {
+            crate::workspace::Workspace::new_with_project_for_test_full(
+                &config,
+                Some(project.clone()),
+                control_test_data_dir(),
+                window,
+                cx,
+            )
+        });
+        *holder.borrow_mut() = Some(workspace.clone());
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let workspace = holder.borrow().clone().expect("workspace constructed");
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(window.into(), workspace.downgrade(), cx);
+    });
+    ControlFixture {
+        window,
+        workspace,
+        pane: None,
+        _root: root,
+    }
+}
+
+/// A unique temp directory per fixture so parallel tests never share
+/// persistence state.
+///
+/// Same shape as `workspace::tests::fresh_test_data_dir`, kept separate
+/// because that one is private to the `workspace::tests` tree and this is
+/// reached from three module trees outside it.
+fn control_test_data_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("daruda_control_test_{pid}_{id}"))
 }

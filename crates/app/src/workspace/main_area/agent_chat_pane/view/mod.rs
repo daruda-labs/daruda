@@ -799,6 +799,15 @@ impl AgentChatView {
         self.activity_title.as_deref()
     }
 
+    /// Seed the agent-supplied title the way a `SessionInfoChanged` would,
+    /// including the `rebuild_rows` that derives `activity_title` from it —
+    /// writing the field alone leaves the derived cache stale.
+    #[cfg(test)]
+    pub(in crate::workspace) fn set_session_title_for_test(&mut self, title: &str) {
+        self.session_title = Some(title.to_string());
+        self.rebuild_rows();
+    }
+
     /// The Workspace-resolved syntax theme id this pane's diff embeds are built
     /// against. Always set — see the field's doc for why it is a construction
     /// seed rather than something the first event fills in.
