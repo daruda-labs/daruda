@@ -152,7 +152,9 @@ fn run_button(
                 .on_click(move |_, window, cx| {
                     let path = path.clone();
                     match workspace.update(cx, |ws, cx| {
-                        ws.run_flow_at(
+                        // A refusal is already on screen; this match only
+                        // cares whether the window was reachable at all.
+                        let _refused_on_screen = ws.run_flow_at(
                             &path,
                             crate::workspace::command::flow_picker::FlowPurpose::Run,
                             // The whole flow: this row names a file, not a
@@ -161,7 +163,7 @@ fn run_button(
                             crate::workspace::flow_request::FlowSelection::default(),
                             window,
                             cx,
-                        )
+                        );
                     }) {
                         Ok(()) => {}
                         Err(e) => daruda_store::observability::log_writer::LogWriter::log(

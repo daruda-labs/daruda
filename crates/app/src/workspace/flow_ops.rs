@@ -122,7 +122,10 @@ impl Workspace {
     /// The live process holding this lane's run lock, if any. A lock left by
     /// a crashed run names a pid that is gone, and does not stop a new run
     /// — the engine reclaims it.
-    fn lane_holder(&self, cwd: &Path) -> Option<daruda_flow::lock::LockHolder> {
+    pub(in crate::workspace) fn lane_holder(
+        &self,
+        cwd: &Path,
+    ) -> Option<daruda_flow::lock::LockHolder> {
         daruda_flow::lock::read_holder(&super::flow_paths::runs_dir(cwd))
             .filter(|holder| super::flow_request::process_is_alive(holder.pid))
     }
@@ -198,11 +201,17 @@ impl Workspace {
         }
     }
 
-    /// Run or check `path` without asking which flow.
+    /// Run or check `path` without asking which flow. `false` means the guard
+    /// refused — it has already said why, on screen.
     ///
     /// The guard still runs: a surface that names the flow does not thereby
     /// know whether the lane is free, and skipping it here would be a second
-    /// answer to "is a run already going" for the lock to disagree with.
+    /// answer to "is a run already going" for the lock to disagree with. The
+    /// return value is for a caller that cannot see the toast — the external
+    /// control surface answers a phone, which would otherwise be told a run
+    /// started that the lock had just refused.
+    #[must_use = "a refused run must be answered, not dropped — the caller may \
+                  be a surface with no toast to show it on"]
     pub(in crate::workspace) fn run_flow_at(
         &mut self,
         path: &Path,
@@ -210,11 +219,12 @@ impl Workspace {
         selection: FlowSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if !self.flow_run_guard(purpose, cx) {
-            return;
+            return false;
         }
         self.start_flow(purpose, path.to_path_buf(), selection, window, cx);
+        true
     }
 
     /// Everything a named flow still has to go through: the profile question

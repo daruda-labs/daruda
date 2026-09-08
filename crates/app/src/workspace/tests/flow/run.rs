@@ -762,12 +762,15 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             // `Validate` rather than `Run`: it walks the same funnel and takes
             // no lock and starts no session.
-            ws.run_flow_at(
-                &flow_path,
-                crate::workspace::command::flow_picker::FlowPurpose::Validate,
-                FlowSelection::default(),
-                window,
-                cx,
+            assert!(
+                ws.run_flow_at(
+                    &flow_path,
+                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    FlowSelection::default(),
+                    window,
+                    cx,
+                ),
+                "the guard let this one through"
             );
             assert!(
                 ws.flow_picker.is_open(),
@@ -804,12 +807,15 @@ async fn naming_a_flow_with_no_profiles_opens_no_picker(cx: &mut TestAppContext)
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.run_flow_at(
-                &flow_path,
-                crate::workspace::command::flow_picker::FlowPurpose::Validate,
-                FlowSelection::default(),
-                window,
-                cx,
+            assert!(
+                ws.run_flow_at(
+                    &flow_path,
+                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    FlowSelection::default(),
+                    window,
+                    cx,
+                ),
+                "the guard let this one through"
             );
             assert!(
                 !ws.flow_picker.is_open(),
@@ -843,12 +849,15 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
-            ws.run_flow_at(
-                &flow_path,
-                crate::workspace::command::flow_picker::FlowPurpose::Run,
-                FlowSelection::default(),
-                window,
-                cx,
+            assert!(
+                !ws.run_flow_at(
+                    &flow_path,
+                    crate::workspace::command::flow_picker::FlowPurpose::Run,
+                    FlowSelection::default(),
+                    window,
+                    cx,
+                ),
+                "a held lane must report the refusal, not just show it"
             );
             assert!(
                 matches!(

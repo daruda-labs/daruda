@@ -83,7 +83,9 @@ impl Workspace {
         // saying about pins that went away.
         view.update(cx, |view, cx| view.forget_unpinned(cx));
         let selection = super::flow_request::FlowSelection { until, pinned };
-        self.run_flow_at(path, FlowPurpose::Run, selection, window, cx);
+        // A refusal has already said so on screen — this caller is the graph
+        // pane's ▶, and the person pressing it is looking at that toast.
+        let _refused_on_screen = self.run_flow_at(path, FlowPurpose::Run, selection, window, cx);
     }
 
     /// Pin the graph pane's selection, or unpin it.
@@ -203,13 +205,17 @@ impl Workspace {
                 FlowGraphEvent::TogglePins => {
                     workspace.toggle_flow_pins(&for_path, view.clone(), cx)
                 }
-                FlowGraphEvent::Validate => workspace.run_flow_at(
-                    &for_path,
-                    FlowPurpose::Validate,
-                    super::flow_request::FlowSelection::default(),
-                    window,
-                    cx,
-                ),
+                FlowGraphEvent::Validate => {
+                    // Same as the ▶ above: a refused validate has already said
+                    // so on screen, to the person who pressed the button.
+                    let _refused_on_screen = workspace.run_flow_at(
+                        &for_path,
+                        FlowPurpose::Validate,
+                        super::flow_request::FlowSelection::default(),
+                        window,
+                        cx,
+                    );
+                }
                 FlowGraphEvent::Connect { out_of, into } => {
                     workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
                 }
