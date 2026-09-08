@@ -178,7 +178,12 @@ pub(crate) enum ControlResult {
     FlowList {
         flows: Vec<FlowEntry>,
     },
-    FlowStarted {
+    /// The start was *requested* and nothing refused it — not that the run is
+    /// under way. The engine takes its lock inside the worker thread it was
+    /// just handed, so a run another process locks in between still fails, and
+    /// reports that failure asynchronously. Naming this `FlowStarted` would
+    /// promise something the caller cannot know yet.
+    FlowStarting {
         name: String,
         origin: FlowOriginKind,
     },
@@ -338,7 +343,7 @@ mod tests {
                     origin: FlowOriginKind::Repo,
                 }],
             },
-            ControlResult::FlowStarted {
+            ControlResult::FlowStarting {
                 name: "ship.yaml".into(),
                 origin: FlowOriginKind::Global,
             },

@@ -52,10 +52,15 @@ pub struct Update {
     pub kind: UpdateKind,
 }
 
-/// The two update shapes this bridge understands. Telegram sends many
-/// other update types (`edited_message`, `channel_post`, ...); those
-/// are skipped during parsing rather than represented here — there is
-/// nothing the routing layer could do with them.
+/// The two update shapes this bridge acts on, plus everything else.
+///
+/// Telegram sends many kinds this bridge has nothing to do with — a photo or
+/// sticker (a message with no `text`), `edited_message`, `channel_post`, a
+/// callback whose message was deleted. They are carried as
+/// [`Self::Unsupported`] rather than dropped during parsing, because the
+/// routing layer advances the `getUpdates` offset from every update it sees:
+/// silently discarding one leaves the offset behind it, and Telegram
+/// re-delivers it immediately, forever.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateKind {
     Message {
@@ -74,6 +79,9 @@ pub enum UpdateKind {
         /// original prompt and append the outcome rather than replacing it.
         message_text: String,
     },
+    /// Carries nothing but its `update_id`, which is the point: the offset has
+    /// to move past it.
+    Unsupported,
 }
 
 /// Inline keyboard rows attached to a `sendMessage` call, outermost first.
@@ -388,36 +396,50 @@ fn parse_updates(body: &str) -> Result<Vec<Update>, ClientError> {
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
     require_ok(envelope.ok, envelope.description, "getUpdates failed")?;
 
+    // `map`, never `filter_map`: every update Telegram sent must reach the
+    // routing layer so its id can advance the offset. See [`UpdateKind`].
     let updates = envelope
         .result
         .into_iter()
-        .filter_map(|raw| {
-            let kind = if let Some(message) = raw.message {
-                let text = message.text?;
-                Some(UpdateKind::Message {
-                    chat_id: message.chat.id,
-                    text,
-                    reply_to_message_id: message.reply_to_message.map(|m| m.message_id),
-                })
-            } else {
-                let cq = raw.callback_query?;
-                let message = cq.message?;
-                Some(UpdateKind::Callback {
-                    chat_id: message.chat.id,
-                    callback_id: cq.id,
-                    data: cq.data.unwrap_or_default(),
-                    message_id: message.message_id,
-                    message_text: message.text.unwrap_or_default(),
-                })
-            }?;
-            Some(Update {
-                update_id: raw.update_id,
-                kind,
-            })
+        .map(|raw| Update {
+            update_id: raw.update_id,
+            kind: update_kind(raw),
         })
         .collect();
 
     Ok(updates)
+}
+
+/// Classify one raw update. Anything this bridge cannot act on becomes
+/// [`UpdateKind::Unsupported`] rather than disappearing.
+fn update_kind(raw: RawUpdate) -> UpdateKind {
+    if let Some(message) = raw.message {
+        // A message with no `text` is a photo, sticker, voice note, or a
+        // service message — nothing the routing layer can read.
+        return match message.text {
+            Some(text) => UpdateKind::Message {
+                chat_id: message.chat.id,
+                text,
+                reply_to_message_id: message.reply_to_message.map(|m| m.message_id),
+            },
+            None => UpdateKind::Unsupported,
+        };
+    }
+    // A callback whose message Telegram no longer has (deleted, or too old)
+    // cannot be answered in place, so there is nothing to route.
+    let Some(cq) = raw.callback_query else {
+        return UpdateKind::Unsupported;
+    };
+    let Some(message) = cq.message else {
+        return UpdateKind::Unsupported;
+    };
+    UpdateKind::Callback {
+        chat_id: message.chat.id,
+        callback_id: cq.id,
+        data: cq.data.unwrap_or_default(),
+        message_id: message.message_id,
+        message_text: message.text.unwrap_or_default(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -469,6 +491,32 @@ fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The regression this guards is a hang, not a wrong answer: an update the
+    /// parser dropped never reached `route`, so the offset stayed behind it and
+    /// Telegram re-delivered it immediately — a tight HTTP loop that also
+    /// stopped every later command from being seen. One sticker was enough.
+    #[test]
+    fn an_update_this_bridge_cannot_act_on_still_carries_its_id() {
+        let body = r#"{"ok":true,"result":[
+            {"update_id":41,"message":{"chat":{"id":7},"sticker":{"emoji":"x"}}},
+            {"update_id":42,"edited_message":{"chat":{"id":7},"text":"redone"}},
+            {"update_id":43,"callback_query":{"id":"cb","data":"tok"}},
+            {"update_id":44,"message":{"chat":{"id":7},"text":"hello"}}
+        ]}"#;
+        let updates = parse_updates(body).expect("parses");
+        let ids: Vec<i64> = updates.iter().map(|u| u.update_id).collect();
+        assert_eq!(ids, vec![41, 42, 43, 44], "every id must survive parsing");
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|u| u.kind == UpdateKind::Unsupported)
+                .count(),
+            3,
+            "a sticker, an edit, and a message-less callback are all unsupported"
+        );
+        assert!(matches!(updates[3].kind, UpdateKind::Message { .. }));
+    }
 
     #[test]
     fn a_long_callback_toast_is_clamped_on_a_char_boundary() {
@@ -635,15 +683,15 @@ mod tests {
     }
 
     #[test]
-    fn callback_query_without_message_is_skipped_without_failing_whole_batch() {
+    fn callback_query_without_message_does_not_fail_the_whole_batch() {
         // Telegram documents `CallbackQuery.message` as optional (absent for
         // inline-query-originated callbacks, or when the original message
         // was deleted). A naive `message` field that's required would fail
         // `serde_json::from_str` for the WHOLE envelope, dropping every
         // update in the batch — including the unrelated, perfectly normal
         // message update alongside it. This must not happen: the malformed
-        // (from this bridge's perspective) callback is skipped, the normal
-        // update survives.
+        // callback this bridge cannot act on is classified `Unsupported`, and
+        // the normal update survives beside it.
         let body = r#"{
             "ok": true,
             "result": [
@@ -666,10 +714,13 @@ mod tests {
         }"#;
 
         let updates = parse_updates(body).expect("parse ok, not Err(Parse)");
-        assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].update_id, 2);
+        // Two, not one: the orphan callback's id still has to move the offset.
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].update_id, 1);
+        assert_eq!(updates[0].kind, UpdateKind::Unsupported);
+        assert_eq!(updates[1].update_id, 2);
         assert_eq!(
-            updates[0].kind,
+            updates[1].kind,
             UpdateKind::Message {
                 chat_id: 5,
                 text: "kept".to_string(),
@@ -686,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn update_with_neither_message_nor_callback_is_skipped() {
+    fn update_with_neither_message_nor_callback_is_unsupported() {
         let body = r#"{
             "ok": true,
             "result": [
@@ -710,12 +761,15 @@ mod tests {
         }"#;
 
         let updates = parse_updates(body).expect("parse ok");
-        assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].update_id, 2);
+        // Two, not one: an `edited_message` is nothing this bridge acts on,
+        // but its id still has to move the offset.
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].kind, UpdateKind::Unsupported);
+        assert_eq!(updates[1].update_id, 2);
     }
 
     #[test]
-    fn message_with_missing_text_is_skipped() {
+    fn message_with_missing_text_is_unsupported_not_dropped() {
         let body = r#"{
             "ok": true,
             "result": [
@@ -731,7 +785,11 @@ mod tests {
         }"#;
 
         let updates = parse_updates(body).expect("parse ok");
-        assert!(updates.is_empty());
+        // Not empty: a photo the bridge ignores still has to move the offset,
+        // or Telegram re-delivers it in a tight loop forever.
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].update_id, 1);
+        assert_eq!(updates[0].kind, UpdateKind::Unsupported);
     }
 
     #[test]

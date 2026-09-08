@@ -5126,8 +5126,12 @@ pub fn control_flow_origin_global() -> String {
     rust_i18n::t!("control.flow_origin_global").into_owned()
 }
 
-pub fn control_flow_started(name: &str) -> String {
-    rust_i18n::t!("control.flow_started", name = name).into_owned()
+/// Said when a flow start was accepted. Deliberately not "started": the
+/// engine takes its lock after this answer is sent, and its outcome — success
+/// or a refusal — surfaces in daruda, not on the phone. Saying so is what
+/// keeps the reply from reading as a hang when a run fails immediately.
+pub fn control_flow_starting(name: &str) -> String {
+    rust_i18n::t!("control.flow_starting", name = name).into_owned()
 }
 
 pub fn control_error_unknown_command(input: &str) -> String {

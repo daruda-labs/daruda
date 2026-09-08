@@ -30,8 +30,8 @@ use crate::workspace::Workspace;
 mod control;
 
 use control::{
-    answer_only, log_unauthorized_inbound, persist_offset, render_outcome, run_command,
-    select_target, send_command_reply,
+    answer_only, log_unauthorized_inbound, persist_offset, render_outcome, report_target_gone,
+    run_command, select_target, send_command_reply,
 };
 use daruda_store::persistence;
 
@@ -250,7 +250,21 @@ fn spawn_poll_task(cx: &mut App) {
                             .update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx));
                         send_command_reply(cx, &token, reply).await;
                     }
-                    // A message-origin action (injected reply, pairing, ignore).
+                    // A plain message routed to a remembered pane. The pane
+                    // can be gone — a selection and a last-pinged target both
+                    // outlive the pane they name — so the delivery is checked
+                    // rather than assumed.
+                    (None, InboundAction::InjectPrompt { pane, text }) => {
+                        let mut delivered = false;
+                        dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
+                            delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
+                        });
+                        if !delivered {
+                            let reply = cx.update(|cx| report_target_gone(pane, cx));
+                            send_command_reply(cx, &token, reply).await;
+                        }
+                    }
+                    // A message-origin action (pairing, ignore, unsupported).
                     (None, action) => dispatch_action(action, cx),
                 }
 
@@ -300,10 +314,9 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
                 }
             });
         }
-        InboundAction::InjectPrompt { pane, text } => {
-            dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                ws.inject_bot_reply(pane.pane, text.clone(), cx)
-            });
+        InboundAction::InjectPrompt { .. } => {
+            // Handled inline in the poll loop, which is the only place that
+            // can await the "that chat is gone" answer.
         }
         InboundAction::RespondPermission { .. }
         | InboundAction::SelectTarget { .. }
@@ -311,6 +324,10 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
             // All three always arrive as callbacks and are handled inline in
             // the poll loop, where their feedback can be accurate; they never
             // reach this message-origin dispatch path.
+        }
+        InboundAction::Unsupported => {
+            // Nothing to do by construction — it reached `route` only so its
+            // id could advance the `getUpdates` offset.
         }
         InboundAction::RunCommand { .. }
         | InboundAction::ReportParseError { .. }
@@ -405,8 +422,9 @@ fn compose_edit_body(original_text: &str, label: &str) -> String {
 /// permission decision names its target pane by `PaneRef { workspace, pane }`,
 /// but `PaneId` alone is only unique within one open window, so every window
 /// must be checked). `pane.pane` itself is *not* checked against anything
-/// here — the workspace-side handlers (`inject_bot_reply` /
-/// `respond_bot_permission`) already no-op on a stale/gone pane id.
+/// here — the workspace-side handlers report a stale/gone pane id back to the
+/// caller (`inject_bot_reply` returns `false`, `respond_bot_permission`
+/// returns `Gone`), which then answers the phone rather than going quiet.
 fn dispatch_to_workspace(
     cx: &mut gpui::AsyncApp,
     workspace: daruda_store::project::WorkspaceUuid,
@@ -489,6 +507,29 @@ fn spawn_send_task(
             // Capture `pane` before `build_ping` consumes `ping` by value —
             // `OutboundMsg` does not carry the pane back.
             let pane = ping.pane;
+
+            // Resync from live config *before* addressing the message, not
+            // just at the top of the poll loop. That resync only runs once the
+            // previous blocking `get_updates` returns, so `BridgeCore`'s copy
+            // can be up to `POLL_TIMEOUT_SECS` stale — long enough for an
+            // agent response queued before an unpair to be addressed to the
+            // chat the user just revoked. Config is the single source of
+            // truth for where a ping may go; this is where it is asked.
+            let deliverable = cx.update(|cx| {
+                let cfg = SettingsStore::global(cx).user_arc();
+                let bridge = cx.global_mut::<TelegramBridge>();
+                bridge.core.set_enabled(cfg.telegram.enabled);
+                bridge
+                    .core
+                    .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
+                cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
+            });
+            if !deliverable {
+                // Disabled or unpaired since this ping was queued. Dropped
+                // rather than held: its context is gone, and the chat it was
+                // meant for may no longer be the user's.
+                continue;
+            }
 
             let msg = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.build_ping(ping));
 

@@ -205,9 +205,9 @@ async fn running_a_flow_without_an_active_lane_is_refused(cx: &mut TestAppContex
 }
 
 /// The headline path, and the one every refusal test above is the negative of:
-/// a runnable flow actually starts, is reported under the file that ran, and —
-/// the invariant the whole `needs_desktop_answer` / profile machinery exists
-/// for — raises no desktop dialog on the way.
+/// a runnable flow is dispatched, is reported under the file that resolved,
+/// and — the invariant the whole `needs_desktop_answer` / profile machinery
+/// exists for — raises no desktop dialog on the way.
 #[gpui::test]
 async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppContext) {
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);

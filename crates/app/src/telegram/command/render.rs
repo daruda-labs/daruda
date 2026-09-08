@@ -115,7 +115,7 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
                 .collect::<Vec<_>>()
                 .join("\n"),
         ),
-        ControlResult::FlowStarted { name, .. } => plain(s::control_flow_started(name)),
+        ControlResult::FlowStarting { name, .. } => plain(s::control_flow_starting(name)),
         ControlResult::Brief(brief) => plain(s::control_brief(
             brief.working,
             brief.awaiting_permission,

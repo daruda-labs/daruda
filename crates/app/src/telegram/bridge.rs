@@ -127,6 +127,11 @@ pub enum InboundAction {
     StaleListing,
     /// Plain text with no reply-to, no selection, and no prior ping.
     NoTarget,
+    /// An update shape this bridge does not act on. Distinct from
+    /// [`Self::Ignore`], which means "we could have acted but chose not to" —
+    /// this one is not about the sender at all, so it must not be answered
+    /// and must not be logged as an unauthorized inbound.
+    Unsupported,
 }
 
 /// `BridgeCore::route`'s full result: the action, plus whether
@@ -305,12 +310,6 @@ impl BridgeCore {
         self.update_offset
     }
 
-    /// The paired chat, if any. The poll loop needs it to address a command
-    /// reply, which — unlike a ping — is not built through `build_ping`.
-    pub fn authorized_chat_id(&self) -> Option<i64> {
-        self.authorized_chat_id
-    }
-
     /// Generates a fresh 6-character uppercase hex pairing code,
     /// stores it as the pending code (overwriting any previous one —
     /// only one pairing flow is active at a time; the Settings UI
@@ -338,6 +337,19 @@ impl BridgeCore {
     pub fn route(&mut self, update: Update) -> RouteResult {
         self.update_offset = self.update_offset.max(update.update_id + 1);
 
+        // Handled before the `enabled` gate, and before anything else: the
+        // offset advanced above, which is the entire reason an update the
+        // bridge cannot act on is carried here rather than dropped by the
+        // parser. Dropping one strands the offset behind it and Telegram
+        // re-delivers it immediately, in a tight loop, forever.
+        if matches!(update.kind, UpdateKind::Unsupported) {
+            return RouteResult {
+                action: InboundAction::Unsupported,
+                answer_callback_id: None,
+                callback_edit: None,
+            };
+        }
+
         if !self.enabled {
             let (answer_callback_id, callback_edit) = match &update.kind {
                 UpdateKind::Callback {
@@ -354,7 +366,7 @@ impl BridgeCore {
                         original_text: message_text.clone(),
                     }),
                 ),
-                UpdateKind::Message { .. } => (None, None),
+                UpdateKind::Message { .. } | UpdateKind::Unsupported => (None, None),
             };
             return RouteResult {
                 action: InboundAction::Ignore,
@@ -376,6 +388,13 @@ impl BridgeCore {
                     callback_edit: None,
                 }
             }
+            // Answered above; the match is exhaustive without a wildcard so a
+            // future variant cannot slip through unrouted.
+            UpdateKind::Unsupported => RouteResult {
+                action: InboundAction::Unsupported,
+                answer_callback_id: None,
+                callback_edit: None,
+            },
             UpdateKind::Callback {
                 chat_id,
                 callback_id,
@@ -678,6 +697,33 @@ mod tests {
             .expect("token");
         let action = core.route(callback(1, 42, "cb", &token)).action;
         assert_eq!(action, InboundAction::SelectTarget { pane: a });
+    }
+
+    /// The invariant the parser now upholds and `route` depends on: the offset
+    /// moves past an update the bridge cannot act on, so it is not re-delivered
+    /// forever.
+    #[test]
+    fn an_unsupported_update_still_advances_the_offset() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let result = core.route(Update {
+            update_id: 9,
+            kind: UpdateKind::Unsupported,
+        });
+        assert_eq!(result.action, InboundAction::Unsupported);
+        assert_eq!(result.answer_callback_id, None, "nothing to acknowledge");
+        assert_eq!(core.current_offset(), 10);
+    }
+
+    /// Even while disabled: the poll loop does not run then, but a disable
+    /// that lands mid-batch must not strand the offset either.
+    #[test]
+    fn an_unsupported_update_advances_the_offset_while_disabled() {
+        let mut core = BridgeCore::new(false, Some(42), 0);
+        core.route(Update {
+            update_id: 3,
+            kind: UpdateKind::Unsupported,
+        });
+        assert_eq!(core.current_offset(), 4);
     }
 
     #[test]

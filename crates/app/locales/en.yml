@@ -1565,7 +1565,7 @@ control:
   flow_origin_repo: "repo"
   flow_origin_project: "project"
   flow_origin_global: "global"
-  flow_started: "Started %{name}."
+  flow_starting: "Starting %{name}. The outcome shows in daruda, not here."
   error_unknown_command: "Unknown command: /%{input}"
   error_unknown_command_did_you_mean: "Unknown command: /%{input} — did you mean /%{suggestion}?"
   error_missing_argument: "Missing argument. %{usage}"

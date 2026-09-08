@@ -643,20 +643,26 @@ impl Workspace {
     /// the fixed fallback ack immediately. A `pub(crate)` entry point for
     /// `crate::telegram::global`'s poll loop to call into (which lives outside
     /// `workspace/` and can't reach the `pub(in crate::workspace)` version).
+    /// `false` means the pane is gone. Reported rather than swallowed: the
+    /// caller resolves the target from a *remembered* selection or last-pinged
+    /// pane, either of which can name a pane the user has since closed — and a
+    /// silent return there loses the message and leaves the same dead target in
+    /// place for every message after it.
     pub(crate) fn inject_bot_reply(
         &mut self,
         pane_id: PaneId,
         text: String,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if self.agent_chat_view(pane_id).is_none() {
-            return;
+            return false;
         }
         match self.send_agent_prompt_text_from_telegram(pane_id, text, cx) {
             Some(PromptDispatch::Queued) => self.relay_queued_notice_to_telegram(pane_id, cx),
             Some(PromptDispatch::SentNow) => {}
             None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
         }
+        true
     }
 
     /// Resolve a phone-tapped Allow/Reject button against this pane's

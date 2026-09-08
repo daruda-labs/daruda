@@ -98,10 +98,10 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
                     out = ws.control_flow_run(&name, window, cx);
                 }
             });
-            // Named by the file that ran, not by what the user typed — `/flow
-            // ship` may resolve `ship.yaml` or `ship.yml`, and the answer has
-            // to say which.
-            out.map(|entry| ControlResult::FlowStarted {
+            // Named by the file that resolved, not by what the user typed —
+            // `/flow ship` may pick `ship.yaml` or `ship.yml`, and the answer
+            // has to say which.
+            out.map(|entry| ControlResult::FlowStarting {
                 name: entry.name,
                 origin: entry.origin,
             })

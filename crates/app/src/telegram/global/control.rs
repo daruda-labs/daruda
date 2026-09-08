@@ -17,6 +17,7 @@ use daruda_store::persistence;
 use super::TelegramBridge;
 use crate::control::result::{ControlOutcome, ControlResult};
 use crate::control::spec::ControlCommand;
+use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::PaneRef;
 use crate::telegram::client;
 use crate::telegram::command;
@@ -124,6 +125,19 @@ pub(super) fn run_command(
     })
 }
 
+/// Answer a message that named a pane which is no longer there, and stop
+/// remembering that pane. Without the second half, the *next* plain message
+/// resolves to the same dead target and is lost just as silently.
+pub(super) fn report_target_gone(pane: PaneRef, cx: &mut App) -> command::RenderedReply {
+    let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
+    state.forget(pane);
+    command::render(
+        &Err(crate::control::result::ControlError::TargetGone),
+        command::Absorbed::SelectionDropped,
+        state,
+    )
+}
+
 /// Render an outcome the executor never saw, against the live ordinal table.
 pub(super) fn render_outcome(outcome: &ControlOutcome, cx: &mut App) -> command::RenderedReply {
     let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
@@ -152,8 +166,17 @@ pub(super) async fn send_command_reply(
     token: &str,
     reply: command::RenderedReply,
 ) {
-    let Some(chat_id) = cx.update(|cx| cx.global::<TelegramBridge>().core.authorized_chat_id())
-    else {
+    // Addressed from live config, not from `BridgeCore`'s copy: that copy is
+    // only resynced at the top of a poll iteration, so a reply composed just
+    // before an unpair could otherwise still be sent to the revoked chat.
+    let chat_id = cx.update(|cx| {
+        let cfg = SettingsStore::global(cx).user_arc();
+        cfg.telegram
+            .enabled
+            .then_some(cfg.telegram.authorized_chat_id)
+            .flatten()
+    });
+    let Some(chat_id) = chat_id else {
         return;
     };
     let send_token = token.to_string();
