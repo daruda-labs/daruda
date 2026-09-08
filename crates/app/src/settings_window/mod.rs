@@ -165,6 +165,12 @@ pub struct SettingsWindow {
     claude_status_enable: bool,
     // Notifications (Telegram)
     telegram_enabled: bool,
+    orchestrator_enabled: bool,
+    /// Empty value = follow the catalog's first entry; see
+    /// `sections::orchestrator`.
+    orchestrator_agent_select: Entity<SelectState>,
+    /// Empty value = the system default account.
+    orchestrator_account_select: Entity<SelectState>,
     telegram_token_input: Entity<InputState>,
     /// Presence-only cache of whether a token is currently stored in
     /// the Keychain — seeded once at construction, updated by the
@@ -299,6 +305,8 @@ enum SelectSetting {
     RenderMaxFps,
     SyntaxTheme,
     PreferredEditor,
+    OrchestratorAgent,
+    OrchestratorAccount,
 }
 
 #[derive(Clone, Copy)]
@@ -311,6 +319,7 @@ pub(super) enum BoolSetting {
     FilesUseGitignore,
     ClaudeStatusEnabled,
     TelegramEnabled,
+    OrchestratorEnabled,
 }
 
 #[derive(Clone)]
@@ -1565,12 +1574,44 @@ impl SettingsWindow {
         );
         let accounts = crate::workspace::accounts_global::snapshot(cx);
         let account_login_busy = crate::workspace::accounts_global::login_busy(cx);
+        // Built here rather than beside the other selects above: the account
+        // picker's options come from `accounts`, which is only in scope now.
+        let orchestrator_agent_select = cx.new(|cx| {
+            select::state_with_options(
+                sections::orchestrator::agent_options(&config),
+                Some(&sections::orchestrator::agent_select_value(&config)),
+                window,
+                cx,
+            )
+        });
+        let orchestrator_account_select = cx.new(|cx| {
+            select::state_with_options(
+                sections::orchestrator::account_options(&accounts.accounts),
+                Some(&sections::orchestrator::account_select_value(&config)),
+                window,
+                cx,
+            )
+        });
+        for (state, setting) in [
+            (&orchestrator_agent_select, SelectSetting::OrchestratorAgent),
+            (
+                &orchestrator_account_select,
+                SelectSetting::OrchestratorAccount,
+            ),
+        ] {
+            input_subscriptions.push(Self::subscribe_select_setting(state, setting, window, cx));
+        }
+        // Rebuilding the account picker needs the current window.
         let _accounts_global_subscription = cx
-            .observe_global::<crate::workspace::accounts_global::AccountsGlobal>(|this, cx| {
-                this.accounts = crate::workspace::accounts_global::snapshot(cx);
-                this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
-                cx.notify();
-            });
+            .observe_global_in::<crate::workspace::accounts_global::AccountsGlobal>(
+                window,
+                |this, window, cx| {
+                    this.accounts = crate::workspace::accounts_global::snapshot(cx);
+                    this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
+                    this.refresh_orchestrator_account_select(window, cx);
+                    cx.notify();
+                },
+            );
         let _agent_vocabulary_global_subscription = cx.observe_global_in::<
             crate::workspace::agent_vocabulary_global::AgentVocabularyGlobal,
         >(window, |this, window, cx| {
@@ -1621,6 +1662,9 @@ impl SettingsWindow {
             agent_vocabulary,
             session_host_rows,
             accounts,
+            orchestrator_enabled: config.orchestrator.enabled,
+            orchestrator_agent_select,
+            orchestrator_account_select,
             account_login_busy,
             auth_statuses,
             max_fps_select,
@@ -2009,6 +2053,7 @@ impl SettingsWindow {
                 self.agent_use_modifier_to_send = live.agent.use_modifier_to_send;
             }
             daruda_config::SettingsPatch::AgentCatalog(_) => {
+                self.refresh_orchestrator_agent_select(window, cx);
                 self.load_agent_catalog_from_config(live, window, cx);
             }
             daruda_config::SettingsPatch::SessionHosts { .. } => {
@@ -2097,6 +2142,15 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::TelegramEnabled(_) => {
                 self.telegram_enabled = live.telegram.enabled;
             }
+            daruda_config::SettingsPatch::OrchestratorEnabled(_) => {
+                self.orchestrator_enabled = live.orchestrator.enabled;
+            }
+            daruda_config::SettingsPatch::OrchestratorAgentId(_) => {
+                self.refresh_orchestrator_agent_select(window, cx);
+            }
+            daruda_config::SettingsPatch::OrchestratorAccountId(_) => {
+                self.refresh_orchestrator_account_select(window, cx);
+            }
             daruda_config::SettingsPatch::ToggleStatusBarItem(_)
             | daruda_config::SettingsPatch::TelegramAuthorizedChatId(_) => {}
         }
@@ -2110,6 +2164,28 @@ impl SettingsWindow {
     ) {
         let value = value.into();
         select.update(cx, |select, cx| {
+            select.set_selected_value(&value, window, cx);
+        });
+    }
+
+    /// Rebuild the orchestrator agent picker from the live catalog.
+    fn refresh_orchestrator_agent_select(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let live = crate::settings_store::SettingsStore::global(cx).user_arc();
+        let options = sections::orchestrator::agent_options(&live);
+        let value = sections::orchestrator::agent_select_value(&live);
+        self.orchestrator_agent_select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
+            select.set_selected_value(&value, window, cx);
+        });
+    }
+
+    /// Rebuild the orchestrator account picker from live account state.
+    fn refresh_orchestrator_account_select(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let live = crate::settings_store::SettingsStore::global(cx).user_arc();
+        let options = sections::orchestrator::account_options(&self.accounts.accounts);
+        let value = sections::orchestrator::account_select_value(&live);
+        self.orchestrator_account_select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
             select.set_selected_value(&value, window, cx);
         });
     }
@@ -2181,6 +2257,9 @@ impl SettingsWindow {
             daruda_config::SettingsPatch::PanelsGridColumns(config.panels.grid_columns),
             daruda_config::SettingsPatch::ClaudeStatusEnabled(config.claude_status.enable),
             daruda_config::SettingsPatch::TelegramEnabled(config.telegram.enabled),
+            daruda_config::SettingsPatch::OrchestratorEnabled(config.orchestrator.enabled),
+            daruda_config::SettingsPatch::OrchestratorAgentId(config.orchestrator.agent_id.clone()),
+            daruda_config::SettingsPatch::OrchestratorAccountId(config.orchestrator.account_id),
         ]
     }
 
@@ -2263,6 +2342,14 @@ impl SettingsWindow {
             }
             SelectSetting::SyntaxTheme => daruda_config::SettingsPatch::SyntaxTheme(value),
             SelectSetting::PreferredEditor => daruda_config::SettingsPatch::PreferredEditor(value),
+            SelectSetting::OrchestratorAgent => daruda_config::SettingsPatch::OrchestratorAgentId(
+                sections::orchestrator::agent_id_from_select(value),
+            ),
+            SelectSetting::OrchestratorAccount => {
+                daruda_config::SettingsPatch::OrchestratorAccountId(
+                    sections::orchestrator::account_id_from_select(&value),
+                )
+            }
         };
         self.apply_settings_patch(patch, cx);
     }
@@ -2290,6 +2377,9 @@ impl SettingsWindow {
                 daruda_config::SettingsPatch::ClaudeStatusEnabled(value)
             }
             BoolSetting::TelegramEnabled => daruda_config::SettingsPatch::TelegramEnabled(value),
+            BoolSetting::OrchestratorEnabled => {
+                daruda_config::SettingsPatch::OrchestratorEnabled(value)
+            }
         };
         self.apply_settings_patch(patch, cx)
     }

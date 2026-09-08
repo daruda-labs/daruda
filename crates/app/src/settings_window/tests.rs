@@ -2306,6 +2306,85 @@ fn telegram_enabled_toggle_round_trips_through_validate(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+async fn the_orchestrator_pickers_follow_a_change_made_while_settings_is_open(
+    cx: &mut TestAppContext,
+) {
+    let (wh, win) = build_window(cx);
+    let account = daruda_store::accounts::ManagedAccount {
+        id: daruda_store::accounts::AccountId::new(),
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+        email: Some("someone@example.com".to_string()),
+        organization: None,
+        config_dir: std::path::PathBuf::from("/tmp/daruda-test-account"),
+        created_at: 0,
+        last_authenticated_at: 0,
+    };
+    let account_value: SharedString = account.id.0.to_string().into();
+
+    let can_pick = |value: &SharedString,
+                    select: fn(&SettingsWindow) -> &Entity<SelectState>,
+                    cx: &mut TestAppContext|
+     -> bool {
+        let value = value.clone();
+        cx.update_window(wh.into(), |_, window, cx| {
+            let entity = select(win.read(cx)).clone();
+            entity.update(cx, |s, cx| {
+                s.set_selected_value(&value, window, cx);
+                s.selected_value().is_some()
+            })
+        })
+        .expect("window is live")
+    };
+
+    assert!(
+        !can_pick(&account_value, |w| &w.orchestrator_account_select, cx),
+        "not offered before the account exists"
+    );
+
+    cx.update(|cx| {
+        crate::workspace::accounts_global::install_if_absent(cx, Default::default());
+        let mut state = crate::workspace::accounts_global::snapshot(cx);
+        state.accounts.push(account.clone());
+        crate::workspace::accounts_global::replace(cx, state);
+    });
+    cx.run_until_parked();
+    assert!(
+        can_pick(&account_value, |w| &w.orchestrator_account_select, cx),
+        "a signed-in account has to be selectable without reopening Settings"
+    );
+
+    let added: SharedString = "codex-acp".into();
+    assert!(!can_pick(&added, |w| &w.orchestrator_agent_select, cx));
+    let with_codex = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::Preset {
+            preset: "codex-acp".to_string(),
+            overrides: Default::default(),
+        }],
+        ..daruda_config::Config::default()
+    };
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.set_user_for_testing(with_codex.clone());
+        });
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            w.load_settings_patch(
+                &daruda_config::SettingsPatch::AgentCatalog(with_codex.agents.clone()),
+                &with_codex,
+                window,
+                cx,
+            );
+        });
+    })
+    .expect("window is live");
+    assert!(
+        can_pick(&added, |w| &w.orchestrator_agent_select, cx),
+        "an added agent has to become selectable"
+    );
+}
+
+#[gpui::test]
 async fn copy_botfather_commands_writes_the_registration_block(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
 
@@ -2318,14 +2397,13 @@ async fn copy_botfather_commands_writes_the_registration_block(cx: &mut TestAppC
         .expect("clipboard populated")
         .text()
         .expect("clipboard item is text");
-    // One line per command daruda answers, in the `name - description` shape
-    // BotFather's /setcommands parses.
-    assert_eq!(text.lines().count(), 6, "one line per command: {text}");
-    for name in ["list", "use", "say", "stop", "flow", "brief"] {
-        assert!(
-            text.lines().any(|l| l.starts_with(&format!("{name} - "))),
-            "/{name} must be registered: {text}"
-        );
+    // That the block names every command is
+    // `control::spec::tests::the_botfather_registration_lists_every_command_name`'s
+    // invariant. This test owns the copy itself — asserted exactly, so a
+    // truncated or doubled paste fails rather than passing a shape check.
+    assert_eq!(text, s::control_botfather_commands());
+    for line in text.lines() {
+        assert!(line.contains(" - "), "not a BotFather row: {line}");
     }
     win.read_with(cx, |w, _cx| assert!(w.telegram_botfather_copied()));
 }

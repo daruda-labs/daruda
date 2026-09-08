@@ -197,6 +197,8 @@ pub(crate) fn resolve_command(command: ControlCommand, state: &mut CommandState)
         ControlCommand::List => Resolution::Run(ResolvedCommand::List, None),
         ControlCommand::Brief => Resolution::Run(ResolvedCommand::Brief, None),
         ControlCommand::Flow(flow) => Resolution::Run(ResolvedCommand::Flow(flow), None),
+        // No ordinal to resolve — the orchestrator names itself.
+        ControlCommand::Ask { text } => Resolution::Run(ResolvedCommand::Ask { text }, None),
         ControlCommand::Use(UseTarget::Clear) => {
             state.select(None);
             Resolution::Answer(Ok(ControlResult::Selected { target: None }))
@@ -432,6 +434,23 @@ pub(crate) mod tests {
             resolve_command(ControlCommand::Stop { target: None }, &mut state),
             Resolution::Answer(Err(ControlError::NoTargetSelected))
         ));
+    }
+
+    /// `/daruda` has no ordinal, so resolution is the identity and the
+    /// executor is what knows where the orchestrator is.
+    #[test]
+    fn daruda_resolves_without_naming_a_pane() {
+        let mut state = CommandState::default();
+        let Resolution::Run(ResolvedCommand::Ask { text }, addressed) = resolve_command(
+            ControlCommand::Ask {
+                text: "make me a pane".into(),
+            },
+            &mut state,
+        ) else {
+            panic!("/daruda reaches the executor");
+        };
+        assert_eq!(text, "make me a pane");
+        assert_eq!(addressed, None, "no target to forget on a TargetGone");
     }
 
     #[test]

@@ -42,16 +42,37 @@ pub(crate) enum ControlCommand {
     },
     Flow(FlowCommand),
     Brief,
+    /// `/daruda <text>` — the only variant that costs an LLM turn, and the
+    /// only one this parser does not read past.
+    ///
+    /// Not *unexamined*, though: the payload still reaches the pane's own
+    /// slash classifier, so `/daruda /clear` resets the orchestrator's session
+    /// instead of asking it anything. That is reported back as
+    /// `AskDisposition::HandledLocally` rather than as an answer on its way.
+    Ask {
+        text: String,
+    },
 }
 
 /// What the executor runs. Every target is concrete.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResolvedCommand {
     List,
-    Say { target: PaneRef, text: String },
-    Stop { target: PaneRef },
+    Say {
+        target: PaneRef,
+        text: String,
+    },
+    Stop {
+        target: PaneRef,
+    },
     Flow(FlowCommand),
     Brief,
+    /// Carries no target: the orchestrator names itself, so there is no
+    /// ordinal for an adapter to resolve. Resolution is the identity, and the
+    /// executor is what knows how to reach it.
+    Ask {
+        text: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,7 +93,7 @@ pub(crate) enum ParseError {
 }
 
 /// Every command name we own. Also the suggestion pool for a typo.
-const COMMANDS: [&str; 6] = ["list", "use", "say", "stop", "flow", "brief"];
+const COMMANDS: [&str; 7] = ["list", "use", "say", "stop", "flow", "brief", "daruda"];
 
 /// The token `/use -` uses to drop the current selection.
 const CLEAR_TOKEN: &str = "-";
@@ -125,6 +146,12 @@ pub(crate) fn parse(input: &str) -> Result<ControlCommand, ParseError> {
                 text: unquote(text).to_string(),
             })
         }
+        "daruda" => {
+            let rest = rest.ok_or(ParseError::MissingArgument { command: "daruda" })?;
+            Ok(ControlCommand::Ask {
+                text: unquote(rest).to_string(),
+            })
+        }
         "flow" => Ok(ControlCommand::Flow(match rest {
             None => FlowCommand::List,
             Some(name) => FlowCommand::Run {
@@ -149,9 +176,16 @@ fn ordinal(token: &str) -> Result<Ordinal, ParseError> {
 
 /// Drop one symmetric layer of double quotes. Phone keyboards add them out of
 /// habit; the rest of the line is taken verbatim either way.
+///
+/// Only when nothing inside is quoted. `"a" is not "b"` also opens and closes
+/// with a quote, and stripping there would hand on `a" is not "b` — a silently
+/// corrupted, unbalanced string. Free-form prose is far likelier to hit that
+/// than an ordinal-prefixed message, which is why the guard lives here rather
+/// than at one call site.
 fn unquote(text: &str) -> &str {
     text.strip_prefix('"')
         .and_then(|t| t.strip_suffix('"'))
+        .filter(|inner| !inner.contains('"'))
         .unwrap_or(text)
 }
 
@@ -235,6 +269,70 @@ mod tests {
     }
 
     #[test]
+    fn daruda_takes_the_rest_of_the_line_verbatim() {
+        assert_eq!(
+            parse("/daruda make me a pane"),
+            Ok(ControlCommand::Ask {
+                text: "make me a pane".into()
+            })
+        );
+    }
+
+    #[test]
+    fn daruda_strips_one_layer_of_wrapping_quotes() {
+        assert_eq!(
+            parse(r#"/daruda "make me a pane""#),
+            Ok(ControlCommand::Ask {
+                text: "make me a pane".into()
+            })
+        );
+    }
+
+    /// A prompt that merely opens and closes with a quote is not a quoted
+    /// prompt — stripping there would hand on an unbalanced string.
+    #[test]
+    fn daruda_keeps_quotes_that_are_part_of_the_prompt() {
+        assert_eq!(
+            parse(r#"/daruda "foo" is not "bar""#),
+            Ok(ControlCommand::Ask {
+                text: r#""foo" is not "bar""#.into()
+            })
+        );
+    }
+
+    #[test]
+    fn daruda_without_text_reports_missing_argument() {
+        assert_eq!(
+            parse("/daruda"),
+            Err(ParseError::MissingArgument { command: "daruda" })
+        );
+    }
+
+    /// The rest of the line is a prompt, not a nested command surface.
+    #[test]
+    fn daruda_does_not_parse_its_payload_as_a_command() {
+        assert_eq!(
+            parse("/daruda /list"),
+            Ok(ControlCommand::Ask {
+                text: "/list".into()
+            })
+        );
+    }
+
+    /// It is in the suggestion pool like every other name, so a typo points
+    /// at it instead of at nothing.
+    #[test]
+    fn a_typo_of_daruda_suggests_it() {
+        assert_eq!(
+            parse("/darudo"),
+            Err(ParseError::Unknown {
+                input: "darudo".into(),
+                suggestion: Some("daruda"),
+            })
+        );
+    }
+
+    #[test]
     fn non_command_text_is_not_a_command() {
         assert_eq!(parse("hello"), Err(ParseError::NotACommand));
         assert_eq!(parse(""), Err(ParseError::NotACommand));
@@ -265,6 +363,30 @@ mod tests {
                 text: "go on".into(),
             })
         );
+    }
+
+    /// The names BotFather is handed have to be the names `parse` accepts, or
+    /// a menu entry sends a command daruda answers with "unknown".
+    #[test]
+    fn the_botfather_registration_lists_every_command_name() {
+        let registered: Vec<&str> = crate::surface::strings::control_botfather_commands()
+            .lines()
+            .filter_map(|line| line.split(" - ").next())
+            .map(str::trim)
+            .map(|name| {
+                COMMANDS
+                    .iter()
+                    .copied()
+                    .find(|c| *c == name)
+                    .unwrap_or_else(|| panic!("{name} is registered but not a command"))
+            })
+            .collect();
+        for command in COMMANDS {
+            assert!(
+                registered.contains(&command),
+                "/{command} is a command but is not registered"
+            );
+        }
     }
 
     #[test]

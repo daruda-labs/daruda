@@ -187,6 +187,23 @@ pub enum TelegramTail {
     Markdown(String),
 }
 
+/// What the outbound queue carries.
+///
+/// The two differ in one load-bearing way. A [`Self::Ping`] is attributed to a
+/// pane, so the message id Telegram hands back registers a reply-to and makes
+/// that pane `last_pinged`. A [`Self::Notice`] is attributed to nothing and
+/// must stay that way — it answers a command the phone sent, and a reply to
+/// "your flow failed" must not become a prompt for whichever agent happened to
+/// speak last. Same reasoning that keeps a command reply off `record_sent`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outbound {
+    Ping(BridgePing),
+    /// Already-localized, already-plain text. Never markdown-parsed: it is
+    /// composed from daruda's own strings and can carry a flow file name whose
+    /// punctuation a markdown pass would misread.
+    Notice(String),
+}
+
 /// A ping to relay to the phone. `header` and `tail` are pre-formatted,
 /// already-localized text whose content `BridgeCore` treats as opaque —
 /// it only cares which `TelegramTail` variant `tail` is. `permission`

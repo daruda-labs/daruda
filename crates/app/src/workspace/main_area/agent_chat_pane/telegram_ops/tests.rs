@@ -7,6 +7,18 @@ use crate::telegram::bridge::PermissionDecision;
 use daruda_acp::{PermissionChoice, PermissionKindView};
 use daruda_store::project::PaneCwd;
 
+/// Every relay in this file is about a chat pane, so every one of them must
+/// leave the queue as a pane-attributed ping — a `Notice` here would mean an
+/// agent's own message stopped registering a reply-to.
+fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::bridge::BridgePing {
+    match outbound {
+        crate::telegram::bridge::Outbound::Ping(ping) => ping,
+        crate::telegram::bridge::Outbound::Notice(text) => {
+            panic!("an agent relay must be a ping, not a standalone notice: {text}")
+        }
+    }
+}
+
 #[test]
 fn should_defer_only_when_enabled_and_active() {
     assert!(super::should_defer_relay(true, true, 60));
@@ -428,10 +440,12 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         );
     });
 
-    let sent = outbound
-        .next()
-        .await
-        .expect("the queued notice should be sent");
+    let sent = expect_ping(
+        outbound
+            .next()
+            .await
+            .expect("the queued notice should be sent"),
+    );
     assert_eq!(
         sent.tail,
         super::TelegramTail::Plain(s::agent_notification_telegram_reply_queued())
@@ -455,10 +469,12 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
             "the overdue fallback consumes the watch"
         );
     });
-    let sent = outbound
-        .next()
-        .await
-        .expect("the fallback ack should be sent");
+    let sent = expect_ping(
+        outbound
+            .next()
+            .await
+            .expect("the fallback ack should be sent"),
+    );
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
@@ -487,10 +503,12 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     });
     cx.run_until_parked();
 
-    let sent = outbound
-        .next()
-        .await
-        .expect("empty-button first response should still ack the phone");
+    let sent = expect_ping(
+        outbound
+            .next()
+            .await
+            .expect("empty-button first response should still ack the phone"),
+    );
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
@@ -681,10 +699,12 @@ async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_an
         );
     });
 
-    let sent = outbound
-        .next()
-        .await
-        .expect("the live completion entry should be sent");
+    let sent = expect_ping(
+        outbound
+            .next()
+            .await
+            .expect("the live completion entry should be sent"),
+    );
     assert_eq!(sent.pane.pane, live_pane);
     assert_eq!(sent.header, "header");
     assert_eq!(

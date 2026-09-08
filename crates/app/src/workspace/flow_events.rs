@@ -210,11 +210,14 @@ impl Workspace {
         end: &RunEnd,
         cx: &mut Context<Self>,
     ) -> Option<PathBuf> {
+        // Asked before `retire`, which drops the handle that knows.
+        let owes_remote_answer = self.runs.owes_telegram_answer(lane_ref);
         let run_dir = self.runs.retire(lane_ref);
         // The run just wrote its completion marker, so the list that reads
         // those markers is now wrong.
         self.invalidate_flow_history(lane_ref);
-        if let Some(message) = end_refusal(end) {
+        let refusal = end_refusal(end);
+        if let Some(message) = refusal.clone() {
             self.report_error(
                 ErrorReport::new(message)
                     .severity(ErrorSeverity::Warning)
@@ -223,6 +226,12 @@ impl Workspace {
                     .build(),
                 cx,
             );
+        }
+        // A run asked for from a phone has to be *told* how it ended. The
+        // report pane and the toast above both land on a desktop the caller
+        // is not at, which is what left a `/flow` answer looking like a hang.
+        if owes_remote_answer {
+            self.relay_notice_to_telegram(flow_outcome_notice(end, refusal), cx);
         }
         cx.notify();
         run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
@@ -275,6 +284,46 @@ fn report_to_open(end: &RunEnd, run_dir: &Path) -> Option<PathBuf> {
     super::flow_history::report_in(run_dir)
 }
 
+/// What the phone is told about a finished run.
+///
+/// `refusal` is [`end_refusal`]'s wording, reused rather than re-translated so
+/// the phone and the desktop say the same thing about the same outcome. The
+/// three outcomes it has no wording for are the ones a person reads the run
+/// report for, so those get a one-line verdict and a pointer to it.
+fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
+    if let Some(message) = refusal {
+        return s::control_flow_refused_notice(&clamp_notice_reason(&message));
+    }
+    // Spelled out rather than defaulted: which ends `end_refusal` answers for
+    // is its business, not this function's, so a variant added there without a
+    // wording here must be a compile error and not a confident "failed".
+    match end {
+        RunEnd::Done => s::control_flow_finished_notice(),
+        RunEnd::Canceled { .. } => s::control_flow_canceled_notice(),
+        RunEnd::Failed { .. } => s::control_flow_failed_notice(),
+        // Every one of these produced a refusal above, so they are unreachable
+        // here — named anyway so the compiler, not a reader, checks that.
+        RunEnd::BudgetExhausted { .. }
+        | RunEnd::Io { .. }
+        | RunEnd::LockHeld { .. }
+        | RunEnd::Invalid { .. }
+        | RunEnd::Unprovisioned { .. } => s::control_flow_failed_notice(),
+    }
+}
+
+/// Cap the engine's own words before they go into a phone message.
+///
+/// `end_refusal` can hand back a whole multi-line validation report, and the
+/// notice goes out as one message against Telegram's 4096-character limit —
+/// where an over-long body is rejected outright and the failure is only
+/// logged, so the outcome would be lost exactly when it matters most.
+fn clamp_notice_reason(reason: &str) -> String {
+    /// Enough for a sentence or two of engine detail; the full report is on
+    /// disk and the notice already points at daruda for it.
+    const MAX_CHARS: usize = 300;
+    reason.chars().take(MAX_CHARS).collect()
+}
+
 /// What to say about a run that has ended, or `None` when it ended the way
 /// it was meant to and `run.md` is the whole story.
 fn end_refusal(end: &RunEnd) -> Option<String> {
@@ -291,6 +340,47 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every outcome a phone can be told about, including that a refusal
+    /// carries the engine's *own* wording through rather than a second
+    /// translation of it.
+    #[test]
+    fn every_outcome_has_its_own_notice() {
+        let done = flow_outcome_notice(&RunEnd::Done, None);
+        let canceled = flow_outcome_notice(&RunEnd::Canceled { node: None }, None);
+        assert_eq!(done, s::control_flow_finished_notice());
+        assert_eq!(canceled, s::control_flow_canceled_notice());
+        assert_ne!(done, canceled, "finished must not read as stopped");
+
+        let holder = daruda_flow::lock::LockHolder {
+            pid: 4321,
+            run_id: "01J".to_string(),
+            started_unix_secs: 0,
+        };
+        let end = RunEnd::LockHeld { holder };
+        let refusal = end_refusal(&end).expect("a held lock is a refusal");
+        let notice = flow_outcome_notice(&end, Some(refusal.clone()));
+        assert!(
+            notice.contains(&refusal),
+            "the desktop's wording must reach the phone verbatim: {notice}"
+        );
+        assert!(notice.contains("4321"), "the detail survives: {notice}");
+    }
+
+    /// `end_refusal` can hand back a whole validation report, and the notice
+    /// goes out as one message against Telegram's limit — where an over-long
+    /// body is rejected outright and only logged, losing the outcome exactly
+    /// when it matters.
+    #[test]
+    fn a_long_refusal_is_bounded_before_it_is_interpolated() {
+        let huge = "x".repeat(10_000);
+        let notice = flow_outcome_notice(&RunEnd::Done, Some(huge));
+        assert!(
+            notice.chars().count() < 500,
+            "{} chars",
+            notice.chars().count()
+        );
+    }
 
     /// A run the engine refused before the lock wrote no report, so there
     /// is nothing to open — and opening a path that is not there replaces

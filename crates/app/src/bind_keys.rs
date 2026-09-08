@@ -240,7 +240,10 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
     // Explicit) keeps the app running past the last closed window.
     cx.on_action(move |_: &CloseProject, cx: &mut App| {
         let Some((handle, weak)) = WindowRegistry::active_workspace(cx) else {
-            close_all_workspace_windows(cx);
+            // The orchestrator has no project to close.
+            if !WindowRegistry::active_is_orchestrator(cx) {
+                close_all_workspace_windows(cx);
+            }
             cx.stop_propagation();
             return;
         };

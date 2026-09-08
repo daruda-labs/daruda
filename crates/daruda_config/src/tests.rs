@@ -730,6 +730,51 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// Each of the three orchestrator keys through the real `toml_edit` writer.
+/// The two optional ones matter most: a `None` has to *remove* its key, since
+/// an empty string is a real agent id that resolves to nothing.
+#[test]
+fn settings_patch_round_trips_every_orchestrator_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let account = daruda_store::accounts::AccountId::new();
+
+    let written =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorEnabled(true), &path)
+            .expect("enabled patch");
+    assert!(written.orchestrator.enabled);
+
+    let written = crate::apply_settings_patch_to(
+        &crate::SettingsPatch::OrchestratorAgentId(Some("codex-acp".to_string())),
+        &path,
+    )
+    .expect("agent patch");
+    assert_eq!(written.orchestrator.agent_id.as_deref(), Some("codex-acp"));
+
+    let written = crate::apply_settings_patch_to(
+        &crate::SettingsPatch::OrchestratorAccountId(Some(account)),
+        &path,
+    )
+    .expect("account patch");
+    assert_eq!(written.orchestrator.account_id, Some(account));
+
+    // Clearing both optional keys leaves `enabled` alone and removes them
+    // rather than persisting a value that would resolve to nothing.
+    let written =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorAgentId(None), &path)
+            .expect("agent clear");
+    assert_eq!(written.orchestrator.agent_id, None);
+    let written =
+        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorAccountId(None), &path)
+            .expect("account clear");
+    assert_eq!(written.orchestrator.account_id, None);
+    assert!(written.orchestrator.enabled);
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(!on_disk.contains("agent_id"), "{on_disk}");
+    assert!(!on_disk.contains("account_id"), "{on_disk}");
+}
+
 #[test]
 fn patch_config_file_creates_missing_file() {
     let dir = tempfile::tempdir().unwrap();

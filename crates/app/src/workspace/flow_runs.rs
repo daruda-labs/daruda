@@ -41,6 +41,12 @@ pub(in crate::workspace) struct RunHandle {
     /// draw nodes this run never had — and an id taken by a different node
     /// would otherwise be painted with the old one's state.
     pub nodes_at_start: Vec<NodeId>,
+    /// This run was asked for from outside the app, by a caller with no
+    /// screen to read a toast on, so its outcome is owed back to that caller.
+    /// Set right after submission by whoever knows the origin; travels with
+    /// the run and retires with it, so there is no second lifetime to keep in
+    /// step with this one.
+    answers_telegram: bool,
     _thread: std::thread::JoinHandle<()>,
 }
 
@@ -120,6 +126,7 @@ impl RunHandle {
             source,
             nodes: NodeRunStates::new(),
             nodes_at_start,
+            answers_telegram: false,
             _thread: thread,
         }
     }
@@ -150,6 +157,7 @@ impl RunHandle {
             source,
             nodes: NodeRunStates::new(),
             nodes_at_start,
+            answers_telegram: false,
             _thread: std::thread::spawn(|| {}),
         }
     }
@@ -248,6 +256,28 @@ impl FlowRuns {
     /// Retire the run `lane` holds and hand back where it wrote.
     pub(in crate::workspace) fn retire(&mut self, lane: LaneRef) -> Option<PathBuf> {
         self.runs.remove(&lane).map(|handle| handle.run_dir)
+    }
+
+    /// Mark `lane`'s run as owing its outcome to a remote caller. `false` when
+    /// the lane holds no run to mark, which is also the caller's signal that
+    /// the submission it just made produced none.
+    #[must_use = "a submission that produced no run has to be answered"]
+    pub(in crate::workspace) fn answer_telegram_on_end(&mut self, lane: LaneRef) -> bool {
+        match self.runs.get_mut(&lane) {
+            Some(handle) => {
+                handle.answers_telegram = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether `lane`'s run owes its outcome to a remote caller. Asked before
+    /// [`Self::retire`], which drops the handle that knows.
+    pub(in crate::workspace) fn owes_telegram_answer(&self, lane: LaneRef) -> bool {
+        self.runs
+            .get(&lane)
+            .is_some_and(|handle| handle.answers_telegram)
     }
 
     pub(in crate::workspace) fn iter(&self) -> impl Iterator<Item = (LaneRef, &RunHandle)> {

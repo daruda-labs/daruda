@@ -8,8 +8,8 @@
 
 use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
-    Activity, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowOriginKind, Health,
-    Listing, SendDisposition, StopDisposition,
+    Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
+    FlowOriginKind, Health, Listing, SendDisposition, StopDisposition,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::surface::strings as s;
@@ -122,6 +122,12 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             brief.error,
             brief.total,
         )),
+        ControlResult::Accepted { disposition } => plain(match disposition {
+            AskDisposition::Connecting => s::control_ask_accepted_connecting(),
+            AskDisposition::Sent => s::control_ask_accepted(),
+            AskDisposition::Queued => s::control_sent_queued(),
+            AskDisposition::HandledLocally => s::control_sent_handled_locally(),
+        }),
     }
 }
 
@@ -133,10 +139,14 @@ fn render_error(error: &ControlError) -> String {
         ControlError::FlowNotFound { name } => s::control_error_flow_not_found(name),
         ControlError::FlowLocked { .. } => s::control_error_flow_locked(),
         ControlError::FlowRefused { name } => s::control_error_flow_refused(name),
+        ControlError::FlowNotStarted { name } => s::control_error_flow_not_started(name),
         ControlError::FlowNeedsInteraction { name } => {
             s::control_error_flow_needs_interaction(name)
         }
         ControlError::NoActiveLane => s::control_error_no_active_lane(),
+        ControlError::OrchestratorDisabled => s::control_error_orchestrator_disabled(),
+        ControlError::OrchestratorUnresolvable => s::control_error_orchestrator_unresolvable(),
+        ControlError::OrchestratorUnavailable => s::control_error_orchestrator_unavailable(),
     }
 }
 
@@ -264,6 +274,7 @@ fn origin_label(origin: FlowOriginKind) -> String {
 fn usage_for(command: &str) -> String {
     match command {
         "say" => s::control_usage_say(),
+        "daruda" => s::control_usage_daruda(),
         _ => s::control_usage_use(),
     }
 }
@@ -336,6 +347,65 @@ mod tests {
         assert_eq!(rendered.text, s::control_listing_empty());
         assert!(rendered.keyboard.is_none());
     }
+    #[test]
+    fn every_ask_disposition_is_worded_differently() {
+        let state = CommandState::default();
+        let texts: Vec<String> = [
+            AskDisposition::Connecting,
+            AskDisposition::Sent,
+            AskDisposition::Queued,
+            AskDisposition::HandledLocally,
+        ]
+        .into_iter()
+        .map(|disposition| {
+            let reply = render(
+                &Ok(ControlResult::Accepted { disposition }),
+                Absorbed::Nothing,
+                &state,
+            );
+            assert!(reply.keyboard.is_none());
+            reply.text
+        })
+        .collect();
+        assert!(texts.iter().all(|t| !t.is_empty()));
+        assert_eq!(
+            texts.iter().collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "{texts:?}"
+        );
+    }
+
+    /// Three refusals with three different fixes, so three different
+    /// sentences — a shared one would send the user to the wrong place.
+    #[test]
+    fn each_orchestrator_refusal_says_something_different() {
+        let state = CommandState::default();
+        let texts: Vec<String> = [
+            ControlError::OrchestratorDisabled,
+            ControlError::OrchestratorUnresolvable,
+            ControlError::OrchestratorUnavailable,
+        ]
+        .into_iter()
+        .map(|e| render(&Err(e), Absorbed::Nothing, &state).text)
+        .collect();
+        assert!(texts.iter().all(|t| !t.is_empty()));
+        assert_eq!(
+            texts.iter().collect::<std::collections::HashSet<_>>().len(),
+            3,
+            "{texts:?}"
+        );
+    }
+
+    /// `/daruda` with no text names its own usage line, not `/use`'s.
+    #[test]
+    fn a_bare_daruda_is_answered_with_its_own_usage() {
+        let rendered = render_parse_error(&ParseError::MissingArgument { command: "daruda" });
+        assert_eq!(
+            rendered.text,
+            s::control_error_missing_argument(&s::control_usage_daruda())
+        );
+    }
+
     #[test]
     fn a_typo_is_answered_with_the_suggestion() {
         let rendered = render_parse_error(&ParseError::Unknown {

@@ -116,6 +116,53 @@ pub(crate) fn workspace_for_control(cx: &mut TestAppContext) -> ControlFixture {
     }
 }
 
+/// Stand up a seeded, registered orchestrator without `orchestrator::window::open`.
+pub(crate) fn register_test_orchestrator(
+    cx: &mut TestAppContext,
+) -> crate::telegram::bridge::PaneRef {
+    crate::test_support::init_gpui_component(cx);
+    let config = daruda_config::Config::default();
+    let holder = std::cell::RefCell::new(None);
+    let window = cx.add_window(|window, cx| {
+        let ws = cx.new(|cx| {
+            crate::workspace::Workspace::new_with_project_for_test_full(
+                &config,
+                None,
+                std::env::temp_dir().join("daruda_orchestrator_wiring_test"),
+                window,
+                cx,
+            )
+        });
+        *holder.borrow_mut() = Some(ws.clone());
+        gpui_component::Root::new(ws, window, cx)
+    });
+    let ws = holder.borrow().clone().expect("workspace constructed");
+    let cwd = std::env::temp_dir().join("daruda_orchestrator_wiring_cwd");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let agent = config.resolved_agents()[0].id.clone();
+    cx.update_window(window.into(), |_, win, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.seed_orchestrator_chat_pane(
+                agent,
+                cwd,
+                daruda_store::accounts::AccountSelection::SystemDefault,
+                win,
+                cx,
+            )
+        })
+    })
+    .expect("window is live")
+    .expect("seeded");
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register_orchestrator(
+            window.into(),
+            ws.downgrade(),
+            cx,
+        );
+        crate::orchestrator::pane(cx).expect("the orchestrator reports its pane")
+    })
+}
+
 /// A unique temp directory per fixture so parallel tests never share
 /// persistence state.
 ///

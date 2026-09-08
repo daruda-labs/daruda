@@ -4243,6 +4243,34 @@ pub fn settings_telegram_unpair() -> String {
     rust_i18n::t!("settings.telegram_unpair").into_owned()
 }
 
+// Notifications section — orchestrator subsection.
+pub fn settings_orchestrator_heading() -> String {
+    rust_i18n::t!("settings.orchestrator_heading").into_owned()
+}
+pub fn settings_orchestrator_enabled_label() -> String {
+    rust_i18n::t!("settings.orchestrator_enabled_label").into_owned()
+}
+pub fn settings_orchestrator_agent_label() -> String {
+    rust_i18n::t!("settings.orchestrator_agent_label").into_owned()
+}
+pub fn settings_orchestrator_account_label() -> String {
+    rust_i18n::t!("settings.orchestrator_account_label").into_owned()
+}
+pub fn settings_orchestrator_agent_default() -> String {
+    rust_i18n::t!("settings.orchestrator_agent_default").into_owned()
+}
+pub fn settings_orchestrator_account_system() -> String {
+    rust_i18n::t!("settings.orchestrator_account_system").into_owned()
+}
+pub fn settings_orchestrator_account_option(domain: &str, identity: &str) -> String {
+    rust_i18n::t!(
+        "settings.orchestrator_account_option",
+        domain = domain,
+        identity = identity
+    )
+    .into_owned()
+}
+
 pub fn settings_label_agent_use_modifier_to_send() -> String {
     rust_i18n::t!("settings.label_agent_use_modifier_to_send").into_owned()
 }
@@ -5110,6 +5138,35 @@ pub fn control_flow_list_row(name: &str, origin: &str) -> String {
     rust_i18n::t!("control.flow_list_row", name = name, origin = origin).into_owned()
 }
 
+/// Told to the phone when a run it asked for finished cleanly.
+/// Stands in for the engine's own words when a run died without saying
+/// anything — the only way `LastWord`'s guard has nothing to report.
+pub fn flow_run_panicked() -> String {
+    rust_i18n::t!("flow.run_panicked").into_owned()
+}
+
+pub fn control_flow_finished_notice() -> String {
+    rust_i18n::t!("control.flow_finished_notice").into_owned()
+}
+
+/// Told to the phone when a run it asked for was stopped.
+pub fn control_flow_canceled_notice() -> String {
+    rust_i18n::t!("control.flow_canceled_notice").into_owned()
+}
+
+/// Told to the phone when a run it asked for ended badly in a way whose
+/// detail lives in the run report — which only the desktop can open.
+pub fn control_flow_failed_notice() -> String {
+    rust_i18n::t!("control.flow_failed_notice").into_owned()
+}
+
+/// Told to the phone when the engine refused the run outright. `reason` is
+/// the same already-localized wording the desktop toast shows, so the two
+/// surfaces cannot drift apart about one outcome.
+pub fn control_flow_refused_notice(reason: &str) -> String {
+    rust_i18n::t!("control.flow_refused_notice", reason = reason).into_owned()
+}
+
 pub fn control_flow_list_empty() -> String {
     rust_i18n::t!("control.flow_list_empty").into_owned()
 }
@@ -5127,9 +5184,9 @@ pub fn control_flow_origin_global() -> String {
 }
 
 /// Said when a flow start was accepted. Deliberately not "started": the
-/// engine takes its lock after this answer is sent, and its outcome — success
-/// or a refusal — surfaces in daruda, not on the phone. Saying so is what
-/// keeps the reply from reading as a hang when a run fails immediately.
+/// engine takes its lock after this answer is sent, so the run can still be
+/// refused. It promises the outcome instead, which
+/// `Workspace::settle_flow_run` then delivers.
 pub fn control_flow_starting(name: &str) -> String {
     rust_i18n::t!("control.flow_starting", name = name).into_owned()
 }
@@ -5179,6 +5236,13 @@ pub fn control_error_flow_refused(name: &str) -> String {
     rust_i18n::t!("control.error_flow_refused", name = name).into_owned()
 }
 
+/// Said when the flow itself is fine but no run appeared. Points at daruda
+/// rather than at the file, because the static check already cleared the file
+/// and the actual reason is in a toast only the desktop shows.
+pub fn control_error_flow_not_started(name: &str) -> String {
+    rust_i18n::t!("control.error_flow_not_started", name = name).into_owned()
+}
+
 pub fn control_error_flow_needs_interaction(name: &str) -> String {
     rust_i18n::t!("control.error_flow_needs_interaction", name = name).into_owned()
 }
@@ -5194,17 +5258,29 @@ pub fn control_usage_use() -> String {
 pub fn control_usage_say() -> String {
     rust_i18n::t!("control.usage_say").into_owned()
 }
+pub fn control_usage_daruda() -> String {
+    rust_i18n::t!("control.usage_daruda").into_owned()
+}
+pub fn control_ask_accepted() -> String {
+    rust_i18n::t!("control.ask_accepted").into_owned()
+}
+pub fn control_ask_accepted_connecting() -> String {
+    rust_i18n::t!("control.ask_accepted_connecting").into_owned()
+}
+pub fn control_error_orchestrator_disabled() -> String {
+    rust_i18n::t!("control.error_orchestrator_disabled").into_owned()
+}
+pub fn control_error_orchestrator_unresolvable() -> String {
+    rust_i18n::t!("control.error_orchestrator_unresolvable").into_owned()
+}
+pub fn control_error_orchestrator_unavailable() -> String {
+    rust_i18n::t!("control.error_orchestrator_unavailable").into_owned()
+}
 
 /// The `/setcommands` block a user pastes into BotFather. Fixed English —
 /// it is registered with Telegram, not shown in daruda's own UI.
 pub fn control_botfather_commands() -> String {
     rust_i18n::t!("control.botfather_commands").into_owned()
-}
-
-/// Stands in for the engine's own words when a run died without saying
-/// anything — the only way `LastWord`'s guard has nothing to report.
-pub fn flow_run_panicked() -> String {
-    rust_i18n::t!("flow.run_panicked").into_owned()
 }
 
 /// Format a `Duration` as a compact, human-friendly span for the

@@ -40,6 +40,9 @@ pub enum SettingsFieldId {
     ClaudeStatusEnabled,
     TelegramEnabled,
     TelegramAuthorizedChatId,
+    OrchestratorEnabled,
+    OrchestratorAgentId,
+    OrchestratorAccountId,
 }
 
 impl SettingsFieldId {
@@ -80,6 +83,9 @@ impl SettingsFieldId {
             Self::ClaudeStatusEnabled => "claude_status.enable",
             Self::TelegramEnabled => "telegram.enabled",
             Self::TelegramAuthorizedChatId => "telegram.authorized_chat_id",
+            Self::OrchestratorEnabled => "orchestrator.enabled",
+            Self::OrchestratorAgentId => "orchestrator.agent_id",
+            Self::OrchestratorAccountId => "orchestrator.account_id",
         }
     }
 }
@@ -126,6 +132,12 @@ pub enum SettingsPatch {
     ClaudeStatusEnabled(bool),
     TelegramEnabled(bool),
     TelegramAuthorizedChatId(Option<i64>),
+    OrchestratorEnabled(bool),
+    /// `None` follows the catalog's first entry — see
+    /// [`crate::OrchestratorConfig::agent_id`].
+    OrchestratorAgentId(Option<String>),
+    /// `None` is the system default, matching a pane's persisted encoding.
+    OrchestratorAccountId(Option<daruda_store::accounts::AccountId>),
 }
 
 impl SettingsPatch {
@@ -166,6 +178,9 @@ impl SettingsPatch {
             Self::ClaudeStatusEnabled(_) => SettingsFieldId::ClaudeStatusEnabled,
             Self::TelegramEnabled(_) => SettingsFieldId::TelegramEnabled,
             Self::TelegramAuthorizedChatId(_) => SettingsFieldId::TelegramAuthorizedChatId,
+            Self::OrchestratorEnabled(_) => SettingsFieldId::OrchestratorEnabled,
+            Self::OrchestratorAgentId(_) => SettingsFieldId::OrchestratorAgentId,
+            Self::OrchestratorAccountId(_) => SettingsFieldId::OrchestratorAccountId,
         }
     }
 
@@ -216,6 +231,9 @@ impl SettingsPatch {
             Self::ClaudeStatusEnabled(value) => config.claude_status.enable = *value,
             Self::TelegramEnabled(value) => config.telegram.enabled = *value,
             Self::TelegramAuthorizedChatId(value) => config.telegram.authorized_chat_id = *value,
+            Self::OrchestratorEnabled(value) => config.orchestrator.enabled = *value,
+            Self::OrchestratorAgentId(value) => config.orchestrator.agent_id = value.clone(),
+            Self::OrchestratorAccountId(value) => config.orchestrator.account_id = *value,
         }
     }
 
@@ -283,6 +301,13 @@ impl SettingsPatch {
             Self::TelegramEnabled(_) => left.telegram.enabled != right.telegram.enabled,
             Self::TelegramAuthorizedChatId(_) => {
                 left.telegram.authorized_chat_id != right.telegram.authorized_chat_id
+            }
+            Self::OrchestratorEnabled(_) => left.orchestrator.enabled != right.orchestrator.enabled,
+            Self::OrchestratorAgentId(_) => {
+                left.orchestrator.agent_id != right.orchestrator.agent_id
+            }
+            Self::OrchestratorAccountId(_) => {
+                left.orchestrator.account_id != right.orchestrator.account_id
             }
         }
     }

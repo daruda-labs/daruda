@@ -436,14 +436,8 @@ impl Workspace {
     ) {
         // Preserve `relay_to_telegram`'s drop-when-not-ready semantics: never
         // stash (or send) a ping while disabled, unpaired, or before the
-        // bridge global is installed.
-        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some()) {
-            return;
-        }
-        if cx
-            .try_global::<crate::telegram::global::TelegramBridge>()
-            .is_none()
-        {
+        // bridge global is installed — the same gate, asked once.
+        if self.telegram_bridge(cx).is_none() {
             return;
         }
         let defer = should_defer_relay(
@@ -486,10 +480,7 @@ impl Workspace {
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
         cx: &Context<Self>,
     ) {
-        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some()) {
-            return;
-        }
-        let Some(bridge) = cx.try_global::<crate::telegram::global::TelegramBridge>() else {
+        let Some(bridge) = self.telegram_bridge(cx) else {
             return;
         };
         bridge.send(crate::telegram::bridge::BridgePing {
@@ -501,6 +492,39 @@ impl Workspace {
             tail,
             permission,
         });
+    }
+
+    /// The live bridge, or `None` when nothing may be sent — the feature is
+    /// off, no chat is paired, or the global is not installed yet (early
+    /// startup, tests).
+    ///
+    /// The one place that question is answered. Every relay below asks it, so
+    /// they cannot come to different conclusions about the same three
+    /// conditions, and a fourth relay inherits the rule instead of copying it.
+    fn telegram_bridge<'a>(
+        &self,
+        cx: &'a Context<Self>,
+    ) -> Option<&'a crate::telegram::global::TelegramBridge> {
+        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some()) {
+            return None;
+        }
+        cx.try_global::<crate::telegram::global::TelegramBridge>()
+    }
+
+    /// Relay text that belongs to no pane.
+    ///
+    /// Lives beside [`Self::relay_to_telegram`] despite not being about a chat
+    /// pane, because both go through [`Self::telegram_bridge`] — keeping the
+    /// two callers of that gate together is what stops it being re-derived.
+    ///
+    /// Not deferred by presence, unlike a ping. This answers a command the
+    /// phone sent, so holding it because the user is at the desktop would be
+    /// backwards — the same reasoning that keeps a command reply out of the
+    /// deferral queue.
+    pub(in crate::workspace) fn relay_notice_to_telegram(&self, text: String, cx: &Context<Self>) {
+        if let Some(bridge) = self.telegram_bridge(cx) {
+            bridge.send_notice(text);
+        }
     }
 
     /// Send the "queued behind the current turn" notice — fires the instant

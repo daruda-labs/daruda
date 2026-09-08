@@ -46,6 +46,7 @@ mod left_dock;
 pub(in crate::workspace) mod main_area;
 pub(in crate::workspace) mod modal_view;
 pub(crate) mod open_project_modal;
+mod orchestrator_ops;
 mod path_drag;
 mod persistence;
 mod project_ops;

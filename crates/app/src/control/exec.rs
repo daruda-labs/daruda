@@ -1,8 +1,8 @@
 //! App-level dispatch for control commands.
 //!
-//! Two shapes. Enumeration walks every open window, because `/list` and
-//! `/brief` answer about the app, not about one window. Targeted commands
-//! resolve their `PaneRef`'s workspace and run there.
+//! Enumeration walks every user window for `/list` and `/brief`. Targeted
+//! commands resolve their `PaneRef`'s workspace, and `/daruda` ensures the
+//! orchestrator.
 //!
 //! The enumeration walk collects plain data inside the per-window callback and
 //! assembles the result afterwards — building it inside would read entities
@@ -12,7 +12,7 @@ use gpui::App;
 
 use crate::control::result::{
     Activity, BriefSummary, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowEntry,
-    Health, LaneGroup, Listing, ProjectGroup, WindowGroup,
+    Health, LaneGroup, Listing, ProjectGroup, WindowGroup, ask_disposition,
 };
 use crate::control::spec::{FlowCommand, ResolvedCommand};
 use crate::telegram::bridge::PaneRef;
@@ -73,7 +73,7 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         // arm may stop at the first window.
         ResolvedCommand::Flow(FlowCommand::List) => {
             let mut flows: Vec<FlowEntry> = Vec::new();
-            WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+            WindowRegistry::for_each_user_workspace(cx, |ws, _window, _cx| {
                 flows.extend(ws.control_flow_list());
             });
             // A name can legitimately appear in two windows' repositories.
@@ -85,7 +85,9 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         }
         ResolvedCommand::Flow(FlowCommand::Run { name }) => {
             let mut out = Err(ControlError::NoActiveLane);
-            WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
+            // User workspaces only: the orchestrator has no lane, so visiting
+            // it can only turn a specific refusal back into `NoActiveLane`.
+            WindowRegistry::for_each_user_workspace(cx, |ws, window, cx| {
                 // Retry on the two refusals another window can answer
                 // differently: it may have an active lane where this one has
                 // none, and its repository may hold a flow this one lacks.
@@ -106,7 +108,34 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
                 origin: entry.origin,
             })
         }
+        // Handed to the orchestrator, not to a window the user opened — so it
+        // does not go through `in_workspace`, which resolves a target the
+        // caller named. Owned here rather than in the Telegram adapter so an
+        // adapter speaking `ResolvedCommand` directly inherits it.
+        ResolvedCommand::Ask { text } => ask(text, cx),
     }
+}
+
+/// Bring the orchestrator up if needed and put `text` on its pane.
+///
+/// The reply is `Accepted`, never the answer: the agent's response arrives
+/// later as that pane's own completion ping.
+fn ask(text: String, cx: &mut App) -> ControlOutcome {
+    let connecting = crate::orchestrator::pane(cx).is_none();
+    let pane = crate::orchestrator::ensure(cx).map_err(|e| match e {
+        crate::orchestrator::EnsureError::Disabled => ControlError::OrchestratorDisabled,
+        crate::orchestrator::EnsureError::Unresolvable => ControlError::OrchestratorUnresolvable,
+        crate::orchestrator::EnsureError::OpenFailed(_) => ControlError::OrchestratorUnavailable,
+    })?;
+    // `/list` never names the orchestrator, so fold a missing pane into its
+    // own error.
+    let send = in_workspace(pane, cx, |ws, _window, cx| {
+        ws.control_say(pane.pane, text.clone(), cx)
+    })
+    .map_err(|_| ControlError::OrchestratorUnavailable)?;
+    Ok(ControlResult::Accepted {
+        disposition: ask_disposition(connecting, send),
+    })
 }
 
 fn count(rows: &[Row], pred: impl Fn(&ChatSummary) -> bool) -> u32 {
@@ -116,7 +145,9 @@ fn count(rows: &[Row], pred: impl Fn(&ChatSummary) -> bool) -> u32 {
 fn collect_rows(cx: &mut App) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut window = 0u32;
-    WindowRegistry::for_each_workspace(cx, |ws, _win, cx| {
+    // A listing answers "what is the user working on?", so the orchestrator's
+    // own chat pane must not appear as a target the user can address.
+    WindowRegistry::for_each_user_workspace(cx, |ws, _win, cx| {
         for (lane_ref, summary) in ws.control_snapshot(cx) {
             rows.push(Row {
                 window,

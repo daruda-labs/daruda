@@ -18,6 +18,7 @@ mod globals;
 mod hooks;
 pub mod lane;
 pub(crate) mod menus;
+mod orchestrator;
 mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;

@@ -20,6 +20,7 @@ mod agent;
 pub(super) mod agent_env;
 pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
+pub(super) mod orchestrator;
 pub(super) mod plugin;
 mod session_hosts;
 
@@ -702,6 +703,9 @@ impl SettingsWindow {
                         ),
                     ),
             )
+            // Beside the bridge controls, not on a page of its own: `/daruda`
+            // arrives over that bridge, so the two are one feature to the user.
+            .child(self.render_orchestrator(cx))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))

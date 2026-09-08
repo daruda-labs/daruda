@@ -212,6 +212,27 @@ impl Workspace {
         ) {
             return Err(ControlError::FlowLocked { name: entry.name });
         }
+        // The guard passing does not mean a run exists: the request builder
+        // can still refuse after it (an unusable session host, an account
+        // directory it cannot prepare). Marking the run is also how that is
+        // detected — no run, nothing to mark.
+        //
+        // WORKAROUND: `submit_flow_run` has the typed `FlowSubmitError` and
+        // discards it into `report_flow_refusal`, so the real reason is only
+        // ever on screen. Surfacing it would mean threading a `Result` through
+        // `run_flow_at` → `start_flow` → `dispatch_flow`, whose other branches
+        // (`validate_flow`, `open_flow_graph`) are not runs and whose guard's
+        // third outcome is a picker rather than an error — a restructure of
+        // the flow host's dispatch, which is a separate subsystem from this
+        // one. Deferred; until then the answer says only what is known.
+        // Marked after dispatch rather than threaded into the submission: the
+        // run is inserted synchronously inside `run_flow_at`, and nothing here
+        // awaits, so the event pump cannot retire it in between. Threading the
+        // origin instead would touch five signatures on a path desktop callers
+        // share, for one flag.
+        if !self.runs.answer_telegram_on_end(self.active) {
+            return Err(ControlError::FlowNotStarted { name: entry.name });
+        }
         Ok(entry)
     }
 

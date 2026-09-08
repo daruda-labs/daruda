@@ -19,6 +19,7 @@ pub mod keybindings;
 pub mod left_dock;
 pub mod logs;
 pub mod notifications;
+pub mod orchestrator;
 pub mod panels;
 pub mod ports;
 pub mod project;
@@ -66,6 +67,7 @@ pub use keybindings::KeybindingConfig;
 pub use left_dock::{IconColorMode, LeftDockConfig};
 pub use logs::LogsConfig;
 pub use notifications::NotificationsConfig;
+pub use orchestrator::OrchestratorConfig;
 pub use panels::PanelsConfig;
 pub use ports::PortsConfig;
 pub use project::{
@@ -167,6 +169,7 @@ pub struct Config {
     pub session_host_tombstones: Vec<SessionHostTombstone>,
     pub update: UpdateConfig,
     pub telegram: TelegramConfig,
+    pub orchestrator: OrchestratorConfig,
 }
 
 impl Default for Config {
@@ -209,6 +212,7 @@ impl Default for Config {
             session_host_tombstones: Vec::new(),
             update: Default::default(),
             telegram: Default::default(),
+            orchestrator: Default::default(),
         }
     }
 }
@@ -1032,6 +1036,24 @@ fn patch_settings_document(
             } else {
                 t.remove("authorized_chat_id");
             }
+        }),
+        SettingsPatch::OrchestratorEnabled(_) => patch_section(doc, "orchestrator", |t| {
+            t.insert("enabled", toml_edit::value(config.orchestrator.enabled));
+        }),
+        // Each `None` removes its key rather than writing a null: absent is
+        // what the deserializer reads as "follow the default", and a written
+        // empty string would be a real agent id that resolves to nothing.
+        SettingsPatch::OrchestratorAgentId(_) => patch_section(doc, "orchestrator", |t| {
+            match &config.orchestrator.agent_id {
+                Some(id) => t.insert("agent_id", toml_edit::value(id.clone())),
+                None => t.remove("agent_id"),
+            };
+        }),
+        SettingsPatch::OrchestratorAccountId(_) => patch_section(doc, "orchestrator", |t| {
+            match config.orchestrator.account_id {
+                Some(id) => t.insert("account_id", toml_edit::value(id.0.to_string())),
+                None => t.remove("account_id"),
+            };
         }),
     }
 }

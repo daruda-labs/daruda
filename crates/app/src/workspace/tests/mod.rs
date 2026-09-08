@@ -20,6 +20,7 @@ mod git_changes_virtualized;
 mod left_dock_pulse;
 mod lifecycle;
 mod modal_tab_containment;
+mod orchestrator;
 mod palette_agent;
 mod pane_menu;
 mod ports;

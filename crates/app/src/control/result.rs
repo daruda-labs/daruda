@@ -128,6 +128,33 @@ pub(crate) enum StopDisposition {
     AlreadyIdle,
 }
 
+/// What became of a `/daruda` prompt. The answer arrives later from the
+/// orchestrator pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AskDisposition {
+    /// This request started the orchestrator, so the answer waits on its ACP
+    /// handshake too.
+    Connecting,
+    /// On the wire now.
+    Sent,
+    /// Behind a turn the orchestrator already had in flight.
+    Queued,
+    /// The pane handled a local slash command, so no agent answer will follow.
+    HandledLocally,
+}
+
+/// Collapse orchestrator startup and prompt delivery into one phone-facing
+/// status.
+pub(crate) fn ask_disposition(connecting: bool, send: SendDisposition) -> AskDisposition {
+    match (send, connecting) {
+        (SendDisposition::HandledLocally, _) => AskDisposition::HandledLocally,
+        (_, true) => AskDisposition::Connecting,
+        (SendDisposition::Delivered, false) => AskDisposition::Sent,
+        (SendDisposition::Queued, false) => AskDisposition::Queued,
+    }
+}
+
 /// Which of the three flow directories a name resolved to. Mirrors
 /// `workspace::flow_paths::FlowOrigin`, which is `pub(in crate::workspace)`;
 /// the single conversion lives in `crate::workspace::control_ops`.
@@ -188,6 +215,11 @@ pub(crate) enum ControlResult {
         origin: FlowOriginKind,
     },
     Brief(BriefSummary),
+    /// `/daruda` was accepted. The reply arrives later from the orchestrator
+    /// pane.
+    Accepted {
+        disposition: AskDisposition,
+    },
 }
 
 /// A command that cannot run. A branch the caller must take in the normal
@@ -217,6 +249,13 @@ pub(crate) enum ControlError {
     FlowRefused {
         name: String,
     },
+    /// The flow is valid and nothing refused it up front, but no run exists
+    /// afterwards — so something between the two said no. Deliberately does
+    /// not guess *what*: at this point the static check has passed, so naming
+    /// the file would send the caller to inspect something that is fine.
+    FlowNotStarted {
+        name: String,
+    },
     /// The flow would open a desktop dialog the phone cannot answer — an
     /// agent node whose permission policy is `ask`, or a file declaring
     /// profiles, which asks which one to run.
@@ -224,6 +263,15 @@ pub(crate) enum ControlError {
         name: String,
     },
     NoActiveLane,
+    /// `[orchestrator] enabled = false` — nothing to hand the prompt to.
+    OrchestratorDisabled,
+    /// Switched on, but the settings name no runnable agent. A separate code
+    /// from `Disabled` because the fix is a different one.
+    OrchestratorUnresolvable,
+    /// Configured and resolvable, but it would not come up. Deliberately does
+    /// not carry the reason: it is an internal failure the log holds, not
+    /// something the caller can act on.
+    OrchestratorUnavailable,
 }
 
 impl std::fmt::Display for ControlError {
@@ -237,8 +285,12 @@ impl std::fmt::Display for ControlError {
             Self::FlowNotFound { name } => write!(f, "no flow named {name}"),
             Self::FlowLocked { name } => write!(f, "flow already running: {name}"),
             Self::FlowRefused { name } => write!(f, "flow will not run as written: {name}"),
+            Self::FlowNotStarted { name } => write!(f, "flow did not start: {name}"),
             Self::FlowNeedsInteraction { name } => write!(f, "flow needs desktop input: {name}"),
             Self::NoActiveLane => write!(f, "no active lane"),
+            Self::OrchestratorDisabled => write!(f, "orchestrator is disabled"),
+            Self::OrchestratorUnresolvable => write!(f, "orchestrator names no runnable agent"),
+            Self::OrchestratorUnavailable => write!(f, "orchestrator would not start"),
         }
     }
 }
@@ -353,6 +405,18 @@ mod tests {
                 error: 3,
                 total: 6,
             }),
+            ControlResult::Accepted {
+                disposition: AskDisposition::Connecting,
+            },
+            ControlResult::Accepted {
+                disposition: AskDisposition::Sent,
+            },
+            ControlResult::Accepted {
+                disposition: AskDisposition::Queued,
+            },
+            ControlResult::Accepted {
+                disposition: AskDisposition::HandledLocally,
+            },
         ];
         for case in cases {
             let json =
@@ -379,10 +443,16 @@ mod tests {
             ControlError::FlowRefused {
                 name: "ship.yaml".into(),
             },
+            ControlError::FlowNotStarted {
+                name: "ship.yaml".into(),
+            },
             ControlError::FlowNeedsInteraction {
                 name: "ship.yaml".into(),
             },
             ControlError::NoActiveLane,
+            ControlError::OrchestratorDisabled,
+            ControlError::OrchestratorUnresolvable,
+            ControlError::OrchestratorUnavailable,
         ];
         for case in cases {
             let json =
@@ -410,6 +480,18 @@ mod tests {
         );
         assert_eq!(sanitize_title("   \n\t  "), None);
         assert_eq!(sanitize_title(""), None);
+    }
+
+    #[test]
+    fn ask_disposition_ranks_no_answer_over_a_cold_start() {
+        use AskDisposition as A;
+        use SendDisposition as S;
+        assert_eq!(ask_disposition(true, S::Queued), A::Connecting);
+        assert_eq!(ask_disposition(true, S::Delivered), A::Connecting);
+        assert_eq!(ask_disposition(true, S::HandledLocally), A::HandledLocally);
+        assert_eq!(ask_disposition(false, S::Delivered), A::Sent);
+        assert_eq!(ask_disposition(false, S::Queued), A::Queued);
+        assert_eq!(ask_disposition(false, S::HandledLocally), A::HandledLocally);
     }
 
     #[test]

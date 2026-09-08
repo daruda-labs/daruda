@@ -1081,7 +1081,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(pane_id) = self.insert_agent_chat_pane(agent_id, window, cx) {
+        let cwds = self.active_lane_cwds();
+        if let Some(pane_id) = self.insert_agent_chat_pane(agent_id, cwds, window, cx) {
             self.reveal_new_agent_chat_pane(pane_id, window, cx);
         }
     }
@@ -1092,10 +1093,16 @@ impl Workspace {
     /// true before a session could start goes between the two — that gap is the
     /// seam `open_agent_chat_pane_seeded` seeds through.
     ///
+    /// `cwds` is the `(local, remote, session_host)` triple the pane roots at,
+    /// passed in rather than read from the active lane: the orchestrator's
+    /// window has no lane and roots its pane at a directory of its own, so it
+    /// reuses this sequence instead of copying it.
+    ///
     /// `None` when the active lane cannot host a pane.
-    fn insert_agent_chat_pane(
+    pub(in crate::workspace) fn insert_agent_chat_pane(
         &mut self,
         agent_id: String,
+        cwds: (Option<PathBuf>, Option<String>, Option<LaneSessionHost>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
@@ -1106,7 +1113,7 @@ impl Workspace {
             return None;
         }
         self.last_agent_id = Some(agent_id.clone());
-        let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
+        let (local_cwd, remote_cwd, session_host) = cwds;
         let pane = self.create_new_agent_chat_pane(
             agent_id,
             local_cwd,
@@ -1145,7 +1152,7 @@ impl Workspace {
     /// Focus a freshly inserted Agent chat pane and settle the layout around
     /// it. Focusing runs `maybe_connect_agent_chat`, so this is always the last
     /// step of an open.
-    fn reveal_new_agent_chat_pane(
+    pub(in crate::workspace) fn reveal_new_agent_chat_pane(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
@@ -1179,7 +1186,8 @@ impl Workspace {
         // does not have falls back exactly as a stale `last_agent_id` would.
         let agent_id =
             resolve_open_agent_id(&self.agents, agent_id.or(self.last_agent_id.as_deref()));
-        let pane_id = self.insert_agent_chat_pane(agent_id, window, cx)?;
+        let cwds = self.active_lane_cwds();
+        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
         // The seed builds embed entities, which re-enter the window.
         view.update(cx, |v, cx| seed(v, window, cx));

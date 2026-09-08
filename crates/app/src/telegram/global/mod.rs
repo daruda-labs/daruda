@@ -16,8 +16,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
 use super::bridge::{
-    BotPermissionOutcome, BridgeCore, BridgePing, CallbackEdit, InboundAction, OutboundMsg,
-    PermissionDecision, RouteResult, TelegramTail,
+    BotPermissionOutcome, BridgeCore, BridgePing, CallbackEdit, InboundAction, Outbound,
+    OutboundMsg, PermissionDecision, RouteResult, TelegramTail,
 };
 use super::client;
 use super::keychain;
@@ -54,15 +54,21 @@ pub struct TelegramBridge {
     persisted_offset: i64,
     // `Workspace::relay_to_telegram` sends into this via
     // `cx.try_global::<TelegramBridge>()`.
-    outbound_tx: UnboundedSender<BridgePing>,
+    outbound_tx: UnboundedSender<Outbound>,
 }
 
 impl Global for TelegramBridge {}
 
 impl TelegramBridge {
-    /// Queue a ping for the outbound send loop.
+    /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
-        let _ = self.outbound_tx.unbounded_send(ping);
+        let _ = self.outbound_tx.unbounded_send(Outbound::Ping(ping));
+    }
+
+    /// Queue a standalone notice — text owed to a command the phone sent,
+    /// belonging to no pane. See [`Outbound`] for why the distinction matters.
+    pub(crate) fn send_notice(&self, text: String) {
+        let _ = self.outbound_tx.unbounded_send(Outbound::Notice(text));
     }
 
     /// Generate a fresh Settings pairing code; only one pairing flow is active.
@@ -76,7 +82,7 @@ pub(crate) fn install_for_test(
     enabled: bool,
     authorized_chat_id: Option<i64>,
     cx: &mut App,
-) -> futures::channel::mpsc::UnboundedReceiver<BridgePing> {
+) -> futures::channel::mpsc::UnboundedReceiver<Outbound> {
     assert!(
         !cx.has_global::<TelegramBridge>(),
         "TelegramBridge test global must be installed once per test app"
@@ -469,11 +475,11 @@ fn html_body(header: &str, tail: &TelegramTail) -> String {
 /// time — never stored on the struct) and posts each ping via
 /// `client::send_message`, off the foreground thread.
 fn spawn_send_task(
-    mut outbound_rx: futures::channel::mpsc::UnboundedReceiver<BridgePing>,
+    mut outbound_rx: futures::channel::mpsc::UnboundedReceiver<Outbound>,
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
-        while let Some(ping) = outbound_rx.next().await {
+        while let Some(outbound) = outbound_rx.next().await {
             // Check for a token BEFORE touching `BridgeCore` state —
             // `build_ping` registers permission tokens as a side effect;
             // if the message that would let the phone redeem them is
@@ -504,10 +510,6 @@ fn spawn_send_task(
                 continue;
             };
 
-            // Capture `pane` before `build_ping` consumes `ping` by value —
-            // `OutboundMsg` does not carry the pane back.
-            let pane = ping.pane;
-
             // Resync from live config *before* addressing the message, not
             // just at the top of the poll loop. That resync only runs once the
             // previous blocking `get_updates` returns, so `BridgeCore`'s copy
@@ -515,21 +517,61 @@ fn spawn_send_task(
             // agent response queued before an unpair to be addressed to the
             // chat the user just revoked. Config is the single source of
             // truth for where a ping may go; this is where it is asked.
-            let deliverable = cx.update(|cx| {
+            let live_chat_id = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
                 let bridge = cx.global_mut::<TelegramBridge>();
                 bridge.core.set_enabled(cfg.telegram.enabled);
                 bridge
                     .core
                     .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
+                cfg.telegram
+                    .enabled
+                    .then_some(cfg.telegram.authorized_chat_id)
+                    .flatten()
             });
-            if !deliverable {
-                // Disabled or unpaired since this ping was queued. Dropped
-                // rather than held: its context is gone, and the chat it was
-                // meant for may no longer be the user's.
+            let Some(live_chat_id) = live_chat_id else {
+                // Disabled or unpaired since this was queued. Dropped rather
+                // than held: its context is gone, and the chat it was meant
+                // for may no longer be the user's.
                 continue;
-            }
+            };
+
+            // A notice belongs to no pane, so it skips `build_ping` (which
+            // would register permission tokens it has none of) and skips
+            // `record_sent` below (which would make some pane the next plain
+            // message's destination).
+            let ping = match outbound {
+                Outbound::Ping(ping) => ping,
+                Outbound::Notice(text) => {
+                    let notice_token = token;
+                    let sent = cx
+                        .background_executor()
+                        .spawn(async move {
+                            client::send_message(&notice_token, live_chat_id, &text, None, None)
+                        })
+                        .await;
+                    if let Err(e) = sent {
+                        // Warning, not Info: a command reply is missed the
+                        // instant it fails because the user is looking at the
+                        // chat, but a flow outcome dropped an hour later is
+                        // invisible outside this log — and something was
+                        // promised it would arrive.
+                        LogWriter::log(
+                            ErrorReport::new("Telegram notice failed to send")
+                                .severity(ErrorSeverity::Warning)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .dedup("telegram.notice")
+                                .build(),
+                        );
+                    }
+                    continue;
+                }
+            };
+
+            // Captured before `build_ping` consumes `ping` by value —
+            // `OutboundMsg` does not carry the pane back.
+            let pane = ping.pane;
 
             let msg = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.build_ping(ping));
 

@@ -7,6 +7,7 @@
 //! become an answer before it.
 
 use super::*;
+use futures::{FutureExt as _, StreamExt as _};
 
 use crate::control::result::{ControlError, FlowOriginKind};
 use crate::workspace::flow_paths;
@@ -35,6 +36,36 @@ nodes:
     kind: command
     run: \"true\"
 ";
+
+/// [`workspace_with_a_flow`] with the bridge on and a chat paired — what the
+/// relay tests need and the refusal tests above do not.
+fn telegram_workspace_with_a_flow(
+    cx: &mut TestAppContext,
+    flow: &str,
+) -> (
+    tempfile::TempDir,
+    gpui::Entity<Workspace>,
+    std::path::PathBuf,
+    gpui::WindowHandle<gpui_component::Root>,
+) {
+    let lane = tempfile::tempdir().expect("tempdir");
+    let flows = flow_paths::flows_dir(lane.path());
+    std::fs::create_dir_all(&flows).expect("create flows dir");
+    let flow_path = flows.join("ship.yaml");
+    std::fs::write(&flow_path, flow).expect("write flow");
+
+    let config = daruda_config::Config {
+        telegram: daruda_config::TelegramConfig {
+            enabled: true,
+            authorized_chat_id: Some(42),
+            ..daruda_config::TelegramConfig::default()
+        },
+        ..daruda_config::Config::default()
+    };
+    let project = daruda_store::project::Project::from_path(lane.path());
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    (lane, ws, flow_path, wh)
+}
 
 /// Names a dependency no node declares — a graph the engine refuses to build.
 const DANGLING_DEP: &str = "\
@@ -250,4 +281,115 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
         });
     })
     .expect("window is live");
+}
+
+/// A run asked for from a phone has to be told how it ended. Without this the
+/// `/flow` answer is the last thing the caller ever hears: the toast and the
+/// run report both land on a desktop they are not at.
+#[gpui::test]
+async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let lane = tempfile::tempdir().expect("tempdir");
+    let flows = crate::workspace::flow_paths::flows_dir(lane.path());
+    std::fs::create_dir_all(&flows).expect("create flows dir");
+    std::fs::write(flows.join("ship.yaml"), COMMAND_ONLY).expect("write flow");
+
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    let project = daruda_store::project::Project::from_path(lane.path());
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.control_flow_run("ship", window, cx).expect("dispatched");
+        });
+    })
+    .expect("window is live");
+
+    // The *real* engine and the *real* event pump produce the outcome — the
+    // flow is `run: "true"`, so it finishes on its own. Hand-settling would
+    // skip `apply_flow_event`, the only production caller, and leave the
+    // engine thread it already started running past the end of the test.
+    cx.run_until_parked();
+
+    // `now_or_never`, not `await`: the sender lives in the global, so an empty
+    // channel is `Pending` forever — a missing relay would hang this test
+    // instead of failing it, and a hang reads as an infrastructure problem
+    // rather than as the regression it is.
+    let sent = outbound
+        .next()
+        .now_or_never()
+        .flatten()
+        .expect("the outcome reaches the phone");
+    match sent {
+        crate::telegram::bridge::Outbound::Notice(text) => {
+            assert_eq!(
+                text,
+                crate::surface::strings::control_flow_finished_notice()
+            );
+        }
+        // A ping would register a reply-to, so answering "flow finished" would
+        // prompt whichever agent spoke last.
+        crate::telegram::bridge::Outbound::Ping(ping) => {
+            panic!("a flow outcome must not be attributed to a pane: {ping:?}")
+        }
+    }
+}
+
+/// A run nobody asked for remotely stays off the phone entirely — the person
+/// who started it is at the desktop, reading the toast.
+#[gpui::test]
+async fn a_desktop_started_run_stays_off_the_phone(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let (lane, ws, _path, _wh) = telegram_workspace_with_a_flow(cx, COMMAND_ONLY);
+
+    ws.update(cx, |ws, cx| {
+        let lane_ref = ws.active_ref();
+        // Seeded, i.e. not marked as owing anyone an answer.
+        ws.seed_flow_run_for_test(lane_ref, lane.path().join("run"));
+        let _ = ws.settle_flow_run(lane_ref, &daruda_flow::event::RunEnd::Done, cx);
+    });
+
+    assert!(
+        outbound.next().now_or_never().is_none(),
+        "a desktop run must not ping the phone"
+    );
+}
+
+/// Stop leaves the phone hanging is precisely the class of bug this relay
+/// exists to kill, so the cancelled outcome gets its own test.
+#[gpui::test]
+async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContext) {
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let (_lane, ws, _path, wh) = telegram_workspace_with_a_flow(cx, COMMAND_ONLY);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.control_flow_run("ship", window, cx).expect("dispatched");
+            // `cancel` trips the token and leaves the handle in place, so the
+            // engine returns and the run still gets to say how it ended.
+            let lane_ref = ws.active_ref();
+            ws.runs.cancel(lane_ref);
+        });
+    })
+    .expect("window is live");
+    cx.run_until_parked();
+
+    // Same reasoning as above: fail, do not hang.
+    let sent = outbound
+        .next()
+        .now_or_never()
+        .flatten()
+        .expect("a stopped run still answers");
+    let crate::telegram::bridge::Outbound::Notice(text) = sent else {
+        panic!("a flow outcome must not be attributed to a pane");
+    };
+    assert!(
+        !text.is_empty(),
+        "the phone is told something rather than left waiting"
+    );
 }

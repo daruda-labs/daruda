@@ -824,6 +824,13 @@ settings:
   telegram_generate_code: "Generate Pairing Code"
   telegram_pair_instructions: "Send /pair %{code} to the bot from your phone"
   telegram_unpair: "Unpair"
+  orchestrator_heading: "Orchestrator — the resident agent /daruda talks to. Started on the first request, not at launch."
+  orchestrator_enabled_label: "Enable the orchestrator"
+  orchestrator_agent_label: "Agent"
+  orchestrator_account_label: "Account"
+  orchestrator_agent_default: "First agent in the catalog"
+  orchestrator_account_system: "System (ambient environment)"
+  orchestrator_account_option: "%{domain} — %{identity}"
   telegram_botfather_label: "Bot command list"
   telegram_botfather_help: "Send /setcommands to @BotFather, pick this bot, and paste:"
   label_agent_use_modifier_to_send: "Use modifier key to send"
@@ -1563,10 +1570,14 @@ control:
   brief: "%{working} working · %{awaiting} waiting · %{error} failed · %{total} open"
   flow_list_row: "%{name} (%{origin})"
   flow_list_empty: "No flows are available in this worktree."
+  flow_finished_notice: "Flow finished."
+  flow_canceled_notice: "Flow stopped."
+  flow_failed_notice: "Flow failed. The run report is in daruda."
+  flow_refused_notice: "Flow did not run: %{reason}"
   flow_origin_repo: "repo"
   flow_origin_project: "project"
   flow_origin_global: "global"
-  flow_starting: "Starting %{name}. The outcome shows in daruda, not here."
+  flow_starting: "Starting %{name}. You'll get the outcome when it ends."
   error_unknown_command: "Unknown command: /%{input}"
   error_unknown_command_did_you_mean: "Unknown command: /%{input} — did you mean /%{suggestion}?"
   error_missing_argument: "Missing argument. %{usage}"
@@ -1577,10 +1588,17 @@ control:
   error_flow_not_found: "No flow named %{name}. Send /flow to list them."
   error_flow_locked: "A flow is already running in this worktree."
   error_flow_refused: "%{name} will not run as written. Validate it in daruda."
+  error_flow_not_started: "%{name} did not start. daruda has the reason."
   error_flow_needs_interaction: "%{name} asks a question only the desktop can answer."
   error_no_active_lane: "No active worktree."
   usage_use: "Usage: /use <number> or /use -"
   usage_say: "Usage: /say <number> <message>"
+  usage_daruda: "Usage: /daruda <what you want>"
+  ask_accepted: "On it. You'll get the answer when it's ready."
+  ask_accepted_connecting: "On it — starting the orchestrator first, so the first answer takes a little longer."
+  error_orchestrator_disabled: "The orchestrator is off. Turn it on in daruda's Notifications settings."
+  error_orchestrator_unresolvable: "The orchestrator names an agent daruda cannot run. Pick one in Settings."
+  error_orchestrator_unavailable: "The orchestrator would not start. daruda has the reason."
   # Registered with Telegram, not translated: BotFather parses these as
   # `name - description`, and the names must match what control::spec accepts.
   botfather_commands: |-
@@ -1590,3 +1608,4 @@ control:
     stop - Stop the running turn
     flow - Run or list flows
     brief - One-line summary
+    daruda - Ask daruda in plain words
