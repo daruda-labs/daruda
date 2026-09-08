@@ -1485,6 +1485,7 @@ flow:
   budget_node_runs: "The run hit its limit on how many steps it may take"
   budget_cost: "The run hit its cost limit"
   lock_held: "Another run (process %{pid}) already has this worktree"
+  run_panicked: "the run stopped unexpectedly"
   unprovisioned: "%{agent} has no runtime to run with: %{message}"
   read_failed_title: "Could not read that flow"
   parse_failed_title: "That file is not a flow"

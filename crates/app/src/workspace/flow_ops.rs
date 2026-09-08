@@ -378,20 +378,28 @@ impl Workspace {
             let cancel = cancel.clone();
             std::thread::spawn(move || {
                 let runners = runners_for(&request, node_install_dir);
-                let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
                 // A run the engine refuses before it starts — a lock another
                 // process holds, a runs directory it cannot create — takes
                 // nothing, so it rightly emits neither `RunStarted` nor
-                // `RunEnded`. It reports by *returning*. Without this the
-                // user picks a flow and sees nothing happen at all.
+                // `RunEnded`. It reports by *returning*. Without a last word
+                // from here the user picks a flow and sees nothing happen.
                 //
-                // Safe to send unconditionally: the watcher stops at the
-                // first `RunEnded`, so when the engine sent its own this one
-                // is never read.
-                if let Some(events) = request.events.as_ref() {
-                    let end = RunEnd::from(&report.outcome);
-                    let _ = events.try_send(FlowEvent::RunEnded { end });
-                }
+                // Sent from a drop guard rather than after `execute`, so a
+                // panic inside the engine also produces one. Landing after the
+                // call meant a panic dropped the sender with nothing sent, and
+                // the watcher's `while let Ok` simply ended — leaving every
+                // surface waiting on that run, including a phone that was
+                // promised the outcome.
+                //
+                // Safe to send unconditionally: the watcher stops at the first
+                // `RunEnded`, so when the engine sent its own this one is
+                // never read.
+                let mut last_word = LastWord {
+                    events: request.events.clone(),
+                    end: None,
+                };
+                let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
+                last_word.end = Some(RunEnd::from(&report.outcome));
             })
         };
         self.runs.insert(
@@ -661,6 +669,30 @@ impl Workspace {
                 .build(),
             cx,
         );
+    }
+}
+
+/// Guarantees the run says something on its way out, panic or not.
+///
+/// `end` is filled in once `execute` returns normally; a panic leaves it
+/// `None`, and `Drop` then reports the failure rather than nothing at all.
+struct LastWord {
+    events: Option<smol::channel::Sender<FlowEvent>>,
+    end: Option<RunEnd>,
+}
+
+impl Drop for LastWord {
+    fn drop(&mut self) {
+        let Some(events) = self.events.as_ref() else {
+            return;
+        };
+        let end = self.end.take().unwrap_or_else(|| RunEnd::Io {
+            site: daruda_flow::error::IoSite::Run,
+            doing: "running the flow",
+            path: std::path::PathBuf::new(),
+            message: s::flow_run_panicked(),
+        });
+        let _ = events.try_send(FlowEvent::RunEnded { end });
     }
 }
 

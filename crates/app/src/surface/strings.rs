@@ -5201,6 +5201,12 @@ pub fn control_botfather_commands() -> String {
     rust_i18n::t!("control.botfather_commands").into_owned()
 }
 
+/// Stands in for the engine's own words when a run died without saying
+/// anything — the only way `LastWord`'s guard has nothing to report.
+pub fn flow_run_panicked() -> String {
+    rust_i18n::t!("flow.run_panicked").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold
