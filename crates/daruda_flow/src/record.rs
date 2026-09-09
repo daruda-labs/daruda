@@ -261,6 +261,14 @@ fn result_of(outcome: &RunOutcome) -> String {
             "never started: run `{}` (pid {}) holds this working directory.",
             holder.run_id, holder.pid
         ),
+        RunOutcome::Stalled { nodes } => format!(
+            "stopped with work left: no directory could be resolved for {}.",
+            nodes
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         RunOutcome::Unprovisioned { agent, message } => {
             format!("never ran: `{agent}`'s runtime could not be prepared: {message}.")
         }

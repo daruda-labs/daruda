@@ -62,10 +62,14 @@ pub fn write_marker(run_dir: &Path, outcome: &RunOutcome) -> Result<(), FlowIoEr
 pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
     match outcome {
         RunOutcome::Done => Some(RunStatus::Done),
+        // `Stalled` among them: the run took the directory and stopped
+        // with work left, so it owes a marker — without one the next
+        // reader finds a lockless run directory and calls it `Crashed`.
         RunOutcome::Failed { .. }
         | RunOutcome::BudgetExhausted { .. }
         | RunOutcome::Io(_)
-        | RunOutcome::Unprovisioned { .. } => Some(RunStatus::Failed),
+        | RunOutcome::Unprovisioned { .. }
+        | RunOutcome::Stalled { .. } => Some(RunStatus::Failed),
         RunOutcome::Canceled { .. } => Some(RunStatus::Canceled),
         // Neither took the directory, so neither has anything to say
         // about it.

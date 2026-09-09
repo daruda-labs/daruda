@@ -38,14 +38,18 @@ pub(super) fn take_ready_batch(
     waiting: &mut Vec<NodeId>,
     done: &HashSet<NodeId>,
     parallel: usize,
-) -> Vec<NodeId> {
+) -> Batch {
     let mut batch: Vec<NodeId> = Vec::new();
+    let mut held: Vec<NodeId> = Vec::new();
     let mut taken_dirs: Vec<PathBuf> = Vec::new();
     waiting.retain(|id| {
         if batch.len() >= parallel || !deps_are_done(flow, id, done) {
             return true;
         }
-        let dirs = reachable_trees(flow, graph, cwd, id);
+        let Some(dirs) = reachable_trees(flow, graph, cwd, id) else {
+            held.push(id.clone());
+            return true;
+        };
         if dirs.iter().any(|dir| taken_dirs.contains(dir)) {
             return true;
         }
@@ -53,7 +57,40 @@ pub(super) fn take_ready_batch(
         batch.push(id.clone());
         false
     });
-    batch
+    // Order matters: a batch to run is the answer even when something was
+    // held, because the held node stays in `waiting` and the next wave asks
+    // again. That is the retry, and it needs no loop of its own — which is
+    // what keeps a hold from spinning or from sitting on the run's lock.
+    if !batch.is_empty() {
+        return Batch::Ready(batch);
+    }
+    if held.is_empty() {
+        Batch::Exhausted
+    } else {
+        Batch::Held(held)
+    }
+}
+
+/// Why a wave is what it is.
+///
+/// The empty case is not one answer but two, and only the type keeps a
+/// caller from reading "could not start anything" as "there is nothing left
+/// to start". The drive loop treats [`Batch::Exhausted`] as the end of the
+/// graph — so a held node reported the same way would end the run as a
+/// success without having run.
+#[derive(Debug)]
+pub(super) enum Batch {
+    /// Nodes to run now, in declaration order.
+    Ready(Vec<NodeId>),
+    /// Nothing is ready and nothing is held: every node left is waiting on
+    /// a dependency that will never finish. Only a cycle produces that, and
+    /// `FlowGraph::build` refuses those — so this is a graph nobody could
+    /// have handed us.
+    Exhausted,
+    /// Nothing could start, and these are why: the scheduler could not
+    /// establish which directory they work in, so it does not know whether
+    /// running them would collide with anything.
+    Held(Vec<NodeId>),
 }
 
 /// Every working directory this node could write in: its own, plus every
@@ -81,7 +118,17 @@ pub(super) fn take_ready_batch(
 /// the graph being well-formed: two gates naming each other is a flow
 /// `crate::validate` refuses, and the visited set means the scheduler does
 /// not hang on one anyway.
-fn reachable_trees(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> Vec<PathBuf> {
+///
+/// `None` when any directory in the set cannot be resolved — the whole
+/// answer is then unknown, not partly known, because a set missing one
+/// member would let the node into a wave beside whatever that member
+/// would have excluded.
+fn reachable_trees(
+    flow: &Flow,
+    graph: &FlowGraph,
+    cwd: &Path,
+    id: &NodeId,
+) -> Option<Vec<PathBuf>> {
     let mut trees: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<NodeId> = HashSet::new();
     let mut queue: Vec<NodeId> = vec![id.clone()];
@@ -92,7 +139,7 @@ fn reachable_trees(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> V
         let Some(node) = flow.nodes.iter().find(|n| n.id == next) else {
             continue;
         };
-        let dir = working_tree_of(cwd, node);
+        let dir = working_tree_of(cwd, node)?;
         if !trees.contains(&dir) {
             trees.push(dir);
         }
@@ -103,7 +150,7 @@ fn reachable_trees(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> V
                 .filter(|member| !seen.contains(member)),
         );
     }
-    trees
+    Some(trees)
 }
 
 /// The nodes this node's failure would re-derive, as the file declares
@@ -134,17 +181,25 @@ fn rerun_of(node: &Node) -> &[NodeId] {
 /// taken.
 ///
 /// `canonicalize` answers all three, because it asks the filesystem rather
-/// than the spelling. It needs the directory to exist, which
-/// `validate_request` has already established; if it fails anyway — the
-/// directory went away mid-run — the lexical form is the fallback, and
-/// erring toward *different* there only costs some overlap, never safety,
-/// because a directory that is gone is not one two nodes can corrupt.
-fn working_tree_of(cwd: &Path, node: &Node) -> PathBuf {
+/// than the spelling. `None` when it cannot answer.
+///
+/// **No lexical fallback.** Falling back to the written form and calling
+/// two paths *different* would be safe only if a failure meant the
+/// directory was gone — nothing there for two nodes to corrupt. It does
+/// not mean that: a live directory can fail to resolve on a network
+/// filesystem timeout, a permission change on a component above it, an
+/// `ELOOP`, or a stale handle. Two nodes pointing through a symlink at one
+/// directory, one of which fails this moment, would then be read as
+/// different and put in the same wave — the exact collision the batch
+/// exists to prevent. The whole exclusion rests on this comparison, so
+/// when the comparison cannot be made the answer is "unknown", not
+/// "different".
+fn working_tree_of(cwd: &Path, node: &Node) -> Option<PathBuf> {
     let joined = match &node.cwd {
         Some(relative) => cwd.join(relative),
         None => cwd.to_path_buf(),
     };
-    std::fs::canonicalize(&joined).unwrap_or(joined)
+    std::fs::canonicalize(&joined).ok()
 }
 
 /// Whether everything this node waits on has finished.
@@ -190,18 +245,28 @@ mod tests {
         resolve(parse_flow_file(&text).expect("parses"), None).expect("resolves")
     }
 
-    fn batch_of(flow: &crate::model::Flow, waiting: &[&str], done: &[&str]) -> Vec<NodeId> {
+    /// The directories a node may name here. Made for real, because
+    /// `working_tree_of` asks the filesystem and a missing one is a
+    /// different answer now — `missing` is the one deliberately absent.
+    const DIRS: [&str; 3] = ["a", "b", "c"];
+
+    fn batch_of(flow: &crate::model::Flow, waiting: &[&str], done: &[&str]) -> Batch {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for sub in DIRS {
+            std::fs::create_dir_all(dir.path().join(sub)).expect("mkdir");
+        }
         let graph = FlowGraph::build(flow).expect("acyclic");
         let mut waiting: Vec<NodeId> = waiting.iter().map(|s| NodeId::from(*s)).collect();
         let done: HashSet<NodeId> = done.iter().map(|s| NodeId::from(*s)).collect();
-        take_ready_batch(
-            flow,
-            &graph,
-            std::path::Path::new("/tmp/daruda-ready-test"),
-            &mut waiting,
-            &done,
-            flow.parallel,
-        )
+        take_ready_batch(flow, &graph, dir.path(), &mut waiting, &done, flow.parallel)
+    }
+
+    /// The ids a batch would run, for a test that only cares about those.
+    fn ready(batch: Batch) -> Vec<NodeId> {
+        match batch {
+            Batch::Ready(ids) => ids,
+            other => panic!("expected a batch to run, got {other:?}"),
+        }
     }
 
     /// The reservation is the whole point: a gate that could re-derive a
@@ -216,7 +281,7 @@ mod tests {
             ("gate", &["helper"], "a", &["helper"]),
             ("other", &[], "b", &[]),
         ]);
-        let batch = batch_of(&flow, &["gate", "other"], &["helper"]);
+        let batch = ready(batch_of(&flow, &["gate", "other"], &["helper"]));
         assert_eq!(
             batch,
             vec![NodeId::from("gate")],
@@ -238,7 +303,7 @@ mod tests {
             ("outer", &["inner"], "a", &["inner"]),
             ("other", &[], "c", &[]),
         ]);
-        let batch = batch_of(&flow, &["outer", "other"], &["deep", "inner"]);
+        let batch = ready(batch_of(&flow, &["outer", "other"], &["deep", "inner"]));
         assert_eq!(
             batch,
             vec![NodeId::from("outer")],
@@ -251,12 +316,48 @@ mod tests {
     #[test]
     fn a_node_with_no_repair_reserves_only_its_own_directory() {
         let flow = flow_of(&[("left", &[], "a", &[]), ("right", &[], "b", &[])]);
-        let batch = batch_of(&flow, &["left", "right"], &[]);
+        let batch = ready(batch_of(&flow, &["left", "right"], &[]));
         assert_eq!(
             batch,
             vec![NodeId::from("left"), NodeId::from("right")],
             "two plain nodes in different directories still overlap"
         );
+    }
+
+    /// A directory the filesystem cannot resolve is not a directory the
+    /// batch may guess about: the node is held, not treated as working
+    /// somewhere of its own.
+    #[test]
+    fn a_directory_that_cannot_be_resolved_holds_the_node() {
+        let flow = flow_of(&[("lonely", &[], "missing", &[])]);
+        match batch_of(&flow, &["lonely"], &[]) {
+            Batch::Held(ids) => assert_eq!(ids, vec![NodeId::from("lonely")]),
+            other => panic!("an unresolvable directory must hold, got {other:?}"),
+        }
+    }
+
+    /// A hold does not stop a wave that has other work: the held node stays
+    /// in `waiting`, so the next wave asks again. That is the retry, and it
+    /// is why no hold loop is needed.
+    #[test]
+    fn a_held_node_leaves_the_rest_of_the_wave_alone() {
+        let flow = flow_of(&[("lonely", &[], "missing", &[]), ("fine", &[], "a", &[])]);
+        assert_eq!(
+            ready(batch_of(&flow, &["lonely", "fine"], &[])),
+            vec![NodeId::from("fine")],
+            "the resolvable node still runs"
+        );
+    }
+
+    /// Nothing ready and nothing held is the end of the graph, which is a
+    /// different answer from "could not start anything".
+    #[test]
+    fn a_graph_with_nothing_left_is_exhausted_not_held() {
+        let flow = flow_of(&[("first", &[], "a", &[]), ("second", &["first"], "b", &[])]);
+        match batch_of(&flow, &["second"], &[]) {
+            Batch::Exhausted => {}
+            other => panic!("a dependency nobody will finish is exhaustion, got {other:?}"),
+        }
     }
 
     /// Two gates naming each other is a flow `crate::validate` refuses,
@@ -268,7 +369,7 @@ mod tests {
             ("first", &[], "a", &["second"]),
             ("second", &[], "b", &["first"]),
         ]);
-        let batch = batch_of(&flow, &["first", "second"], &[]);
+        let batch = ready(batch_of(&flow, &["first", "second"], &[]));
         assert_eq!(
             batch,
             vec![NodeId::from("first")],

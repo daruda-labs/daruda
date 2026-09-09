@@ -99,6 +99,11 @@ pub enum RunEnd {
         agent: String,
         message: String,
     },
+    /// The run stopped with work left because the scheduler could not tell
+    /// which directory these nodes work in.
+    Stalled {
+        nodes: Vec<crate::NodeId>,
+    },
 }
 
 /// The one place an event is handed over. Emitting can never fail a run: a
@@ -137,6 +142,9 @@ impl From<&RunOutcome> for RunEnd {
                 agent: agent.clone(),
                 message: message.clone(),
             },
+            RunOutcome::Stalled { nodes } => RunEnd::Stalled {
+                nodes: nodes.clone(),
+            },
         }
     }
 }
@@ -160,6 +168,7 @@ mod tests {
             RunEnd::LockHeld { .. } => "LockHeld",
             RunEnd::Invalid { .. } => "Invalid",
             RunEnd::Unprovisioned { .. } => "Unprovisioned",
+            RunEnd::Stalled { .. } => "Stalled",
         }
     }
 
@@ -177,6 +186,7 @@ mod tests {
             RunOutcome::LockHeld { .. } => ("LockHeld", None),
             RunOutcome::Invalid { .. } => ("Invalid", None),
             RunOutcome::Unprovisioned { .. } => ("Unprovisioned", Some(RunStatus::Failed)),
+            RunOutcome::Stalled { .. } => ("Stalled", Some(RunStatus::Failed)),
         }
     }
 
@@ -220,6 +230,9 @@ mod tests {
                 agent: "claude".to_string(),
                 message: "no managed Node.js build for this platform".to_string(),
             },
+            RunOutcome::Stalled {
+                nodes: vec!["review".into()],
+            },
         ]
     }
 
@@ -238,7 +251,7 @@ mod tests {
         }
         assert_eq!(
             names.len(),
-            8,
+            9,
             "a variant added to `expected` needs a sample here too"
         );
     }

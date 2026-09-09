@@ -126,6 +126,14 @@ fn run_with(
     budget: Budget,
 ) -> (RunReport, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
+    // The subdirectories the fixtures here name. `validate_request`
+    // guarantees a node's `cwd` exists before a real run starts, and
+    // `run_flow` is the seam that skips it — so a fixture whose directory
+    // was never made is posing a state production refuses, and the
+    // scheduler now holds such a node instead of guessing where it works.
+    for sub in ["a", "b"] {
+        std::fs::create_dir_all(dir.path().join(sub)).expect("mkdir");
+    }
     let loaded = load(text, None).expect("valid flow");
     let report = smol::block_on(run_flow(
         RunInputs {

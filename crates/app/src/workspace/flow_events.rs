@@ -340,7 +340,8 @@ fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
         | RunEnd::Io { .. }
         | RunEnd::LockHeld { .. }
         | RunEnd::Invalid { .. }
-        | RunEnd::Unprovisioned { .. } => s::control_flow_failed_notice(),
+        | RunEnd::Unprovisioned { .. }
+        | RunEnd::Stalled { .. } => s::control_flow_failed_notice(),
     }
 }
 
@@ -367,7 +368,18 @@ fn end_refusal(end: &RunEnd) -> Option<String> {
         RunEnd::LockHeld { holder } => Some(s::flow_lock_held(holder.pid)),
         RunEnd::Invalid { issues } => Some(issue_report(issues)),
         RunEnd::Unprovisioned { agent, message } => Some(s::flow_unprovisioned(agent, message)),
+        RunEnd::Stalled { nodes } => Some(s::flow_stalled(&node_list(nodes))),
     }
+}
+
+/// The held nodes as one phrase. Backticked like the engine's own wording
+/// so a reader sees the same names in `run.md` and in the toast.
+fn node_list(nodes: &[daruda_flow::NodeId]) -> String {
+    nodes
+        .iter()
+        .map(|node| format!("`{node}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

@@ -163,3 +163,39 @@ fn a_node_waits_for_what_it_depends_on() {
         assert!(deps_are_done(flow, &pair[1], &done));
     }
 }
+
+/// One command node in a subdirectory and nothing else, so the node is the
+/// run's only chance to make progress.
+const ONLY_A_SUBDIR: &str = "\
+version: 1
+nodes:
+  - id: there
+    kind: command
+    cwd: sub
+    run: \"true\"
+";
+
+/// A directory the filesystem cannot resolve stops the run and says which
+/// node it could not place.
+///
+/// Not `Done`: the drive loop ends on an empty batch, and an empty batch
+/// used to mean only "the graph is exhausted" — so a node the scheduler
+/// refused to place would have handed back the run's initial `Done` and
+/// reported success for work that never happened. `run_flow` skips
+/// `validate_request`, which is what a directory going away mid-run looks
+/// like from in here.
+#[test]
+fn a_directory_that_cannot_be_resolved_stalls_the_run_instead_of_passing_it() {
+    // `sub` deliberately not created.
+    let (report, _dir) = run(ONLY_A_SUBDIR, &FakeRunner::new());
+    assert!(
+        matches!(&report.outcome, RunOutcome::Stalled { nodes } if nodes == &vec![crate::NodeId::from("there")]),
+        "{:?}",
+        report.outcome
+    );
+    assert!(
+        report.nodes.is_empty(),
+        "the node was never run, so it owes no record: {:?}",
+        report.nodes
+    );
+}

@@ -228,13 +228,29 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         .collect();
 
     while !waiting.is_empty() {
-        let batch = take_ready_batch(flow, graph, cwd, &mut waiting, &done, flow.parallel);
-        if batch.is_empty() {
-            // Nothing ready and nothing in flight. Only a cycle can produce
-            // that, and `FlowGraph::build` refuses those — so this is a
-            // graph nobody could have handed us.
-            break;
-        }
+        let batch = match take_ready_batch(flow, graph, cwd, &mut waiting, &done, flow.parallel) {
+            ready::Batch::Ready(batch) => batch,
+            // Every node left waits on a dependency nobody will finish.
+            // Only a cycle can produce that, and `FlowGraph::build`
+            // refuses those — so this is a graph nobody could have handed
+            // us, and the run ends on whatever `outcome` already holds.
+            ready::Batch::Exhausted => break,
+            // Nothing could start and the scheduler said why. Reported as
+            // its own outcome rather than left to `Done`: the run stopped
+            // with work still to do, and a `break` here would hand back a
+            // success for nodes that never ran.
+            //
+            // A cancel or a spent budget outranks it — either is a reason
+            // the run was going to stop anyway, and naming the hold
+            // instead would blame the filesystem for a decision made
+            // elsewhere.
+            ready::Batch::Held(nodes) => {
+                outcome = run
+                    .stop_before_more_work()
+                    .unwrap_or(RunOutcome::Stalled { nodes });
+                break;
+            }
+        };
         // A wave at a time: everything started together is awaited together
         // before the next set is chosen. A rolling window would start
         // newly-ready nodes sooner, and would also mean a node still in

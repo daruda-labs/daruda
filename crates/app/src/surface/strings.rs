@@ -6355,6 +6355,11 @@ pub fn flow_lock_held(pid: u32) -> String {
 pub fn flow_unprovisioned(agent: &str, message: &str) -> String {
     rust_i18n::t!("flow.unprovisioned", agent => agent, message => message).into_owned()
 }
+/// The nodes a run stopped short of, already joined — the engine names
+/// them all, and a reader needs the list rather than a count.
+pub fn flow_stalled(nodes: &str) -> String {
+    rust_i18n::t!("flow.stalled", nodes => nodes).into_owned()
+}
 /// Which ceiling stopped the run. A `Debug` rendering of the limit would
 /// put a Rust identifier in front of a user.
 pub fn flow_budget_exhausted(limit: daruda_flow::schedule::BudgetLimit) -> String {

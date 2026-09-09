@@ -1495,6 +1495,7 @@ flow:
   lock_held: "다른 실행(프로세스 %{pid})이 이미 이 worktree를 쓰고 있습니다"
   run_panicked: "실행이 예기치 않게 중단되었습니다"
   unprovisioned: "%{agent}을(를) 돌릴 런타임이 없습니다: %{message}"
+  stalled: "할 일이 남은 채 실행이 멈췄습니다: %{nodes}의 폴더를 읽을 수 없습니다"
   read_failed_title: "플로우 파일을 읽지 못했습니다"
   parse_failed_title: "플로우 파일 형식이 아닙니다"
   valid_title: "문제가 없습니다"

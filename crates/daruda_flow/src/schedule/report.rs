@@ -48,6 +48,16 @@ pub enum RunOutcome {
         agent: String,
         message: String,
     },
+    /// The scheduler could not establish which directory these nodes work
+    /// in, so it would not start them — and nothing else was left to run.
+    ///
+    /// Its own outcome rather than `Failed`: no node failed and no policy
+    /// gave up. The run stopped because the host's filesystem could not
+    /// answer a question the wave rule rests on, which is a different thing
+    /// for a person to act on than a node that did its work badly.
+    Stalled {
+        nodes: Vec<NodeId>,
+    },
 }
 
 /// Which of the three defences stopped the run.
