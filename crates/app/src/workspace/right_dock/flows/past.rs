@@ -31,6 +31,9 @@ fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla {
         S::Done => theme::SUCCESS,
         S::Failed | S::Crashed => theme::ERROR,
         S::Running => theme::WARNING,
+        // Stopped rather than failed, and resumable — the same reading a
+        // run still going gets, because both are unfinished business.
+        S::Stalled => theme::WARNING,
         // Nothing went wrong and nothing succeeded — saying either in
         // colour would be a claim the evidence does not support.
         S::Canceled | S::Unknown => theme::TEXT_SUBTLE,

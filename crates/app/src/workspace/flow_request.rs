@@ -26,6 +26,13 @@ use crate::workspace::main_area::pane::{AccountDomain, resolve_pane_account};
 pub(in crate::workspace) enum FlowSubmitError {
     /// No active lane, so no working directory. The welcome window.
     NoLane,
+    /// The lane is there, but its path would not resolve — so there is no
+    /// telling which tree it is, and therefore no telling where its lock
+    /// lives. Its own refusal rather than [`Self::NoLane`]: the lane exists
+    /// and saying it does not sends the reader looking in the wrong place.
+    LaneUnresolvable {
+        path: PathBuf,
+    },
     /// The lane runs its agents on another machine. See the module note
     /// below on why this is refused rather than resolved.
     RemoteLane {
@@ -270,10 +277,10 @@ impl Workspace {
         // will not resolve has no lock directory to name, and `prepare`
         // would read every run as `Unknown` — which is to say unresumable,
         // silently. Refused here instead, where it can be reported.
-        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&self.data_dir, &cwd) else {
-            return Err(FlowSubmitError::NoLane);
+        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&cwd) else {
+            return Err(FlowSubmitError::LaneUnresolvable { path: cwd.clone() });
         };
-        let resumed = daruda_flow::resume::prepare(run_dir, &lock_dir, &is_alive)
+        let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
             .map_err(FlowSubmitError::Resume)?;
 
         let agents = self.flow_agent_catalog(
@@ -294,7 +301,7 @@ impl Workspace {
             run_dir: run_dir.to_path_buf(),
             // The root, not this lane's own directory: the engine names the
             // per-tree one, so the app and the engine share one derivation.
-            lock_dir: super::flow_paths::locks_root(&self.data_dir),
+            lock_dir: super::flow_paths::locks_root(),
             // The run's own directory: `run.yaml` inlined every file-backed
             // prompt and hint when it was written, so a resumed run resolves
             // nothing against the flow file's directory — which may not even
@@ -363,7 +370,7 @@ impl Workspace {
             pinned,
             loaded,
             run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id()),
-            lock_dir: super::flow_paths::locks_root(&self.data_dir),
+            lock_dir: super::flow_paths::locks_root(),
             flow_dir: flow_path
                 .parent()
                 .map(Path::to_path_buf)

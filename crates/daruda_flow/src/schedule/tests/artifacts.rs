@@ -451,11 +451,7 @@ fn run_ended_distinguishes_what_the_marker_folds_together() {
         let (report, events, _dir) = run_watched(flow, &runner, budget);
         // All three write the same marker…
         assert_eq!(
-            crate::marker::run_status(
-                &report.run_dir,
-                report.run_dir.parent().expect("runs dir"),
-                &|_| true
-            ),
+            crate::marker::run_status(&report.run_dir, report.run_dir.parent(), &|_| true),
             crate::marker::RunStatus::Failed,
             "{label}"
         );
@@ -629,7 +625,7 @@ fn a_run_in_flight_reads_as_running_in_the_layout_execute_builds() {
         fn ask(&self, ctx: &RunContext<'_>) {
             self.1.borrow_mut().push(crate::marker::run_status(
                 ctx.run_dir,
-                ctx.run_dir.parent().expect("runs dir"),
+                ctx.run_dir.parent(),
                 &|_| true,
             ));
         }
@@ -733,11 +729,7 @@ fn an_io_failure_writes_the_same_marker_and_still_says_what_it_was() {
     let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert_eq!(
-        crate::marker::run_status(
-            &report.run_dir,
-            report.run_dir.parent().expect("runs dir"),
-            &|_| true
-        ),
+        crate::marker::run_status(&report.run_dir, report.run_dir.parent(), &|_| true),
         crate::marker::RunStatus::Failed
     );
     let end = last_run_end(&events);

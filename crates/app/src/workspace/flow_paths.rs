@@ -27,9 +27,6 @@ const REPO_DIR: &str = ".daruda";
 const FLOWS_DIR: &str = "flows";
 /// One directory per run. `.gitignore`d by the engine on first run.
 const RUNS_DIR: &str = "flow-runs";
-/// Where run locks live, in the app's home rather than in any working
-/// tree — see [`locks_root`].
-const LOCKS_DIR: &str = "flow-locks";
 
 /// Extensions a flow file may carry. Both are accepted because a file
 /// named `.yml` that simply never appears in the picker is a worse
@@ -134,7 +131,7 @@ pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
     lane_cwd.join(REPO_DIR).join(RUNS_DIR)
 }
 
-/// `<data_dir>/flow-locks/` — the root every run lock hangs under.
+/// The root every run lock hangs under.
 ///
 /// **Outside every working tree, deliberately.** The lock used to live in
 /// the lane's own `flow-runs/`, covered by a `.gitignore`; `git clean -fdx`
@@ -142,12 +139,16 @@ pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
 /// one file the engine's exclusion rests on while the run still held the
 /// tree.
 ///
-/// Derived from the data directory the caller was **given**, for the reason
-/// [`global_flows_dir`] is: production passes the profile's, a test passes a
-/// temp one, and resolving it again here would have a suite that thought it
-/// was isolated contend with the developer's own running app.
-pub(in crate::workspace) fn locks_root(data_dir: &Path) -> PathBuf {
-    data_dir.join(LOCKS_DIR)
+/// **And profile-independent**, unlike [`global_flows_dir`] beside it —
+/// which is the opposite of what the cross-profile rule usually asks for,
+/// and deliberate. A flow's locks are not daruda's own state; they are a
+/// mutex on something every profile shares, the user's working tree. A
+/// release build and a debug build running flows in one checkout have to
+/// exclude each other, and the lock the tree used to carry did that for
+/// free. `daruda_store` owns the resolution so the reasoning lives beside
+/// `node_install_dir`, the other path shared for its own reasons.
+pub(in crate::workspace) fn locks_root() -> PathBuf {
+    daruda_store::persistence::flow_lock_root()
 }
 
 /// Where one lane's lock lives. `None` when the lane's path cannot be
@@ -158,12 +159,9 @@ pub(in crate::workspace) fn locks_root(data_dir: &Path) -> PathBuf {
 /// the engine takes the lock and the app reads it, and a second answer to
 /// "where is this tree's lock" would drift into the app reporting every live
 /// run as idle.
-pub(in crate::workspace) fn lane_lock_dir(data_dir: &Path, lane_cwd: &Path) -> Option<PathBuf> {
+pub(in crate::workspace) fn lane_lock_dir(lane_cwd: &Path) -> Option<PathBuf> {
     let tree = lane_cwd.canonicalize().ok()?;
-    Some(daruda_flow::lock::lock_dir_for(
-        &locks_root(data_dir),
-        &tree,
-    ))
+    Some(daruda_flow::lock::lock_dir_for(&locks_root(), &tree))
 }
 
 /// Where this lane's runnable flows come from.

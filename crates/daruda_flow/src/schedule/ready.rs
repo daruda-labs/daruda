@@ -50,7 +50,7 @@ pub(super) fn take_ready_batch(
             held.push(id.clone());
             return true;
         };
-        if dirs.iter().any(|dir| taken_dirs.contains(dir)) {
+        if dirs.iter().any(|dir| overlaps(dir, &taken_dirs)) {
             return true;
         }
         taken_dirs.extend(dirs);
@@ -93,16 +93,18 @@ pub(super) enum Batch {
     Held(Vec<NodeId>),
 }
 
-/// Every working directory this node could write in: its own, plus every
-/// directory any repair reachable from it could re-derive into.
+/// Every working directory this node could write in: its own, the run's
+/// root if it repairs at all, and every directory any repair reachable
+/// from it could re-derive into.
 ///
 /// **Why the reservation is not just the node's own directory.** A gate's
-/// `repair` re-derives its `rerun` closure by calling `drive` directly
-/// (`super::repair`), which does not come back through this function — so a
-/// member of that closure can start writing in a directory a wave sibling
-/// is already using. Checking inside `repair` cannot fix it: `repair` runs
-/// inside the wave's `join_all`, so waiting for a sibling there deadlocks.
-/// Reserving the whole set up front is what makes the exclusion hold.
+/// `repair` runs its `fix` session and then re-derives its `rerun` closure
+/// by calling `drive` directly (`super::repair`), neither of which comes
+/// back through this function — so a fix session, or a member of that
+/// closure, can start writing in a directory a wave sibling is already
+/// using. Checking inside `repair` cannot fix it: `repair` runs inside the
+/// wave's `join_all`, so waiting for a sibling there deadlocks. Reserving
+/// the whole set up front is what makes the exclusion hold.
 ///
 /// **A fixpoint, not one hop.** A member of this node's closure may itself
 /// be a gate with a `rerun` of its own, and `validate`'s
@@ -139,13 +141,19 @@ fn reachable_trees(
         let Some(node) = flow.nodes.iter().find(|n| n.id == next) else {
             continue;
         };
-        let dir = working_tree_of(cwd, node)?;
-        if !trees.contains(&dir) {
-            trees.push(dir);
-        }
+        push(&mut trees, working_tree_of(cwd, node)?);
+        let Some(rerun) = rerun_of(node) else {
+            continue;
+        };
+        // The `fix` session's own directory. `super::repair::run_fix` opens
+        // it at the run's root rather than at the gate's, so a gate working
+        // in a subdirectory still reaches the root when it repairs — and
+        // the flow author cannot narrow that the way they can a node's own
+        // `cwd`.
+        push(&mut trees, canonical(cwd)?);
         queue.extend(
             graph
-                .rerun_closure(rerun_of(node))
+                .rerun_closure(rerun)
                 .into_iter()
                 .filter(|member| !seen.contains(member)),
         );
@@ -153,20 +161,31 @@ fn reachable_trees(
     Some(trees)
 }
 
-/// The nodes this node's failure would re-derive, as the file declares
-/// them. Empty for anything but a gate with a `repair` policy: `rerun`
-/// lives on [`GateFail::Repair`], and an agent node's `retry` re-runs only
-/// itself.
+/// The nodes this node's failure would re-derive, or `None` when its
+/// failure re-derives nothing. `rerun` lives on [`GateFail::Repair`], and
+/// an agent node's `retry` re-runs only itself.
+///
+/// `Some(&[])` and `None` are different answers, which is why this is not
+/// just a slice: a repair with an empty `rerun` still opens a `fix`
+/// session, and that session works somewhere.
 ///
 /// The declared roots, not the closure — the caller expands them, because
 /// expanding needs the graph and this needs only the node.
-fn rerun_of(node: &Node) -> &[NodeId] {
+fn rerun_of(node: &Node) -> Option<&[NodeId]> {
+    // Spelled out rather than defaulted: a node kind added with a policy
+    // that re-derives anything must stop compiling here. A catch-all would
+    // instead answer "nothing", quietly narrowing the reservation this
+    // whole function exists to widen.
     match &node.kind {
         NodeKind::Command {
             on_fail: GateFail::Repair { rerun, .. },
             ..
-        } => rerun,
-        _ => &[],
+        } => Some(rerun),
+        NodeKind::Command {
+            on_fail: GateFail::Halt,
+            ..
+        } => None,
+        NodeKind::Agent(_) => None,
     }
 }
 
@@ -195,11 +214,41 @@ fn rerun_of(node: &Node) -> &[NodeId] {
 /// when the comparison cannot be made the answer is "unknown", not
 /// "different".
 fn working_tree_of(cwd: &Path, node: &Node) -> Option<PathBuf> {
-    let joined = match &node.cwd {
-        Some(relative) => cwd.join(relative),
-        None => cwd.to_path_buf(),
-    };
-    std::fs::canonicalize(&joined).ok()
+    match &node.cwd {
+        Some(relative) => canonical(&cwd.join(relative)),
+        None => canonical(cwd),
+    }
+}
+
+/// The one call the comparison rests on, named so every site that resolves
+/// a directory for it reads the same.
+fn canonical(path: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(path).ok()
+}
+
+/// Add a directory to the reservation, once.
+fn push(trees: &mut Vec<PathBuf>, dir: PathBuf) {
+    if !trees.contains(&dir) {
+        trees.push(dir);
+    }
+}
+
+/// Whether working in `dir` could touch anything already reserved.
+///
+/// Containment, not equality: a node at the run's root writes in every
+/// subdirectory beneath it, so it is in "the same place" as a node working
+/// in one of them even though the two paths are different strings. The
+/// `working_dirs` module says the same thing about locks — a holder of the
+/// root and a holder of `sub/` do not exclude each other, and both write to
+/// `sub/`.
+///
+/// Both directions, because the reservation may be made in either order.
+/// Sound on resolved paths only, which is what `working_tree_of` returns:
+/// `starts_with` compares components, so `/a/bc` does not contain `/a/b`.
+fn overlaps(dir: &Path, taken: &[PathBuf]) -> bool {
+    taken
+        .iter()
+        .any(|other| dir.starts_with(other) || other.starts_with(dir))
 }
 
 /// Whether everything this node waits on has finished.
@@ -222,24 +271,57 @@ mod tests {
     use crate::parse::parse_flow_file;
     use crate::resolve::resolve;
 
-    /// A flow of command nodes, each with its own `cwd` and optional
-    /// `rerun`. Command nodes only: `rerun` lives on `GateFail::Repair`,
-    /// which is the gate policy, so an agent node could not carry one.
-    fn flow_of(spec: &[(&str, &[&str], &str, &[&str])]) -> crate::model::Flow {
+    /// A flow of command nodes, each with its own `cwd` and an optional
+    /// repair policy. Command nodes only: `rerun` lives on
+    /// `GateFail::Repair`, which is the gate policy, so an agent node could
+    /// not carry one.
+    ///
+    /// The policy is `Option<&[&str]>` for the reason `rerun_of` returns one:
+    /// `None` is a node that repairs nothing, and `Some(&[])` is a repair
+    /// that re-derives nothing but still opens a `fix` session.
+    /// One node in a fixture. Named rather than a tuple because four
+    /// positional fields, two of them slices, read as noise at the call
+    /// site — and clippy says the same.
+    struct N {
+        id: &'static str,
+        deps: &'static [&'static str],
+        cwd: &'static str,
+        /// `None` repairs nothing; `Some(&[])` repairs but re-derives
+        /// nothing — and still opens a `fix` session.
+        rerun: Option<&'static [&'static str]>,
+    }
+
+    /// The common shape: no deps, no repair.
+    fn plain(id: &'static str, cwd: &'static str) -> N {
+        N {
+            id,
+            deps: &[],
+            cwd,
+            rerun: None,
+        }
+    }
+
+    fn flow_of(spec: &[N]) -> crate::model::Flow {
         let mut text = String::from("version: 1\ndefaults:\n  parallel: 4\nnodes:\n");
-        for (id, deps, cwd, rerun) in spec {
+        for N {
+            id,
+            deps,
+            cwd,
+            rerun,
+        } in spec
+        {
             text.push_str(&format!(
                 "  - id: {id}\n    kind: command\n    run: \"true\"\n    cwd: {cwd}\n"
             ));
             if !deps.is_empty() {
                 text.push_str(&format!("    deps: [{}]\n", deps.join(", ")));
             }
-            if !rerun.is_empty() {
-                text.push_str(&format!(
-                    "    on_fail:\n      repair:\n        fix: fix {{{{attempts}}}}\n        \
-                     rerun: [{}]\n        max_attempts: 2\n        wait: 0s\n",
-                    rerun.join(", ")
-                ));
+            if let Some(rerun) = rerun {
+                text.push_str("    on_fail:\n      repair:\n        fix: fix {{attempts}}\n");
+                if !rerun.is_empty() {
+                    text.push_str(&format!("        rerun: [{}]\n", rerun.join(", ")));
+                }
+                text.push_str("        max_attempts: 2\n        wait: 0s\n");
             }
         }
         resolve(parse_flow_file(&text).expect("parses"), None).expect("resolves")
@@ -277,9 +359,14 @@ mod tests {
         //  helper(b) --> gate(a, rerun: [helper])
         //  other(b)                                  (independent)
         let flow = flow_of(&[
-            ("helper", &[], "b", &[]),
-            ("gate", &["helper"], "a", &["helper"]),
-            ("other", &[], "b", &[]),
+            plain("helper", "b"),
+            N {
+                id: "gate",
+                deps: &["helper"],
+                cwd: "a",
+                rerun: Some(&["helper"]),
+            },
+            plain("other", "b"),
         ]);
         let batch = ready(batch_of(&flow, &["gate", "other"], &["helper"]));
         assert_eq!(
@@ -298,10 +385,20 @@ mod tests {
         //  deep(c) --> inner(a, rerun: [deep]) --> outer(a, rerun: [inner])
         //  other(c)                                       (independent)
         let flow = flow_of(&[
-            ("deep", &[], "c", &[]),
-            ("inner", &["deep"], "a", &["deep"]),
-            ("outer", &["inner"], "a", &["inner"]),
-            ("other", &[], "c", &[]),
+            plain("deep", "c"),
+            N {
+                id: "inner",
+                deps: &["deep"],
+                cwd: "a",
+                rerun: Some(&["deep"]),
+            },
+            N {
+                id: "outer",
+                deps: &["inner"],
+                cwd: "a",
+                rerun: Some(&["inner"]),
+            },
+            plain("other", "c"),
         ]);
         let batch = ready(batch_of(&flow, &["outer", "other"], &["deep", "inner"]));
         assert_eq!(
@@ -311,11 +408,50 @@ mod tests {
         );
     }
 
+    /// A node at the root can write in every subdirectory under it, so
+    /// "the same place" is containment and not string equality. The
+    /// neighbouring `working_dirs` module states the same thing about
+    /// locks: a holder of the root and a holder of `sub/` do not exclude
+    /// each other, and both write to `sub/`.
+    #[test]
+    fn a_node_at_the_root_does_not_share_a_wave_with_one_below_it() {
+        let flow = flow_of(&[plain("root", "."), plain("under", "a")]);
+        assert_eq!(
+            ready(batch_of(&flow, &["root", "under"], &[])),
+            vec![NodeId::from("root")],
+            "the root node can write in `a`, so `under` must wait"
+        );
+    }
+
+    /// A gate's `fix` session runs at the run's own root, whatever
+    /// directory the gate itself works in — so the root is part of what a
+    /// repair could write in, and a node working there cannot share the
+    /// wave.
+    #[test]
+    fn a_gate_reserves_the_root_its_fix_session_runs_in() {
+        //  gate(a, repair) — its fix runs at the root
+        //  other()        — works at the root itself
+        let flow = flow_of(&[
+            N {
+                id: "gate",
+                deps: &[],
+                cwd: "a",
+                rerun: Some(&[]),
+            },
+            plain("other", "."),
+        ]);
+        assert_eq!(
+            ready(batch_of(&flow, &["gate", "other"], &[])),
+            vec![NodeId::from("gate")],
+            "the fix session works at the root, so `other` must wait"
+        );
+    }
+
     /// A node with no repair policy reserves its own directory and nothing
     /// else — the reservation must not become "the whole graph".
     #[test]
     fn a_node_with_no_repair_reserves_only_its_own_directory() {
-        let flow = flow_of(&[("left", &[], "a", &[]), ("right", &[], "b", &[])]);
+        let flow = flow_of(&[plain("left", "a"), plain("right", "b")]);
         let batch = ready(batch_of(&flow, &["left", "right"], &[]));
         assert_eq!(
             batch,
@@ -329,7 +465,7 @@ mod tests {
     /// somewhere of its own.
     #[test]
     fn a_directory_that_cannot_be_resolved_holds_the_node() {
-        let flow = flow_of(&[("lonely", &[], "missing", &[])]);
+        let flow = flow_of(&[plain("lonely", "missing")]);
         match batch_of(&flow, &["lonely"], &[]) {
             Batch::Held(ids) => assert_eq!(ids, vec![NodeId::from("lonely")]),
             other => panic!("an unresolvable directory must hold, got {other:?}"),
@@ -341,7 +477,7 @@ mod tests {
     /// is why no hold loop is needed.
     #[test]
     fn a_held_node_leaves_the_rest_of_the_wave_alone() {
-        let flow = flow_of(&[("lonely", &[], "missing", &[]), ("fine", &[], "a", &[])]);
+        let flow = flow_of(&[plain("lonely", "missing"), plain("fine", "a")]);
         assert_eq!(
             ready(batch_of(&flow, &["lonely", "fine"], &[])),
             vec![NodeId::from("fine")],
@@ -353,7 +489,15 @@ mod tests {
     /// different answer from "could not start anything".
     #[test]
     fn a_graph_with_nothing_left_is_exhausted_not_held() {
-        let flow = flow_of(&[("first", &[], "a", &[]), ("second", &["first"], "b", &[])]);
+        let flow = flow_of(&[
+            plain("first", "a"),
+            N {
+                id: "second",
+                deps: &["first"],
+                cwd: "b",
+                rerun: None,
+            },
+        ]);
         match batch_of(&flow, &["second"], &[]) {
             Batch::Exhausted => {}
             other => panic!("a dependency nobody will finish is exhaustion, got {other:?}"),
@@ -366,8 +510,18 @@ mod tests {
     #[test]
     fn gates_that_rerun_each_other_terminate() {
         let flow = flow_of(&[
-            ("first", &[], "a", &["second"]),
-            ("second", &[], "b", &["first"]),
+            N {
+                id: "first",
+                deps: &[],
+                cwd: "a",
+                rerun: Some(&["second"]),
+            },
+            N {
+                id: "second",
+                deps: &[],
+                cwd: "b",
+                rerun: Some(&["first"]),
+            },
         ]);
         let batch = ready(batch_of(&flow, &["first", "second"], &[]));
         assert_eq!(

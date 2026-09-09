@@ -1021,6 +1021,7 @@ pub fn flow_run_status(status: daruda_flow::marker::RunStatus) -> String {
         RunStatus::Canceled => rust_i18n::t!("flow.status_canceled"),
         RunStatus::Running => rust_i18n::t!("flow.status_running"),
         RunStatus::Crashed => rust_i18n::t!("flow.status_crashed"),
+        RunStatus::Stalled => rust_i18n::t!("flow.status_stalled"),
         RunStatus::Unknown => rust_i18n::t!("flow.status_unknown"),
     }
     .into_owned()
@@ -6357,6 +6358,11 @@ pub fn flow_unprovisioned(agent: &str, message: &str) -> String {
 }
 /// The nodes a run stopped short of, already joined — the engine names
 /// them all, and a reader needs the list rather than a count.
+/// The lane whose path would not resolve. Shows the path because the
+/// person has to look at it to see what happened to it.
+pub fn flow_lane_unresolvable(path: &str) -> String {
+    rust_i18n::t!("flow.lane_unresolvable", path => path).into_owned()
+}
 pub fn flow_stalled(nodes: &str) -> String {
     rust_i18n::t!("flow.stalled", nodes => nodes).into_owned()
 }

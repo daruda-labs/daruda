@@ -140,7 +140,7 @@ impl Workspace {
     /// a crashed run names a pid that is gone, and does not stop a new run
     /// — the engine reclaims it.
     ///
-    /// Both places, for one release: the lock now lives outside the tree
+    /// MIGRATION: both places, for one release: the lock now lives outside the tree
     /// (`flow_paths::lane_lock_dir`), and the copy the engine still writes
     /// inside it is what an older build looks at. Reading the new one first
     /// keeps this answering for a run *this* build started even after an
@@ -149,7 +149,7 @@ impl Workspace {
         &self,
         cwd: &Path,
     ) -> Option<daruda_flow::lock::LockHolder> {
-        super::flow_paths::lane_lock_dir(&self.data_dir, cwd)
+        super::flow_paths::lane_lock_dir(cwd)
             .and_then(|dir| daruda_flow::lock::read_holder(&dir))
             .or_else(|| daruda_flow::lock::read_holder(&super::flow_paths::runs_dir(cwd)))
             .filter(|holder| super::flow_request::process_is_alive(holder.pid))
@@ -693,6 +693,10 @@ impl Workspace {
     fn report_flow_refusal(&mut self, error: FlowSubmitError, cx: &mut Context<Self>) {
         let (message, detail) = match error {
             FlowSubmitError::NoLane => (s::flow_no_lane(), String::new()),
+            FlowSubmitError::LaneUnresolvable { path } => (
+                s::flow_lane_unresolvable(&path.display().to_string()),
+                String::new(),
+            ),
             FlowSubmitError::RemoteLane { agent } => (s::flow_remote_lane(&agent), String::new()),
             FlowSubmitError::LockHeld { pid } => (s::flow_lock_held(pid), String::new()),
             // The reason carries its own already-localized wording — the same

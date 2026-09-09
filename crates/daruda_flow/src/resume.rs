@@ -29,15 +29,18 @@ pub const RUN_SPEC_FILE: &str = "run.yaml";
 
 /// Whether a run may be picked up.
 ///
-/// Only a run that was **killed**: no marker, and the lock's holder is
-/// gone. A run that failed or was canceled ended the way its policy said
-/// to, and continuing one of those is a different verb — offering both
-/// behind one button would leave nobody able to predict which happened.
+/// A run that stopped without deciding to. `Crashed` is one — no marker,
+/// and the lock's holder is gone — and `Stalled` is the other: the
+/// scheduler could not place a node, so nothing was in flight and the
+/// journal is whole. A run that failed or was canceled ended the way its
+/// policy said to, and continuing one of those is a different verb —
+/// offering both behind one button would leave nobody able to predict
+/// which happened.
 ///
 /// One function so the engine and the host cannot disagree about what the
 /// button means, and so widening it later is one edit.
 pub fn is_resumable(status: RunStatus) -> bool {
-    matches!(status, RunStatus::Crashed)
+    matches!(status, RunStatus::Crashed | RunStatus::Stalled)
 }
 
 /// What a resumed run starts from.
@@ -98,7 +101,7 @@ impl std::fmt::Display for ResumeError {
 /// unresumable — see [`crate::marker::run_status`].
 pub fn prepare(
     run_dir: &Path,
-    lock_dir: &Path,
+    lock_dir: Option<&Path>,
     is_alive: &dyn Fn(u32) -> bool,
 ) -> Result<Resumed, ResumeError> {
     let status = crate::marker::run_status(run_dir, lock_dir, is_alive);
@@ -189,7 +192,7 @@ mod tests {
         crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock");
 
         assert!(matches!(
-            prepare(&run_dir, &runs, &|_| true),
+            prepare(&run_dir, Some(&runs), &|_| true),
             Err(ResumeError::NotResumable(RunStatus::Running))
         ));
     }
@@ -215,13 +218,13 @@ mod tests {
 
         assert!(
             matches!(
-                prepare(&run_dir, &lock_dir, &|_| false),
+                prepare(&run_dir, Some(&lock_dir), &|_| false),
                 Err(ResumeError::NothingStarted)
             ),
             "a crashed run must reach the journal check, not stop at `Unknown`"
         );
         assert_eq!(
-            crate::marker::run_status(&run_dir, &lock_dir, &|_| false),
+            crate::marker::run_status(&run_dir, Some(&lock_dir), &|_| false),
             RunStatus::Crashed,
             "the lock outside the tree is what says the run crashed"
         );
@@ -241,7 +244,7 @@ mod tests {
         let lock_dir = dir.path().join("locks/never-written");
 
         assert_eq!(
-            crate::marker::run_status(&run_dir, &lock_dir, &|_| false),
+            crate::marker::run_status(&run_dir, Some(&lock_dir), &|_| false),
             RunStatus::Crashed
         );
     }
@@ -260,7 +263,7 @@ mod tests {
         std::mem::forget(crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock"));
 
         assert!(matches!(
-            prepare(&run_dir, &runs, &|_| false),
+            prepare(&run_dir, Some(&runs), &|_| false),
             Err(ResumeError::NothingStarted)
         ));
     }

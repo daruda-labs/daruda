@@ -84,22 +84,35 @@ fn execute_with(
     // not become two locks. Unresolvable is not a tree this run can be sure
     // it excludes anything in, so it refuses rather than guessing — the same
     // call the batcher makes about a node's directory.
-    let Ok(tree) = request.cwd.canonicalize() else {
-        return not_started(
-            request,
-            RunOutcome::Io(FlowIoError {
-                site: IoSite::Run,
-                doing: RESOLVE_TREE,
-                path: request.cwd.clone(),
-                source: std::io::Error::from(std::io::ErrorKind::NotFound),
-            }),
-        );
+    let tree = match request.cwd.canonicalize() {
+        Ok(tree) => tree,
+        // The error as the filesystem gave it: a permission denied read as
+        // "no such directory" sends the reader looking for the wrong thing.
+        Err(source) => {
+            return not_started(
+                request,
+                RunOutcome::Io(FlowIoError {
+                    site: IoSite::Run,
+                    doing: RESOLVE_TREE,
+                    path: request.cwd.clone(),
+                    source,
+                }),
+            );
+        }
     };
-    // The legacy place too, for one release. An older build looks only
+    // MIGRATION: the legacy place too, for one release. An older build looks only
     // there, so writing it is what stops that build starting a second run
     // in a tree this one holds; and `run_status` reads it so a run *it*
-    // started stays resumable. Deleting the copy costs nothing — the one
-    // outside the tree is the authority.
+    // started stays resumable.
+    //
+    // The copy is inside the tree, so `git clean -fdx` can take it — and
+    // then an older build sees a free tree and starts a second run in one
+    // this run holds. That window is what the move closes for every build
+    // that knows the new place, and all it leaves is the older one; before
+    // the move the same `git clean` freed the tree for *any* build.
+    // Watching for the deletion would buy back the rest, at the price of a
+    // watcher living as long as the compatibility copy — which is one
+    // release.
     let legacy = request.run_dir.parent().unwrap_or(&request.cwd);
     let lock_dirs = vec![
         crate::lock::lock_dir_for(&request.lock_dir, &tree),

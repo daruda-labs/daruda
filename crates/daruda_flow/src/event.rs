@@ -186,7 +186,7 @@ mod tests {
             RunOutcome::LockHeld { .. } => ("LockHeld", None),
             RunOutcome::Invalid { .. } => ("Invalid", None),
             RunOutcome::Unprovisioned { .. } => ("Unprovisioned", Some(RunStatus::Failed)),
-            RunOutcome::Stalled { .. } => ("Stalled", Some(RunStatus::Failed)),
+            RunOutcome::Stalled { .. } => ("Stalled", Some(RunStatus::Stalled)),
         }
     }
 

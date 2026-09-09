@@ -208,6 +208,33 @@ pub fn node_install_dir() -> PathBuf {
     base.join("daruda").join("node")
 }
 
+/// Where flow run locks live: `<config>/daruda/flow-locks`.
+///
+/// Deliberately **profile-independent**, for the opposite reason to
+/// [`default_data_dir`]. This is not daruda's own state — it is a mutex on
+/// something every profile shares, the user's working tree. A release build
+/// and a debug build running a flow in one checkout must exclude each
+/// other, and a per-profile lock root would have each of them see a free
+/// tree and put two agents in it. The same reasoning [`node_install_dir`]
+/// gives for being shared, arrived at from the other side.
+///
+/// Honors `DARUDA_DATA_DIR` so tests and portable installs stay isolated —
+/// two suites pointed at different data directories are not sharing a
+/// working tree either.
+pub fn flow_lock_root() -> PathBuf {
+    if let Some(dir) = std::env::var(DARUDA_DATA_DIR_ENV).ok().as_deref() {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join("flow-locks");
+        }
+    }
+    // The third allowed exception to the `disallowed-methods`
+    // `dirs::config_dir` entry, for the reason in the doc above.
+    #[allow(clippy::disallowed_methods)]
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("daruda").join("flow-locks")
+}
+
 /// Pure layout resolver — no env reads, no fs reads. Returns the
 /// path that `default_data_dir()` would produce for the given inputs.
 /// Crate-visible so unit tests drive every branch deterministically.

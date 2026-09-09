@@ -1,6 +1,13 @@
 //! Mutual exclusion for runs sharing one working directory. Two runs in
 //! one tree would interleave file writes, so exactly one lock exists per
-//! `cwd` and it is taken atomically.
+//! tree and it is taken atomically.
+//!
+//! The lock does not live in the tree it guards — an agent working there
+//! can delete it (`git clean -fdx` reaches ignored files). It hangs under a
+//! root the host names instead, one directory per tree
+//! ([`lock_dir_for`]). For one release a copy is also kept in the old
+//! in-tree place, so a build that only knows that place still excludes and
+//! is still excluded.
 //!
 //! A live holder is never reclaimed, however old it is. Age cannot tell a
 //! long run apart from a lock whose pid the OS has handed to something
@@ -547,10 +554,6 @@ mod tests {
             .expect("release");
     }
 
-    /// The reclaim path races too, and it is the one the takeover guard
-    /// exists for: without it, reclaimers that all delete before any of
-    /// them creates all end up holding. Measured at 8 racers, that leaked
-    /// a second holder in roughly 4% of rounds.
     /// A tree gets a directory of its own, so the `.lock` /
     /// `.lock.takeover` pair stays paired per tree.
     #[test]
@@ -612,6 +615,10 @@ mod tests {
         );
     }
 
+    /// The reclaim path races too, and it is the one the takeover guard
+    /// exists for: without it, reclaimers that all delete before any of
+    /// them creates all end up holding. Measured at 8 racers, that leaked
+    /// a second holder in roughly 4% of rounds.
     #[test]
     fn only_one_of_many_simultaneous_reclaims_wins() {
         use std::sync::atomic::{AtomicUsize, Ordering};

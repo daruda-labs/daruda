@@ -141,7 +141,7 @@ impl Workspace {
     ) -> Option<FlowHistory> {
         if self.flow_history.get(lane).is_none() {
             let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
-            let lock_dir = super::flow_paths::lane_lock_dir(&self.data_dir, &cwd);
+            let lock_dir = super::flow_paths::lane_lock_dir(&cwd);
             let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd), lock_dir.as_deref());
             self.flow_history.put(lane, read);
         }
@@ -169,12 +169,12 @@ fn entry_for(dir: &Path, lock_dir: Option<&Path>) -> FlowRunEntry {
         // `is_alive` is how a lock's pid is judged, and it is the same
         // predicate submission uses — a run this window is holding must
         // read as `Running`, not `Crashed`.
-        // `None` is a lane whose path would not resolve: `run_status` then
-        // has only the copy inside the tree to go by, which is what it
-        // falls back to anyway.
+        // `None` is a lane whose path would not resolve, passed on as
+        // "unknown" rather than as some path with no lock in it — which
+        // would read the same as a free tree.
         status: daruda_flow::marker::run_status(
             dir,
-            lock_dir.unwrap_or(dir),
+            lock_dir,
             &super::flow_request::process_is_alive,
         ),
         report: report_in(dir),

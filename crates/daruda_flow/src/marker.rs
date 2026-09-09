@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 const DONE: &str = "DONE";
 const FAILED: &str = "FAILED";
 const CANCELED: &str = "CANCELED";
+/// Written like the three above, but read like `Crashed`: the run said how
+/// it ended, and what it said is "not finished".
+const STALLED: &str = "STALLED";
 
 const WRITE_MARKER: &str = "recording how the run ended";
 
@@ -24,6 +27,11 @@ pub enum RunStatus {
     Done,
     Failed,
     Canceled,
+    /// The scheduler could not place a node and nothing else could start.
+    /// Its own status because it is resumable and `Failed` is not: no node
+    /// failed, no policy gave up, the journal is complete and nothing was
+    /// in flight — a cleaner place to pick up from than a crash.
+    Stalled,
     Running,
     Crashed,
     Unknown,
@@ -62,14 +70,16 @@ pub fn write_marker(run_dir: &Path, outcome: &RunOutcome) -> Result<(), FlowIoEr
 pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
     match outcome {
         RunOutcome::Done => Some(RunStatus::Done),
-        // `Stalled` among them: the run took the directory and stopped
-        // with work left, so it owes a marker — without one the next
-        // reader finds a lockless run directory and calls it `Crashed`.
         RunOutcome::Failed { .. }
         | RunOutcome::BudgetExhausted { .. }
         | RunOutcome::Io(_)
-        | RunOutcome::Unprovisioned { .. }
-        | RunOutcome::Stalled { .. } => Some(RunStatus::Failed),
+        | RunOutcome::Unprovisioned { .. } => Some(RunStatus::Failed),
+        // Not folded into `Failed`: that would make it unresumable, and a
+        // run that stopped because a directory would not resolve has lost
+        // nothing a resume cannot pick up. It still owes a marker — without
+        // one the next reader finds a lockless run directory and guesses
+        // `Crashed`, which is the same verb by a wrong route.
+        RunOutcome::Stalled { .. } => Some(RunStatus::Stalled),
         RunOutcome::Canceled { .. } => Some(RunStatus::Canceled),
         // Neither took the directory, so neither has anything to say
         // about it.
@@ -85,6 +95,7 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
         RunStatus::Done => Some(DONE),
         RunStatus::Failed => Some(FAILED),
         RunStatus::Canceled => Some(CANCELED),
+        RunStatus::Stalled => Some(STALLED),
         RunStatus::Running | RunStatus::Crashed | RunStatus::Unknown => None,
     }
 }
@@ -93,7 +104,7 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// evidence there is, so where the lock lives is part of this answer.
 ///
 /// **`lock_dir` is passed, not derived, and that is a hazard the caller
-/// owns.** It used to be `run_dir.parent()` — the runs directory, where the
+/// owns.** `None` says the caller does not know where it is. It used to be `run_dir.parent()` — the runs directory, where the
 /// lock also lived. The lock has moved out of the working tree
 /// ([`crate::lock::lock_dir_for`]), so there is nothing left in `run_dir`
 /// to derive it from, and a caller naming the wrong directory would read
@@ -101,7 +112,7 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// `Running`, no `Crashed`, and therefore nothing resumable. That is why
 /// `crate::resume` has a test that a crashed run is still resumable through
 /// this function rather than only through the files it writes.
-pub fn run_status(run_dir: &Path, lock_dir: &Path, is_alive: IsAlive<'_>) -> RunStatus {
+pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -> RunStatus {
     if run_dir.join(DONE).is_file() {
         return RunStatus::Done;
     }
@@ -111,10 +122,19 @@ pub fn run_status(run_dir: &Path, lock_dir: &Path, is_alive: IsAlive<'_>) -> Run
     if run_dir.join(CANCELED).is_file() {
         return RunStatus::Canceled;
     }
-    // The compatibility copy inside the tree, for a run an older build
-    // started: it wrote only there, and reading it is what keeps such a run
-    // resumable across the upgrade. See `schedule::run`'s dual acquire.
-    let holder = crate::lock::read_holder(lock_dir)
+    if run_dir.join(STALLED).is_file() {
+        return RunStatus::Stalled;
+    }
+    // `None` is a caller that could not resolve the tree, so it does not
+    // know where the lock is — said as an absent argument rather than as a
+    // path with no lock in it, which would read the same as "free".
+    //
+    // MIGRATION: the second read is the compatibility copy inside the tree,
+    // for a run an older build started — it wrote only there, and reading it
+    // is what keeps such a run resumable across the upgrade. Goes when
+    // `schedule::run` stops writing it.
+    let holder = lock_dir
+        .and_then(crate::lock::read_holder)
         .or_else(|| run_dir.parent().and_then(crate::lock::read_holder));
     // A lock naming a different run is evidence about that run, not this
     // one; an unreadable or absent one is no evidence at all. Either way
@@ -168,12 +188,13 @@ pub fn sweep_old_runs(runs_dir: &Path, keep: usize) -> std::io::Result<Vec<PathB
     Ok(removed)
 }
 
-/// Whether the run got to say how it ended. The one question retention asks
-/// — and the only one it can answer without a lock.
+/// Whether the run is finished *and* done with. The one question retention
+/// asks — and the only one it can answer without a lock.
 ///
-/// This is also what keeps a killed run around long enough to be resumed:
-/// it never wrote a marker, so the sweep never reaches it. See
-/// [`crate::resume`].
+/// This is what keeps a run that can still be picked up around long enough
+/// to be: a killed run never wrote a marker at all, and a stalled one wrote
+/// `STALLED`, which says it ended without finishing. Neither is a sweep
+/// candidate however old. See [`crate::resume`].
 fn has_marker(run_dir: &Path) -> bool {
     [DONE, FAILED, CANCELED]
         .iter()
@@ -187,7 +208,7 @@ mod tests {
     /// fallback as well as its primary path. The lock's real home outside
     /// the tree has tests of its own below.
     fn status_beside(run_dir: &std::path::Path, is_alive: super::IsAlive<'_>) -> super::RunStatus {
-        super::run_status(run_dir, run_dir.parent().unwrap_or(run_dir), is_alive)
+        super::run_status(run_dir, run_dir.parent(), is_alive)
     }
 
     use super::*;

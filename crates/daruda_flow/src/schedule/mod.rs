@@ -244,6 +244,14 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
             // the run was going to stop anyway, and naming the hold
             // instead would blame the filesystem for a decision made
             // elsewhere.
+            //
+            // No loop around this. A hold that leaves other work runnable
+            // never gets here — the node stays in `waiting` and the next
+            // wave asks again — so the only hold this arm sees is one with
+            // nothing left to make progress against, where re-asking is
+            // either a spin or an arbitrary sleep. The recoverable half is
+            // instead that `Stalled` is resumable (`crate::resume`), which
+            // costs the run nothing it had already done.
             ready::Batch::Held(nodes) => {
                 outcome = run
                     .stop_before_more_work()

@@ -24,11 +24,7 @@ fn a_finished_run_leaves_a_marker_and_frees_the_lock() {
     assert!(report.run_dir.join("DONE").is_file());
     assert!(!dir.path().join(".lock").exists());
     assert_eq!(
-        crate::marker::run_status(
-            &report.run_dir,
-            report.run_dir.parent().expect("runs dir"),
-            &|_| true
-        ),
+        crate::marker::run_status(&report.run_dir, report.run_dir.parent(), &|_| true),
         crate::marker::RunStatus::Done
     );
 }
@@ -171,5 +167,77 @@ fn a_request_with_a_relative_path_never_starts() {
     assert!(
         !std::path::Path::new("Users").exists(),
         "a relative path was resolved against the process's own directory"
+    );
+}
+
+/// **The lock is where the app will look for it, and where an agent
+/// cannot reach.**
+///
+/// Asserted while the run is going, because `execute` gives the lock back
+/// on the way out — the end state looks the same either way. Without this
+/// the whole move is only checked by the compatibility copy, which is the
+/// one part due to be deleted.
+#[test]
+fn execute_takes_the_lock_outside_the_tree_and_the_copy_inside_it() {
+    /// Looks at both places on each call, then delegates.
+    struct Watcher(FakeRunner, std::cell::RefCell<Vec<(bool, bool)>>);
+
+    impl Watcher {
+        fn look(&self, ctx: &RunContext<'_>) {
+            let tree = ctx.cwd.canonicalize().expect("the tree resolves");
+            let outside = crate::lock::lock_dir_for(&LOCK_ROOT.with(|r| r.clone()), &tree);
+            self.1.borrow_mut().push((
+                crate::lock::read_holder(&outside).is_some(),
+                ctx.run_dir
+                    .parent()
+                    .and_then(crate::lock::read_holder)
+                    .is_some(),
+            ));
+        }
+    }
+
+    impl NodeRunner for Watcher {
+        fn run_agent<'a>(
+            &'a self,
+            ctx: &'a RunContext<'a>,
+            agent: &'a crate::model::AgentSpec,
+            prompt: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = RunResult> + 'a>> {
+            self.look(ctx);
+            self.0.run_agent(ctx, agent, prompt)
+        }
+
+        fn run_command<'a>(
+            &'a self,
+            ctx: &'a RunContext<'a>,
+            run: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = RunResult> + 'a>> {
+            self.look(ctx);
+            self.0.run_command(ctx, run)
+        }
+    }
+
+    thread_local! {
+        static LOCK_ROOT: std::path::PathBuf =
+            std::env::temp_dir().join("daruda-flow-test-locks");
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let watcher = Watcher(FakeRunner::new(), std::cell::RefCell::new(Vec::new()));
+    execute(
+        &request_for(CHAIN, dir.path()),
+        &watcher,
+        &CancelToken::default(),
+    );
+
+    let seen = watcher.1.borrow().clone();
+    assert!(!seen.is_empty(), "no node ran, so nothing was observed");
+    assert!(
+        seen.iter().all(|(outside, _)| *outside),
+        "the authoritative lock must be outside the tree for the whole run: {seen:?}"
+    );
+    assert!(
+        seen.iter().all(|(_, inside)| *inside),
+        "MIGRATION: the compatibility copy must be there too: {seen:?}"
     );
 }
