@@ -117,16 +117,20 @@ async fn the_orchestrator_window_is_still_walked_by_the_pulse(cx: &mut TestAppCo
 #[gpui::test]
 async fn a_daruda_prompt_reaches_the_live_orchestrator(cx: &mut TestAppContext) {
     let _orchestrator = crate::test_support::register_test_orchestrator(cx);
-    // `exec::run` goes through `orchestrator::ensure`, which wants a control
+    // `destination` goes through `orchestrator::ensure`, which wants a control
     // surface before it will reuse a live pane — and a test must not bind the
     // profile's socket.
     cx.update(crate::orchestrator::seed_control_surface_for_test);
     enable_orchestrator(cx);
     cx.update(|cx| {
+        let (destination, connecting) =
+            crate::orchestrator::destination(cx).expect("the orchestrator is up");
         assert_eq!(
             crate::control::exec::run(
                 ResolvedCommand::Ask {
-                    text: "make me a pane".into()
+                    text: "make me a pane".into(),
+                    destination,
+                    connecting,
                 },
                 cx,
             ),
@@ -145,12 +149,7 @@ async fn a_daruda_prompt_with_no_orchestrator_configured_is_refused(cx: &mut Tes
     cx.update(|cx| {
         crate::settings_store::SettingsStore::init(cx);
         assert_eq!(
-            crate::control::exec::run(
-                ResolvedCommand::Ask {
-                    text: "make me a pane".into()
-                },
-                cx,
-            ),
+            crate::orchestrator::destination(cx),
             Err(ControlError::OrchestratorDisabled)
         );
         assert!(WindowRegistry::orchestrator(cx).is_none());

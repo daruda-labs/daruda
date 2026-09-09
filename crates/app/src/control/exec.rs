@@ -56,14 +56,14 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
     match cmd {
         ResolvedCommand::List => Ok(ControlResult::Listing(listing(cx))),
         ResolvedCommand::Brief => Ok(ControlResult::Brief(brief(cx))),
-        ResolvedCommand::Say { target, text } => in_workspace(target, cx, |ws, _window, cx| {
+        ResolvedCommand::Say { target, text } => in_pane_window(target, cx, |ws, _window, cx| {
             ws.control_say(target.pane, text.clone(), cx)
         })
         .map(|disposition| ControlResult::Sent {
             target,
             disposition,
         }),
-        ResolvedCommand::Stop { target } => in_workspace(target, cx, |ws, _window, cx| {
+        ResolvedCommand::Stop { target } => in_pane_window(target, cx, |ws, _window, cx| {
             ws.control_stop(target.pane, cx)
         })
         .map(|disposition| ControlResult::Stopped {
@@ -129,29 +129,27 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             });
             Ok(ControlResult::LaneListing { lanes })
         }
-        // Handed to the orchestrator, not to a window the user opened — so it
-        // does not go through `in_workspace`, which resolves a target the
-        // caller named. Owned here rather than in the Telegram adapter so an
-        // adapter speaking `ResolvedCommand` directly inherits it.
-        ResolvedCommand::Ask { text } => ask(text, cx),
+        // The destination is already concrete, like every other target here:
+        // the adapter brought the orchestrator up to name it. Owned in this
+        // match rather than in the Telegram adapter so an adapter speaking
+        // `ResolvedCommand` directly inherits the same handling.
+        ResolvedCommand::Ask {
+            text,
+            destination,
+            connecting,
+        } => ask(text, destination, connecting, cx),
     }
 }
 
-/// Bring the orchestrator up if needed and put `text` on its pane.
+/// Put `text` on the orchestrator's pane.
 ///
 /// The reply is `Accepted`, never the answer: the agent's response arrives
 /// later as that pane's own completion ping.
-fn ask(text: String, cx: &mut App) -> ControlOutcome {
-    let connecting = crate::orchestrator::pane(cx).is_none();
-    let pane = crate::orchestrator::ensure(cx).map_err(|e| match e {
-        crate::orchestrator::EnsureError::Disabled => ControlError::OrchestratorDisabled,
-        crate::orchestrator::EnsureError::Unresolvable => ControlError::OrchestratorUnresolvable,
-        crate::orchestrator::EnsureError::OpenFailed(_) => ControlError::OrchestratorUnavailable,
-    })?;
+fn ask(text: String, destination: PaneRef, connecting: bool, cx: &mut App) -> ControlOutcome {
     // `/list` never names the orchestrator, so fold a missing pane into its
     // own error.
-    let send = in_workspace(pane, cx, |ws, _window, cx| {
-        ws.control_say(pane.pane, text.clone(), cx)
+    let send = in_pane_window(destination, cx, |ws, _window, cx| {
+        ws.control_say(destination.pane, text.clone(), cx)
     })
     .map_err(|_| ControlError::OrchestratorUnavailable)?;
     Ok(ControlResult::Accepted {
@@ -168,7 +166,9 @@ pub(crate) enum Dispatch {
     Ready(ControlOutcome),
     /// Resolves once the user has answered and any filesystem work is done.
     Deferred {
-        outcome: smol::channel::Receiver<ControlOutcome>,
+        /// `None` when the caller took the question back: there is an outcome
+        /// to stop waiting for, but none to answer with.
+        outcome: smol::channel::Receiver<Option<ControlOutcome>>,
         /// The card this is waiting on, so a caller that gives up can take
         /// the question back before the work starts.
         approval: crate::control::approval::ApprovalId,
@@ -189,25 +189,24 @@ pub(crate) fn run_gated(cmd: GatedCommand, cx: &mut App) -> Dispatch {
     let (approval, answer) = crate::control::approval::request(summary, cx);
     let (tx, rx) = smol::channel::bounded(1);
     cx.spawn(async move |cx| {
-        let outcome = match answer.recv().await {
+        let outcome: Option<ControlOutcome> = match answer.recv().await {
             // Re-checked here, not only before the card: the guard above ran
             // before *this* request waited, so N cards opened together would
             // all have passed a budget that only one of them can spend.
-            Ok(ApprovalOutcome::Approved) => match cx.update(|cx| guard_gated(&cmd, cx)) {
+            Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| guard_gated(&cmd, cx)) {
                 Ok(()) => perform_gated(cmd, cx).await,
                 Err(refusal) => Err(refusal),
-            },
-            // A withdrawal is reported as a refusal because the agent-facing
-            // error vocabulary is a contract: the caller that withdrew is not
-            // waiting for this reply, and no other caller can see it.
-            Ok(ApprovalOutcome::Refused | ApprovalOutcome::Withdrawn) => {
-                Err(ControlError::ApprovalRefused)
-            }
-            Ok(ApprovalOutcome::Undeliverable) => Err(ControlError::ApprovalUnavailable),
-            Ok(ApprovalOutcome::TooManyPending) => Err(ControlError::ApprovalsPending),
+            }),
+            // Not a refusal: the user never said no, and the caller has freed
+            // the id it would be answered on. Nothing ran and nothing is owed,
+            // which is what `None` says and no error variant could.
+            Ok(ApprovalOutcome::Withdrawn) => None,
+            Ok(ApprovalOutcome::Refused) => Some(Err(ControlError::ApprovalRefused)),
+            Ok(ApprovalOutcome::Undeliverable) => Some(Err(ControlError::ApprovalUnavailable)),
+            Ok(ApprovalOutcome::TooManyPending) => Some(Err(ControlError::ApprovalsPending)),
             // A dropped channel means the app is going away, which the caller
             // cannot act on either — report it as the unanswered card it is.
-            Ok(ApprovalOutcome::TimedOut) | Err(_) => Err(ControlError::ApprovalTimedOut),
+            Ok(ApprovalOutcome::TimedOut) | Err(_) => Some(Err(ControlError::ApprovalTimedOut)),
         };
         let _ = tx.send(outcome).await;
     })
@@ -245,8 +244,24 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
 /// By uuid, never by scanning for a matching `LaneRef`: those ids are
 /// per-window, so a scan would match — and act on — every window that happens
 /// to hold the same numbers.
-fn in_lane_window<T>(
-    lane: LaneHandle,
+/// Which windows a lookup may enter.
+///
+/// The orchestrator is a `Workspace` but not one of the user's. A command
+/// about the user's work must not find it; `/daruda`, and a `/stop` aimed at
+/// a runaway, must.
+#[derive(Clone, Copy)]
+enum Scope {
+    User,
+    All,
+}
+
+/// Run `f` against the window `workspace` names, when `holds` agrees it is the
+/// right one. `TargetGone` when no window matches — including when the window
+/// is there but no longer holds what the command named.
+fn in_window<T>(
+    workspace: daruda_store::project::WorkspaceUuid,
+    scope: Scope,
+    holds: impl Fn(&Workspace) -> bool,
     cx: &mut App,
     mut f: impl FnMut(
         &mut Workspace,
@@ -255,12 +270,34 @@ fn in_lane_window<T>(
     ) -> Result<T, ControlError>,
 ) -> Result<T, ControlError> {
     let mut out = Err(ControlError::TargetGone);
-    WindowRegistry::for_each_user_workspace(cx, |ws, window, cx| {
-        if ws.uuid() == lane.workspace && ws.control_has_lane(lane.lane_ref()) {
+    let run = |ws: &mut Workspace, window: &mut gpui::Window, cx: &mut gpui::Context<Workspace>| {
+        if ws.uuid() == workspace && holds(ws) {
             out = f(ws, window, cx);
         }
-    });
+    };
+    match scope {
+        Scope::User => WindowRegistry::for_each_user_workspace(cx, run),
+        Scope::All => WindowRegistry::for_each_workspace(cx, run),
+    }
     out
+}
+
+fn in_lane_window<T>(
+    lane: LaneHandle,
+    cx: &mut App,
+    f: impl FnMut(
+        &mut Workspace,
+        &mut gpui::Window,
+        &mut gpui::Context<Workspace>,
+    ) -> Result<T, ControlError>,
+) -> Result<T, ControlError> {
+    in_window(
+        lane.workspace,
+        Scope::User,
+        |ws| ws.control_has_lane(lane.lane_ref()),
+        cx,
+        f,
+    )
 }
 
 /// Same, for a project the caller named by window uuid plus local id.
@@ -268,19 +305,19 @@ fn in_project_window<T>(
     workspace: daruda_store::project::WorkspaceUuid,
     project: daruda_store::project::ProjectId,
     cx: &mut App,
-    mut f: impl FnMut(
+    f: impl FnMut(
         &mut Workspace,
         &mut gpui::Window,
         &mut gpui::Context<Workspace>,
     ) -> Result<T, ControlError>,
 ) -> Result<T, ControlError> {
-    let mut out = Err(ControlError::TargetGone);
-    WindowRegistry::for_each_user_workspace(cx, |ws, window, cx| {
-        if ws.uuid() == workspace && ws.control_has_project(project) {
-            out = f(ws, window, cx);
-        }
-    });
-    out
+    in_window(
+        workspace,
+        Scope::User,
+        |ws| ws.control_has_project(project),
+        cx,
+        f,
+    )
 }
 
 /// One line naming what the user is being asked to allow. Built here rather
@@ -359,10 +396,8 @@ async fn create_lane(
         // Best effort, and not its own outcome: the worktree exists either
         // way, and the caller can send the prompt again.
         cx.update(|cx| {
-            WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-                if ws.uuid() == chat.workspace {
-                    let _ = ws.control_say(chat.pane, prompt.clone(), cx);
-                }
+            let _ = in_pane_window(chat, cx, |ws, _window, cx| {
+                ws.control_say(chat.pane, prompt.clone(), cx)
             });
         });
     }
@@ -447,22 +482,18 @@ fn group(rows: Vec<Row>) -> Vec<WindowGroup> {
 /// Run `f` against the workspace `target` names. `WindowRegistry` has no
 /// uuid lookup, so this is the same scan `telegram::global::dispatch_to_workspace`
 /// does — kept separate because that one returns nothing.
-fn in_workspace<T>(
+fn in_pane_window<T>(
     target: PaneRef,
     cx: &mut App,
-    mut f: impl FnMut(
+    f: impl FnMut(
         &mut Workspace,
         &mut gpui::Window,
         &mut gpui::Context<Workspace>,
     ) -> Result<T, ControlError>,
 ) -> Result<T, ControlError> {
-    let mut out = Err(ControlError::TargetGone);
-    WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
-        if ws.uuid() == target.workspace {
-            out = f(ws, window, cx);
-        }
-    });
-    out
+    // Every window: a pane the caller named by uuid may be the orchestrator's,
+    // and a stop aimed at it is how a runaway is ended.
+    in_window(target.workspace, Scope::All, |_| true, cx, f)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! The control-command half of the bridge's GPUI wiring.
 //!
-//! Split from the transport loops next door because the two answer different
+//! Separate from the transport loops next door because the two answer different
 //! questions: `mod.rs` owns *when* daruda talks to Telegram (long-poll cadence,
 //! send queue, token handling), and this file owns *what* a control command
 //! does once one has been routed — resolve it, run it, fold the outcome back
@@ -113,6 +113,21 @@ pub(super) fn run_command(
     });
     let (outcome, addressed) = match step {
         command::Resolution::Answer(outcome) => (outcome, None),
+        // Fill in the one target no listing can name, then run like any other.
+        command::Resolution::Ask(text) => (
+            cx.update(|cx| {
+                let (destination, connecting) = crate::orchestrator::destination(cx)?;
+                crate::control::exec::run(
+                    crate::control::spec::ResolvedCommand::Ask {
+                        text,
+                        destination,
+                        connecting,
+                    },
+                    cx,
+                )
+            }),
+            None,
+        ),
         command::Resolution::Run(resolved, addressed) => (
             cx.update(|cx| crate::control::exec::run(resolved, cx)),
             addressed,

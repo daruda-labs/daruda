@@ -18,6 +18,7 @@ mod claude_status_aggregate;
 pub(in crate::workspace) mod command;
 mod config_ops;
 mod config_sync;
+mod control_flow_ops;
 mod control_lane_ops;
 mod control_ops;
 pub(crate) mod delete_project_modal;
@@ -106,8 +107,8 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 #[action(namespace = workspace, no_json)]
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
 
-/// Switch the focused pane's managed account (Task 8, A+C hybrid). Carries
-/// an [`daruda_store::accounts::AccountSelection`] so the dropdown's
+/// Switch the focused pane's managed account. Carries an
+/// [`daruda_store::accounts::AccountSelection`] so the dropdown's
 /// per-account menu item can dispatch a concrete managed-account target
 /// ([`AccountSelection::Managed`]) while its "System default" entry
 /// dispatches [`AccountSelection::SystemDefault`] — reverting the pane back
@@ -121,9 +122,8 @@ pub struct OpenSettings(pub daruda_config::BuiltinSection);
 #[action(namespace = workspace, no_json)]
 pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 
-/// Start a headless add-account login (Plan B — see
-/// `account_login_ops::add_managed_account`). Carries the [`AccountRecipeId`]
-/// bucket the resulting account is filed under; the login *command* is
+/// Start a headless add-account login. Carries the [`AccountRecipeId`] bucket
+/// the resulting account is filed under; the login *command* is
 /// resolved for that same domain (`Workspace::login_command_for_recipe`),
 /// so the two can't disagree. `no_json`:
 /// dispatched only from the status-bar "+ Add account…" menu item, never
@@ -134,9 +134,8 @@ pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 #[action(namespace = workspace, no_json)]
 pub struct AddManagedAccount(pub daruda_store::accounts::AccountRecipeId);
 
-/// Re-run a headless login for an **existing** managed account (Plan B —
-/// see `account_login_ops::reauthenticate_account`). Carries the target
-/// [`daruda_store::accounts::AccountId`] rather than a provider: unlike
+/// Re-run a headless login for an **existing** managed account. Carries the
+/// target [`daruda_store::accounts::AccountId`] rather than a provider: unlike
 /// [`AddManagedAccount`], this reuses the account's existing config dir
 /// and identity row instead of minting a new one, so the concrete account
 /// must be known up front. `no_json`: dispatched only from the Settings
@@ -303,9 +302,8 @@ pub(in crate::workspace) enum CommitMode {
     Amend { saved_draft: String },
 }
 
-/// State of an in-flight headless add-account login (Plan B — see
-/// `account_login_ops::add_managed_account`). At most one at a time; a second
-/// `AddManagedAccount` while `InProgress` is expected to be blocked by the
+/// State of an in-flight headless add-account login. At most one at a time; a
+/// second `AddManagedAccount` while `InProgress` is expected to be blocked by the
 /// UI (a disabled "+ Add account" affordance while a login is running),
 /// not by this enum itself.
 ///
@@ -647,8 +645,8 @@ pub struct Workspace {
     /// `focused_account`, the status-bar slot) stay cx-free, exactly like the
     /// config fields cache `SettingsStore`.
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
-    /// In-flight headless add-account login (Plan B), if any — see
-    /// [`PendingLogin`]. Drives the add-account spinner/cancel affordance;
+    /// In-flight headless add-account login, if any — see [`PendingLogin`].
+    /// Drives the add-account spinner/cancel affordance;
     /// `None` outside of `Workspace::add_managed_account`'s call through
     /// `Workspace::finish_login` / `Workspace::cancel_pending_login`.
     pub(in crate::workspace) pending_login: PendingLogin,

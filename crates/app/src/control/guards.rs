@@ -18,7 +18,7 @@
 //! **Two of the three are applied by the caller, not inherited.**
 //! [`guard_agent_budget`] sits inside `exec::run_gated`, so every adapter gets
 //! it; [`guard_self_target`] and [`guard_queue_depth`] are applied by
-//! `orchestrator::control::guard_immediate`, i.e. on the MCP path only. That
+//! `super::mcp::dispatch::guard_immediate`, i.e. on the MCP path only. That
 //! is deliberate — Telegram's `/say` is a person, and refusing them for
 //! "addressing the orchestrator" would refuse the whole point of the app — but
 //! a new adapter driving an *agent* has to apply those two itself.
@@ -53,8 +53,14 @@ impl Global for AgentBudget {}
 /// A prompt from the orchestrator to itself makes a turn that makes a turn.
 /// With lane agents holding no tools, this is the only pure software loop
 /// left.
-pub(crate) fn guard_self_target(target: PaneRef, cx: &App) -> Result<(), ControlError> {
-    if crate::orchestrator::pane(cx) == Some(target) {
+///
+/// `protected` is the caller's to supply. Which pane the orchestrator owns is
+/// the orchestrator's fact, and this module sits below it.
+pub(crate) fn guard_self_target(
+    target: PaneRef,
+    protected: Option<PaneRef>,
+) -> Result<(), ControlError> {
+    if protected == Some(target) {
         return Err(ControlError::SelfTargetRefused);
     }
     Ok(())
@@ -114,35 +120,32 @@ mod tests {
         }
     }
 
-    #[gpui::test]
-    fn the_orchestrator_cannot_target_itself(cx: &mut TestAppContext) {
-        let own = crate::test_support::register_test_orchestrator(cx);
-        cx.update(|cx| {
-            assert_eq!(
-                guard_self_target(own, cx),
-                Err(ControlError::SelfTargetRefused)
-            );
-        });
+    #[test]
+    fn the_orchestrator_cannot_target_itself() {
+        let own = pane(1);
+        assert_eq!(
+            guard_self_target(own, Some(own)),
+            Err(ControlError::SelfTargetRefused)
+        );
     }
 
-    #[gpui::test]
-    fn a_non_self_target_passes(cx: &mut TestAppContext) {
-        let own = crate::test_support::register_test_orchestrator(cx);
-        cx.update(|cx| {
-            let other = PaneRef {
-                workspace: own.workspace,
-                pane: own.pane + 1,
-            };
-            assert_eq!(guard_self_target(other, cx), Ok(()));
-            assert_eq!(guard_self_target(pane(own.pane), cx), Ok(()));
-        });
+    #[test]
+    fn a_non_self_target_passes() {
+        let own = pane(1);
+        let other = PaneRef {
+            workspace: own.workspace,
+            pane: own.pane + 1,
+        };
+        assert_eq!(guard_self_target(other, Some(own)), Ok(()));
+        // Same pane number, another window: not the same pane.
+        assert_eq!(guard_self_target(pane(own.pane), Some(own)), Ok(()));
     }
 
     /// With no orchestrator up, nothing is self — the guard must not refuse
     /// every pane just because the comparison has no left-hand side.
-    #[gpui::test]
-    fn nothing_is_self_when_no_orchestrator_is_running(cx: &mut TestAppContext) {
-        cx.update(|cx| assert_eq!(guard_self_target(pane(0), cx), Ok(())));
+    #[test]
+    fn nothing_is_self_when_no_orchestrator_is_running() {
+        assert_eq!(guard_self_target(pane(0), None), Ok(()));
     }
 
     #[gpui::test]
