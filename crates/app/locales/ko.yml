@@ -1543,6 +1543,14 @@ flow:
   issue_schema_keyword_on_wrong_kind: "출력 스키마가 %{keyword}를 %{kind} 아래에 뒀는데, 거기서는 검사되지 않습니다"
 
 # External control surface — the command replies sent back to a phone
+orchestrator:
+  idle: "오케스트레이터: 대기 중"
+  working: "오케스트레이터: 작업 중"
+  awaiting_permission: "오케스트레이터: 승인 대기 중"
+  failed: "오케스트레이터: 연결 실패"
+  label: "오케스트레이터"
+  tab_unavailable: "이 워크트리에서는 오케스트레이터 탭을 열 수 없습니다. 세션은 계속 실행 중입니다."
+
 control:
   listing_header: "열려 있는 에이전트 대화"
   listing_row: "%{ordinal}. %{marker}%{state} %{name} — %{title}%{ago}"

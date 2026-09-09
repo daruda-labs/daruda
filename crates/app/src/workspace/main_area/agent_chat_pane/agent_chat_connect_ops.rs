@@ -267,11 +267,8 @@ impl Workspace {
         // leases each view, and holding a read across that would re-enter the
         // same entity (CLAUDE.md Pitfall #5).
         let revived: Vec<PaneId> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .map(|pane| (pane.id, pane.account_selection()))
+            .every_agent_chat()
+            .map(|(id, _)| (id, Some(self.agent_chat_account_selection(id))))
             .collect::<Vec<_>>()
             .into_iter()
             .filter(|&(pane_id, selection)| {
@@ -463,12 +460,7 @@ impl Workspace {
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                 view.update(cx, |v, _| v.cwd = Some(resolved.resolved_cwd.clone()));
             }
-            if let Some(content) = self
-                .pane_mut(pane_id)
-                .and_then(|p| p.agent_chat_content_mut())
-            {
-                content.cwd = Some(resolved.resolved_cwd.clone());
-            }
+            self.update_agent_chat_cwd(pane_id, resolved.resolved_cwd.clone());
             self.mutate_durable(cx, |_, _| {});
         }
 

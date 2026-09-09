@@ -47,6 +47,8 @@ const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
 const NAME_AGENT_CHAT: &str = "agent-chat";
+const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
+const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
 /// CLI token for the mid-turn transcript, before the agent writes its answer.
 const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
 /// CLI token for the same transcript with the filter and tail chips engaged.
@@ -118,6 +120,8 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 /// One scenario per capture — these overlays are mutually exclusive on screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenshotScenario {
+    OrchestratorChip,
+    OrchestratorTab,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -251,6 +255,8 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
+            NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
+            NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
@@ -423,6 +429,14 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_transcript_for_shot(window, cx)
             });
+        }
+        ScreenshotScenario::OrchestratorChip => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_orchestrator_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::OrchestratorTab => {
+            workspace.update(cx, |ws, cx| ws.seed_orchestrator_for_shot(true, window, cx));
         }
         ScreenshotScenario::AgentChatWorking => {
             workspace.update(cx, |ws, cx| {

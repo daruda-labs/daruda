@@ -1544,6 +1544,14 @@ flow:
   issue_schema_keyword_on_wrong_kind: "has an output schema writing %{keyword} under a %{kind}, where it is never checked"
 
 # External control surface — the command replies sent back to a phone
+orchestrator:
+  idle: "Orchestrator: idle"
+  working: "Orchestrator: working"
+  awaiting_permission: "Orchestrator: waiting for approval"
+  failed: "Orchestrator: connection failed"
+  label: "Orchestrator"
+  tab_unavailable: "The orchestrator tab cannot open in this worktree. The session is still running."
+
 control:
   listing_header: "Open agent chats"
   listing_row: "%{ordinal}. %{marker}%{state} %{name} — %{title}%{ago}"

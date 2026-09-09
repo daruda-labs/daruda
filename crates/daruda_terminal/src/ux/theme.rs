@@ -8,6 +8,16 @@
 
 use gpui::Hsla;
 
+pub const ORCHESTRATOR_IDLE_GLYPH: &str = "\u{25cb}";
+pub const ORCHESTRATOR_WORKING_GLYPH: &str = "\u{25d0}";
+pub const ORCHESTRATOR_PERMISSION_GLYPH: &str = "!";
+pub const ORCHESTRATOR_FAILED_GLYPH: &str = "\u{2715}";
+pub const ORCHESTRATOR_GLYPH_WIDTH: f32 = 12.0;
+pub const ORCHESTRATOR_IDLE_COLOR: Hsla = hsla(0.0, 0.0, 0.5, 1.0);
+pub const ORCHESTRATOR_WORKING_COLOR: Hsla = hsla(145.0, 0.65, 0.42, 1.0);
+pub const ORCHESTRATOR_PERMISSION_COLOR: Hsla = hsla(38.0, 0.9, 0.45, 1.0);
+pub const ORCHESTRATOR_FAILED_COLOR: Hsla = hsla(0.0, 0.7, 0.52, 1.0);
+
 /// `const`-friendly `Hsla` constructor — daruda speaks in degrees
 /// (0–360 for hue) while `gpui::Hsla` stores hue as a fraction in
 /// [0, 1]. The conversion lives here, at the daruda↔gpui boundary, so

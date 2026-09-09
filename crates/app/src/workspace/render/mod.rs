@@ -333,9 +333,10 @@ impl Render for Workspace {
                     .panes
                     .iter()
                     .find(|p| p.id == tab.last_focused_pane);
-                let base_label = tab
-                    .user_label
-                    .clone()
+                let base_label = self
+                    .is_orchestrator_tab(tab)
+                    .then(|| crate::surface::strings::orchestrator_label().into())
+                    .or_else(|| tab.user_label.clone())
                     .or_else(|| {
                         pane.and_then(|p| {
                             // File panes: filename is the tab identity; the parent
@@ -538,6 +539,11 @@ impl Render for Workspace {
             .items_center()
             .children(tab_titles.into_iter().map(
                 |(i, tab_id, is_active, display, file_path, worktree_root)| {
+                    let is_orchestrator = self
+                        .active_runtime()
+                        .tabs
+                        .get(i)
+                        .is_some_and(|tab| self.is_orchestrator_tab(tab));
                     // Stop the left-press from bubbling to the tab cell's
                     // `on_mouse_down(Left, activate_tab)` below — clicking ×
                     // must close the tab without first activating it. The
@@ -610,18 +616,20 @@ impl Render for Workspace {
                                 this.request_close_tab(i, window, cx);
                             }),
                         )
-                        .on_drag(
-                            TabDrag {
-                                tab_id,
-                                title: drag_title,
-                            },
-                            |d, offset, _window, cx| {
-                                cx.new(|_| TabDragGhost {
-                                    title: d.title.clone(),
-                                    offset,
-                                })
-                            },
-                        )
+                        .when(!is_orchestrator, |el| {
+                            el.on_drag(
+                                TabDrag {
+                                    tab_id,
+                                    title: drag_title,
+                                },
+                                |d, offset, _window, cx| {
+                                    cx.new(|_| TabDragGhost {
+                                        title: d.title.clone(),
+                                        offset,
+                                    })
+                                },
+                            )
+                        })
                         .on_drag_move::<TabDrag>(cx.listener(
                             move |this, event: &DragMoveEvent<TabDrag>, window, cx| {
                                 this.update_tab_drag_from_move(tab_id, i, event, window, cx);
@@ -1064,6 +1072,7 @@ impl Render for Workspace {
             .collect();
         let flows = self.flow_status_rows();
         let status_data = StatusBarData {
+            orchestrator: self.orchestrator_chip_state(cx),
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
             title: focused_title,

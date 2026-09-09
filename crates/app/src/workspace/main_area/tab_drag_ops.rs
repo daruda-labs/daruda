@@ -215,6 +215,15 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .active_runtime()
+            .tabs
+            .iter()
+            .any(|tab| tab.id == dragged_tab_id && self.is_orchestrator_tab(tab))
+        {
+            self.finish_tab_drag(false, cx);
+            return;
+        }
         let target_index = self.main_area.tab_reorder_preview.map(|(_, index)| index);
         let from = self
             .active_runtime()

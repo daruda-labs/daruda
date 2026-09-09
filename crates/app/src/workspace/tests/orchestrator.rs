@@ -1,9 +1,4 @@
-//! `/daruda` end to end, minus the window opening.
-//!
-//! `orchestrator::window::open` goes through `cx.open_window`, which is not
-//! deterministic under the gpui test scheduler — so these tests register a
-//! project-less workspace in the orchestrator slot by hand, which is the state
-//! that open leaves behind, and drive everything from there.
+//! `/daruda` routing through a registered host with a hidden, disconnected slot.
 //!
 //! The invariant with the most to lose is that the orchestrator's own pane
 //! never appears in `/list`: it is not the user's work, and offering it as an
@@ -106,9 +101,6 @@ async fn the_orchestrator_window_is_still_walked_by_the_pulse(cx: &mut TestAppCo
         let mut seen = 0usize;
         WindowRegistry::for_each_workspace(cx, |_, _, _| seen += 1);
         assert_eq!(seen, 2, "the pulse reaches both");
-        let mut user_only = 0usize;
-        WindowRegistry::for_each_user_workspace(cx, |_, _, _| user_only += 1);
-        assert_eq!(user_only, 1);
     });
 }
 

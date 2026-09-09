@@ -29,31 +29,26 @@ impl Workspace {
     pub(crate) fn control_snapshot(&self, cx: &App) -> Vec<(LaneRef, ChatSummary)> {
         let active = self.active;
         let uuid = self.uuid();
-        self.main_area
-            .runtimes
-            .iter()
-            .flat_map(|(lane_ref, rt)| {
-                // Lane-scoped, so it is resolved once per lane rather than per
-                // pane: daruda tracks "not looked at yet" on the lane row.
-                let unread = self.lane_for(*lane_ref).is_some_and(|l| l.is_unread);
-                rt.panes.iter().filter_map(move |pane| {
-                    let v = pane.agent_chat_view()?.read(cx);
-                    Some((
-                        *lane_ref,
-                        ChatSummary {
-                            target: PaneRef {
-                                workspace: uuid,
-                                pane: pane.id,
-                            },
-                            is_active_lane: *lane_ref == active,
-                            activity: map_activity(v.activity_state()),
-                            health: map_health(&v.status),
-                            unread,
-                            title: v.activity_title().and_then(sanitize_title),
-                            last_activity: last_activity_unix(v),
+        self.lane_agent_chats()
+            .filter_map(|(pane_id, view)| {
+                let lane_ref = self.lane_ref_for_pane(pane_id)?;
+                let unread = self.lane_for(lane_ref).is_some_and(|l| l.is_unread);
+                let v = view.read(cx);
+                Some((
+                    lane_ref,
+                    ChatSummary {
+                        target: PaneRef {
+                            workspace: uuid,
+                            pane: pane_id,
                         },
-                    ))
-                })
+                        is_active_lane: lane_ref == active,
+                        activity: map_activity(v.activity_state()),
+                        health: map_health(&v.status),
+                        unread,
+                        title: v.activity_title().and_then(sanitize_title),
+                        last_activity: last_activity_unix(v),
+                    },
+                ))
             })
             .collect()
     }
@@ -135,7 +130,7 @@ impl Workspace {
             .map_or(0, |rt| {
                 rt.panes
                     .iter()
-                    .filter(|p| p.agent_chat_view().is_some())
+                    .filter(|p| !self.is_orchestrator_pane(p.id) && p.agent_chat_view().is_some())
                     .count()
             })
             .try_into()

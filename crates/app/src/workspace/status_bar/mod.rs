@@ -8,6 +8,7 @@
 mod account_slot;
 mod context_menu;
 mod flow_segment;
+pub(in crate::workspace) mod orchestrator_chip;
 mod ports_segment;
 mod usage_chip;
 
@@ -78,6 +79,7 @@ fn abbreviate_project_branch(label: &str, density: StatusBarDensity) -> &str {
 /// avoid entity reads during element construction (GPUI re-entrant
 /// panic prevention).
 pub(super) struct StatusBarData {
+    pub orchestrator: Option<orchestrator_chip::OrchestratorChipState>,
     /// `<project>/<branch>` for git-backed active lanes, just
     /// `<project>` for non-git or detached HEAD, `None` in Welcome
     /// state (no project loaded). The detached marker is rendered
@@ -180,6 +182,9 @@ impl RenderOnce for StatusBar {
             .min_w_0()
             .overflow_hidden()
             .gap(px(theme::STATUS_BAR_GAP))
+            .when_some(data.orchestrator, |el, state| {
+                el.child(orchestrator_chip::render(state, data.workspace.clone(), cx))
+            })
             .when(show_project_branch, |el| {
                 el.when_some(data.project_branch.clone(), |el, pb| {
                     let text = abbreviate_project_branch(&pb, density).to_string();

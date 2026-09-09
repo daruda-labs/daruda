@@ -59,9 +59,7 @@ pub(crate) struct WindowRegistry {
     workspaces: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
     settings: Option<SettingsHandle>,
     welcome: Option<WelcomeHandle>,
-    /// The app-global orchestrator window. An `Option` rather than a flagged
-    /// entry in `workspaces`, so the singleton constraint is the type's and
-    /// not a comment's.
+    /// The workspace hosting the app-global orchestrator session.
     orchestrator: Option<(AnyWindowHandle, WeakEntity<Workspace>)>,
 }
 
@@ -90,48 +88,24 @@ impl WindowRegistry {
 
     /// Apply `f` to every live workspace and lazily prune closed windows.
     ///
-    /// Includes the orchestrator: it is a `Workspace`, so per-window machinery
-    /// — the status pulse that drives completion settle, the deferred relay
-    /// flush, a targeted `PaneRef` dispatch — has to reach it. It is kept out
-    /// of `workspaces` only so the Welcome policy and `/list` do not count it
-    /// as the user's work.
+    /// The orchestrator's host remains a normal workspace in this list.
     pub(crate) fn for_each_workspace<F>(cx: &mut App, f: F)
     where
         F: FnMut(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>),
     {
-        let mut pairs = Self::user_pairs(cx);
-        if let Some(orch) = cx
-            .try_global::<WindowRegistry>()
-            .and_then(|r| r.orchestrator.clone())
-        {
-            pairs.push(orch);
-        }
+        let pairs = Self::workspace_pairs(cx);
         Self::for_each_pair(pairs, cx, f);
     }
 
-    /// Apply `f` to every *user* workspace — the ones the user opened.
-    ///
-    /// Distinct from [`Self::for_each_workspace`], which also reaches the
-    /// orchestrator window. A caller answering "what is the user working on?"
-    /// wants this one; a caller driving per-window machinery wants the other.
-    pub(crate) fn for_each_user_workspace<F>(cx: &mut App, f: F)
-    where
-        F: FnMut(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>),
-    {
-        let pairs = Self::user_pairs(cx);
-        Self::for_each_pair(pairs, cx, f);
-    }
-
-    /// Snapshot the user list so the shared borrow on the global is released
+    /// Snapshot the workspace list so the shared borrow on the global is released
     /// before any per-window update closure runs.
-    fn user_pairs(cx: &App) -> Vec<(AnyWindowHandle, WeakEntity<Workspace>)> {
+    fn workspace_pairs(cx: &App) -> Vec<(AnyWindowHandle, WeakEntity<Workspace>)> {
         cx.try_global::<WindowRegistry>()
             .map(|r| r.workspaces.clone())
             .unwrap_or_default()
     }
 
-    /// The walk both `for_each_*` variants share, including the lazy prune of
-    /// windows that have since closed. Only the pair list differs between them.
+    /// Walk live workspace handles and prune closed windows.
     fn for_each_pair<F>(
         pairs: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
         cx: &mut App,
@@ -180,13 +154,8 @@ impl WindowRegistry {
             return Vec::new();
         }
         let registry = cx.global_mut::<WindowRegistry>();
-        let mut handles: Vec<AnyWindowHandle> =
-            registry.workspaces.iter().map(|(h, _)| *h).collect();
-        // Close-all means every window daruda opened, orchestrator included —
-        // and taking the slot here is what stops a second caller re-closing it.
-        if let Some((handle, _)) = registry.orchestrator.take() {
-            handles.push(handle);
-        }
+        let handles: Vec<AnyWindowHandle> = registry.workspaces.iter().map(|(h, _)| *h).collect();
+        registry.orchestrator = None;
         registry.workspaces.clear();
         handles
     }
@@ -227,30 +196,16 @@ impl WindowRegistry {
             .cloned()
     }
 
-    /// Record the orchestrator window: move it out of the user list, take the
-    /// slot, and arm its teardown.
-    ///
-    /// All three, not just the third, because each of the other two is a
-    /// correctness requirement a caller could otherwise forget.
-    /// `Workspace::new` registers every window it builds, so a workspace
-    /// promoted here would otherwise sit in both places — walked twice by
-    /// [`Self::for_each_workspace`] and counted as the user's by
-    /// [`Self::all_handles`]. And a slot nobody clears would keep naming a
-    /// closed window, so the next request would address a dead pane instead of
-    /// starting a fresh orchestrator.
-    ///
-    /// Replaces any previous orchestrator; the slot is an `Option` because a
-    /// second one would compete for the same conversation.
+    /// Remember the host without changing its normal workspace registration.
     pub(crate) fn register_orchestrator(
         handle: AnyWindowHandle,
         workspace: WeakEntity<Workspace>,
         cx: &mut App,
     ) {
         let registry = cx.default_global::<WindowRegistry>();
-        registry.workspaces.retain(|(_, w)| *w != workspace);
         registry.orchestrator = Some((handle, workspace.clone()));
         // Separate from the constructor's own release hook, which knows only
-        // about the user list. Conditional, because replacing an orchestrator
+        // about the workspace list. Conditional, because replacing an orchestrator
         // closes the old window *after* the new one has taken the slot.
         if let Some(entity) = workspace.upgrade() {
             entity
@@ -291,16 +246,6 @@ impl WindowRegistry {
     /// Return the live orchestrator entry, if one is up.
     pub(crate) fn orchestrator(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
         cx.try_global::<WindowRegistry>()?.orchestrator.clone()
-    }
-
-    /// `true` when the OS-active window is the orchestrator's.
-    pub(crate) fn active_is_orchestrator(cx: &App) -> bool {
-        let Some(active) = cx.active_window() else {
-            return false;
-        };
-        cx.try_global::<WindowRegistry>()
-            .and_then(|r| r.orchestrator.as_ref())
-            .is_some_and(|(handle, _)| *handle == active)
     }
 
     /// Record the live Settings singleton.
@@ -508,11 +453,10 @@ mod tests {
         });
     }
 
-    /// One user window plus a registered orchestrator, which is the shape every
-    /// split below is about. Returns both weaks so a caller can keep them live.
+    /// Two workspaces, one hosting the orchestrator. Both stay live for the caller.
     fn register_user_and_orchestrator(cx: &mut TestAppContext) -> (TestWindow, TestWindow) {
         // `make_window` goes through the production `Workspace::new`, which
-        // registers itself — so only the promotion below is explicit here.
+        // registers itself, so only the host registration below is explicit here.
         let config = daruda_config::Config::default();
         let user = make_window(cx, &config);
         let orch = make_window(cx, &config);
@@ -520,34 +464,6 @@ mod tests {
             WindowRegistry::register_orchestrator(orch.0.into(), orch.1.downgrade(), cx);
         });
         (user, orch)
-    }
-
-    #[gpui::test]
-    fn for_each_workspace_reaches_the_orchestrator(cx: &mut TestAppContext) {
-        let (_user, _orch) = register_user_and_orchestrator(cx);
-        let mut seen = 0usize;
-        cx.update(|cx| WindowRegistry::for_each_workspace(cx, |_, _, _| seen += 1));
-        assert_eq!(seen, 2, "pulse must reach the orchestrator too");
-    }
-
-    #[gpui::test]
-    fn for_each_user_workspace_excludes_the_orchestrator(cx: &mut TestAppContext) {
-        let (_user, _orch) = register_user_and_orchestrator(cx);
-        let mut seen = 0usize;
-        cx.update(|cx| WindowRegistry::for_each_user_workspace(cx, |_, _, _| seen += 1));
-        assert_eq!(seen, 1, "a listing must not mix the orchestrator in");
-    }
-
-    #[gpui::test]
-    fn all_handles_excludes_the_orchestrator(cx: &mut TestAppContext) {
-        let (_user, _orch) = register_user_and_orchestrator(cx);
-        cx.update(|cx| {
-            assert_eq!(
-                WindowRegistry::all_handles(cx).len(),
-                1,
-                "the Welcome policy asks about user windows only"
-            );
-        });
     }
 
     #[gpui::test]
@@ -566,17 +482,15 @@ mod tests {
         });
     }
 
-    /// Registering the orchestrator takes it *out* of the user list: the
-    /// `Workspace` constructor registers every window it builds, so without
-    /// this the same window would be walked twice and counted as the user's.
+    /// Hosting a session must neither remove nor duplicate the workspace.
     #[gpui::test]
-    fn registering_the_orchestrator_removes_it_from_the_user_list(cx: &mut TestAppContext) {
+    fn registering_the_orchestrator_preserves_the_workspace_list(cx: &mut TestAppContext) {
         let config = daruda_config::Config::default();
         let (handle, ws) = make_window(cx, &config);
         cx.update(|cx| {
             assert_eq!(WindowRegistry::all_handles(cx).len(), 1);
             WindowRegistry::register_orchestrator(handle.into(), ws.downgrade(), cx);
-            assert!(WindowRegistry::all_handles(cx).is_empty());
+            assert_eq!(WindowRegistry::all_handles(cx).len(), 1);
             let mut seen = 0usize;
             WindowRegistry::for_each_workspace(cx, |_, _, _| seen += 1);
             assert_eq!(seen, 1, "walked once, not twice");
@@ -613,42 +527,21 @@ mod tests {
             let mut seen = 0usize;
             WindowRegistry::for_each_workspace(cx, |_, _, _| seen += 1);
             assert_eq!(
-                seen, 2,
-                "registering a second orchestrator replaces the first"
+                seen, 3,
+                "replacing the host does not remove either workspace"
             );
         });
     }
 
     #[gpui::test]
-    fn the_orchestrator_is_recognisable_as_the_active_window(cx: &mut TestAppContext) {
-        let (user, orch) = register_user_and_orchestrator(cx);
-        let activate = |handle: gpui::AnyWindowHandle, cx: &mut TestAppContext| {
-            cx.update_window(handle, |_, window, _| window.activate_window())
-                .expect("window is live");
-        };
-
-        activate(orch.0.into(), cx);
+    fn orchestrator_host_remains_an_active_workspace(cx: &mut TestAppContext) {
+        let (_, host) = register_user_and_orchestrator(cx);
+        cx.update_window(host.0.into(), |_, window, _| window.activate_window())
+            .unwrap();
         cx.update(|cx| {
-            assert!(WindowRegistry::active_is_orchestrator(cx));
-            assert!(
-                WindowRegistry::active_workspace(cx).is_none(),
-                "it must never answer as a user workspace: a caller that would \
-                 add a project to the active one has to keep falling through"
-            );
-        });
-
-        activate(user.0.into(), cx);
-        cx.update(|cx| {
-            assert!(!WindowRegistry::active_is_orchestrator(cx));
-            assert!(WindowRegistry::active_workspace(cx).is_some());
-        });
-
-        activate(orch.0.into(), cx);
-        cx.update(|cx| {
-            WindowRegistry::clear_orchestrator(cx);
-            assert!(
-                !WindowRegistry::active_is_orchestrator(cx),
-                "an empty slot names no window"
+            assert_eq!(
+                WindowRegistry::active_workspace(cx).unwrap().0,
+                host.0.into()
             );
         });
     }
@@ -659,7 +552,7 @@ mod tests {
         cx.update(|cx| {
             WindowRegistry::clear_orchestrator(cx);
             assert!(WindowRegistry::orchestrator(cx).is_none());
-            assert_eq!(WindowRegistry::all_handles(cx).len(), 1);
+            assert_eq!(WindowRegistry::all_handles(cx).len(), 2);
         });
     }
 

@@ -177,14 +177,10 @@ impl Workspace {
         &self,
         cx: &gpui::App,
     ) -> Vec<(PaneId, SessionStatus)> {
-        self.main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| {
-                let view = p.agent_chat_view()?;
+        self.lane_agent_chats()
+            .filter_map(|(id, view)| {
                 let status = view.read(cx).to_session_status()?;
-                Some((p.id, status))
+                Some((id, status))
             })
             .collect()
     }

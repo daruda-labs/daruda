@@ -199,6 +199,13 @@ impl Workspace {
             };
             content.account = selection;
         }
+        if let Some(chat) = self
+            .orchestrator_chat
+            .as_mut()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            chat.account = selection;
+        }
         self.reset_agent_chat_session(pane_id, cx);
     }
 
@@ -344,8 +351,16 @@ impl Workspace {
             .runtimes
             .values()
             .flat_map(|rt| rt.panes.iter())
-            .filter(|p| p.account_selection() == Some(AccountSelection::Managed(account_id)))
+            .filter(|p| {
+                !self.is_orchestrator_pane(p.id)
+                    && p.account_selection() == Some(AccountSelection::Managed(account_id))
+            })
             .count()
+            + usize::from(
+                self.orchestrator_chat
+                    .as_ref()
+                    .is_some_and(|chat| chat.account == AccountSelection::Managed(account_id)),
+            )
     }
 
     /// Reset every pane pinned to `account_id` back to
@@ -375,6 +390,14 @@ impl Workspace {
             );
         }
         let mut pane_changed = false;
+        if let Some(chat) = self
+            .orchestrator_chat
+            .as_mut()
+            .filter(|chat| chat.account == AccountSelection::Managed(account_id))
+        {
+            chat.account = AccountSelection::SystemDefault;
+            pane_changed = true;
+        }
         for rt in self.main_area.runtimes.values_mut() {
             for p in rt.panes.iter_mut() {
                 match &mut p.content {

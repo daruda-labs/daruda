@@ -75,7 +75,7 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         // arm may stop at the first window.
         ResolvedCommand::Flow(FlowCommand::List) => {
             let mut flows: Vec<FlowEntry> = Vec::new();
-            WindowRegistry::for_each_user_workspace(cx, |ws, _window, _cx| {
+            WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
                 flows.extend(ws.control_flow_list());
             });
             // Sorted by name so the listing reads as a vocabulary, but *not*
@@ -96,9 +96,7 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         }
         ResolvedCommand::Flow(FlowCommand::Run { name }) => {
             let mut out = Err(ControlError::NoActiveLane);
-            // User workspaces only: the orchestrator has no lane, so visiting
-            // it can only turn a specific refusal back into `NoActiveLane`.
-            WindowRegistry::for_each_user_workspace(cx, |ws, window, cx| {
+            WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
                 // Retry on the two refusals another window can answer
                 // differently: it may have an active lane where this one has
                 // none, and its repository may hold a flow this one lacks.
@@ -124,7 +122,7 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         // choosing where to open a chat needs the whole set.
         ResolvedCommand::LaneList => {
             let mut lanes = Vec::new();
-            WindowRegistry::for_each_user_workspace(cx, |ws, _window, _cx| {
+            WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
                 lanes.extend(ws.control_lane_list());
             });
             Ok(ControlResult::LaneListing { lanes })
@@ -239,28 +237,11 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
     }
 }
 
-/// Run `f` against the one window `lane` names, resolving by workspace uuid.
-///
-/// By uuid, never by scanning for a matching `LaneRef`: those ids are
-/// per-window, so a scan would match — and act on — every window that happens
-/// to hold the same numbers.
-/// Which windows a lookup may enter.
-///
-/// The orchestrator is a `Workspace` but not one of the user's. A command
-/// about the user's work must not find it; `/daruda`, and a `/stop` aimed at
-/// a runaway, must.
-#[derive(Clone, Copy)]
-enum Scope {
-    User,
-    All,
-}
-
 /// Run `f` against the window `workspace` names, when `holds` agrees it is the
 /// right one. `TargetGone` when no window matches — including when the window
 /// is there but no longer holds what the command named.
 fn in_window<T>(
     workspace: daruda_store::project::WorkspaceUuid,
-    scope: Scope,
     holds: impl Fn(&Workspace) -> bool,
     cx: &mut App,
     mut f: impl FnMut(
@@ -275,10 +256,7 @@ fn in_window<T>(
             out = f(ws, window, cx);
         }
     };
-    match scope {
-        Scope::User => WindowRegistry::for_each_user_workspace(cx, run),
-        Scope::All => WindowRegistry::for_each_workspace(cx, run),
-    }
+    WindowRegistry::for_each_workspace(cx, run);
     out
 }
 
@@ -293,7 +271,6 @@ fn in_lane_window<T>(
 ) -> Result<T, ControlError> {
     in_window(
         lane.workspace,
-        Scope::User,
         |ws| ws.control_has_lane(lane.lane_ref()),
         cx,
         f,
@@ -311,13 +288,7 @@ fn in_project_window<T>(
         &mut gpui::Context<Workspace>,
     ) -> Result<T, ControlError>,
 ) -> Result<T, ControlError> {
-    in_window(
-        workspace,
-        Scope::User,
-        |ws| ws.control_has_project(project),
-        cx,
-        f,
-    )
+    in_window(workspace, |ws| ws.control_has_project(project), cx, f)
 }
 
 /// One line naming what the user is being asked to allow. Built here rather
@@ -413,7 +384,7 @@ fn collect_rows(cx: &mut App) -> Vec<Row> {
     let mut window = 0u32;
     // A listing answers "what is the user working on?", so the orchestrator's
     // own chat pane must not appear as a target the user can address.
-    WindowRegistry::for_each_user_workspace(cx, |ws, _win, cx| {
+    WindowRegistry::for_each_workspace(cx, |ws, _win, cx| {
         for (lane_ref, summary) in ws.control_snapshot(cx) {
             rows.push(Row {
                 window,
@@ -493,7 +464,7 @@ fn in_pane_window<T>(
 ) -> Result<T, ControlError> {
     // Every window: a pane the caller named by uuid may be the orchestrator's,
     // and a stop aimed at it is how a runaway is ended.
-    in_window(target.workspace, Scope::All, |_| true, cx, f)
+    in_window(target.workspace, |_| true, cx, f)
 }
 
 #[cfg(test)]

@@ -61,7 +61,7 @@ fn fresh_test_data_dir() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("daruda_test_{pid}_{id}"))
 }
 
-fn build_workspace(
+pub(in crate::workspace) fn build_workspace(
     cx: &mut TestAppContext,
 ) -> (
     gpui::WindowHandle<gpui_component::Root>,
@@ -75,7 +75,7 @@ fn build_workspace(
 /// `Project`. Mirrors `windows::open_workspace_window` — Workspace constructed
 /// inside `gpui_component::Root::new(...)` so window-root APIs (Dialog, Theme,
 /// focus) see the same shape as the running app.
-fn build_workspace_with(
+pub(in crate::workspace) fn build_workspace_with(
     cx: &mut TestAppContext,
     config: &daruda_config::Config,
     project: Option<daruda_store::project::Project>,

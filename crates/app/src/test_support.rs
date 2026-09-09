@@ -116,7 +116,7 @@ pub(crate) fn workspace_for_control(cx: &mut TestAppContext) -> ControlFixture {
     }
 }
 
-/// Stand up a seeded, registered orchestrator without `orchestrator::window::open`.
+/// Stand up a registered host with a hidden session and no live adapter or PTY.
 pub(crate) fn register_test_orchestrator(
     cx: &mut TestAppContext,
 ) -> crate::telegram::bridge::PaneRef {
@@ -125,7 +125,7 @@ pub(crate) fn register_test_orchestrator(
     let holder = std::cell::RefCell::new(None);
     let window = cx.add_window(|window, cx| {
         let ws = cx.new(|cx| {
-            crate::workspace::Workspace::new_with_project_for_test_full(
+            crate::workspace::Workspace::new_with_project_for_test(
                 &config,
                 None,
                 control_test_data_dir(),
@@ -157,6 +157,7 @@ pub(crate) fn register_test_orchestrator(
     .expect("window is live")
     .expect("seeded");
     cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(window.into(), ws.downgrade(), cx);
         crate::window_registry::WindowRegistry::register_orchestrator(
             window.into(),
             ws.downgrade(),

@@ -1149,6 +1149,32 @@ impl Workspace {
         Some(pane_id)
     }
 
+    /// Register a wrapper around an existing session without creating or connecting a view.
+    pub(in crate::workspace) fn wrap_existing_agent_chat_pane(
+        &mut self,
+        pane_id: PaneId,
+        view: Entity<AgentChatView>,
+        cwd: Option<PaneCwd>,
+        account: daruda_store::accounts::AccountSelection,
+    ) {
+        let tab_id = self.alloc_id();
+        let rt = self.active_runtime_mut();
+        if !rt.tabs.is_empty() {
+            rt.tab_history.push(rt.active_tab_index);
+        }
+        rt.panes.push(Pane {
+            id: pane_id,
+            content: PaneContent::AgentChat(AgentChatContent { view, cwd, account }),
+        });
+        rt.tabs.push(TabEntry {
+            id: tab_id,
+            layout: PaneLayout::Pane(pane_id),
+            last_focused_pane: pane_id,
+            user_label: None,
+        });
+        rt.active_tab_index = rt.tabs.len() - 1;
+    }
+
     /// Focus a freshly inserted Agent chat pane and settle the layout around
     /// it. Focusing runs `maybe_connect_agent_chat`, so this is always the last
     /// step of an open.
@@ -1319,25 +1345,30 @@ impl Workspace {
         &self,
         pane_id: PaneId,
     ) -> Option<&Entity<AgentChatView>> {
-        self.main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|p| p.id == pane_id)?
-            .agent_chat_view()
+        self.every_agent_chat()
+            .find(|(id, _)| *id == pane_id)
+            .map(|(_, view)| view)
     }
 
-    /// Mutable counterpart of [`Self::agent_chat_view`]'s cross-lane scan —
-    /// same reason (a parked lane's pane still needs reaching). Used to keep
-    /// `Pane::agent_chat_content_mut().cwd` (the cx-free wrapper cache
-    /// `Pane::cwd()` reads) in step with the view's own `cwd` when a connect
-    /// resolves somewhere new.
-    pub(in crate::workspace) fn pane_mut(&mut self, pane_id: PaneId) -> Option<&mut Pane> {
-        self.main_area
+    /// Keep both the owning slot and any visible wrapper's cwd cache current.
+    pub(in crate::workspace) fn update_agent_chat_cwd(&mut self, pane_id: PaneId, cwd: PaneCwd) {
+        if let Some(chat) = self
+            .orchestrator_chat
+            .as_mut()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            chat.cwd = Some(cwd.clone());
+        }
+        if let Some(content) = self
+            .main_area
             .runtimes
             .values_mut()
             .flat_map(|rt| rt.panes.iter_mut())
             .find(|p| p.id == pane_id)
+            .and_then(Pane::agent_chat_content_mut)
+        {
+            content.cwd = Some(cwd);
+        }
     }
 
     /// The lane that owns `pane_id`, found by the same cross-lane scan as
@@ -1351,6 +1382,9 @@ impl Workspace {
         &self,
         pane_id: PaneId,
     ) -> Option<daruda_store::project::LaneRef> {
+        if self.is_orchestrator_pane(pane_id) {
+            return None;
+        }
         self.main_area
             .runtimes
             .iter()
@@ -1491,6 +1525,13 @@ impl Workspace {
         &self,
         pane_id: PaneId,
     ) -> daruda_store::accounts::AccountSelection {
+        if let Some(chat) = self
+            .orchestrator_chat
+            .as_ref()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            return chat.account;
+        }
         self.main_area
             .runtimes
             .values()

@@ -255,8 +255,9 @@ impl Workspace {
         self.main_area
             .runtimes
             .values()
-            .map(|rt| rt.tabs.len())
-            .sum()
+            .flat_map(|rt| rt.tabs.iter())
+            .filter(|tab| !self.is_orchestrator_tab(tab))
+            .count()
     }
 
     /// Drop every pane in the active lane's runtime and reset it to an empty
@@ -300,15 +301,19 @@ impl Workspace {
         if index >= self.active_runtime().tabs.len() {
             return;
         }
+        if self.is_orchestrator_tab(&self.active_runtime().tabs[index]) {
+            self.hide_orchestrator_tab(window, cx);
+            return;
+        }
+        if self.total_open_tabs() <= 1 {
+            window.remove_window();
+            return;
+        }
         // The active lane's last tab. Close the window only when it is also
         // the window's last tab across every lane and project; otherwise empty
         // this lane in place (→ empty-state) and keep the window, so closing
         // one lane's content never tears down others parked in `runtimes`.
         if self.active_runtime().tabs.len() <= 1 {
-            if self.total_open_tabs() <= 1 {
-                window.remove_window();
-                return;
-            }
             self.empty_active_lane_runtime(window, cx);
             return;
         }
@@ -642,6 +647,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .active_runtime()
+            .tabs
+            .get(tab_index)
+            .is_none_or(|tab| self.is_orchestrator_tab(tab))
+        {
+            return;
+        }
         if self.active_runtime().active_tab_index != tab_index {
             self.activate_tab(tab_index, window, cx);
         }
@@ -713,7 +726,10 @@ impl Workspace {
         // Reject an inaccessible lane or no real focused pane: without one the
         // `insert_split_at` loop below matches no tab, orphaning the new pane
         // in `panes` with no `TabEntry`.
-        if self.active_lane_is_inaccessible() || !self.has_focused_pane() {
+        if self.active_lane_is_inaccessible()
+            || !self.has_focused_pane()
+            || self.is_orchestrator_pane(self.active_runtime().focused_pane_id)
+        {
             return;
         }
         let new_pane = match kind {
@@ -942,6 +958,11 @@ impl Workspace {
             return false;
         };
         let active_index = self.active_runtime().active_tab_index;
+        if self.is_orchestrator_tab(&self.active_runtime().tabs[src_index])
+            || self.is_orchestrator_pane(target_pane_id)
+        {
+            return false;
+        }
         if src_index == active_index {
             return false; // dragged tab is the one currently showing this content
         }
@@ -1239,7 +1260,10 @@ fn rebase_tab_history_after_insertion(history: &mut [usize], inserted_index: usi
 /// Shared by `close_tab_at` and `merge_tab_into_pane` — both remove one tab
 /// by index. Drops any history entries pointing at the removed index and
 /// shifts every higher index down by one so the remainder stay valid.
-fn rebase_tab_history_after_removal(history: &mut Vec<usize>, removed_index: usize) {
+pub(in crate::workspace) fn rebase_tab_history_after_removal(
+    history: &mut Vec<usize>,
+    removed_index: usize,
+) {
     history.retain(|&i| i != removed_index);
     for idx in history.iter_mut() {
         if *idx > removed_index {

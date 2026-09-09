@@ -1,6 +1,6 @@
 //! The orchestrator's lifetime.
 //!
-//! Lazy on purpose: starting one at launch costs a window, an agent process
+//! Lazy on purpose: starting one at launch costs an agent process
 //! and a slice of the account's rate limit on every day the user never says
 //! `/daruda`. The first request pays for it instead.
 //!
@@ -9,15 +9,15 @@
 //! every run gets a fresh session.
 //!
 //! There is no separate state machine here. Whether the orchestrator is up is
-//! exactly "does `WindowRegistry`'s orchestrator slot hold a window with a
-//! chat pane", and a second copy of that answer could only disagree with it —
+//! exactly whether the registered host owns an orchestrator chat slot,
+//! and a second copy of that answer could only disagree with it —
 //! so [`pane`] asks the registry and nothing caches the result.
 
 pub(crate) mod briefing;
 pub(crate) mod config;
 pub(crate) mod window;
 
-use gpui::{App, Global};
+use gpui::{App, AppContext as _, Global};
 
 use crate::control::mcp::socket;
 use crate::control::result::ControlError;
@@ -26,8 +26,7 @@ use crate::window_registry::WindowRegistry;
 
 /// Why the orchestrator cannot take a prompt. Returned rather than reported:
 /// the caller is answering a phone, and each of these needs its own wording
-/// there. The internal detail behind `OpenFailed` is logged by
-/// [`window::open`]'s caller before this is handed back.
+/// there. The internal detail behind `OpenFailed` is also logged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnsureError {
     /// `[orchestrator] enabled = false`.
@@ -40,7 +39,7 @@ pub(crate) enum EnsureError {
 /// The control socket this run serves, and the token its shim must present.
 ///
 /// A GPUI global rather than a field on the orchestrator's `Workspace`: the
-/// socket outlives any one window (a closed orchestrator window leaves the
+/// socket outlives any one window (closing its host workspace leaves the
 /// socket bound, so the next `/daruda` reuses it instead of rebinding), and
 /// it is one per process by construction.
 struct ControlSurface {
@@ -250,15 +249,100 @@ pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
     if let Some(pane) = pane(cx) {
         return Ok(pane);
     }
-    match window::open(&resolved, cx) {
+    let cwd = window::cwd().map_err(|error| {
+        window::log_open_failure(&error);
+        EnsureError::OpenFailed(error.to_string())
+    })?;
+    window::install_instructions(&cwd);
+    let (handle, weak) = host_workspace(cx)?;
+    let workspace = weak.upgrade().ok_or_else(|| open_failed("host released"))?;
+    WindowRegistry::register_orchestrator(handle, weak, cx);
+    let briefing = session_briefing(cx);
+    let result = cx.update_window(handle, |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.seed_orchestrator_chat_pane(
+                resolved.agent_id,
+                cwd,
+                resolved.account,
+                briefing,
+                window,
+                cx,
+            );
+            PaneRef {
+                workspace: ws.uuid(),
+                pane,
+            }
+        })
+    });
+    match result {
         Ok(pane) => Ok(pane),
         Err(error) => {
-            window::log_open_failure(&error);
-            // Deliberately leaves nothing behind: a transient failure must not
-            // wedge the feature, so the next `/daruda` retries from scratch.
-            Err(EnsureError::OpenFailed(error.to_string()))
+            WindowRegistry::clear_orchestrator(cx);
+            Err(open_failed(error))
         }
     }
+}
+
+/// Reuse the active workspace, or another live workspace when Settings has focus.
+fn host_workspace(
+    cx: &mut App,
+) -> Result<
+    (
+        gpui::AnyWindowHandle,
+        gpui::WeakEntity<crate::workspace::Workspace>,
+    ),
+    EnsureError,
+> {
+    host_workspace_with(cx, |cx| {
+        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
+        let options = orchestrator_host_window_options(&config);
+        crate::windows::try_open_workspace_window(config, None, None, options, cx)
+            .map_err(open_failed)
+    })
+}
+
+/// A phone command may create the first workspace, but must not interrupt the
+/// window the person is currently using (for example Settings or Welcome).
+fn orchestrator_host_window_options(config: &daruda_config::Config) -> gpui::WindowOptions {
+    let mut options = crate::windows::build_window_options(config);
+    options.focus = false;
+    options
+}
+
+fn host_workspace_with(
+    cx: &mut App,
+    open: impl FnOnce(&mut App) -> Result<gpui::AnyWindowHandle, EnsureError>,
+) -> Result<
+    (
+        gpui::AnyWindowHandle,
+        gpui::WeakEntity<crate::workspace::Workspace>,
+    ),
+    EnsureError,
+> {
+    if let Some(host) =
+        WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
+    {
+        return Ok(host);
+    }
+    let handle = open(cx)?;
+    let weak = WindowRegistry::workspace_for_window(handle, cx)
+        .ok_or_else(|| open_failed("workspace was not registered"))?;
+    Ok((handle, weak))
+}
+
+fn open_failed(error: impl std::fmt::Display) -> EnsureError {
+    let reason = error.to_string();
+    daruda_store::observability::log_writer::LogWriter::log(
+        daruda_store::observability::error_report::ErrorReport::new(
+            "Orchestrator host unavailable",
+        )
+        .severity(daruda_store::observability::error_report::ErrorSeverity::Error)
+        .with_context("reason", reason.clone())
+        .at(file!(), line!())
+        .dedup("orchestrator.host")
+        .build(),
+    );
+    EnsureError::OpenFailed(reason)
 }
 
 /// Which refusal an unresolvable configuration is. Separate from [`ensure`] so

@@ -126,9 +126,20 @@ pub(crate) fn open_workspace_window(
     config: std::sync::Arc<daruda_config::Config>,
     saved: Option<(WorkspaceState, Vec<ProjectState>)>,
     project: Option<daruda_store::project::Project>,
-    mut window_opts: WindowOptions,
+    window_opts: WindowOptions,
     cx: &mut App,
 ) {
+    try_open_workspace_window(config, saved, project, window_opts, cx).unwrap();
+}
+
+/// Fallible counterpart for callers that must report an unavailable host.
+pub(crate) fn try_open_workspace_window(
+    config: std::sync::Arc<daruda_config::Config>,
+    saved: Option<(WorkspaceState, Vec<ProjectState>)>,
+    project: Option<daruda_store::project::Project>,
+    mut window_opts: WindowOptions,
+    cx: &mut App,
+) -> anyhow::Result<gpui::AnyWindowHandle> {
     // Apply saved window geometry before opening so the new window
     // spawns at its previous position/size instead of the default.
     if let Some((ws, _)) = saved.as_ref()
@@ -142,21 +153,30 @@ pub(crate) fn open_workspace_window(
 
     cx.open_window(window_opts, |window, cx| {
         let workspace: gpui::Entity<Workspace> = cx.new(|cx| {
+            #[cfg(not(test))]
             let data_dir = daruda_store::persistence::default_data_dir();
+            #[cfg(test)]
+            let data_dir =
+                std::env::temp_dir().join(format!("daruda-host-{}", uuid::Uuid::new_v4()));
             // Mirror the legacy split: when restoring, build the
             // workspace without an initial project (restore will
             // populate `self.projects`); otherwise seed with the
             // caller-supplied project (or None for an empty window).
             let seed = if saved.is_some() { None } else { project };
+            #[cfg(not(test))]
             let mut ws = Workspace::new_with_project(&config, seed, data_dir, window, cx);
+            #[cfg(test)]
+            let mut ws = Workspace::new_with_project_for_test(&config, seed, data_dir, window, cx);
             if let Some((ws_state, project_states)) = saved {
                 ws.restore_from_disk(&ws_state, &project_states, window, cx);
             }
             ws
         });
+        #[cfg(test)]
+        WindowRegistry::register(window.window_handle(), workspace.downgrade(), cx);
         cx.new(|cx| gpui_component::Root::new(workspace, window, cx))
     })
-    .unwrap();
+    .map(Into::into)
 }
 
 /// Resolve a recent-list `WorkspaceUuid` to its `(WorkspaceState,

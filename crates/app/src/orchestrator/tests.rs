@@ -1,6 +1,35 @@
 use super::*;
 use gpui::{BorrowAppContext as _, TestAppContext};
 
+#[gpui::test]
+fn orchestrator_opens_a_host_only_when_no_workspace_exists(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    with_config(cx, enabled_naming(None));
+    cx.update(|cx| {
+        assert!(WindowRegistry::all_handles(cx).is_empty());
+        let (handle, weak) = host_workspace(cx).expect("host opens");
+        assert!(weak.upgrade().is_some());
+        assert_eq!(WindowRegistry::all_handles(cx), vec![handle]);
+        let again = host_workspace_with(cx, |_| panic!("existing host must be reused")).unwrap();
+        assert_eq!(again.0, handle);
+    });
+}
+
+#[gpui::test]
+fn orchestrator_host_open_failure_is_returned_without_a_registry_slot(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        let result = host_workspace_with(cx, |_| Err(EnsureError::OpenFailed("no display".into())));
+        assert!(matches!(result, Err(EnsureError::OpenFailed(reason)) if reason == "no display"));
+        assert!(WindowRegistry::orchestrator(cx).is_none());
+        assert!(WindowRegistry::all_handles(cx).is_empty());
+    });
+}
+
+#[test]
+fn a_phone_created_host_does_not_take_keyboard_focus() {
+    assert!(!orchestrator_host_window_options(&daruda_config::Config::default()).focus);
+}
+
 /// Install a `SettingsStore` holding `config`. `ensure` reads it before
 /// any `Workspace` exists to install one.
 fn with_config(cx: &mut TestAppContext, config: daruda_config::Config) {

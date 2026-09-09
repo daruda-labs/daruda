@@ -370,6 +370,7 @@ pub struct Workspace {
     /// (tabs / panes / focus, keyed by `LaneRef`) plus the
     /// drag/context-menu overlays.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
+    orchestrator_chat: Option<orchestrator_ops::OrchestratorChat>,
     next_id: u64,
     focus_handle: FocusHandle,
     /// Dock resize drag — active while the user is pulling on the
@@ -1118,6 +1119,7 @@ impl Workspace {
         let mut ws = Self {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
+            orchestrator_chat: None,
             next_id: 0,
             focus_handle,
             dock_drag: None,
@@ -1827,11 +1829,8 @@ impl Workspace {
             gpui::Entity<main_area::agent_chat_pane::view::AgentChatView>,
         );
         let candidates: Vec<PulseCandidate> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| p.agent_chat_view().map(|v| (p.id, v.clone())))
+            .every_agent_chat()
+            .map(|(id, view)| (id, view.clone()))
             .filter(|(_, v)| {
                 let vr = v.read(cx);
                 vr.activity.was_busy || vr.maybe_active()

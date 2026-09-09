@@ -4254,6 +4254,19 @@ pub fn orchestrator_tab_unavailable() -> String {
 pub fn orchestrator_label() -> String {
     rust_i18n::t!("orchestrator.label").into_owned()
 }
+
+pub fn orchestrator_idle() -> String {
+    rust_i18n::t!("orchestrator.idle").into_owned()
+}
+pub fn orchestrator_working() -> String {
+    rust_i18n::t!("orchestrator.working").into_owned()
+}
+pub fn orchestrator_awaiting_permission() -> String {
+    rust_i18n::t!("orchestrator.awaiting_permission").into_owned()
+}
+pub fn orchestrator_failed() -> String {
+    rust_i18n::t!("orchestrator.failed").into_owned()
+}
 pub fn settings_orchestrator_enabled_label() -> String {
     rust_i18n::t!("settings.orchestrator_enabled_label").into_owned()
 }

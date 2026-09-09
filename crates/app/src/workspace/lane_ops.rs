@@ -559,6 +559,10 @@ impl Workspace {
         if self.lane_for(target).is_none() {
             return;
         }
+        let reinsert_orchestrator = self.orchestrator_tab_is_visible();
+        if reinsert_orchestrator {
+            self.detach_orchestrator_tab_for_lane_change(window, cx);
+        }
         // Leaving the active lane abandons any pending amend (the prefill
         // belongs to the lane we're leaving). No-op when not amending.
         self.exit_amend_mode(window, cx);
@@ -621,6 +625,10 @@ impl Workspace {
         //    the user opens content from there. Only the first project at
         //    app launch seeds a shell (see `new_with_project_impl`).
 
+        if reinsert_orchestrator {
+            self.reinsert_orchestrator_tab(window, cx);
+        }
+
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
         //    Route through `set_focused_pane` so the bottom-dock draft
@@ -634,7 +642,9 @@ impl Workspace {
         {
             let focused = self.active_runtime().focused_pane_id;
             self.set_focused_pane(focused, window, cx);
-            self.focus_pane(focused, window, cx);
+            if !self.is_orchestrator_pane(focused) {
+                self.focus_pane(focused, window, cx);
+            }
         }
         // The incoming lane's runtime carries its own panes/split state;
         // recompute inactive-pane dim against the now-live focused pane.

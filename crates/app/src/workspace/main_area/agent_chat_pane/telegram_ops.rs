@@ -290,16 +290,10 @@ impl FirstResponseWatch {
 }
 
 impl Workspace {
-    /// The owning project's display name for `pane_id` (found via whichever
-    /// `main_area.runtimes` entry's pane list contains it). `None` for a pane
-    /// whose lane/project has since gone away.
+    /// The owning project's display name, excluding workspace-owned chats
+    /// and panes whose lane or project has gone away.
     fn project_name_for_pane(&self, pane_id: PaneId) -> Option<String> {
-        let project_id = self
-            .main_area
-            .runtimes
-            .iter()
-            .find(|(_, rt)| rt.panes.iter().any(|p| p.id == pane_id))
-            .map(|(lane_ref, _)| lane_ref.project)?;
+        let project_id = self.lane_ref_for_pane(pane_id)?.project;
         self.project_for(project_id).map(|p| p.name.clone())
     }
 
@@ -616,14 +610,7 @@ impl Workspace {
     /// fallback at most once per phone-dispatched turn.
     pub(crate) fn flush_telegram_first_response_fallbacks(&mut self, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
-        let panes: Vec<PaneId> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .filter(|pane| pane.agent_chat_view().is_some())
-            .map(|pane| pane.id)
-            .collect();
+        let panes: Vec<PaneId> = self.every_agent_chat().map(|(id, _)| id).collect();
 
         for pane_id in panes {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {

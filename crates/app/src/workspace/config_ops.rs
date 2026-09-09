@@ -73,13 +73,7 @@ impl Workspace {
         // tracks a config edit live instead of waiting for the next restore.
         // Resolved per pane, not once: the defaults are per-agent, and a window
         // holds panes on different agents.
-        for view in self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|pane| pane.agent_chat_content().map(|ac| ac.view.clone()))
-        {
+        for (_, view) in self.every_agent_chat() {
             view.update(cx, |view, cx| {
                 let name = agent_names
                     .iter()
@@ -230,11 +224,8 @@ impl Workspace {
         {
             let syntax_theme = self.syntax_theme.clone();
             let views: Vec<_> = self
-                .main_area
-                .runtimes
-                .values()
-                .flat_map(|rt| rt.panes.iter())
-                .filter_map(|pane| pane.agent_chat_content().map(|ac| ac.view.clone()))
+                .every_agent_chat()
+                .map(|(_, view)| view.clone())
                 .collect();
             for view in views {
                 view.update(cx, |view, cx| {

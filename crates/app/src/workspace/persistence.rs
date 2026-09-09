@@ -84,6 +84,7 @@ impl Workspace {
         let mut project_ids = Vec::with_capacity(self.projects.len());
         let mut project_overrides = BTreeMap::new();
         let mut project_tabs: BTreeMap<ProjectUuid, Vec<SerializedTab>> = BTreeMap::new();
+        let mut focused_pane_id = self.active_runtime().focused_pane_id;
 
         for project in &self.projects {
             // Per-lane serialized payload — captures the active
@@ -108,13 +109,25 @@ impl Workspace {
                         (&rt.tabs, &rt.panes, rt.active_tab_index);
                     s.tabs = tabs_src
                         .iter()
+                        .filter(|tab| !self.is_orchestrator_tab(tab))
                         .map(|tab| daruda_store::project::SerializedTab {
                             layout: serialize_layout(&tab.layout, panes_src, cx),
                             last_focused_pane: tab.last_focused_pane,
                             user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                         })
                         .collect();
-                    s.active_tab_index = active_idx;
+                    s.active_tab_index = tabs_src
+                        .iter()
+                        .take(active_idx)
+                        .filter(|tab| !self.is_orchestrator_tab(tab))
+                        .count()
+                        .min(s.tabs.len().saturating_sub(1));
+                    if wt_ref == self.active && self.is_orchestrator_pane(focused_pane_id) {
+                        focused_pane_id = s
+                            .tabs
+                            .get(s.active_tab_index)
+                            .map_or(0, |tab| tab.last_focused_pane);
+                    }
                     s
                 })
                 .collect();
@@ -200,7 +213,7 @@ impl Workspace {
             font_size: self.terminal_config.font_size,
             vertical_spacing: self.terminal_config.vertical_spacing,
             horizontal_spacing: self.terminal_config.horizontal_spacing,
-            focused_pane_id: self.active_runtime().focused_pane_id,
+            focused_pane_id,
             active_dock_view: self.left_dock_view,
             active_right_panel_view: self.right_dock_view,
             window_open_policy: self.window_open_policy,

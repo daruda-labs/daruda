@@ -273,6 +273,7 @@ impl Workspace {
             .iter()
             .filter(|(key, _)| key.project == project_id)
             .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
+            .filter(|id| !self.is_orchestrator_pane(*id))
             .collect();
         self.release_pane_tracking(&owned_pane_ids, cx);
         // Same reason, for the GPU images a Markdown preview holds: the
