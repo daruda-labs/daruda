@@ -138,16 +138,16 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub agent_status_per_lane:
         std::collections::HashMap<daruda_store::project::LaneRef, daruda_agent::SessionStatus>,
     /// Per-session statuses for lanes that have ≥ 2 active agent
-    /// sessions. Phase D sub-row badges read this. Lanes with 0 or
-    /// 1 sessions are absent (the leading indicator covers them).
+    /// sessions. Sub-row badges read this. Lanes with 0 or 1 sessions are
+    /// absent (the leading indicator covers them).
     /// Keyed by `LaneRef` for the same cross-project reason.
     pub agent_per_session_per_lane: std::collections::HashMap<
         daruda_store::project::LaneRef,
         Vec<(String, daruda_agent::SessionStatus)>,
     >,
-    /// `session_id` of the agent process living inside the focused
-    /// pane (Phase E). Used by sub-row badge render to highlight the
-    /// session attached to the active terminal. `None` when the
+    /// `session_id` of the agent process living inside the focused pane.
+    /// Used by sub-row badge render to highlight the session attached to
+    /// the active terminal. `None` when the
     /// focused pane has no agent descendant or the tracker hasn't
     /// resolved it yet.
     pub agent_active_session_id: Option<String>,

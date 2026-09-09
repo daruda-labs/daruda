@@ -49,8 +49,10 @@ pub(crate) fn new_token() -> String {
 /// The token the socket accepts right now, and which orchestrator session it
 /// belongs to.
 ///
-/// Shared with the accept loop rather than copied into it, because the token is
-/// bound to the *session*, not the process: creating an orchestrator session
+/// Shared with the accept loop rather than copied into it — and behind a lock
+/// because that loop runs on the background executor while the rotation
+/// happens on the foreground. The token is bound to the *session*, not the
+/// process: creating an orchestrator session
 /// rotates it, so a shim from a discarded session can neither authenticate
 /// again nor keep issuing calls on a connection it authorized earlier.
 ///

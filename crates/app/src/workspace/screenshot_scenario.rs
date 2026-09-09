@@ -241,7 +241,7 @@ pub(crate) enum ScreenshotScenario {
     FlowDeleteConfirm,
     /// A flow parked on a permission question, with the Flows panel showing.
     /// The buttons a person has to read and hit — the one part of `ask` no
-    /// state test can look at, and the surface Task 1 proved needs eyes.
+    /// state test can look at, and a surface that needs visual verification.
     FlowAsking,
 }
 

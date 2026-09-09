@@ -131,9 +131,9 @@ pub(in crate::workspace) struct ClaudeContext {
     /// two concurrent `/api/oauth/usage` round-trips.
     pub(in crate::workspace) usage_refresh_in_flight: bool,
 
-    /// Claude Code session-status mirror — driven by the hook channel
-    /// (and Phase B jsonl fallback). Read by the left dock to render the
-    /// per-lane Working/NeedsAttention/Idle/Connecting indicator.
+    /// Claude Code session-status mirror — driven by the hook channel and
+    /// JSONL fallback. Read by the left dock to render the per-lane
+    /// Working/NeedsAttention/Idle/Connecting indicator.
     pub(in crate::workspace) claude_status: daruda_agent::ClaudeStatusStore,
 
     /// Whether the Claude status feature is enabled in `[claude_status]`

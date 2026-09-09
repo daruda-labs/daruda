@@ -334,8 +334,8 @@ impl Workspace {
     /// Count of this workspace's currently-*loaded* panes (every lane
     /// runtime visited this session, not just the active one) whose
     /// account override is `account_id`. `pub(crate)`: the Settings
-    /// window (Task 9's account-delete confirm) sums this across every
-    /// open `Workspace` window via `WindowRegistry::for_each_workspace`
+    /// window's account-delete confirm sums this across every open
+    /// `Workspace` window via `WindowRegistry::for_each_workspace`
     /// to build its confirm-body count. A lane never opened this session
     /// has no entry in `main_area.runtimes` yet, so this can undercount
     /// — an accepted simplification (see `settings_window/sections/accounts.rs`).

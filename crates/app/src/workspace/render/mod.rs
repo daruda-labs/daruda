@@ -272,9 +272,8 @@ impl Render for Workspace {
         let t = theme::current(cx);
         let dark = t.is_dark();
         let title_bar_bg = t.title_bar_bg;
-        // These tab-strip slots still read raw consts (the deferred Phase-3
-        // migration tail); pick light-aware values so the tab bar doesn't
-        // render dark with white text on the light theme.
+        // These tab-strip slots still read raw consts; pick light-aware values
+        // so the tab bar doesn't render dark with white text on the light theme.
         let tab_bar_bg = if dark {
             theme::SURFACE_1
         } else {

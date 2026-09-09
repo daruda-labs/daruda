@@ -763,7 +763,10 @@ mod tests {
             );
         });
         cx.run_until_parked();
-        assert_eq!(rx.recv().await, Ok(Err(ControlError::ApprovalRefused)));
+        assert_eq!(
+            rx.recv().await,
+            Ok(Some(Err(ControlError::ApprovalRefused)))
+        );
     }
 
     #[gpui::test]

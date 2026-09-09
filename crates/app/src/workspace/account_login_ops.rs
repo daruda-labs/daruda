@@ -1,4 +1,4 @@
-//! Headless add-account / reauthenticate login (Plan B):
+//! Headless add-account / reauthenticate login:
 //! [`Workspace::add_managed_account`] orchestrates the headless add-account
 //! login itself — spawning the login process, tracking it in
 //! `Workspace::pending_login`, and folding the result back into
@@ -200,8 +200,8 @@ impl Workspace {
         !can_start_login(&self.pending_login) || accounts_global::login_busy(cx)
     }
 
-    /// Start a headless add-account login (Plan B, A2 approach) for the
-    /// `recipe` auth domain: spawn that domain's login command
+    /// Start a headless add-account login for the `recipe` auth domain:
+    /// spawn that domain's login command
     /// ([`Self::login_command_for_recipe`]) with a fresh per-account config
     /// dir and the isolating env (`daruda_config::account_env`), stash a
     /// cancel handle in `pending_login` (drives the status-bar dropdown's

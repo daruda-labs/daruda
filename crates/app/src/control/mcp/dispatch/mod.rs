@@ -10,8 +10,6 @@
 //! or a pane it may not address is refused before the user's phone buzzes.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{App, AppContext as _};
 
@@ -42,9 +40,6 @@ pub(crate) struct ConnectionSession {
 /// A `tools/call` waiting on the user.
 struct Outstanding {
     approval: ApprovalId,
-    /// Set when the caller withdraws the call. The task that would send the
-    /// reply reads it instead of answering a request the client has freed.
-    withdrawn: Arc<AtomicBool>,
 }
 
 impl ConnectionSession {
@@ -72,18 +67,10 @@ impl ConnectionSession {
 
     /// Remember a call that has not been answered yet, and forget the ones
     /// whose card has since been decided.
-    fn track(&mut self, request: String, approval: ApprovalId, cx: &App) -> Arc<AtomicBool> {
+    fn track(&mut self, request: String, approval: ApprovalId, cx: &App) {
         self.outstanding
             .retain(|_, o| crate::control::approval::is_waiting(o.approval, cx));
-        let withdrawn = Arc::new(AtomicBool::new(false));
-        self.outstanding.insert(
-            request,
-            Outstanding {
-                approval,
-                withdrawn: withdrawn.clone(),
-            },
-        );
-        withdrawn
+        self.outstanding.insert(request, Outstanding { approval });
     }
 
     /// Take back the call `request` names: the card comes down, the work never
@@ -96,9 +83,8 @@ impl ConnectionSession {
         let Some(entry) = self.outstanding.remove(request) else {
             return;
         };
-        // Before withdrawing: the flag is what suppresses the reply, and
-        // settling the card is what wakes the task that would send it.
-        entry.withdrawn.store(true, Ordering::SeqCst);
+        // Settling the card is what both wakes the waiting task and tells it
+        // there is nothing to answer with.
         crate::control::approval::withdraw(entry.approval, cx);
     }
 }
@@ -114,10 +100,10 @@ enum Answer {
     /// A notification: no reply, ever.
     Silence,
     /// The tool is still waiting on the user. Whoever awaits `outcome` sends
-    /// the reply — unless the call is withdrawn first.
+    /// the reply, or sends nothing when the call was withdrawn.
     Later {
         id: serde_json::Value,
-        outcome: smol::channel::Receiver<ControlOutcome>,
+        outcome: smol::channel::Receiver<Option<ControlOutcome>>,
         approval: ApprovalId,
     },
 }
@@ -162,21 +148,21 @@ pub(crate) fn answer(
             outcome,
             approval,
         } => {
-            let withdrawn = session.track(protocol::request_key(&id), approval, cx);
+            session.track(protocol::request_key(&id), approval, cx);
             cx.background_spawn(async move {
                 // A closed channel means the task that would have answered
                 // is gone (the app is shutting down) — the target, not the
                 // orchestrator, is what became unreachable.
-                let result = outcome
+                // `None` is a call the caller took back: per the cancellation
+                // spec it gets no response, because it has freed the id and a
+                // reply would answer a question nobody is asking.
+                let Some(result) = outcome
                     .recv()
                     .await
-                    .unwrap_or(Err(ControlError::TargetGone));
-                // The caller took the call back, so per the cancellation spec
-                // it gets no response — it has freed the id and a reply would
-                // be answering a question nobody asked.
-                if withdrawn.load(Ordering::SeqCst) {
+                    .unwrap_or(Some(Err(ControlError::TargetGone)))
+                else {
                     return;
-                }
+                };
                 if reply
                     .send(protocol::result_frame(id, convert::to_tool_result(&result)))
                     .await
