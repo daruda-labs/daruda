@@ -1616,6 +1616,7 @@ control:
   lane_listing_row: "%{path} — %{chats} chat(s)"
   lane_created: "Worktree created."
   chat_created: "Chat opened."
+  transcript_empty: "That chat has not said anything yet."
   error_approval_refused: "Refused."
   error_approval_timed_out: "That went unanswered, so nothing was created."
   error_agent_limit_reached: "The agent has created as many worktrees as it may this run."

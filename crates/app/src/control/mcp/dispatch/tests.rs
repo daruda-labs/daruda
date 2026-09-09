@@ -361,7 +361,13 @@ async fn stopping_the_orchestrator_is_allowed(cx: &mut TestAppContext) {
 async fn a_non_call_frame_falls_through_to_the_protocol_layer(cx: &mut TestAppContext) {
     let reply = answered(r#"{"jsonrpc":"2.0","id":8,"method":"tools/list"}"#, cx);
     assert_eq!(reply["id"], 8);
-    assert_eq!(reply["result"]["tools"].as_array().expect("tools").len(), 9);
+    // Against the table, not a literal: this test is about the frame reaching
+    // the protocol layer at all. How many tools there are is
+    // `tools::tests`'s to assert, and one owner means one place to update.
+    assert_eq!(
+        reply["result"]["tools"].as_array().expect("tools").len(),
+        ToolTable::all().describe().len(),
+    );
 }
 
 /// A premature call is refused, and by the same predicate `handle` uses.

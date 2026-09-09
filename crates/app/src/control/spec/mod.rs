@@ -81,6 +81,10 @@ pub(crate) enum ResolvedCommand {
     /// Every worktree, including ones with no agent chat in them — the
     /// listing `/list` answers with is chat-scoped and cannot name one.
     LaneList,
+    /// What one chat's agent last said. A read; it starts no turn.
+    Read {
+        target: PaneRef,
+    },
 }
 
 /// A command that cannot be answered in one turn of the event loop.

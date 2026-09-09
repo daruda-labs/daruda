@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn nine_tools_are_exposed() {
-    assert_eq!(ToolTable::all().describe().len(), 9);
+fn ten_tools_are_exposed() {
+    assert_eq!(ToolTable::all().describe().len(), 10);
 }
 
 #[test]
@@ -58,6 +58,7 @@ fn every_tool_id_has_a_row() {
         ToolId::ChatList,
         ToolId::ChatSend,
         ToolId::ChatStop,
+        ToolId::ChatRead,
         ToolId::Status,
         ToolId::LaneList,
         ToolId::LaneCreate,

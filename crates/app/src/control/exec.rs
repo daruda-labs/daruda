@@ -70,6 +70,10 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             target,
             disposition,
         }),
+        ResolvedCommand::Read { target } => in_pane_window(target, cx, |ws, _window, cx| {
+            ws.control_read(target.pane, cx)
+        })
+        .map(|text| ControlResult::Transcript { target, text }),
         // A flow is lane-scoped, and which flows a lane can run depends on its
         // repository — so two windows genuinely see different sets and neither
         // arm may stop at the first window.

@@ -10,6 +10,7 @@
 //! currently selected, are conversation context owned by the adapter — see
 //! `crate::telegram::command`.
 
+pub(crate) mod agent_text;
 pub(crate) mod approval;
 pub(crate) mod exec;
 pub(crate) mod guards;

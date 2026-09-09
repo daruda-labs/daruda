@@ -5325,6 +5325,9 @@ pub fn control_lane_created() -> String {
 pub fn control_chat_created() -> String {
     rust_i18n::t!("control.chat_created").into_owned()
 }
+pub fn control_transcript_empty() -> String {
+    rust_i18n::t!("control.transcript_empty").into_owned()
+}
 pub fn control_error_approval_refused() -> String {
     rust_i18n::t!("control.error_approval_refused").into_owned()
 }

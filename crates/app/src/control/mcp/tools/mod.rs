@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Nine tools, all for the orchestrator. A lane's own agent gets none — it
+//! Ten tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -25,6 +25,7 @@ pub(crate) enum ToolId {
     ChatList,
     ChatSend,
     ChatStop,
+    ChatRead,
     Status,
     LaneList,
     LaneCreate,
@@ -150,6 +151,10 @@ fn chat_stop_properties() -> serde_json::Value {
     serde_json::json!({ "target": pane_ref_schema() })
 }
 
+fn chat_read_properties() -> serde_json::Value {
+    serde_json::json!({ "target": pane_ref_schema() })
+}
+
 fn lane_create_properties() -> serde_json::Value {
     serde_json::json!({
         "workspace": {
@@ -235,6 +240,18 @@ static TABLE: &[Tool] = &[
                       already idle.",
         gate: Gate::Open,
         properties: chat_stop_properties,
+        required: &["target"],
+    },
+    Tool {
+        id: ToolId::ChatRead,
+        name: "daruda_chat_read",
+        description: "Read what one agent chat last said — the most recent message it \
+                      finished writing, long ones cut in the middle. A message still being \
+                      written does not count, so a chat that is working reports what it said \
+                      before — check `activity` from daruda_chat_list to tell the two apart. \
+                      Nothing is returned when it has not spoken yet.",
+        gate: Gate::Open,
+        properties: chat_read_properties,
         required: &["target"],
     },
     Tool {

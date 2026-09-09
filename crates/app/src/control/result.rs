@@ -10,29 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::telegram::bridge::PaneRef;
 
-/// A session title is agent-authored and unbounded. Capped here, at the one
-/// place a [`ChatSummary`] is built, so the bound is a property of the type
-/// rather than of one adapter's renderer.
-const TITLE_MAX_CHARS: usize = 80;
-
-/// Flatten an agent-authored title to one bounded line. Control characters
-/// become spaces before the whitespace run is collapsed, so a multi-line title
-/// cannot break the row it is rendered on, and no consumer has to defend
-/// against one.
-pub(crate) fn sanitize_title(raw: &str) -> Option<String> {
-    let clean: String = raw
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(TITLE_MAX_CHARS)
-        .collect();
-    (!clean.is_empty()).then_some(clean)
-}
-
 /// A pane's live agent activity.
 ///
 /// Deliberately a separate type from `AgentChatView`'s `ActivityState`, which
@@ -67,8 +44,9 @@ pub(crate) struct ChatSummary {
     /// Lane-scoped because that is where daruda tracks the signal.
     pub unread: bool,
     /// The agent-authored session title, flattened to one bounded line by
-    /// [`sanitize_title`] at construction — it is agent-authored and otherwise
-    /// unbounded, so every consumer, not just a phone screen, gets it capped.
+    /// [`crate::control::agent_text::sanitize_title`] at construction — it is
+    /// agent-authored and otherwise unbounded, so every consumer, not just a
+    /// phone screen, gets it capped.
     /// `None` = a session that has not titled itself yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -297,6 +275,18 @@ pub(crate) enum ControlResult {
     },
     ChatCreated {
         target: PaneRef,
+    },
+    /// What one chat's agent last said, bounded by
+    /// [`crate::control::agent_text::bound_agent_text`].
+    ///
+    /// `None` is a pane whose transcript holds no assistant text — a turn that
+    /// was all tool calls, or a session that has not answered yet. A distinct
+    /// answer from an empty string, which would read as "it said nothing" when
+    /// the truth is "it has not said anything *yet*".
+    Transcript {
+        target: PaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
 }
 
@@ -577,6 +567,11 @@ mod tests {
                 chat: target,
             },
             ControlResult::ChatCreated { target },
+            ControlResult::Transcript { target, text: None },
+            ControlResult::Transcript {
+                target,
+                text: Some("the answer".into()),
+            },
         ];
         for case in cases {
             let json =
@@ -634,24 +629,6 @@ mod tests {
             assert_eq!(back, case);
             assert!(!case.to_string().is_empty(), "every error has a diagnostic");
         }
-    }
-
-    #[test]
-    fn a_title_is_capped_and_stripped_of_control_characters() {
-        let raw = format!("line one\nline two\t{}", "x".repeat(200));
-        let clean = sanitize_title(&raw).expect("non-empty");
-        assert_eq!(clean.chars().count(), TITLE_MAX_CHARS);
-        assert!(!clean.contains('\n') && !clean.contains('\t'));
-    }
-
-    #[test]
-    fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
-        assert_eq!(
-            sanitize_title("restore invariants").as_deref(),
-            Some("restore invariants")
-        );
-        assert_eq!(sanitize_title("   \n\t  "), None);
-        assert_eq!(sanitize_title(""), None);
     }
 
     #[test]

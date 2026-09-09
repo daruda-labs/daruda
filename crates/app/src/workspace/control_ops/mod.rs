@@ -7,9 +7,10 @@
 
 use gpui::{App, Context};
 
+use crate::control::agent_text::{bound_agent_text, sanitize_title};
 use crate::control::result::{
     Activity, ChatSummary, ControlError, Health, LaneEntry, LaneHandle, SendDisposition,
-    StopDisposition, sanitize_title,
+    StopDisposition,
 };
 use crate::telegram::bridge::PaneRef;
 use crate::workspace::Workspace;
@@ -342,6 +343,31 @@ impl Workspace {
         }
     }
 
+    /// What this pane's agent last said, bounded for a tool result.
+    ///
+    /// The *last* completed assistant text, not the whole transcript: the
+    /// caller asked what came of a prompt, and an agent's closing message is
+    /// that answer. Reading further back would hand over other turns' text
+    /// nobody asked for.
+    ///
+    /// A still-streaming message does not count as said. This surface can be
+    /// called mid-turn, so it needs the filter that
+    /// `telegram_completion_parts` does not: that one runs only at the
+    /// completion tee, where nothing is in flight. Reporting half a sentence
+    /// as the agent's answer is the worse of the two failures — a caller
+    /// wanting the answer to its *own* prompt has `daruda_chat_ask`, and one
+    /// checking progress has `activity`.
+    pub(crate) fn control_read(
+        &self,
+        pane: PaneId,
+        cx: &App,
+    ) -> Result<Option<String>, ControlError> {
+        let Some(view) = self.agent_chat_view(pane) else {
+            return Err(ControlError::TargetGone);
+        };
+        Ok(last_assistant_text(view.read(cx)).and_then(|t| bound_agent_text(&t)))
+    }
+
     /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
     /// owns the settle edge and the completion firing, so nothing here
     /// duplicates the activity state machine.
@@ -359,6 +385,21 @@ impl Workspace {
             Ok(StopDisposition::AlreadyIdle)
         }
     }
+}
+
+/// The last assistant message this pane finished saying.
+///
+/// Skips an empty one for the reason every other reader does — it would put a
+/// blank body under a header — and a streaming one because it is not finished.
+fn last_assistant_text(view: &AgentChatView) -> Option<String> {
+    view.items.iter().rev().find_map(|item| match item {
+        daruda_acp::ChatItem::AssistantText {
+            text,
+            streaming: false,
+            ..
+        } if !text.trim().is_empty() => Some(text.clone()),
+        _ => None,
+    })
 }
 
 /// The single conversion between the workspace-private activity state and the

@@ -292,11 +292,14 @@ fn guard_immediate(
             guards::guard_queue_depth(*target, cx)
         }
         // A stop is how a runaway is *ended*, so it is never refused for
-        // addressing the orchestrator; a listing names nothing.
+        // addressing the orchestrator; a listing names nothing. A read starts
+        // no turn and enqueues nothing, so neither target guard has anything
+        // to protect — including against reading its own pane.
         ResolvedCommand::List
         | ResolvedCommand::Brief
         | ResolvedCommand::LaneList
         | ResolvedCommand::Stop { .. }
+        | ResolvedCommand::Read { .. }
         | ResolvedCommand::Flow(_)
         | ResolvedCommand::Ask { .. } => Ok(()),
     }

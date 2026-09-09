@@ -142,6 +142,13 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         ),
         ControlResult::LaneCreated { .. } => plain(s::control_lane_created()),
         ControlResult::ChatCreated { .. } => plain(s::control_chat_created()),
+        // The body is the agent's own markdown, already bounded at the source.
+        // Rendered as-is rather than wrapped in copy: a person who asked what
+        // an agent said wants its words, not a sentence about them.
+        ControlResult::Transcript { text, .. } => match text {
+            Some(text) => plain(text.clone()),
+            None => plain(s::control_transcript_empty()),
+        },
         ControlResult::Accepted { disposition } => plain(match disposition {
             AskDisposition::Connecting => s::control_ask_accepted_connecting(),
             AskDisposition::Sent => s::control_ask_accepted(),

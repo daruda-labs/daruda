@@ -78,6 +78,9 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
         ToolId::ChatStop => Command::Immediate(ResolvedCommand::Stop {
             target: pane_arg(args, "target")?,
         }),
+        ToolId::ChatRead => Command::Immediate(ResolvedCommand::Read {
+            target: pane_arg(args, "target")?,
+        }),
         ToolId::FlowRun => Command::Immediate(ResolvedCommand::Flow(FlowCommand::Run {
             name: string_arg(args, "name")?,
         })),
