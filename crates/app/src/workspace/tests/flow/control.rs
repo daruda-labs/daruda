@@ -477,6 +477,63 @@ async fn a_run_ending_in_a_parked_worktree_opens_no_report_there(cx: &mut TestAp
     .expect("window is live");
 }
 
+/// The other half of starting one. Without this the orchestrator could set a
+/// flow going and had no way to end it.
+#[gpui::test]
+async fn a_stop_reaches_the_named_worktree_not_the_active_one(cx: &mut TestAppContext) {
+    let (lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
+
+    ws.update(cx, |ws, cx| {
+        let active = ws.active;
+        ws.seed_flow_run_for_test(active, lane.path().join("run-here"));
+        ws.seed_flow_run_for_test(other, lane.path().join("run-elsewhere"));
+
+        assert_eq!(
+            ws.control_flow_stop(other, cx),
+            Ok(crate::control::result::StopDisposition::Stopped)
+        );
+        // The token is the stop; the entry stays until the event pump retires
+        // it, so cancellation is what to read — not `is_running`.
+        let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
+            .runs
+            .iter()
+            .map(|(lane, handle)| (lane, handle.cancel.is_canceled()))
+            .collect();
+        assert!(
+            canceled.contains(&(other, true)),
+            "the named worktree's run was not stopped: {canceled:?}"
+        );
+        assert!(
+            canceled.contains(&(active, false)),
+            "the worktree on screen must be left alone: {canceled:?}"
+        );
+    });
+}
+
+/// Nothing running is the state a stop asked for, so it is an `Ok` with a
+/// disposition — the same shape `daruda_chat_stop` answers an idle pane with,
+/// and no new error code.
+#[gpui::test]
+async fn stopping_a_worktree_with_no_run_is_an_ok_disposition(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, _wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    ws.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.control_flow_stop(ws.active, cx),
+            Ok(crate::control::result::StopDisposition::AlreadyIdle)
+        );
+        // And a worktree that is not there at all is a different answer.
+        let gone = daruda_store::project::LaneRef {
+            project: ws.active.project,
+            lane: ws.active.lane + 9,
+        };
+        assert_eq!(
+            ws.control_flow_stop(gone, cx),
+            Err(ControlError::TargetGone)
+        );
+    });
+}
+
 /// A text adapter names no worktree, so the executor picks one — and has to
 /// keep the two refusals apart. "Nowhere to run" and "no such flow" send a
 /// person to look at different things.

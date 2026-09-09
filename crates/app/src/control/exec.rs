@@ -114,6 +114,12 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
                 lane: entry.lane,
             })
         }
+        ResolvedCommand::Flow(ResolvedFlowCommand::Stop { lane }) => {
+            in_lane_window(lane, cx, |ws, _window, cx| {
+                ws.control_flow_stop(lane.lane_ref(), cx)
+            })
+            .map(|disposition| ControlResult::FlowStopped { lane, disposition })
+        }
         // Every window's worktrees, not just the active one's: a caller
         // choosing where to open a chat needs the whole set.
         ResolvedCommand::LaneList => {

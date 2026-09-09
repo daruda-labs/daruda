@@ -258,6 +258,12 @@ pub(crate) enum ControlResult {
         /// is the only place the answer says where the run landed.
         lane: LaneHandle,
     },
+    /// A run the caller asked to end. `AlreadyIdle` is an `Ok`: nothing was
+    /// running, which is the state a stop was asking for.
+    FlowStopped {
+        lane: LaneHandle,
+        disposition: StopDisposition,
+    },
     Brief(BriefSummary),
     /// `/daruda` was accepted. The reply arrives later from the orchestrator
     /// pane.
@@ -539,6 +545,14 @@ mod tests {
                 name: "ship.yaml".into(),
                 origin: FlowOriginKind::Global,
                 lane: sample_lane().target,
+            },
+            ControlResult::FlowStopped {
+                lane: sample_lane().target,
+                disposition: StopDisposition::Stopped,
+            },
+            ControlResult::FlowStopped {
+                lane: sample_lane().target,
+                disposition: StopDisposition::AlreadyIdle,
             },
             ControlResult::Brief(BriefSummary {
                 working: 1,

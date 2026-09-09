@@ -1617,6 +1617,8 @@ control:
   lane_created: "Worktree created."
   chat_created: "Chat opened."
   transcript_empty: "That chat has not said anything yet."
+  flow_stopped: "Stopped it."
+  flow_stop_already_idle: "No flow was running there."
   error_approval_refused: "Refused."
   error_approval_timed_out: "That went unanswered, so nothing was created."
   error_agent_limit_reached: "The agent has created as many worktrees as it may this run."

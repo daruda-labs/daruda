@@ -61,7 +61,7 @@ const TOOLS: &str = "\
 - daruda_worktree_list — every worktree, with the branch each is on
 - daruda_chat_new — one more chat (a new tab) in a worktree that already exists
 - daruda_worktree_create — a worktree on a *new* branch
-- daruda_flow_list, daruda_flow_run — the saved flows";
+- daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows";
 
 const RULES: &str = "\
 How to work here:

@@ -9,7 +9,9 @@ use std::path::Path;
 
 use gpui::Context;
 
-use crate::control::result::{ControlError, FlowEntry, FlowOriginKind, LaneHandle};
+use crate::control::result::{
+    ControlError, FlowEntry, FlowOriginKind, LaneHandle, StopDisposition,
+};
 use crate::workspace::Workspace;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
 use crate::workspace::flow_request::FlowSelection;
@@ -126,6 +128,27 @@ impl Workspace {
             return Err(ControlError::FlowNotStarted { name: entry.name });
         }
         Ok(entry)
+    }
+
+    /// Stop the run `lane` holds.
+    ///
+    /// Open, not gated: a stop is how a runaway is ended, and asking a person
+    /// to approve one is the wrong way round. `AlreadyIdle` rather than an
+    /// error for a worktree with nothing running — the caller asked for a
+    /// state, and it is already in it.
+    pub(crate) fn control_flow_stop(
+        &mut self,
+        lane: LaneRef,
+        cx: &mut Context<Self>,
+    ) -> Result<StopDisposition, ControlError> {
+        if self.lane_for(lane).is_none() {
+            return Err(ControlError::TargetGone);
+        }
+        if !self.runs.is_running(lane) {
+            return Ok(StopDisposition::AlreadyIdle);
+        }
+        self.stop_flow_run_in(lane, cx);
+        Ok(StopDisposition::Stopped)
     }
 
     /// This window's active worktree, if it can run `name`.

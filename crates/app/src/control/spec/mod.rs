@@ -44,6 +44,11 @@ pub(crate) enum ResolvedFlowCommand {
         name: String,
         lane: crate::control::result::LaneHandle,
     },
+    /// Stop whatever `lane` is running. Names no flow: a worktree runs one at
+    /// a time, so the worktree *is* the identifier.
+    Stop {
+        lane: crate::control::result::LaneHandle,
+    },
 }
 
 /// Parsed from text. Targets are ordinals.

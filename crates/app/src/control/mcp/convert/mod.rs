@@ -85,6 +85,9 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             name: string_arg(args, "name")?,
             lane: lane_arg(args, "worktree")?,
         })),
+        ToolId::FlowStop => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Stop {
+            lane: lane_arg(args, "worktree")?,
+        })),
         ToolId::LaneCreate => Command::Gated(GatedCommand::LaneCreate {
             workspace: uuid_arg(args, "workspace")?,
             project: u64_arg(args, "project")?,

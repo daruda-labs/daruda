@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Ten tools, all for the orchestrator. A lane's own agent gets none — it
+//! Eleven tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -32,6 +32,7 @@ pub(crate) enum ToolId {
     ChatNew,
     FlowList,
     FlowRun,
+    FlowStop,
 }
 
 /// Whether a tool's effect needs the user's say-so before it runs.
@@ -197,6 +198,10 @@ fn chat_new_properties() -> serde_json::Value {
     })
 }
 
+fn flow_stop_properties() -> serde_json::Value {
+    serde_json::json!({ "worktree": lane_ref_schema() })
+}
+
 fn flow_run_properties() -> serde_json::Value {
     serde_json::json!({
         "name": {
@@ -319,6 +324,17 @@ static TABLE: &[Tool] = &[
         gate: Gate::Open,
         properties: flow_run_properties,
         required: &["name", "worktree"],
+    },
+    Tool {
+        id: ToolId::FlowStop,
+        name: "daruda_flow_stop",
+        description: "Stop the flow running in one worktree — it runs one at a time, so no \
+                      flow name is needed. Reports if nothing was running. Take the \
+                      `worktree` from a daruda_flow_list row, or from the `lane` \
+                      daruda_flow_run answered with.",
+        gate: Gate::Open,
+        properties: flow_stop_properties,
+        required: &["worktree"],
     },
 ];
 

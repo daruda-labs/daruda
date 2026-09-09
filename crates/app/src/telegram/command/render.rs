@@ -122,6 +122,10 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             plain(rows.join("\n"))
         }
         ControlResult::FlowStarting { name, .. } => plain(s::control_flow_starting(name)),
+        ControlResult::FlowStopped { disposition, .. } => plain(match disposition {
+            StopDisposition::Stopped => s::control_flow_stopped(),
+            StopDisposition::AlreadyIdle => s::control_flow_stop_already_idle(),
+        }),
         ControlResult::Brief(brief) => plain(s::control_brief(
             brief.working,
             brief.awaiting_permission,

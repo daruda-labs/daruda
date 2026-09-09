@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn ten_tools_are_exposed() {
-    assert_eq!(ToolTable::all().describe().len(), 10);
+fn eleven_tools_are_exposed() {
+    assert_eq!(ToolTable::all().describe().len(), 11);
 }
 
 #[test]
@@ -65,6 +65,7 @@ fn every_tool_id_has_a_row() {
         ToolId::ChatNew,
         ToolId::FlowList,
         ToolId::FlowRun,
+        ToolId::FlowStop,
     ] {
         assert!(TABLE.iter().any(|t| t.id == id), "{id:?} has no row");
     }
