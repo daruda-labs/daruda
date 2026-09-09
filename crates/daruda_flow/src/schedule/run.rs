@@ -4,7 +4,7 @@
 use super::{RunInputs, RunOutcome, RunReport, run_flow};
 use crate::error::{FlowIoError, IoSite};
 use crate::event::{FlowEvent, RunEnd, emit};
-use crate::lock::{LockError, RunLock};
+use crate::lock::{LockError, RunLocks};
 use crate::marker::{DEFAULT_KEEP_RUNS, sweep_old_runs, write_marker};
 use crate::model::Flow;
 use crate::request::RunRequest;
@@ -32,6 +32,10 @@ const GITIGNORE: &str = ".gitignore";
 const GITIGNORE_BODY: &str = "*\n";
 const WRITE_GITIGNORE: &str = "hiding the run directory from git";
 const SWEEP_RUNS: &str = "clearing out old run directories";
+/// Resolving the working tree so its lock can be named. A tree that
+/// cannot be resolved is one this run cannot be sure it excludes anything
+/// in.
+const RESOLVE_TREE: &str = "resolving the working tree";
 
 /// The whole of one run: take the lock, drive the graph, record how it
 /// ended, let go. `run_flow` is the middle third and stays callable on its
@@ -67,26 +71,55 @@ fn execute_with(
         return not_started(request, RunOutcome::Invalid { issues });
     }
 
-    // In the runs directory, not `cwd`. It excludes exactly the same thing
-    // either way — there is one runs directory per working directory — but
-    // only here is it covered by the `.gitignore` below. At `cwd` the lock
-    // is a stray file in the user's repository root, which is the noise
-    // that `.gitignore` exists to prevent.
-    let lock_dir = request.run_dir.parent().unwrap_or(&request.cwd);
-    // Before the lock, because the lock is a file inside it. Making a
+    // Outside the working tree, under the host's lock root.
+    //
+    // It used to sit in the runs directory, covered by the `.gitignore`
+    // below. That put the one file this whole exclusion rests on inside the
+    // tree the exclusion protects — and `git clean -fdx` deletes ignored
+    // files, so an agent tidying its own worktree could remove the lock
+    // while the run still held the tree. `take` succeeds on a missing file,
+    // so the next run would walk straight in.
+    //
+    // The tree's own path resolved, because two spellings of one tree must
+    // not become two locks. Unresolvable is not a tree this run can be sure
+    // it excludes anything in, so it refuses rather than guessing — the same
+    // call the batcher makes about a node's directory.
+    let Ok(tree) = request.cwd.canonicalize() else {
+        return not_started(
+            request,
+            RunOutcome::Io(FlowIoError {
+                site: IoSite::Run,
+                doing: RESOLVE_TREE,
+                path: request.cwd.clone(),
+                source: std::io::Error::from(std::io::ErrorKind::NotFound),
+            }),
+        );
+    };
+    // The legacy place too, for one release. An older build looks only
+    // there, so writing it is what stops that build starting a second run
+    // in a tree this one holds; and `run_status` reads it so a run *it*
+    // started stays resumable. Deleting the copy costs nothing — the one
+    // outside the tree is the authority.
+    let legacy = request.run_dir.parent().unwrap_or(&request.cwd);
+    let lock_dirs = vec![
+        crate::lock::lock_dir_for(&request.lock_dir, &tree),
+        legacy.to_path_buf(),
+    ];
+    // Before the locks, because a lock is a file inside one. Making a
     // directory claims nothing, so there is no race to lose here.
-    if let Err(source) = std::fs::create_dir_all(lock_dir) {
+    if let Err(source) = std::fs::create_dir_all(legacy) {
         return not_started(
             request,
             RunOutcome::Io(FlowIoError {
                 site: IoSite::Run,
                 doing: MAKE_RUNS_DIR,
-                path: lock_dir.to_path_buf(),
+                path: legacy.to_path_buf(),
                 source,
             }),
         );
     }
-    let lock = match RunLock::acquire(lock_dir, &run_id_of(&request.run_dir), &*request.is_alive) {
+    let lock = match RunLocks::acquire(&lock_dirs, &run_id_of(&request.run_dir), &*request.is_alive)
+    {
         Ok(lock) => lock,
         // Neither refusal took the directory, so neither writes a marker
         // and neither releases: the run that is going owns both.

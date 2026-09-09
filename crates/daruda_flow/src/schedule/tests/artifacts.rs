@@ -451,7 +451,11 @@ fn run_ended_distinguishes_what_the_marker_folds_together() {
         let (report, events, _dir) = run_watched(flow, &runner, budget);
         // All three write the same marker…
         assert_eq!(
-            crate::marker::run_status(&report.run_dir, &|_| true),
+            crate::marker::run_status(
+                &report.run_dir,
+                report.run_dir.parent().expect("runs dir"),
+                &|_| true
+            ),
             crate::marker::RunStatus::Failed,
             "{label}"
         );
@@ -542,10 +546,14 @@ fn a_gate_failure_records_the_set_it_invalidated() {
 }
 
 /// The `.gitignore` covers the runs directory, so anything the engine
-/// leaves outside it lands in the user's `git status`. The lock is the one
-/// candidate — it is taken before the run directory exists — and it has to
-/// be caught *during* the run: `execute` removes it on the way out, so the
-/// end state looks clean either way.
+/// leaves outside it lands in the user's `git status`. It has to be caught
+/// *during* the run: `execute` cleans up on the way out, so the end state
+/// looks clean either way.
+///
+/// The lock used to be the one candidate, taken before the run directory
+/// existed. It now lives outside the tree entirely, and the compatibility
+/// copy it still writes goes inside the runs directory — so this also
+/// checks that the move did not leave a stray root behind.
 #[test]
 fn nothing_the_engine_makes_sits_outside_the_directory_it_hides() {
     /// Lists the working directory on each call, minus what the engine is
@@ -619,9 +627,11 @@ fn a_run_in_flight_reads_as_running_in_the_layout_execute_builds() {
 
     impl Asker {
         fn ask(&self, ctx: &RunContext<'_>) {
-            self.1
-                .borrow_mut()
-                .push(crate::marker::run_status(ctx.run_dir, &|_| true));
+            self.1.borrow_mut().push(crate::marker::run_status(
+                ctx.run_dir,
+                ctx.run_dir.parent().expect("runs dir"),
+                &|_| true,
+            ));
         }
     }
 
@@ -723,7 +733,11 @@ fn an_io_failure_writes_the_same_marker_and_still_says_what_it_was() {
     let events: Vec<FlowEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert_eq!(
-        crate::marker::run_status(&report.run_dir, &|_| true),
+        crate::marker::run_status(
+            &report.run_dir,
+            report.run_dir.parent().expect("runs dir"),
+            &|_| true
+        ),
         crate::marker::RunStatus::Failed
     );
     let end = last_run_end(&events);

@@ -24,7 +24,11 @@ fn a_finished_run_leaves_a_marker_and_frees_the_lock() {
     assert!(report.run_dir.join("DONE").is_file());
     assert!(!dir.path().join(".lock").exists());
     assert_eq!(
-        crate::marker::run_status(&report.run_dir, &|_| true),
+        crate::marker::run_status(
+            &report.run_dir,
+            report.run_dir.parent().expect("runs dir"),
+            &|_| true
+        ),
         crate::marker::RunStatus::Done
     );
 }

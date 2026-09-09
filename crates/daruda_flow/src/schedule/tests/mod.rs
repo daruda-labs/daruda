@@ -193,7 +193,7 @@ nodes:
         wait: 0s
 ";
 
-/// A run as the host submits it: the lock lives beside the working
+/// A run as the host submits it: the lock lives outside the working
 /// directory, and the run id is the run directory's own name.
 pub(super) fn request_for(text: &str, dir: &std::path::Path) -> crate::request::RunRequest {
     request_for_profile(text, None, dir)
@@ -212,6 +212,13 @@ pub(super) fn request_for_profile(
         pinned: Vec::new(),
         cwd: dir.to_path_buf(),
         run_dir: dir.join(".daruda/flow-runs/01J"),
+        // Outside the tree, like the host's — which is the whole point of
+        // where the lock now lives, and what
+        // `nothing_the_engine_makes_sits_outside_the_directory_it_hides`
+        // checks. Keyed off the tree by `lock_dir_for`, and every test's
+        // tree is its own temporary directory, so two tests cannot collide
+        // here.
+        lock_dir: std::env::temp_dir().join("daruda-flow-test-locks"),
         flow_dir: dir.to_path_buf(),
         agents: std::collections::HashMap::from([(
             "claude".to_string(),

@@ -133,6 +133,93 @@ impl RunLock {
     }
 }
 
+/// Where a working tree's lock pair lives under the host's lock root.
+///
+/// **A directory per tree, not a file per tree.** [`take`] pairs `.lock`
+/// with `.lock.takeover` through `with_file_name`, so two trees sharing one
+/// directory would share one takeover guard — and a reclaim for either
+/// would refuse the other and report a holder belonging to neither.
+///
+/// The tree's own path, mirrored. Deterministic forever, which a hash
+/// cannot promise: `DefaultHasher`'s output is explicitly not stable across
+/// Rust versions, and a lock whose name moved on upgrade would be invisible
+/// to the run still holding it. Readable too, which matters the one time
+/// someone has to look.
+///
+/// `tree` is expected canonical — the caller resolves it, because two
+/// spellings of one tree must not become two locks.
+pub fn lock_dir_for(root: &Path, tree: &Path) -> PathBuf {
+    let mut out = root.to_path_buf();
+    // Root and prefix components dropped so the result stays under `root`:
+    // joining an absolute path would replace it.
+    for part in tree.components() {
+        if let std::path::Component::Normal(name) = part {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// Every lock one run needs, held together and given back together.
+///
+/// Acquired in sorted order. Fail-fast makes deadlock impossible — nothing
+/// here ever waits — but without an order two runs wanting the same pair
+/// can livelock, each holding one and failing on the other's, both backing
+/// off and both retrying. The order is the progress guarantee.
+#[derive(Debug)]
+pub struct RunLocks(Vec<RunLock>);
+
+impl RunLocks {
+    /// Take all of `dirs`, or none of them.
+    ///
+    /// A partial hold is worse than no hold: the caller would believe it has
+    /// the set and act on trees it never took, so anything already taken is
+    /// released before the refusal goes back.
+    pub fn acquire(
+        dirs: &[PathBuf],
+        run_id: &str,
+        is_alive: IsAlive<'_>,
+    ) -> Result<Self, LockError> {
+        let mut ordered: Vec<&PathBuf> = dirs.iter().collect();
+        ordered.sort();
+        ordered.dedup();
+        let mut held: Vec<RunLock> = Vec::new();
+        for dir in ordered {
+            if let Err(source) = std::fs::create_dir_all(dir) {
+                Self(held).release_quietly();
+                return Err(LockError::Io(io_error(doing::TAKE, dir.clone(), source)));
+            }
+            match RunLock::acquire(dir, run_id, is_alive) {
+                Ok(lock) => held.push(lock),
+                Err(refusal) => {
+                    Self(held).release_quietly();
+                    return Err(refusal);
+                }
+            }
+        }
+        Ok(Self(held))
+    }
+
+    /// Give every one back. The first failure is reported and the rest are
+    /// still released — a leaked lock is recovered by the next run's
+    /// reclaim, and stopping early would leak more than it reported.
+    pub fn release(self) -> Result<(), FlowIoError> {
+        let mut first = None;
+        for lock in self.0 {
+            if let Err(e) = lock.release() {
+                first = first.or(Some(e));
+            }
+        }
+        first.map_or(Ok(()), Err)
+    }
+
+    /// Unwinding a partial acquire, where there is no one to report to: the
+    /// refusal that caused it is what the caller needs to hear.
+    fn release_quietly(self) {
+        let _ = self.release();
+    }
+}
+
 /// Create the lock file, holder and all, or fail with `AlreadyExists`.
 ///
 /// The name appears only once the contents are complete: it is written to
@@ -464,6 +551,67 @@ mod tests {
     /// exists for: without it, reclaimers that all delete before any of
     /// them creates all end up holding. Measured at 8 racers, that leaked
     /// a second holder in roughly 4% of rounds.
+    /// A tree gets a directory of its own, so the `.lock` /
+    /// `.lock.takeover` pair stays paired per tree.
+    #[test]
+    fn each_tree_gets_its_own_lock_directory() {
+        let root = Path::new("/data/flow-locks");
+        let one = lock_dir_for(root, Path::new("/Users/me/repo-a"));
+        let two = lock_dir_for(root, Path::new("/Users/me/repo-b"));
+        assert_eq!(one, Path::new("/data/flow-locks/Users/me/repo-a"));
+        assert_ne!(one, two);
+        assert!(one.starts_with(root), "the mirror must stay under the root");
+    }
+
+    /// The same tree always names the same directory — two processes have to
+    /// agree, and so do this release and the next upgrade.
+    #[test]
+    fn the_same_tree_always_names_the_same_directory() {
+        let root = Path::new("/data/flow-locks");
+        let tree = Path::new("/Users/me/repo");
+        assert_eq!(lock_dir_for(root, tree), lock_dir_for(root, tree));
+    }
+
+    /// All of them or none: a partial hold would let the caller act on a
+    /// tree it never took.
+    #[test]
+    fn a_set_that_cannot_be_completed_is_not_held_at_all() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let (free, taken) = (root.path().join("free"), root.path().join("taken"));
+        std::fs::create_dir_all(&taken).expect("mkdir");
+        let _held = RunLock::acquire(&taken, "01J", &alive).expect("free");
+
+        let dirs = vec![free.clone(), taken.clone()];
+        assert!(
+            matches!(
+                RunLocks::acquire(&dirs, "01K", &alive),
+                Err(LockError::Held(_))
+            ),
+            "one held member refuses the set"
+        );
+        assert!(
+            RunLock::acquire(&free, "01L", &alive).is_ok(),
+            "the member it did take was given back"
+        );
+    }
+
+    /// A set with nothing in the way is held, and released together.
+    #[test]
+    fn a_free_set_is_held_and_given_back_together() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let dirs = vec![root.path().join("one"), root.path().join("two")];
+        let locks = RunLocks::acquire(&dirs, "01J", &alive).expect("free");
+        assert!(
+            RunLock::acquire(&dirs[1], "01K", &alive).is_err(),
+            "held while the set is held"
+        );
+        locks.release().expect("released");
+        assert!(
+            RunLock::acquire(&dirs[1], "01K", &alive).is_ok(),
+            "free once the set is released"
+        );
+    }
+
     #[test]
     fn only_one_of_many_simultaneous_reclaims_wins() {
         use std::sync::atomic::{AtomicUsize, Ordering};

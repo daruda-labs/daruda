@@ -266,8 +266,15 @@ impl Workspace {
             return Err(FlowSubmitError::NoLane);
         };
         let is_alive: fn(u32) -> bool = process_is_alive;
-        let resumed =
-            daruda_flow::resume::prepare(run_dir, &is_alive).map_err(FlowSubmitError::Resume)?;
+        // Where this lane's lock lives, outside the tree. A lane whose path
+        // will not resolve has no lock directory to name, and `prepare`
+        // would read every run as `Unknown` — which is to say unresumable,
+        // silently. Refused here instead, where it can be reported.
+        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&self.data_dir, &cwd) else {
+            return Err(FlowSubmitError::NoLane);
+        };
+        let resumed = daruda_flow::resume::prepare(run_dir, &lock_dir, &is_alive)
+            .map_err(FlowSubmitError::Resume)?;
 
         let agents = self.flow_agent_catalog(
             lane_ref,
@@ -285,6 +292,9 @@ impl Workspace {
             pinned: Vec::new(),
             loaded: resumed.loaded,
             run_dir: run_dir.to_path_buf(),
+            // The root, not this lane's own directory: the engine names the
+            // per-tree one, so the app and the engine share one derivation.
+            lock_dir: super::flow_paths::locks_root(&self.data_dir),
             // The run's own directory: `run.yaml` inlined every file-backed
             // prompt and hint when it was written, so a resumed run resolves
             // nothing against the flow file's directory — which may not even
@@ -353,6 +363,7 @@ impl Workspace {
             pinned,
             loaded,
             run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id()),
+            lock_dir: super::flow_paths::locks_root(&self.data_dir),
             flow_dir: flow_path
                 .parent()
                 .map(Path::to_path_buf)

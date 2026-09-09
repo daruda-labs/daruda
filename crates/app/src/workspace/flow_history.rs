@@ -50,7 +50,10 @@ impl FlowHistory {
     /// Sorted by directory name, which is chronological only because the
     /// host names runs with a leading fixed-width millisecond field — the
     /// same property `daruda_flow`'s retention sweep depends on.
-    pub(in crate::workspace) fn read(runs_dir: &Path) -> Self {
+    /// `lock_dir` is where this lane's lock lives — outside the tree, so
+    /// there is nothing under `runs_dir` left to derive it from. Getting it
+    /// wrong shows every live run as idle rather than `Running`.
+    pub(in crate::workspace) fn read(runs_dir: &Path, lock_dir: Option<&Path>) -> Self {
         let mut names: Vec<PathBuf> = std::fs::read_dir(runs_dir)
             .into_iter()
             .flatten()
@@ -61,7 +64,10 @@ impl FlowHistory {
         names.sort();
         names.reverse();
 
-        let runs = names.into_iter().map(|dir| entry_for(&dir)).collect();
+        let runs = names
+            .into_iter()
+            .map(|dir| entry_for(&dir, lock_dir))
+            .collect();
         Self { runs }
     }
 
@@ -135,7 +141,8 @@ impl Workspace {
     ) -> Option<FlowHistory> {
         if self.flow_history.get(lane).is_none() {
             let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
-            let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd));
+            let lock_dir = super::flow_paths::lane_lock_dir(&self.data_dir, &cwd);
+            let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd), lock_dir.as_deref());
             self.flow_history.put(lane, read);
         }
         self.flow_history.get(lane).cloned()
@@ -149,7 +156,7 @@ impl Workspace {
     }
 }
 
-fn entry_for(dir: &Path) -> FlowRunEntry {
+fn entry_for(dir: &Path, lock_dir: Option<&Path>) -> FlowRunEntry {
     let name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -162,7 +169,14 @@ fn entry_for(dir: &Path) -> FlowRunEntry {
         // `is_alive` is how a lock's pid is judged, and it is the same
         // predicate submission uses — a run this window is holding must
         // read as `Running`, not `Crashed`.
-        status: daruda_flow::marker::run_status(dir, &super::flow_request::process_is_alive),
+        // `None` is a lane whose path would not resolve: `run_status` then
+        // has only the copy inside the tree to go by, which is what it
+        // falls back to anyway.
+        status: daruda_flow::marker::run_status(
+            dir,
+            lock_dir.unwrap_or(dir),
+            &super::flow_request::process_is_alive,
+        ),
         report: report_in(dir),
         dir: dir.to_path_buf(),
     }
@@ -204,7 +218,7 @@ mod tests {
         // No marker and no lock: nothing says what happened.
         run_dir(runs, 1, None);
 
-        let statuses: Vec<RunStatus> = FlowHistory::read(runs)
+        let statuses: Vec<RunStatus> = FlowHistory::read(runs, Some(runs))
             .runs()
             .iter()
             .map(|r| r.status)
@@ -232,7 +246,7 @@ mod tests {
             run_dir(runs, millis, Some("DONE"));
         }
 
-        let read = FlowHistory::read(runs);
+        let read = FlowHistory::read(runs, Some(runs));
         let times: Vec<&str> = read.runs().iter().map(|r| r.started.as_ref()).collect();
         let mut descending = times.clone();
         descending.sort();
@@ -245,7 +259,7 @@ mod tests {
     #[test]
     fn a_lane_that_never_ran_a_flow_reads_empty() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let read = FlowHistory::read(&tmp.path().join("never-created"));
+        let read = FlowHistory::read(&tmp.path().join("never-created"), None);
         assert!(read.runs().is_empty());
     }
 
@@ -264,7 +278,7 @@ mod tests {
         .expect("report");
         run_dir(runs, 1, Some("FAILED"));
 
-        let read = FlowHistory::read(runs);
+        let read = FlowHistory::read(runs, Some(runs));
         let reports: Vec<bool> = read.runs().iter().map(|r| r.report.is_some()).collect();
         assert_eq!(reports, vec![true, false]);
     }
@@ -275,7 +289,7 @@ mod tests {
     fn a_directory_that_is_not_a_run_id_shows_no_time() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("scratch")).expect("mkdir");
-        let read = FlowHistory::read(tmp.path());
+        let read = FlowHistory::read(tmp.path(), Some(tmp.path()));
         assert_eq!(read.runs().len(), 1);
         assert!(read.runs()[0].started.is_empty(), "invented a start time");
     }

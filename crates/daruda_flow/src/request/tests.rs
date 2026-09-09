@@ -32,6 +32,7 @@ fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest
         pinned: Vec::new(),
         cwd: dir.to_path_buf(),
         run_dir: dir.join("run"),
+        lock_dir: dir.join("locks"),
         flow_dir: dir.to_path_buf(),
         agents: agents.iter().map(|a| (a.to_string(), spec("x"))).collect(),
         node_install_dir: dir.to_path_buf(),

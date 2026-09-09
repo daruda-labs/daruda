@@ -18,6 +18,14 @@ pub struct RunRequest {
     pub cwd: PathBuf,
     /// `<cwd>/.daruda/flow-runs/<run-id>/`.
     pub run_dir: PathBuf,
+    /// Where run locks live, outside every working tree.
+    ///
+    /// The root, not this run's own directory — the engine names the
+    /// per-tree one with [`crate::lock::lock_dir_for`], because the app
+    /// reads the same lock and one derivation is what keeps the two from
+    /// drifting. Given rather than derived: only the host knows the
+    /// profile's data directory.
+    pub lock_dir: PathBuf,
     /// Where the flow file lives — `prompt_file` and `hint_file` resolve
     /// against this, not against `cwd`.
     pub flow_dir: PathBuf,

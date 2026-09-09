@@ -139,11 +139,19 @@ impl Workspace {
     /// The live process holding this lane's run lock, if any. A lock left by
     /// a crashed run names a pid that is gone, and does not stop a new run
     /// — the engine reclaims it.
+    ///
+    /// Both places, for one release: the lock now lives outside the tree
+    /// (`flow_paths::lane_lock_dir`), and the copy the engine still writes
+    /// inside it is what an older build looks at. Reading the new one first
+    /// keeps this answering for a run *this* build started even after an
+    /// agent has cleaned the worktree out from under the copy.
     pub(in crate::workspace) fn lane_holder(
         &self,
         cwd: &Path,
     ) -> Option<daruda_flow::lock::LockHolder> {
-        daruda_flow::lock::read_holder(&super::flow_paths::runs_dir(cwd))
+        super::flow_paths::lane_lock_dir(&self.data_dir, cwd)
+            .and_then(|dir| daruda_flow::lock::read_holder(&dir))
+            .or_else(|| daruda_flow::lock::read_holder(&super::flow_paths::runs_dir(cwd)))
             .filter(|holder| super::flow_request::process_is_alive(holder.pid))
     }
 
@@ -831,6 +839,7 @@ nodes:
             loaded,
             cwd: PathBuf::from("/lane"),
             run_dir: PathBuf::from("/lane/runs/1"),
+            lock_dir: PathBuf::from("/data/flow-locks"),
             flow_dir: PathBuf::from("/lane/flows"),
             agents: HashMap::from([(
                 "claude".to_string(),

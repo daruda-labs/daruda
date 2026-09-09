@@ -90,16 +90,18 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 }
 
 /// What state a run directory is in. With no marker the lock is the only
-/// evidence there is, so where the lock lives is part of this answer — and
-/// it is derived from `run_dir` rather than passed, because a caller that
-/// named the wrong directory would see every live run as `Unknown` and
-/// nothing would say so.
-pub fn run_status(run_dir: &Path, is_alive: IsAlive<'_>) -> RunStatus {
-    // The runs directory, which is where `schedule::execute` takes the
-    // lock — one derivation, so the two cannot drift apart.
-    let Some(lock_dir) = run_dir.parent() else {
-        return RunStatus::Unknown;
-    };
+/// evidence there is, so where the lock lives is part of this answer.
+///
+/// **`lock_dir` is passed, not derived, and that is a hazard the caller
+/// owns.** It used to be `run_dir.parent()` — the runs directory, where the
+/// lock also lived. The lock has moved out of the working tree
+/// ([`crate::lock::lock_dir_for`]), so there is nothing left in `run_dir`
+/// to derive it from, and a caller naming the wrong directory would read
+/// every live run as `Unknown` with nothing saying so: no marker, no
+/// `Running`, no `Crashed`, and therefore nothing resumable. That is why
+/// `crate::resume` has a test that a crashed run is still resumable through
+/// this function rather than only through the files it writes.
+pub fn run_status(run_dir: &Path, lock_dir: &Path, is_alive: IsAlive<'_>) -> RunStatus {
     if run_dir.join(DONE).is_file() {
         return RunStatus::Done;
     }
@@ -109,10 +111,15 @@ pub fn run_status(run_dir: &Path, is_alive: IsAlive<'_>) -> RunStatus {
     if run_dir.join(CANCELED).is_file() {
         return RunStatus::Canceled;
     }
+    // The compatibility copy inside the tree, for a run an older build
+    // started: it wrote only there, and reading it is what keeps such a run
+    // resumable across the upgrade. See `schedule::run`'s dual acquire.
+    let holder = crate::lock::read_holder(lock_dir)
+        .or_else(|| run_dir.parent().and_then(crate::lock::read_holder));
     // A lock naming a different run is evidence about that run, not this
     // one; an unreadable or absent one is no evidence at all. Either way
     // there is nothing here to call a crash without guessing.
-    match crate::lock::read_holder(lock_dir) {
+    match holder {
         Some(holder) if !holds_this_run(&holder.run_id, run_dir) => RunStatus::Unknown,
         Some(holder) if is_alive(holder.pid) => RunStatus::Running,
         Some(_) => RunStatus::Crashed,
@@ -175,6 +182,14 @@ fn has_marker(run_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// These keep the lock beside the run directory, which is where the
+    /// compatibility copy lives — so they read through `run_status`'s
+    /// fallback as well as its primary path. The lock's real home outside
+    /// the tree has tests of its own below.
+    fn status_beside(run_dir: &std::path::Path, is_alive: super::IsAlive<'_>) -> super::RunStatus {
+        super::run_status(run_dir, run_dir.parent().unwrap_or(run_dir), is_alive)
+    }
+
     use super::*;
     use crate::lock::LockHolder;
     use crate::runner::NodeFailure;
@@ -244,7 +259,7 @@ mod tests {
             let run_dir = run_dir_in(dir.path(), name);
             write_marker(&run_dir, &outcome).expect("write");
             assert!(run_dir.join(name).is_file(), "{outcome:?}");
-            assert_eq!(run_status(&run_dir, &|_| true), status);
+            assert_eq!(status_beside(&run_dir, &|_| true), status);
             std::fs::remove_file(run_dir.join(name)).expect("clean");
         }
     }
@@ -284,7 +299,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let run_dir = run_dir_in(dir.path(), "01J");
         write_lock(dir.path(), 4242, "01J");
-        assert_eq!(run_status(&run_dir, &|_| true), RunStatus::Running);
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Running);
     }
 
     /// The row that cannot be reached by writing a marker: a crash leaves no
@@ -295,7 +310,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let run_dir = run_dir_in(dir.path(), "01J");
         write_lock(dir.path(), 4242, "01J");
-        assert_eq!(run_status(&run_dir, &|_| false), RunStatus::Crashed);
+        assert_eq!(status_beside(&run_dir, &|_| false), RunStatus::Crashed);
     }
 
     /// Not the same as crashed. Without a lock there is no evidence either
@@ -304,7 +319,7 @@ mod tests {
     fn no_marker_and_no_lock_reads_as_unknown() {
         let dir = tempfile::tempdir().expect("tempdir");
         let run_dir = run_dir_in(dir.path(), "01J");
-        assert_eq!(run_status(&run_dir, &|_| true), RunStatus::Unknown);
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Unknown);
     }
 
     /// A live lock naming a different run is evidence about that run, not
@@ -315,7 +330,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let run_dir = run_dir_in(dir.path(), "01J");
         write_lock(dir.path(), 4242, "01K");
-        assert_eq!(run_status(&run_dir, &|_| true), RunStatus::Unknown);
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Unknown);
     }
 
     /// A run that ended and said so. The id doubles as the sort key, the way
@@ -383,7 +398,7 @@ mod tests {
         // directory. This one reads no lock at all.
         write_lock(dir.path(), 4242, "other");
         assert_eq!(
-            run_status(&crashed, &|_| true),
+            status_beside(&crashed, &|_| true),
             RunStatus::Unknown,
             "the misreading this test exists to survive"
         );
@@ -426,6 +441,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let run_dir = run_dir_in(dir.path(), "01J");
         std::fs::write(dir.path().join(".lock"), "{ truncated").expect("write");
-        assert_eq!(run_status(&run_dir, &|_| true), RunStatus::Unknown);
+        assert_eq!(status_beside(&run_dir, &|_| true), RunStatus::Unknown);
     }
 }

@@ -82,7 +82,8 @@ fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> Run
     // at all, and whether its stale lock may be reclaimed. A host that let
     // them disagree would offer a resume the lock then refuses.
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(run_dir, &dead).expect("a killed run is resumable");
+    let resumed = crate::resume::prepare(run_dir, run_dir.parent().expect("runs dir"), &dead)
+        .expect("a killed run is resumable");
     let dir = run_dir.parent().expect("runs").parent().expect("cwd");
     let mut request = request_for(flow, dir);
     request.loaded = resumed.loaded;
@@ -209,7 +210,8 @@ fn a_resume_carries_the_spend_and_not_the_waiting() {
     let run_dir = killed_after(dir.path(), CHAIN_OF_THREE, "two", FakeRunner::new());
 
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(&run_dir, &dead).expect("resumable");
+    let resumed = crate::resume::prepare(&run_dir, run_dir.parent().expect("runs dir"), &dead)
+        .expect("resumable");
     let spent_before = resumed.replay.spent.node_runs;
     assert!(spent_before > 0, "the first half ran nothing");
 
@@ -256,7 +258,8 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
     );
 
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(&run_dir, &dead).expect("resumable");
+    let resumed = crate::resume::prepare(&run_dir, run_dir.parent().expect("runs dir"), &dead)
+        .expect("resumable");
     assert!(
         resumed.replay.spent.parked >= Duration::from_secs(30),
         "the first half's waiting did not read back: {:?}",

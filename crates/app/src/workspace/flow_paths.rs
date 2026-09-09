@@ -27,6 +27,9 @@ const REPO_DIR: &str = ".daruda";
 const FLOWS_DIR: &str = "flows";
 /// One directory per run. `.gitignore`d by the engine on first run.
 const RUNS_DIR: &str = "flow-runs";
+/// Where run locks live, in the app's home rather than in any working
+/// tree — see [`locks_root`].
+const LOCKS_DIR: &str = "flow-locks";
 
 /// Extensions a flow file may carry. Both are accepted because a file
 /// named `.yml` that simply never appears in the picker is a worse
@@ -129,6 +132,38 @@ pub(in crate::workspace) struct FoundFlow {
 
 pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
     lane_cwd.join(REPO_DIR).join(RUNS_DIR)
+}
+
+/// `<data_dir>/flow-locks/` — the root every run lock hangs under.
+///
+/// **Outside every working tree, deliberately.** The lock used to live in
+/// the lane's own `flow-runs/`, covered by a `.gitignore`; `git clean -fdx`
+/// deletes ignored files, so an agent tidying its worktree could remove the
+/// one file the engine's exclusion rests on while the run still held the
+/// tree.
+///
+/// Derived from the data directory the caller was **given**, for the reason
+/// [`global_flows_dir`] is: production passes the profile's, a test passes a
+/// temp one, and resolving it again here would have a suite that thought it
+/// was isolated contend with the developer's own running app.
+pub(in crate::workspace) fn locks_root(data_dir: &Path) -> PathBuf {
+    data_dir.join(LOCKS_DIR)
+}
+
+/// Where one lane's lock lives. `None` when the lane's path cannot be
+/// resolved — two spellings of one tree must not become two locks, so an
+/// unresolvable tree has no answer rather than a guessed one.
+///
+/// One derivation shared with the engine ([`daruda_flow::lock::lock_dir_for`]):
+/// the engine takes the lock and the app reads it, and a second answer to
+/// "where is this tree's lock" would drift into the app reporting every live
+/// run as idle.
+pub(in crate::workspace) fn lane_lock_dir(data_dir: &Path, lane_cwd: &Path) -> Option<PathBuf> {
+    let tree = lane_cwd.canonicalize().ok()?;
+    Some(daruda_flow::lock::lock_dir_for(
+        &locks_root(data_dir),
+        &tree,
+    ))
 }
 
 /// Where this lane's runnable flows come from.

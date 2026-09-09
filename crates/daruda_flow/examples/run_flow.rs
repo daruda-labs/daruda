@@ -89,6 +89,9 @@ fn main() {
         pinned: Vec::new(),
         cwd: cwd.clone(),
         run_dir: run_dir.clone(),
+        // Beside the run for this example: it has no profile data directory
+        // of its own, and the point here is the engine, not the layout.
+        lock_dir: cwd.join(".daruda/flow-locks"),
         flow_dir,
         agents,
         node_install_dir: node_install_dir.clone(),

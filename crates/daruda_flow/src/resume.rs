@@ -92,8 +92,16 @@ impl std::fmt::Display for ResumeError {
 ///
 /// `is_alive` is the host's, the same predicate the lock and the panel use
 /// — the engine never asks the OS about a pid.
-pub fn prepare(run_dir: &Path, is_alive: &dyn Fn(u32) -> bool) -> Result<Resumed, ResumeError> {
-    let status = crate::marker::run_status(run_dir, is_alive);
+///
+/// `lock_dir` is where this tree's lock lives ([`crate::lock::lock_dir_for`]).
+/// Naming the wrong one makes every run look `Unknown`, which is to say
+/// unresumable — see [`crate::marker::run_status`].
+pub fn prepare(
+    run_dir: &Path,
+    lock_dir: &Path,
+    is_alive: &dyn Fn(u32) -> bool,
+) -> Result<Resumed, ResumeError> {
+    let status = crate::marker::run_status(run_dir, lock_dir, is_alive);
     if !is_resumable(status) {
         return Err(ResumeError::NotResumable(status));
     }
@@ -181,9 +189,61 @@ mod tests {
         crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock");
 
         assert!(matches!(
-            prepare(&run_dir, &|_| true),
+            prepare(&run_dir, &runs, &|_| true),
             Err(ResumeError::NotResumable(RunStatus::Running))
         ));
+    }
+
+    /// **The guard for the lock's move out of the working tree.**
+    ///
+    /// `run_status` reads the lock at a directory it is handed rather than
+    /// one it derives, so a caller naming the wrong one gets `Unknown` for
+    /// every run — no marker, no holder, nothing resumable — and neither
+    /// the compiler nor a file-level test would say so. This asserts the
+    /// whole path a resume actually takes: the lock where the engine now
+    /// puts it, read back through `prepare`.
+    #[test]
+    fn a_crashed_run_is_still_resumable_with_the_lock_outside_the_tree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tree = dir.path().join("tree");
+        let run_dir = tree.join(".daruda/flow-runs/01J");
+        std::fs::create_dir_all(&run_dir).expect("mkdir");
+        let lock_dir = crate::lock::lock_dir_for(&dir.path().join("locks"), &tree);
+        std::fs::create_dir_all(&lock_dir).expect("mkdir");
+        // Left behind by a process that is gone, the way `RunLock` writes it.
+        std::mem::forget(crate::lock::RunLock::acquire(&lock_dir, "01J", &|_| true).expect("lock"));
+
+        assert!(
+            matches!(
+                prepare(&run_dir, &lock_dir, &|_| false),
+                Err(ResumeError::NothingStarted)
+            ),
+            "a crashed run must reach the journal check, not stop at `Unknown`"
+        );
+        assert_eq!(
+            crate::marker::run_status(&run_dir, &lock_dir, &|_| false),
+            RunStatus::Crashed,
+            "the lock outside the tree is what says the run crashed"
+        );
+    }
+
+    /// A run an older build started wrote its lock only inside the tree.
+    /// `run_status` falls back to that copy so the upgrade does not make
+    /// such a run unresumable.
+    #[test]
+    fn a_lock_left_inside_the_tree_by_an_older_build_still_answers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runs = dir.path().join(".daruda/flow-runs");
+        let run_dir = runs.join("01J");
+        std::fs::create_dir_all(&run_dir).expect("mkdir");
+        std::mem::forget(crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock"));
+        // Where this build would have put it, and never did.
+        let lock_dir = dir.path().join("locks/never-written");
+
+        assert_eq!(
+            crate::marker::run_status(&run_dir, &lock_dir, &|_| false),
+            RunStatus::Crashed
+        );
     }
 
     /// A crash during setup leaves a lock and no journal. There is nothing
@@ -200,7 +260,7 @@ mod tests {
         std::mem::forget(crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock"));
 
         assert!(matches!(
-            prepare(&run_dir, &|_| false),
+            prepare(&run_dir, &runs, &|_| false),
             Err(ResumeError::NothingStarted)
         ));
     }
