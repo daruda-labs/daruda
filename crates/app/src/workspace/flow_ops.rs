@@ -38,6 +38,17 @@ use super::flow_runs::RunHandle;
 use super::flow_runs::RunStage;
 use crate::surface::strings as s;
 
+/// Everything a dispatch has been told, once every question the picker asks
+/// has an answer. One value because the five always travel together, and
+/// three functions passing them one by one is how one of them goes missing.
+struct FlowDispatch<'a> {
+    lane: daruda_store::project::LaneRef,
+    purpose: FlowPurpose,
+    path: &'a Path,
+    profile: Option<&'a str>,
+    selection: &'a FlowSelection,
+}
+
 impl Workspace {
     // ---- Picker ----
 
@@ -201,11 +212,13 @@ impl Workspace {
                 self.flow_picker.close();
                 cx.notify();
                 self.dispatch_flow(
-                    self.active,
-                    purpose,
-                    &path,
-                    profile.as_deref(),
-                    &selection,
+                    FlowDispatch {
+                        lane: self.active,
+                        purpose,
+                        path: &path,
+                        profile: profile.as_deref(),
+                        selection: &selection,
+                    },
                     window,
                     cx,
                 );
@@ -281,20 +294,33 @@ impl Workspace {
 
         self.flow_picker.close();
         cx.notify();
-        self.dispatch_flow(lane, purpose, &path, None, &selection, window, cx);
+        self.dispatch_flow(
+            FlowDispatch {
+                lane,
+                purpose,
+                path: &path,
+                profile: None,
+                selection: &selection,
+            },
+            window,
+            cx,
+        );
     }
 
     /// Act on a flow that has every answer it needs.
     fn dispatch_flow(
         &mut self,
-        lane: daruda_store::project::LaneRef,
-        purpose: FlowPurpose,
-        path: &Path,
-        profile: Option<&str>,
-        selection: &FlowSelection,
+        flow: FlowDispatch<'_>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let FlowDispatch {
+            lane,
+            purpose,
+            path,
+            profile,
+            selection,
+        } = flow;
         match purpose {
             FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
             FlowPurpose::Run => self.submit_flow_run(lane, path, profile, selection, cx),

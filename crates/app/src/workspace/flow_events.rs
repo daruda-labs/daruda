@@ -177,17 +177,19 @@ impl Workspace {
         // lane's runtime rather than always the active one — that is the file-pane
         // subsystem's shape, not this call site's, and changing it also decides
         // whether a background lane may silently gain a tab.
-        if let Some(report) = self.settle_flow_run(lane_ref, end, cx) {
-            if lane_ref == self.active {
-                self.open_pane_file_view(
-                    lane_ref.lane,
-                    report,
-                    /* staged = */ false,
-                    super::main_area::file_view_pane::FileViewMode::Preview,
-                    window,
-                    cx,
-                );
-            }
+        // Settling is unconditional — it is the left-hand side, so it runs
+        // whether or not the report is opened.
+        if let Some(report) = self.settle_flow_run(lane_ref, end, cx)
+            && lane_ref == self.active
+        {
+            self.open_pane_file_view(
+                lane_ref.lane,
+                report,
+                /* staged = */ false,
+                super::main_area::file_view_pane::FileViewMode::Preview,
+                window,
+                cx,
+            );
         }
     }
 
