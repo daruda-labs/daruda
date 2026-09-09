@@ -88,7 +88,7 @@ impl Workspace {
             .flow_sources_for(lane)
             .map(|sources| sources.list_flows())
             .unwrap_or_default();
-        self.flow_picker.open(purpose, listed);
+        self.flow_picker.open(lane, purpose, listed);
         cx.notify();
     }
 
@@ -122,7 +122,7 @@ impl Workspace {
             // another lane belongs to this process too and would not stop
             // this one.
             Some(_) if self.runs.is_running(lane) => {
-                self.flow_picker = FlowPicker::Stopping;
+                self.flow_picker = FlowPicker::Stopping { lane };
                 cx.notify();
                 false
             }
@@ -193,27 +193,36 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let picked = self.flow_picker.focused_pick();
-        let was_stopping = matches!(self.flow_picker, FlowPicker::Stopping);
+        // The worktree the prompt was raised for, not whichever is on screen
+        // now: the picker can have been opened for a parked one, and a stop
+        // must end the run it offered to stop.
+        let stopping = match self.flow_picker {
+            FlowPicker::Stopping { lane } => Some(lane),
+            _ => None,
+        };
 
         match picked {
             // Which flow, answered. Whatever is left of it belongs to
             // `start_flow`, which is also where the graph pane's ▶ comes in —
             // that button knows the flow already and skips only this question.
-            Some(FlowPick::Flow(purpose, path)) => self.start_flow(
-                self.active,
+            Some(FlowPick::Flow {
+                lane,
                 purpose,
                 path,
-                FlowSelection::default(),
-                window,
-                cx,
-            ),
+            }) => self.start_flow(lane, purpose, path, FlowSelection::default(), window, cx),
             // The second question, so nothing is left to ask.
-            Some(FlowPick::Profile(purpose, path, selection, profile)) => {
+            Some(FlowPick::Profile {
+                lane,
+                purpose,
+                path,
+                selection,
+                profile,
+            }) => {
                 self.flow_picker.close();
                 cx.notify();
                 self.dispatch_flow(
                     FlowDispatch {
-                        lane: self.active,
+                        lane,
                         purpose,
                         path: &path,
                         profile: profile.as_deref(),
@@ -226,8 +235,8 @@ impl Workspace {
             None => {
                 self.flow_picker.close();
                 cx.notify();
-                if was_stopping {
-                    self.stop_flow_run(cx);
+                if let Some(lane) = stopping {
+                    self.stop_flow_run_in(lane, cx);
                 }
             }
         }
@@ -286,7 +295,7 @@ impl Workspace {
                 // what has been decided so far, and which nodes to spend on is
                 // one of those things.
                 self.flow_picker
-                    .ask_profile(purpose, path, selection, profiles);
+                    .ask_profile(lane, purpose, path, selection, profiles);
                 cx.notify();
                 return;
             }
@@ -463,13 +472,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Stop the run in the active lane. Runs in other lanes are untouched
-    /// — each holds its own token.
-    pub(in crate::workspace) fn stop_flow_run(&mut self, cx: &mut Context<Self>) {
-        let lane = self.active;
-        self.stop_flow_run_in(lane, cx);
-    }
-
     /// Stop the run a named lane holds. The status bar lists every run this
     /// window started, including ones in lanes that are not active, so it
     /// needs to say which — the active lane is not the answer there.
@@ -571,8 +573,13 @@ impl Workspace {
         }) else {
             return;
         };
-        self.flow_picker
-            .ask_profile(FlowPurpose::Run, path, FlowSelection::default(), profiles);
+        self.flow_picker.ask_profile(
+            self.active,
+            FlowPurpose::Run,
+            path,
+            FlowSelection::default(),
+            profiles,
+        );
         cx.notify();
     }
 

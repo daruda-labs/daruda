@@ -122,9 +122,19 @@ impl Workspace {
     /// exactly what is *not* on screen. It costs one directory listing, and
     /// only when the cache is absent or belongs to another lane.
     pub(in crate::workspace) fn flow_history_of_active_lane(&mut self) -> Option<FlowHistory> {
-        let lane = self.active;
+        self.flow_history_of(self.active)
+    }
+
+    /// The same, for a worktree the caller named rather than the one on
+    /// screen. A run targeted elsewhere resolves its inputs against *its own*
+    /// past runs — reading this one's would feed it another worktree's
+    /// outputs.
+    pub(in crate::workspace) fn flow_history_of(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+    ) -> Option<FlowHistory> {
         if self.flow_history.get(lane).is_none() {
-            let cwd = self.active_lane_root()?;
+            let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
             let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd));
             self.flow_history.put(lane, read);
         }

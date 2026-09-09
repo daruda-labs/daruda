@@ -335,7 +335,7 @@ impl Workspace {
         // Here and not at the surface that asked: which past run holds a
         // pinned output depends on the profile, and the profile is only
         // settled by the time this runs.
-        let pinned = self.resolve_flow_pins(flow_path, profile, &selection.pinned, cx);
+        let pinned = self.resolve_flow_pins(lane_ref, flow_path, profile, &selection.pinned, cx);
 
         let agents = self.flow_agent_catalog(
             lane_ref,

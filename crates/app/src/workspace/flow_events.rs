@@ -169,16 +169,18 @@ impl Workspace {
         // pane whose owner named one runtime and whose home was another — and
         // `load_pane_file_content` then looks it up by owner, misses, and drops
         // the content, leaving a pane on "Loading" for good (the invariant
-        // `git_ops::file_view::debug_assert_owner_is_active` guards). Settling
-        // still happens either way, so the outcome still reaches the panel, the
-        // chip and the phone; the report is one click away in the Flows panel.
+        // `git_ops::file_view::debug_assert_owner_is_active` guards).
+        //
+        // Settling is unconditional — it is the let-chain's left-hand side, so
+        // the outcome still reaches the panel, the chip and the phone either
+        // way. Only the pane is withheld, and getting to that report means
+        // switching to the worktree first: the past-runs list is active-lane
+        // scoped, and the chip drops the run once settling retires it.
         //
         // WORKAROUND: the real fix is for a pane to be able to live in its own
-        // lane's runtime rather than always the active one — that is the file-pane
-        // subsystem's shape, not this call site's, and changing it also decides
-        // whether a background lane may silently gain a tab.
-        // Settling is unconditional — it is the left-hand side, so it runs
-        // whether or not the report is opened.
+        // lane's runtime rather than always the active one — that is the
+        // file-pane subsystem's shape, not this call site's, and changing it
+        // also decides whether a background lane may silently gain a tab.
         if let Some(report) = self.settle_flow_run(lane_ref, end, cx)
             && lane_ref == self.active
         {

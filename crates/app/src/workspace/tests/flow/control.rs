@@ -452,32 +452,148 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
 /// whose owner named one runtime and whose home was another.
 /// `load_pane_file_content` then resolves it by owner, misses, and drops the
 /// content — the pane sits on "Loading" for good. Reachable from the desktop
-/// alone (start a run, switch worktrees, wait), and the invariant is guarded
-/// by `git_ops::file_view::debug_assert_owner_is_active`, which is what makes
-/// simply driving the event here a sufficient assertion.
+/// alone (start a run, switch worktrees, wait).
+///
+/// The run directory has to hold a real `RUN_REPORT_FILE`: `settle_flow_run`
+/// answers `None` without one (`flow_history::report_in` checks `is_file`), and
+/// then the guard under test is never even reached. Both poles are asserted —
+/// the active lane *does* gain the pane, the parked one does not — so neither
+/// half can pass by accident.
 #[gpui::test]
 async fn a_run_ending_in_a_parked_worktree_opens_no_report_there(cx: &mut TestAppContext) {
-    let (lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
-    let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
+
+    // The run belongs to `other`, so its directory lives under `other`'s tree.
+    let parked_run = other_dir.path().join("run-elsewhere");
+    std::fs::create_dir_all(&parked_run).expect("run dir");
+    std::fs::write(
+        parked_run.join(daruda_flow::record::RUN_REPORT_FILE),
+        "# Run",
+    )
+    .expect("report");
+
+    let ended = daruda_flow::event::FlowEvent::RunEnded {
+        end: daruda_flow::event::RunEnd::Done,
+    };
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
             assert_ne!(other, active);
-            ws.seed_flow_run_for_test(other, lane.path().join("run-elsewhere"));
-            ws.apply_flow_event_with_window_for_test(
-                other,
-                &daruda_flow::event::FlowEvent::RunEnded {
-                    end: daruda_flow::event::RunEnd::Done,
-                },
-                window,
-                cx,
-            );
+            let before = ws.active_runtime().panes.len();
+
+            ws.seed_flow_run_for_test(other, parked_run.clone());
+            ws.apply_flow_event_with_window_for_test(other, &ended, window, cx);
+
             assert!(
                 !ws.runs.is_running(other),
                 "settling still has to happen — only the pane is withheld"
             );
+            assert_eq!(
+                ws.active_runtime().panes.len(),
+                before,
+                "a parked lane's report must not land in the active runtime"
+            );
             assert_eq!(ws.active, active, "and the screen must not move");
+
+            // The other pole: the same event for the lane on screen *does*
+            // open its report, so the assertion above is about the guard and
+            // not about a report that was never produced.
+            let here_run = _lane.path().join("run-here");
+            std::fs::create_dir_all(&here_run).expect("run dir");
+            std::fs::write(here_run.join(daruda_flow::record::RUN_REPORT_FILE), "# Run")
+                .expect("report");
+            ws.seed_flow_run_for_test(active, here_run);
+            ws.apply_flow_event_with_window_for_test(active, &ended, window, cx);
+            assert_eq!(
+                ws.active_runtime().panes.len(),
+                before + 1,
+                "the active lane's report is what the parked one was withheld from"
+            );
+        });
+    })
+    .expect("window is live");
+}
+
+/// The worktree has to survive the picker's *second* question. A flow that
+/// declares profiles is dispatched only after the profile is answered, and
+/// that answer arrives long after `run_flow_at` was told where to run — so
+/// re-reading the active worktree there would run it in the wrong place.
+///
+/// Not reachable from the control surface today (`needs_desktop_answer`
+/// refuses a profile-declaring flow before it gets here), which is exactly
+/// why it is worth pinning: the lane's correctness would otherwise rest on
+/// that unrelated guard staying in agreement.
+#[gpui::test]
+async fn the_profile_question_dispatches_to_the_worktree_it_was_opened_for(
+    cx: &mut TestAppContext,
+) {
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", WITH_PROFILES);
+    let deploy = flow_paths::flows_dir(other_dir.path()).join("deploy.yaml");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let active = ws.active;
+            assert_ne!(other, active);
+
+            // Asking about `other` puts the profile question up...
+            assert!(ws.run_flow_at(
+                other,
+                &deploy,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                crate::workspace::flow_request::FlowSelection::default(),
+                window,
+                cx,
+            ));
+            let pick = ws.flow_picker.focused_pick().expect("the profile question");
+            assert!(
+                matches!(
+                    pick,
+                    crate::workspace::command::flow_picker::FlowPick::Profile { lane, .. }
+                        if lane == other
+                ),
+                "the second question forgot which worktree it was asked for: {pick:?}"
+            );
+        });
+    })
+    .expect("window is live");
+}
+
+/// The stop prompt answers for the run it offered to stop, not for whichever
+/// worktree is on screen when Enter lands.
+#[gpui::test]
+async fn the_stop_prompt_stops_the_run_it_was_raised_for(cx: &mut TestAppContext) {
+    let (lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
+    let runs = flow_paths::runs_dir(lane.path());
+    std::fs::create_dir_all(&runs).expect("runs dir");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let active = ws.active;
+            ws.seed_flow_run_for_test(active, runs.join("run-here"));
+            ws.seed_flow_run_for_test(other, runs.join("run-elsewhere"));
+
+            // Raised for `other`, answered with Enter.
+            ws.flow_picker =
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: other };
+            ws.execute_flow_picker_selection(window, cx);
+
+            let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
+                .runs
+                .iter()
+                .map(|(l, handle)| (l, handle.cancel.is_canceled()))
+                .collect();
+            assert!(
+                canceled.contains(&(other, true)),
+                "the prompt stopped a different run than it named: {canceled:?}"
+            );
+            assert!(
+                canceled.contains(&(active, false)),
+                "and the worktree on screen must be left alone: {canceled:?}"
+            );
         });
     })
     .expect("window is live");

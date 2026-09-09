@@ -1,9 +1,12 @@
 //! Running a flow from outside the app.
 //!
-//! A flow answers to different rules than a chat: it belongs to the active
-//! worktree rather than to a pane the caller named, only one may run at a
-//! time, and one that would stop to ask a question has nowhere to ask it from
-//! a phone.
+//! A flow answers to different rules than a chat: it is addressed by worktree
+//! rather than by pane, only one may run in a worktree at a time, and one that
+//! would stop to ask a question has nowhere to ask it from a phone.
+//!
+//! Listing is the exception that takes no target — every open window
+//! contributes its active worktree's set and each row says which, so there is
+//! nothing for a caller to name.
 
 use std::path::Path;
 

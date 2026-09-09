@@ -128,6 +128,7 @@ impl Workspace {
     /// newest run changes.
     pub(in crate::workspace) fn resolve_flow_pins(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         flow_path: &Path,
         profile: Option<&str>,
         pinned: &[NodeId],
@@ -136,8 +137,10 @@ impl Workspace {
         if pinned.is_empty() {
             return Vec::new();
         }
+        // `lane`'s own history, not the active worktree's: a pinned input is a
+        // previous run's output, and runs belong to the worktree they ran in.
         let newest = self
-            .flow_history_of_active_lane()
+            .flow_history_of(lane)
             .and_then(|history| history.runs().first().map(|run| run.dir.clone()));
         let text = std::fs::read_to_string(flow_path).unwrap_or_default();
         let resolved = resolve_in(pinned, &text, profile, newest.as_deref());

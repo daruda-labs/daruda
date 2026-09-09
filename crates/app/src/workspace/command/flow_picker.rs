@@ -178,6 +178,11 @@ impl Stage {
 #[derive(Clone, Debug)]
 pub(in crate::workspace) struct Choosing {
     pub purpose: FlowPurpose,
+    /// The worktree the answer will run in. Held here rather than read from
+    /// the workspace when the answer comes back: the picker may have been
+    /// opened for a worktree that is not the one on screen, and the second
+    /// question is asked *after* the first was answered.
+    pub lane: daruda_store::project::LaneRef,
     pub stage: Stage,
     /// The typed query and the keyboard selection, shared with the other
     /// two pickers. Private to this module: a list key reaches it through
@@ -192,14 +197,20 @@ pub(in crate::workspace) struct Choosing {
 pub(in crate::workspace) enum FlowPick {
     /// A flow. Whether a profile is asked for next is the host's to decide,
     /// because only it can read the file.
-    Flow(FlowPurpose, PathBuf),
-    /// A profile for the flow already picked. `None` is the file as written.
-    Profile(
-        FlowPurpose,
-        PathBuf,
-        crate::workspace::flow_request::FlowSelection,
-        Option<String>,
-    ),
+    Flow {
+        lane: daruda_store::project::LaneRef,
+        purpose: FlowPurpose,
+        path: PathBuf,
+    },
+    /// A profile for the flow already picked. `profile: None` is the file as
+    /// written.
+    Profile {
+        lane: daruda_store::project::LaneRef,
+        purpose: FlowPurpose,
+        path: PathBuf,
+        selection: crate::workspace::flow_request::FlowSelection,
+        profile: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -207,21 +218,26 @@ pub(in crate::workspace) enum FlowPicker {
     #[default]
     Closed,
     Choosing(Choosing),
-    /// A run already holds this lane, so the list is not the question —
-    /// whether to stop it is. Derived from the lock rather than from a
-    /// field, which is what lets a run started before this app launched be
-    /// recognised at all.
-    Stopping,
+    /// A run already holds `lane`, so the list is not the question — whether
+    /// to stop it is. Derived from the lock rather than from a field, which
+    /// is what lets a run started before this app launched be recognised at
+    /// all. Carries the worktree because the answer stops *that* run, not
+    /// whichever one is on screen when Enter lands.
+    Stopping {
+        lane: daruda_store::project::LaneRef,
+    },
 }
 
 impl FlowPicker {
     pub fn open(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         purpose: FlowPurpose,
         found: Vec<crate::workspace::flow_paths::FoundFlow>,
     ) {
         *self = FlowPicker::Choosing(Choosing {
             purpose,
+            lane,
             stage: Stage::Flows {
                 candidates: found.into_iter().map(FlowCandidate::from_found).collect(),
             },
@@ -234,6 +250,7 @@ impl FlowPicker {
     /// filter profile names by whatever was typed to find the file.
     pub fn ask_profile(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         purpose: FlowPurpose,
         flow: PathBuf,
         selection: crate::workspace::flow_request::FlowSelection,
@@ -241,6 +258,7 @@ impl FlowPicker {
     ) {
         *self = FlowPicker::Choosing(Choosing {
             purpose,
+            lane,
             stage: Stage::Profiles {
                 flow,
                 selection,
@@ -263,14 +281,14 @@ impl FlowPicker {
     pub fn choosing(&self) -> Option<&Choosing> {
         match self {
             FlowPicker::Choosing(c) => Some(c),
-            FlowPicker::Closed | FlowPicker::Stopping => None,
+            FlowPicker::Closed | FlowPicker::Stopping { .. } => None,
         }
     }
 
     fn choosing_mut(&mut self) -> Option<&mut Choosing> {
         match self {
             FlowPicker::Choosing(c) => Some(c),
-            FlowPicker::Closed | FlowPicker::Stopping => None,
+            FlowPicker::Closed | FlowPicker::Stopping { .. } => None,
         }
     }
 
@@ -331,20 +349,22 @@ impl FlowPicker {
         let c = self.choosing()?;
         let &index = c.visible().get(c.picker.focused_index())?;
         match &c.stage {
-            Stage::Flows { candidates } => Some(FlowPick::Flow(
-                c.purpose,
-                candidates.get(index)?.path.clone(),
-            )),
+            Stage::Flows { candidates } => Some(FlowPick::Flow {
+                lane: c.lane,
+                purpose: c.purpose,
+                path: candidates.get(index)?.path.clone(),
+            }),
             Stage::Profiles {
                 flow,
                 selection,
                 candidates,
-            } => Some(FlowPick::Profile(
-                c.purpose,
-                flow.clone(),
-                selection.clone(),
-                candidates.get(index)?.name.clone(),
-            )),
+            } => Some(FlowPick::Profile {
+                lane: c.lane,
+                purpose: c.purpose,
+                path: flow.clone(),
+                selection: selection.clone(),
+                profile: candidates.get(index)?.name.clone(),
+            }),
         }
     }
 }
@@ -422,7 +442,7 @@ impl RenderOnce for FlowPickerOverlay {
         // run that is already going.
         let (prompt, rows) = match &self.state {
             FlowPicker::Closed => unreachable!("returned above"),
-            FlowPicker::Stopping => (
+            FlowPicker::Stopping { .. } => (
                 self.stop_prompt.clone(),
                 vec![Row {
                     label: self.stop_action.clone(),
@@ -522,9 +542,18 @@ impl RenderOnce for FlowPickerOverlay {
 mod tests {
     use super::*;
 
+    /// Any worktree — these tests are about the list, not about where a pick
+    /// would run. That the value survives to the pick is
+    /// `a_pick_carries_the_worktree_it_was_opened_for`'s business.
+    const LANE: daruda_store::project::LaneRef = daruda_store::project::LaneRef {
+        project: 0,
+        lane: 0,
+    };
+
     fn opened(purpose: FlowPurpose, names: &[&str]) -> FlowPicker {
         let mut picker = FlowPicker::default();
         picker.open(
+            LANE,
             purpose,
             names
                 .iter()
@@ -544,6 +573,7 @@ mod tests {
     fn only_a_global_flow_carries_a_tag_and_the_tag_is_not_searchable() {
         let mut picker = FlowPicker::default();
         picker.open(
+            LANE,
             FlowPurpose::Run,
             vec![
                 crate::workspace::flow_paths::FoundFlow {
@@ -576,11 +606,49 @@ mod tests {
     #[test]
     fn a_pick_carries_what_it_was_opened_for() {
         let picker = opened(FlowPurpose::Validate, &["ship.yaml"]);
-        let FlowPick::Flow(purpose, path) = picker.focused_pick().expect("a pick") else {
+        let FlowPick::Flow { purpose, path, .. } = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
         assert_eq!(purpose, FlowPurpose::Validate);
         assert!(path.ends_with("ship.yaml"));
+    }
+
+    /// The worktree has to survive to the pick. A picker opened for a parked
+    /// worktree that answered with whichever one is on screen would run the
+    /// flow in the wrong place — and the answer comes back after the question,
+    /// so the value cannot be re-read then.
+    #[test]
+    fn a_pick_carries_the_worktree_it_was_opened_for() {
+        let elsewhere = daruda_store::project::LaneRef {
+            project: 3,
+            lane: 7,
+        };
+        let mut picker = FlowPicker::default();
+        picker.open(
+            elsewhere,
+            FlowPurpose::Run,
+            vec![crate::workspace::flow_paths::FoundFlow {
+                path: PathBuf::from("/lane/.daruda/flows/ship.yaml"),
+                origin: crate::workspace::flow_paths::FlowOrigin::Repo,
+            }],
+        );
+        let FlowPick::Flow { lane, .. } = picker.focused_pick().expect("a pick") else {
+            panic!("the first question is which flow");
+        };
+        assert_eq!(lane, elsewhere);
+
+        // And across the second question, which is where it used to be lost.
+        picker.ask_profile(
+            elsewhere,
+            FlowPurpose::Run,
+            PathBuf::from("/lane/.daruda/flows/ship.yaml"),
+            crate::workspace::flow_request::FlowSelection::default(),
+            vec!["cheap".into()],
+        );
+        let FlowPick::Profile { lane, .. } = picker.focused_pick().expect("a pick") else {
+            panic!("the second question is which profile");
+        };
+        assert_eq!(lane, elsewhere);
     }
 
     /// Enter acts on the row the arrow keys walked to. Written when the
@@ -602,7 +670,7 @@ mod tests {
             ],
         );
         picker.on_key("down", None);
-        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+        let FlowPick::Flow { path, .. } = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
         assert!(path.ends_with("02-broken.yaml"), "picked {path:?}");
@@ -627,7 +695,7 @@ mod tests {
         let mut picker = opened(FlowPurpose::Run, &["build.yaml", "review.yaml"]);
         picker.on_key("r", Some('r'));
         picker.on_key("v", Some('v'));
-        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+        let FlowPick::Flow { path, .. } = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
         assert!(path.ends_with("review.yaml"), "{path:?}");
@@ -643,7 +711,7 @@ mod tests {
         for _ in 0..5 {
             picker.on_key("down", None);
         }
-        let FlowPick::Flow(_, path) = picker.focused_pick().expect("a pick") else {
+        let FlowPick::Flow { path, .. } = picker.focused_pick().expect("a pick") else {
             panic!("the first question is which flow");
         };
         assert!(path.ends_with("b.yaml"), "{path:?}");
@@ -681,7 +749,7 @@ mod tests {
     /// repainting for a keystroke that changed nothing.
     #[test]
     fn the_stop_prompt_answers_escape_and_enter_and_refuses_the_list_keys() {
-        let mut picker = FlowPicker::Stopping;
+        let mut picker = FlowPicker::Stopping { lane: LANE };
         assert_eq!(picker.on_key("escape", None), PickerKey::Dismiss);
         assert_eq!(picker.on_key("enter", None), PickerKey::Confirm);
         for (key, ch) in [
@@ -694,7 +762,7 @@ mod tests {
         }
         // None of it turned the prompt into a list, and Enter still has
         // nothing to pick — the two halves of what makes it a stop.
-        assert!(matches!(picker, FlowPicker::Stopping));
+        assert!(matches!(picker, FlowPicker::Stopping { .. }));
         assert!(picker.focused_pick().is_none());
     }
 
@@ -707,6 +775,7 @@ mod tests {
         picker.on_key("s", Some('s'));
         picker.on_key("down", None);
         picker.ask_profile(
+            LANE,
             FlowPurpose::Run,
             PathBuf::from("/lane/f/ship.yaml"),
             crate::workspace::flow_request::FlowSelection::default(),

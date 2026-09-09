@@ -219,12 +219,13 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
     };
     assert_eq!(
         ws.read_with(&vcx, |ws, _| ws.flow_picker.focused_pick()),
-        Some(crate::workspace::command::flow_picker::FlowPick::Profile(
-            crate::workspace::command::flow_picker::FlowPurpose::Run,
-            flow_path.clone(),
-            expected.clone(),
-            None,
-        )),
+        Some(crate::workspace::command::flow_picker::FlowPick::Profile {
+            lane: ws.read_with(&vcx, |ws, _| ws.active),
+            purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
+            path: flow_path.clone(),
+            selection: expected.clone(),
+            profile: None,
+        }),
         "the pin did not survive the way to the run"
     );
 
@@ -345,15 +346,16 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
     press(&mut vcx, TOOLBAR_RUN_UNTIL_SELECTOR);
     assert_eq!(
         ws.read_with(&vcx, |ws, _| ws.flow_picker.focused_pick()),
-        Some(crate::workspace::command::flow_picker::FlowPick::Profile(
-            crate::workspace::command::flow_picker::FlowPurpose::Run,
-            flow_path.clone(),
-            crate::workspace::flow_request::FlowSelection {
+        Some(crate::workspace::command::flow_picker::FlowPick::Profile {
+            lane: ws.read_with(&vcx, |ws, _| ws.active),
+            purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
+            path: flow_path.clone(),
+            selection: crate::workspace::flow_request::FlowSelection {
                 until: Some("design".into()),
                 pinned: Vec::new(),
             },
-            None,
-        )),
+            profile: None,
+        }),
         "the node it was pressed on did not reach the run"
     );
     ws.update(&mut vcx, |ws, cx| ws.close_flow_picker(cx));

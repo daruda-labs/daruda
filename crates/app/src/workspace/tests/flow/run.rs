@@ -536,12 +536,13 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
             ws.flow_picker.on_key("down", None);
             assert_eq!(
                 ws.flow_picker.focused_pick(),
-                Some(crate::workspace::command::flow_picker::FlowPick::Profile(
-                    crate::workspace::command::flow_picker::FlowPurpose::Run,
-                    flow_path.clone(),
-                    FlowSelection::default(),
-                    Some("cheap".to_string()),
-                )),
+                Some(crate::workspace::command::flow_picker::FlowPick::Profile {
+                    lane: ws.active,
+                    purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
+                    path: flow_path.clone(),
+                    selection: FlowSelection::default(),
+                    profile: Some("cheap".to_string()),
+                }),
                 "the second question answered with something other than the profile"
             );
         });
@@ -805,12 +806,13 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
             ws.flow_picker.on_key("down", None);
             assert_eq!(
                 ws.flow_picker.focused_pick(),
-                Some(crate::workspace::command::flow_picker::FlowPick::Profile(
-                    crate::workspace::command::flow_picker::FlowPurpose::Validate,
-                    flow_path.clone(),
-                    FlowSelection::default(),
-                    Some("cheap".to_string()),
-                )),
+                Some(crate::workspace::command::flow_picker::FlowPick::Profile {
+                    lane: ws.active,
+                    purpose: crate::workspace::command::flow_picker::FlowPurpose::Validate,
+                    path: flow_path.clone(),
+                    selection: FlowSelection::default(),
+                    profile: Some("cheap".to_string()),
+                }),
             );
         });
     })
@@ -882,7 +884,7 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
             assert!(
                 matches!(
                     ws.flow_picker,
-                    crate::workspace::command::flow_picker::FlowPicker::Stopping
+                    crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
                 ),
                 "a second run was started behind the first"
             );
@@ -923,13 +925,15 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
 
             // Escape: the prompt goes away and the run keeps going.
-            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+            ws.flow_picker =
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
             ws.on_flow_picker_key(&key("escape"), window, cx);
             assert!(!ws.flow_picker.is_open(), "Escape left the prompt up");
             assert_eq!(canceled(ws), vec![false], "Escape stopped the run");
 
             // Enter: the stop. Nothing else in the prompt can reach it.
-            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+            ws.flow_picker =
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
             ws.on_flow_picker_key(&key("enter"), window, cx);
             assert!(!ws.flow_picker.is_open(), "Enter left the prompt up");
             assert_eq!(canceled(ws), vec![true], "Enter did not stop the run");
@@ -961,7 +965,8 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
-            ws.flow_picker = crate::workspace::command::flow_picker::FlowPicker::Stopping;
+            ws.flow_picker =
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
 
             for (k, ch) in [
                 ("up", None),
@@ -973,7 +978,7 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
                 assert!(
                     matches!(
                         ws.flow_picker,
-                        crate::workspace::command::flow_picker::FlowPicker::Stopping
+                        crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
                     ),
                     "{k} closed the stop prompt"
                 );
