@@ -15,7 +15,7 @@
 //!    fill + 1px border tint) **and** a `ShapedLine` for the first text
 //!    line rendered inside the box using [`crate::ux::theme::ANNOTATION_TEXT`].
 //!
-//! Layout heuristic (per design §8):
+//! Layout heuristic:
 //! - **Inline** when there is enough right-margin on the annotated row
 //!   for the box to fit without overlapping text. The first line of
 //!   the payload is rendered immediately past the row's last glyph
@@ -47,8 +47,8 @@ pub(crate) struct OverlayRect {
     pub y_rows: u16,
     /// Width in cells (includes the 1-cell trailing padding).
     pub w_cells: u16,
-    /// Height in rows (SP-1: always 1 — only the first text line is
-    /// surfaced inline; future SPs may stack additional rows).
+    /// Height in rows (always 1 today — only the first text line is
+    /// surfaced inline; future overlay variants may stack additional rows).
     pub h_rows: u16,
 }
 
@@ -73,7 +73,7 @@ const INLINE_LEADING_GAP_CELLS: u16 = 1;
 ///
 /// `first_line_chars` is the codepoint count of the first text line in
 /// the payload — the layout heuristic only considers the first line
-/// (SP-1 inline overlays are single-row).
+/// because inline overlays are single-row.
 ///
 /// `line_text_end_col` is the last column (0-indexed) with text on the
 /// annotated row. Used to decide whether there is enough right-margin
@@ -191,15 +191,15 @@ impl TerminalTextElement {
             let Some(line_coord) = view.session.screen_row_to_line_coord(screen_row) else {
                 continue;
             };
-            // SP-1: paint annotation only on the head row of a wrapped logical
-            // line. Continuations would otherwise produce duplicate boxes (one
-            // per wrap segment) because LineBufferPosition is the logical-line
-            // id shared by every wrapped row.
+            // Paint annotation only on the head row of a wrapped logical line.
+            // Continuations would otherwise produce duplicate boxes (one per
+            // wrap segment) because LineBufferPosition is the logical-line id
+            // shared by every wrapped row.
             if view.session.is_wrap_continuation(screen_row) {
                 continue;
             }
-            // `annotation_at_point` returns the first match; SP-1 marks
-            // are single-line so one annotation per row is the rule.
+            // `annotation_at_point` returns the first match; marks are
+            // single-line today so one annotation per row is the rule.
             // Pass column 0 — the inline-overlay layout treats the row
             // as a whole rather than per-cell anchoring.
             let Some((mark_id, payload)) = view.session.annotation_at_point(line_coord, 0) else {
@@ -207,10 +207,9 @@ impl TerminalTextElement {
             };
             let visible_row = visible_row as u16;
 
-            // Strip everything past the first newline — the inline
-            // overlay is a single-row affordance in SP-1 (per design
-            // §8). Multi-line text on disk is fine; we just truncate
-            // the display.
+            // Strip everything past the first newline: the inline overlay is
+            // a single-row affordance. Multi-line text on disk is fine; we
+            // just truncate the display.
             let first_line = payload.text.lines().next().unwrap_or("");
             // Codepoint count — the renderer pads the box with one
             // cell on each side, so columns are what we need rather

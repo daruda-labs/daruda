@@ -26,8 +26,8 @@ fn permission_answer(
     (result.outcome, answer)
 }
 
-/// §6's procedure: cancel the turn, wait out the grace, then drop. The
-/// grace is what gives an adapter the chance to stop mid-write instead of
+/// Cancel the turn, wait out the grace, then drop. The grace is what gives
+/// an adapter the chance to stop mid-write instead of
 /// being killed with a half-written file on disk.
 #[test]
 fn a_turn_over_its_timeout_is_cancelled_then_dropped() {

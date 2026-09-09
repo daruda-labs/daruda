@@ -182,9 +182,9 @@ impl Workspace {
         self.window_open_policy
     }
 
-    /// Open the project's root in a fresh daruda window without
-    /// touching the current workspace. Used by the left-dock Project
-    /// context menu's "Open in New Window" entry (§5.1).
+    /// Open the project's root in a fresh daruda window without touching
+    /// the current workspace. Used by the left-dock Project context menu's
+    /// "Open in New Window" entry.
     ///
     /// Policy B explicitly allows the same root in multiple windows
     /// (the two workspaces share the on-disk `ProjectState` via UUID

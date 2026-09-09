@@ -123,8 +123,8 @@ impl From<&crate::runner::RunResult> for Reported {
 /// paths are where that same set's evidence went.
 #[derive(Debug, Clone, Default)]
 pub struct Invalidation {
-    /// The set the failure invalidated, gate included. Design §10 calls this
-    /// the rerun set and asks `run.md` to name it.
+    /// The set the failure invalidated, gate included. `run.md` names this
+    /// rerun set.
     pub nodes: Vec<NodeId>,
     pub archived: Vec<PathBuf>,
 }
@@ -171,8 +171,8 @@ pub const RUN_REPORT_FILE: &str = "run.md";
 ///
 /// The lead is three kinds of line and nothing else: how the run ended,
 /// whether the cost ceiling was ever measurable, and what the run had to say.
-/// Design §6 puts the cost line there because a limit nothing reported
-/// against is indistinguishable from one that held — and an overnight run is
+/// The cost line is included because a limit nothing reported against is
+/// indistinguishable from one that held — and an overnight run is
 /// started on the strength of that belief.
 pub fn render_run_md(report: &RunReport) -> String {
     let mut out = String::from("# Run\n\n");

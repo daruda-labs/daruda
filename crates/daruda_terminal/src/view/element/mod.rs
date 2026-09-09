@@ -41,8 +41,7 @@ pub(super) struct TerminalPrepaintState {
     /// scrollbar itself is visible.
     search_scrollbar_ticks: Vec<PaintQuad>,
     /// Annotation overlay quads. Painted above terminal text but below
-    /// selection and cursor (spec §8 z-order:
-    /// cursor > selection > search > annotation > text).
+    /// selection and cursor.
     annotation_quads: Vec<PaintQuad>,
     /// Shaped first-line text for each annotation overlay box, paired
     /// with the pixel origin where the text should paint. Shaped in

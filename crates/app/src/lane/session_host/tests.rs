@@ -700,8 +700,8 @@ fn a_deleted_entry_resolves_through_a_single_tombstone_redirect() {
             target: "merged-target".into(),
             session_path: "/srv/app".into(),
             // Unchanged: rewriting the cached `registry_id` to the
-            // redirected-to id is the write-back Task 3 owns, not this
-            // read-only resolver.
+            // redirected-to id belongs to connect-path write-back, not
+            // this read-only resolver.
             registry_id: Some(old_id),
         }
     );

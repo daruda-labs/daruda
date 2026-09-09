@@ -116,8 +116,8 @@ pub(in crate::workspace) struct FlowSubmission {
 /// Every env var to unset before a command node runs: the union of what
 /// each agent's account strips.
 ///
-/// Design §9 lets a command node inherit the environment but not the ACP
-/// account credentials, and computing that list is the host's job — the
+/// A command node inherits the environment but not the ACP account
+/// credentials, and computing that list is the host's job — the
 /// runner only unsets what it is given. Passing an empty vec here (which
 /// is what the terminal example does, because its `LaunchSpec` strips
 /// nothing) would leak an account's credentials into every shell line a
@@ -213,12 +213,11 @@ impl Workspace {
 
     /// Every static problem this flow has, found without running it.
     ///
-    /// `load` alone is not the whole of stage 1: a missing `prompt_file`,
+    /// `load` alone is not the whole of request validation: a missing `prompt_file`,
     /// a prompt file reaching for a non-ancestor's output, and an agent id
     /// the catalog lacks are only knowable with the request's own context
     /// (`validate_request`). Checking less here than `Run` checks would
-    /// mean "no problems found" followed by a refusal — the exact split
-    /// design §12 exists to prevent.
+    /// mean "no problems found" followed by a refusal.
     ///
     /// Takes no lock and creates no run directory: assembling a request is
     /// pure path arithmetic, and `FlowPurpose::Validate` keeps it that way
@@ -625,8 +624,8 @@ nodes:
         );
     }
 
-    /// The security property design §9 names: a command node inherits the
-    /// environment minus the account credentials. An empty list here is
+    /// Security property: a command node inherits the environment minus
+    /// the account credentials. An empty list here is
     /// what a committed flow file would need to read them — and a name two
     /// agents share is one name, not two.
     #[test]

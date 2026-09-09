@@ -1,6 +1,6 @@
 //! What an agent node's turn said, on disk.
 //!
-//! A command node has left a log since P2c; an agent node left nothing, so
+//! A command node leaves a log, but an agent node used to leave nothing, so
 //! a repair's `{{attempts}}` pointed at the failed node's *output* and
 //! nothing else — what the agent was doing when it went wrong was gone. A
 //! cancelled or killed turn left no trace at all.
@@ -21,9 +21,8 @@ use std::path::{Path, PathBuf};
 const MAX_CHUNK: usize = 4_000;
 
 /// Cap on the whole transcript. A per-chunk cap bounds nothing on its own:
-/// a turn streams as many chunks as it likes, and an agent looping until
-/// its node timeout is exactly what design §6's ceilings exist for. Past
-/// this the file says it stopped rather than trailing off.
+/// a turn streams as many chunks as it likes, and an agent can loop until
+/// its node timeout. Past this the file says it stopped rather than trailing off.
 const MAX_TRANSCRIPT: u64 = 512 * 1024;
 
 /// Where the transcript is going, if anywhere.

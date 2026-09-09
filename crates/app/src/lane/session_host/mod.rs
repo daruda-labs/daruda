@@ -311,8 +311,8 @@ fn resolve_catalog_id<'a>(
 /// the "resolve to the latest registered value" behavior. `session_path` and
 /// `registry_id` are left exactly as `host` carried them: the id may have
 /// been reached via a tombstone redirect rather than being `host`'s own, and
-/// writing that back onto the cached value is Task 3's job, not this
-/// resolver's.
+/// writing that back onto the cached value belongs to connect-path
+/// write-back, not this resolver.
 fn apply_catalog_entry(host: LaneSessionHost, entry: &SessionHostEntry) -> LaneSessionHost {
     match (host, &entry.kind) {
         (

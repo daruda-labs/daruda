@@ -341,8 +341,7 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
 /// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
 /// and `ChevronRight` (collapsed). The chevron carries its own click
 /// handler that toggles the flag; the rest of the row stays bound to
-/// `activate_lane(last_active)` so a header click still snaps the
-/// focus per §5.5.
+/// `activate_lane(last_active)` so a header click still snaps the focus.
 pub(in crate::workspace) fn project_header_row(
     args: ProjectHeaderArgs,
     snap: &LeftDockSnapshot,
@@ -410,7 +409,7 @@ pub(in crate::workspace) fn project_header_row(
         // Accent left border is lane-only; the header carries the active fill only.
         .when(show_active_bg, move |d| d.bg(row_active_bg))
         // Header click snaps the workspace focus to this project's
-        // last-active lane (§5.5). No-op when the click lands on
+        // last-active lane. No-op when the click lands on
         // the already-active project — the snap target would equal
         // the current focus and `activate_lane` short-circuits.
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {

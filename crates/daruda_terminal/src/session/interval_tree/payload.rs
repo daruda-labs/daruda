@@ -2,12 +2,12 @@
 //!
 //! Each variant of [`MarkPayload`] represents a distinct kind of mark
 //! (annotation, prompt region, search hit, ...). Only the `Annotation`
-//! variant ships in SP-1 — future variants extend this enum.
+//! variant exists today; future variants extend this enum.
 //!
 //! The enum uses serde's adjacently-tagged representation
 //! (`#[serde(tag = "kind", content = "data")]`) so the on-disk NDJSON form
-//! is `{"kind": "annotation", "data": {...}}`, matching the schema planned
-//! for Task 3 persistence.
+//! is `{"kind": "annotation", "data": {...}}`, matching the persisted
+//! annotation schema.
 
 use std::time::SystemTime;
 
@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 /// Stable `"kind"` tag identifying the `Annotation` variant in NDJSON and
 /// any other discriminator context. Kept as a single source of truth so
-/// future call sites (Task 3 persistence, diagnostics) cannot drift from
-/// the value used by `kind_tag`. The `#[serde(rename = ...)]` attribute
+/// future persistence and diagnostics call sites cannot drift from the
+/// value used by `kind_tag`. The `#[serde(rename = ...)]` attribute
 /// below still uses the bare literal because Rust attributes do not
 /// accept `const` expressions.
 pub(crate) const KIND_ANNOTATION: &str = "annotation";
@@ -71,7 +71,7 @@ pub enum MarkPayload {
 
 impl MarkPayload {
     /// Stable identifier used as the `"kind"` field in NDJSON records.
-    /// SP-1 only knows `"annotation"`; future variants will extend this.
+    /// Only `"annotation"` exists today; future variants will extend this.
     pub fn kind_tag(&self) -> &'static str {
         match self {
             MarkPayload::Annotation(_) => KIND_ANNOTATION,

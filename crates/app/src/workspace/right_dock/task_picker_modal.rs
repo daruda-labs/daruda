@@ -108,8 +108,7 @@ impl TaskPickerModal {
     /// `GlobalTasks`. Called by `Workspace::open_task_picker_modal`
     /// *before* opening the modal, while the workspace borrow is still
     /// in scope — passing the result via [`Self::new`] avoids a
-    /// re-entrant read from inside the modal's constructor
-    /// (G2 / pitfall §4).
+    /// re-entrant read from inside the modal's constructor.
     pub fn build_items(
         state: &daruda_store::tasks::TasksState,
         action: TaskPickAction,

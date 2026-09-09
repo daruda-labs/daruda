@@ -2708,7 +2708,7 @@ pub fn ctx_merge_disabled_detached() -> String {
 }
 
 // ----------------------------------------------------------------
-// Inaccessible lane / project state (Task 2)
+// Inaccessible lane / project state
 // ----------------------------------------------------------------
 
 /// Context-menu "Remove…" item for an inaccessible lane or project.
@@ -3087,7 +3087,7 @@ pub fn section_add_menu_group() -> String {
     rust_i18n::t!("projects.add_menu_group").into_owned()
 }
 
-// Group context menu (§5.1) — rename / recolor / collapse / delete.
+// Group context menu — rename / recolor / collapse / delete.
 pub fn group_menu_rename() -> String {
     rust_i18n::t!("group.menu_rename").into_owned()
 }
@@ -3151,7 +3151,7 @@ pub fn group_current_suffix() -> String {
 
 /// Confirm-dialog copy shown before opening a new pane for a busy
 /// pane's account switch (`Workspace::confirm_open_pane_with_account`,
-/// account_ops.rs — Task 8's `SwitchKind::NewPane` path).
+/// account_ops.rs `SwitchKind::NewPane` path).
 pub fn switch_account_new_pane_title() -> String {
     rust_i18n::t!("modal.switch_account_new_pane_title").into_owned()
 }
@@ -3184,8 +3184,8 @@ pub const GROUP_PRESET_INDIGO: &str = "#818cf8";
 pub const GROUP_PRESET_PURPLE: &str = "#a78bfa";
 pub const GROUP_PRESET_PINK: &str = "#f472b6";
 
-// Project context menu (§5.1) — rename / move to group / delete /
-// open in new window.
+// Project context menu — rename / move to group / delete / open in new
+// window.
 pub fn project_menu_rename() -> String {
     rust_i18n::t!("project.menu_rename").into_owned()
 }
@@ -3608,8 +3608,7 @@ pub fn settings_section_accounts() -> String {
     rust_i18n::t!("settings.section_accounts").into_owned()
 }
 /// Placeholder for an account with no captured email (shouldn't happen
-/// once Plan B login always captures `oauthAccount`, but the field is
-/// `Option` today).
+/// once login captures `oauthAccount`, but the field is `Option` today).
 pub fn settings_accounts_unknown_email() -> String {
     rust_i18n::t!("settings.accounts_unknown_email").into_owned()
 }
@@ -3681,13 +3680,13 @@ pub fn settings_accounts_last_auth_hours(n: u64) -> String {
 pub fn settings_accounts_last_auth_days(n: u64) -> String {
     rust_i18n::t!("settings.accounts_last_auth_days", n => n).into_owned()
 }
-/// Success toast title after a headless add-account login (Plan B)
-/// finishes and the account is saved.
+/// Success toast title after a headless add-account login finishes and
+/// the account is saved.
 pub fn settings_accounts_login_added() -> String {
     rust_i18n::t!("settings.accounts_login_added").into_owned()
 }
 /// Toast shown in place of `settings_accounts_login_added()` when a
-/// headless add-account login (Plan B) succeeds but its email+org matches
+/// headless add-account login succeeds but its email+org matches
 /// an account already tracked (`find_duplicate`'s dedup hit branch of
 /// `Workspace::finish_login_success`): the fresh throwaway dir's
 /// credentials are discarded, not adopted, so the existing account's
@@ -3697,8 +3696,8 @@ pub fn settings_accounts_login_added() -> String {
 pub fn settings_accounts_login_already_exists() -> String {
     rust_i18n::t!("settings.accounts_login_already_exists").into_owned()
 }
-/// Failure toast title for a headless add-account login (Plan B) that
-/// didn't produce a usable account — denied, timed out, the process
+/// Failure toast title for a headless add-account login that didn't
+/// produce a usable account — denied, timed out, the process
 /// failed, or credentials weren't found after a reported success. The
 /// outcome-specific detail rides in the report's untranslated `.message()`
 /// (diagnostic text, same convention as the rest of the error pipeline).
@@ -3754,8 +3753,8 @@ pub fn settings_accounts_workspace_required() -> String {
 pub fn settings_account_login_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
-/// Success toast title after `Workspace::reauthenticate_account` (Plan B,
-/// Task 6) finishes and the existing account's row is refreshed.
+/// Success toast title after `Workspace::reauthenticate_account` finishes
+/// and the existing account's row is refreshed.
 pub fn settings_accounts_reauth_added() -> String {
     rust_i18n::t!("settings.accounts_reauth_added").into_owned()
 }
@@ -4246,6 +4245,14 @@ pub fn settings_telegram_unpair() -> String {
 // Notifications section — orchestrator subsection.
 pub fn settings_orchestrator_heading() -> String {
     rust_i18n::t!("settings.orchestrator_heading").into_owned()
+}
+
+pub fn orchestrator_tab_unavailable() -> String {
+    rust_i18n::t!("orchestrator.tab_unavailable").into_owned()
+}
+
+pub fn orchestrator_label() -> String {
+    rust_i18n::t!("orchestrator.label").into_owned()
 }
 pub fn settings_orchestrator_enabled_label() -> String {
     rust_i18n::t!("settings.orchestrator_enabled_label").into_owned()

@@ -116,7 +116,7 @@ pub struct ManagedAccount {
     pub id: AccountId,
     #[serde(rename = "provider")]
     pub recipe: AccountRecipeId,
-    /// Captured from `oauthAccount` after login (Plan B); `None` when unknown.
+    /// Captured from `oauthAccount` after login; `None` when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

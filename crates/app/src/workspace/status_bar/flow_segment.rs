@@ -1,10 +1,9 @@
 //! Status bar's Flow segment — what the flow runs this app started are
 //! doing, and the one thing there is to do about them.
 //!
-//! Until this existed a run was invisible unless you reopened the palette,
-//! which is where design §14 wanted a stop affordance and decision L had
-//! to put one for want of a surface. This is that surface: the chip says a
-//! run is going, and the dropdown gives each one a Stop.
+//! Until this existed a run was invisible unless you reopened the palette.
+//! This is the status surface: the chip says a run is going, and the
+//! dropdown gives each one a Stop.
 //!
 //! A run another *process* holds is not here — this lists what this app can
 //! actually stop. The lock is what answers the wider question, and the

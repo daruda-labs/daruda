@@ -235,7 +235,7 @@ pub const BELL_FLASH_OVERLAY: Hsla = hsla(0.0, 0.0, 1.0, 0.1);
 pub const PROMPT_JUMP_FLASH_STRIPE: Hsla = hsla(198.0, 0.70, 0.60, 0.85);
 
 // ============================================================================
-// Annotation overlay (SP-1)
+// Annotation overlay
 // ============================================================================
 //
 // Pastel-yellow palette that mirrors iTerm2's default annotation tone —
@@ -405,12 +405,12 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // Idle: #34d399
 // Connecting: #9ca3af
 
-// ---- Phase D — sub-row per-session badge strip ----
+// ---- Sub-row per-session badge strip ----
 // Rendered beneath the sublabel when a lane has ≥ 2 active Claude
 // sessions. The leading indicator still shows the aggregate priority;
 // these badges drill into the individual sessions.
 
-// ---- Phase E — active session badge outline ----
+// ---- Active session badge outline ----
 // 1 px ring drawn outside the badge for the session attached to the
 // focused tab. Distinguishes "this is what your terminal is talking
 // to" from sibling sessions in the same cwd.

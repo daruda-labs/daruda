@@ -2,15 +2,15 @@
 //!
 //! Wraps the payload-aware methods on `IntervalTree<MarkPayload>` with
 //! `TerminalSession`-level validation: a single-line range constraint
-//! (SP-1 dialog-side enforcement is the first layer, this is the second)
-//! and a typed error enum that surfaces the few cases the caller actually
+//! (dialog-side enforcement is the first layer, this is the second) and a
+//! typed error enum that surfaces the few cases the caller actually
 //! needs to distinguish from "succeeded".
 //!
 //! No persistence handling lives here — the tree's sink machinery does
 //! its own `tracing::warn!` logging when an `append` fails, and never
 //! propagates the error to the mutation method's caller. The
 //! [`AnnotationError::PersistenceFailed`] variant is reserved for a
-//! future revision where sink errors do surface (Task 6 hookup).
+//! future revision where sink errors do surface.
 
 use std::fmt;
 use std::io;
@@ -28,13 +28,13 @@ use super::interval_tree::{AnnotationPayload, LineCoord, LineRange, MarkId, Mark
 #[derive(Debug)]
 pub enum AnnotationError {
     /// The supplied range was outside the live coordinate space, or
-    /// violates the SP-1 single-line constraint (`range.start != range.end`).
+    /// violates the single-line constraint (`range.start != range.end`).
     CoordOutOfRange,
     /// No annotation with the given id exists.
     NotFound,
     /// The persistence sink returned an io error. Reserved for future
     /// use — not constructed today.
-    #[allow(dead_code)] // reserved for Task 6 / SP-2 when sink errors propagate
+    #[allow(dead_code)] // reserved for when sink errors propagate
     PersistenceFailed(io::Error),
 }
 
@@ -64,7 +64,7 @@ impl std::error::Error for AnnotationError {
 impl TerminalSession {
     /// Create a new annotation covering `range` with the supplied `text`.
     ///
-    /// SP-1 only supports single-line ranges (`range.start == range.end`).
+    /// Only single-line ranges are supported (`range.start == range.end`).
     /// Multi-line input is rejected with [`AnnotationError::CoordOutOfRange`].
     /// Newlines inside `text` are preserved — the constraint is only on the
     /// y-axis coordinates of `range`.
@@ -83,7 +83,7 @@ impl TerminalSession {
     /// Replace the text of an existing annotation. Returns
     /// [`AnnotationError::NotFound`] if `id` does not refer to a current
     /// annotation, or if the payload is no longer an `Annotation` variant
-    /// (future-proofing — only `Annotation` exists in SP-1).
+    /// (future-proofing — only `Annotation` exists today).
     pub fn update_annotation_text(
         &mut self,
         id: MarkId,

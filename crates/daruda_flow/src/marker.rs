@@ -123,8 +123,8 @@ fn holds_this_run(run_id: &str, run_dir: &Path) -> bool {
 }
 
 /// How many finished runs a sweep leaves behind when the host states no
-/// preference. Design §10's default; the parameter is where a host that
-/// gains a config knob expresses its own.
+/// preference. The parameter is where a host that gains a config knob
+/// expresses its own.
 pub const DEFAULT_KEEP_RUNS: usize = 20;
 
 /// Delete finished runs beyond `keep`, newest first, and report what went.
@@ -132,13 +132,13 @@ pub const DEFAULT_KEEP_RUNS: usize = 20;
 /// "Finished" means a completion marker is present — not `run_status`, which
 /// also answers from the lock and would call a crashed run `Unknown` whenever
 /// any other run is going. An unmarked directory is the only evidence a crash
-/// ever happened (§10's status table derives `Crashed` from exactly that), so
+/// ever happened, so
 /// it is never a candidate however old it is, and never counts against `keep`.
 /// Reading no lock is why this takes no `is_alive`.
 ///
 /// Newest is decided by directory name, which is chronological only because
-/// the host names run directories with ULIDs (design §10 — the app makes the
-/// run-id, the engine only receives `run_dir`). A host using a different id
+/// the host names run directories with ULIDs (the app makes the run-id, the
+/// engine only receives `run_dir`). A host using a different id
 /// scheme would silently have this delete the wrong ones.
 pub fn sweep_old_runs(runs_dir: &Path, keep: usize) -> std::io::Result<Vec<PathBuf>> {
     let mut finished: Vec<PathBuf> = std::fs::read_dir(runs_dir)?

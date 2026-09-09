@@ -156,8 +156,8 @@ fn each_setting_is_read_against_the_set_the_agent_last_advertised() {
     );
 }
 
-/// §8's rule: an axis the adapter never advertised cannot be honoured, and
-/// running anyway would silently produce a different run than the record
+/// An axis the adapter never advertised cannot be honoured, and running
+/// anyway would silently produce a different run than the record
 /// claims.
 #[test]
 fn a_model_the_adapter_does_not_advertise_fails_the_node() {

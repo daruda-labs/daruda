@@ -83,8 +83,8 @@ impl Workspace {
     /// Whether `purpose` may go ahead in the active lane, having already said
     /// why not when it may not.
     ///
-    /// Design §14's affordance: what says a run is going is the lock, not a
-    /// field this app keeps — so a run started by a previous session, or by
+    /// What says a run is going is the lock, not a field this app keeps — so
+    /// a run started by a previous session, or by
     /// another window, is recognised the same way. Every way in asks this
     /// first, whether or not a list of flows is part of it.
     fn flow_run_guard(&mut self, purpose: FlowPurpose, cx: &mut Context<Self>) -> bool {
@@ -700,8 +700,8 @@ impl Drop for LastWord {
 ///
 /// A free function rather than an inline literal inside the thread so the
 /// one security-relevant decision in it — what `ProcessRunner` is told to
-/// unset — can be asserted. Design §9 lets a command node inherit the
-/// environment but not the ACP account credentials, and the runner only
+/// unset — can be asserted. A command node inherits the environment but
+/// not the ACP account credentials, and the runner only
 /// unsets what the host hands it: `Vec::new()` here is a silent leak into
 /// every shell line a committed flow file names, with no other symptom.
 fn runners_for(request: &daruda_flow::request::RunRequest, node_install_dir: PathBuf) -> Runners {
@@ -790,7 +790,7 @@ nodes:
         }
     }
 
-    /// Design §9's rule, at the one place it is actually applied. Reverting
+    /// The account-credential stripping rule is applied here. Reverting
     /// `runners_for` to `ProcessRunner::new(Vec::new())` — which is what
     /// `examples/run_flow.rs` does, and the obvious thing to copy — leaks
     /// the account's credentials into every shell line a committed flow

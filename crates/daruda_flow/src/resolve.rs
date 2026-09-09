@@ -425,8 +425,8 @@ fn merge_agent(
 /// recording a mode the file never said. What the file says is the whole
 /// of it, so this makes it say.
 ///
-/// Names no mode itself. Which modes prompt is the adapter's to advertise
-/// (§8), and this only observes that the deciding axis was left unset.
+/// Names no mode itself. Which modes prompt is the adapter's to advertise,
+/// and this only observes that the deciding axis was left unset.
 fn check_ask_has_a_mode(
     spec: &AgentSpec,
     node: Option<&crate::NodeId>,

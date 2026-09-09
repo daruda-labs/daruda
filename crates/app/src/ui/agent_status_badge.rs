@@ -40,7 +40,7 @@ fn snake_head(tick: u64) -> usize {
 pub enum IndicatorSize {
     /// Left-dock leading indicator on a lane row.
     Leading,
-    /// Phase D sub-row per-session badge.
+    /// Sub-row per-session badge.
     Badge,
 }
 
@@ -77,7 +77,7 @@ pub struct AgentStatusBadge {
     status: SessionStatus,
     size: IndicatorSize,
     color: Hsla,
-    /// Phase E — when true, the indicator is wrapped in a 1 px outline
+    /// When true, the indicator is wrapped in a 1 px outline
     /// ring marking it as the session attached to the focused tab.
     active: bool,
 }
@@ -100,7 +100,7 @@ impl AgentStatusBadge {
     }
 
     /// Wrap the indicator with an outline ring (sub-row "active in
-    /// the focused tab" affordance, Phase E).
+    /// the focused tab" affordance).
     pub fn active(mut self) -> Self {
         self.active = true;
         self

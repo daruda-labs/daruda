@@ -91,8 +91,8 @@ impl Run<'_> {
             output: None,
             contract: None,
             evidence_seq: self.take_seq(),
-            // The gate's own timeout, by design (§6): a fix is a prompt
-            // inside a policy rather than a node, so nothing else would
+            // The gate's own timeout: a fix is a prompt inside a policy
+            // rather than a node, so nothing else would
             // bound it and a hung fix session's only defence would be the
             // run's wall clock — which every other gate then has to share.
             //

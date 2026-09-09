@@ -249,11 +249,12 @@ pub struct TerminalSession {
     /// pins the viewport to the live grid; positive values reveal rows
     /// from `line_buffer` above the live viewport. Replaces ghostty's
     /// internal `scroll_viewport` state — we no longer rely on its
-    /// scrollback for navigation (Task 3 cut ghostty's retained
-    /// scrollback to a tiny capture window; see `GHOSTTY_TRANSIENT_SCROLLBACK`).
+    /// scrollback for navigation; ghostty's retained scrollback is limited
+    /// to a tiny capture window (see `GHOSTTY_TRANSIENT_SCROLLBACK`).
     scroll_offset: u32,
     /// Augmented interval tree storing user-authored marks (annotations
-    /// today; prompt regions and search hits in future SP). Lifecycle is
+    /// today; prompt regions and search hits may become future mark types).
+    /// Lifecycle is
     /// wired through `capture_scrolled_out` (eviction), `resize` (column
     /// clamp), and the alt-screen toggle (visibility filter). See
     /// `crate::session::annotation_ops` for the public API.
@@ -463,17 +464,17 @@ impl TerminalSession {
     /// (anchored to the head row, sub_row == 0) instead of one per wrapped
     /// visual row.
     ///
-    /// SP-1 limitation: rows in the live ghostty viewport (`screen_row >=
+    /// Current limitation: rows in the live ghostty viewport (`screen_row >=
     /// lb_rows`) always return `false` — ghostty_vt does not expose a
     /// wrap-continuation predicate for viewport rows in a way that can be
     /// consumed here without new FFI. The annotation-paint duplication bug
     /// (resize-wrap) is triggered by rows already captured in `LineBuffer`,
-    /// so this limitation is acceptable for SP-1.
+    /// so this limitation is acceptable for the current annotation support.
     pub fn is_wrap_continuation(&self, screen_row: u32) -> bool {
         let cols = self.dims.cols;
         let lb_rows = self.line_buffer.wrapped_row_count(cols);
         if screen_row >= lb_rows {
-            // SP-1: viewport-region wrap continuations are not detected;
+            // Viewport-region wrap continuations are not detected;
             // ghostty does not expose per-row wrap info for live grid rows.
             return false;
         }
@@ -1212,7 +1213,7 @@ impl TerminalSession {
         // scrollback — otherwise the `Ord` rule (Buffered < Viewport)
         // makes every subsequent range query miss it. The rebind math
         // lives on `LineBuffer::rebind_viewport_abs`; this loop just
-        // walks SP-1 single-line marks and forwards.
+        // walks single-line marks and forwards.
         {
             let cols = self.dims.cols;
             // Collect first: `iter()` borrows `&self`, `update_payload_range`
@@ -1221,7 +1222,7 @@ impl TerminalSession {
                 .interval_tree
                 .iter()
                 .filter_map(|m| match (m.range.start, m.range.end) {
-                    // SP-1 marks are single-line (start == end). Multi-line
+                    // Marks are single-line today (start == end). Multi-line
                     // marks are out of scope.
                     (LineCoord::Viewport { abs_y: s }, LineCoord::Viewport { abs_y: e })
                         if s == e =>
@@ -1886,7 +1887,7 @@ impl TerminalSession {
     /// NOTE: a soft-wrap *continuation* row maps to its logical line's abs
     /// (no Hard EOL fires before it), so a mark on a continuation row snaps to
     /// the line's head row after re-projection. This matches `abs_to_screen_row`'s
-    /// head-row contract and the SP-1 "one annotation box per logical line" goal.
+    /// head-row contract and the "one annotation box per logical line" goal.
     fn screen_row_to_logical_abs(&self, unified_row: u32) -> Option<LogicalLineAbs> {
         let cols = self.dims.cols;
         let overflow = self.line_buffer.overflow();

@@ -203,7 +203,7 @@ impl Workspace {
         // Background opacity drives both the terminal pane fill (pushed above)
         // and the agent-chat pane background. Mirror to the GPUI-side global;
         // on change, dirty each cached `AgentChatView` below so its `.cached()`
-        // subtree repaints with the new alpha (render-cost rule §10).
+        // subtree repaints with the new alpha.
         let bg_alpha_changed =
             (crate::ui::theme::background_alpha(cx) - config.window.opacity).abs() > f32::EPSILON;
         crate::ui::theme::set_background_alpha(cx, config.window.opacity);

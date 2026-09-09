@@ -23,8 +23,8 @@ const WRITE_SPEC: &str = "recording the resolved spec";
 use crate::record::RUN_REPORT_FILE as RUN_MD;
 const WRITE_RECORD: &str = "recording what the run did";
 
-/// Keeps every run's artifacts out of the user's `git status`. Design §10
-/// puts it inside the runs directory rather than at `.daruda/`, so that the
+/// Keeps every run's artifacts out of the user's `git status`. The ignore
+/// file lives inside the runs directory rather than at `.daruda/`, so that the
 /// visibility of the `task-*.md` files already living there is not silently
 /// changed.
 const MAKE_RUNS_DIR: &str = "making the runs directory";
@@ -429,8 +429,7 @@ nodes:
     prompt: write
 ";
 
-    /// `review` overrides the flow's agent, so one run needs two runtimes —
-    /// the case design §6 added provisioning for.
+    /// `review` overrides the flow's agent, so one run needs two runtimes.
     const TWO_AGENTS: &str = "\
 version: 1
 defaults: { agent: { id: claude } }

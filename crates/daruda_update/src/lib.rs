@@ -1,8 +1,7 @@
 //! Self-update logic for the daruda macOS app.
 //!
-//! This crate is GPUI-free: it holds pure release-parsing logic (Task 1),
-//! plus (in later tasks) networking to fetch release metadata and download
-//! assets, and the DMG-based install/bundle-swap flow.
+//! This crate is GPUI-free: it holds release parsing, release metadata
+//! fetching, DMG download, and the DMG-based install/bundle-swap flow.
 
 pub mod check;
 pub mod install;

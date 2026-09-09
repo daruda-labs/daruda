@@ -568,8 +568,8 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
 
 #[test]
 fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
-    // A `PaneCwd::Remote` cwd (Task 4+ — no pane constructs one yet, but
-    // the wire shape must round-trip and stay distinguishable from
+    // A `PaneCwd::Remote` cwd (no pane constructs one yet, but the wire
+    // shape must round-trip and stay distinguishable from
     // `Local` so a future remote-backed pane doesn't get silently
     // reinterpreted as a local path on restore.
     let leaf = SerializedLayout::Leaf {

@@ -458,8 +458,8 @@ fn theme_config_parses_from_toml() {
 
 #[test]
 fn theme_config_accepts_legacy_preset_alias() {
-    // Pre-Phase-2 configs used the unqualified `preset` key. Serde
-    // alias should keep those configs loading without an opt-in
+    // Legacy configs used the unqualified `preset` key. Serde alias
+    // should keep those configs loading without an opt-in
     // migration step.
     let input = "[theme]\npreset = \"dracula\"\n";
     let cfg: Config = toml::from_str(input).unwrap();

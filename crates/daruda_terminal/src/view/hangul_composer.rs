@@ -247,8 +247,8 @@ mod tests {
     use super::*;
 
     /// Drive the composer with a sequence of input chars, collecting
-    /// every emission plus the final `flush()` result. Models how
-    /// `replace_text_in_range` will call into it in Phase C2.
+    /// every emission plus the final `flush()` result. Models how callers
+    /// drive replacement text through the composer.
     fn drive(input: &str) -> Vec<String> {
         let mut c = HangulComposer::new();
         let mut out: Vec<String> = Vec::new();

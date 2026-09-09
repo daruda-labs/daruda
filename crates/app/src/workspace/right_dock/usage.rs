@@ -357,7 +357,7 @@ fn header(
 /// Display-only identity of the account the tab's usage/activity data
 /// belongs to — the focused pane's managed-account email, or the
 /// "System" fallback. Purely informational: no click target, no
-/// dropdown. An account selector is deferred (plan §6.8 option B).
+/// dropdown.
 fn account_label_text(label: SharedString, muted: Hsla) -> impl IntoElement {
     div()
         .w_full()

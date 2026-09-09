@@ -45,8 +45,7 @@ impl Workspace {
         use super::skills::SkillPickerModal;
 
         // Build the items now while we hold `&mut self` — the modal
-        // must not re-enter the workspace from inside its constructor
-        // (G2 / pitfall §4).
+        // must not re-enter the workspace from inside its constructor.
         let items = SkillPickerModal::build_items(skills);
         let workspace = cx.weak_entity();
 

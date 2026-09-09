@@ -1122,8 +1122,8 @@ fn scrollback_anchor_survives_resize_widen() {
     );
 }
 
-/// Cross-line matches were impossible before Task 5 — each row was
-/// scanned in isolation. With `FindContext` driving the scrollback
+/// Cross-line matches used to be impossible because each row was scanned
+/// in isolation. With `FindContext` driving the scrollback
 /// portion, a needle that straddles a hard newline must produce one
 /// `MatchRange` per visual row it spans.
 #[test]

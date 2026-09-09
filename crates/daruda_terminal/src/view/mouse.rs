@@ -715,7 +715,7 @@ impl TerminalView {
     /// position. The lookup goes straight through
     /// `TerminalSession::annotation_at_point` — no separate hit-test
     /// cache — since each visible row contains at most one annotation
-    /// in SP-1 and the tree's `at_line` walk is O(matches).
+    /// today and the tree's `at_line` walk is O(matches).
     fn update_hovered_annotation(
         &mut self,
         position: gpui::Point<Pixels>,

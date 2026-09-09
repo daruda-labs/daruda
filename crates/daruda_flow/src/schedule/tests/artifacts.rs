@@ -510,8 +510,8 @@ fn a_failed_run_still_leaves_its_own_account() {
     assert!(report.warnings().is_empty(), "{:?}", report.warnings());
 }
 
-/// Design §10 asks `run.md` to name the rerun set. Without it the record
-/// shows a re-derivation only by implication — a node appearing twice at
+/// `run.md` names the rerun set. Without it the record shows a
+/// re-derivation only by implication — a node appearing twice at
 /// attempt 1 with different evidence ids — leaving the reader to guess
 /// which failure caused it.
 #[test]

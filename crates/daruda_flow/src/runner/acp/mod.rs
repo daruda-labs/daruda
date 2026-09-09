@@ -50,8 +50,8 @@ use std::time::{Duration, Instant};
 /// is nothing to attribute the stop to but the session itself.
 const ENDED_EARLY: &str = "the session ended before the turn did";
 
-/// Design §6: how long a cancelled turn has to end itself before the session
-/// is dropped. The wait is what lets an adapter stop mid-write instead of
+/// How long a cancelled turn has to end itself before the session is
+/// dropped. The wait is what lets an adapter stop mid-write instead of
 /// being killed with a half-written file on disk.
 const CANCEL_GRACE: Duration = Duration::from_secs(5);
 

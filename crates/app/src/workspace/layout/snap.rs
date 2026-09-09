@@ -50,7 +50,7 @@ pub(in crate::workspace) struct ProjectSnapshot {
     pub lanes: Vec<crate::lane::Lane>,
     /// Last-active lane id, mirrored from the runtime project so
     /// the dock can snap the active focus back to it when the user
-    /// clicks the project header (§5.5).
+    /// clicks the project header.
     pub last_active_lane_id: daruda_store::project::LaneId,
     /// Whether the project's lane list is hidden under its header.
     /// Toggled by the project header chevron click.
@@ -343,8 +343,8 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub usage_refresh_in_flight: bool,
     /// Per-lane projection of the app-wide `SkillsState` Global
     /// for the Skills tab renderer. Carried by-value so the panel
-    /// renderer never re-enters the workspace entity (G2 / pitfall §4)
-    /// and never reads the Global from inside `Render::render`.
+    /// renderer never re-enters the workspace entity and never reads
+    /// the Global from inside `Render::render`.
     pub skills: crate::agent::skills::SkillsSnapshot,
     /// Search query input rendered atop the Skills tab. Entity is
     /// shared with the Workspace; the renderer just embeds it inline.
@@ -400,7 +400,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub right_panel_scroll_handle: gpui::ScrollHandle,
     /// Snapshot of `Workspace::mcp` for the Tools tab renderer.
     /// Carried by-value so the panel renderer never re-enters the
-    /// workspace entity (G2 / pitfall §4).
+    /// workspace entity.
     pub mcp: crate::agent::mcp::McpSnapshot,
     /// Flow runs in the active lane, for the Flows tab. Only this lane's:
     /// the panel sits beside a per-lane run history, and the status bar

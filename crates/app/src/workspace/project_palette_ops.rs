@@ -78,8 +78,7 @@ impl Workspace {
         };
         // Build the dropdown options + initial value now, while the
         // workspace borrow is in scope — passing them into the modal
-        // constructor avoids a re-entrant read from inside the entity
-        // (G2 / pitfall §4).
+        // constructor avoids a re-entrant read from inside the entity.
         let (options, initial) = GroupSelectModal::build_options(self, project_id);
         let weak = cx.entity().downgrade();
         open_form_modal(

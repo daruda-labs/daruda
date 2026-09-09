@@ -360,8 +360,8 @@ impl TerminalView {
     /// that has already been evicted from `LineBuffer`.
     ///
     /// Powers the "Add annotation" menu item raised by the
-    /// `ContextMenuRequested` event — SP-1 annotations are
-    /// single-line, so a multi-row selection disables the entry.
+    /// `ContextMenuRequested` event. Annotations are single-line, so a
+    /// multi-row selection disables the entry.
     pub fn selection_single_line_range(&self) -> Option<crate::session::interval_tree::LineRange> {
         use crate::session::interval_tree::LineRange;
         let selection = self.state.selection.as_ref()?;
@@ -580,7 +580,7 @@ impl TerminalView {
 
     /// Update the hovered annotation id and request a repaint when the
     /// value changed. Drives the hover-tint switch in the annotation
-    /// paint pass (SP-1). Idempotent: passing the same id repeatedly
+    /// paint pass. Idempotent: passing the same id repeatedly
     /// is a no-op, so the mouse-move hot path can call freely without
     /// flooding the render queue.
     pub fn set_hovered_annotation(

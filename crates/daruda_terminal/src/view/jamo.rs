@@ -104,7 +104,7 @@ pub(super) fn is_compat_jongseong(ch: char) -> bool {
 
 // `is_lv_syllable` and the old `try_jamo_compose` helpers were
 // retired when the HangulComposer state machine replaced the DEL +
-// rewrite recomposition path (Phase C2). The composer resolves
+// rewrite recomposition path. The composer resolves
 // choseong + jungseong + jongseong internally from its own state,
 // so there is no longer a caller that needs to probe a precomposed
 // syllable character or attempt a one-shot compose.

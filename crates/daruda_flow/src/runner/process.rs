@@ -18,7 +18,7 @@ use std::time::Duration;
 /// pipes and quotes, and this repo already builds shell strings elsewhere.
 const SHELL: &str = "sh";
 
-/// Design §9 — what a node's script orients itself by.
+/// What a node's script orients itself by.
 const RUN_DIR_VAR: &str = "DARUDA_FLOW_RUN_DIR";
 const NODE_ID_VAR: &str = "DARUDA_FLOW_NODE_ID";
 const ATTEMPT_VAR: &str = "DARUDA_FLOW_ATTEMPT";
@@ -461,8 +461,8 @@ mod tests {
         assert!(wait_until_gone(pid), "the grandchild outlived the cancel");
     }
 
-    /// Design §9: a node's script gets three variables to orient itself by.
-    /// Without them a gate cannot find the outputs it is meant to check.
+    /// A node's script gets three variables to orient itself by. Without
+    /// them a gate cannot find the outputs it is meant to check.
     #[test]
     fn a_command_is_told_which_run_node_and_attempt_it_is() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -479,8 +479,7 @@ mod tests {
         );
     }
 
-    /// Design §9's stated cost, and the one mitigation it commits to: flow
-    /// files are committed and shared, so the credentials the ACP path
+    /// Flow files are committed and shared, so the credentials the ACP path
     /// strips must not survive into a shell any flow author can write.
     ///
     /// The stripped name is one cargo already set in this process, because
@@ -503,8 +502,7 @@ mod tests {
     }
 
     /// …but everything else is inherited, because a gate that cannot see
-    /// `PATH` or `HOME` simply does not run — which is why §9 chose
-    /// inheritance over a whitelist.
+    /// `PATH` or `HOME` simply does not run.
     #[test]
     fn a_command_still_inherits_the_environment_it_needs() {
         let dir = tempfile::tempdir().expect("tempdir");

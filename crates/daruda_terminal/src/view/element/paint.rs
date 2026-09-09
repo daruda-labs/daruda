@@ -55,7 +55,7 @@ impl TerminalTextElement {
             }
 
             // Paint order (bottom-up): background → prompt_marks → search → text → annotation → selection → cursor.
-            // Spec §8 places annotation above text; selection still wins over annotation for the highlight gesture.
+            // Annotation paints above text; selection still wins over annotation for the highlight gesture.
             for quad in prepaint.annotation_quads.drain(..) {
                 window.paint_quad(quad);
             }

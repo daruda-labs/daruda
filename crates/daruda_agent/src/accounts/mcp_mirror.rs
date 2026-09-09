@@ -28,8 +28,8 @@ const MCP_SERVERS_KEY: &str = "mcpServers";
 /// process — which only reads MCP servers from *its own*
 /// `CLAUDE_CONFIG_DIR` — sees the same servers as the system default.
 ///
-/// MCP is shared across accounts by decision (Plan B): there is one
-/// `mcpServers` set, not one per account. Every other key in the
+/// MCP is shared across accounts by design: there is one `mcpServers`
+/// set, not one per account. Every other key in the
 /// account file — most importantly `oauthAccount`, written there by
 /// that account's own login — is left untouched.
 ///

@@ -1,5 +1,5 @@
-//! [`ClaudeRecipe`]: the [`AccountRecipe`] for Claude Code — the only auth
-//! domain Plan A/B manage today. Every method delegates to the free
+//! [`ClaudeRecipe`]: the [`AccountRecipe`] for Claude Code — the auth
+//! domain managed here today. Every method delegates to the free
 //! function this crate already exposed for it, so this is a structural
 //! seam over existing behavior, not new logic.
 

@@ -375,8 +375,8 @@ pub(super) struct BlockQuadRect {
 /// rows with `\n` — the copy payload for Block-mode selection.
 ///
 /// Rows are fetched via [`TerminalSession::dump_screen_row`] so the
-/// block walks scrollback and viewport uniformly (Task 7: iTerm2
-/// `iTermSubSelection.absRange + columnWindow` parity). A row that
+/// block walks scrollback and viewport uniformly, matching iTerm2's
+/// `iTermSubSelection.absRange + columnWindow` behavior. A row that
 /// fails to dump (e.g. evicted from `LineBuffer`) contributes an empty
 /// line so the rectangle's geometry is preserved when pasted back.
 ///

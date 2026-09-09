@@ -118,8 +118,8 @@ fn main() {
 
     let runners = Runners {
         agent: AcpRunner::new(request.agents.clone(), node_install_dir),
-        // Design §9: a command node inherits the environment but not the
-        // ACP account credentials, and computing that list is the host's
+        // A command node inherits the environment but not the ACP account
+        // credentials, and computing that list is the host's
         // job — the runner only unsets what it is given. `Vec::new()` here
         // would leak them into every shell line a committed flow names,
         // which is why this is spelled out even though the launch above

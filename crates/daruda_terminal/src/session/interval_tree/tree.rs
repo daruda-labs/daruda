@@ -60,7 +60,7 @@ pub struct IntervalTree<P> {
     /// This flag lives on the generic struct to avoid threading it through
     /// every query call site, but only `impl IntervalTree<MarkPayload>` exposes
     /// a setter. Future non-MarkPayload payload types will inherit the field
-    /// dormant — acceptable as long as SP-1 stays the only consumer.
+    /// dormant — acceptable as long as MarkPayload stays the only consumer.
     pub(crate) alt_screen_active: bool,
     /// Optional NDJSON sink. Populated only via the `IntervalTree<MarkPayload>`
     /// specialized API; the generic struct holds it but never emits records on

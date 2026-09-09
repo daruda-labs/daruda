@@ -17,8 +17,8 @@ fn a_turn_that_ends_cleanly_passes() {
     assert_eq!(result.outcome, Ok(()), "{:?}", result.outcome);
 }
 
-/// §6's core correction: `daruda_acp` calls these "completed normally",
-/// and taking that at face value lets a node that wrote half its output
+/// `daruda_acp` calls these "completed normally", and taking that at face
+/// value lets a node that wrote half its output
 /// flow downstream as a pass.
 #[test]
 fn the_three_stop_reasons_that_are_not_success_each_map_to_their_own_failure() {

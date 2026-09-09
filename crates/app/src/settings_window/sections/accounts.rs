@@ -54,8 +54,8 @@ fn now_unix() -> u64 {
 
 /// Bucket "time since last authenticated" into a display label. `0` is
 /// the never-authenticated sentinel (`ManagedAccount` has no captured
-/// login yet — unreachable once Plan B always stamps this on login, but
-/// the field predates that work). Mirrors `right_dock::usage`'s
+/// login yet — unreachable once login stamps this, but the field predates
+/// that guarantee). Mirrors `right_dock::usage`'s
 /// `cache_age_bucket` shape; kept as its own function since account
 /// freshness and fetch-cache age are different concepts that could
 /// diverge in wording later.
@@ -431,8 +431,8 @@ impl SettingsWindow {
         }
     }
 
-    /// Starts a headless reauthenticate-account login (Plan B, Task 6)
-    /// against the first live `Workspace` window — same
+    /// Starts a headless reauthenticate-account login against the first
+    /// live `Workspace` window — same
     /// `WindowRegistry::first_workspace` target-resolution rationale as
     /// [`Self::start_add_account`]. Unlike that method, this dispatches
     /// the [`crate::workspace::ReauthenticateAccount`] action into the

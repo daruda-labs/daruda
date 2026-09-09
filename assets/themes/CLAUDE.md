@@ -107,8 +107,8 @@ mis-detects as dark.
 Some render sites still read a raw dark constant directly
 (`theme::SURFACE_1`, `theme::CANVAS`, `theme::TEXT_PRIMARY`, …) instead of the
 theme-variant `theme::current(cx).field`. Those stay **dark in light mode no
-matter what this directory contains** — the deferred Phase-3 migration tail
-noted in `daruda_theme.rs`. Fixing such a spot is a code change, not a JSON
+matter what this directory contains** while they still use raw constants.
+Fixing such a spot is a code change, not a JSON
 change: either migrate it to a `DarudaTheme` field, or pick by
 `theme::current(cx).is_dark()` (e.g. `if dark { SURFACE_1 } else { LIGHT_SURFACE_1 }`).
 So when light mode shows a stray dark surface, first check whether the field

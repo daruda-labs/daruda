@@ -497,8 +497,8 @@ fn account_strip_env_carries_the_recipes_auth_overrides() {
     assert!(account_strip_env(None).is_empty());
 }
 
-// Task 3: connect-path write-back — a registry `target`/`container` edit,
-// or a tombstone redirect, syncs back onto the lane's cached
+// Connect-path write-back: a registry `target`/`container` edit, or a
+// tombstone redirect, syncs back onto the lane's cached
 // `session_host` so a future connect (and any UI reading it) sees the
 // fresh value instead of re-deriving it every time.
 
@@ -517,9 +517,8 @@ fn write_back_tombstone(
     }
 }
 
-/// The Step 1 scenario: a catalog `target` edit surfaces through
-/// `effective_session_host` already (Task 2) — this asserts the
-/// write-back actually persists it onto the lane's cache.
+/// A catalog `target` edit surfaces through `effective_session_host` before
+/// connect-path write-back persists it onto the lane's cache.
 #[test]
 fn catalog_target_change_writes_back_the_lanes_cached_target() {
     let id = daruda_store::project::SessionHostId::new();
@@ -535,8 +534,8 @@ fn catalog_target_change_writes_back_the_lanes_cached_target() {
             target: "new-target".into(),
         },
     }];
-    // Task 2's resolver already folded the catalog's current target
-    // in — this is what `connect_agent_chat` would pass as `resolved`.
+    // The resolver already folded the catalog's current target in; this is
+    // what `connect_agent_chat` would pass as `resolved`.
     let resolved = LaneSessionHost::Ssh {
         target: "new-target".into(),
         session_path: "/srv/app".into(),
@@ -574,8 +573,8 @@ fn tombstone_redirect_writes_back_both_target_and_registry_id() {
         },
     }];
     let tombstones = vec![write_back_tombstone(old_id, Some(new_id))];
-    // `effective_session_host` (Task 2) resolves the target through the
-    // redirect but leaves `registry_id` at the stale cached id — exactly
+    // `effective_session_host` resolves the target through the redirect
+    // but leaves `registry_id` at the stale cached id — exactly
     // what `connect_agent_chat` would pass here.
     let resolved = LaneSessionHost::Ssh {
         target: "merged-target".into(),

@@ -3,7 +3,7 @@
 //!
 //! This module is the data-structure layer only — payload semantics,
 //! lifecycle (rebinding viewport coords to scrollback positions), and
-//! persistence are layered on top in later tasks.
+//! persistence are layered on top.
 
 mod coord;
 mod lifecycle;

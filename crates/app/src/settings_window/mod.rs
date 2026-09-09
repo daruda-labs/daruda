@@ -125,8 +125,8 @@ pub struct SettingsWindow {
     /// can reference by id instead of repeating the same target/container
     /// as free text on every lane. See [`SessionHostRow`].
     session_host_rows: Vec<SessionHostRow>,
-    // Accounts (Task 9). Snapshot loaded from `accounts.json` at
-    // construction; every write goes through the section's own
+    // Accounts snapshot loaded from `accounts.json` at construction;
+    // every write goes through the section's own
     // `set_default_account`/`remove_account` handlers, which persist
     // immediately and broadcast the new state to every open
     // `Workspace` window. See `sections/accounts.rs`'s module doc.
@@ -3099,7 +3099,7 @@ const MAX_SESSION_HOST_TOMBSTONES: usize = 20;
 ///    field *is* its value — against the surviving unresolved tombstones
 ///    (`redirected_to: None`). The most recently removed match gets
 ///    `redirected_to` set to the new entry's id; an older tie is left
-///    unresolved, the plan's stated tie-break.
+///    unresolved by this tie-break.
 ///
 /// Pure and GPUI-free so it is directly unit-testable — [`SettingsWindow::validate`]
 /// is the only caller.
@@ -3484,7 +3484,7 @@ mod session_host_reconcile_tests {
 
     /// Two live tombstones share `(kind, value)` — only the most recently
     /// removed one gets redirected; the older one stays unresolved rather
-    /// than being touched, per the plan's stated tie-break.
+    /// than being touched.
     #[test]
     fn ties_redirect_only_the_most_recently_removed_tombstone() {
         let older_id = SessionHostId::new();

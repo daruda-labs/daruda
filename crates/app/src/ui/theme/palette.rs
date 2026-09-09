@@ -2080,7 +2080,7 @@ pub const DRAG_PILL_CURSOR_OFFSET: f32 = 4.0;
 /// Leading indicator footprint on the lane row. All four states
 /// share the same 3×3 dot-grid shape; only color/animation differ.
 pub const STATUS_INDICATOR_SIZE: f32 = 16.0;
-/// Sub-row per-session badge footprint (Phase D).
+/// Sub-row per-session badge footprint.
 pub const STATUS_INDICATOR_BADGE_SIZE: f32 = 12.0;
 /// Width of the cell that holds the indicator inside the lane row,
 /// inserted between the active-row accent bar and the body.

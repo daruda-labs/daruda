@@ -2049,8 +2049,8 @@ fn clear_scrollback_drops_history_marks_keeps_viewport_marks_abs_y() {
 
 #[test]
 fn clear_scrollback_under_wrap_does_not_over_shift_marks() {
-    // Pin Task 4's fix: a wrap-inflated buffer (visual rows > logical
-    // lines) used to apply a `visual_residual` shift on top of the
+    // Pin the wrap-inflated buffer fix: visual rows > logical lines used
+    // to apply a `visual_residual` shift on top of the
     // logical-line `abs_y`, over-shifting viewport-resident marks.
     // Post-Task-4 the wipe is line-symmetric, so `abs_y` must survive
     // intact regardless of wrap inflation.

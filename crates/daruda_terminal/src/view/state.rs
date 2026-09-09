@@ -238,7 +238,7 @@ pub(crate) struct TerminalViewState {
     /// `None` when no URL or no modifier.
     pub(crate) hovered_url: Option<super::HoveredUrl>,
 
-    /// Annotation overlay under the mouse pointer (SP-1). Drives the
+    /// Annotation overlay under the mouse pointer. Drives the
     /// hover-tint switch in the annotation paint pass. Updated by the
     /// mouse-move hit test in `view/mouse.rs`; `None` when the cursor
     /// is not over any annotation box.

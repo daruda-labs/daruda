@@ -53,7 +53,7 @@ fn in_window<R>(
     .unwrap()
 }
 
-// ---- Step 1: preview switch must skip persistence ----
+// ---- Preview switch must skip persistence ----
 
 #[gpui::test]
 async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) {

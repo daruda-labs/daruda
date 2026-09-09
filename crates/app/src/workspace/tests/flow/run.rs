@@ -46,10 +46,9 @@ async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContex
 ///
 /// The runtime must not land in the user's working tree: the `.gitignore`
 /// the engine writes reaches `flow-runs/` only, so a runtime unpacked
-/// beside it turns up in `git status`. Found the hard way with a real
-/// agent in P2c. And design §6's ceilings are only a last line of defence
-/// if they are actually installed — a `Budget::unlimited()` slipping in
-/// here is invisible until a flow runs all night.
+/// beside it turns up in `git status`. Cost ceilings are only a last line
+/// of defence if they are actually installed — a `Budget::unlimited()`
+/// slipping in here is invisible until a flow runs all night.
 #[gpui::test]
 async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
@@ -170,8 +169,8 @@ nodes:
     );
 }
 
-/// Design §14 derives "a run is going" from the lock so a run this app did
-/// not start is still recognised. But the stop switch is a `CancelToken`
+/// "A run is going" is derived from the lock, so a run this app did not
+/// start is still recognised. But the stop switch is a `CancelToken`
 /// this process holds — there is no way to reach another process's. The
 /// picker must not offer a button that cannot work.
 #[gpui::test]
@@ -425,10 +424,10 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
     .expect("the test window is live");
 }
 
-/// `load` alone is not the whole of stage 1. A `prompt_file` that is not
+/// `load` alone is not the whole of request validation. A `prompt_file` that is not
 /// there is only knowable with the request's own context, so checking less
 /// here than `Run Flow…` checks means "no problems found" followed by a
-/// refusal — the split design §12 exists to prevent.
+/// refusal.
 #[gpui::test]
 async fn checking_a_flow_finds_what_only_the_request_can_see(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(
