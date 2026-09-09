@@ -61,8 +61,15 @@ impl AgentChatView {
     /// [`Self::send_prompt_text_inner`] with [`PromptOrigin::InApp`] — the
     /// dispatch outcome is uninteresting since an in-app prompt never arms
     /// the Telegram watch.
-    pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
-        self.send_prompt_text_inner(text, PromptOrigin::InApp, cx);
+    /// Returns the dispatch for the same reason the Telegram form does: a
+    /// full queue refuses the prompt, and a caller that discarded that would
+    /// tell the user it was sent.
+    pub(in crate::workspace) fn send_prompt_text(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, cx)
     }
 
     /// Send `text` relayed from a phone-tapped Telegram reply. Sugar over
@@ -109,13 +116,19 @@ impl AgentChatView {
             cx.notify();
             return PromptDispatch::Queued;
         }
-        let dispatch = if matches!(self.status, AgentSessionStatus::Connected)
-            && let Some(handle) = &self.handle
+        let ready = matches!(self.status, AgentSessionStatus::Connected)
+            && self.handle.is_some()
             && !self.queue.turn.is_in_flight()
-            && !self.activity.cancel_in_flight
-        {
+            && !self.activity.cancel_in_flight;
+        let dispatch = if ready {
             // Connected and idle: send now, mark the turn in flight, and echo.
-            handle.send_prompt(text.clone());
+            // What goes on the wire and what the transcript shows are not the
+            // same string — see [`Self::wire_text`]. Resolved before the handle
+            // is borrowed, because taking the briefing needs `&mut self`.
+            let wire = self.wire_text(&text);
+            if let Some(handle) = &self.handle {
+                handle.send_prompt(wire);
+            }
             self.queue.turn = Turn::InFlight {
                 started_at: std::time::Instant::now(),
             };
@@ -131,8 +144,10 @@ impl AgentChatView {
             // `pump_pending_prompt` (after `Connected`, on each `TurnEnded`, and
             // when the cancel window closes) and is echoed then. Do *not* mark
             // the turn in flight: nothing new is on the wire yet.
-            self.enqueue_prompt(text, origin);
-            PromptDispatch::Queued
+            match self.enqueue_prompt(text, origin) {
+                Some(_) => PromptDispatch::Queued,
+                None => PromptDispatch::QueueFull,
+            }
         };
         cx.notify();
         dispatch
@@ -266,13 +281,48 @@ impl AgentChatView {
     /// [`PromptId`]. Does NOT echo or notify — the caller does that once after
     /// mutating. `origin` travels with the entry to arm the Telegram watch
     /// when it actually dispatches.
-    pub(super) fn enqueue_prompt(&mut self, text: String, origin: PromptOrigin) -> PromptId {
+    /// Both queues' depth — what the cap is measured against, and what the
+    /// control surface reports. A paused prompt still has to drain before a
+    /// new one does, so leaving it out would let the cap be bypassed by
+    /// pressing Stop.
+    pub(in crate::workspace) fn queued_prompt_count(&self) -> usize {
+        self.queue.pending_prompts.len() + self.queue.paused_prompts.len()
+    }
+
+    /// Append a prompt, or refuse when the pane is already holding its limit.
+    ///
+    /// The cap lives here rather than only on the MCP path because every
+    /// producer can outrun the drain: an agent's tool calls, a phone `/say`
+    /// hammered from a pocket, and a person holding Enter all queue through
+    /// this one function.
+    pub(super) fn enqueue_prompt(
+        &mut self,
+        text: String,
+        origin: PromptOrigin,
+    ) -> Option<PromptId> {
+        if self.queued_prompt_count() >= crate::control::guards::QUEUE_DEPTH_MAX {
+            return None;
+        }
         let id = PromptId(self.queue.next_prompt_id);
         self.queue.next_prompt_id += 1;
         self.queue
             .pending_prompts
             .push(QueuedPrompt { id, text, origin });
-        id
+        Some(id)
+    }
+
+    /// Push `depth` placeholder prompts, for the queue-cap tests.
+    #[cfg(test)]
+    pub(in crate::workspace) fn fill_queue_for_test(&mut self, depth: usize) {
+        while self.queued_prompt_count() < depth {
+            let id = PromptId(self.queue.next_prompt_id);
+            self.queue.next_prompt_id += 1;
+            self.queue.pending_prompts.push(QueuedPrompt {
+                id,
+                text: String::new(),
+                origin: PromptOrigin::InApp,
+            });
+        }
     }
 
     /// Remove the queued prompt `id` from either the live or parked queue,
@@ -362,10 +412,40 @@ impl AgentChatView {
         let Some(text) = self.drain_next_queued_prompt(cx) else {
             return;
         };
+        // `drain_next_queued_prompt` already echoed `text`; the wire gets the
+        // briefed form, which is why the two are separate strings.
+        let wire = self.wire_text(&text);
         if let Some(handle) = &self.handle {
-            handle.send_prompt(text);
+            handle.send_prompt(wire);
         }
         cx.notify();
+    }
+
+    /// What actually goes on the wire for `text`.
+    ///
+    /// Equal to `text` for every pane but a briefed one, where the session's
+    /// **first** prompt carries the briefing in front of it and the transcript
+    /// keeps showing only what the person typed. The person never wrote it and
+    /// would have to scroll past it on every glance; the agent needs it once.
+    ///
+    /// One-shot by construction: the briefing is taken, so a second prompt
+    /// cannot repeat it and no call site has to track whether it already ran.
+    fn wire_text(&mut self, text: &str) -> String {
+        match self.briefing.take() {
+            Some(briefing) => format!("{briefing}\n\n---\n\n{text}"),
+            None => text.to_owned(),
+        }
+    }
+
+    /// Arm the one-shot briefing. Called between inserting the orchestrator's
+    /// pane and revealing it, which is what starts the session.
+    pub(in crate::workspace) fn set_briefing(&mut self, briefing: String) {
+        self.briefing = Some(briefing);
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn wire_text_for_test(&mut self, text: &str) -> String {
+        self.wire_text(text)
     }
 
     /// Resolve what Escape should do and apply it, in priority order:

@@ -71,6 +71,61 @@ impl TelegramBridge {
         let _ = self.outbound_tx.unbounded_send(Outbound::Notice(text));
     }
 
+    /// Mint an approval card's callback tokens, build it, and queue it.
+    ///
+    /// All three together so the tokens are registered before the message that
+    /// redeems them can be sent, and so nothing outside this module has to
+    /// know `BridgeCore` holds the table. `false` when there is no bridge to
+    /// ask through.
+    pub(crate) fn send_approval_card(
+        id: crate::control::approval::ApprovalId,
+        summary: String,
+        cx: &mut App,
+    ) -> bool {
+        // All three conditions, before minting anything. `install` runs
+        // unconditionally at startup, so the global existing says nothing
+        // about whether a message can actually go out — and the send task
+        // drops an unsendable card silently, which would leave the caller
+        // waiting out the whole approval timeout for a question the user
+        // never saw. Same three conditions `Workspace::telegram_bridge`
+        // asks, for the same reason: they must not disagree.
+        let deliverable = {
+            let cfg = SettingsStore::global(cx).user_arc();
+            cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
+        };
+        if !deliverable || cx.try_global::<TelegramBridge>().is_none() {
+            return false;
+        }
+        let bridge = cx.global_mut::<TelegramBridge>();
+        let (approve, refuse) = bridge.core.record_pending_approval(id);
+        let prompt = crate::telegram::bridge::ApprovalPrompt {
+            summary,
+            buttons: [
+                (s::control_approval_allow(), approve),
+                (s::control_approval_refuse(), refuse),
+            ],
+        };
+        let _ = bridge
+            .outbound_tx
+            .unbounded_send(Outbound::Approval(prompt));
+        true
+    }
+
+    /// Drop an approval's callback tokens once it has been decided.
+    ///
+    /// Settle-time cleanup, not tap-time: while a card is live, tapping twice
+    /// is ordinary use, so the tokens have to survive a tap. Once the request
+    /// is answered they are dead weight — and the table is bounded, so leaving
+    /// them would eventually evict a *live* card's tokens and leave the user
+    /// tapping a button that resolves nothing.
+    pub(crate) fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut App) {
+        if cx.try_global::<TelegramBridge>().is_some() {
+            cx.global_mut::<TelegramBridge>()
+                .core
+                .forget_pending_approval(id);
+        }
+    }
+
     /// Generate a fresh Settings pairing code; only one pairing flow is active.
     pub(crate) fn generate_pair_code(cx: &mut App) -> String {
         cx.global_mut::<TelegramBridge>().core.new_pair_code()
@@ -95,6 +150,15 @@ pub(crate) fn install_for_test(
         outbound_tx,
     });
     outbound_rx
+}
+
+/// How many approval tokens the bridge is still holding. Lets a test assert
+/// that a settled card leaves none — the property that keeps a bounded table
+/// from evicting a live card's buttons.
+#[cfg(test)]
+pub(crate) fn pending_approval_tokens_for_test(cx: &App) -> usize {
+    cx.try_global::<TelegramBridge>()
+        .map_or(0, |b| b.core.pending_approval_token_count())
 }
 
 /// Register the Telegram bridge global and spawn its poll + send
@@ -225,6 +289,27 @@ fn spawn_poll_task(cx: &mut App) {
                         let label = cx.update(|cx| select_target(pane, cx));
                         answer_only(cx, &token, callback_id, &label).await;
                     }
+                    // An approval button tap. The card keeps its buttons: the
+                    // tool call may still be waiting, and a second tap is
+                    // ordinary use rather than a second decision.
+                    (Some(callback_id), InboundAction::ResolveApproval { id, choice }) => {
+                        // The label follows what *happened*, not what was
+                        // tapped: the card keeps its buttons while it is live,
+                        // so a second, contradictory tap must not be told it
+                        // took effect. Same rule as `permission_feedback`.
+                        let settled =
+                            cx.update(|cx| crate::control::approval::resolve(id, choice, cx));
+                        let label = match (settled, choice) {
+                            (false, _) => s::control_approval_already_answered(),
+                            (true, crate::control::approval::ApprovalChoice::Approved) => {
+                                s::control_approval_allowed()
+                            }
+                            (true, crate::control::approval::ApprovalChoice::Refused) => {
+                                s::control_approval_refused()
+                            }
+                        };
+                        answer_only(cx, &token, callback_id, &label).await;
+                    }
                     // A tap on a superseded listing. Answered with its own
                     // wording and *not* edited — `answer_and_edit` drops the
                     // message's keyboard, which would strip the rows off a
@@ -326,6 +411,7 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
         }
         InboundAction::RespondPermission { .. }
         | InboundAction::SelectTarget { .. }
+        | InboundAction::ResolveApproval { .. }
         | InboundAction::StaleListing => {
             // All three always arrive as callbacks and are handled inline in
             // the poll loop, where their feedback can be accurate; they never
@@ -542,6 +628,39 @@ fn spawn_send_task(
             // message's destination).
             let ping = match outbound {
                 Outbound::Ping(ping) => ping,
+                // Like a notice, this belongs to no pane — so it skips
+                // `build_ping` and `record_sent`. Unlike one, it carries
+                // buttons, and a card the user cannot answer is worse than no
+                // card: the tool call would wait out the whole timeout.
+                Outbound::Approval(prompt) => {
+                    let approval_token = token;
+                    let keyboard = client::InlineKeyboard {
+                        rows: vec![prompt.buttons.to_vec()],
+                    };
+                    let sent = cx
+                        .background_executor()
+                        .spawn(async move {
+                            client::send_message(
+                                &approval_token,
+                                live_chat_id,
+                                &prompt.summary,
+                                None,
+                                Some(keyboard),
+                            )
+                        })
+                        .await;
+                    if let Err(e) = sent {
+                        LogWriter::log(
+                            ErrorReport::new("Telegram approval card failed to send")
+                                .severity(ErrorSeverity::Warning)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .dedup("telegram.approval")
+                                .build(),
+                        );
+                    }
+                    continue;
+                }
                 Outbound::Notice(text) => {
                     let notice_token = token;
                     let sent = cx

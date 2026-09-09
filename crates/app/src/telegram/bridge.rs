@@ -27,6 +27,16 @@ const SENT_PINGS_CAP: usize = 64;
 /// routes to `Ignore` on a later tap like any unknown one.
 const PENDING_PERMISSIONS_CAP: usize = 64;
 
+/// Callback-data prefix for an approval button. Distinct from the listing
+/// prefix and from a permission token (bare `Uuid::simple`, no `:`), so the
+/// three namespaces cannot collide structurally.
+const APPROVAL_TOKEN_PREFIX: &str = "apv";
+
+/// Approval tokens kept before the oldest is evicted. Two per card, and a
+/// card the user never answers times out on the app side — so this only
+/// bounds a pathological run of unanswered ones.
+const PENDING_APPROVALS_CAP: usize = 64;
+
 /// How long a generated `/pair` code stays valid. After this, `/pair`
 /// against it is rejected regardless of correctness and the pending
 /// code is cleared — the user must generate a fresh code in Settings.
@@ -115,6 +125,11 @@ pub enum InboundAction {
     ReportParseError {
         error: crate::control::spec::ParseError,
     },
+    /// An approval card's button was tapped.
+    ResolveApproval {
+        id: crate::control::approval::ApprovalId,
+        choice: crate::control::approval::ApprovalChoice,
+    },
     /// A listing button was tapped — make that pane the current target.
     SelectTarget {
         pane: PaneRef,
@@ -198,6 +213,10 @@ pub enum TelegramTail {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outbound {
     Ping(BridgePing),
+    /// A card asking the user to allow something an agent wants to create.
+    /// Belongs to no pane, so it is not a [`BridgePing`]: nothing here should
+    /// become the next plain message's destination.
+    Approval(ApprovalPrompt),
     /// Already-localized, already-plain text. Never markdown-parsed: it is
     /// composed from daruda's own strings and can carry a flow file name whose
     /// punctuation a markdown pass would misread.
@@ -215,6 +234,18 @@ pub struct BridgePing {
     pub header: String,
     pub tail: TelegramTail,
     pub permission: Option<PermissionPromptRef>,
+}
+
+/// A pending approval, ready to send. The two tokens are already registered
+/// with [`BridgeCore`], so a tap on either resolves without a second lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalPrompt {
+    /// One line naming what is being allowed.
+    pub summary: String,
+    /// `(label, callback token)` — allow first, so the thumb order matches
+    /// every other card daruda sends. Exactly two, in the type: a card with
+    /// one button or five is not a thing this asks.
+    pub buttons: [(String, String); 2],
 }
 
 /// The currently pending `/pair` code: text, mint time, and wrong-guess
@@ -260,6 +291,18 @@ pub struct BridgeCore {
     sent_pings_order: VecDeque<i64>,
     pending_permissions: HashMap<String, (PaneRef, u64, PermissionDecision)>,
     pending_permissions_order: VecDeque<String>,
+    /// Approval tokens. Deliberately *not* consumed on a tap, unlike
+    /// `pending_permissions`: the card stays on screen, and tapping the same
+    /// button twice is ordinary use rather than a second decision. The
+    /// approval store discards the redundant answer.
+    pending_approvals: HashMap<
+        String,
+        (
+            crate::control::approval::ApprovalId,
+            crate::control::approval::ApprovalChoice,
+        ),
+    >,
+    pending_approvals_order: VecDeque<String>,
     command_state: crate::telegram::command::CommandState,
 }
 
@@ -280,6 +323,8 @@ impl BridgeCore {
             sent_pings_order: VecDeque::new(),
             pending_permissions: HashMap::new(),
             pending_permissions_order: VecDeque::new(),
+            pending_approvals: HashMap::new(),
+            pending_approvals_order: VecDeque::new(),
             command_state: crate::telegram::command::CommandState::default(),
         }
     }
@@ -515,6 +560,16 @@ impl BridgeCore {
             };
         }
 
+        if data.starts_with(APPROVAL_TOKEN_PREFIX) {
+            return match self.pending_approvals.get(&data) {
+                Some((id, choice)) => InboundAction::ResolveApproval {
+                    id: *id,
+                    choice: *choice,
+                },
+                None => InboundAction::Ignore,
+            };
+        }
+
         match self.pending_permissions.remove(&data) {
             Some((pane, perm_id, decision)) => InboundAction::RespondPermission {
                 pane,
@@ -523,6 +578,54 @@ impl BridgeCore {
             },
             None => InboundAction::Ignore,
         }
+    }
+
+    /// Mint the two callback tokens one approval card needs and remember what
+    /// each means. Returns them in `(approve, refuse)` order.
+    pub fn record_pending_approval(
+        &mut self,
+        id: crate::control::approval::ApprovalId,
+    ) -> (String, String) {
+        use crate::control::approval::ApprovalChoice;
+        let approve = self.insert_pending_approval(id, ApprovalChoice::Approved);
+        let refuse = self.insert_pending_approval(id, ApprovalChoice::Refused);
+        (approve, refuse)
+    }
+
+    #[cfg(test)]
+    pub fn pending_approval_token_count(&self) -> usize {
+        self.pending_approvals.len()
+    }
+
+    /// Drop both of `id`'s tokens. Called when the request settles, so the
+    /// bounded table holds only cards that can still be answered.
+    pub fn forget_pending_approval(&mut self, id: crate::control::approval::ApprovalId) {
+        self.pending_approvals.retain(|_, (held, _)| *held != id);
+        self.pending_approvals_order
+            .retain(|token| self.pending_approvals.contains_key(token));
+    }
+
+    fn insert_pending_approval(
+        &mut self,
+        id: crate::control::approval::ApprovalId,
+        choice: crate::control::approval::ApprovalChoice,
+    ) -> String {
+        // Random rather than derived from `id`: a card survives a restart in
+        // the user's chat history while this table does not, and a derived
+        // token would let a stale button resolve a *new* request that happens
+        // to reuse the number.
+        let token = format!(
+            "{APPROVAL_TOKEN_PREFIX}:{}",
+            uuid::Uuid::new_v4().as_simple()
+        );
+        self.pending_approvals.insert(token.clone(), (id, choice));
+        self.pending_approvals_order.push_back(token.clone());
+        if self.pending_approvals_order.len() > PENDING_APPROVALS_CAP
+            && let Some(oldest) = self.pending_approvals_order.pop_front()
+        {
+            self.pending_approvals.remove(&oldest);
+        }
+        token
     }
 
     /// Shapes a `BridgePing` into an `OutboundMsg` ready for
@@ -874,6 +977,87 @@ mod tests {
         // Not `Ignore`: an authorized message that reaches nothing is answered,
         // because silence reads as the bot being broken.
         assert_eq!(result.action, InboundAction::NoTarget);
+    }
+
+    /// The card stays on screen while the tool call waits, so tapping the
+    /// same button twice is ordinary use — the token must survive it. (The
+    /// *decision* is deduplicated by the approval store, not here.)
+    #[test]
+    fn an_approval_token_survives_repeated_taps() {
+        use crate::control::approval::{ApprovalChoice, ApprovalId};
+        let mut bridge = BridgeCore::new(true, Some(42), 0);
+        let (approve, refuse) = bridge.record_pending_approval(ApprovalId(1));
+        assert_ne!(approve, refuse, "one token per button");
+
+        for _ in 0..2 {
+            assert_eq!(
+                bridge.route(callback(1, 42, "cbq-1", &approve)).action,
+                InboundAction::ResolveApproval {
+                    id: ApprovalId(1),
+                    choice: ApprovalChoice::Approved,
+                }
+            );
+        }
+        assert_eq!(
+            bridge.route(callback(2, 42, "cbq-2", &refuse)).action,
+            InboundAction::ResolveApproval {
+                id: ApprovalId(1),
+                choice: ApprovalChoice::Refused,
+            }
+        );
+    }
+
+    #[test]
+    fn an_approval_tap_from_an_unauthorized_chat_is_ignored() {
+        use crate::control::approval::ApprovalId;
+        let mut bridge = BridgeCore::new(true, Some(42), 0);
+        let (approve, _refuse) = bridge.record_pending_approval(ApprovalId(1));
+        assert_eq!(
+            bridge.route(callback(1, 99, "cbq-1", &approve)).action,
+            InboundAction::Ignore
+        );
+    }
+
+    /// A card that outlived the process leaves a button in the chat history;
+    /// its token must not resolve against a request this run happens to
+    /// number the same.
+    #[test]
+    fn an_approval_token_from_another_process_does_not_resolve() {
+        use crate::control::approval::ApprovalId;
+        let mut before = BridgeCore::new(true, Some(42), 0);
+        let (stale, _) = before.record_pending_approval(ApprovalId(1));
+
+        let mut after = BridgeCore::new(true, Some(42), 0);
+        let _ = after.record_pending_approval(ApprovalId(1));
+        assert_eq!(
+            after.route(callback(1, 42, "cbq-1", &stale)).action,
+            InboundAction::Ignore
+        );
+    }
+
+    /// Three token namespaces share one callback channel, so a token from one
+    /// must never be read as another's.
+    #[test]
+    fn the_three_token_namespaces_do_not_collide() {
+        use crate::control::approval::ApprovalId;
+        let mut bridge = BridgeCore::new(true, Some(42), 0);
+        let target = pane(1, 3);
+        bridge.pending_permissions.insert(
+            "abcdef0123456789".to_string(),
+            (target, 55, PermissionDecision::Allow("opt_yes".to_string())),
+        );
+        let (approve, _) = bridge.record_pending_approval(ApprovalId(1));
+
+        assert!(approve.starts_with(APPROVAL_TOKEN_PREFIX));
+        assert!(!approve.starts_with(crate::telegram::command::LISTING_TOKEN_PREFIX));
+        // A permission token is a bare `Uuid::simple`, so it carries neither
+        // prefix and still reaches the permission table.
+        assert!(matches!(
+            bridge
+                .route(callback(1, 42, "cbq-1", "abcdef0123456789"))
+                .action,
+            InboundAction::RespondPermission { .. }
+        ));
     }
 
     #[test]

@@ -30,10 +30,23 @@ struct ConfigWriter {
 
 impl Default for ConfigWriter {
     fn default() -> Self {
+        // Under `cfg(test)`, never the developer's own `config.toml`. A
+        // fixture that read it would inherit whichever switches that person
+        // happens to have on — the approval-card tests need Telegram *off*,
+        // and a real user has it on — and one that patched it would rewrite
+        // their settings. [`SettingsStore::set_user_for_testing`] replaces
+        // this with a directory it seeds itself.
+        #[cfg(test)]
+        {
+            let temp_dir = tempfile::tempdir().expect("settings test temp dir");
+            Self {
+                path: temp_dir.path().join("config.toml"),
+                _temp_dir: Some(temp_dir),
+            }
+        }
+        #[cfg(not(test))]
         Self {
             path: daruda_config::config_path(),
-            #[cfg(test)]
-            _temp_dir: None,
         }
     }
 }
@@ -57,10 +70,26 @@ impl Global for SettingsStore {}
 impl Default for SettingsStore {
     fn default() -> Self {
         Self {
-            user: Arc::new(Config::load()),
+            user: Arc::new(fresh_user_config()),
             project: BTreeMap::new(),
             writer: ConfigWriter::default(),
         }
+    }
+}
+
+/// The user layer a fresh store starts from.
+///
+/// Defaults rather than the file under `cfg(test)`, for the reason
+/// [`ConfigWriter::default`] gives: a test must not depend on which switches
+/// the developer running it has on.
+fn fresh_user_config() -> Config {
+    #[cfg(test)]
+    {
+        Config::default()
+    }
+    #[cfg(not(test))]
+    {
+        Config::load()
     }
 }
 
@@ -202,6 +231,36 @@ mod tests {
 
     /// `init(cx)` is idempotent — calling it twice does not overwrite
     /// an already-populated store. Mirrors the `tasks_global::init`
+    /// A fixture must not inherit — or overwrite — the settings of whoever
+    /// runs the suite. This is the guard for both halves: the read (a store
+    /// starts at defaults, not at the file) and the write (the patch path
+    /// addresses a temp file, not `config_path()`).
+    #[gpui::test]
+    fn a_test_store_never_addresses_the_developers_config(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            SettingsStore::init(cx);
+            let store = SettingsStore::global(cx);
+            assert_ne!(
+                store.writer.path,
+                daruda_config::config_path(),
+                "a patch from a test must not land in the developer's config"
+            );
+            // Field-wise, because `Config` is not `PartialEq`: these are the
+            // switches a real user turns on and a fixture must not see.
+            let user = store.user();
+            let default = Config::default();
+            assert_eq!(user.telegram.enabled, default.telegram.enabled);
+            assert_eq!(
+                user.telegram.authorized_chat_id,
+                default.telegram.authorized_chat_id
+            );
+            assert_eq!(
+                user.orchestrator.enabled, default.orchestrator.enabled,
+                "a fixture must not inherit whichever switches they have on"
+            );
+        });
+    }
+
     /// fixture expectation that production entry + test setup both
     /// call `init` without panicking on the second `set_global`.
     #[gpui::test]

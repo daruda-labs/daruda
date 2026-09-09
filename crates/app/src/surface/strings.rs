@@ -4948,6 +4948,12 @@ pub fn agent_notification_telegram_reply_ack() -> String {
 pub fn agent_notification_telegram_reply_queued() -> String {
     rust_i18n::t!("notification.telegram_reply_queued").into_owned()
 }
+pub fn agent_chat_queue_full() -> String {
+    rust_i18n::t!("agent_chat.queue_full").into_owned()
+}
+pub fn agent_notification_telegram_queue_full() -> String {
+    rust_i18n::t!("notification.telegram_queue_full").into_owned()
+}
 
 /// Body for the Telegram ack sent when a phone-triggered turn goes straight to
 /// a tool call with no preceding text.
@@ -5257,6 +5263,69 @@ pub fn control_usage_use() -> String {
 
 pub fn control_usage_say() -> String {
     rust_i18n::t!("control.usage_say").into_owned()
+}
+pub fn control_approval_lane_create(name: &str) -> String {
+    rust_i18n::t!("control.approval_lane_create", name = name).into_owned()
+}
+pub fn control_approval_chat_new(path: &str) -> String {
+    rust_i18n::t!("control.approval_chat_new", path = path).into_owned()
+}
+pub fn control_approval_allow() -> String {
+    rust_i18n::t!("control.approval_allow").into_owned()
+}
+pub fn control_approval_refuse() -> String {
+    rust_i18n::t!("control.approval_refuse").into_owned()
+}
+pub fn control_approval_already_answered() -> String {
+    rust_i18n::t!("control.approval_already_answered").into_owned()
+}
+pub fn control_approval_allowed() -> String {
+    rust_i18n::t!("control.approval_allowed").into_owned()
+}
+pub fn control_approval_refused() -> String {
+    rust_i18n::t!("control.approval_refused").into_owned()
+}
+pub fn control_lane_listing_empty() -> String {
+    rust_i18n::t!("control.lane_listing_empty").into_owned()
+}
+pub fn control_lane_listing_row(path: &str, chats: u32) -> String {
+    rust_i18n::t!("control.lane_listing_row", path = path, chats = chats).into_owned()
+}
+pub fn control_lane_created() -> String {
+    rust_i18n::t!("control.lane_created").into_owned()
+}
+pub fn control_chat_created() -> String {
+    rust_i18n::t!("control.chat_created").into_owned()
+}
+pub fn control_error_approval_refused() -> String {
+    rust_i18n::t!("control.error_approval_refused").into_owned()
+}
+pub fn control_error_approval_timed_out() -> String {
+    rust_i18n::t!("control.error_approval_timed_out").into_owned()
+}
+pub fn control_error_agent_limit_reached() -> String {
+    rust_i18n::t!("control.error_agent_limit_reached").into_owned()
+}
+pub fn control_error_queue_full() -> String {
+    rust_i18n::t!("control.error_queue_full").into_owned()
+}
+pub fn control_error_lane_create_failed() -> String {
+    rust_i18n::t!("control.error_lane_create_failed").into_owned()
+}
+pub fn control_error_lane_name_invalid() -> String {
+    rust_i18n::t!("control.error_lane_name_invalid").into_owned()
+}
+pub fn control_error_approvals_pending() -> String {
+    rust_i18n::t!("control.error_approvals_pending").into_owned()
+}
+pub fn control_error_approval_unavailable() -> String {
+    rust_i18n::t!("control.error_approval_unavailable").into_owned()
+}
+pub fn control_error_lane_create_busy() -> String {
+    rust_i18n::t!("control.error_lane_create_busy").into_owned()
+}
+pub fn control_error_self_target_refused() -> String {
+    rust_i18n::t!("control.error_self_target_refused").into_owned()
 }
 pub fn control_usage_daruda() -> String {
     rust_i18n::t!("control.usage_daruda").into_owned()

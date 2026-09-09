@@ -51,7 +51,7 @@ use std::time::Duration;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AuthCapabilities, BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest,
+    ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest, McpServer,
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
     SessionConfigOptionsCapabilities, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
@@ -425,9 +425,16 @@ pub fn connect_session(
         restore_mode,
         resume,
         agent_id,
+        Vec::new(),
     )
 }
 
+/// `mcp_servers` is what the new session may reach.
+///
+/// Passed at `session/new` rather than written into the agent's own config
+/// files, which keeps it session-scoped: nothing to clean up if the app dies,
+/// and a second session cannot inherit it.
+#[allow(clippy::too_many_arguments)]
 fn connect_session_inner(
     command: AdapterCommand,
     cwd: PathBuf,
@@ -436,6 +443,7 @@ fn connect_session_inner(
     restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
+    mcp_servers: Vec<McpServer>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent = AcpAgent::from_str(&command.0)
         .map_err(|e| AcpClientError::Command(format!("{e:?}")))
@@ -459,6 +467,7 @@ fn connect_session_inner(
             initial_modes,
             restore_mode,
             resume,
+            mcp_servers,
             command_rx,
             task_event_tx.clone(),
             permission_parks,
@@ -525,6 +534,7 @@ pub fn connect_agent_session_with_model(
     restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
+    mcp_servers: Vec<McpServer>,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
@@ -536,7 +546,57 @@ pub fn connect_agent_session_with_model(
         restore_mode,
         resume,
         agent_id,
+        mcp_servers,
     )
+}
+
+/// Build the stdio MCP server entry a session should be handed.
+///
+/// Here rather than at the call site so the app never names
+/// `agent_client_protocol` — the crate boundary CLAUDE.md draws is that ACP
+/// types live behind `daruda_acp`.
+pub fn stdio_mcp_server(
+    name: String,
+    command: PathBuf,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+) -> McpServer {
+    use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+
+    McpServer::Stdio(
+        McpServerStdio::new(name, command).args(args).env(
+            env.into_iter()
+                .map(|(name, value)| EnvVariable::new(name, value))
+                .collect(),
+        ),
+    )
+}
+
+/// `session/new` with the MCP servers this session should reach.
+///
+/// The field has always been in the schema; daruda simply never used it. A
+/// helper rather than an inline assignment so a test can pin the wiring
+/// without standing up a connection.
+fn build_new_session_request(cwd: PathBuf, mcp_servers: Vec<McpServer>) -> NewSessionRequest {
+    let mut request = NewSessionRequest::new(cwd);
+    request.mcp_servers = mcp_servers;
+    request
+}
+
+/// `session/load` with the same MCP servers a fresh session would get.
+///
+/// A resume re-establishes the whole session, servers included — the agent does
+/// not remember the list from the run that created the session id. Omitting it
+/// here leaves a resumed session connected but tool-less, with nothing to
+/// report because the request itself succeeded.
+fn build_load_session_request(
+    session_id: SessionId,
+    cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
+) -> LoadSessionRequest {
+    let mut request = LoadSessionRequest::new(session_id, cwd);
+    request.mcp_servers = mcp_servers;
+    request
 }
 
 /// What this client advertises at `initialize`.
@@ -754,7 +814,8 @@ fn forward_session_update(
 /// [`AcpAgent`]) so tests can wire an in-process fake agent — an SDK
 /// `Agent.builder()` implements `ConnectTo<Client>` too — and drive this exact
 /// code path deterministically, dispatch semantics included.
-#[allow(clippy::too_many_arguments)] // Internal connection state threaded through one call — bundling wraps callers more than it saves.
+// Internal connection state threaded through one call — bundling wraps callers more than it saves.
+#[allow(clippy::too_many_arguments)]
 async fn run_connection(
     agent: impl ConnectTo<Client> + 'static,
     cwd: PathBuf,
@@ -762,6 +823,7 @@ async fn run_connection(
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
     resume: Option<SessionId>,
+    mcp_servers: Vec<McpServer>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
     permission_parks: PermissionParks,
@@ -934,7 +996,7 @@ async fn run_connection(
                         .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::LoadingSession));
                     with_connect_timeout("session/load", CONNECT_RESUME_LOAD_TIMEOUT, async {
                         let loaded = connection
-                            .send_request(LoadSessionRequest::new(id.clone(), cwd))
+                            .send_request(build_load_session_request(id.clone(), cwd, mcp_servers))
                             .block_task()
                             .await?;
                         Ok((
@@ -952,7 +1014,7 @@ async fn run_connection(
                         .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::CreatingSession));
                     with_connect_timeout("session/new", CONNECT_HANDSHAKE_TIMEOUT, async {
                         let new_session = connection
-                            .send_request(NewSessionRequest::new(cwd))
+                            .send_request(build_new_session_request(cwd, mcp_servers))
                             .block_task()
                             .await?;
                         Ok((
@@ -1485,6 +1547,48 @@ fn resolve_resume(
 
 #[cfg(test)]
 mod tests {
+
+    /// The field has always been in the schema and daruda never used it; this
+    /// pins that a requested server actually rides out on `session/new`.
+    #[test]
+    fn new_session_carries_the_requested_mcp_servers() {
+        use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+
+        let server = McpServer::Stdio(
+            McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
+                .args(vec!["--mcp".to_string()])
+                .env(vec![EnvVariable::new("DARUDA_CONTROL_TOKEN", "tok")]),
+        );
+        let request = build_new_session_request(PathBuf::from("/tmp"), vec![server.clone()]);
+        assert_eq!(request.mcp_servers, vec![server]);
+        assert_eq!(request.cwd, PathBuf::from("/tmp"));
+    }
+
+    /// A resume must carry the servers too — see [`build_load_session_request`].
+    #[test]
+    fn a_resumed_session_carries_the_same_mcp_servers() {
+        use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+
+        let server = McpServer::Stdio(
+            McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
+                .args(vec![String::from("--mcp")])
+                .env(vec![EnvVariable::new("DARUDA_CONTROL_TOKEN", "tok")]),
+        );
+        let request = build_load_session_request(
+            SessionId::from("sess-1"),
+            PathBuf::from("/tmp"),
+            vec![server.clone()],
+        );
+        assert_eq!(request.mcp_servers, vec![server]);
+        assert_eq!(request.session_id, SessionId::from("sess-1"));
+        assert_eq!(request.cwd, PathBuf::from("/tmp"));
+    }
+
+    #[test]
+    fn no_requested_servers_leaves_the_list_empty() {
+        let request = build_new_session_request(PathBuf::from("/tmp"), Vec::new());
+        assert!(request.mcp_servers.is_empty());
+    }
     use super::*;
     use crate::model::ChatItem;
     use agent_client_protocol::schema::v1::{PermissionOptionId, SessionNotification};
@@ -1912,6 +2016,7 @@ mod tests {
                 vec!["plan".to_string()],
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2195,6 +2300,7 @@ mod tests {
                 Vec::new(),
                 None,
                 Some(SessionId::from("sess-root")),
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2255,6 +2361,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2380,6 +2487,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2448,6 +2556,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2611,6 +2720,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2656,6 +2766,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,
@@ -2715,6 +2826,7 @@ mod tests {
                 Vec::new(),
                 None,
                 None,
+                Vec::new(),
                 command_rx,
                 event_tx,
                 permission_parks,

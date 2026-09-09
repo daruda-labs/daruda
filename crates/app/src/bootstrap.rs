@@ -25,6 +25,19 @@ pub(crate) fn route_hook_subcommand() -> Option<i32> {
     None
 }
 
+/// Returns `Some(exit_code)` when invoked as `daruda --mcp`.
+///
+/// Routed here next to `--hook` so a non-GUI invocation exits without
+/// instantiating `Application`: a Metal context and a Dock presence per agent
+/// session is not free, and an agent may spawn several.
+pub(crate) fn route_mcp_subcommand() -> Option<i32> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some(crate::control::mcp::shim::SUBCOMMAND) {
+        return Some(crate::control::mcp::shim::run());
+    }
+    None
+}
+
 /// Observability bootstrap. Order matters — see module docs.
 pub(crate) fn init_observability() {
     daruda_store::observability::system_info::set_app_version(env!("CARGO_PKG_VERSION"));

@@ -30,6 +30,7 @@ pub use agent_client_protocol::schema::v1::SessionId;
 // `PermissionKindView` because that mapping renders an unrecognized kind as a
 // reject, which is right for a UI and wrong for anything selecting on it.
 pub use adapter::MessagePhase;
+pub use agent_client_protocol::schema::v1::McpServer;
 pub use agent_client_protocol::schema::v1::{
     ContentBlock, PermissionOption, PermissionOptionKind, SessionUpdate, ToolCall, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
@@ -52,6 +53,6 @@ pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
 pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision,
-    connect_agent_session, connect_agent_session_with_model, connect_session,
+    connect_agent_session, connect_agent_session_with_model, connect_session, stdio_mcp_server,
 };
 pub use wire_log::{Replay, ReplayError, agent_id_from_path, replay_log};

@@ -547,6 +547,24 @@ impl Workspace {
         );
     }
 
+    /// Send the "queue is full" notice. Same shape as the queued notice next
+    /// door, but a different fact: that one says "later", this one says "not
+    /// at all".
+    pub(in crate::workspace) fn relay_queue_full_notice_to_telegram(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) {
+        let header = self.telegram_header(pane_id, cx);
+        self.relay_to_telegram(
+            pane_id,
+            header,
+            TelegramTail::Plain(s::agent_notification_telegram_queue_full()),
+            None,
+            cx,
+        );
+    }
+
     /// Relay a phone-triggered turn's resolved first response: the agent's own
     /// text (markdown, truncated like the completion ping) or a fixed
     /// "checking via tool" note naming it. Bypasses the presence-defer gate
@@ -683,6 +701,11 @@ impl Workspace {
         }
         match self.send_agent_prompt_text_from_telegram(pane_id, text, cx) {
             Some(PromptDispatch::Queued) => self.relay_queued_notice_to_telegram(pane_id, cx),
+            // Reported, not lost: the sender is on a phone and would otherwise
+            // read the silence as the prompt having been accepted.
+            Some(PromptDispatch::QueueFull) => {
+                self.relay_queue_full_notice_to_telegram(pane_id, cx)
+            }
             Some(PromptDispatch::SentNow) => {}
             None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
         }

@@ -73,6 +73,39 @@ pub(crate) enum ResolvedCommand {
     Ask {
         text: String,
     },
+    /// Every worktree, including ones with no agent chat in them — the
+    /// listing `/list` answers with is chat-scoped and cannot name one.
+    LaneList,
+}
+
+/// A command that cannot be answered in one turn of the event loop.
+///
+/// Separate from [`ResolvedCommand`] rather than two more variants of it,
+/// because the difference is not cosmetic: each of these has to wait — for
+/// the user to tap an approval card, and for `git worktree add` on the
+/// background executor — so the executor hands back a channel instead of an
+/// outcome. Folding them in would leave `run` with two arms it could never
+/// answer, which is the unreachable state this split removes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GatedCommand {
+    /// Create a worktree and open a chat in it.
+    ///
+    /// Window-qualified: `ProjectId` is monotonic *per workspace*, so the id
+    /// alone names a project in every open window (see
+    /// [`crate::control::result::LaneHandle`]).
+    LaneCreate {
+        workspace: daruda_store::project::WorkspaceUuid,
+        project: daruda_store::project::ProjectId,
+        name: String,
+        base_ref: Option<String>,
+        agent: Option<String>,
+        prompt: Option<String>,
+    },
+    /// Another agent chat in a worktree that already exists.
+    ChatNew {
+        lane: crate::control::result::LaneHandle,
+        agent: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

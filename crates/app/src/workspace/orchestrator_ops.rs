@@ -28,6 +28,31 @@ impl Workspace {
         agent_id: String,
         cwd: PathBuf,
         account: AccountSelection,
+        briefing: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneId> {
+        let pane_id =
+            self.insert_orchestrator_chat_pane(agent_id, cwd, account, briefing, window, cx)?;
+        // Last, because revealing focuses the pane and focusing is what starts
+        // the session — everything the session depends on has to be true
+        // before this line.
+        self.reveal_new_agent_chat_pane(pane_id, window, cx);
+        Some(pane_id)
+    }
+
+    /// Everything [`Self::seed_orchestrator_chat_pane`] does except revealing.
+    ///
+    /// Split for the same reason `control_insert_chat` is: revealing starts a
+    /// real ACP adapter, whose task outlives a test and then trips gpui's
+    /// determinism assert in whichever test runs next — so a fixture can stand
+    /// an orchestrator up without a session.
+    fn insert_orchestrator_chat_pane(
+        &mut self,
+        agent_id: String,
+        cwd: PathBuf,
+        account: AccountSelection,
+        briefing: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
@@ -35,12 +60,31 @@ impl Workspace {
         // No lane, so the lane-derived cwd triple would be all `None` and the
         // pane would park in `Error`; the orchestrator supplies its own.
         let pane_id = self.insert_agent_chat_pane(agent_id, (Some(cwd), None, None), window, cx)?;
-        // Between insert and reveal on purpose: revealing focuses the pane,
-        // which is what starts the session, and the account decides which
-        // config dir that session runs under.
+        // Both before any reveal: the account decides which config dir the
+        // session runs under, and the briefing has to be armed before the
+        // first prompt can reach the wire.
         self.set_agent_chat_account(pane_id, account);
-        self.reveal_new_agent_chat_pane(pane_id, window, cx);
+        if let Some(briefing) = briefing
+            && let Some(view) = self.agent_chat_view(pane_id).cloned()
+        {
+            view.update(cx, |v, _| v.set_briefing(briefing));
+        }
         Some(pane_id)
+    }
+
+    /// [`Self::insert_orchestrator_chat_pane`] for a fixture that wants an
+    /// orchestrator window without a live session.
+    #[cfg(test)]
+    pub(crate) fn seed_orchestrator_chat_pane_unrevealed_for_test(
+        &mut self,
+        agent_id: String,
+        cwd: PathBuf,
+        account: AccountSelection,
+        briefing: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneId> {
+        self.insert_orchestrator_chat_pane(agent_id, cwd, account, briefing, window, cx)
     }
 
     /// Overwrite a freshly inserted chat pane's account. Narrow on purpose:
@@ -145,11 +189,7 @@ mod tests {
                 Workspace::new_with_project_for_test_full(
                     &config,
                     None,
-                    std::env::temp_dir().join(format!(
-                        "daruda_orchestrator_test_{}_{}",
-                        std::process::id(),
-                        next_id()
-                    )),
+                    unique_dir("state"),
                     window,
                     cx,
                 )
@@ -163,9 +203,15 @@ mod tests {
         )
     }
 
-    fn next_id() -> u64 {
+    /// A directory no other test in this process shares. Parallel tests write
+    /// real files here, so a fixed name would let them collide.
+    fn unique_dir(kind: &str) -> std::path::PathBuf {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "daruda_orchestrator_test_{}_{id}_{kind}",
+            std::process::id()
+        ))
     }
 
     fn seed(
@@ -176,17 +222,68 @@ mod tests {
         account: AccountSelection,
         cx: &mut TestAppContext,
     ) -> Option<PaneId> {
-        let cwd = std::env::temp_dir().join("daruda_orchestrator_cwd");
+        seed_at(fixture, account, None, cx).map(|(pane, _)| pane)
+    }
+
+    /// Same, also reporting the directory the pane was rooted at — unique per
+    /// call, so the assertion cannot pass against another test's leftovers.
+    fn seed_at(
+        fixture: &(
+            gpui::WindowHandle<gpui_component::Root>,
+            gpui::Entity<Workspace>,
+        ),
+        account: AccountSelection,
+        briefing: Option<String>,
+        cx: &mut TestAppContext,
+    ) -> Option<(PaneId, PathBuf)> {
+        // These are the tests that exercise the *revealing* seed, so a real
+        // ACP adapter really does start and wake this app from its own thread.
+        // gpui's sanctioned opt-out for that, rather than a determinism assert
+        // this test cannot honour — fixtures that only need a pane use
+        // `seed_orchestrator_chat_pane_unrevealed_for_test`.
+        cx.executor().allow_parking();
+        let cwd = unique_dir("cwd");
         std::fs::create_dir_all(&cwd).expect("cwd");
         let agent = daruda_config::Config::default().resolved_agents()[0]
             .id
             .clone();
-        cx.update_window(fixture.0.into(), |_, window, cx| {
-            fixture.1.update(cx, |ws, cx| {
-                ws.seed_orchestrator_chat_pane(agent, cwd, account, window, cx)
+        let pane = cx
+            .update_window(fixture.0.into(), |_, window, cx| {
+                fixture.1.update(cx, |ws, cx| {
+                    ws.seed_orchestrator_chat_pane(
+                        agent,
+                        cwd.clone(),
+                        account,
+                        briefing.clone(),
+                        window,
+                        cx,
+                    )
+                })
             })
-        })
-        .expect("window is live")
+            .expect("window is live")?;
+        Some((pane, cwd))
+    }
+
+    /// Production registers the orchestrator *before* seeding it
+    /// (`orchestrator::window::seed`), and the seed's reveal connects from
+    /// inside `workspace.update` — so the connect path asks "am I the
+    /// orchestrator?" about the entity it is already holding. Reading that
+    /// entity back through the registry's handle is a double-lease panic; this
+    /// pins the order that finds it.
+    #[gpui::test]
+    fn seeding_an_already_registered_orchestrator_does_not_double_lease(cx: &mut TestAppContext) {
+        let fixture = projectless_window(cx);
+        cx.update(|cx| {
+            crate::window_registry::WindowRegistry::register_orchestrator(
+                fixture.0.into(),
+                fixture.1.downgrade(),
+                cx,
+            );
+        });
+        assert!(
+            seed(&fixture, AccountSelection::SystemDefault, cx).is_some(),
+            "the seed completes rather than panicking"
+        );
     }
 
     /// The constructor's `add_tab` leaves a terminal pane; the seed must
@@ -211,12 +308,10 @@ mod tests {
     #[gpui::test]
     fn the_seeded_pane_is_rooted_at_the_directory_it_was_given(cx: &mut TestAppContext) {
         let fixture = projectless_window(cx);
-        let pane = seed(&fixture, AccountSelection::SystemDefault, cx).expect("seeded");
+        let (pane, expected) =
+            seed_at(&fixture, AccountSelection::SystemDefault, None, cx).expect("seeded");
         fixture.1.read_with(cx, |ws, _| {
-            assert_eq!(
-                ws.pane_local_cwd_for_test(pane),
-                Some(std::env::temp_dir().join("daruda_orchestrator_cwd")),
-            );
+            assert_eq!(ws.pane_local_cwd_for_test(pane), Some(expected));
         });
     }
 

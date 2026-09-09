@@ -12,6 +12,33 @@ use futures::{FutureExt as _, StreamExt as _};
 use crate::control::result::{ControlError, FlowOriginKind};
 use crate::workspace::flow_paths;
 
+/// The next thing the phone is told, once the run that produces it finishes.
+///
+/// `now_or_never` in a loop rather than `await`: the sender lives in a global,
+/// so an empty channel is `Pending` forever and awaiting it would turn a
+/// missing relay into a hang. The retry is for the *engine*, which runs a real
+/// subprocess — one `run_until_parked` only proves gpui has nothing left to
+/// do, not that `true` has exited, and under a loaded test machine it has not.
+fn outcome_reaches_the_phone(
+    outbound: &mut futures::channel::mpsc::UnboundedReceiver<crate::telegram::bridge::Outbound>,
+    cx: &mut TestAppContext,
+) -> Option<crate::telegram::bridge::Outbound> {
+    // The engine runs on a thread of its own and wakes this app from it,
+    // which gpui's test scheduler otherwise reports as non-determinism. This
+    // is the sanctioned opt-out for a test that awaits real work — and the
+    // real engine is the point here: hand-settling would skip
+    // `apply_flow_event`, the only production caller of the relay under test.
+    cx.executor().allow_parking();
+    for _ in 0..40 {
+        cx.run_until_parked();
+        if let Some(sent) = outbound.next().now_or_never().flatten() {
+            return Some(sent);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    None
+}
+
 /// A flow that stops to ask a person — the exact shape a phone cannot answer.
 const ASKS_A_PERSON: &str = "\
 version: 1
@@ -309,20 +336,8 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
     .expect("window is live");
 
     // The *real* engine and the *real* event pump produce the outcome — the
-    // flow is `run: "true"`, so it finishes on its own. Hand-settling would
-    // skip `apply_flow_event`, the only production caller, and leave the
-    // engine thread it already started running past the end of the test.
-    cx.run_until_parked();
-
-    // `now_or_never`, not `await`: the sender lives in the global, so an empty
-    // channel is `Pending` forever — a missing relay would hang this test
-    // instead of failing it, and a hang reads as an infrastructure problem
-    // rather than as the regression it is.
-    let sent = outbound
-        .next()
-        .now_or_never()
-        .flatten()
-        .expect("the outcome reaches the phone");
+    // flow is `run: "true"`, so it finishes on its own.
+    let sent = outcome_reaches_the_phone(&mut outbound, cx).expect("the outcome reaches the phone");
     match sent {
         crate::telegram::bridge::Outbound::Notice(text) => {
             assert_eq!(
@@ -332,6 +347,9 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
         }
         // A ping would register a reply-to, so answering "flow finished" would
         // prompt whichever agent spoke last.
+        crate::telegram::bridge::Outbound::Approval(prompt) => {
+            panic!("a flow outcome asks nothing: {prompt:?}")
+        }
         crate::telegram::bridge::Outbound::Ping(ping) => {
             panic!("a flow outcome must not be attributed to a pane: {ping:?}")
         }
@@ -377,14 +395,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
         });
     })
     .expect("window is live");
-    cx.run_until_parked();
-
-    // Same reasoning as above: fail, do not hang.
-    let sent = outbound
-        .next()
-        .now_or_never()
-        .flatten()
-        .expect("a stopped run still answers");
+    let sent = outcome_reaches_the_phone(&mut outbound, cx).expect("a stopped run still answers");
     let crate::telegram::bridge::Outbound::Notice(text) = sent else {
         panic!("a flow outcome must not be attributed to a pane");
     };

@@ -220,6 +220,11 @@ pub(in crate::workspace) enum PromptOrigin {
 pub(in crate::workspace) enum PromptDispatch {
     SentNow,
     Queued,
+    /// The pane is already holding `QUEUE_DEPTH_MAX` prompts, so this one was
+    /// not taken. A named outcome rather than a silent drop: every producer
+    /// (an agent's tool call, a phone `/say`, a person typing) has something
+    /// to tell whoever sent it.
+    QueueFull,
 }
 
 /// A Telegram-origin turn's first-response watch side effect, returned by
@@ -535,6 +540,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// The buffered/parked queue of prompts not yet on the wire, plus the
     /// in-flight-turn sequencing that gates draining it — see [`PromptQueue`].
     pub(in crate::workspace) queue: PromptQueue,
+    /// Text to put in front of this session's *first* prompt, without showing
+    /// it in the transcript. `None` for every pane but the orchestrator's,
+    /// which is briefed on what it is and which tools it has — see
+    /// `orchestrator::briefing`.
+    ///
+    /// One-shot: [`Self::wire_text`] takes it. A pane that carries none is
+    /// structurally unable to inject anything, so no send path needs to ask
+    /// whose pane it is.
+    briefing: Option<String>,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
@@ -733,6 +747,7 @@ impl AgentChatView {
             items: Vec::new(),
             handle: None,
             queue: PromptQueue::default(),
+            briefing: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
             telegram_first_response_watch: None,

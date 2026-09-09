@@ -33,6 +33,11 @@ struct AgentChatConnectionPlan {
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
     prepared: Option<PreparedAccount>,
+    /// MCP servers this session may reach. Non-empty for exactly one pane —
+    /// the orchestrator's — because a lane agent holding daruda's tools could
+    /// drive the app, which is the threat model this whole surface is shaped
+    /// around.
+    mcp_servers: Vec<daruda_acp::McpServer>,
 }
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
@@ -498,7 +503,46 @@ impl Workspace {
             initial_modes,
             restore_mode,
             prepared,
+            mcp_servers: self.mcp_servers_for_pane(pane_id, cx),
         })
+    }
+
+    /// The MCP servers one pane's session may reach.
+    ///
+    /// Exactly one pane gets any: the orchestrator's. Decided here, at the
+    /// single place a session is planned, rather than by whoever opens a pane
+    /// — a new pane path must not be able to hand out tools by omission.
+    fn mcp_servers_for_pane(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> Vec<daruda_acp::McpServer> {
+        let Some((_, weak)) = crate::window_registry::WindowRegistry::orchestrator(cx) else {
+            return Vec::new();
+        };
+        // Identity by entity id, never by reading the registry's handle back:
+        // this runs inside `prepare_agent_chat_connection`, which is already
+        // inside `Workspace::update`, and the orchestrator seeding its own
+        // pane *is* that workspace — so `weak.upgrade().read(cx)` would be a
+        // second lease on the entity we are in (CLAUDE.md pitfall 5).
+        if weak.entity_id() != cx.entity_id() {
+            return Vec::new();
+        }
+        if self.orchestrator_chat_pane().map(|p| p.pane) != Some(pane_id) {
+            return Vec::new();
+        }
+        crate::orchestrator::mcp_server(cx).into_iter().collect()
+    }
+
+    /// [`Self::mcp_servers_for_pane`], for the test that pins the threat
+    /// model: exactly one pane in the process may be offered the server.
+    #[cfg(test)]
+    pub(crate) fn mcp_servers_for_pane_for_test(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> Vec<daruda_acp::McpServer> {
+        self.mcp_servers_for_pane(pane_id, cx)
     }
 
     /// Open the live ACP session for an already-pushed pane and store the
@@ -525,6 +569,7 @@ impl Workspace {
             initial_modes,
             restore_mode,
             prepared,
+            mcp_servers,
         } = plan;
 
         // DIAG: an ACP adapter spawn that fails with `os error 2` means the
@@ -636,6 +681,7 @@ impl Workspace {
                         restore_mode,
                         resume.map(daruda_acp::SessionId::new),
                         &agent_id,
+                        mcp_servers,
                         &mut progress,
                     )
                 })

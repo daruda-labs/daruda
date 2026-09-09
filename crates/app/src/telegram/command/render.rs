@@ -108,13 +108,19 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         ControlResult::FlowList { flows } if flows.is_empty() => {
             plain(s::control_flow_list_empty())
         }
-        ControlResult::FlowList { flows } => plain(
-            flows
+        ControlResult::FlowList { flows } => {
+            let mut rows: Vec<String> = flows
                 .iter()
                 .map(|e| s::control_flow_list_row(&e.name, &origin_label(e.origin)))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
+                .collect();
+            // One row per name, not per worktree: the phone runs a flow in
+            // whichever window's active worktree has it, so two windows
+            // offering the same name are one choice to the person reading
+            // this. The rows arrive sorted by name, so duplicates are
+            // neighbours.
+            rows.dedup();
+            plain(rows.join("\n"))
+        }
         ControlResult::FlowStarting { name, .. } => plain(s::control_flow_starting(name)),
         ControlResult::Brief(brief) => plain(s::control_brief(
             brief.working,
@@ -122,6 +128,20 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             brief.error,
             brief.total,
         )),
+        ControlResult::LaneListing { lanes } if lanes.is_empty() => {
+            plain(s::control_lane_listing_empty())
+        }
+        ControlResult::LaneListing { lanes } => plain(
+            lanes
+                .iter()
+                .map(|l| {
+                    s::control_lane_listing_row(&s::control_lane_path(&l.project, &l.name), l.chats)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+        ControlResult::LaneCreated { .. } => plain(s::control_lane_created()),
+        ControlResult::ChatCreated { .. } => plain(s::control_chat_created()),
         ControlResult::Accepted { disposition } => plain(match disposition {
             AskDisposition::Connecting => s::control_ask_accepted_connecting(),
             AskDisposition::Sent => s::control_ask_accepted(),
@@ -147,6 +167,19 @@ fn render_error(error: &ControlError) -> String {
         ControlError::OrchestratorDisabled => s::control_error_orchestrator_disabled(),
         ControlError::OrchestratorUnresolvable => s::control_error_orchestrator_unresolvable(),
         ControlError::OrchestratorUnavailable => s::control_error_orchestrator_unavailable(),
+        ControlError::ApprovalRefused => s::control_error_approval_refused(),
+        ControlError::ApprovalTimedOut => s::control_error_approval_timed_out(),
+        ControlError::AgentLimitReached => s::control_error_agent_limit_reached(),
+        ControlError::QueueFull => s::control_error_queue_full(),
+        ControlError::SelfTargetRefused => s::control_error_self_target_refused(),
+        ControlError::LaneCreateBusy => s::control_error_lane_create_busy(),
+        // The phone gets the localized sentence, not git's words: a person
+        // reading a notification is not the caller that has to fix an
+        // argument. The detail is in the log and in the MCP result.
+        ControlError::LaneCreateFailed { .. } => s::control_error_lane_create_failed(),
+        ControlError::LaneNameInvalid => s::control_error_lane_name_invalid(),
+        ControlError::ApprovalUnavailable => s::control_error_approval_unavailable(),
+        ControlError::ApprovalsPending => s::control_error_approvals_pending(),
     }
 }
 

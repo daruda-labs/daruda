@@ -16,6 +16,9 @@ fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::
         crate::telegram::bridge::Outbound::Notice(text) => {
             panic!("an agent relay must be a ping, not a standalone notice: {text}")
         }
+        crate::telegram::bridge::Outbound::Approval(prompt) => {
+            panic!("an agent relay must be a ping, not an approval card: {prompt:?}")
+        }
     }
 }
 

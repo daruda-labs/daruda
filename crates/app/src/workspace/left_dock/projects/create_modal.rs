@@ -248,17 +248,7 @@ impl CreateWorktreeModal {
             return Err(s::create_lane_err_branch_required());
         }
         let branch = sanitize_branch_name(raw).ok_or_else(s::create_lane_err_branch_invalid)?;
-        let repo_name = self
-            .repo_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project");
-        let path_suffix = branch.replace('/', "-");
-        let new_path = self
-            .repo_root
-            .parent()
-            .unwrap_or(&self.repo_root)
-            .join(format!("{repo_name}-{path_suffix}"));
+        let new_path = crate::workspace::lane_ops::lane_checkout_path(&self.repo_root, &branch);
 
         let base_ref = blank_to_none(&self.base_input.read(cx).value());
         let description = blank_to_none(&self.description_input.read(cx).value());
@@ -336,6 +326,7 @@ impl CreateWorktreeModal {
                                         plan.clone(),
                                         project_id,
                                         daruda_store::tasks::TaskAgentSurface::Terminal,
+                                        None,
                                         window,
                                         cx,
                                     )

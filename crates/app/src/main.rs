@@ -189,6 +189,13 @@ fn main() {
         std::process::exit(code);
     }
 
+    // `daruda --mcp` is the stdio↔socket relay an ACP agent spawns to reach
+    // daruda's tools. Same reasoning as the hook above: it must not open a
+    // window, and an agent may run several at once.
+    if let Some(code) = bootstrap::route_mcp_subcommand() {
+        std::process::exit(code);
+    }
+
     // A GUI launch (Finder / Dock / `open`) inherits only launchd's minimal
     // PATH; hydrate it from the login shell so subprocesses spawned later —
     // the ACP `npx` adapter, the `claude` CLI — are found. No-op from a

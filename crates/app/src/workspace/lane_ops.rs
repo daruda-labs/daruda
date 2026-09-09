@@ -386,11 +386,18 @@ impl Workspace {
     /// in a Tab / LaneRuntime, register the Lane, and activate it. Errors
     /// leave the created worktree orphaned on disk (recover via `git
     /// worktree prune`) and bubble the message back to the modal.
+    /// `requested_agent` names the agent the initial chat pane opens under.
+    /// `None` keeps the session-sticky default; an id the catalog does not
+    /// hold falls back to that default too, which is
+    /// [`resolve_open_agent_id`]'s existing rule rather than a second one.
+    /// Only the control surface passes a value — the create form and the task
+    /// workflow both leave the choice to the session.
     pub(in crate::workspace) fn finalize_create_lane(
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
         surface: TaskAgentSurface,
+        requested_agent: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, String> {
@@ -435,7 +442,10 @@ impl Workspace {
                 // whose command needs the legacy `{{cwd}}` token parks in
                 // the "no remote path set" error rather than connecting;
                 // every other launch shape resolves to `Local`.
-                let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+                let agent_id = resolve_open_agent_id(
+                    &self.agents,
+                    requested_agent.or(self.last_agent_id.as_deref()),
+                );
                 self.create_new_agent_chat_pane(
                     agent_id,
                     Some(new_path.clone()),
@@ -971,6 +981,51 @@ impl Workspace {
             p.and_then(|p| p.default_branch.as_deref()),
         )
     }
+
+    /// Same, for a *named* project.
+    ///
+    /// The active-project form above is right for the create form, which only
+    /// ever makes a lane in the project on screen. A control command names its
+    /// project, and resolving that one against the active project's default
+    /// branch would branch from the wrong repository.
+    pub(in crate::workspace) fn resolve_lane_base_ref_for(
+        &self,
+        project: ProjectId,
+        requested: Option<String>,
+    ) -> Option<String> {
+        let p = self.project_for(project);
+        resolved_lane_base_ref(
+            requested,
+            p.and_then(|p| p.base_branch.as_deref()),
+            p.and_then(|p| p.default_branch.as_deref()),
+        )
+    }
+}
+
+/// Repo-basename fallback when a path has no final component. Never displayed
+/// — it only keeps the derived directory name from starting with a dash.
+const UNNAMED_REPO: &str = "project";
+
+/// Where a new lane's checkout goes: a sibling of the repository named
+/// `<repo>-<branch>`, with `/` folded to `-`.
+///
+/// One function because three paths derive it — the create form, the task
+/// workflow, and the control surface — and a lane an agent made has to sit
+/// where a lane the user made would. Folding the slash matters: `feat/x` would
+/// otherwise nest the checkout inside a stray `repo-feat` directory.
+pub(in crate::workspace) fn lane_checkout_path(
+    repo_root: &std::path::Path,
+    branch: &str,
+) -> std::path::PathBuf {
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(UNNAMED_REPO);
+    let suffix = branch.replace('/', "-");
+    repo_root
+        .parent()
+        .unwrap_or(repo_root)
+        .join(format!("{repo_name}-{suffix}"))
 }
 
 /// Effective base ref for a new lane: an explicit user choice wins;

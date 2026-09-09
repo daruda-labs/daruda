@@ -84,6 +84,59 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
     })
 }
 
+/// The contract the orchestrator briefing rests on: the agent is told more
+/// than the transcript shows, exactly once.
+///
+/// If the two ever converged, the person would either read a wall of
+/// instructions they never wrote (echo carries it) or the agent would never be
+/// briefed at all (wire drops it).
+#[gpui::test]
+fn a_briefing_rides_the_first_prompt_and_is_never_echoed(cx: &mut gpui::TestAppContext) {
+    let handle = make_test_view(cx);
+    handle
+        .update(cx, |view, _window, cx| {
+            view.set_briefing("YOU ARE THE ORCHESTRATOR".to_string());
+
+            let first = view.wire_text_for_test("open a tab on main");
+            assert!(
+                first.starts_with("YOU ARE THE ORCHESTRATOR"),
+                "the agent reads the briefing before the prompt: {first}"
+            );
+            assert!(
+                first.ends_with("open a tab on main"),
+                "and the person's words survive it verbatim: {first}"
+            );
+
+            // One-shot: a second turn is the person's words and nothing else.
+            assert_eq!(view.wire_text_for_test("and another"), "and another");
+
+            // The transcript is the echo, and the echo never saw a briefing.
+            view.echo_prompt("open a tab on main".to_string(), cx);
+            let shown: Vec<&str> = view
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    daruda_acp::ChatItem::UserText(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(shown, vec!["open a tab on main"]);
+        })
+        .expect("window is live");
+}
+
+/// A pane with no briefing cannot inject one — the property that keeps every
+/// lane agent out of this path without a single `if` asking whose pane it is.
+#[gpui::test]
+fn an_unbriefed_pane_sends_exactly_what_was_typed(cx: &mut gpui::TestAppContext) {
+    let handle = make_test_view(cx);
+    handle
+        .update(cx, |view, _window, _cx| {
+            assert_eq!(view.wire_text_for_test("run the tests"), "run the tests");
+        })
+        .expect("window is live");
+}
+
 #[gpui::test]
 fn host_is_dark_tracks_agent_chat_background_not_ui_theme(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
@@ -1018,7 +1071,8 @@ fn queued_telegram_prompt_arms_the_watch_only_once_drained(cx: &mut gpui::TestAp
     window
         .update(cx, |view, _window, cx| {
             view.set_turn_in_flight();
-            view.enqueue_prompt("from telegram".to_string(), super::PromptOrigin::Telegram);
+            view.enqueue_prompt("from telegram".to_string(), super::PromptOrigin::Telegram)
+                .expect("room in the queue");
             assert!(
                 !view.is_waiting_for_telegram_first_response(),
                 "queuing alone must not arm the watch"
@@ -1040,7 +1094,9 @@ fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppCont
     window
         .update(cx, |view, _window, cx| {
             view.set_turn_in_flight();
-            let id = view.enqueue_prompt("local draft".to_string(), super::PromptOrigin::InApp);
+            let id = view
+                .enqueue_prompt("local draft".to_string(), super::PromptOrigin::InApp)
+                .expect("room in the queue");
             view.begin_edit(id, cx);
 
             let dispatch = view.send_prompt_text_for_telegram("from phone".to_string(), cx);
@@ -1064,13 +1120,74 @@ fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppCont
         .unwrap();
 }
 
+/// The cap lives on the queue itself so every producer meets it, and a
+/// refusal is a named outcome — an unbounded queue and a silent drop are both
+/// worse than being told.
+#[gpui::test]
+fn a_full_queue_refuses_instead_of_growing_or_dropping(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.set_turn_in_flight();
+            view.fill_queue_for_test(crate::control::guards::QUEUE_DEPTH_MAX);
+            assert_eq!(
+                view.queued_prompt_count(),
+                crate::control::guards::QUEUE_DEPTH_MAX
+            );
+
+            assert_eq!(
+                view.enqueue_prompt("one too many".to_string(), super::PromptOrigin::InApp),
+                None
+            );
+            assert_eq!(
+                view.queued_prompt_count(),
+                crate::control::guards::QUEUE_DEPTH_MAX,
+                "a refusal must not grow the queue"
+            );
+
+            // Both submit funnels report it rather than pretending it landed.
+            assert_eq!(
+                view.send_prompt_text("typed".to_string(), cx),
+                super::PromptDispatch::QueueFull
+            );
+            assert_eq!(
+                view.send_prompt_text_for_telegram("from phone".to_string(), cx),
+                super::PromptDispatch::QueueFull
+            );
+        })
+        .unwrap();
+}
+
+/// A parked prompt still has to drain, so it counts — otherwise pressing Stop
+/// would reset the cap.
+#[gpui::test]
+fn a_paused_prompt_still_counts_against_the_cap(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            view.fill_queue_for_test(crate::control::guards::QUEUE_DEPTH_MAX);
+            let parked = std::mem::take(&mut view.queue.pending_prompts);
+            view.queue.paused_prompts = parked;
+            assert_eq!(
+                view.queued_prompt_count(),
+                crate::control::guards::QUEUE_DEPTH_MAX
+            );
+            assert_eq!(
+                view.enqueue_prompt("one too many".to_string(), super::PromptOrigin::InApp),
+                None
+            );
+        })
+        .unwrap();
+}
+
 #[gpui::test]
 fn queued_in_app_prompt_never_arms_the_watch(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
             view.set_turn_in_flight();
-            view.enqueue_prompt("typed in app".to_string(), super::PromptOrigin::InApp);
+            view.enqueue_prompt("typed in app".to_string(), super::PromptOrigin::InApp)
+                .expect("room in the queue");
             view.set_turn_idle();
 
             view.drain_next_queued_prompt_for_test(cx);

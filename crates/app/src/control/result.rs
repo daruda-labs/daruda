@@ -172,6 +172,69 @@ pub(crate) struct FlowEntry {
     /// same-stem files (`ship.yaml` / `ship.yml`) it means.
     pub name: String,
     pub origin: FlowOriginKind,
+    /// The worktree this flow belongs to.
+    ///
+    /// A flow is lane-scoped and every open window contributes its active
+    /// worktree's set, so a bare name does not say *where* it would run. Two
+    /// windows on different repositories can both offer `ship.yaml` and mean
+    /// different things.
+    pub lane: LaneHandle,
+}
+
+/// A worktree, addressed across the whole process.
+///
+/// Window-qualified for the reason [`PaneRef`] is: `ProjectId` and `LaneId`
+/// are monotonic *per workspace*, so `{ project: 0, lane: 0 }` exists in every
+/// open window. Without the uuid, two windows holding the same repository
+/// produce listing rows a caller cannot tell apart — and a command built from
+/// one of them would reach both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct LaneHandle {
+    pub workspace: daruda_store::project::WorkspaceUuid,
+    pub project: daruda_store::project::ProjectId,
+    /// Named `worktree` on the wire, matching what daruda has always
+    /// persisted and what [`daruda_store::project::LaneRef`] serializes.
+    #[serde(rename = "worktree", alias = "lane")]
+    pub lane: daruda_store::project::LaneId,
+}
+
+impl LaneHandle {
+    /// The window-local half, for a caller that has already resolved which
+    /// workspace this names.
+    pub(crate) fn lane_ref(self) -> daruda_store::project::LaneRef {
+        daruda_store::project::LaneRef {
+            project: self.project,
+            lane: self.lane,
+        }
+    }
+
+    /// Qualify a window-local ref with the workspace that owns it.
+    pub(crate) fn new(
+        workspace: daruda_store::project::WorkspaceUuid,
+        target: daruda_store::project::LaneRef,
+    ) -> Self {
+        Self {
+            workspace,
+            project: target.project,
+            lane: target.lane,
+        }
+    }
+}
+
+/// One worktree, as `daruda_worktree_list` reports it.
+///
+/// Carries the handle plus enough context to choose between rows without a
+/// second call: which project it belongs to, whether it is the one on screen,
+/// and how many chats are already in it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LaneEntry {
+    pub target: LaneHandle,
+    /// Display name of the owning project.
+    pub project: String,
+    pub name: String,
+    pub is_active: bool,
+    /// Open agent-chat panes in this worktree.
+    pub chats: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,12 +276,27 @@ pub(crate) enum ControlResult {
     FlowStarting {
         name: String,
         origin: FlowOriginKind,
+        /// Which worktree it started in. The command names no target, so this
+        /// is the only place the answer says where the run landed.
+        lane: LaneHandle,
     },
     Brief(BriefSummary),
     /// `/daruda` was accepted. The reply arrives later from the orchestrator
     /// pane.
     Accepted {
         disposition: AskDisposition,
+    },
+    LaneListing {
+        lanes: Vec<LaneEntry>,
+    },
+    /// A worktree and the chat pane that came with it — both handles, so the
+    /// caller can talk to the new agent without listing again.
+    LaneCreated {
+        target: LaneHandle,
+        chat: PaneRef,
+    },
+    ChatCreated {
+        target: PaneRef,
     },
 }
 
@@ -272,6 +350,51 @@ pub(crate) enum ControlError {
     /// not carry the reason: it is an internal failure the log holds, not
     /// something the caller can act on.
     OrchestratorUnavailable,
+    /// The user said no to a tool that creates something.
+    ApprovalRefused,
+    /// The card went unanswered. Distinct from a refusal: nobody decided, so
+    /// asking again later is reasonable where retrying a refusal is not.
+    ApprovalTimedOut,
+    /// The agent has created as many worktrees as it may. Refused before the
+    /// card, since there is nothing to ask about.
+    AgentLimitReached,
+    /// The addressed pane already holds as many queued prompts as it may.
+    QueueFull,
+    /// The orchestrator addressed its own pane, which would make a turn that
+    /// makes a turn.
+    SelfTargetRefused,
+    /// The worktree could not be created. Reported as its own code rather than
+    /// as `TargetGone`, which would send the caller looking for a target that
+    /// is there — the branch name, the base ref or the checkout path is the
+    /// problem.
+    ///
+    /// `detail` carries git's own words (`LC_ALL=C`, so not the user's locale),
+    /// because the caller here is usually a model whose only recovery is to
+    /// change an argument and which cannot read the log. Without it, "creation
+    /// failed" is indistinguishable from a refusal, and a model told only that
+    /// invents reasons.
+    LaneCreateFailed {
+        detail: String,
+    },
+    /// The name is not a usable branch name. Refused by `guard_gated`, before
+    /// the approval card, since a name git will reject is not worth a tap.
+    ///
+    /// A name that is *usable* but already taken by an existing branch is a
+    /// different case and still costs a tap: recognising it needs a `git`
+    /// call, which the pre-card guards are synchronous and so cannot make.
+    /// That one comes back as [`Self::LaneCreateFailed`] with git's words.
+    LaneNameInvalid,
+    /// daruda could not ask the user — the Telegram bridge is off, unpaired,
+    /// or has no token. Distinct from a refusal *and* from a timeout: nobody
+    /// declined and nobody failed to answer, the question never went out.
+    ApprovalUnavailable,
+    /// Too many approval cards are already waiting. Retryable once the user
+    /// has worked through them, unlike the refusals above.
+    ApprovalsPending,
+    /// Another worktree creation is already in flight for that repository.
+    /// Two `git worktree add` runs against one repo can leave a half-created
+    /// checkout, so the second one waits its turn rather than racing.
+    LaneCreateBusy,
 }
 
 impl std::fmt::Display for ControlError {
@@ -291,6 +414,18 @@ impl std::fmt::Display for ControlError {
             Self::OrchestratorDisabled => write!(f, "orchestrator is disabled"),
             Self::OrchestratorUnresolvable => write!(f, "orchestrator names no runnable agent"),
             Self::OrchestratorUnavailable => write!(f, "orchestrator would not start"),
+            Self::ApprovalRefused => write!(f, "the user refused"),
+            Self::ApprovalTimedOut => write!(f, "the approval went unanswered"),
+            Self::AgentLimitReached => write!(f, "agent worktree budget spent"),
+            Self::QueueFull => write!(f, "prompt queue full"),
+            Self::SelfTargetRefused => write!(f, "an agent may not prompt itself"),
+            Self::LaneCreateFailed { detail } => {
+                write!(f, "worktree creation failed: {detail}")
+            }
+            Self::LaneNameInvalid => write!(f, "not a usable branch name"),
+            Self::ApprovalUnavailable => write!(f, "no way to ask the user"),
+            Self::ApprovalsPending => write!(f, "too many approvals already waiting"),
+            Self::LaneCreateBusy => write!(f, "a worktree is already being created there"),
         }
     }
 }
@@ -301,6 +436,20 @@ pub(crate) type ControlOutcome = Result<ControlResult, ControlError>;
 mod tests {
     use super::*;
     use daruda_store::project::WorkspaceUuid;
+
+    fn sample_lane() -> LaneEntry {
+        LaneEntry {
+            target: LaneHandle {
+                workspace: WorkspaceUuid::new(),
+                project: 1,
+                lane: 2,
+            },
+            project: "daruda".into(),
+            name: "fix-picker".into(),
+            is_active: true,
+            chats: 2,
+        }
+    }
 
     fn sample_summary() -> ChatSummary {
         ChatSummary {
@@ -393,11 +542,13 @@ mod tests {
                 flows: vec![FlowEntry {
                     name: "ship.yaml".into(),
                     origin: FlowOriginKind::Repo,
+                    lane: sample_lane().target,
                 }],
             },
             ControlResult::FlowStarting {
                 name: "ship.yaml".into(),
                 origin: FlowOriginKind::Global,
+                lane: sample_lane().target,
             },
             ControlResult::Brief(BriefSummary {
                 working: 1,
@@ -417,6 +568,15 @@ mod tests {
             ControlResult::Accepted {
                 disposition: AskDisposition::HandledLocally,
             },
+            ControlResult::LaneListing { lanes: Vec::new() },
+            ControlResult::LaneListing {
+                lanes: vec![sample_lane()],
+            },
+            ControlResult::LaneCreated {
+                target: sample_lane().target,
+                chat: target,
+            },
+            ControlResult::ChatCreated { target },
         ];
         for case in cases {
             let json =
@@ -453,6 +613,18 @@ mod tests {
             ControlError::OrchestratorDisabled,
             ControlError::OrchestratorUnresolvable,
             ControlError::OrchestratorUnavailable,
+            ControlError::ApprovalRefused,
+            ControlError::ApprovalTimedOut,
+            ControlError::AgentLimitReached,
+            ControlError::QueueFull,
+            ControlError::SelfTargetRefused,
+            ControlError::LaneCreateBusy,
+            ControlError::LaneCreateFailed {
+                detail: "fatal: a branch named 'main' already exists".into(),
+            },
+            ControlError::LaneNameInvalid,
+            ControlError::ApprovalUnavailable,
+            ControlError::ApprovalsPending,
         ];
         for case in cases {
             let json =
@@ -492,6 +664,48 @@ mod tests {
         assert_eq!(ask_disposition(false, S::Delivered), A::Sent);
         assert_eq!(ask_disposition(false, S::Queued), A::Queued);
         assert_eq!(ask_disposition(false, S::HandledLocally), A::HandledLocally);
+    }
+
+    /// The wire key stays `worktree`, and both spellings deserialize — a
+    /// caller copying a listing row back must not have to translate it.
+    #[test]
+    fn a_lane_handle_serializes_with_the_persisted_key_name() {
+        let handle = LaneHandle {
+            workspace: WorkspaceUuid::new(),
+            project: 1,
+            lane: 2,
+        };
+        let json = serde_json::to_value(handle).expect("serialize");
+        assert_eq!(json["worktree"], 2);
+        assert!(json.get("lane").is_none());
+        assert_eq!(
+            serde_json::from_value::<LaneHandle>(json).expect("deserialize"),
+            handle
+        );
+
+        let aliased = serde_json::json!({
+            "workspace": handle.workspace,
+            "project": 1,
+            "lane": 2,
+        });
+        assert_eq!(
+            serde_json::from_value::<LaneHandle>(aliased).expect("alias"),
+            handle
+        );
+    }
+
+    /// The whole point of the type: two windows produce distinguishable
+    /// handles for the same window-local ref.
+    #[test]
+    fn two_windows_produce_different_handles_for_the_same_local_ref() {
+        let local = daruda_store::project::LaneRef {
+            project: 0,
+            lane: 0,
+        };
+        let a = LaneHandle::new(WorkspaceUuid::new(), local);
+        let b = LaneHandle::new(WorkspaceUuid::new(), local);
+        assert_ne!(a, b);
+        assert_eq!(a.lane_ref(), b.lane_ref(), "the local halves do match");
     }
 
     #[test]

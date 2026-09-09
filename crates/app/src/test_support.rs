@@ -128,7 +128,7 @@ pub(crate) fn register_test_orchestrator(
             crate::workspace::Workspace::new_with_project_for_test_full(
                 &config,
                 None,
-                std::env::temp_dir().join("daruda_orchestrator_wiring_test"),
+                control_test_data_dir(),
                 window,
                 cx,
             )
@@ -137,15 +137,18 @@ pub(crate) fn register_test_orchestrator(
         gpui_component::Root::new(ws, window, cx)
     });
     let ws = holder.borrow().clone().expect("workspace constructed");
-    let cwd = std::env::temp_dir().join("daruda_orchestrator_wiring_cwd");
+    // Unique per fixture: parallel tests must not share a state dir or a
+    // working directory (`control_test_data_dir` keys on pid + a counter).
+    let cwd = control_test_data_dir().join("orchestrator-cwd");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let agent = config.resolved_agents()[0].id.clone();
     cx.update_window(window.into(), |_, win, cx| {
         ws.update(cx, |ws, cx| {
-            ws.seed_orchestrator_chat_pane(
+            ws.seed_orchestrator_chat_pane_unrevealed_for_test(
                 agent,
                 cwd,
                 daruda_store::accounts::AccountSelection::SystemDefault,
+                None,
                 win,
                 cx,
             )

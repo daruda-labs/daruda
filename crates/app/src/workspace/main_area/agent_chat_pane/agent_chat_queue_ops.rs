@@ -7,10 +7,13 @@
 
 use gpui::{Context, Window};
 
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::view::{
     EscapeOutcome, PromptDispatch, PromptId, PromptOrigin, TelegramFirstResponseEffect,
 };
+use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -18,13 +21,28 @@ impl Workspace {
     /// Send `text` as a prompt to an Agent chat pane. Shim for the bottom-dock
     /// input: routes into the view, which echoes the prompt locally, forwards it
     /// over the session, and marks a turn in flight.
+    /// A refusal is toasted rather than swallowed: the composer clears on a
+    /// handled submit, so silence would look like the prompt was accepted.
+    /// The text is not restored — reaching the cap by hand means ten prompts
+    /// are already waiting, and the next turn frees a slot.
     pub(in crate::workspace) fn send_agent_prompt_text(
         &mut self,
         pane_id: PaneId,
         text: String,
         cx: &mut Context<Self>,
     ) {
-        let _ = self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, cx);
+        if let Some(PromptDispatch::QueueFull) =
+            self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, cx)
+        {
+            self.report_error(
+                ErrorReport::new(s::agent_chat_queue_full())
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup(format!("agent_chat.queue_full.{pane_id}"))
+                    .build(),
+                cx,
+            );
+        }
     }
 
     pub(super) fn relay_telegram_first_response_effect(
@@ -80,8 +98,7 @@ impl Workspace {
                 let prompt_dispatch = if origin == PromptOrigin::Telegram {
                     view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                 } else {
-                    view.update(cx, |v, cx| v.send_prompt_text(text, cx));
-                    PromptDispatch::SentNow
+                    view.update(cx, |v, cx| v.send_prompt_text(text, cx))
                 };
                 // Open the activity span on the idle→busy edge (stamps the
                 // working-indicator elapsed anchor at send). A returned

@@ -10,8 +10,8 @@ use gpui::{App, Context};
 use std::path::Path;
 
 use crate::control::result::{
-    Activity, ChatSummary, ControlError, FlowEntry, FlowOriginKind, Health, SendDisposition,
-    StopDisposition, sanitize_title,
+    Activity, ChatSummary, ControlError, FlowEntry, FlowOriginKind, Health, LaneEntry, LaneHandle,
+    SendDisposition, StopDisposition, sanitize_title,
 };
 use crate::telegram::bridge::PaneRef;
 use crate::workspace::Workspace;
@@ -85,6 +85,246 @@ impl Workspace {
         self.lane_for(target).map(|l| l.tab_order).unwrap_or(0)
     }
 
+    /// Every worktree in this window, grouped by project and then in tab
+    /// order within it.
+    ///
+    /// Deliberately not derived from [`Self::control_snapshot`]: that one is
+    /// chat-scoped, so a worktree with no agent chat in it — which is exactly
+    /// the one a caller wants to open a chat in — has no row there.
+    pub(crate) fn control_lane_list(&self) -> Vec<LaneEntry> {
+        let active = self.active;
+        let uuid = self.uuid();
+        let mut lanes: Vec<(u32, LaneEntry)> = self
+            .projects
+            .iter()
+            .flat_map(|project| {
+                project.lanes.iter().map(move |lane| {
+                    let target = LaneRef {
+                        project: project.id,
+                        lane: lane.id,
+                    };
+                    (
+                        lane.tab_order,
+                        LaneEntry {
+                            target: LaneHandle::new(uuid, target),
+                            project: project.name.clone(),
+                            name: lane.display_name(),
+                            is_active: target == active,
+                            chats: self.control_chat_count(target),
+                        },
+                    )
+                })
+            })
+            .collect();
+        // Name first so the listing reads alphabetically, then id so two
+        // projects sharing a basename stay apart instead of interleaving
+        // their worktrees — the same key `control::exec::collect_rows` sorts
+        // its chat rows by, for the same reason.
+        lanes.sort_by(|a, b| {
+            a.1.project
+                .cmp(&b.1.project)
+                .then_with(|| a.1.target.project.cmp(&b.1.target.project))
+                .then_with(|| a.0.cmp(&b.0))
+                .then_with(|| a.1.target.lane.cmp(&b.1.target.lane))
+        });
+        lanes.into_iter().map(|(_, entry)| entry).collect()
+    }
+
+    /// How many agent-chat panes one worktree holds. A worktree that has never
+    /// been activated has no runtime entry, which is zero rather than missing.
+    fn control_chat_count(&self, target: LaneRef) -> u32 {
+        self.main_area
+            .runtimes
+            .get(&target)
+            .map_or(0, |rt| {
+                rt.panes
+                    .iter()
+                    .filter(|p| p.agent_chat_view().is_some())
+                    .count()
+            })
+            .try_into()
+            .unwrap_or(u32::MAX)
+    }
+
+    /// The worktree this window is currently showing. Test-only: a control
+    /// command always names its target, so nothing in production asks.
+    #[cfg(test)]
+    pub(crate) fn control_active_lane(&self) -> LaneRef {
+        self.active
+    }
+
+    /// Whether this window holds `target`. The control surface's question:
+    /// its commands name a worktree that may live in any window, so the
+    /// dispatcher asks each one rather than reaching into `lane_for`.
+    pub(crate) fn control_has_lane(&self, target: LaneRef) -> bool {
+        self.lane_for(target).is_some()
+    }
+
+    /// Same, for a project.
+    pub(crate) fn control_has_project(&self, project: ProjectId) -> bool {
+        self.project_for(project).is_some()
+    }
+
+    /// Open another agent chat in an existing worktree.
+    ///
+    /// Activates the worktree first, because that is the only way daruda opens
+    /// a pane: the runtime a pane is inserted into is the *active* one, and
+    /// `finalize_create_lane` does the same for the pane it makes. So this
+    /// changes what is on screen — an agent's tool call moves the user's view.
+    pub(crate) fn control_chat_new(
+        &mut self,
+        target: LaneRef,
+        agent: Option<String>,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PaneRef, ControlError> {
+        let pane = self.control_insert_chat(target, agent, window, cx)?;
+        // Revealing focuses the pane, which starts the session — so it is the
+        // last step, the same split `open_agent_chat_pane_with_agent` uses.
+        self.reveal_new_agent_chat_pane(pane, window, cx);
+        Ok(PaneRef {
+            workspace: self.uuid(),
+            pane,
+        })
+    }
+
+    /// Everything [`Self::control_chat_new`] does except revealing the pane.
+    ///
+    /// Split out because revealing spawns a real ACP adapter, whose task
+    /// outlives a test and then trips gpui's determinism assert in whichever
+    /// test runs next — so a test can assert placement without a session.
+    fn control_insert_chat(
+        &mut self,
+        target: LaneRef,
+        agent: Option<String>,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PaneId, ControlError> {
+        // Both checks *before* activating: revealing a worktree and then
+        // refusing to open a pane in it leaves the user staring at an empty
+        // state for a tool call that failed.
+        let Some(lane) = self.lane_for(target) else {
+            return Err(ControlError::TargetGone);
+        };
+        if lane.availability != crate::lane::availability::LaneAvailability::Present {
+            return Err(ControlError::TargetGone);
+        }
+        self.activate_lane(target, window, cx);
+        let agent_id =
+            crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id(
+                &self.agents,
+                agent.as_deref().or(self.last_agent_id.as_deref()),
+            );
+        let cwds = self.active_lane_cwds();
+        self.insert_agent_chat_pane(agent_id, cwds, window, cx)
+            .ok_or(ControlError::TargetGone)
+    }
+
+    /// The insert half of [`Self::control_chat_new`], for a test that must not
+    /// start a session.
+    #[cfg(test)]
+    pub(crate) fn control_insert_chat_for_test(
+        &mut self,
+        target: LaneRef,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PaneId, ControlError> {
+        self.control_insert_chat(target, None, window, cx)
+    }
+
+    /// The worktree-creation plan `git worktree add` needs, derived from a
+    /// tool call's arguments.
+    ///
+    /// Split from [`Self::control_lane_finalize`] because the step between
+    /// them is blocking git I/O that has to run off the UI thread — the same
+    /// shape the task workflow already uses.
+    pub(in crate::workspace) fn control_lane_plan(
+        &self,
+        project: ProjectId,
+        name: &str,
+        base_ref: Option<String>,
+    ) -> Result<crate::workspace::lane_ops::CreateWorktreePlan, ControlError> {
+        // Validated here, before anything is spawned and before the approval
+        // card quotes it: an agent-supplied name reaches both `git worktree
+        // add -b` and a filesystem path, and the create form has always run it
+        // through the same rules (`create_modal`'s `sanitize_branch_name`).
+        // Letting git reject it instead would cost the user a tap and then
+        // blame them for a mistake they did not make.
+        let branch =
+            daruda_core::git::sanitize_branch_name(name).ok_or(ControlError::LaneNameInvalid)?;
+        let Some(repo_root) = self.project_for(project).map(|p| p.root.clone()) else {
+            return Err(ControlError::TargetGone);
+        };
+        Ok(crate::workspace::lane_ops::CreateWorktreePlan {
+            new_path: crate::workspace::lane_ops::lane_checkout_path(&repo_root, &branch),
+            branch,
+            repo_root,
+            base_ref: self.resolve_lane_base_ref_for(project, base_ref),
+            description: None,
+            // No host picker on this path, so the lane stays at `Lane::git`'s
+            // unanswered/Local default, exactly like a task-created one.
+            session_host: None,
+        })
+    }
+
+    /// Register a worktree that is already on disk, and report both handles.
+    ///
+    /// Delegates to `finalize_create_lane`, which owns branch bookkeeping and
+    /// the initial pane, so nothing here becomes a second way to make a lane.
+    pub(in crate::workspace) fn control_lane_finalize(
+        &mut self,
+        plan: crate::workspace::lane_ops::CreateWorktreePlan,
+        project: ProjectId,
+        agent: Option<String>,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(LaneRef, PaneRef), ControlError> {
+        let pane = self
+            .finalize_create_lane(
+                plan,
+                project,
+                daruda_store::tasks::TaskAgentSurface::AgentChat,
+                agent.as_deref(),
+                window,
+                cx,
+            )
+            // The checkout is on disk and only the bookkeeping failed, which
+            // is not something a caller can fix by asking differently — so
+            // the detail says that rather than forwarding the toast's
+            // localized wording onto a machine payload.
+            .map_err(|_| ControlError::LaneCreateFailed {
+                detail: "the worktree was created but daruda could not register it".to_owned(),
+            })?;
+        Ok((
+            self.active,
+            PaneRef {
+                workspace: self.uuid(),
+                pane,
+            },
+        ))
+    }
+
+    /// How many prompts one pane has waiting. `None` when the pane is gone,
+    /// which is a different refusal from a full queue.
+    ///
+    /// Counts both queues: a paused prompt still has to drain before a new
+    /// one does, so leaving it out would let the cap be bypassed by stopping.
+    pub(crate) fn agent_chat_queue_depth(&self, pane: PaneId, cx: &App) -> Option<usize> {
+        Some(self.agent_chat_view(pane)?.read(cx).queued_prompt_count())
+    }
+
+    /// Fill a pane's queue to `depth`, for the guard's test.
+    #[cfg(test)]
+    pub(crate) fn fill_prompt_queue_for_test(
+        &mut self,
+        pane: PaneId,
+        depth: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, _| v.fill_queue_for_test(depth));
+    }
+
     /// Send a prompt to one pane. Delegates to the existing Telegram-origin
     /// prompt path so slash classification and post-turn flush stay on their
     /// single funnel; only the disposition is surfaced instead of relayed.
@@ -106,6 +346,7 @@ impl Workspace {
         match self.send_agent_prompt_text_from_telegram(pane, text, cx) {
             Some(PromptDispatch::SentNow) => Ok(SendDisposition::Delivered),
             Some(PromptDispatch::Queued) => Ok(SendDisposition::Queued),
+            Some(PromptDispatch::QueueFull) => Err(ControlError::QueueFull),
             None => Ok(SendDisposition::HandledLocally),
         }
     }
@@ -143,6 +384,7 @@ impl Workspace {
                     .map(|found| FlowEntry {
                         name: flow_label(&found.path),
                         origin: map_origin(found.origin),
+                        lane: LaneHandle::new(self.uuid(), self.active),
                     })
                     .collect()
             })
@@ -200,6 +442,7 @@ impl Workspace {
         let entry = FlowEntry {
             name: label,
             origin: map_origin(found.origin),
+            lane: LaneHandle::new(self.uuid(), self.active),
         };
         // The guard reads the lock again, so a run that took it in between is
         // still caught — and answered, rather than reported as started.
@@ -329,13 +572,26 @@ fn last_activity_unix(view: &AgentChatView) -> Option<u64> {
 /// `pub(in crate::workspace)` at its source.
 #[cfg(test)]
 impl Workspace {
+    /// Insert a pane the way [`Self::control_insert_chat`] does — *without*
+    /// revealing it.
+    ///
+    /// Same reason: revealing focuses the pane, focusing starts a real ACP
+    /// adapter, and its task outlives the test and then trips gpui's
+    /// determinism assert in whichever test runs next. Every control test
+    /// addresses panes by id, so none of them needs the focus.
     pub(crate) fn open_agent_chat_pane_for_test(
         &mut self,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> PaneId {
-        self.open_agent_chat_pane(window, cx);
-        self.active_runtime().panes.last().expect("pane opened").id
+        let agent_id =
+            crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id(
+                &self.agents,
+                self.last_agent_id.as_deref(),
+            );
+        let cwds = self.active_lane_cwds();
+        self.insert_agent_chat_pane(agent_id, cwds, window, cx)
+            .expect("pane opened")
     }
 
     /// Add `count` lanes to the active project, each holding one agent-chat
@@ -403,6 +659,7 @@ impl Workspace {
 mod tests {
     use super::*;
     use crate::test_support::workspace_with_agent_chat;
+    use gpui::AppContext as _;
 
     #[test]
     fn health_separates_a_dead_session_from_one_that_never_started() {
@@ -426,6 +683,190 @@ mod tests {
             map_activity(ActivityState::AwaitingPermission),
             Activity::AwaitingPermission
         );
+    }
+
+    /// A worktree with no agent chat in it still exists and is still a place
+    /// to open one — which is exactly why this is not derived from
+    /// `control_snapshot`.
+    #[gpui::test]
+    async fn lane_list_reports_every_lane_not_just_chatty_ones(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let extra = cx
+            .update_window(fixture.window.into(), |_, window, cx| {
+                fixture.workspace.update(cx, |ws, cx| {
+                    let project = ws.active.project;
+                    let root = ws.project_for(project).expect("project").root.clone();
+                    let lane_id = ws.alloc_id();
+                    let lane = crate::lane::Lane::default_for_project(lane_id, root);
+                    ws.project_for_mut(project)
+                        .expect("project")
+                        .lanes
+                        .push(lane);
+                    let _ = (window, cx);
+                    LaneRef {
+                        project,
+                        lane: lane_id,
+                    }
+                })
+            })
+            .expect("window is live");
+
+        fixture.workspace.read_with(cx, |ws, _| {
+            let lanes = ws.control_lane_list();
+            assert!(
+                lanes.len() >= 2,
+                "the chatless lane is listed too: {lanes:?}"
+            );
+            assert!(lanes.iter().all(|l| !l.name.is_empty()));
+            let chatless = lanes
+                .iter()
+                .find(|l| l.target.lane_ref() == extra)
+                .expect("the added lane");
+            assert_eq!(chatless.chats, 0);
+            assert!(!chatless.is_active);
+            let active = lanes.iter().find(|l| l.is_active).expect("one active lane");
+            assert_eq!(active.chats, 1, "the fixture's chat is counted");
+        });
+    }
+
+    #[gpui::test]
+    async fn chat_new_opens_a_pane_in_the_named_lane(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let before = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx).len());
+        let target = fixture.workspace.read_with(cx, |ws, _| ws.active);
+
+        // The insert half only: revealing spawns a real ACP adapter, whose
+        // background task outlives the test and then trips gpui's determinism
+        // assert in whichever test runs next.
+        let pane = cx
+            .update_window(fixture.window.into(), |_, window, cx| {
+                fixture.workspace.update(cx, |ws, cx| {
+                    ws.control_insert_chat_for_test(target, window, cx)
+                })
+            })
+            .expect("window is live")
+            .expect("created");
+
+        fixture.workspace.read_with(cx, |ws, cx| {
+            let snap = ws.control_snapshot(cx);
+            assert_eq!(snap.len(), before + 1);
+            assert!(snap.iter().any(|(_, s)| s.target.pane == pane));
+            assert_eq!(
+                ws.control_active_lane(),
+                target,
+                "the pane went into the worktree that was named"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn chat_new_on_a_missing_lane_is_target_gone(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let bogus = LaneRef {
+            project: 9_999,
+            lane: 9_999,
+        };
+        let result = cx
+            .update_window(fixture.window.into(), |_, window, cx| {
+                fixture
+                    .workspace
+                    .update(cx, |ws, cx| ws.control_chat_new(bogus, None, window, cx))
+            })
+            .expect("window is live");
+        assert_eq!(result, Err(ControlError::TargetGone));
+    }
+
+    #[gpui::test]
+    async fn a_lane_plan_for_a_missing_project_is_target_gone(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.read_with(cx, |ws, _| {
+            assert!(matches!(
+                ws.control_lane_plan(9_999, "x", None),
+                Err(ControlError::TargetGone)
+            ));
+        });
+    }
+
+    /// The plan has to name a sibling of the repo, so a lane an agent made
+    /// sits where a lane the user made would.
+    /// An agent-supplied name reaches `git worktree add -b` and a filesystem
+    /// path, so it is validated before anything is spawned and before the
+    /// approval card quotes it. Letting git reject it instead would cost the
+    /// user a tap and then blame them for it.
+    #[gpui::test]
+    async fn a_hostile_lane_name_is_refused_before_anything_runs(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.read_with(cx, |ws, _| {
+            let project = ws.control_active_lane().project;
+            for name in [
+                "",
+                "   ",
+                "../../pwn",
+                "has:colon",
+                "has space",
+                "trailing.",
+                "/leading",
+                "tilde~",
+                "star*",
+                "back\\slash",
+            ] {
+                assert!(
+                    matches!(
+                        ws.control_lane_plan(project, name, None),
+                        Err(ControlError::LaneNameInvalid)
+                    ),
+                    "{name:?} must not reach git"
+                );
+            }
+        });
+    }
+
+    /// A slash is legal in a branch name but must not nest the checkout: the
+    /// path suffix folds it, exactly as the create form does.
+    #[gpui::test]
+    async fn a_slashed_branch_name_stays_one_directory_deep(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.read_with(cx, |ws, _| {
+            let project = ws.control_active_lane().project;
+            let root = ws.project_for(project).expect("project").root.clone();
+            let plan = ws
+                .control_lane_plan(project, "feat/x", None)
+                .expect("a slash is a legal branch name");
+            assert_eq!(plan.branch, "feat/x");
+            assert_eq!(plan.new_path.parent(), root.parent());
+            assert!(
+                plan.new_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with("-feat-x")),
+                "{:?}",
+                plan.new_path
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn a_lane_plan_puts_the_checkout_beside_its_repo(cx: &mut gpui::TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.read_with(cx, |ws, _| {
+            let project = ws.active.project;
+            let root = ws.project_for(project).expect("project").root.clone();
+            let plan = ws
+                .control_lane_plan(project, "fix-picker", None)
+                .expect("planned");
+            assert_eq!(plan.branch, "fix-picker");
+            assert_eq!(plan.repo_root, root);
+            assert_eq!(plan.new_path.parent(), root.parent());
+            let name = plan
+                .new_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("name");
+            assert!(name.ends_with("-fix-picker"), "{name}");
+            assert!(plan.session_host.is_none());
+        });
     }
 
     #[gpui::test]
