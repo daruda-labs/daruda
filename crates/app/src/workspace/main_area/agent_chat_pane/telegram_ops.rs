@@ -13,6 +13,7 @@ use gpui::Context;
 use crate::surface::strings as s;
 use crate::telegram::bridge::BotPermissionOutcome;
 use crate::telegram::bridge::TelegramTail;
+use crate::telegram::trace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -144,14 +145,31 @@ pub(in crate::workspace) fn ready_to_deliver(
 /// pending `Completion` (a newer completion supersedes an older one's "last
 /// response"); post-turn deltas and permissions accumulate, bounded by
 /// [`MAX_DEFERRED_PER_PANE`] (oldest evicted first).
-fn push_deferred(queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
+fn push_deferred(pane_id: PaneId, queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
     if entry.kind == DeferKind::Completion {
+        let before = queue.len();
         queue.retain(|e| e.kind != DeferKind::Completion);
+        let superseded = before - queue.len();
+        if superseded > 0 {
+            trace::state("defer.superseded", || {
+                format!("pane={pane_id} dropped={superseded}")
+            });
+        }
     }
     queue.push(entry);
+    let mut evicted = 0usize;
     while queue.len() > MAX_DEFERRED_PER_PANE {
         queue.remove(0);
+        evicted += 1;
     }
+    if evicted > 0 {
+        trace::state("defer.evicted", || {
+            format!("pane={pane_id} dropped={evicted} cap={MAX_DEFERRED_PER_PANE}")
+        });
+    }
+    trace::state("defer.held", || {
+        format!("pane={pane_id} depth={}", queue.len())
+    });
 }
 
 /// Splits a pane's deferred queue into `(ready, still_holding)`: a permission
@@ -430,15 +448,35 @@ impl Workspace {
         // stash (or send) a ping while disabled, unpaired, or before the
         // bridge global is installed — the same gate, asked once.
         if self.telegram_bridge(cx).is_none() {
+            trace::delivery("relay.gated", || {
+                format!("pane={pane_id} entry=defer kind={kind:?} reason=bridge")
+            });
             return;
         }
+        // One reading, shared by the decision and the trace: two calls could
+        // disagree, and a line describing a presence the decision never saw
+        // is worse than no line.
+        let app_active = crate::platform::attention::is_app_active();
         let defer = should_defer_relay(
             self.telegram.defer_while_active,
-            crate::platform::attention::is_app_active(),
+            app_active,
             self.telegram.active_idle_secs,
         );
+        trace::delivery("relay.defer", || {
+            format!(
+                "pane={pane_id} kind={kind:?} defer={defer} quiet_secs={} {} text={}",
+                self.telegram.active_idle_secs,
+                trace::presence(
+                    app_active,
+                    self.lane_ref_for_pane(pane_id),
+                    self.active_ref()
+                ),
+                trace::tail_digest(&tail)
+            )
+        });
         if defer {
             push_deferred(
+                pane_id,
                 self.deferred_telegram.entry(pane_id).or_default(),
                 DeferredRelay {
                     kind,
@@ -473,8 +511,22 @@ impl Workspace {
         cx: &Context<Self>,
     ) {
         let Some(bridge) = self.telegram_bridge(cx) else {
+            trace::delivery("relay.gated", || {
+                format!("pane={pane_id} entry=direct reason=bridge")
+            });
             return;
         };
+        trace::delivery("relay.send", || {
+            format!(
+                "pane={pane_id} {} text={}",
+                trace::presence(
+                    crate::platform::attention::is_app_active(),
+                    self.lane_ref_for_pane(pane_id),
+                    self.active_ref()
+                ),
+                trace::tail_digest(&tail)
+            )
+        });
         bridge.send(crate::telegram::bridge::BridgePing {
             pane: crate::telegram::bridge::PaneRef {
                 workspace: self.uuid(),
@@ -514,9 +566,13 @@ impl Workspace {
     /// backwards — the same reasoning that keeps a command reply out of the
     /// deferral queue.
     pub(in crate::workspace) fn relay_notice_to_telegram(&self, text: String, cx: &Context<Self>) {
-        if let Some(bridge) = self.telegram_bridge(cx) {
-            bridge.send_notice(text);
-        }
+        let Some(bridge) = self.telegram_bridge(cx) else {
+            trace::delivery("relay.gated", || {
+                format!("entry=notice reason=bridge text={}", trace::digest(&text))
+            });
+            return;
+        };
+        bridge.send_notice(text);
     }
 
     /// Send the "queued behind the current turn" notice — fires the instant

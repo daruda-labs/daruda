@@ -2,7 +2,8 @@
 //! and reply/approve permissions remotely. Holds the keychain wrapper
 //! for the bot token (non-secret settings live in
 //! `daruda_config::TelegramConfig`), the raw Bot API HTTP client, the
-//! pure routing state machine, and the GPUI poll/send wiring.
+//! pure routing state machine, the GPUI poll/send wiring, and the
+//! env-gated debug trace the transport loops write to.
 
 pub mod bridge;
 pub mod client;
@@ -10,3 +11,4 @@ pub(crate) mod command;
 pub mod global;
 pub mod keychain;
 mod markdown;
+pub(crate) mod trace;

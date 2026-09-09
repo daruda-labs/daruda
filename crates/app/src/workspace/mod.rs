@@ -1924,13 +1924,36 @@ impl Workspace {
     ) {
         let now = std::time::Instant::now();
         let pending = std::mem::take(&mut self.deferred_telegram);
+        crate::telegram::trace::delivery("defer.flush", || {
+            format!(
+                "panes={} app_active={app_active} idle_secs={idle_secs:.0} \
+                 quiet_secs={quiet_secs} active_lane={}",
+                pending.len(),
+                crate::telegram::trace::lane_ref(self.active_ref())
+            )
+        });
         for (pane_id, queue) in pending {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+                crate::telegram::trace::delivery("defer.pane_gone", || {
+                    format!("pane={pane_id} dropped={}", queue.len())
+                });
                 continue;
             };
+            let held = queue.len();
             let live_perms = view.read(cx).pending_permissions.clone();
             let (ready, still_holding) =
                 partition_deferred(queue, &live_perms, now, app_active, idle_secs, quiet_secs);
+            // `held - ready - holding` is the third outcome `partition_deferred`
+            // has and neither vector shows: a permission ping whose request was
+            // answered in-app, dropped rather than delivered.
+            crate::telegram::trace::delivery("defer.partition", || {
+                format!(
+                    "pane={pane_id} held={held} ready={} holding={} dropped={}",
+                    ready.len(),
+                    still_holding.len(),
+                    held - ready.len() - still_holding.len()
+                )
+            });
             for entry in ready {
                 self.relay_to_telegram(pane_id, entry.header, entry.tail, entry.permission, cx);
             }

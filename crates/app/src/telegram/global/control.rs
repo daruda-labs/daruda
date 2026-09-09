@@ -21,6 +21,7 @@ use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::PaneRef;
 use crate::telegram::client;
 use crate::telegram::command;
+use crate::telegram::trace;
 
 /// How long one "unauthorized inbound" line suppresses the next.
 ///
@@ -37,6 +38,10 @@ const UNAUTHORIZED_LOG_WINDOW: std::time::Duration = std::time::Duration::from_s
 pub(super) fn log_unauthorized_inbound() {
     use std::sync::Mutex;
     static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+    // Ahead of the rate limit on purpose: the limit exists to keep the shared
+    // NDJSON log readable, and an opt-in trace wants every occurrence.
+    trace::delivery("inbound.unauthorized", || "dropped=1".to_string());
 
     let now = std::time::Instant::now();
     {
@@ -80,6 +85,7 @@ pub(super) fn persist_offset(cx: &mut gpui::AsyncApp) {
     let Some(offset) = offset else {
         return;
     };
+    trace::state("offset", || format!("persisted={offset}"));
     let state = daruda_store::telegram::TelegramState {
         update_offset: offset,
     };
@@ -107,6 +113,7 @@ pub(super) fn run_command(
     command: ControlCommand,
     cx: &mut gpui::AsyncApp,
 ) -> command::RenderedReply {
+    trace::delivery("command", || format!("{command:?}"));
     let step = cx.update(|cx| {
         let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
         command::resolve_command(command, state)
@@ -158,6 +165,7 @@ pub(super) fn run_command(
 /// remembering that pane. Without the second half, the *next* plain message
 /// resolves to the same dead target and is lost just as silently.
 pub(super) fn report_target_gone(pane: PaneRef, cx: &mut App) -> command::RenderedReply {
+    trace::state("target.forgotten", || format!("pane={}", trace::pane(pane)));
     let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
     state.forget(pane);
     command::render(
@@ -176,6 +184,7 @@ pub(super) fn render_outcome(outcome: &ControlOutcome, cx: &mut App) -> command:
 /// Point the target at `pane` and produce the toast naming it. A tap is the
 /// same act as `/use <n>`, so it goes through the same render funnel.
 pub(super) fn select_target(pane: PaneRef, cx: &mut App) -> String {
+    trace::state("target.selected", || format!("pane={}", trace::pane(pane)));
     let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
     state.select(Some(pane));
     let summary = state.summary_for(pane);
@@ -206,8 +215,16 @@ pub(super) async fn send_command_reply(
             .flatten()
     });
     let Some(chat_id) = chat_id else {
+        trace::delivery("reply.dropped", || {
+            format!("reason=gate text={}", trace::preview(&reply.text))
+        });
         return;
     };
+    let text = trace::is_on().then(|| trace::preview(&reply.text));
+    let buttons: usize = reply
+        .keyboard
+        .as_ref()
+        .map_or(0, |k| k.rows.iter().map(Vec::len).sum());
     let send_token = token.to_string();
     let sent = cx
         .background_executor()
@@ -215,6 +232,13 @@ pub(super) async fn send_command_reply(
             client::send_message(&send_token, chat_id, &reply.text, None, reply.keyboard)
         })
         .await;
+    trace::delivery("send.reply", || {
+        format!(
+            "chat_id={chat_id} ok={} buttons={buttons} text={}",
+            sent.is_ok(),
+            trace::opt(text)
+        )
+    });
     if let Err(e) = sent {
         LogWriter::log(
             ErrorReport::new("Telegram command reply failed")
@@ -242,6 +266,13 @@ pub(super) async fn answer_only(
         .background_executor()
         .spawn(async move { client::answer_callback(&ack_token, &callback_id, Some(&toast)) })
         .await;
+    trace::delivery("answer_callback", || {
+        format!(
+            "ok={} edits=false label={}",
+            answered.is_ok(),
+            trace::preview(label)
+        )
+    });
     if let Err(e) = answered {
         LogWriter::log(
             ErrorReport::new("Telegram answerCallbackQuery failed")

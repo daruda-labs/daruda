@@ -112,13 +112,16 @@ fn mk_relay(kind: super::DeferKind) -> super::DeferredRelay {
     }
 }
 
+/// Any pane id — `push_deferred` only carries it into a trace line.
+const PANE: super::PaneId = 1;
+
 #[test]
 fn push_deferred_keeps_one_completion_but_accumulates_others() {
     use super::DeferKind;
     let mut q = Vec::new();
-    super::push_deferred(&mut q, mk_relay(DeferKind::Completion));
-    super::push_deferred(&mut q, mk_relay(DeferKind::PostTurn));
-    super::push_deferred(&mut q, mk_relay(DeferKind::Completion));
+    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Completion));
+    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::PostTurn));
+    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Completion));
     assert_eq!(q.len(), 2);
     assert_eq!(q[0].kind, DeferKind::PostTurn);
     assert_eq!(q[1].kind, DeferKind::Completion);
@@ -130,7 +133,7 @@ fn push_deferred_evicts_oldest_beyond_cap() {
     let mut q = Vec::new();
     let extra = 5;
     for i in 0..(super::MAX_DEFERRED_PER_PANE + extra) as u64 {
-        super::push_deferred(&mut q, mk_relay(DeferKind::Permission { perm_id: i }));
+        super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Permission { perm_id: i }));
     }
     assert_eq!(q.len(), super::MAX_DEFERRED_PER_PANE);
     // The oldest entries (ids 0..extra) were evicted; the newest survive.

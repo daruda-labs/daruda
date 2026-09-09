@@ -21,7 +21,9 @@ use super::bridge::{
 };
 use super::client;
 use super::keychain;
+use super::trace;
 use crate::control::result::ControlError;
+use crate::platform::attention::is_app_active;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 use crate::window_registry::WindowRegistry;
@@ -62,13 +64,36 @@ impl Global for TelegramBridge {}
 impl TelegramBridge {
     /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
-        let _ = self.outbound_tx.unbounded_send(Outbound::Ping(ping));
+        let (pane, permission) = (ping.pane, ping.permission.is_some());
+        let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
+        match self.outbound_tx.unbounded_send(Outbound::Ping(ping)) {
+            Ok(()) => trace::delivery("queue.ping", || {
+                format!(
+                    "{} pane={} permission={permission} text={}",
+                    trace::enqueue_slot(),
+                    trace::pane(pane),
+                    trace::opt(text)
+                )
+            }),
+            // Only reachable once the send loop is gone, which is to say once
+            // nothing will ever be delivered again — worth a line of its own
+            // rather than the silent drop this used to be.
+            Err(_) => trace::delivery("queue.closed", || {
+                format!("kind=ping pane={}", trace::pane(pane))
+            }),
+        }
     }
 
     /// Queue a standalone notice — text owed to a command the phone sent,
     /// belonging to no pane. See [`Outbound`] for why the distinction matters.
     pub(crate) fn send_notice(&self, text: String) {
-        let _ = self.outbound_tx.unbounded_send(Outbound::Notice(text));
+        let digest = trace::is_on().then(|| trace::digest(&text));
+        match self.outbound_tx.unbounded_send(Outbound::Notice(text)) {
+            Ok(()) => trace::delivery("queue.notice", || {
+                format!("{} text={}", trace::enqueue_slot(), trace::opt(digest))
+            }),
+            Err(_) => trace::delivery("queue.closed", || "kind=notice".to_string()),
+        }
     }
 
     /// Mint an approval card's callback tokens, build it, and queue it.
@@ -94,6 +119,9 @@ impl TelegramBridge {
             cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
         };
         if !deliverable || cx.try_global::<TelegramBridge>().is_none() {
+            trace::delivery("queue.approval.refused", || {
+                format!("id={id:?} deliverable={deliverable}")
+            });
             return false;
         }
         let bridge = cx.global_mut::<TelegramBridge>();
@@ -105,9 +133,21 @@ impl TelegramBridge {
                 (s::control_approval_refuse(), refuse),
             ],
         };
-        let _ = bridge
+        trace::state("approval.tokens", || format!("id={id:?} minted=2"));
+        let digest = trace::is_on().then(|| trace::digest(&prompt.summary));
+        match bridge
             .outbound_tx
-            .unbounded_send(Outbound::Approval(prompt));
+            .unbounded_send(Outbound::Approval(prompt))
+        {
+            Ok(()) => trace::delivery("queue.approval", || {
+                format!(
+                    "{} id={id:?} text={}",
+                    trace::enqueue_slot(),
+                    trace::opt(digest)
+                )
+            }),
+            Err(_) => trace::delivery("queue.closed", || format!("kind=approval id={id:?}")),
+        }
         true
     }
 
@@ -120,6 +160,7 @@ impl TelegramBridge {
     /// tapping a button that resolves nothing.
     pub(crate) fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut App) {
         if cx.try_global::<TelegramBridge>().is_some() {
+            trace::state("approval.forgotten", || format!("id={id:?}"));
             cx.global_mut::<TelegramBridge>()
                 .core
                 .forget_pending_approval(id);
@@ -128,6 +169,9 @@ impl TelegramBridge {
 
     /// Generate a fresh Settings pairing code; only one pairing flow is active.
     pub(crate) fn generate_pair_code(cx: &mut App) -> String {
+        // The value is deliberately absent: it authorizes a chat, and this
+        // file is plain text that outlives the pairing window.
+        trace::state("pair_code.minted", || "replaced=pending".to_string());
         cx.global_mut::<TelegramBridge>().core.new_pair_code()
     }
 }
@@ -199,7 +243,7 @@ pub fn install(cx: &mut App) {
 fn spawn_poll_task(cx: &mut App) {
     cx.spawn(async move |cx| {
         loop {
-            let (enabled, token, offset) = cx.update(|cx| {
+            let (enabled, chat_id, token, offset) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
                 let bridge = cx.global_mut::<TelegramBridge>();
                 bridge.core.set_enabled(cfg.telegram.enabled);
@@ -208,10 +252,14 @@ fn spawn_poll_task(cx: &mut App) {
                     .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
                 (
                     bridge.core.is_enabled(),
+                    cfg.telegram.authorized_chat_id,
                     keychain::read_token(),
                     bridge.core.current_offset(),
                 )
             });
+            // Why an idle bridge writes no line of its own: the gate is
+            // resynced every iteration, so only its transitions are traced.
+            trace::gate_change(enabled, chat_id, token.is_some());
 
             if !enabled {
                 cx.background_executor().timer(IDLE_RECHECK).await;
@@ -234,6 +282,7 @@ fn spawn_poll_task(cx: &mut App) {
             let updates = match fetched {
                 Ok(updates) => updates,
                 Err(e) => {
+                    trace::delivery("poll.failed", || format!("offset={offset} error={e}"));
                     LogWriter::log(
                         ErrorReport::new("Telegram getUpdates failed")
                             .severity(ErrorSeverity::Info)
@@ -247,6 +296,18 @@ fn spawn_poll_task(cx: &mut App) {
                 }
             };
 
+            // Read after the fetch returns, not before it: the long-poll can
+            // block for POLL_TIMEOUT_SECS, so a presence reading taken at the
+            // top of the iteration would describe the wrong moment entirely.
+            let app_active = trace::is_on().then(|| cx.update(|_cx| is_app_active()));
+            trace::delivery("poll", || {
+                format!(
+                    "offset={offset} count={} app_active={}",
+                    updates.len(),
+                    trace::opt(app_active)
+                )
+            });
+
             // One update at a time, routed and then acted on before the next
             // is routed. A batch can hold `/use 2` and a plain message that
             // means it: routing them together would resolve the second
@@ -256,11 +317,29 @@ fn spawn_poll_task(cx: &mut App) {
             // before any side effect (HTTP calls, cross-workspace dispatch)
             // — routing is the only step that touches `BridgeCore` directly.
             for update in updates {
+                let update_id = update.update_id;
+                trace::delivery("inbound", || {
+                    format!(
+                        "update_id={update_id} kind={} chat_id={} app_active={} \
+                         payload={}",
+                        trace::update_kind_name(&update.kind),
+                        trace::opt(trace::update_chat_id(&update.kind)),
+                        trace::opt(app_active),
+                        trace::update_payload(&update.kind)
+                    )
+                });
                 let RouteResult {
                     action,
                     answer_callback_id,
                     callback_edit,
                 } = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.route(update));
+                trace::delivery("routed", || {
+                    format!(
+                        "update_id={update_id} action={} answers_callback={}",
+                        trace::action_name(&action),
+                        answer_callback_id.is_some()
+                    )
+                });
 
                 match (answer_callback_id, action) {
                     // A permission button tap: apply the decision FIRST so the
@@ -278,6 +357,13 @@ fn spawn_poll_task(cx: &mut App) {
                         dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
                             outcome =
                                 ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx);
+                        });
+                        trace::delivery("permission", || {
+                            format!(
+                                "pane={} perm_id={perm_id} decision={decision:?} \
+                                 outcome={outcome:?}",
+                                trace::pane(pane)
+                            )
                         });
                         let label = permission_feedback(&decision, outcome);
                         answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
@@ -308,6 +394,9 @@ fn spawn_poll_task(cx: &mut App) {
                                 s::control_approval_refused()
                             }
                         };
+                        trace::delivery("approval.tap", || {
+                            format!("id={id:?} choice={choice:?} settled={settled}")
+                        });
                         answer_only(cx, &token, callback_id, &label).await;
                     }
                     // A tap on a superseded listing. Answered with its own
@@ -350,6 +439,13 @@ fn spawn_poll_task(cx: &mut App) {
                         dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
                             delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
                         });
+                        trace::delivery("inject", || {
+                            format!(
+                                "pane={} delivered={delivered} text={}",
+                                trace::pane(pane),
+                                trace::preview(&text)
+                            )
+                        });
                         if !delivered {
                             let reply = cx.update(|cx| report_target_gone(pane, cx));
                             send_command_reply(cx, &token, reply).await;
@@ -386,6 +482,7 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
     match action {
         InboundAction::Ignore => log_unauthorized_inbound(),
         InboundAction::Paired { chat_id } => {
+            trace::state("paired", || format!("chat_id={chat_id}"));
             // `BridgeCore::route`'s `Paired` branch already updated the
             // in-memory `authorized_chat_id` — this persists it so pairing
             // survives a restart.
@@ -448,6 +545,14 @@ async fn answer_and_edit(
         .background_executor()
         .spawn(async move { client::answer_callback(&ack_token, &callback_id, Some(&toast)) })
         .await;
+    trace::delivery("answer_callback", || {
+        format!(
+            "ok={} edits={} label={}",
+            answered.is_ok(),
+            callback_edit.is_some(),
+            trace::preview(label)
+        )
+    });
     if let Err(e) = answered {
         LogWriter::log(
             ErrorReport::new("Telegram answerCallbackQuery failed")
@@ -462,6 +567,7 @@ async fn answer_and_edit(
     let Some(edit) = callback_edit else {
         return;
     };
+    let (edit_chat_id, edit_message_id) = (edit.chat_id, edit.message_id);
     let body = compose_edit_body(&edit.original_text, label);
     let edit_token = token.to_string();
     let edited = cx
@@ -470,6 +576,12 @@ async fn answer_and_edit(
             client::edit_message_text(&edit_token, edit.chat_id, edit.message_id, &body)
         })
         .await;
+    trace::delivery("edit_message", || {
+        format!(
+            "chat_id={edit_chat_id} message_id={edit_message_id} ok={}",
+            edited.is_ok()
+        )
+    });
     if let Err(e) = edited {
         LogWriter::log(
             ErrorReport::new("Telegram editMessageText failed")
@@ -566,6 +678,13 @@ fn spawn_send_task(
 ) {
     cx.spawn(async move |cx| {
         while let Some(outbound) = outbound_rx.next().await {
+            trace::delivery("queue.drained", || {
+                format!(
+                    "{} kind={}",
+                    trace::drain_slot(),
+                    trace::outbound_kind(&outbound)
+                )
+            });
             // Check for a token BEFORE touching `BridgeCore` state —
             // `build_ping` registers permission tokens as a side effect;
             // if the message that would let the phone redeem them is
@@ -576,6 +695,7 @@ fn spawn_send_task(
             // `pending_permissions`.
             let token = cx.update(|_cx| keychain::read_token());
             let Some(token) = token else {
+                trace::delivery("send.dropped", || "reason=no_token".to_string());
                 // The caller only builds a ping when the feature is on and a
                 // chat is paired, so reaching here means the config says
                 // "paired" while the Keychain has no token — the relay is dead
@@ -603,22 +723,28 @@ fn spawn_send_task(
             // agent response queued before an unpair to be addressed to the
             // chat the user just revoked. Config is the single source of
             // truth for where a ping may go; this is where it is asked.
-            let live_chat_id = cx.update(|cx| {
+            let (enabled, chat_id) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
                 let bridge = cx.global_mut::<TelegramBridge>();
                 bridge.core.set_enabled(cfg.telegram.enabled);
                 bridge
                     .core
                     .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                cfg.telegram
-                    .enabled
-                    .then_some(cfg.telegram.authorized_chat_id)
-                    .flatten()
+                (cfg.telegram.enabled, cfg.telegram.authorized_chat_id)
             });
-            let Some(live_chat_id) = live_chat_id else {
+            // A token is in hand by here, so `has_token` is not in question —
+            // shares the poll loop's dedup slot, which reports the real value.
+            trace::gate_change(enabled, chat_id, true);
+            let Some(live_chat_id) = enabled.then_some(chat_id).flatten() else {
                 // Disabled or unpaired since this was queued. Dropped rather
                 // than held: its context is gone, and the chat it was meant
                 // for may no longer be the user's.
+                trace::delivery("send.dropped", || {
+                    format!(
+                        "reason=gate enabled={enabled} chat_id={}",
+                        trace::opt(chat_id)
+                    )
+                });
                 continue;
             };
 
@@ -633,6 +759,7 @@ fn spawn_send_task(
                 // buttons, and a card the user cannot answer is worse than no
                 // card: the tool call would wait out the whole timeout.
                 Outbound::Approval(prompt) => {
+                    let summary = trace::is_on().then(|| trace::digest(&prompt.summary));
                     let approval_token = token;
                     let keyboard = client::InlineKeyboard {
                         rows: vec![prompt.buttons.to_vec()],
@@ -649,6 +776,13 @@ fn spawn_send_task(
                             )
                         })
                         .await;
+                    trace::delivery("send.approval", || {
+                        format!(
+                            "chat_id={live_chat_id} ok={} text={}",
+                            sent.is_ok(),
+                            trace::opt(summary)
+                        )
+                    });
                     if let Err(e) = sent {
                         LogWriter::log(
                             ErrorReport::new("Telegram approval card failed to send")
@@ -662,6 +796,7 @@ fn spawn_send_task(
                     continue;
                 }
                 Outbound::Notice(text) => {
+                    let notice = trace::is_on().then(|| trace::digest(&text));
                     let notice_token = token;
                     let sent = cx
                         .background_executor()
@@ -669,6 +804,13 @@ fn spawn_send_task(
                             client::send_message(&notice_token, live_chat_id, &text, None, None)
                         })
                         .await;
+                    trace::delivery("send.notice", || {
+                        format!(
+                            "chat_id={live_chat_id} ok={} text={}",
+                            sent.is_ok(),
+                            trace::opt(notice)
+                        )
+                    });
                     if let Err(e) = sent {
                         // Warning, not Info: a command reply is missed the
                         // instant it fails because the user is looking at the
@@ -700,6 +842,23 @@ fn spawn_send_task(
                 tail,
                 keyboard,
             } = msg;
+            // One token per button, so the keyboard's width *is* what
+            // `build_ping` just registered in `pending_permissions`.
+            let buttons: usize = keyboard
+                .as_ref()
+                .map_or(0, |k| k.rows.iter().map(Vec::len).sum());
+            if buttons > 0 {
+                trace::state("permission.tokens", || {
+                    format!("pane={} registered={buttons}", trace::pane(pane))
+                });
+            }
+            trace::delivery("send.ping", || {
+                format!(
+                    "chat_id={chat_id} pane={} buttons={buttons} text={}",
+                    trace::pane(pane),
+                    trace::tail_digest(&tail)
+                )
+            });
             // Computed up front (not inside the spawn below), since both
             // `header` and `tail` get moved into the closure next.
             let plain_text = plain_body(&header, &tail);
@@ -729,7 +888,12 @@ fn spawn_send_task(
                         keyboard.clone(),
                     ) {
                         Ok(id) => Ok(id),
-                        Err(_) => {
+                        Err(e) => {
+                            // The only place this error is ever named: the
+                            // fallback below discards it by design.
+                            trace::delivery("send.html_rejected", || {
+                                format!("chat_id={chat_id} error={e}")
+                            });
                             client::send_message(&token, chat_id, &plain_text, None, keyboard)
                         }
                     }
@@ -738,6 +902,12 @@ fn spawn_send_task(
 
             match sent {
                 Ok(message_id) => {
+                    trace::state("sent_pings", || {
+                        format!(
+                            "message_id={message_id} pane={} last_pinged=true",
+                            trace::pane(pane)
+                        )
+                    });
                     cx.update(|cx| {
                         cx.global_mut::<TelegramBridge>()
                             .core
@@ -745,6 +915,7 @@ fn spawn_send_task(
                     });
                 }
                 Err(e) => {
+                    trace::delivery("send.failed", || format!("chat_id={chat_id} error={e}"));
                     LogWriter::log(
                         ErrorReport::new("Telegram sendMessage failed")
                             .severity(ErrorSeverity::Info)

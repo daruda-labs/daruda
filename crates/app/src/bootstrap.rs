@@ -63,6 +63,22 @@ pub(crate) fn init_observability() {
             std::env::set_var("DARUDA_ACP_WIRE_LOG", dir.join("acp-wire.log"));
         }
     }
+    // Dev-build Telegram trace, on the same terms as the wire tap above and
+    // for the same reason: the bridge's per-message traffic and gate
+    // transitions belong in their own file, not in the NDJSON error log.
+    #[cfg(debug_assertions)]
+    if std::env::var_os(crate::telegram::trace::TRACE_ENV).is_none()
+        && let Some(dir) = daruda_store::observability::log_writer::log_dir()
+    {
+        // SAFETY: same single-threaded window as the wire-tap `set_var` above —
+        // before `LogWriter::init` spawns the log-writer thread.
+        unsafe {
+            std::env::set_var(
+                crate::telegram::trace::TRACE_ENV,
+                dir.join(crate::telegram::trace::TRACE_FILE_NAME),
+            );
+        }
+    }
     daruda_store::observability::log_writer::LogWriter::init(log_policy);
     std::panic::set_hook(Box::new(|info| {
         let report = daruda_store::observability::error_report::ErrorReport::from_panic(info);
