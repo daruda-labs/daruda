@@ -119,7 +119,7 @@ async fn a_daruda_prompt_reaches_the_live_orchestrator(cx: &mut TestAppContext) 
             crate::orchestrator::destination(cx).expect("the orchestrator is up");
         assert_eq!(
             crate::control::exec::run(
-                ResolvedCommand::Ask {
+                ResolvedCommand::AskOrchestrator {
                     text: "make me a pane".into(),
                     destination,
                     connecting,

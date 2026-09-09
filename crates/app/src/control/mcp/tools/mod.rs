@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Eleven tools, all for the orchestrator. A lane's own agent gets none — it
+//! Twelve tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -26,6 +26,7 @@ pub(crate) enum ToolId {
     ChatSend,
     ChatStop,
     ChatRead,
+    ChatAsk,
     Status,
     LaneList,
     LaneCreate,
@@ -156,6 +157,13 @@ fn chat_read_properties() -> serde_json::Value {
     serde_json::json!({ "target": pane_ref_schema() })
 }
 
+fn chat_ask_properties() -> serde_json::Value {
+    serde_json::json!({
+        "target": pane_ref_schema(),
+        "text": { "type": "string", "description": "The prompt to send." },
+    })
+}
+
 fn lane_create_properties() -> serde_json::Value {
     serde_json::json!({
         "workspace": {
@@ -255,10 +263,25 @@ static TABLE: &[Tool] = &[
                       finished writing, long ones cut in the middle. A message still being \
                       written does not count, so a chat that is working reports what it said \
                       before — check `activity` from daruda_chat_list to tell the two apart. \
-                      Nothing is returned when it has not spoken yet.",
+                      Nothing is returned when it has not spoken yet. To send a prompt and \
+                      get the reply to *that* prompt, use daruda_chat_ask.",
         gate: Gate::Open,
         properties: chat_read_properties,
         required: &["target"],
+    },
+    Tool {
+        id: ToolId::ChatAsk,
+        name: "daruda_chat_ask",
+        description: "Send a prompt to one agent chat and wait for the reply, in one call. \
+                      Answers `text` with what the turn said, `no_answer` if it only ran \
+                      tools, `failed` if it errored, `queued` if the chat was already busy \
+                      so this is not the call that will see the reply, and `still_working` \
+                      if the turn outran the wait — the last two are not failures, and \
+                      daruda_chat_read gets the reply afterwards. Cancelling this call \
+                      stops the waiting, never the turn.",
+        gate: Gate::Open,
+        properties: chat_ask_properties,
+        required: &["target", "text"],
     },
     Tool {
         id: ToolId::Status,

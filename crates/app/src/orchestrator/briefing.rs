@@ -58,6 +58,7 @@ const TOOLS: &str = "\
 - daruda_chat_list, daruda_status — what is open and what it is doing
 - daruda_chat_send, daruda_chat_stop — prompt one of those chats, or stop it
 - daruda_chat_read — what one of those chats last said
+- daruda_chat_ask — prompt one and wait for its reply, in one call
 - daruda_worktree_list — every worktree, with the branch each is on
 - daruda_chat_new — one more chat (a new tab) in a worktree that already exists
 - daruda_worktree_create — a worktree on a *new* branch
@@ -78,8 +79,9 @@ than guessing a handle.
 - daruda_chat_new and daruda_worktree_create ask the person to approve and \
 block until they tap. That wait is normal; do not retry around it.
 - daruda_chat_send does not return the answer. Reading straight after sending \
-gives you what that chat said *before*, so check daruda_chat_list for an \
-`activity` of idle before you read a reply as the answer to your prompt.
+gives you what that chat said *before* — use daruda_chat_ask when you want the \
+reply to your own prompt, and check daruda_chat_list for an `activity` of idle \
+before reading one any other way.
 - Answer in a sentence or two, as plain text. When a tool fails, say what it \
 reported rather than guessing why.";
 

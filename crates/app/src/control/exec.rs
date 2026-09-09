@@ -8,12 +8,13 @@
 //! assembles the result afterwards — building it inside would read entities
 //! while their workspace is mid-`update` (CLAUDE.md pitfall 5).
 
-use gpui::App;
+use gpui::{App, AppContext as _};
 
 use crate::control::approval::ApprovalOutcome;
 use crate::control::result::{
     Activity, BriefSummary, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowEntry,
-    Health, LaneGroup, LaneHandle, Listing, ProjectGroup, WindowGroup, ask_disposition,
+    Health, LaneGroup, LaneHandle, Listing, PaneAnswer, ProjectGroup, SendDisposition, WindowGroup,
+    ask_disposition,
 };
 use crate::control::spec::{GatedCommand, ResolvedCommand, ResolvedFlowCommand};
 use crate::surface::strings as s;
@@ -133,11 +134,66 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
         // the adapter brought the orchestrator up to name it. Owned in this
         // match rather than in the Telegram adapter so an adapter speaking
         // `ResolvedCommand` directly inherits the same handling.
-        ResolvedCommand::Ask {
+        ResolvedCommand::AskOrchestrator {
             text,
             destination,
             connecting,
-        } => ask(text, destination, connecting, cx),
+        } => ask_orchestrator(text, destination, connecting, cx),
+        // Handled by `run_waiting`, which can hand back a channel. Reaching
+        // here would mean an adapter called the wrong entry point, and
+        // answering "still working" about a prompt never sent would be a lie.
+        ResolvedCommand::AskPane { target, .. } => Ok(ControlResult::Answer {
+            target,
+            answer: PaneAnswer::Queued,
+        }),
+    }
+}
+
+/// Prompt a pane and hand back a promise of the turn's answer.
+///
+/// A waiter is registered only for a prompt that went out *now*: a delivered
+/// prompt means the pane was idle, so the next settle edge is this turn's and
+/// at most one call is ever waiting on a pane. One that queued behind a turn
+/// already in flight would be answered by that turn's edge instead, which is
+/// somebody else's answer — so it is told `Queued` and can read the reply
+/// later.
+pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
+    let ResolvedCommand::AskPane { target, text } = cmd else {
+        // Unreachable: `convert` builds `Command::Waiting` for exactly one
+        // tool. Answering through the immediate path is the harmless way to
+        // be wrong.
+        return Dispatch::Ready(run(cmd, cx));
+    };
+    let sent = in_pane_window(target, cx, |ws, _window, cx| {
+        ws.control_say(target.pane, text.clone(), cx)
+    });
+    let answered = |answer| Dispatch::Ready(Ok(ControlResult::Answer { target, answer }));
+    match sent {
+        Err(refusal) => Dispatch::Ready(Err(refusal)),
+        Ok(SendDisposition::Queued) => answered(PaneAnswer::Queued),
+        // `/clear` and its kin never reach the agent, so no turn will settle.
+        Ok(SendDisposition::HandledLocally) => answered(PaneAnswer::NoAnswer),
+        Ok(SendDisposition::Delivered) => {
+            let (deadline, answer) = crate::control::ask::wait_for(target, cx);
+            let (tx, rx) = smol::channel::bounded(1);
+            cx.background_spawn(async move {
+                // A closed channel is the app going away, which the caller
+                // hears as the target being unreachable.
+                let outcome = match answer.recv().await {
+                    Ok(answer) => Ok(ControlResult::Answer { target, answer }),
+                    Err(_) => Err(ControlError::TargetGone),
+                };
+                let _ = tx.send(Some(outcome)).await;
+            })
+            .detach();
+            Dispatch::Deferred {
+                outcome: rx,
+                pending: Pending::Waiter {
+                    pane: target,
+                    deadline,
+                },
+            }
+        }
     }
 }
 
@@ -173,7 +229,12 @@ pub(crate) fn first_lane_offering(name: &str, cx: &mut App) -> Result<LaneHandle
 ///
 /// The reply is `Accepted`, never the answer: the agent's response arrives
 /// later as that pane's own completion ping.
-fn ask(text: String, destination: PaneRef, connecting: bool, cx: &mut App) -> ControlOutcome {
+fn ask_orchestrator(
+    text: String,
+    destination: PaneRef,
+    connecting: bool,
+    cx: &mut App,
+) -> ControlOutcome {
     // `/list` never names the orchestrator, so fold a missing pane into its
     // own error.
     let send = in_pane_window(destination, cx, |ws, _window, cx| {
@@ -185,22 +246,61 @@ fn ask(text: String, destination: PaneRef, connecting: bool, cx: &mut App) -> Co
     })
 }
 
-/// A gated command's answer, or a promise of one.
+/// A command's answer, or a promise of one.
 ///
 /// The two shapes are not interchangeable: a refusal the guards can make on
-/// the spot must reach the caller without a round trip to a phone, and
-/// everything else has to wait for one.
+/// the spot must reach the caller without a round trip, and everything else
+/// has to wait for one.
 pub(crate) enum Dispatch {
     Ready(ControlOutcome),
-    /// Resolves once the user has answered and any filesystem work is done.
+    /// Resolves once whatever [`Pending`] names has happened.
     Deferred {
         /// `None` when the caller took the question back: there is an outcome
         /// to stop waiting for, but none to answer with.
         outcome: smol::channel::Receiver<Option<ControlOutcome>>,
-        /// The card this is waiting on, so a caller that gives up can take
-        /// the question back before the work starts.
-        approval: crate::control::approval::ApprovalId,
+        pending: Pending,
     },
+}
+
+/// What a deferred call is waiting on, and so what taking it back means.
+///
+/// Carried rather than assumed, because the two are not the same act. A card
+/// is a question whose work has not started, so withdrawing prevents it; a
+/// turn is already running for the pane's own sake, so withdrawing is only
+/// giving up on hearing how it went.
+#[derive(Clone, Copy)]
+pub(crate) enum Pending {
+    Approval(crate::control::approval::ApprovalId),
+    Waiter {
+        pane: PaneRef,
+        /// When this wait answers itself. What a caller still holding a record
+        /// of it prunes by — a turn has no `is_waiting` a card does.
+        deadline: std::time::Instant,
+    },
+}
+
+impl Pending {
+    /// Whether this is still worth holding a record of.
+    pub(crate) fn is_live(self, cx: &App) -> bool {
+        match self {
+            Self::Approval(id) => crate::control::approval::is_waiting(id, cx),
+            Self::Waiter { pane, deadline } => {
+                std::time::Instant::now() < deadline && crate::control::ask::is_waiting(pane, cx)
+            }
+        }
+    }
+
+    /// Take the call back. The turn behind a `Waiter` keeps running.
+    pub(crate) fn withdraw(self, cx: &mut App) {
+        match self {
+            Self::Approval(id) => {
+                crate::control::approval::withdraw(id, cx);
+            }
+            Self::Waiter { pane, .. } => {
+                crate::control::ask::withdraw(pane, cx);
+            }
+        }
+    }
 }
 
 /// Run a command that has to wait: guards, then the user's approval, then the
@@ -241,7 +341,7 @@ pub(crate) fn run_gated(cmd: GatedCommand, cx: &mut App) -> Dispatch {
     .detach();
     Dispatch::Deferred {
         outcome: rx,
-        approval,
+        pending: Pending::Approval(approval),
     }
 }
 
@@ -502,7 +602,7 @@ fn in_pane_window<T>(
 mod tests {
     use super::*;
     use crate::test_support::{workspace_for_control, workspace_with_agent_chat};
-    use gpui::{AppContext as _, BorrowAppContext as _};
+    use gpui::BorrowAppContext as _;
 
     #[gpui::test]
     async fn listing_spans_every_window(cx: &mut gpui::TestAppContext) {

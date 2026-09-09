@@ -9,7 +9,7 @@
 use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
     Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
-    FlowOriginKind, Health, Listing, SendDisposition, StopDisposition,
+    FlowOriginKind, Health, Listing, PaneAnswer, SendDisposition, StopDisposition,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::surface::strings as s;
@@ -153,6 +153,15 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             Some(text) => plain(text.clone()),
             None => plain(s::control_transcript_empty()),
         },
+        // The agent's own words when there are any, bounded at the source —
+        // a person who asked wants the reply, not a sentence about it.
+        ControlResult::Answer { answer, .. } => plain(match answer {
+            PaneAnswer::Text { text } => text.clone(),
+            PaneAnswer::NoAnswer => s::control_answer_none(),
+            PaneAnswer::Failed => s::control_answer_failed(),
+            PaneAnswer::Queued => s::control_sent_queued(),
+            PaneAnswer::StillWorking => s::control_answer_still_working(),
+        }),
         ControlResult::Accepted { disposition } => plain(match disposition {
             AskDisposition::Connecting => s::control_ask_accepted_connecting(),
             AskDisposition::Sent => s::control_ask_accepted(),

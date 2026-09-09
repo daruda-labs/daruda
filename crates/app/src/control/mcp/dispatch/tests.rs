@@ -340,6 +340,81 @@ async fn a_self_addressed_prompt_is_refused(cx: &mut TestAppContext) {
     assert_eq!(payload(&reply)["code"], "self_target_refused");
 }
 
+/// `daruda_chat_ask` answers later, which is a different code path from
+/// `daruda_chat_send` — so it has to be shown clearing the same target
+/// guards, not assumed to.
+#[gpui::test]
+async fn a_self_addressed_ask_is_refused(cx: &mut TestAppContext) {
+    let own = crate::test_support::register_test_orchestrator(cx);
+    let reply = answered(
+        &call(
+            20,
+            "daruda_chat_ask",
+            serde_json::json!({ "target": own, "text": "go" }),
+        ),
+        cx,
+    );
+    assert_eq!(reply["result"]["isError"], true);
+    assert_eq!(
+        payload(&reply)["code"],
+        "self_target_refused",
+        "waiting for the answer does not exempt it: {reply}"
+    );
+}
+
+/// The other guard the waiting path inherits.
+#[gpui::test]
+async fn an_ask_to_a_full_queue_is_refused(cx: &mut TestAppContext) {
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let target = fixture
+        .workspace
+        .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.fill_prompt_queue_for_test(target.pane, crate::control::guards::QUEUE_DEPTH_MAX, cx)
+    });
+
+    let reply = answered(
+        &call(
+            21,
+            "daruda_chat_ask",
+            serde_json::json!({
+                "target": { "workspace": target.workspace, "pane": target.pane },
+                "text": "go",
+            }),
+        ),
+        cx,
+    );
+    assert_eq!(reply["result"]["isError"], true);
+    assert_eq!(payload(&reply)["code"], "queue_full");
+}
+
+/// A pane with no live session cannot take a prompt, so the call is answered
+/// rather than left waiting on a turn that will never start.
+#[gpui::test]
+async fn an_ask_to_a_pane_that_is_not_there_is_answered_at_once(cx: &mut TestAppContext) {
+    let _fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let reply = answered(
+        &call(
+            22,
+            "daruda_chat_ask",
+            serde_json::json!({
+                "target": { "workspace": daruda_store::project::WorkspaceUuid::new(), "pane": 9999 },
+                "text": "go",
+            }),
+        ),
+        cx,
+    );
+    assert_eq!(reply["result"]["isError"], true);
+    assert_eq!(payload(&reply)["code"], "target_gone");
+    cx.update(|cx| {
+        assert_eq!(
+            crate::control::ask::waiting_count_for_test(cx),
+            0,
+            "a prompt that never went out must leave no waiter"
+        );
+    });
+}
+
 /// A stop is how a runaway is *ended*, so it must not be refused for
 /// naming the orchestrator.
 #[gpui::test]

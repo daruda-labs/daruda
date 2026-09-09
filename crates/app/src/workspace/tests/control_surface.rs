@@ -192,3 +192,169 @@ async fn an_ordinal_with_no_listing_behind_it_is_refused(cx: &mut TestAppContext
         }))
     ));
 }
+
+/// The settle edge is what answers a `daruda_chat_ask`, so the wait and the
+/// completion signals cannot disagree about when a turn is done. Driven
+/// through the real pulse tick — the time-based settle driver — rather than by
+/// calling the tee, because the edge detection is the part under test.
+mod ask {
+    use super::*;
+    use crate::control::result::PaneAnswer;
+    use daruda_acp::ChatItem;
+    use gpui::AppContext as _;
+
+    fn said(text: &str) -> ChatItem {
+        ChatItem::AssistantText {
+            text: text.into(),
+            streaming: false,
+            message_id: None,
+            phase: Default::default(),
+        }
+    }
+
+    /// Put a pane through busy → idle with `items` in its transcript, and
+    /// return what the waiting call was answered with.
+    ///
+    /// The turn is ended with a real `TurnEnded`, not by parking the turn
+    /// field: the settle edge reports the outcome that event *stashes*, so a
+    /// hand-parked turn produces no edge at all and would make this pass
+    /// vacuously.
+    fn answer_after_a_turn(
+        items: Vec<ChatItem>,
+        completed_normally: bool,
+        cx: &mut TestAppContext,
+    ) -> Option<PaneAnswer> {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let waiter = cx.update(|cx| {
+            let (_deadline, rx) = crate::control::ask::wait_for(target, cx);
+            rx
+        });
+
+        cx.update_window(fixture.window.into(), |_, _window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+                view.update(cx, |v, _| {
+                    v.set_turn_in_flight();
+                    v.items = items;
+                });
+                // Busy is observed first, so the tick has an edge to detect.
+                ws.pulse_agent_chats(cx);
+                view.update(cx, |v, cx| {
+                    v.apply_event(
+                        daruda_acp::AcpEvent::TurnEnded {
+                            stop_reason: "end_turn".into(),
+                            completed_normally,
+                        },
+                        "base16-ocean.dark",
+                        false,
+                        cx,
+                    );
+                });
+                ws.pulse_agent_chats(cx);
+            });
+        })
+        .expect("window is live");
+
+        waiter.try_recv().ok()
+    }
+
+    #[gpui::test]
+    async fn an_ask_answers_with_the_text_the_turn_produced(cx: &mut TestAppContext) {
+        assert_eq!(
+            answer_after_a_turn(vec![said("here is the summary")], true, cx),
+            Some(PaneAnswer::Text {
+                text: "here is the summary".into()
+            })
+        );
+    }
+
+    /// A turn that only ran tools said nothing, which is a different answer
+    /// from an empty string — a caller told `""` cannot tell the two apart.
+    #[gpui::test]
+    async fn a_tool_only_turn_answers_no_answer(cx: &mut TestAppContext) {
+        assert_eq!(
+            answer_after_a_turn(Vec::new(), true, cx),
+            Some(PaneAnswer::NoAnswer)
+        );
+    }
+
+    /// A message still streaming when the turn ends is *finished* by
+    /// `settle_turn`, so by the settle edge it is what the agent said. Pinned
+    /// because the reader skips streaming messages, and that skip must not be
+    /// read as "an interrupted answer is lost".
+    #[gpui::test]
+    async fn text_still_streaming_when_the_turn_ends_is_the_answer(cx: &mut TestAppContext) {
+        let streaming = ChatItem::AssistantText {
+            text: "partial".into(),
+            streaming: true,
+            message_id: None,
+            phase: Default::default(),
+        };
+        assert_eq!(
+            answer_after_a_turn(vec![streaming], true, cx),
+            Some(PaneAnswer::Text {
+                text: "partial".into()
+            })
+        );
+    }
+
+    /// Where the skip does matter: a read taken *while* a turn is running must
+    /// not present a half-written sentence as the agent's answer. This is what
+    /// separates `daruda_chat_read` from `daruda_chat_ask`.
+    #[gpui::test]
+    async fn a_mid_turn_read_skips_a_streaming_message(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+            view.update(cx, |v, _| {
+                v.set_turn_in_flight();
+                v.items = vec![
+                    said("the previous turn's answer"),
+                    ChatItem::AssistantText {
+                        text: "half a sen".into(),
+                        streaming: true,
+                        message_id: None,
+                        phase: Default::default(),
+                    },
+                ];
+            });
+            assert_eq!(
+                ws.control_read(target.pane, cx).expect("pane is there"),
+                Some("the previous turn's answer".to_string()),
+                "a fragment must not be reported as what it said"
+            );
+        });
+    }
+
+    /// A pane nobody asked about must not be charged for the lookup with a
+    /// spurious answer going nowhere.
+    #[gpui::test]
+    async fn a_turn_nobody_asked_about_leaves_no_waiter(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        cx.update_window(fixture.window.into(), |_, _window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+                view.update(cx, |v, _| {
+                    v.set_turn_in_flight();
+                    v.items = vec![said("nobody is listening")];
+                });
+                ws.pulse_agent_chats(cx);
+                view.update(cx, |v, _| v.set_turn_idle());
+                ws.pulse_agent_chats(cx);
+            });
+        })
+        .expect("window is live");
+        cx.update(|cx| {
+            assert_eq!(crate::control::ask::waiting_count_for_test(cx), 0);
+        });
+    }
+}

@@ -57,6 +57,9 @@ impl ConvertError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Immediate(ResolvedCommand),
+    /// Runs at once but answers later: it starts a turn and the reply is that
+    /// turn's. Not `Gated` — nobody is asked, so nothing is approved.
+    Waiting(ResolvedCommand),
     Gated(GatedCommand),
 }
 
@@ -85,6 +88,10 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             name: string_arg(args, "name")?,
             lane: lane_arg(args, "worktree")?,
         })),
+        ToolId::ChatAsk => Command::Waiting(ResolvedCommand::AskPane {
+            target: pane_arg(args, "target")?,
+            text: string_arg(args, "text")?,
+        }),
         ToolId::FlowStop => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Stop {
             lane: lane_arg(args, "worktree")?,
         })),

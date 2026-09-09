@@ -106,6 +106,30 @@ pub(crate) enum StopDisposition {
     AlreadyIdle,
 }
 
+/// What a prompt sent with `daruda_chat_ask` came back with.
+///
+/// An enum rather than an `Option<String>` beside a flag: "said nothing",
+/// "not finished", "went behind another turn" and "failed" are four different
+/// things a caller acts on differently, and a text field plus a boolean can
+/// spell combinations none of them mean.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum PaneAnswer {
+    /// What the turn this prompt started ended up saying.
+    Text { text: String },
+    /// The turn finished without producing any text — all tool calls.
+    NoAnswer,
+    /// The turn ended in an error. Whatever it managed to say is in the chat;
+    /// this call has no answer to give.
+    Failed,
+    /// The prompt went behind a turn already in flight, so this call is not
+    /// the one that will see its reply. Read it later.
+    Queued,
+    /// The turn outlived the wait and is still going. Not a failure — read it
+    /// later.
+    StillWorking,
+}
+
 /// What became of a `/daruda` prompt. The answer arrives later from the
 /// orchestrator pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +305,12 @@ pub(crate) enum ControlResult {
     },
     ChatCreated {
         target: PaneRef,
+    },
+    /// A prompt sent with the reply waited for. Distinct from `Sent`, which
+    /// reports only that a prompt went out.
+    Answer {
+        target: PaneRef,
+        answer: PaneAnswer,
     },
     /// What one chat's agent last said, bounded by
     /// [`crate::control::agent_text::bound_agent_text`].
@@ -581,6 +611,28 @@ mod tests {
                 chat: target,
             },
             ControlResult::ChatCreated { target },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::Text {
+                    text: "the reply".into(),
+                },
+            },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::NoAnswer,
+            },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::Failed,
+            },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::Queued,
+            },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::StillWorking,
+            },
             ControlResult::Transcript { target, text: None },
             ControlResult::Transcript {
                 target,

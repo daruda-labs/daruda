@@ -118,7 +118,7 @@ pub(super) fn run_command(
             cx.update(|cx| {
                 let (destination, connecting) = crate::orchestrator::destination(cx)?;
                 crate::control::exec::run(
-                    crate::control::spec::ResolvedCommand::Ask {
+                    crate::control::spec::ResolvedCommand::AskOrchestrator {
                         text,
                         destination,
                         connecting,

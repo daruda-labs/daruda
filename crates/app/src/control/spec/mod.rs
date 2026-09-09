@@ -91,16 +91,31 @@ pub(crate) enum ResolvedCommand {
     },
     Flow(ResolvedFlowCommand),
     Brief,
-    /// `destination` is the orchestrator's pane and `connecting` says whether
-    /// naming it had to start one.
+    /// Hand `text` to the orchestrator. Named for who receives it, not for
+    /// the act: the answer is *not* in this command's result — it arrives
+    /// later as that pane's own completion ping — and a bare `Ask` promised
+    /// otherwise. Compare [`Self::AskPane`], where the answer *is* the result.
     ///
-    /// Neither comes from an ordinal, so an adapter fills them from the
-    /// orchestrator rather than from its own listing — but it does fill them,
-    /// before the executor sees the command, like every other target here.
-    Ask {
+    /// `destination` is the orchestrator's pane and `connecting` says whether
+    /// naming it had to start one. Neither comes from an ordinal, so an
+    /// adapter fills them from the orchestrator rather than from its own
+    /// listing — but it does fill them, before the executor sees the command,
+    /// like every other target here.
+    AskOrchestrator {
         text: String,
         destination: PaneRef,
         connecting: bool,
+    },
+    /// Prompt one lane's agent and wait for the turn it starts, so the answer
+    /// comes back as this command's own result.
+    ///
+    /// The waiting is what separates it from [`Self::Say`], which reports only
+    /// that a prompt went out. Not a flag on `Say`: the two answer with
+    /// different shapes, and a `wait: bool` beside a text field would spell
+    /// states neither means.
+    AskPane {
+        target: PaneRef,
+        text: String,
     },
     /// Every worktree, including ones with no agent chat in them — the
     /// listing `/list` answers with is chat-scoped and cannot name one.

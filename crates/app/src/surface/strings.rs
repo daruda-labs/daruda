@@ -5325,6 +5325,15 @@ pub fn control_lane_created() -> String {
 pub fn control_chat_created() -> String {
     rust_i18n::t!("control.chat_created").into_owned()
 }
+pub fn control_answer_none() -> String {
+    rust_i18n::t!("control.answer_none").into_owned()
+}
+pub fn control_answer_failed() -> String {
+    rust_i18n::t!("control.answer_failed").into_owned()
+}
+pub fn control_answer_still_working() -> String {
+    rust_i18n::t!("control.answer_still_working").into_owned()
+}
 pub fn control_flow_stopped() -> String {
     rust_i18n::t!("control.flow_stopped").into_owned()
 }

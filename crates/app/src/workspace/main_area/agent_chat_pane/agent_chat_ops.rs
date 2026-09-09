@@ -537,6 +537,43 @@ impl Workspace {
         {
             self.apply_agent_chat_task_ended(&cwd, reason, cx);
         }
+        // Last, because handing `outcome` on moves it — the matches above
+        // bind nothing and so only read it.
+        self.answer_waiting_ask(pane_id, outcome, cx);
+    }
+
+    /// Answer a `daruda_chat_ask` waiting on this pane, if one is.
+    ///
+    /// Teed off [`Self::fire_activity_completion`] rather than an
+    /// `AcpEvent::TurnEnded` arm, for the reason the notification is: that
+    /// event settles before trailing subagents finish, so a call answered
+    /// there would report the turn done while work was still running
+    /// (CLAUDE.md pitfall 11).
+    ///
+    /// A pane nobody asked about is the common case, and `resolve` says so by
+    /// finding nothing.
+    fn answer_waiting_ask(
+        &mut self,
+        pane_id: PaneId,
+        outcome: TurnOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        let target = crate::telegram::bridge::PaneRef {
+            workspace: self.uuid(),
+            pane: pane_id,
+        };
+        if !crate::control::ask::is_waiting(target, cx) {
+            return;
+        }
+        // The same bounded read `daruda_chat_read` answers with, so the two
+        // tools cannot disagree about what the agent said.
+        let said = self.control_read(pane_id, cx).ok().flatten();
+        let answer = match (outcome, said) {
+            (TurnOutcome::Errored, _) => crate::control::result::PaneAnswer::Failed,
+            (_, Some(text)) => crate::control::result::PaneAnswer::Text { text },
+            (_, None) => crate::control::result::PaneAnswer::NoAnswer,
+        };
+        crate::control::ask::resolve(target, answer, cx);
     }
 
     /// Construct an Agent chat `Pane` (no tab side-effects), parked `Idle` (or

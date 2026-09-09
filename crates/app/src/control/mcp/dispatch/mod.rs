@@ -13,8 +13,7 @@ use std::collections::HashMap;
 
 use gpui::{App, AppContext as _};
 
-use crate::control::approval::ApprovalId;
-use crate::control::exec::{self, Dispatch};
+use crate::control::exec::{self, Dispatch, Pending};
 use crate::control::guards;
 use crate::control::mcp::convert::{self, Command};
 use crate::control::mcp::protocol::{self, Session};
@@ -37,9 +36,9 @@ pub(crate) struct ConnectionSession {
     outstanding: HashMap<String, Outstanding>,
 }
 
-/// A `tools/call` waiting on the user.
+/// A `tools/call` whose answer has not been sent yet.
 struct Outstanding {
-    approval: ApprovalId,
+    pending: Pending,
 }
 
 impl ConnectionSession {
@@ -67,25 +66,24 @@ impl ConnectionSession {
 
     /// Remember a call that has not been answered yet, and forget the ones
     /// whose card has since been decided.
-    fn track(&mut self, request: String, approval: ApprovalId, cx: &App) {
-        self.outstanding
-            .retain(|_, o| crate::control::approval::is_waiting(o.approval, cx));
-        self.outstanding.insert(request, Outstanding { approval });
+    fn track(&mut self, request: String, pending: Pending, cx: &App) {
+        self.outstanding.retain(|_, o| o.pending.is_live(cx));
+        self.outstanding.insert(request, Outstanding { pending });
     }
 
-    /// Take back the call `request` names: the card comes down, the work never
-    /// starts, and no reply is sent.
+    /// Take back the call `request` names, and send no reply.
     ///
-    /// A cancellation for a call already answered — or one that was never
-    /// gated — finds nothing, which is the right outcome either way: the
-    /// effect it wanted to prevent has already happened or was never pending.
+    /// What that prevents depends on what was pending — see [`Pending`]. A
+    /// cancellation for a call already answered, or one that never deferred,
+    /// finds nothing, which is right either way: the effect it wanted to
+    /// prevent has already happened or was never pending.
     fn withdraw(&mut self, request: &str, cx: &mut App) {
         let Some(entry) = self.outstanding.remove(request) else {
             return;
         };
-        // Settling the card is what both wakes the waiting task and tells it
-        // there is nothing to answer with.
-        crate::control::approval::withdraw(entry.approval, cx);
+        // Settling is what both wakes the waiting task and tells it there is
+        // nothing to answer with.
+        entry.pending.withdraw(cx);
     }
 }
 use crate::control::mcp::socket::Inbound;
@@ -99,12 +97,12 @@ enum Answer {
     Now(String),
     /// A notification: no reply, ever.
     Silence,
-    /// The tool is still waiting on the user. Whoever awaits `outcome` sends
-    /// the reply, or sends nothing when the call was withdrawn.
+    /// The tool has not finished. Whoever awaits `outcome` sends the reply,
+    /// or sends nothing when the call was withdrawn.
     Later {
         id: serde_json::Value,
         outcome: smol::channel::Receiver<Option<ControlOutcome>>,
-        approval: ApprovalId,
+        pending: Pending,
     },
 }
 
@@ -146,9 +144,9 @@ pub(crate) fn answer(
         Answer::Later {
             id,
             outcome,
-            approval,
+            pending,
         } => {
-            session.track(protocol::request_key(&id), approval, cx);
+            session.track(protocol::request_key(&id), pending, cx);
             cx.background_spawn(async move {
                 // A closed channel means the task that would have answered
                 // is gone (the app is shutting down) — the target, not the
@@ -253,15 +251,35 @@ fn answer_frame(
                 convert::to_tool_result(&outcome),
             ))
         }
+        // The same target guards an immediate call clears — it prompts a pane,
+        // so it must not be able to address the orchestrator or overfill a
+        // queue — but its answer arrives with the turn rather than at once.
+        Command::Waiting(resolved) => match guard_immediate(id, &resolved, protected, cx) {
+            Err(refusal) => Answer::Now(protocol::result_frame(
+                call.id,
+                convert::to_tool_result(&Err(refusal)),
+            )),
+            Ok(()) => match exec::run_waiting(resolved, cx) {
+                Dispatch::Ready(outcome) => Answer::Now(protocol::result_frame(
+                    call.id,
+                    convert::to_tool_result(&outcome),
+                )),
+                Dispatch::Deferred { outcome, pending } => Answer::Later {
+                    id: call.id,
+                    outcome,
+                    pending,
+                },
+            },
+        },
         Command::Gated(gated) => match exec::run_gated(gated, cx) {
             Dispatch::Ready(outcome) => Answer::Now(protocol::result_frame(
                 call.id,
                 convert::to_tool_result(&outcome),
             )),
-            Dispatch::Deferred { outcome, approval } => Answer::Later {
+            Dispatch::Deferred { outcome, pending } => Answer::Later {
                 id: call.id,
                 outcome,
-                approval,
+                pending,
             },
         },
     }
@@ -284,10 +302,13 @@ fn guard_immediate(
     debug_assert_eq!(
         ToolTable::all().gate(id),
         Gate::Open,
-        "a gated tool must not reach the immediate path"
+        "a gated tool must not reach the unapproved path"
     );
     match resolved {
-        ResolvedCommand::Say { target, .. } => {
+        // Both prompt a pane, so both clear the same two: a prompt to the
+        // orchestrator's own pane makes a turn that makes a turn, and an
+        // unbounded queue outgrows the one-per-turn drain.
+        ResolvedCommand::Say { target, .. } | ResolvedCommand::AskPane { target, .. } => {
             guards::guard_self_target(*target, protected)?;
             guards::guard_queue_depth(*target, cx)
         }
@@ -301,7 +322,7 @@ fn guard_immediate(
         | ResolvedCommand::Stop { .. }
         | ResolvedCommand::Read { .. }
         | ResolvedCommand::Flow(_)
-        | ResolvedCommand::Ask { .. } => Ok(()),
+        | ResolvedCommand::AskOrchestrator { .. } => Ok(()),
     }
 }
 

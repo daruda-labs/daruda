@@ -12,6 +12,7 @@
 
 pub(crate) mod agent_text;
 pub(crate) mod approval;
+pub(crate) mod ask;
 pub(crate) mod exec;
 pub(crate) mod guards;
 pub(crate) mod mcp;
