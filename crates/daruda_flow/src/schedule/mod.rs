@@ -1,7 +1,10 @@
-//! Runs a validated flow: topological order, one node at a time, judging
-//! each before moving on, and driving each node's `on_fail` policy until it
-//! passes or gives up. Serial by design — every node shares one working
-//! directory, so two running at once would corrupt each other.
+//! Runs a validated flow: a wave at a time in topological order, judging
+//! each node before the next wave is chosen, and driving each node's
+//! `on_fail` policy until it passes or gives up.
+//!
+//! How many run at once is the flow's `parallel`, and which of them may
+//! overlap is [`ready::take_ready_batch`]'s answer — nodes that could
+//! write in one directory never share a wave.
 
 use crate::NodeId;
 use crate::contract::file::FileContract;
@@ -225,7 +228,7 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         .collect();
 
     while !waiting.is_empty() {
-        let batch = take_ready_batch(flow, cwd, &mut waiting, &done, flow.parallel);
+        let batch = take_ready_batch(flow, graph, cwd, &mut waiting, &done, flow.parallel);
         if batch.is_empty() {
             // Nothing ready and nothing in flight. Only a cycle can produce
             // that, and `FlowGraph::build` refuses those — so this is a
