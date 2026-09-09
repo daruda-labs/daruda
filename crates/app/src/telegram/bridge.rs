@@ -122,8 +122,29 @@ pub enum InboundAction {
     },
     /// The text started with `/` but is not one of ours. Answered, never
     /// swallowed — a silently dropped message is the defect this replaces.
+    ///
+    /// Only for a name daruda *does* own, used wrongly (`/say` with no
+    /// argument), or for a name nobody can take because there is no target.
+    /// A name daruda does not own, with somewhere to send it, is
+    /// [`Self::UnknownSlash`] — the agent's command namespace is open and this
+    /// one is closed, so "not ours" cannot mean "nobody's".
     ReportParseError {
         error: crate::control::spec::ParseError,
+    },
+    /// A `/name` daruda does not own, aimed at `pane`.
+    ///
+    /// Whether it is the agent's own command or a typo of one of ours is a
+    /// question only that pane can answer — it advertises its own list — and
+    /// this layer is GPUI-free, so the decision waits for the one that can
+    /// read it.
+    UnknownSlash {
+        pane: PaneRef,
+        /// The name without its slash, to ask the agent about.
+        name: String,
+        /// The message as sent, forwarded verbatim when the agent owns it.
+        text: String,
+        /// The nearest daruda command, for the answer when it does not.
+        suggestion: Option<&'static str>,
     },
     /// An approval card's button was tapped.
     ResolveApproval {
@@ -527,11 +548,18 @@ impl BridgeCore {
 
         // Parsing sits behind the gate on purpose: a listing names projects,
         // lanes, and session titles, so an unauthorized chat must not reach it.
-        match crate::control::spec::parse(&text) {
+        // A name we do not own is held back rather than answered: the agent's
+        // slash namespace is open and ours is closed, so only the pane can say
+        // whether `/usage` is its command or a typo of `/use`.
+        let unknown = match crate::control::spec::parse(&text) {
             Ok(command) => return InboundAction::RunCommand { command },
-            Err(crate::control::spec::ParseError::NotACommand) => {}
+            Err(crate::control::spec::ParseError::NotACommand) => None,
+            Err(crate::control::spec::ParseError::Unknown { input, suggestion }) => {
+                Some((input, suggestion))
+            }
+            // A command we *do* own, used wrongly. Ours to answer.
             Err(error) => return InboundAction::ReportParseError { error },
-        }
+        };
 
         let reply_to = reply_to_message_id
             .and_then(|id| self.sent_pings.get(&id))
@@ -541,8 +569,24 @@ impl BridgeCore {
             .command_state
             .plain_text_target(reply_to, self.last_pinged)
         {
-            Some(pane) => InboundAction::InjectPrompt { pane, text },
-            None => InboundAction::NoTarget,
+            Some(pane) => match unknown {
+                Some((name, suggestion)) => InboundAction::UnknownSlash {
+                    pane,
+                    name,
+                    text,
+                    suggestion,
+                },
+                None => InboundAction::InjectPrompt { pane, text },
+            },
+            // Nowhere to send it, so the suggestion is the most useful answer
+            // left — and a typo of ours is the likeliest reason to be here
+            // with no target at all.
+            None => match unknown {
+                Some((input, suggestion)) => InboundAction::ReportParseError {
+                    error: crate::control::spec::ParseError::Unknown { input, suggestion },
+                },
+                None => InboundAction::NoTarget,
+            },
         }
     }
 
@@ -777,6 +821,46 @@ mod tests {
                     input: "lst".into(),
                     suggestion: Some("list"),
                 }
+            }
+        );
+    }
+
+    /// The regression this fixes. Claude owns `/usage`, daruda owns `/use`,
+    /// and they share the `/` namespace — so daruda answered a command it does
+    /// not have with a suggestion for one the user did not want, and the
+    /// agent never saw it. Every agent slash command was unreachable from the
+    /// phone this way; `/usage` is the one that has a near-miss to make it
+    /// look deliberate.
+    #[test]
+    fn a_slash_we_do_not_own_is_held_for_the_pane_to_claim() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let target = pane(1, 10);
+        core.command_state_mut().select(Some(target));
+        let action = core.route(message(1, 42, "/usage", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::UnknownSlash {
+                pane: target,
+                name: "usage".into(),
+                text: "/usage".into(),
+                suggestion: Some("use"),
+            },
+            "an agent command must reach the agent, not a typo answer"
+        );
+    }
+
+    /// A command we *do* own, used wrongly, stays ours — the agent has no
+    /// `/say` and forwarding it would answer a daruda mistake with an agent's
+    /// confusion.
+    #[test]
+    fn our_own_command_used_wrongly_is_still_ours_to_answer() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        core.command_state_mut().select(Some(pane(1, 10)));
+        let action = core.route(message(1, 42, "/say", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::ReportParseError {
+                error: crate::control::spec::ParseError::MissingArgument { command: "say" }
             }
         );
     }

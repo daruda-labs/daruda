@@ -435,19 +435,38 @@ fn spawn_poll_task(cx: &mut App) {
                     // outlive the pane they name — so the delivery is checked
                     // rather than assumed.
                     (None, InboundAction::InjectPrompt { pane, text }) => {
-                        let mut delivered = false;
+                        deliver_prompt(cx, &token, pane, text).await;
+                    }
+                    // A slash daruda does not own. Which vocabulary it belongs
+                    // to is the *pane's* to answer — it advertises its own
+                    // commands — and `route` is GPUI-free, so the question is
+                    // settled here and then rejoins the two paths that already
+                    // handle each outcome.
+                    (
+                        None,
+                        InboundAction::UnknownSlash {
+                            pane,
+                            name,
+                            text,
+                            suggestion,
+                        },
+                    ) => {
+                        let mut agents = false;
                         dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                            delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
+                            agents = ws.agent_takes_slash_command(pane.pane, &name, cx);
                         });
-                        trace::delivery("inject", || {
-                            format!(
-                                "pane={} delivered={delivered} text={}",
-                                trace::pane(pane),
-                                trace::preview(&text)
-                            )
+                        trace::delivery("slash.unowned", || {
+                            format!("pane={} name={name} to_agent={agents}", trace::pane(pane))
                         });
-                        if !delivered {
-                            let reply = cx.update(|cx| report_target_gone(pane, cx));
+                        if agents {
+                            deliver_prompt(cx, &token, pane, text).await;
+                        } else {
+                            let reply = super::command::render_parse_error(
+                                &crate::control::spec::ParseError::Unknown {
+                                    input: name,
+                                    suggestion,
+                                },
+                            );
                             send_command_reply(cx, &token, reply).await;
                         }
                     }
@@ -476,7 +495,36 @@ fn spawn_poll_task(cx: &mut App) {
 /// and `ErrorReport::dedup` does *not* help here: `LogWriter` writes every
 /// report it is given, and `dedup_key` only merges toasts (see
 /// `workspace::error::toast`). Without a real window, a probing sender writes
-/// one NDJSON line per message and drowns genuine diagnostics./// Apply one routed [`InboundAction`]'s side effect. Pure dispatch —
+/// one NDJSON line per message and drowns genuine diagnostics./// Put `text` on `pane`, answering the sender when the pane is gone.
+///
+/// The pane can be: a selection and a last-pinged target both outlive the pane
+/// they name, so the delivery is checked rather than assumed. Shared by the
+/// plain-message path and by a slash the agent claimed — the two differ in how
+/// they were routed, not in how they are delivered.
+async fn deliver_prompt(
+    cx: &mut gpui::AsyncApp,
+    token: &str,
+    pane: crate::telegram::bridge::PaneRef,
+    text: String,
+) {
+    let mut delivered = false;
+    dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
+        delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
+    });
+    trace::delivery("inject", || {
+        format!(
+            "pane={} delivered={delivered} text={}",
+            trace::pane(pane),
+            trace::preview(&text)
+        )
+    });
+    if !delivered {
+        let reply = cx.update(|cx| report_target_gone(pane, cx));
+        send_command_reply(cx, token, reply).await;
+    }
+}
+
+/// Apply one routed [`InboundAction`]'s side effect. Pure dispatch —
 /// no routing policy here, `bridge.rs` already decided what to do.
 fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
     match action {
@@ -505,6 +553,10 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
         InboundAction::InjectPrompt { .. } => {
             // Handled inline in the poll loop, which is the only place that
             // can await the "that chat is gone" answer.
+        }
+        InboundAction::UnknownSlash { .. } => {
+            // Same: settled in the poll loop, which can both read the pane's
+            // command list and await whichever answer that settles on.
         }
         InboundAction::RespondPermission { .. }
         | InboundAction::SelectTarget { .. }

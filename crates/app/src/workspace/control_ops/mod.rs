@@ -380,6 +380,27 @@ impl Workspace {
         Ok(last_assistant_text(view.read(cx)).and_then(|t| bound_agent_text(&t)))
     }
 
+    /// Whether a `/name` from outside should go to this pane's agent.
+    ///
+    /// The agent advertises its own slash commands over ACP, and the in-app
+    /// completion menu already offers them from this same list — so a phone
+    /// answering "unknown command" for one the menu would happily complete is
+    /// the surface disagreeing with itself.
+    ///
+    /// An *empty* list also forwards. Empty means the session has not said yet
+    /// (a pane that is cold, or connecting), which is not the same as "it does
+    /// not have that command" — and a name daruda does not own is far more
+    /// likely the agent's than a typo of one of ours. A pane that is not there
+    /// forwards too, so the answer comes from the delivery attempt, which can
+    /// say `target_gone`, rather than from a guess here.
+    pub(crate) fn agent_takes_slash_command(&self, pane: PaneId, name: &str, cx: &App) -> bool {
+        let Some(view) = self.agent_chat_view(pane) else {
+            return true;
+        };
+        let advertised = &view.read(cx).session_config.available_commands;
+        advertised.is_empty() || advertised.iter().any(|c| c.name == name)
+    }
+
     /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
     /// owns the settle edge and the completion firing, so nothing here
     /// duplicates the activity state machine.

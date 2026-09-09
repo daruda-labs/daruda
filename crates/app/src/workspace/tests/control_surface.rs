@@ -411,3 +411,92 @@ mod ask {
         });
     }
 }
+
+/// Which vocabulary a `/name` from the phone belongs to.
+///
+/// daruda owns seven names and the agent's set is open, so they share the `/`
+/// namespace. The regression: daruda answered `/usage` — Claude's — with a
+/// suggestion for `/use`, its own, and the agent never saw it. The agent's
+/// advertised list is the arbiter, and the in-app completion menu already
+/// reads the same field.
+mod unowned_slash {
+    use super::*;
+    use daruda_acp::{SlashCommand, SlashCommandInput};
+
+    fn advertise(names: &[&str]) -> Vec<SlashCommand> {
+        names
+            .iter()
+            .map(|n| SlashCommand {
+                name: (*n).to_string(),
+                description: String::new(),
+                input: SlashCommandInput::NoInput,
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    async fn a_command_the_agent_advertises_goes_to_the_agent(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+            view.update(cx, |v, _| {
+                v.session_config.available_commands = advertise(&["usage", "cost", "model"]);
+            });
+            assert!(
+                ws.agent_takes_slash_command(target.pane, "usage", cx),
+                "the agent advertises /usage, so /usage is the agent's"
+            );
+        });
+    }
+
+    /// The other side: with a list that lacks the name, daruda really does
+    /// know better, and the typo answer is the useful one.
+    #[gpui::test]
+    async fn a_name_the_agent_does_not_have_stays_ours(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+            view.update(cx, |v, _| {
+                v.session_config.available_commands = advertise(&["usage", "cost"]);
+            });
+            assert!(
+                !ws.agent_takes_slash_command(target.pane, "lst", cx),
+                "a typo of /list is not one of the agent's, so daruda answers it"
+            );
+        });
+    }
+
+    /// An empty list is "the session has not said yet", not "it does not have
+    /// it". Forwarding is the safe reading — a cold pane must not turn every
+    /// agent command into a typo answer.
+    #[gpui::test]
+    async fn an_agent_that_has_advertised_nothing_still_gets_it(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let target = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        fixture.workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+            view.update(cx, |v, _| {
+                v.session_config.available_commands.clear();
+            });
+            assert!(ws.agent_takes_slash_command(target.pane, "usage", cx));
+        });
+    }
+
+    /// A pane that is gone forwards too, so the answer comes from the delivery
+    /// attempt — which can say `target_gone` — rather than from a guess.
+    #[gpui::test]
+    async fn a_pane_that_is_gone_is_not_answered_as_a_typo(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert!(ws.agent_takes_slash_command(9999, "usage", cx));
+        });
+    }
+}
