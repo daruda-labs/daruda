@@ -18,32 +18,30 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::view::PromptDispatch;
 
-/// Below this char count, [`preview_for`] sends the text verbatim.
-const TELEGRAM_PREVIEW_THRESHOLD: usize = 2000;
 /// Leading/trailing characters kept when a response is truncated — head carries
 /// the ask, tail carries the result; the elided middle is usually tool-output
-/// detail already visible in the app.
+/// detail already visible in the app. Their sum is the threshold below which
+/// text goes verbatim.
 const TELEGRAM_PREVIEW_HEAD_CHARS: usize = 1000;
 const TELEGRAM_PREVIEW_TAIL_CHARS: usize = 1000;
 /// Maximum time a phone-triggered turn can stay silent before Telegram receives
 /// the fixed fallback acknowledgement.
 pub(in crate::workspace) const FIRST_RESPONSE_FALLBACK_SECS: u64 = 60;
 
-/// Keep `text` verbatim under [`TELEGRAM_PREVIEW_THRESHOLD`] characters; past
-/// it, keep the first [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last
-/// [`TELEGRAM_PREVIEW_TAIL_CHARS`] characters around `marker` (the caller's
-/// localized "…(truncated)…" string). Counts `char`s, not bytes, so a multi-byte
-/// response never splits mid-character.
+/// The phone's slice of an agent response: the first
+/// [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last [`TELEGRAM_PREVIEW_TAIL_CHARS`]
+/// characters around `marker` (the caller's localized "…(truncated)…" string).
+///
+/// This file owns the *budget* and the localized marker; the elision itself is
+/// `crate::control::agent_text`'s, shared with the orchestrator's own reader —
+/// which keeps a different amount and a fixed English marker.
 fn preview_for(text: &str, marker: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= TELEGRAM_PREVIEW_THRESHOLD {
-        return text.to_string();
-    }
-    let head: String = chars[..TELEGRAM_PREVIEW_HEAD_CHARS].iter().collect();
-    let tail: String = chars[chars.len() - TELEGRAM_PREVIEW_TAIL_CHARS..]
-        .iter()
-        .collect();
-    format!("{head}\n{marker}\n{tail}")
+    crate::control::agent_text::elide_middle(
+        text,
+        TELEGRAM_PREVIEW_HEAD_CHARS,
+        TELEGRAM_PREVIEW_TAIL_CHARS,
+        marker,
+    )
 }
 
 /// Compose the permission-wait ping's tail: the localized "waiting for input"
