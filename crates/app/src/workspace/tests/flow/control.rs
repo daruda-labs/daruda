@@ -314,6 +314,9 @@ async fn running_a_flow_without_an_active_lane_is_refused(cx: &mut TestAppContex
 /// exists for — raises no desktop dialog on the way.
 #[gpui::test]
 async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppContext) {
+    // Really starts a run, so the engine wakes the app from its own thread —
+    // the sanctioned opt-out, as in `outcome_reaches_the_phone`.
+    cx.executor().allow_parking();
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -361,6 +364,9 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
 /// the answer was the first place a caller learned where its run had gone.
 #[gpui::test]
 async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppContext) {
+    // This one really starts a run, and the engine wakes the app from its own
+    // thread — the sanctioned opt-out, as in `outcome_reaches_the_phone`.
+    cx.executor().allow_parking();
     let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let (_other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
 
