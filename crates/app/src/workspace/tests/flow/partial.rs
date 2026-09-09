@@ -233,6 +233,7 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
     let request = ws
         .update(&mut vcx, |ws, cx| {
             ws.build_flow_request(
+                ws.active,
                 &flow_path,
                 None,
                 &crate::workspace::flow_request::FlowSelection {
@@ -282,6 +283,7 @@ async fn a_pin_with_no_finished_output_is_reported_and_not_sent(cx: &mut TestApp
     let request = ws
         .update(&mut vcx, |ws, cx| {
             ws.build_flow_request(
+                ws.active,
                 &flow_path,
                 None,
                 &crate::workspace::flow_request::FlowSelection {

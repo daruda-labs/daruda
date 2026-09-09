@@ -196,13 +196,20 @@ impl Workspace {
     /// host that only watched the stream would show the user nothing.
     pub(in crate::workspace) fn build_flow_request(
         &mut self,
+        lane_ref: daruda_store::project::LaneRef,
         flow_path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let submission =
-            self.assemble_flow_request(flow_path, profile, selection, FlowPurpose::Run, cx)?;
+        let submission = self.assemble_flow_request(
+            lane_ref,
+            flow_path,
+            profile,
+            selection,
+            FlowPurpose::Run,
+            cx,
+        )?;
         let issues = daruda_flow::request::validate_request(&submission.request);
         if issues.is_empty() {
             Ok(submission)
@@ -224,6 +231,7 @@ impl Workspace {
     /// by skipping the account-directory preparation a real run does.
     pub(in crate::workspace) fn check_flow(
         &mut self,
+        lane_ref: daruda_store::project::LaneRef,
         flow_path: &Path,
         profile: Option<&str>,
         cx: &mut Context<Self>,
@@ -231,6 +239,7 @@ impl Workspace {
         // The whole flow, always: ✓ answers "could this file run", and a
         // question about a slice of it is not that question.
         let submission = self.assemble_flow_request(
+            lane_ref,
             flow_path,
             profile,
             &FlowSelection::default(),
@@ -307,13 +316,13 @@ impl Workspace {
 
     fn assemble_flow_request(
         &mut self,
+        lane_ref: daruda_store::project::LaneRef,
         flow_path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let lane_ref = self.active;
         let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
             return Err(FlowSubmitError::NoLane);
         };

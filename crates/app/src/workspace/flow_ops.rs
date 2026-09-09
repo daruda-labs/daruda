@@ -47,7 +47,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_flow_picker(FlowPurpose::Run, cx);
+        self.open_flow_picker(self.active, FlowPurpose::Run, cx);
     }
 
     pub(in crate::workspace) fn on_validate_flow(
@@ -56,11 +56,12 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_flow_picker(FlowPurpose::Validate, cx);
+        self.open_flow_picker(self.active, FlowPurpose::Validate, cx);
     }
 
     pub(in crate::workspace) fn open_flow_picker(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) {
@@ -69,26 +70,31 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if !self.flow_run_guard(purpose, cx) {
+        if !self.flow_run_guard(lane, purpose, cx) {
             return;
         }
         let listed = self
-            .flow_sources()
+            .flow_sources_for(lane)
             .map(|sources| sources.list_flows())
             .unwrap_or_default();
         self.flow_picker.open(purpose, listed);
         cx.notify();
     }
 
-    /// Whether `purpose` may go ahead in the active lane, having already said
-    /// why not when it may not.
+    /// Whether `purpose` may go ahead in `lane`, having already said why not
+    /// when it may not.
     ///
     /// What says a run is going is the lock, not a field this app keeps — so
     /// a run started by a previous session, or by
     /// another window, is recognised the same way. Every way in asks this
     /// first, whether or not a list of flows is part of it.
-    fn flow_run_guard(&mut self, purpose: FlowPurpose, cx: &mut Context<Self>) -> bool {
-        let Some(cwd) = self.active_lane_root() else {
+    fn flow_run_guard(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        purpose: FlowPurpose,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
             self.report_flow_refusal(FlowSubmitError::NoLane, cx);
             return false;
         };
@@ -104,7 +110,7 @@ impl Workspace {
             // The map is the authority, not the lock's pid: a token for
             // another lane belongs to this process too and would not stop
             // this one.
-            Some(_) if self.runs.is_running(self.active) => {
+            Some(_) if self.runs.is_running(lane) => {
                 self.flow_picker = FlowPicker::Stopping;
                 cx.notify();
                 false
@@ -182,14 +188,27 @@ impl Workspace {
             // Which flow, answered. Whatever is left of it belongs to
             // `start_flow`, which is also where the graph pane's ▶ comes in —
             // that button knows the flow already and skips only this question.
-            Some(FlowPick::Flow(purpose, path)) => {
-                self.start_flow(purpose, path, FlowSelection::default(), window, cx)
-            }
+            Some(FlowPick::Flow(purpose, path)) => self.start_flow(
+                self.active,
+                purpose,
+                path,
+                FlowSelection::default(),
+                window,
+                cx,
+            ),
             // The second question, so nothing is left to ask.
             Some(FlowPick::Profile(purpose, path, selection, profile)) => {
                 self.flow_picker.close();
                 cx.notify();
-                self.dispatch_flow(purpose, &path, profile.as_deref(), &selection, window, cx);
+                self.dispatch_flow(
+                    self.active,
+                    purpose,
+                    &path,
+                    profile.as_deref(),
+                    &selection,
+                    window,
+                    cx,
+                );
             }
             None => {
                 self.flow_picker.close();
@@ -214,16 +233,17 @@ impl Workspace {
                   be a surface with no toast to show it on"]
     pub(in crate::workspace) fn run_flow_at(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         path: &Path,
         purpose: FlowPurpose,
         selection: FlowSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.flow_run_guard(purpose, cx) {
+        if !self.flow_run_guard(lane, purpose, cx) {
             return false;
         }
-        self.start_flow(purpose, path.to_path_buf(), selection, window, cx);
+        self.start_flow(lane, purpose, path.to_path_buf(), selection, window, cx);
         true
     }
 
@@ -235,6 +255,7 @@ impl Workspace {
     /// asking twice would drop a `Stopping` picker over a list already shown.
     fn start_flow(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         purpose: FlowPurpose,
         path: PathBuf,
         selection: FlowSelection,
@@ -260,12 +281,13 @@ impl Workspace {
 
         self.flow_picker.close();
         cx.notify();
-        self.dispatch_flow(purpose, &path, None, &selection, window, cx);
+        self.dispatch_flow(lane, purpose, &path, None, &selection, window, cx);
     }
 
     /// Act on a flow that has every answer it needs.
     fn dispatch_flow(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         purpose: FlowPurpose,
         path: &Path,
         profile: Option<&str>,
@@ -274,8 +296,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match purpose {
-            FlowPurpose::Validate => self.validate_flow(path, profile, window, cx),
-            FlowPurpose::Run => self.submit_flow_run(path, profile, selection, cx),
+            FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
+            FlowPurpose::Run => self.submit_flow_run(lane, path, profile, selection, cx),
+            // The graph pane shows a file; which worktree would run it is not
+            // part of opening it.
             FlowPurpose::Graph => self.open_flow_graph(path, window, cx),
         }
     }
@@ -288,13 +312,14 @@ impl Workspace {
     /// takes no lock, and creates no run directory.
     fn validate_flow(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         path: &Path,
         profile: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let name = super::flow_paths::flow_label(path);
-        let (title, body) = match self.check_flow(path, profile, cx) {
+        let (title, body) = match self.check_flow(lane, path, profile, cx) {
             Ok(issues) if issues.is_empty() => (s::flow_valid_title(), s::flow_valid_body(&name)),
             Ok(issues) => (
                 s::flow_invalid_title(&name, issues.len()),
@@ -321,12 +346,13 @@ impl Workspace {
 
     fn submit_flow_run(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
         cx: &mut Context<Self>,
     ) {
-        match self.build_flow_request(path, profile, selection, cx) {
+        match self.build_flow_request(lane, path, profile, selection, cx) {
             Ok(submission) => self.start_flow_thread(submission, cx),
             Err(e) => self.report_flow_refusal(e, cx),
         }

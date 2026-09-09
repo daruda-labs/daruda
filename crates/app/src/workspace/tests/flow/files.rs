@@ -20,6 +20,7 @@ async fn the_picker_offers_the_person_s_own_flows_beside_the_lane_s(cx: &mut Tes
 
     let rows = ws.update(cx, |ws, cx| {
         ws.open_flow_picker(
+            ws.active,
             crate::workspace::command::flow_picker::FlowPurpose::Validate,
             cx,
         );

@@ -152,6 +152,16 @@ impl Workspace {
         self.lane_for(target).is_some()
     }
 
+    /// Whether this window is showing a worktree at all.
+    ///
+    /// A predicate rather than a getter, so a caller cannot use it to *act* on
+    /// the active worktree — commands here name their target. It exists only
+    /// to keep two refusals apart when a text adapter resolves its own
+    /// default: nowhere to run is a different answer than no such flow.
+    pub(crate) fn control_has_active_lane(&self) -> bool {
+        self.lane_for(self.active).is_some()
+    }
+
     /// Same, for a project.
     pub(crate) fn control_has_project(&self, project: ProjectId) -> bool {
         self.project_for(project).is_some()

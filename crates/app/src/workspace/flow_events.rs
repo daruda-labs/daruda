@@ -161,18 +161,33 @@ impl Workspace {
             return;
         };
         // What a completion toast would have said, in the form a person can
-        // actually read afterwards — the run's own narrative. Opened under
-        // the lane the run belongs to, which may no longer be the active
-        // one by the time a long run ends.
+        // actually read afterwards — the run's own narrative.
+        //
+        // Only when the run's lane is the one on screen. `open_pane_file_view`
+        // always pushes into the *active* runtime while stamping the pane with
+        // the `owner` it is handed, so opening a parked lane's report built a
+        // pane whose owner named one runtime and whose home was another — and
+        // `load_pane_file_content` then looks it up by owner, misses, and drops
+        // the content, leaving a pane on "Loading" for good (the invariant
+        // `git_ops::file_view::debug_assert_owner_is_active` guards). Settling
+        // still happens either way, so the outcome still reaches the panel, the
+        // chip and the phone; the report is one click away in the Flows panel.
+        //
+        // WORKAROUND: the real fix is for a pane to be able to live in its own
+        // lane's runtime rather than always the active one — that is the file-pane
+        // subsystem's shape, not this call site's, and changing it also decides
+        // whether a background lane may silently gain a tab.
         if let Some(report) = self.settle_flow_run(lane_ref, end, cx) {
-            self.open_pane_file_view(
-                lane_ref.lane,
-                report,
-                /* staged = */ false,
-                super::main_area::file_view_pane::FileViewMode::Preview,
-                window,
-                cx,
-            );
+            if lane_ref == self.active {
+                self.open_pane_file_view(
+                    lane_ref.lane,
+                    report,
+                    /* staged = */ false,
+                    super::main_area::file_view_pane::FileViewMode::Preview,
+                    window,
+                    cx,
+                );
+            }
         }
     }
 
@@ -252,6 +267,20 @@ impl Workspace {
         // left to `apply_flow_event` itself.
         self.colour_flow_graph(lane, event, cx);
         self.advance_flow_stage(lane, event, cx);
+    }
+
+    /// The whole path, including the `RunEnded` arm that opens the report and
+    /// so needs a window. Separate from [`Self::apply_flow_event_for_test`] so
+    /// a stage-transition test does not have to hold a window it never uses.
+    #[cfg(test)]
+    pub(in crate::workspace) fn apply_flow_event_with_window_for_test(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        event: &FlowEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_flow_event(lane, event, window, cx);
     }
 
     /// Park a question on a seeded run, so a test can exercise answering

@@ -28,7 +28,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_flow_picker(FlowPurpose::Graph, cx);
+        self.open_flow_picker(self.active, FlowPurpose::Graph, cx);
     }
 
     /// Read the focused graph pane's file again.
@@ -85,7 +85,8 @@ impl Workspace {
         let selection = super::flow_request::FlowSelection { until, pinned };
         // A refusal has already said so on screen — this caller is the graph
         // pane's ▶, and the person pressing it is looking at that toast.
-        let _refused_on_screen = self.run_flow_at(path, FlowPurpose::Run, selection, window, cx);
+        let _refused_on_screen =
+            self.run_flow_at(self.active, path, FlowPurpose::Run, selection, window, cx);
     }
 
     /// Pin the graph pane's selection, or unpin it.
@@ -209,6 +210,7 @@ impl Workspace {
                     // Same as the ▶ above: a refused validate has already said
                     // so on screen, to the person who pressed the button.
                     let _refused_on_screen = workspace.run_flow_at(
+                        workspace.active,
                         &for_path,
                         FlowPurpose::Validate,
                         super::flow_request::FlowSelection::default(),

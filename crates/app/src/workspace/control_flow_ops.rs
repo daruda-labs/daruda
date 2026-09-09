@@ -13,6 +13,7 @@ use crate::control::result::{ControlError, FlowEntry, FlowOriginKind, LaneHandle
 use crate::workspace::Workspace;
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label};
 use crate::workspace::flow_request::FlowSelection;
+use daruda_store::project::LaneRef;
 
 impl Workspace {
     /// Every flow the active lane can run, in the order the flows panel shows
@@ -37,30 +38,36 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// Start `name` in the active lane.
+    /// Start `name` in `lane`.
+    ///
+    /// The worktree is the caller's to name — every other targeted command on
+    /// this surface names its target, and a run that read the active lane
+    /// instead made the answer the first place the caller learned where it
+    /// landed.
     ///
     /// Every refusal is taken *before* dispatch, because a refusal after it
     /// surfaces as a desktop toast the caller never sees and would leave a
-    /// phone told a run started that never did. A flow is lane-scoped, so with
-    /// no active lane there is nowhere to put it; one that would open a desktop
-    /// dialog (an `ask` permission policy, or a profile question) would hang a
-    /// caller that cannot answer it; a lane runs one flow at a time, enforced
-    /// by an on-disk lock; and a flow that does not pass its own static checks
-    /// would be refused on submit.
+    /// phone told a run started that never did. A worktree that is gone has
+    /// nowhere to put a run; one that would open a desktop dialog (an `ask`
+    /// permission policy, or a profile question) would hang a caller that
+    /// cannot answer it; a lane runs one flow at a time, enforced by an
+    /// on-disk lock; and a flow that does not pass its own static checks would
+    /// be refused on submit.
     pub(crate) fn control_flow_run(
         &mut self,
+        lane: LaneRef,
         name: &str,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<FlowEntry, ControlError> {
-        let Some(cwd) = self.active_lane_root() else {
-            return Err(ControlError::NoActiveLane);
+        let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
+            return Err(ControlError::TargetGone);
         };
-        let found = self
-            .resolve_flow_name(name)
-            .ok_or_else(|| ControlError::FlowNotFound {
-                name: name.to_string(),
-            })?;
+        let found =
+            self.resolve_flow_name_in(lane, name)
+                .ok_or_else(|| ControlError::FlowNotFound {
+                    name: name.to_string(),
+                })?;
         let label = flow_label(&found.path);
         if needs_desktop_answer(&found.path) {
             return Err(ControlError::FlowNeedsInteraction { name: label });
@@ -70,7 +77,7 @@ impl Workspace {
         // leaves the guard inside `run_flow_at` to answer the second case by
         // opening its "stop it?" picker — a desktop dialog raised by a phone
         // command, which is the one thing this surface must never do.
-        if self.lane_holder(&cwd).is_some() || self.runs.is_running(self.active) {
+        if self.lane_holder(&cwd).is_some() || self.runs.is_running(lane) {
             return Err(ControlError::FlowLocked { name: label });
         }
         // Everything the run would refuse *after* dispatch surfaces on the
@@ -78,7 +85,7 @@ impl Workspace {
         // is taken here, where it can still become an answer. Same check
         // `Validate Flow…` runs: no lock, no run directory.
         let runnable = matches!(
-            self.check_flow(&found.path, None, cx),
+            self.check_flow(lane, &found.path, None, cx),
             Ok(issues) if issues.is_empty()
         );
         if !runnable {
@@ -88,11 +95,12 @@ impl Workspace {
         let entry = FlowEntry {
             name: label,
             origin: map_origin(found.origin),
-            lane: LaneHandle::new(self.uuid(), self.active),
+            lane: LaneHandle::new(self.uuid(), lane),
         };
         // The guard reads the lock again, so a run that took it in between is
         // still caught — and answered, rather than reported as started.
         if !self.run_flow_at(
+            lane,
             &found.path,
             crate::workspace::command::flow_picker::FlowPurpose::Run,
             FlowSelection::default(),
@@ -114,17 +122,27 @@ impl Workspace {
         // Marked after dispatch rather than threaded into the submission: the
         // run is inserted synchronously and nothing here awaits, so the event
         // pump cannot retire it in between.
-        if !self.runs.answer_telegram_on_end(self.active) {
+        if !self.runs.answer_telegram_on_end(lane) {
             return Err(ControlError::FlowNotStarted { name: entry.name });
         }
         Ok(entry)
     }
 
-    /// The flow `name` points at, accepting either the file name as written
-    /// on disk or its stem — a phone keyboard should not have to type
-    /// `.yaml`.
-    fn resolve_flow_name(&self, name: &str) -> Option<FoundFlow> {
-        let sources = self.flow_sources()?;
+    /// This window's active worktree, if it can run `name`.
+    ///
+    /// For a text adapter's default target. Goes through the same resolution
+    /// [`Self::control_flow_run`] uses, so the worktree a bare stem picks and
+    /// the run that follows cannot disagree about which file that was.
+    pub(crate) fn control_active_lane_offers(&self, name: &str) -> Option<LaneHandle> {
+        self.resolve_flow_name_in(self.active, name)
+            .map(|_| LaneHandle::new(self.uuid(), self.active))
+    }
+
+    /// The flow `name` points at *in `lane`*, accepting either the file name
+    /// as written on disk or its stem — a phone keyboard should not have to
+    /// type `.yaml`.
+    fn resolve_flow_name_in(&self, lane: LaneRef, name: &str) -> Option<FoundFlow> {
+        let sources = self.flow_sources_for(lane)?;
         sources.list_flows().into_iter().find(|found| {
             let file = found.path.file_name().map(|n| n.to_string_lossy());
             let stem = found.path.file_stem().map(|n| n.to_string_lossy());

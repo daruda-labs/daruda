@@ -155,6 +155,7 @@ fn run_button(
                         // A refusal is already on screen; this match only
                         // cares whether the window was reachable at all.
                         let _refused_on_screen = ws.run_flow_at(
+                            ws.active,
                             &path,
                             crate::workspace::command::flow_picker::FlowPurpose::Run,
                             // The whole flow: this row names a file, not a

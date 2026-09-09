@@ -390,10 +390,23 @@ impl Workspace {
     /// picker, the panel and the shot scenarios cannot disagree about what
     /// this lane can run.
     pub(in crate::workspace) fn flow_sources(&self) -> Option<super::flow_paths::FlowSources> {
+        self.flow_sources_for(self.active)
+    }
+
+    /// The same, for a worktree the caller named rather than the one on
+    /// screen.
+    ///
+    /// The project scope follows `target`'s own owner, not the active
+    /// project: a run in another worktree must not pick up this one's
+    /// project-scoped flows.
+    pub(in crate::workspace) fn flow_sources_for(
+        &self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<super::flow_paths::FlowSources> {
         Some(super::flow_paths::FlowSources {
-            lane: self.active_lane_root()?,
+            lane: self.lane_for(target)?.path.clone(),
             project: self
-                .active_project()
+                .project_for(target.project)
                 .map(|p| super::flow_paths::project_flows_dir(&self.data_dir, &p.root)),
             global: super::flow_paths::global_flows_dir(&self.data_dir),
         })

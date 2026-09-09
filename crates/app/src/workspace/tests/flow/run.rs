@@ -19,7 +19,7 @@ async fn every_path_the_app_puts_in_a_request_is_absolute(cx: &mut TestAppContex
 
     let (lane_ref, issues) = ws.update(cx, |ws, cx| {
         let submission = ws
-            .build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+            .build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
             .unwrap_or_else(|_| panic!("a local lane with a valid flow builds a request"));
         (
             submission.lane,
@@ -55,7 +55,7 @@ async fn a_submitted_request_is_whole(cx: &mut TestAppContext) {
 
     let request = ws
         .update(cx, |ws, cx| {
-            ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+            ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
         })
         .expect("a local lane with a valid flow builds a request")
         .request;
@@ -87,7 +87,7 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
     );
 
     let refused = ws.update(cx, |ws, cx| {
-        ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+        ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
             .is_err()
     });
     assert!(refused, "a node depending on nothing should not run");
@@ -110,6 +110,7 @@ async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext)
 
     let labels = ws.update(cx, |ws, cx| {
         ws.open_flow_picker(
+            ws.active,
             crate::workspace::command::flow_picker::FlowPurpose::Validate,
             cx,
         );
@@ -154,7 +155,7 @@ nodes:
     );
 
     let refused = ws.update(cx, |ws, cx| {
-        match ws.build_flow_request(&flow_path, None, &FlowSelection::default(), cx) {
+        match ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx) {
             Err(crate::workspace::flow_request::FlowSubmitError::Invalid(issues)) => issues,
             Err(_) => panic!("refused, but not for the reason under test"),
             Ok(_) => panic!("a flow naming an unconfigured agent was accepted"),
@@ -186,7 +187,11 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
     .expect("plant a lock");
 
     let state = ws.update(cx, |ws, cx| {
-        ws.open_flow_picker(crate::workspace::command::flow_picker::FlowPurpose::Run, cx);
+        ws.open_flow_picker(
+            ws.active,
+            crate::workspace::command::flow_picker::FlowPurpose::Run,
+            cx,
+        );
         format!("{:?}", ws.flow_picker)
     });
     assert!(
@@ -447,7 +452,8 @@ nodes:
     );
 
     let issues = ws.update(cx, |ws, cx| {
-        ws.check_flow(&flow_path, None, cx).expect("checked")
+        ws.check_flow(ws.active, &flow_path, None, cx)
+            .expect("checked")
     });
     assert!(
         issues.iter().any(|i| matches!(
@@ -505,7 +511,11 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_flow_picker(crate::workspace::command::flow_picker::FlowPurpose::Run, cx);
+            ws.open_flow_picker(
+                ws.active,
+                crate::workspace::command::flow_picker::FlowPurpose::Run,
+                cx,
+            );
             ws.execute_flow_picker_selection(window, cx);
 
             assert!(
@@ -551,6 +561,7 @@ async fn answering_the_second_question_runs_under_that_profile(cx: &mut TestAppC
             // `Validate` rather than `Run`: it walks the same two stages and
             // the same wiring, and takes no lock and starts no session.
             ws.open_flow_picker(
+                ws.active,
                 crate::workspace::command::flow_picker::FlowPurpose::Validate,
                 cx,
             );
@@ -572,6 +583,7 @@ async fn a_flow_without_profiles_is_never_asked_about_one(cx: &mut TestAppContex
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_flow_picker(
+                ws.active,
                 crate::workspace::command::flow_picker::FlowPurpose::Validate,
                 cx,
             );
@@ -593,11 +605,17 @@ async fn the_chosen_profile_reaches_the_request(cx: &mut TestAppContext) {
 
     let (plain, chosen) = ws.update(cx, |ws, cx| {
         let plain = ws
-            .build_flow_request(&flow_path, None, &FlowSelection::default(), cx)
+            .build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
             .expect("builds")
             .request;
         let chosen = ws
-            .build_flow_request(&flow_path, Some("cheap"), &FlowSelection::default(), cx)
+            .build_flow_request(
+                ws.active,
+                &flow_path,
+                Some("cheap"),
+                &FlowSelection::default(),
+                cx,
+            )
             .expect("builds")
             .request;
         (
@@ -763,6 +781,7 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
             // no lock and starts no session.
             assert!(
                 ws.run_flow_at(
+                    ws.active,
                     &flow_path,
                     crate::workspace::command::flow_picker::FlowPurpose::Validate,
                     FlowSelection::default(),
@@ -808,6 +827,7 @@ async fn naming_a_flow_with_no_profiles_opens_no_picker(cx: &mut TestAppContext)
         ws.update(cx, |ws, cx| {
             assert!(
                 ws.run_flow_at(
+                    ws.active,
                     &flow_path,
                     crate::workspace::command::flow_picker::FlowPurpose::Validate,
                     FlowSelection::default(),
@@ -850,6 +870,7 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
             assert!(
                 !ws.run_flow_at(
+                    ws.active,
                     &flow_path,
                     crate::workspace::command::flow_picker::FlowPurpose::Run,
                     FlowSelection::default(),

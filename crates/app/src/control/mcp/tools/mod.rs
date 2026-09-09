@@ -203,6 +203,7 @@ fn flow_run_properties() -> serde_json::Value {
             "type": "string",
             "description": "Flow file name, from daruda_flow_list. The extension is optional.",
         },
+        "worktree": lane_ref_schema(),
     })
 }
 
@@ -310,12 +311,14 @@ static TABLE: &[Tool] = &[
     Tool {
         id: ToolId::FlowRun,
         name: "daruda_flow_run",
-        description: "Start a flow by name, in whichever open window's active worktree \
-                      has it — the answer says which. Reports that it started, not that \
-                      it finished; the outcome arrives when the run ends.",
+        description: "Start a flow by name in one worktree. Take the `worktree` from the \
+                      matching daruda_flow_list row — a flow belongs to the worktree it \
+                      was listed under, and the same name in two of them is two \
+                      different flows. Reports that it started, not that it finished; \
+                      the outcome arrives when the run ends.",
         gate: Gate::Open,
         properties: flow_run_properties,
-        required: &["name"],
+        required: &["name", "worktree"],
     },
 ];
 

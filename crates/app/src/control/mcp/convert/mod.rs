@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::control::mcp::tools::ToolId;
 use crate::control::result::{ControlOutcome, LaneHandle};
-use crate::control::spec::{FlowCommand, GatedCommand, ResolvedCommand};
+use crate::control::spec::{GatedCommand, ResolvedCommand, ResolvedFlowCommand};
 use crate::telegram::bridge::PaneRef;
 
 /// Why a call could not become a command. Reported as a tool error, not a
@@ -70,7 +70,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
         ToolId::ChatList => Command::Immediate(ResolvedCommand::List),
         ToolId::Status => Command::Immediate(ResolvedCommand::Brief),
         ToolId::LaneList => Command::Immediate(ResolvedCommand::LaneList),
-        ToolId::FlowList => Command::Immediate(ResolvedCommand::Flow(FlowCommand::List)),
+        ToolId::FlowList => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::List)),
         ToolId::ChatSend => Command::Immediate(ResolvedCommand::Say {
             target: pane_arg(args, "target")?,
             text: string_arg(args, "text")?,
@@ -81,8 +81,9 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
         ToolId::ChatRead => Command::Immediate(ResolvedCommand::Read {
             target: pane_arg(args, "target")?,
         }),
-        ToolId::FlowRun => Command::Immediate(ResolvedCommand::Flow(FlowCommand::Run {
+        ToolId::FlowRun => Command::Immediate(ResolvedCommand::Flow(ResolvedFlowCommand::Run {
             name: string_arg(args, "name")?,
+            lane: lane_arg(args, "worktree")?,
         })),
         ToolId::LaneCreate => Command::Gated(GatedCommand::LaneCreate {
             workspace: uuid_arg(args, "workspace")?,

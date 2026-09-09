@@ -87,6 +87,7 @@ async fn a_flow_on_a_lane_with_an_unusable_host_is_refused_not_run_locally(
 
     ws.update(cx, |ws, cx| {
         match ws.build_flow_request(
+            ws.active,
             &flow_path,
             None,
             &crate::workspace::flow_request::FlowSelection::default(),
@@ -136,6 +137,7 @@ async fn a_flow_naming_an_unlaunchable_agent_is_refused_with_the_reason(cx: &mut
 
     let reason = ws.update(cx, |ws, cx| {
         match ws.build_flow_request(
+            ws.active,
             &flow_path,
             None,
             &crate::workspace::flow_request::FlowSelection::default(),

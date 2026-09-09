@@ -21,10 +21,29 @@ pub(crate) enum UseTarget {
     Clear,
 }
 
+/// Parsed from text. Names no worktree — a person who names a flow has not
+/// said where it should run, so the adapter fills that in before the executor
+/// sees the command, exactly as it turns an [`Ordinal`] into a [`PaneRef`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FlowCommand {
     List,
     Run { name: String },
+}
+
+/// What the executor runs. `Run` carries the worktree it lands in, so the
+/// answer is no longer the first place a caller learns where that was.
+///
+/// `List` takes none: it reports every window's active worktree and each row
+/// says which, so there is no target to name. The same reason
+/// `daruda_chat_list` and `daruda_worktree_list` take no arguments — a listing
+/// names nothing, only an action does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ResolvedFlowCommand {
+    List,
+    Run {
+        name: String,
+        lane: crate::control::result::LaneHandle,
+    },
 }
 
 /// Parsed from text. Targets are ordinals.
@@ -65,7 +84,7 @@ pub(crate) enum ResolvedCommand {
     Stop {
         target: PaneRef,
     },
-    Flow(FlowCommand),
+    Flow(ResolvedFlowCommand),
     Brief,
     /// `destination` is the orchestrator's pane and `connecting` says whether
     /// naming it had to start one.

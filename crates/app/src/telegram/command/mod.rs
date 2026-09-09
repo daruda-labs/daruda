@@ -9,7 +9,9 @@
 //! it; turning an outcome into a message a phone shows is [`render`]'s.
 
 use crate::control::result::{ChatSummary, ControlError, ControlOutcome, ControlResult, Listing};
-use crate::control::spec::{ControlCommand, Ordinal, ResolvedCommand, UseTarget};
+use crate::control::spec::{
+    ControlCommand, FlowCommand, Ordinal, ResolvedCommand, ResolvedFlowCommand, UseTarget,
+};
 use crate::surface::strings as s;
 use crate::telegram::bridge::PaneRef;
 
@@ -192,6 +194,11 @@ pub(crate) enum Resolution {
     /// it may have to start one. That needs the `App` this step does not
     /// have, so the caller finishes the command.
     Ask(String),
+    /// `/flow <name>` — a person naming a flow has not named a worktree, and
+    /// finding one that holds it means walking every window. Same reason as
+    /// [`Self::Ask`]: the target is real, just not resolvable from the
+    /// ordinal table alone.
+    RunFlow(String),
 }
 
 /// Turn ordinals into concrete panes, and handle the one command that is
@@ -200,7 +207,12 @@ pub(crate) fn resolve_command(command: ControlCommand, state: &mut CommandState)
     match command {
         ControlCommand::List => Resolution::Run(ResolvedCommand::List, None),
         ControlCommand::Brief => Resolution::Run(ResolvedCommand::Brief, None),
-        ControlCommand::Flow(flow) => Resolution::Run(ResolvedCommand::Flow(flow), None),
+        // Listing needs no target and each row says which worktree it came
+        // from; running needs one, and only the `App` can pick it.
+        ControlCommand::Flow(FlowCommand::List) => {
+            Resolution::Run(ResolvedCommand::Flow(ResolvedFlowCommand::List), None)
+        }
+        ControlCommand::Flow(FlowCommand::Run { name }) => Resolution::RunFlow(name),
         ControlCommand::Ask { text } => Resolution::Ask(text),
         ControlCommand::Use(UseTarget::Clear) => {
             state.select(None);

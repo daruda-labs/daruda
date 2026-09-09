@@ -128,6 +128,20 @@ pub(super) fn run_command(
             }),
             None,
         ),
+        // Same shape as `Ask`: pick the target the text did not name, then
+        // run like any other command.
+        command::Resolution::RunFlow(name) => (
+            cx.update(|cx| {
+                let lane = crate::control::exec::first_lane_offering(&name, cx)?;
+                crate::control::exec::run(
+                    crate::control::spec::ResolvedCommand::Flow(
+                        crate::control::spec::ResolvedFlowCommand::Run { name, lane },
+                    ),
+                    cx,
+                )
+            }),
+            None,
+        ),
         command::Resolution::Run(resolved, addressed) => (
             cx.update(|cx| crate::control::exec::run(resolved, cx)),
             addressed,

@@ -502,6 +502,7 @@ nodes:
     // The control: the same file under a purpose that *does* ask.
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_flow_picker(
+            ws.active,
             crate::workspace::command::flow_picker::FlowPurpose::Validate,
             cx,
         );
@@ -516,6 +517,7 @@ nodes:
     ws.update(&mut vcx, |ws, _| ws.flow_picker.close());
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_flow_picker(
+            ws.active,
             crate::workspace::command::flow_picker::FlowPurpose::Graph,
             cx,
         );

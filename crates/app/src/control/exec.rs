@@ -15,7 +15,7 @@ use crate::control::result::{
     Activity, BriefSummary, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowEntry,
     Health, LaneGroup, LaneHandle, Listing, ProjectGroup, WindowGroup, ask_disposition,
 };
-use crate::control::spec::{FlowCommand, GatedCommand, ResolvedCommand};
+use crate::control::spec::{GatedCommand, ResolvedCommand, ResolvedFlowCommand};
 use crate::surface::strings as s;
 use crate::telegram::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
@@ -74,10 +74,10 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             ws.control_read(target.pane, cx)
         })
         .map(|text| ControlResult::Transcript { target, text }),
-        // A flow is lane-scoped, and which flows a lane can run depends on its
-        // repository — so two windows genuinely see different sets and neither
-        // arm may stop at the first window.
-        ResolvedCommand::Flow(FlowCommand::List) => {
+        // A flow is worktree-scoped, and which flows one can run depends on
+        // its repository — so two windows genuinely see different sets and the
+        // listing may not stop at the first window.
+        ResolvedCommand::Flow(ResolvedFlowCommand::List) => {
             let mut flows: Vec<FlowEntry> = Vec::new();
             WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
                 flows.extend(ws.control_flow_list());
@@ -98,25 +98,17 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             flows.dedup();
             Ok(ControlResult::FlowList { flows })
         }
-        ResolvedCommand::Flow(FlowCommand::Run { name }) => {
-            let mut out = Err(ControlError::NoActiveLane);
-            WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
-                // Retry on the two refusals another window can answer
-                // differently: it may have an active lane where this one has
-                // none, and its repository may hold a flow this one lacks.
-                // Neither started anything, so retrying cannot double-start.
-                // Every other refusal is about the file and would repeat.
-                if matches!(
-                    out,
-                    Err(ControlError::NoActiveLane) | Err(ControlError::FlowNotFound { .. })
-                ) {
-                    out = ws.control_flow_run(&name, window, cx);
-                }
-            });
-            // Named by the file that resolved, not by what the user typed —
-            // `/flow ship` may pick `ship.yaml` or `ship.yml`, and the answer
-            // has to say which.
-            out.map(|entry| ControlResult::FlowStarting {
+        // One window, one worktree: the caller named it, so there is nothing
+        // to search and nothing that could start in a place it did not ask
+        // for.
+        ResolvedCommand::Flow(ResolvedFlowCommand::Run { name, lane }) => {
+            in_lane_window(lane, cx, |ws, window, cx| {
+                ws.control_flow_run(lane.lane_ref(), &name, window, cx)
+            })
+            // Named by the file that resolved, not by what the caller typed —
+            // `ship` may pick `ship.yaml` or `ship.yml`, and the answer has to
+            // say which.
+            .map(|entry| ControlResult::FlowStarting {
                 name: entry.name,
                 origin: entry.origin,
                 lane: entry.lane,
@@ -140,6 +132,34 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             destination,
             connecting,
         } => ask(text, destination, connecting, cx),
+    }
+}
+
+/// The first open window whose active worktree can run `name`.
+///
+/// A text adapter's default target: a person typing `/flow ship` has not named
+/// a worktree, and filling that in is what the adapter owes the executor,
+/// which takes only concrete ones. It lives here rather than in the adapter
+/// because walking windows needs the `App` that adapter's pure resolution step
+/// does not have — the same reason `/daruda` finishes here.
+///
+/// Keeps the two refusals apart: no worktree anywhere means there is nowhere to
+/// run, which is a different thing to tell someone than "no flow by that name".
+pub(crate) fn first_lane_offering(name: &str, cx: &mut App) -> Result<LaneHandle, ControlError> {
+    let mut any_lane = false;
+    let mut found: Option<LaneHandle> = None;
+    WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+        any_lane |= ws.control_has_active_lane();
+        if found.is_none() {
+            found = ws.control_active_lane_offers(name);
+        }
+    });
+    match found {
+        Some(lane) => Ok(lane),
+        None if any_lane => Err(ControlError::FlowNotFound {
+            name: name.to_string(),
+        }),
+        None => Err(ControlError::NoActiveLane),
     }
 }
 
