@@ -872,7 +872,7 @@ fn spawn_send_task(
             // inside the background-executor spawn below, alongside the
             // blocking HTTP call, rather than on this foreground async
             // loop — a full CommonMark parse of a response up to
-            // `TELEGRAM_PREVIEW_THRESHOLD` chars is real work that
+            // `TELEGRAM_PREVIEW_HEAD_CHARS` + `_TAIL_CHARS` is real work that
             // shouldn't run on the GPUI thread (mirrors
             // `daruda_acp::node`'s "blocking work stays off the
             // foreground executor" convention).

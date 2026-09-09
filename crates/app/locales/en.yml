@@ -1620,6 +1620,7 @@ control:
   flow_stopped: "Stopped it."
   answer_none: "It finished without saying anything."
   answer_failed: "That run ended in an error."
+  answer_interrupted: "That was stopped before it answered."
   answer_still_working: "Still working. I'll have the answer once it finishes."
   flow_stop_already_idle: "No flow was running there."
   error_approval_refused: "Refused."

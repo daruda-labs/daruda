@@ -203,6 +203,16 @@ mod ask {
     use daruda_acp::ChatItem;
     use gpui::AppContext as _;
 
+    /// How the turn under test ended. Three outcomes, and `completed_normally`
+    /// alone cannot name the third.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum TurnEnd {
+        Completed,
+        /// A Stop — from the desk or from another surface.
+        Cancelled,
+        Failed,
+    }
+
     fn said(text: &str) -> ChatItem {
         ChatItem::AssistantText {
             text: text.into(),
@@ -221,7 +231,7 @@ mod ask {
     /// vacuously.
     fn answer_after_a_turn(
         items: Vec<ChatItem>,
-        completed_normally: bool,
+        end: TurnEnd,
         cx: &mut TestAppContext,
     ) -> Option<PaneAnswer> {
         let fixture = workspace_with_agent_chat(cx);
@@ -229,7 +239,7 @@ mod ask {
             .workspace
             .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
         let waiter = cx.update(|cx| {
-            let (_deadline, rx) = crate::control::ask::wait_for(target, cx);
+            let (_id, _deadline, rx) = crate::control::ask::wait_for(target, cx);
             rx
         });
 
@@ -242,29 +252,50 @@ mod ask {
                 });
                 // Busy is observed first, so the tick has an edge to detect.
                 ws.pulse_agent_chats(cx);
-                view.update(cx, |v, cx| {
-                    v.apply_event(
-                        daruda_acp::AcpEvent::TurnEnded {
-                            stop_reason: "end_turn".into(),
-                            completed_normally,
-                        },
-                        "base16-ocean.dark",
-                        false,
-                        cx,
-                    );
-                });
+                match end {
+                    TurnEnd::Completed | TurnEnd::Cancelled => {
+                        let completed_normally = end == TurnEnd::Completed;
+                        view.update(cx, |v, cx| {
+                            v.apply_event(
+                                daruda_acp::AcpEvent::TurnEnded {
+                                    stop_reason: "end_turn".into(),
+                                    completed_normally,
+                                },
+                                "base16-ocean.dark",
+                                false,
+                                cx,
+                            );
+                        });
+                    }
+                    // The error arm stashes its own outcome, so it is reached
+                    // by the failure event rather than by `TurnEnded`.
+                    TurnEnd::Failed => {
+                        view.update(cx, |v, cx| {
+                            v.apply_event(
+                                daruda_acp::AcpEvent::TurnFailed(
+                                    daruda_acp::AcpFailure::Unclassified {
+                                        message: "the adapter gave up".into(),
+                                    },
+                                ),
+                                "base16-ocean.dark",
+                                false,
+                                cx,
+                            );
+                        });
+                    }
+                }
                 ws.pulse_agent_chats(cx);
             });
         })
         .expect("window is live");
 
-        waiter.try_recv().ok()
+        waiter.try_recv().ok().flatten()
     }
 
     #[gpui::test]
     async fn an_ask_answers_with_the_text_the_turn_produced(cx: &mut TestAppContext) {
         assert_eq!(
-            answer_after_a_turn(vec![said("here is the summary")], true, cx),
+            answer_after_a_turn(vec![said("here is the summary")], TurnEnd::Completed, cx),
             Some(PaneAnswer::Text {
                 text: "here is the summary".into()
             })
@@ -276,7 +307,7 @@ mod ask {
     #[gpui::test]
     async fn a_tool_only_turn_answers_no_answer(cx: &mut TestAppContext) {
         assert_eq!(
-            answer_after_a_turn(Vec::new(), true, cx),
+            answer_after_a_turn(Vec::new(), TurnEnd::Completed, cx),
             Some(PaneAnswer::NoAnswer)
         );
     }
@@ -294,7 +325,7 @@ mod ask {
             phase: Default::default(),
         };
         assert_eq!(
-            answer_after_a_turn(vec![streaming], true, cx),
+            answer_after_a_turn(vec![streaming], TurnEnd::Completed, cx),
             Some(PaneAnswer::Text {
                 text: "partial".into()
             })
@@ -330,6 +361,28 @@ mod ask {
                 "a fragment must not be reported as what it said"
             );
         });
+    }
+
+    /// A turn somebody stopped is not an answer. `settle_items` finalises
+    /// whatever was streaming, so the transcript *does* hold text — reporting
+    /// that as the reply would hand the caller a cut-off sentence as though
+    /// the agent had meant it.
+    #[gpui::test]
+    async fn a_stopped_turn_answers_interrupted_not_its_partial_text(cx: &mut TestAppContext) {
+        assert_eq!(
+            answer_after_a_turn(vec![said("half an ans")], TurnEnd::Cancelled, cx),
+            Some(PaneAnswer::Interrupted)
+        );
+    }
+
+    /// The error state the tool advertises to the model, which nothing
+    /// exercised end to end.
+    #[gpui::test]
+    async fn an_errored_turn_answers_failed(cx: &mut TestAppContext) {
+        assert_eq!(
+            answer_after_a_turn(vec![said("got this far")], TurnEnd::Failed, cx),
+            Some(PaneAnswer::Failed)
+        );
     }
 
     /// A pane nobody asked about must not be charged for the lookup with a

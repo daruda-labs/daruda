@@ -149,6 +149,11 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         // The body is the agent's own markdown, already bounded at the source.
         // Rendered as-is rather than wrapped in copy: a person who asked what
         // an agent said wants its words, not a sentence about them.
+        //
+        // That bound is in *chars* and Telegram's limit is in bytes, so a
+        // 4000-char CJK reply would still be refused. Unreachable today — no
+        // text command parses to a read or an ask, and these two arms exist
+        // because the match is exhaustive.
         ControlResult::Transcript { text, .. } => match text {
             Some(text) => plain(text.clone()),
             None => plain(s::control_transcript_empty()),
@@ -159,6 +164,7 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             PaneAnswer::Text { text } => text.clone(),
             PaneAnswer::NoAnswer => s::control_answer_none(),
             PaneAnswer::Failed => s::control_answer_failed(),
+            PaneAnswer::Interrupted => s::control_answer_interrupted(),
             PaneAnswer::Queued => s::control_sent_queued(),
             PaneAnswer::StillWorking => s::control_answer_still_working(),
         }),

@@ -6,10 +6,13 @@
 //! untrusted at the source, so each consumer would otherwise have to defend
 //! against it alone.
 //!
-//! The *algorithm* lives here; the *policy* — how much to keep, what the
-//! marker says — belongs to the caller. A phone screen and an LLM context are
-//! not bounded by the same thing, and a marker a person reads is localized
-//! while one a model reads must not be.
+//! One algorithm, two policies. A phone screen and an LLM context are not
+//! bounded by the same thing, and a marker a person reads is localized while
+//! one a model reads must not be — so [`elide_middle`] takes the budget and
+//! the marker as arguments. The orchestrator's policy lives here beside it
+//! (`bound_agent_text`, fixed English) because it has no other home; the
+//! phone's lives at its call site in `telegram_ops`, which owns the localized
+//! string.
 //!
 //! GPUI-free.
 

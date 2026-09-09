@@ -122,6 +122,11 @@ pub(crate) enum PaneAnswer {
     /// The turn ended in an error. Whatever it managed to say is in the chat;
     /// this call has no answer to give.
     Failed,
+    /// Somebody stopped the turn — a person at the desk, or another surface.
+    /// Its own state rather than `Text`: the transcript *does* hold whatever
+    /// had been written by then, and handing that back as the reply would
+    /// present a cut-off sentence as the agent's answer.
+    Interrupted,
     /// The prompt went behind a turn already in flight, so this call is not
     /// the one that will see its reply. Read it later.
     Queued,
@@ -624,6 +629,10 @@ mod tests {
             ControlResult::Answer {
                 target,
                 answer: PaneAnswer::Failed,
+            },
+            ControlResult::Answer {
+                target,
+                answer: PaneAnswer::Interrupted,
             },
             ControlResult::Answer {
                 target,

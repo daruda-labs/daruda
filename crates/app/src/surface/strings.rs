@@ -5331,6 +5331,9 @@ pub fn control_answer_none() -> String {
 pub fn control_answer_failed() -> String {
     rust_i18n::t!("control.answer_failed").into_owned()
 }
+pub fn control_answer_interrupted() -> String {
+    rust_i18n::t!("control.answer_interrupted").into_owned()
+}
 pub fn control_answer_still_working() -> String {
     rust_i18n::t!("control.answer_still_working").into_owned()
 }

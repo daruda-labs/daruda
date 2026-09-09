@@ -273,12 +273,13 @@ static TABLE: &[Tool] = &[
         id: ToolId::ChatAsk,
         name: "daruda_chat_ask",
         description: "Send a prompt to one agent chat and wait for the reply, in one call. \
-                      Answers `text` with what the turn said, `no_answer` if it only ran \
-                      tools, `failed` if it errored, `queued` if the chat was already busy \
-                      so this is not the call that will see the reply, and `still_working` \
-                      if the turn outran the wait — the last two are not failures, and \
-                      daruda_chat_read gets the reply afterwards. Cancelling this call \
-                      stops the waiting, never the turn.",
+                      Answers `text` with what the turn said; `no_answer` if it only ran \
+                      tools; `failed` if it errored; `interrupted` if somebody stopped it \
+                      before it answered; `queued` if the chat was already busy, so this \
+                      is not the call that will see the reply; `still_working` if the turn \
+                      outran the wait. The last two are not failures — daruda_chat_read \
+                      gets the reply afterwards. Cancelling this call stops the waiting, \
+                      never the turn.",
         gate: Gate::Open,
         properties: chat_ask_properties,
         required: &["target", "text"],

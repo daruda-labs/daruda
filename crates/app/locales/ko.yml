@@ -1619,6 +1619,7 @@ control:
   flow_stopped: "중지했습니다."
   answer_none: "아무 말 없이 끝냈습니다."
   answer_failed: "그 작업이 오류로 끝났습니다."
+  answer_interrupted: "답하기 전에 중지됐습니다."
   answer_still_working: "아직 작업 중입니다. 끝나면 답을 알 수 있습니다."
   flow_stop_already_idle: "거기서 실행 중인 플로우가 없습니다."
   error_approval_refused: "거절했습니다."

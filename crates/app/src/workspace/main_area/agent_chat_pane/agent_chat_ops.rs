@@ -562,16 +562,23 @@ impl Workspace {
             workspace: self.uuid(),
             pane: pane_id,
         };
-        if !crate::control::ask::is_waiting(target, cx) {
+        if !crate::control::ask::has_waiter(target, cx) {
             return;
         }
         // The same bounded read `daruda_chat_read` answers with, so the two
         // tools cannot disagree about what the agent said.
         let said = self.control_read(pane_id, cx).ok().flatten();
-        let answer = match (outcome, said) {
-            (TurnOutcome::Errored, _) => crate::control::result::PaneAnswer::Failed,
-            (_, Some(text)) => crate::control::result::PaneAnswer::Text { text },
-            (_, None) => crate::control::result::PaneAnswer::NoAnswer,
+        // `Stopped` is not an answer. `settle_items` finalises whatever was
+        // streaming, so the transcript *will* have text — handing it back as
+        // the reply would present a sentence somebody cut off as what the
+        // agent said.
+        let answer = match outcome {
+            TurnOutcome::Errored => crate::control::result::PaneAnswer::Failed,
+            TurnOutcome::Stopped => crate::control::result::PaneAnswer::Interrupted,
+            TurnOutcome::Completed => match said {
+                Some(text) => crate::control::result::PaneAnswer::Text { text },
+                None => crate::control::result::PaneAnswer::NoAnswer,
+            },
         };
         crate::control::ask::resolve(target, answer, cx);
     }

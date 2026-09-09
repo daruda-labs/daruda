@@ -174,26 +174,38 @@ pub(crate) fn run_waiting(cmd: ResolvedCommand, cx: &mut App) -> Dispatch {
         // `/clear` and its kin never reach the agent, so no turn will settle.
         Ok(SendDisposition::HandledLocally) => answered(PaneAnswer::NoAnswer),
         Ok(SendDisposition::Delivered) => {
-            let (deadline, answer) = crate::control::ask::wait_for(target, cx);
+            let (id, deadline, answer) = crate::control::ask::wait_for(target, cx);
             let (tx, rx) = smol::channel::bounded(1);
             cx.background_spawn(async move {
-                // A closed channel is the app going away, which the caller
-                // hears as the target being unreachable.
-                let outcome = match answer.recv().await {
-                    Ok(answer) => Ok(ControlResult::Answer { target, answer }),
-                    Err(_) => Err(ControlError::TargetGone),
-                };
-                let _ = tx.send(Some(outcome)).await;
+                let outcome = ask_outcome(answer.recv().await.ok(), target);
+                let _ = tx.send(outcome).await;
             })
             .detach();
             Dispatch::Deferred {
                 outcome: rx,
                 pending: Pending::Waiter {
                     pane: target,
+                    id,
                     deadline,
                 },
             }
         }
+    }
+}
+
+/// What a wait's channel earned the caller, and `None` for "send nothing".
+///
+/// Three inputs, three different debts, and they are easy to conflate. An
+/// answer is an answer. A caller that took its call back is owed *no reply at
+/// all* — it has freed its request id, and a frame against a freed id is the
+/// one thing the cancellation spec forbids. A channel that died with the app
+/// is owed the honest failure. A dropped sender alone cannot tell the middle
+/// case from the last, which is why a withdrawal is sent rather than dropped.
+fn ask_outcome(received: Option<Option<PaneAnswer>>, target: PaneRef) -> Option<ControlOutcome> {
+    match received {
+        Some(Some(answer)) => Some(Ok(ControlResult::Answer { target, answer })),
+        Some(None) => None,
+        None => Some(Err(ControlError::TargetGone)),
     }
 }
 
@@ -273,8 +285,12 @@ pub(crate) enum Pending {
     Approval(crate::control::approval::ApprovalId),
     Waiter {
         pane: PaneRef,
-        /// When this wait answers itself. What a caller still holding a record
-        /// of it prunes by — a turn has no `is_waiting` a card does.
+        /// *Which* wait on that pane. A pane is unique in space but not in
+        /// time, and this record can outlive the wait it names — so a
+        /// cancellation arriving late must not reach into the next one.
+        id: crate::control::ask::AskId,
+        /// When this wait answers itself, so a record of it stops being live
+        /// even if nothing came to say so.
         deadline: std::time::Instant,
     },
 }
@@ -284,8 +300,9 @@ impl Pending {
     pub(crate) fn is_live(self, cx: &App) -> bool {
         match self {
             Self::Approval(id) => crate::control::approval::is_waiting(id, cx),
-            Self::Waiter { pane, deadline } => {
-                std::time::Instant::now() < deadline && crate::control::ask::is_waiting(pane, cx)
+            Self::Waiter { pane, id, deadline } => {
+                std::time::Instant::now() < deadline
+                    && crate::control::ask::is_waiting(pane, id, cx)
             }
         }
     }
@@ -296,8 +313,8 @@ impl Pending {
             Self::Approval(id) => {
                 crate::control::approval::withdraw(id, cx);
             }
-            Self::Waiter { pane, .. } => {
-                crate::control::ask::withdraw(pane, cx);
+            Self::Waiter { pane, id, .. } => {
+                crate::control::ask::withdraw(pane, id, cx);
             }
         }
     }
