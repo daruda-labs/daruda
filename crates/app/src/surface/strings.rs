@@ -4251,6 +4251,14 @@ pub fn orchestrator_tab_unavailable() -> String {
     rust_i18n::t!("orchestrator.tab_unavailable").into_owned()
 }
 
+pub fn orchestrator_start_failed() -> String {
+    rust_i18n::t!("orchestrator.start_failed").into_owned()
+}
+
+pub fn orchestrator_not_started() -> String {
+    rust_i18n::t!("orchestrator.not_started").into_owned()
+}
+
 pub fn orchestrator_label() -> String {
     rust_i18n::t!("orchestrator.label").into_owned()
 }

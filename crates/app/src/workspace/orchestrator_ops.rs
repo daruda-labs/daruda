@@ -20,17 +20,34 @@ pub(in crate::workspace) struct OrchestratorChat {
 }
 
 impl Workspace {
+    /// What the status bar's orchestrator chip shows, or `None` for no chip
+    /// (the feature is off, or another window hosts the session).
+    ///
+    /// The registry is what makes the last case possible: a second window has
+    /// no slot of its own, so reading `orchestrator_chat` alone would have it
+    /// claim "not started" about a session that is working.
     pub(in crate::workspace) fn orchestrator_chip_state(
         &self,
-        cx: &gpui::App,
+        cx: &Context<Self>,
     ) -> Option<super::status_bar::orchestrator_chip::OrchestratorChipState> {
-        let view = self.orchestrator_chat.as_ref()?.view.read(cx);
-        Some(
-            super::status_bar::orchestrator_chip::OrchestratorChipState::from_activity(
+        use super::status_bar::orchestrator_chip::OrchestratorChipState;
+
+        if let Some(chat) = self.orchestrator_chat.as_ref() {
+            let view = chat.view.read(cx);
+            return Some(OrchestratorChipState::from_activity(
                 view.activity_state(),
                 &view.status,
-            ),
-        )
+            ));
+        }
+        // From the mirror `apply_config` keeps: `Config::resolved_agents()`
+        // deep-clones the catalog, and this runs on every render.
+        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
+        crate::orchestrator::config::resolve_from(&config.orchestrator, &self.agents)?;
+        // By entity id, never by reading the registry's handle back: this runs
+        // inside the render of the workspace it may be naming (pitfall 5).
+        let hosted_elsewhere = crate::window_registry::WindowRegistry::orchestrator(cx)
+            .is_some_and(|(_, host)| host.entity_id() != cx.entity_id());
+        (!hosted_elsewhere).then_some(OrchestratorChipState::NotStarted)
     }
 
     #[cfg(feature = "screenshot")]
@@ -135,11 +152,11 @@ impl Workspace {
             .any(|rt| rt.tabs.iter().any(|tab| self.is_orchestrator_tab(tab)))
     }
 
-    pub(in crate::workspace) fn toggle_orchestrator_tab(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Show the orchestrator's tab, or take it down if it is already up.
+    ///
+    /// `pub(crate)` for one caller — `orchestrator::start_or_toggle_from_chip`,
+    /// which must start a session first and so cannot live on this type.
+    pub(crate) fn toggle_orchestrator_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.orchestrator_tab_is_visible() {
             self.hide_orchestrator_tab(window, cx);
         } else if self.orchestrator_chat.is_some() && !self.show_orchestrator_tab(window, cx) {
@@ -184,7 +201,8 @@ impl Workspace {
             .position(|tab| self.is_orchestrator_tab(tab))
             .expect("inserted tab");
         self.active_runtime_mut().active_tab_index = index;
-        self.main_area.zoomed_pane_id = None;
+        // Remembered, not dropped: hiding restores it.
+        self.orchestrator_zoom_to_restore = self.main_area.zoomed_pane_id.take();
         self.main_area.pane_drop_hover = None;
         self.set_focused_pane(id, window, cx);
         if !self.bottom_dock.read(cx).is_open {
@@ -214,9 +232,12 @@ impl Workspace {
         self.remove_orchestrator_tab(true, window, cx);
     }
 
-    /// Moving the temporary tab between lanes must not focus a pane in the
-    /// lane being left: focusing an idle chat would start its ACP session.
-    pub(in crate::workspace) fn detach_orchestrator_tab_for_lane_change(
+    /// Take the orchestrator's tab down because the user is switching
+    /// worktrees.
+    ///
+    /// Focus is deliberately not restored: focusing an idle chat connects it,
+    /// and the lane switch refocuses its own pane afterwards anyway.
+    pub(in crate::workspace) fn close_orchestrator_tab_for_lane_change(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -257,9 +278,11 @@ impl Workspace {
                     .map_or(0, |tab| tab.last_focused_pane);
             }
         }
-        if self.main_area.zoomed_pane_id == Some(id) {
-            self.main_area.zoomed_pane_id = None;
-        }
+        // Put back the zoom the tab stood down, never the tab's own pane.
+        self.main_area.zoomed_pane_id = self
+            .orchestrator_zoom_to_restore
+            .take()
+            .filter(|zoomed| *zoomed != id);
         self.main_area.pane_drop_hover = None;
         if was_focused {
             let focused = self.active_runtime().focused_pane_id;
@@ -281,14 +304,6 @@ impl Workspace {
         }
         self.main_area.pending_resize = true;
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn reinsert_orchestrator_tab(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.show_orchestrator_tab(window, cx);
     }
 
     /// Session maintenance includes the hidden slot and never counts its tab twice.

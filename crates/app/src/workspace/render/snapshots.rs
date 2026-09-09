@@ -400,12 +400,11 @@ impl Workspace {
         // the active one) — such a session isn't "past" any more, and
         // `restore_session` would just focus the existing pane anyway, so
         // it doesn't belong in a list of things to restore.
+        // `every_agent_chat`, so the set does not change with whether the
+        // orchestrator's tab happens to be visible.
         let open_session_ids: std::collections::HashSet<String> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| p.agent_chat_content()?.view.read(cx).session_id.clone())
+            .every_agent_chat()
+            .filter_map(|(_, view)| view.read(cx).session_id.clone())
             .collect();
         // Up to 10 most-recent sessions per section, restricted to the active
         // Lane. A session belonging to another Lane is restorable after the

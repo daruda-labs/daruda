@@ -94,7 +94,7 @@ fn closing_last_user_tab_with_orchestrator_visible_closes_window(cx: &mut TestAp
 }
 
 #[gpui::test]
-fn visible_orchestrator_moves_to_another_worktree_as_the_same_view(cx: &mut TestAppContext) {
+fn switching_worktrees_closes_the_orchestrator_tab_and_keeps_the_session(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(root.path());
     let (window, workspace) =
@@ -115,32 +115,37 @@ fn visible_orchestrator_moves_to_another_worktree_as_the_same_view(cx: &mut Test
             let header = ws.telegram_header(pane, cx);
             assert!(ws.show_orchestrator_tab(window, cx));
             assert_eq!(ws.telegram_header(pane, cx), header);
-            ws.activate_lane(target, window, cx);
-            assert_eq!(ws.active, target);
-            assert_eq!(ws.active_runtime().focused_pane_id, pane);
-            assert!(
-                ws.main_area.runtimes[&previous]
-                    .panes
-                    .iter()
-                    .all(|p| p.id != pane)
-            );
-            assert_eq!(
-                ws.active_runtime()
-                    .panes
-                    .iter()
-                    .find(|p| p.id == pane)
-                    .unwrap()
-                    .agent_chat_view()
-                    .unwrap()
-                    .entity_id(),
-                view
-            );
             assert_eq!(
                 ws.lane_ref_for_pane(pane),
                 None,
                 "a visible slot must not inherit its host worktree's session host"
             );
-            ws.hide_orchestrator_tab(window, cx);
+
+            ws.activate_lane(target, window, cx);
+            assert_eq!(ws.active, target);
+            // The orchestrator belongs to no worktree, so it does not follow
+            // the user into the next one.
+            assert!(
+                !ws.orchestrator_tab_is_visible(),
+                "switching worktrees takes the tab down"
+            );
+            for (lane_ref, rt) in &ws.main_area.runtimes {
+                assert!(
+                    rt.panes.iter().all(|p| p.id != pane),
+                    "no worktree keeps a wrapper for it: {lane_ref:?}"
+                );
+            }
+            assert_ne!(
+                ws.active_runtime().focused_pane_id,
+                pane,
+                "focus lands on the incoming worktree's own pane"
+            );
+
+            // The session is what must survive: the slot still owns the same
+            // view, and the chip can put it back.
+            assert_eq!(ws.agent_chat_view(pane).unwrap().entity_id(), view);
+            assert_eq!(ws.telegram_header(pane, cx), header);
+            assert!(ws.show_orchestrator_tab(window, cx), "the chip reopens it");
             assert_eq!(ws.agent_chat_view(pane).unwrap().entity_id(), view);
         })
     })
@@ -148,7 +153,7 @@ fn visible_orchestrator_moves_to_another_worktree_as_the_same_view(cx: &mut Test
 }
 
 #[gpui::test]
-fn moving_the_orchestrator_does_not_connect_the_lane_being_left(cx: &mut TestAppContext) {
+fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mut TestAppContext) {
     use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 
     let root = tempfile::tempdir().unwrap();
@@ -167,35 +172,39 @@ fn moving_the_orchestrator_does_not_connect_the_lane_being_left(cx: &mut TestApp
                     root.path().to_path_buf(),
                 ));
 
-            ws.activate_lane(second, window, cx);
+            // A dormant chat in the worktree the user is about to leave. Its
+            // session starts on focus, so the close must not hand it focus.
             let dormant = ws
                 .insert_agent_chat_pane(ws.agents[0].id.clone(), ws.active_lane_cwds(), window, cx)
                 .unwrap();
-            ws.set_focused_pane(dormant, window, cx);
             assert!(matches!(
                 ws.agent_chat_view(dormant).unwrap().read(cx).status,
                 AgentSessionStatus::Idle
             ));
 
-            ws.activate_lane(first, window, cx);
             seed(ws, window, cx);
             assert!(ws.show_orchestrator_tab(window, cx));
             ws.activate_lane(second, window, cx);
-            ws.activate_lane(first, window, cx);
 
-            assert!(matches!(
-                ws.agent_chat_view(dormant).unwrap().read(cx).status,
-                AgentSessionStatus::Idle
-            ));
+            assert!(
+                !ws.orchestrator_tab_is_visible(),
+                "the switch took the tab down"
+            );
+            assert!(
+                matches!(
+                    ws.agent_chat_view(dormant).unwrap().read(cx).status,
+                    AgentSessionStatus::Idle
+                ),
+                "taking the tab down must not focus — and so connect — the \
+                 chat left behind in the outgoing worktree"
+            );
         })
     })
     .unwrap();
 }
 
 #[gpui::test]
-fn closing_a_project_preserves_the_orchestrator_draft_in_the_surviving_project(
-    cx: &mut TestAppContext,
-) {
+fn closing_a_project_stashes_the_orchestrator_draft_for_its_next_open(cx: &mut TestAppContext) {
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(first.path());
@@ -214,8 +223,19 @@ fn closing_a_project_preserves_the_orchestrator_draft_in_the_surviving_project(
             });
             assert!(ws.close_active_project(window, cx));
             assert_eq!(ws.active, surviving);
-            assert_eq!(ws.active_runtime().focused_pane_id, pane);
-            assert_eq!(ws.agent_chat_view(pane).unwrap().entity_id(), view);
+            // Closing the project switches worktrees, which takes the
+            // orchestrator's tab down with it.
+            assert!(!ws.orchestrator_tab_is_visible());
+            assert_ne!(ws.active_runtime().focused_pane_id, pane);
+            assert_eq!(
+                ws.agent_chat_view(pane).unwrap().entity_id(),
+                view,
+                "the session survives the project that hosted its tab"
+            );
+
+            // The unsent prompt is not lost with the tab — it comes back with
+            // it, in whichever project survived.
+            assert!(ws.show_orchestrator_tab(window, cx));
             assert_eq!(ws.input_owner, Some(pane));
             assert_eq!(
                 ws.terminal_input.read(cx).value().as_str(),
@@ -396,6 +416,185 @@ fn hidden_orchestrator_account_cleanup_updates_the_canonical_slot(cx: &mut TestA
         });
     })
     .unwrap();
+}
+
+/// The tab is temporary chrome, so showing and hiding it must leave the
+/// user's zoom exactly as they left it.
+#[gpui::test]
+fn showing_and_hiding_the_tab_restores_the_users_zoom(cx: &mut TestAppContext) {
+    let (window, workspace) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let zoomed = ws.active_runtime().focused_pane_id;
+            ws.main_area.zoomed_pane_id = Some(zoomed);
+            seed(ws, window, cx);
+
+            assert!(ws.show_orchestrator_tab(window, cx));
+            assert_eq!(
+                ws.main_area.zoomed_pane_id, None,
+                "the tab has to be visible, so the zoom stands down"
+            );
+
+            ws.hide_orchestrator_tab(window, cx);
+            assert_eq!(
+                ws.main_area.zoomed_pane_id,
+                Some(zoomed),
+                "and comes back when the tab goes away"
+            );
+        });
+    })
+    .expect("live window");
+}
+
+/// A second window must not claim a session it does not host.
+///
+/// Before this, every non-host window read its own empty slot and rendered
+/// "not started — click to start" while the host was working, and the click
+/// did nothing at all.
+#[gpui::test]
+fn only_the_host_window_shows_a_chip_once_a_session_exists(cx: &mut TestAppContext) {
+    use crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState;
+    use gpui::BorrowAppContext as _;
+
+    let (host_window, host) = build_workspace(cx);
+    let (_other_window, other) = build_workspace(cx);
+    cx.update(|cx| {
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user()).clone();
+            cfg.orchestrator.enabled = true;
+            store.set_user_for_testing(cfg);
+        });
+    });
+
+    // Nothing started yet: both windows offer to start it.
+    for ws in [&host, &other] {
+        ws.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                Some(OrchestratorChipState::NotStarted)
+            );
+        });
+    }
+
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register_orchestrator(
+            host_window.into(),
+            host.downgrade(),
+            cx,
+        );
+    });
+    cx.update_window(host_window.into(), |_, window, cx| {
+        host.update(cx, |ws, cx| seed(ws, window, cx));
+    })
+    .expect("live window");
+
+    host.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.orchestrator_chip_state(cx),
+            Some(OrchestratorChipState::Idle),
+            "the host reports the session"
+        );
+    });
+    other.update(cx, |ws, cx| {
+        assert_eq!(
+            ws.orchestrator_chip_state(cx),
+            None,
+            "and no other window claims it"
+        );
+    });
+}
+
+/// The chip's click must actually start a session.
+///
+/// It runs inside the host window's event dispatch, so anything it calls that
+/// re-enters `cx.update_window` on that same window gets "window not found"
+/// (crates/app/src/CLAUDE.md — the May-2026 add-project regression). This
+/// drives the click the way gpui does: from inside `update_window`.
+#[gpui::test]
+fn clicking_the_chip_starts_a_session_from_inside_the_windows_dispatch(cx: &mut TestAppContext) {
+    use gpui::BorrowAppContext as _;
+
+    let (window, workspace) = build_workspace(cx);
+    cx.update(|cx| {
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user()).clone();
+            cfg.orchestrator.enabled = true;
+            store.set_user_for_testing(cfg);
+        });
+        crate::orchestrator::seed_control_surface_for_test(cx);
+        crate::window_registry::WindowRegistry::register(window.into(), workspace.downgrade(), cx);
+    });
+
+    let weak = workspace.downgrade();
+    cx.update_window(window.into(), |_, win, cx| {
+        crate::orchestrator::start_or_toggle_from_chip(&weak, win, cx);
+    })
+    .expect("live window");
+
+    workspace.update(cx, |ws, _| {
+        assert!(
+            ws.orchestrator_chat.is_some(),
+            "the click has to leave a session behind — the chip is the only \
+             way the desktop can start one"
+        );
+        assert!(
+            ws.orchestrator_tab_is_visible(),
+            "and show it, which is what the person clicked for"
+        );
+    });
+}
+
+/// The chip is present from launch, before anything has started a session —
+/// otherwise the desktop has no way to start one at all, and the orchestrator
+/// is deliberately not started at launch.
+#[gpui::test]
+fn a_configured_orchestrator_shows_a_chip_before_it_has_a_session(cx: &mut TestAppContext) {
+    use crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState;
+    use gpui::BorrowAppContext as _;
+
+    let (window, workspace) = build_workspace(cx);
+    cx.update(|cx| {
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user()).clone();
+            cfg.orchestrator.enabled = true;
+            store.set_user_for_testing(cfg);
+        });
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(ws.orchestrator_chat.is_none());
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                Some(OrchestratorChipState::NotStarted),
+                "configured but not started is a state, not an absence"
+            );
+
+            // Switching the feature off takes the chip away entirely: one that
+            // could only refuse is noise.
+            cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+                let mut cfg = (*store.user()).clone();
+                cfg.orchestrator.enabled = false;
+                store.set_user_for_testing(cfg);
+            });
+            assert_eq!(ws.orchestrator_chip_state(cx), None);
+
+            // With a session, the chip reports the session's own activity.
+            cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+                let mut cfg = (*store.user()).clone();
+                cfg.orchestrator.enabled = true;
+                store.set_user_for_testing(cfg);
+            });
+            seed(ws, window, cx);
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                Some(OrchestratorChipState::Idle)
+            );
+        });
+    })
+    .expect("live window");
 }
 
 #[gpui::test]

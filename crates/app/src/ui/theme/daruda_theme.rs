@@ -159,6 +159,13 @@ daruda_theme_fields! {
     agent_banner_hover_bg => AGENT_BANNER_HOVER_BG,
     agent_banner_icon => AGENT_BANNER_ICON,
     right_panel_task_running_color => SIGNAL_GREEN,
+    // The status bar's orchestrator chip. Aliases of the signal set every
+    // other chip uses, so the four states read the same as the rest of the
+    // bar; `not_started` is deliberately the subtle text tone, not a signal.
+    orchestrator_not_started => TEXT_SUBTLE,
+    orchestrator_working => SIGNAL_GREEN,
+    orchestrator_permission => SIGNAL_ORANGE,
+    orchestrator_failed => SIGNAL_RED,
     task_edit_branch_invalid_border => ERROR,
     badge_bg => BG_HOVER,
     gauge_track_bg => BG_HOVER,

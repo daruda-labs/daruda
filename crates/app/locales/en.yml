@@ -1543,15 +1543,17 @@ flow:
   issue_pinned_node_in_rerun: "is pinned, but the repair on %{gate} re-runs %{node} to change its own verdict; unpin it or drop the rerun"
   issue_schema_keyword_on_wrong_kind: "has an output schema writing %{keyword} under a %{kind}, where it is never checked"
 
-# External control surface — the command replies sent back to a phone
 orchestrator:
   idle: "Orchestrator: idle"
   working: "Orchestrator: working"
   awaiting_permission: "Orchestrator: waiting for approval"
   failed: "Orchestrator: connection failed"
+  start_failed: "The orchestrator would not start. The reason is in daruda's log."
+  not_started: "Orchestrator: not started — click to start"
   label: "Orchestrator"
   tab_unavailable: "The orchestrator tab cannot open in this worktree. The session is still running."
 
+# External control surface — the command replies sent back to a phone
 control:
   listing_header: "Open agent chats"
   listing_row: "%{ordinal}. %{marker}%{state} %{name} — %{title}%{ago}"

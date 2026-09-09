@@ -184,8 +184,86 @@ pub(crate) fn mcp_server(cx: &App) -> Option<daruda_acp::McpServer> {
     ))
 }
 
-/// Where to send a prompt, if the orchestrator is up. The single "is it
-/// running?" question, answered from the registry.
+/// The status bar chip's click: bring the orchestrator up if it is not, then
+/// show or hide its tab.
+///
+/// Not a `Workspace` method: this runs inside the clicked window's dispatch,
+/// so seeding has to go through the `&mut Window` already in hand — see
+/// [`prepare`].
+///
+/// When the resolved host is a *different* window the session still starts
+/// there, but the tab is left alone rather than inserted into a window the
+/// person did not click.
+pub(crate) fn start_or_toggle_from_chip(
+    chip_host: &gpui::WeakEntity<crate::workspace::Workspace>,
+    window: &mut gpui::Window,
+    cx: &mut App,
+) {
+    match prepare(cx) {
+        // Already up — nothing to start, just toggle below.
+        Ok(None) => {}
+        // The clicked window is mid-update; a different host is not.
+        Ok(Some(prepared)) if prepared.handle == window.window_handle() => {
+            prepared.seed(window, cx);
+        }
+        Ok(Some(prepared)) => {
+            let handle = prepared.handle;
+            if let Err(error) = cx.update_window(handle, |_, host, cx| prepared.seed(host, cx)) {
+                WindowRegistry::clear_orchestrator(cx);
+                report_chip_start_failure(chip_host, &open_failed(error), cx);
+                return;
+            }
+        }
+        Err(error) => {
+            report_chip_start_failure(chip_host, &error, cx);
+            return;
+        }
+    }
+    let host_is_the_clicked_window = WindowRegistry::orchestrator(cx)
+        .is_some_and(|(_, host)| host.entity_id() == chip_host.entity_id());
+    if !host_is_the_clicked_window {
+        return;
+    }
+    if let Err(error) = chip_host.update(cx, |ws, cx| ws.toggle_orchestrator_tab(window, cx)) {
+        daruda_store::observability::log_writer::LogWriter::log(
+            daruda_store::observability::error_report::ErrorReport::new(
+                "Orchestrator host closed before toggle",
+            )
+            .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+            .with_context("error", error.to_string())
+            .at(file!(), line!())
+            .dedup("orchestrator.toggle")
+            .build(),
+        );
+    }
+}
+
+/// Tell the person their click did not start anything — a toast, not just a
+/// log line, because the chip would otherwise sit unchanged with no way to
+/// learn why.
+fn report_chip_start_failure(
+    chip_host: &gpui::WeakEntity<crate::workspace::Workspace>,
+    error: &EnsureError,
+    cx: &mut App,
+) {
+    let report = daruda_store::observability::error_report::ErrorReport::new(
+        crate::surface::strings::orchestrator_start_failed(),
+    )
+    .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+    .with_context("reason", format!("{error:?}"))
+    .at(file!(), line!())
+    .dedup("orchestrator.chip.start")
+    .build();
+    if chip_host
+        .update(cx, |ws, cx| ws.report_error(report.clone(), cx))
+        .is_err()
+    {
+        // The window went away with the click in flight — the log is all
+        // that is left to tell.
+        daruda_store::observability::log_writer::LogWriter::log(report);
+    }
+}
+
 /// Where a `/daruda` prompt goes, and whether asking had to start the
 /// orchestrator to answer.
 ///
@@ -240,14 +318,37 @@ const MCP_NAME_SUFFIX_LEN: usize = 8;
 /// the pane immediately and the prompt queues behind the connect — which is
 /// what the phone's "accepted" reply already means.
 pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
+    let Some(prepared) = prepare(cx)? else {
+        // Already up: `prepare` answers with the live pane.
+        return pane(cx).ok_or_else(|| open_failed("host released"));
+    };
+    let handle = prepared.handle;
+    match cx.update_window(handle, |_, window, cx| prepared.seed(window, cx)) {
+        Ok(pane) => Ok(pane),
+        Err(error) => {
+            WindowRegistry::clear_orchestrator(cx);
+            Err(open_failed(error))
+        }
+    }
+}
+
+/// Everything about bringing the orchestrator up that needs no window, plus
+/// what the seeding step will need. `Ok(None)` when a session is already up.
+///
+/// Split from [`Prepared::seed`] because a caller holding a live `&mut Window`
+/// for the host must seed through *that* window: `cx.update_window` on a
+/// window whose update is already in progress answers "window not found"
+/// (`crates/app/src/CLAUDE.md`, GPUI Result handling). The status bar chip is
+/// exactly that caller.
+fn prepare(cx: &mut App) -> Result<Option<Prepared>, EnsureError> {
     // Resolve before reusing a live pane so disabling the feature takes effect
     // on the next request.
     let resolved = config::resolve(cx).ok_or_else(|| refusal(cx))?;
     // Socket first, then the window, then the session — an agent that spawns
     // its shim immediately must find something to connect to.
     ensure_control_surface(cx)?;
-    if let Some(pane) = pane(cx) {
-        return Ok(pane);
+    if pane(cx).is_some() {
+        return Ok(None);
     }
     let cwd = window::cwd().map_err(|error| {
         window::log_open_failure(&error);
@@ -258,13 +359,35 @@ pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
     let workspace = weak.upgrade().ok_or_else(|| open_failed("host released"))?;
     WindowRegistry::register_orchestrator(handle, weak, cx);
     let briefing = session_briefing(cx);
-    let result = cx.update_window(handle, |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
+    Ok(Some(Prepared {
+        handle,
+        workspace,
+        agent_id: resolved.agent_id,
+        cwd,
+        account: resolved.account,
+        briefing,
+    }))
+}
+
+/// A resolved start, waiting only for a window to seed the chat in.
+struct Prepared {
+    handle: gpui::AnyWindowHandle,
+    workspace: gpui::Entity<crate::workspace::Workspace>,
+    agent_id: String,
+    cwd: std::path::PathBuf,
+    account: daruda_store::accounts::AccountSelection,
+    briefing: Option<String>,
+}
+
+impl Prepared {
+    /// Seed the chat. `window` must be the host's — see [`prepare`].
+    fn seed(self, window: &mut gpui::Window, cx: &mut App) -> PaneRef {
+        self.workspace.update(cx, |ws, cx| {
             let pane = ws.seed_orchestrator_chat_pane(
-                resolved.agent_id,
-                cwd,
-                resolved.account,
-                briefing,
+                self.agent_id,
+                self.cwd,
+                self.account,
+                self.briefing,
                 window,
                 cx,
             );
@@ -273,13 +396,6 @@ pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
                 pane,
             }
         })
-    });
-    match result {
-        Ok(pane) => Ok(pane),
-        Err(error) => {
-            WindowRegistry::clear_orchestrator(cx);
-            Err(open_failed(error))
-        }
     }
 }
 

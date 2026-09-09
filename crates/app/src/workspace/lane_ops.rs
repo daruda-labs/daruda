@@ -336,6 +336,12 @@ impl Workspace {
         // pane in the removed lane; clear `input_owner` if it pointed at
         // one of them.
         for pane_id in &removed_pane_ids {
+            // Never the orchestrator's: its pane can be in the runtime being
+            // torn down, but its draft belongs to a session that outlives any
+            // worktree. `hide_orchestrator_tab` is what stashes it.
+            if self.is_orchestrator_pane(*pane_id) {
+                continue;
+            }
             self.forget_pane_input_draft(*pane_id);
         }
         self.input_history.remove(&target);
@@ -559,10 +565,10 @@ impl Workspace {
         if self.lane_for(target).is_none() {
             return;
         }
-        let reinsert_orchestrator = self.orchestrator_tab_is_visible();
-        if reinsert_orchestrator {
-            self.detach_orchestrator_tab_for_lane_change(window, cx);
-        }
+        // The orchestrator belongs to no worktree, so it does not follow the
+        // user into the next one — a tab that trailed every switch would read
+        // as content of whichever lane it landed in. The chip puts it back.
+        self.close_orchestrator_tab_for_lane_change(window, cx);
         // Leaving the active lane abandons any pending amend (the prefill
         // belongs to the lane we're leaving). No-op when not amending.
         self.exit_amend_mode(window, cx);
@@ -625,10 +631,6 @@ impl Workspace {
         //    the user opens content from there. Only the first project at
         //    app launch seeds a shell (see `new_with_project_impl`).
 
-        if reinsert_orchestrator {
-            self.reinsert_orchestrator_tab(window, cx);
-        }
-
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
         //    Route through `set_focused_pane` so the bottom-dock draft
@@ -642,9 +644,10 @@ impl Workspace {
         {
             let focused = self.active_runtime().focused_pane_id;
             self.set_focused_pane(focused, window, cx);
-            if !self.is_orchestrator_pane(focused) {
-                self.focus_pane(focused, window, cx);
-            }
+            // Cannot be the orchestrator's: its tab was taken down above, and
+            // `remove_orchestrator_tab` repairs `focused_pane_id` in every
+            // runtime it touches.
+            self.focus_pane(focused, window, cx);
         }
         // The incoming lane's runtime carries its own panes/split state;
         // recompute inactive-pane dim against the now-live focused pane.

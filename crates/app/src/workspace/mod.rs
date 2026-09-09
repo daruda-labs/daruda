@@ -371,6 +371,10 @@ pub struct Workspace {
     /// drag/context-menu overlays.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
     orchestrator_chat: Option<orchestrator_ops::OrchestratorChat>,
+    /// The pane the user had zoomed when the orchestrator's tab stood it down.
+    /// Beside the slot, not in it: a property of showing the tab, not of the
+    /// session, and it outlives the wrapper.
+    orchestrator_zoom_to_restore: Option<main_area::pane_tree::PaneId>,
     next_id: u64,
     focus_handle: FocusHandle,
     /// Dock resize drag — active while the user is pulling on the
@@ -1120,6 +1124,7 @@ impl Workspace {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
             orchestrator_chat: None,
+            orchestrator_zoom_to_restore: None,
             next_id: 0,
             focus_handle,
             dock_drag: None,

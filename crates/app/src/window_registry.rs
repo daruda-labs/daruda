@@ -203,10 +203,21 @@ impl WindowRegistry {
         cx: &mut App,
     ) {
         let registry = cx.default_global::<WindowRegistry>();
+        let already_this_host = registry
+            .orchestrator
+            .as_ref()
+            .is_some_and(|(_, held)| held.entity_id() == workspace.entity_id());
         registry.orchestrator = Some((handle, workspace.clone()));
+        if already_this_host {
+            // The hook below is already installed for this entity. Registering
+            // the same host twice happens on a retried start, and a second
+            // subscription would accumulate one per attempt.
+            return;
+        }
         // Separate from the constructor's own release hook, which knows only
-        // about the workspace list. Conditional, because replacing an orchestrator
-        // closes the old window *after* the new one has taken the slot.
+        // about the workspace list. It clears through `clear_orchestrator_if`
+        // so a host released *after* another window has taken the slot cannot
+        // wipe the new entry.
         if let Some(entity) = workspace.upgrade() {
             entity
                 .update(cx, |_, cx| {

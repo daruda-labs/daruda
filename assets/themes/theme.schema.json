@@ -583,6 +583,26 @@
       "$ref": "#/$defs/Rgba",
       "default": "#33c758ff"
     },
+    "orchestrator_not_started": {
+      "description": "Maps to `palette::TEXT_SUBTLE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#797e86ff"
+    },
+    "orchestrator_working": {
+      "description": "Maps to `palette::SIGNAL_GREEN`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#33c758ff"
+    },
+    "orchestrator_permission": {
+      "description": "Maps to `palette::SIGNAL_ORANGE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ff910aff"
+    },
+    "orchestrator_failed": {
+      "description": "Maps to `palette::SIGNAL_RED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ff4a3dff"
+    },
     "task_edit_branch_invalid_border": {
       "description": "Maps to `palette::ERROR`.",
       "$ref": "#/$defs/Rgba",

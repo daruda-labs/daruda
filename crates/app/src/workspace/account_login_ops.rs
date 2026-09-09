@@ -1031,16 +1031,9 @@ impl Workspace {
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         cx: &mut Context<Self>,
     ) {
-        let Some(selection) = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|p| p.id == pane_id)
-            .and_then(|p| p.account_selection())
-        else {
-            return;
-        };
+        // Slot-aware, so a retry aimed at the orchestrator's chat resolves
+        // whether or not its tab happens to be in a runtime right now.
+        let selection = self.agent_chat_account_selection(pane_id);
         let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.account_pane_for(pane_id, cx),
         );

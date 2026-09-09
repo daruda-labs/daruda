@@ -148,6 +148,10 @@ impl Workspace {
     /// attribution follows pane membership rather than session cwd —
     /// and covers parked lanes, so a backgrounded lane's agent-chat
     /// indicator keeps updating after a lane switch.
+    /// Not orchestrator-filtered: while its tab is visible its pane maps to
+    /// the host worktree here. Safe only because every consumer joins this
+    /// against a filtered set (`agent_chat_statuses`) or one it is never in
+    /// (`pty_claude_bindings`) — a new consumer must filter or join likewise.
     pub(in crate::workspace) fn pane_lane_index(
         &self,
     ) -> Vec<(PaneId, daruda_store::project::LaneRef)> {

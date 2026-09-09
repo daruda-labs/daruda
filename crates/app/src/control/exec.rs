@@ -382,8 +382,9 @@ fn count(rows: &[Row], pred: impl Fn(&ChatSummary) -> bool) -> u32 {
 fn collect_rows(cx: &mut App) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut window = 0u32;
-    // A listing answers "what is the user working on?", so the orchestrator's
-    // own chat pane must not appear as a target the user can address.
+    // Every workspace: a listing answers "what is the user working on?", and
+    // it is `control_snapshot` — through `lane_agent_chats` — that keeps the
+    // orchestrator's own chat out of it, not the choice of walk here.
     WindowRegistry::for_each_workspace(cx, |ws, _win, cx| {
         for (lane_ref, summary) in ws.control_snapshot(cx) {
             rows.push(Row {
