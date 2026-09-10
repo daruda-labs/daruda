@@ -140,7 +140,8 @@ impl Workspace {
     /// a crashed run names a pid that is gone, and does not stop a new run
     /// — the engine reclaims it.
     ///
-    /// MIGRATION: both places, for one release: the lock now lives outside the tree
+    /// MIGRATION(from v0.2.12): both places, for one release: the lock now lives
+    /// outside the tree
     /// (`flow_paths::lane_lock_dir`), and the copy the engine still writes
     /// inside it is what an older build looks at. Reading the new one first
     /// keeps this answering for a run *this* build started even after an

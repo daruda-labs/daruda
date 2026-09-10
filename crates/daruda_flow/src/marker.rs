@@ -129,7 +129,8 @@ pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>
     // know where the lock is — said as an absent argument rather than as a
     // path with no lock in it, which would read the same as "free".
     //
-    // MIGRATION: the second read is the compatibility copy inside the tree,
+    // MIGRATION(from v0.2.12): the second read is the compatibility copy inside
+    // the tree,
     // for a run an older build started — it wrote only there, and reading it
     // is what keeps such a run resumable across the upgrade. Goes when
     // `schedule::run` stops writing it.

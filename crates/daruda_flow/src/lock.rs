@@ -155,13 +155,34 @@ impl RunLock {
 ///
 /// `tree` is expected canonical — the caller resolves it, because two
 /// spellings of one tree must not become two locks.
+///
+/// A prefix becomes a component of its own rather than being dropped.
+/// Nothing on unix produces one, so this changes no path daruda builds
+/// today; on Windows dropping it would map `C:\a` and `D:\a` onto one
+/// directory, which is the collision the whole function exists to avoid.
+/// Untested here — Windows is not a target yet, and `Path` on unix does
+/// not parse a drive letter as a prefix to test it with.
 pub fn lock_dir_for(root: &Path, tree: &Path) -> PathBuf {
     let mut out = root.to_path_buf();
-    // Root and prefix components dropped so the result stays under `root`:
+    // The root component is dropped so the result stays under `root`:
     // joining an absolute path would replace it.
     for part in tree.components() {
-        if let std::path::Component::Normal(name) = part {
-            out.push(name);
+        use std::path::Component as C;
+        match part {
+            C::Normal(name) => out.push(name),
+            // `:` and `\` are not filename characters on the platform that
+            // produces a prefix, so the raw form cannot be a directory
+            // name. Folded rather than dropped: what matters is that two
+            // prefixes stay two names.
+            C::Prefix(prefix) => out.push(
+                prefix
+                    .as_os_str()
+                    .to_string_lossy()
+                    .replace([':', '\\', '/'], "-"),
+            ),
+            // A canonical path has neither of these, and the root must go
+            // for the result to stay under `root`.
+            C::RootDir | C::CurDir | C::ParentDir => {}
         }
     }
     out
@@ -210,6 +231,15 @@ impl RunLocks {
     /// Give every one back. The first failure is reported and the rest are
     /// still released — a leaked lock is recovered by the next run's
     /// reclaim, and stopping early would leak more than it reported.
+    ///
+    /// **The directory stays.** A lock root accumulates one empty directory
+    /// per tree a flow has ever run in, and removing it here looks like the
+    /// obvious tidy-up — but `acquire` makes the directory and then takes
+    /// the lock inside it as two steps, so a release that removed the
+    /// directory between another run's two steps would fail that run with
+    /// `NotFound`. Refusing a run to save an empty directory is the wrong
+    /// trade; the set is bounded by how many working trees the user has,
+    /// and every one of them is a directory they already have.
     pub fn release(self) -> Result<(), FlowIoError> {
         let mut first = None;
         for lock in self.0 {
@@ -564,6 +594,18 @@ mod tests {
         assert_eq!(one, Path::new("/data/flow-locks/Users/me/repo-a"));
         assert_ne!(one, two);
         assert!(one.starts_with(root), "the mirror must stay under the root");
+    }
+
+    /// A tree with no components of its own is the root itself, which is a
+    /// directory like any other — and still under `root`, which is the one
+    /// property every caller depends on.
+    #[test]
+    fn a_tree_at_the_filesystem_root_still_lands_under_the_lock_root() {
+        let root = Path::new("/data/flow-locks");
+        let at_root = lock_dir_for(root, Path::new("/"));
+        assert_eq!(at_root, root);
+        assert!(at_root.starts_with(root));
+        assert_ne!(at_root, lock_dir_for(root, Path::new("/a")));
     }
 
     /// The same tree always names the same directory — two processes have to
