@@ -1270,11 +1270,16 @@ impl Node {
                                                     this.bg(header_fill)
                                                         .font_weight(FontWeight::BOLD)
                                                 })
+                                                // Both halves of the alignment: the block
+                                                // inside the track, and the lines inside the
+                                                // block. A cell whose text wraps fills its
+                                                // track, which leaves `items_*` nothing to
+                                                // move — only `text_*` reaches those lines.
                                                 .when(align == ColumnumnAlign::Center, |this| {
-                                                    this.items_center()
+                                                    this.items_center().text_center()
                                                 })
                                                 .when(align == ColumnumnAlign::Right, |this| {
-                                                    this.items_end()
+                                                    this.items_end().text_right()
                                                 })
                                                 // Separators on the leading edges only —
                                                 // the frame draws the outer ones, so no
