@@ -2,6 +2,24 @@
 //! which of those can run beside each other without sharing a working
 //! directory. Separated from the drive loop because the loop only asks for
 //! the next wave — deciding what may be in one is a question of its own.
+//!
+//! # `NOT_IN_THE_FLOW`
+//!
+//! Three things here look up a [`NodeId`] in `flow.nodes` and have to say
+//! something when it is absent, and they say three different things:
+//! [`deps_are_done`] calls it ready, [`Reachability::trees`] holds it, and
+//! `super::Run::drive` returns success. **None of them is reachable.**
+//! `crate::load::LoadedFlow` is the only producer of a `(Flow, FlowGraph)`
+//! pair, `FlowGraph::build` inserts exactly one graph node per declared
+//! node and refuses a duplicate, and `waiting` is that graph's topological
+//! order — so an id nobody declared cannot arrive.
+//!
+//! Recorded rather than made uniform because the three answers are not
+//! interchangeable if the invariant ever breaks: holding is the safe one (a
+//! node with an empty reservation excludes nothing and would join any
+//! wave, which is the collision this module exists to prevent), and the
+//! other two are older and merely convenient. A reader who has to touch
+//! one of them should start here.
 
 use crate::NodeId;
 use crate::graph::FlowGraph;
@@ -109,6 +127,13 @@ pub(super) enum Batch {
 /// exist. [`Self::of`] settles the graph half once for the run;
 /// [`Self::trees`] asks the filesystem, every wave.
 ///
+/// **Only for the nodes that could still run.** Built from the worklist,
+/// not from the flow: a `--until` selection, a pinned node and a resumed
+/// run all leave nodes that will never be asked about, and the fixpoint is
+/// the expensive half. Working the whole flow out up front made a run of
+/// one node in a long chain of gates pay for the chain, and a fully pinned
+/// run pay for everything before finding it had nothing to do.
+///
 /// **Why the reservation is not just the node's own directory.** A gate's
 /// `repair` runs its `fix` session and then re-derives its `rerun` closure
 /// by calling `drive` directly (`super::repair`), neither of which comes
@@ -120,7 +145,10 @@ pub(super) enum Batch {
 pub(super) struct Reachability(HashMap<NodeId, Vec<PathBuf>>);
 
 impl Reachability {
-    /// Work the set out for every node, once, from the graph alone.
+    /// Work the set out for each of `for_nodes`, once, from the graph
+    /// alone. Reaching *through* a node needs no entry of its own — the
+    /// closure walk looks nodes up directly — so this is the set of nodes
+    /// that may be asked, which is the caller's worklist.
     ///
     /// **A fixpoint, not one hop.** A member of a node's closure may itself
     /// be a gate with a `rerun` of its own, and `validate`'s
@@ -133,11 +161,15 @@ impl Reachability {
     /// Bounded by the node set rather than by the graph being well-formed:
     /// two gates naming each other is a flow `crate::validate` refuses, and
     /// the visited set means this does not hang on one anyway.
-    pub(super) fn of(flow: &Flow, graph: &FlowGraph, cwd: &Path) -> Self {
+    pub(super) fn of(flow: &Flow, graph: &FlowGraph, cwd: &Path, for_nodes: &[NodeId]) -> Self {
+        // Once, rather than a linear scan per visit per node: the walk
+        // looks up every node it reaches, and it reaches the same ones
+        // repeatedly.
+        let by_id: HashMap<&NodeId, &Node> = flow.nodes.iter().map(|n| (&n.id, n)).collect();
         Self(
-            flow.nodes
+            for_nodes
                 .iter()
-                .map(|node| (node.id.clone(), dirs_reached_by(flow, graph, cwd, &node.id)))
+                .map(|id| (id.clone(), dirs_reached_by(&by_id, graph, cwd, id)))
                 .collect(),
         )
     }
@@ -159,10 +191,14 @@ impl Reachability {
     /// lock is keyed off — so the wave and the lock cannot disagree about
     /// what one tree is.
     ///
-    /// `None` when any directory in the set cannot be resolved, or when the
-    /// node is not in the flow. The answer is then unknown rather than
-    /// partly known: a set missing one member would let the node into a
-    /// wave beside whatever that member would have excluded.
+    /// `None` when any directory in the set cannot be resolved. The answer
+    /// is then unknown rather than partly known: a set missing one member
+    /// would let the node into a wave beside whatever that member would
+    /// have excluded.
+    ///
+    /// `None` too for a node this was not built for — every id the caller
+    /// can ask about, since [`Self::of`] takes the worklist. See
+    /// [`NOT_IN_THE_FLOW`](self#not_in_the_flow).
     ///
     /// **No lexical fallback.** Falling back to the written form and
     /// calling two paths *different* would be safe only if a failure meant
@@ -188,7 +224,12 @@ impl Reachability {
 ///
 /// Absolute but not canonicalized: the join is arithmetic on what the flow
 /// wrote, and asking the filesystem is [`Reachability::trees`]'s job.
-fn dirs_reached_by(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> Vec<PathBuf> {
+fn dirs_reached_by(
+    by_id: &HashMap<&NodeId, &Node>,
+    graph: &FlowGraph,
+    cwd: &Path,
+    id: &NodeId,
+) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<NodeId> = HashSet::new();
     let mut queue: Vec<NodeId> = vec![id.clone()];
@@ -196,7 +237,9 @@ fn dirs_reached_by(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> V
         if !seen.insert(next.clone()) {
             continue;
         }
-        let Some(node) = flow.nodes.iter().find(|n| n.id == next) else {
+        // An id the flow does not declare reaches nothing. See
+        // `NOT_IN_THE_FLOW` in the module doc — it cannot arrive.
+        let Some(node) = by_id.get(&next) else {
             continue;
         };
         push(&mut dirs, working_dir_of(cwd, node));
@@ -294,6 +337,10 @@ fn overlaps(dir: &CanonicalTree, taken: &[CanonicalTree]) -> bool {
 /// says, and asking the graph would be asking the same thing one
 /// indirection away. Free-standing for the same reason — it needs no run
 /// state, and a method would have implied it did.
+///
+/// An id the flow does not declare reads as ready. See
+/// [`NOT_IN_THE_FLOW`](self#not_in_the_flow) — it cannot arrive, and this
+/// is not the same answer the other two sites give.
 pub(crate) fn deps_are_done(flow: &Flow, id: &NodeId, done: &HashSet<NodeId>) -> bool {
     flow.nodes
         .iter()
@@ -370,7 +417,7 @@ mod tests {
     fn reserved_by(flow: &crate::model::Flow, id: &str) -> Vec<String> {
         let graph = FlowGraph::build(flow).expect("acyclic");
         let root = Path::new("/run");
-        let mut names: Vec<String> = Reachability::of(flow, &graph, root)
+        let mut names: Vec<String> = Reachability::of(flow, &graph, root, &[NodeId::from(id)])
             .0
             .remove(&NodeId::from(id))
             .expect("every node in the flow has a reservation")
@@ -399,9 +446,10 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(sub)).expect("mkdir");
         }
         let graph = FlowGraph::build(flow).expect("acyclic");
-        let reach = Reachability::of(flow, &graph, dir.path());
         let mut waiting: Vec<NodeId> = waiting.iter().map(|s| NodeId::from(*s)).collect();
         let done: HashSet<NodeId> = done.iter().map(|s| NodeId::from(*s)).collect();
+        // The worklist, the way `run_flow` builds it before the wave loop.
+        let reach = Reachability::of(flow, &graph, dir.path(), &waiting);
         take_ready_batch(flow, &reach, &mut waiting, &done, flow.parallel)
     }
 
@@ -480,6 +528,54 @@ mod tests {
             vec!["c"],
             "no repair, so no closure and no root — a reservation must not \
              grow into the whole graph"
+        );
+    }
+
+    /// **The second deduplication earns its place.**
+    ///
+    /// `push` runs twice — once on what the flow wrote and once on what it
+    /// resolved to — and the first pass cannot stand in for the second.
+    /// `PathBuf` compares `Components`, which drops `CurDir`, so `a` and
+    /// `./a` are already one entry before anything is resolved; `a/../a`
+    /// keeps its `ParentDir` component and is not. Only the filesystem
+    /// folds that one, so without the second pass a reservation carries the
+    /// same directory twice.
+    ///
+    /// Goes through `trees`, which the sibling tests do not — they read the
+    /// unresolved set, where this is invisible.
+    #[test]
+    fn resolving_folds_two_spellings_the_written_form_kept_apart() {
+        //  gate(a, rerun: [helper]) --> helper(a/../a), which is `a`
+        let flow = flow_of(&[
+            plain("helper", "a/../a"),
+            N {
+                id: "gate",
+                deps: &["helper"],
+                cwd: "a",
+                rerun: Some(&["helper"]),
+            },
+        ]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("a")).expect("mkdir");
+        let gate = NodeId::from("gate");
+        let reach = Reachability::of(
+            &flow,
+            &FlowGraph::build(&flow).expect("acyclic"),
+            dir.path(),
+            std::slice::from_ref(&gate),
+        );
+
+        assert_eq!(
+            reach.0[&gate].len(),
+            3,
+            "as written the three are distinct: {:?}",
+            reach.0[&gate]
+        );
+        let trees = reach.trees(&gate).expect("every directory resolves");
+        assert_eq!(
+            trees.len(),
+            2,
+            "`a` and `a/../a` are one directory, leaving it and the root: {trees:?}"
         );
     }
 

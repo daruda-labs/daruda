@@ -231,7 +231,10 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
     // question about the flow, and the flow does not change while it runs.
     // Whether those directories resolve is asked every wave — see
     // `ready::Reachability`.
-    let reach = ready::Reachability::of(flow, graph, cwd);
+    //
+    // After `waiting`, and for exactly it: a selection or a pin leaves
+    // nodes nothing will ask about, and the fixpoint is not free.
+    let reach = ready::Reachability::of(flow, graph, cwd, &waiting);
     while !waiting.is_empty() {
         let batch = match take_ready_batch(flow, &reach, &mut waiting, &done, flow.parallel) {
             ready::Batch::Ready(batch) => batch,
