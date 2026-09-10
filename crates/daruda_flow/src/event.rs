@@ -173,7 +173,7 @@ mod tests {
     }
 
     /// What a watcher and the marker each see, per outcome. Exhaustive on
-    /// purpose: a seventh `RunOutcome` stops compiling here until someone
+    /// purpose: a new `RunOutcome` stops compiling here until someone
     /// decides both answers.
     fn expected(outcome: &RunOutcome) -> (&'static str, Option<RunStatus>) {
         match outcome {

@@ -20,7 +20,7 @@ const STALLED: &str = "STALLED";
 
 const WRITE_MARKER: &str = "recording how the run ended";
 
-/// The three a run can write about itself, plus the two that can only be
+/// The four a run can write about itself, and the three that can only be
 /// derived. `Crashed` has no marker because a crash cannot write one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -64,9 +64,10 @@ pub fn write_marker(run_dir: &Path, outcome: &RunOutcome) -> Result<(), FlowIoEr
 /// finer axis to carry. `None` is `LockHeld`: that run never took the
 /// directory, so it has nothing to say about it.
 ///
-/// The one place the six outcomes are folded into three. `event::RunEnd` does
-/// not repeat this fold — it spreads the same outcomes out instead, so a
-/// seventh variant is decided once on each axis rather than twice on one.
+/// The one place every outcome is folded onto this coarser axis.
+/// `event::RunEnd` does not repeat the fold — it spreads the same outcomes
+/// out instead, so a new one is decided once on each axis rather than twice
+/// on one.
 pub fn status_of(outcome: &RunOutcome) -> Option<RunStatus> {
     match outcome {
         RunOutcome::Done => Some(RunStatus::Done),
@@ -243,8 +244,9 @@ mod tests {
         .expect("write");
     }
 
-    /// The three a run can state about itself. Every non-success shares one
-    /// marker: `run.md` (P2b-3) is where the reason belongs.
+    /// Every marker a run can write, and the outcome that writes it. The
+    /// several ways of failing share `FAILED`: `run.md` (P2b-3) is where the
+    /// reason belongs.
     #[test]
     fn each_outcome_a_run_can_record_writes_its_own_marker() {
         let dir = tempfile::tempdir().expect("tempdir");

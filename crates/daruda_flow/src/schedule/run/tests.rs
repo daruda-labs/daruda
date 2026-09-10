@@ -33,8 +33,6 @@ nodes:
 ";
 
 /// No node names an agent, and yet a repair's `fix` would open a session
-/// as `defaults.agent`.
-/// No node names an agent, and yet a repair's `fix` would open a session
 /// as `defaults.agent`. The repair is the whole fixture: without one
 /// nothing here could ever open a session, and provisioning would be
 /// paying to download a runtime for work the flow cannot ask for.

@@ -243,6 +243,11 @@ impl RunLocks {
     /// A partial hold is worse than no hold: the caller would believe it has
     /// the set and act on trees it never took, so anything already taken is
     /// released before the refusal goes back.
+    ///
+    /// Deduplicated as well as sorted. `RunLock::acquire` refuses a
+    /// directory that already has a lock, and it does not except the lock
+    /// this same call just placed — so one name given twice would refuse
+    /// the run against itself.
     pub fn acquire(
         dirs: &[PathBuf],
         run_id: &str,

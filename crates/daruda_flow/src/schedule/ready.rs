@@ -270,14 +270,6 @@ mod tests {
     use crate::parse::parse_flow_file;
     use crate::resolve::resolve;
 
-    /// A flow of command nodes, each with its own `cwd` and an optional
-    /// repair policy. Command nodes only: `rerun` lives on
-    /// `GateFail::Repair`, which is the gate policy, so an agent node could
-    /// not carry one.
-    ///
-    /// The policy is `Option<&[&str]>` for the reason `rerun_of` returns one:
-    /// `None` is a node that repairs nothing, and `Some(&[])` is a repair
-    /// that re-derives nothing but still opens a `fix` session.
     /// One node in a fixture. Named rather than a tuple because four
     /// positional fields, two of them slices, read as noise at the call
     /// site — and clippy says the same.
@@ -300,6 +292,10 @@ mod tests {
         }
     }
 
+    /// A flow of command nodes, each with its own `cwd` and an optional
+    /// repair policy. Command nodes only: `rerun` lives on
+    /// `GateFail::Repair`, which is the gate policy, so an agent node could
+    /// not carry one.
     fn flow_of(spec: &[N]) -> crate::model::Flow {
         let mut text = String::from("version: 1\ndefaults:\n  parallel: 4\nnodes:\n");
         for N {

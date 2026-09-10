@@ -6356,13 +6356,13 @@ pub fn flow_lock_held(pid: u32) -> String {
 pub fn flow_unprovisioned(agent: &str, message: &str) -> String {
     rust_i18n::t!("flow.unprovisioned", agent => agent, message => message).into_owned()
 }
-/// The nodes a run stopped short of, already joined — the engine names
-/// them all, and a reader needs the list rather than a count.
 /// The lane whose path would not resolve. Shows the path because the
 /// person has to look at it to see what happened to it.
 pub fn flow_lane_unresolvable(path: &str) -> String {
     rust_i18n::t!("flow.lane_unresolvable", path => path).into_owned()
 }
+/// The nodes a run stopped short of, already joined — the engine names
+/// them all, and a reader needs the list rather than a count.
 pub fn flow_stalled(nodes: &str) -> String {
     rust_i18n::t!("flow.stalled", nodes => nodes).into_owned()
 }
