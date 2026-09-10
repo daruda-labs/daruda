@@ -11,7 +11,7 @@ use crate::contract::file::FileContract;
 use crate::error::{FlowIoError, IoSite};
 use crate::event::FlowEvent;
 use crate::graph::FlowGraph;
-use crate::model::{AgentSpec, Flow, Node, NodeKind};
+use crate::model::{Flow, Node, NodeKind};
 use crate::record::{AttemptOutcome, AttemptRecord, GitStatus, Invalidation, Reported};
 use crate::request::Budget;
 use crate::runner::{CancelToken, NodeFailure, NodeRunner, OutputContract, RunContext, RunResult};
@@ -548,13 +548,9 @@ impl<'a> Run<'a> {
         crate::event::emit(self.events, event);
     }
 
-    /// Called wherever an attempt's fate is sealed — five places, because
-    /// three of them return before `judge` or before any archiving. The
-    /// `git_status` ask happens here, so the number of asks equals the
-    /// number of attempts.
-    /// What the runner call reported, for the record. Grouped because all of
-    /// it comes from one `RunResult` and every call site was passing the parts
-    /// positionally — and `Default` is the refusal that never made a call.
+    /// Called wherever an attempt's fate is sealed, including the arms that
+    /// return before `judge` or before any archiving. The `git_status` ask
+    /// happens here, so the number of asks equals the number of attempts.
     fn record(
         &self,
         ctx: &RunContext<'_>,
@@ -711,49 +707,6 @@ fn node_output(node: &Node, run_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-fn permission_of(node: &Node) -> crate::model::PermissionPolicy {
-    match &node.kind {
-        NodeKind::Agent(body) => body.agent.permission,
-        // A command node launches no agent, so nothing can ask for
-        // permission; the value is inert and never read.
-        NodeKind::Command { .. } => crate::model::PermissionPolicy::Deny,
-    }
-}
-
-impl Run<'_> {
-    /// Turn a node's declared policy into the capability the runner gets.
-    ///
-    /// `Ask` without a port cannot be built, so it degrades to `Deny` —
-    /// unreachable in practice because `validate_request` refuses such a
-    /// run before the lock, and safe rather than silent if it ever were.
-    fn permission_for(&self, node: &Node) -> crate::runner::Permission<'_> {
-        self.permission_for_policy(permission_of(node))
-    }
-
-    /// The repair's `fix` runs as `flow.default_agent` and inherits its
-    /// policy, so a flow whose defaults say `ask` asks during repair too.
-    fn permission_for_fix(&self, agent: &AgentSpec) -> crate::runner::Permission<'_> {
-        self.permission_for_policy(agent.permission)
-    }
-
-    /// A policy becomes a capability: `ask` is only one if this run has
-    /// somewhere to ask. Validation refuses that combination up front, so
-    /// reaching `Deny` here means a host built a request by hand.
-    fn permission_for_policy(
-        &self,
-        policy: crate::model::PermissionPolicy,
-    ) -> crate::runner::Permission<'_> {
-        match policy {
-            crate::model::PermissionPolicy::Deny => crate::runner::Permission::Deny,
-            crate::model::PermissionPolicy::AllowOnce => crate::runner::Permission::AllowOnce,
-            crate::model::PermissionPolicy::Ask => match self.ask.as_ref() {
-                Some(channel) => crate::runner::Permission::Ask(channel),
-                None => crate::runner::Permission::Deny,
-            },
-        }
-    }
-}
-
 /// Every future to completion, in one place.
 ///
 /// Hand-rolled because `futures-lite` — what `smol` brings — has `zip` for
@@ -799,6 +752,7 @@ fn judge(ctx: &RunContext<'_>, result: RunResult) -> Result<(), NodeFailure> {
 }
 
 mod budget;
+mod permission;
 mod policy;
 mod prompt;
 mod ready;
