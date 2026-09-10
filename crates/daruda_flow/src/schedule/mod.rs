@@ -227,8 +227,13 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
         .filter(|id| selected.includes(id))
         .collect();
 
+    // Once for the run: which directories a node could write in is a
+    // question about the flow, and the flow does not change while it runs.
+    // Whether those directories resolve is asked every wave — see
+    // `ready::Reachability`.
+    let reach = ready::Reachability::of(flow, graph, cwd);
     while !waiting.is_empty() {
-        let batch = match take_ready_batch(flow, graph, cwd, &mut waiting, &done, flow.parallel) {
+        let batch = match take_ready_batch(flow, &reach, &mut waiting, &done, flow.parallel) {
             ready::Batch::Ready(batch) => batch,
             // Every node left waits on a dependency nobody will finish.
             // Only a cycle can produce that, and `FlowGraph::build`

@@ -7,8 +7,8 @@ use crate::NodeId;
 use crate::graph::FlowGraph;
 use crate::lock::CanonicalTree;
 use crate::model::{Flow, GateFail, Node, NodeKind};
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 /// The next set of nodes to run together: ready, in declaration order, at
 /// most `parallel` of them, and **no two able to reach one working
@@ -22,7 +22,12 @@ use std::path::Path;
 ///
 /// "Could reach", not "works in": a node's own directory is not the whole
 /// answer, because its `on_fail` repair re-derives other nodes and
-/// `repair` does not come back through here — see [`reachable_trees`].
+/// `repair` does not come back through here — see [`Reachability`].
+///
+/// Takes the reservation rather than the graph it came from. The graph
+/// question is answered once for the run, before any of this; what is left
+/// here is the wave's own two decisions — who is ready, and who fits beside
+/// whom.
 ///
 /// **The unit is a directory, not a repository.** Two nodes in different
 /// subdirectories of one checkout do overlap, and that is what `parallel`
@@ -34,8 +39,7 @@ use std::path::Path;
 /// whole feature exists for.
 pub(super) fn take_ready_batch(
     flow: &Flow,
-    graph: &FlowGraph,
-    cwd: &Path,
+    reach: &Reachability,
     waiting: &mut Vec<NodeId>,
     done: &HashSet<NodeId>,
     parallel: usize,
@@ -47,7 +51,7 @@ pub(super) fn take_ready_batch(
         if batch.len() >= parallel || !deps_are_done(flow, id, done) {
             return true;
         }
-        let Some(dirs) = reachable_trees(flow, graph, cwd, id) else {
+        let Some(dirs) = reach.trees(id) else {
             held.push(id.clone());
             return true;
         };
@@ -94,45 +98,98 @@ pub(super) enum Batch {
     Held(Vec<NodeId>),
 }
 
-/// Every working directory this node could write in: its own, the run's
-/// root if it repairs at all, and every directory any repair reachable
-/// from it could re-derive into.
+/// Every working directory each node could write in, spelled the way the
+/// flow spells it — the graph's half of the exclusion answer.
+///
+/// **Two questions, and only one of them can fail.** Which directories a
+/// node reaches is a question about the flow; whether those directories
+/// resolve is a question for the filesystem. Answering both in one pass
+/// meant the graph half was re-derived once per candidate per wave even
+/// though it cannot change, and that asking it at all needed a directory to
+/// exist. [`Self::of`] settles the graph half once for the run;
+/// [`Self::trees`] asks the filesystem, every wave.
 ///
 /// **Why the reservation is not just the node's own directory.** A gate's
 /// `repair` runs its `fix` session and then re-derives its `rerun` closure
 /// by calling `drive` directly (`super::repair`), neither of which comes
-/// back through this function — so a fix session, or a member of that
+/// back through the batcher — so a fix session, or a member of that
 /// closure, can start writing in a directory a wave sibling is already
 /// using. Checking inside `repair` cannot fix it: `repair` runs inside the
 /// wave's `join_all`, so waiting for a sibling there deadlocks. Reserving
 /// the whole set up front is what makes the exclusion hold.
+pub(super) struct Reachability(HashMap<NodeId, Vec<PathBuf>>);
+
+impl Reachability {
+    /// Work the set out for every node, once, from the graph alone.
+    ///
+    /// **A fixpoint, not one hop.** A member of a node's closure may itself
+    /// be a gate with a `rerun` of its own, and `validate`'s
+    /// `rerun_roots_are_ancestors` only asks that a root be an ancestor of
+    /// *its* gate — so a nested gate's closure can leave the outer one.
+    /// `super::repair`'s own note ("each member starts a fresh generation
+    /// of its own — that is the rule that gives a nested gate its cap
+    /// back") is that structure.
+    ///
+    /// Bounded by the node set rather than by the graph being well-formed:
+    /// two gates naming each other is a flow `crate::validate` refuses, and
+    /// the visited set means this does not hang on one anyway.
+    pub(super) fn of(flow: &Flow, graph: &FlowGraph, cwd: &Path) -> Self {
+        Self(
+            flow.nodes
+                .iter()
+                .map(|node| (node.id.clone(), dirs_reached_by(flow, graph, cwd, &node.id)))
+                .collect(),
+        )
+    }
+
+    /// The same set, resolved.
+    ///
+    /// **Per wave, not per run.** A directory that will not resolve holds
+    /// its node for *this* wave and is asked again in the next one — that
+    /// is the whole retry, and resolving everything up front would settle
+    /// it once for the run instead.
+    ///
+    /// **Resolved, not compared as written** — which the return type says.
+    /// `a` and `./a` are one directory spelled two ways, and a string
+    /// comparison puts both in the same wave, bypassing the one rule this
+    /// whole feature rests on with a `./`. The same goes for `A` and `a` on
+    /// the case-insensitive filesystem macOS ships by default, and for a
+    /// symlink pointing at a directory already taken. [`CanonicalTree`]
+    /// answers all three by asking the filesystem, and is the same type the
+    /// lock is keyed off — so the wave and the lock cannot disagree about
+    /// what one tree is.
+    ///
+    /// `None` when any directory in the set cannot be resolved, or when the
+    /// node is not in the flow. The answer is then unknown rather than
+    /// partly known: a set missing one member would let the node into a
+    /// wave beside whatever that member would have excluded.
+    ///
+    /// **No lexical fallback.** Falling back to the written form and
+    /// calling two paths *different* would be safe only if a failure meant
+    /// the directory was gone — nothing there for two nodes to corrupt. It
+    /// does not mean that: a live directory can fail to resolve on a
+    /// network filesystem timeout, a permission change on a component above
+    /// it, an `ELOOP`, or a stale handle. Two nodes pointing through a
+    /// symlink at one directory, one of which fails this moment, would then
+    /// be read as different and put in the same wave — the exact collision
+    /// the batch exists to prevent. When the comparison cannot be made the
+    /// answer is "unknown", not "different".
+    fn trees(&self, id: &NodeId) -> Option<Vec<CanonicalTree>> {
+        let mut trees: Vec<CanonicalTree> = Vec::new();
+        for dir in self.0.get(id)? {
+            push(&mut trees, CanonicalTree::resolve(dir).ok()?);
+        }
+        Some(trees)
+    }
+}
+
+/// One node's reservation, unresolved — the fixpoint [`Reachability::of`]
+/// runs per node.
 ///
-/// **A fixpoint, not one hop.** A member of this node's closure may itself
-/// be a gate with a `rerun` of its own, and `validate`'s
-/// `rerun_roots_are_ancestors` only asks that a root be an ancestor of
-/// *its* gate — so a nested gate's closure can leave the outer one.
-/// `super::repair`'s own note ("each member starts a fresh generation of
-/// its own — that is the rule that gives a nested gate its cap back") is
-/// that structure.
-///
-/// **Static.** `rerun_closure` is a question about the graph, so the answer
-/// does not depend on what is running, which is what lets a batch reserve
-/// the set before starting anything. Bounded by the node set rather than by
-/// the graph being well-formed: two gates naming each other is a flow
-/// `crate::validate` refuses, and the visited set means the scheduler does
-/// not hang on one anyway.
-///
-/// `None` when any directory in the set cannot be resolved — the whole
-/// answer is then unknown, not partly known, because a set missing one
-/// member would let the node into a wave beside whatever that member
-/// would have excluded.
-fn reachable_trees(
-    flow: &Flow,
-    graph: &FlowGraph,
-    cwd: &Path,
-    id: &NodeId,
-) -> Option<Vec<CanonicalTree>> {
-    let mut trees: Vec<CanonicalTree> = Vec::new();
+/// Absolute but not canonicalized: the join is arithmetic on what the flow
+/// wrote, and asking the filesystem is [`Reachability::trees`]'s job.
+fn dirs_reached_by(flow: &Flow, graph: &FlowGraph, cwd: &Path, id: &NodeId) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<NodeId> = HashSet::new();
     let mut queue: Vec<NodeId> = vec![id.clone()];
     while let Some(next) = queue.pop() {
@@ -142,7 +199,7 @@ fn reachable_trees(
         let Some(node) = flow.nodes.iter().find(|n| n.id == next) else {
             continue;
         };
-        push(&mut trees, working_tree_of(cwd, node)?);
+        push(&mut dirs, working_dir_of(cwd, node));
         let Some(rerun) = rerun_of(node) else {
             continue;
         };
@@ -151,7 +208,7 @@ fn reachable_trees(
         // in a subdirectory still reaches the root when it repairs — and
         // the flow author cannot narrow that the way they can a node's own
         // `cwd`.
-        push(&mut trees, CanonicalTree::resolve(cwd).ok()?);
+        push(&mut dirs, cwd.to_path_buf());
         queue.extend(
             graph
                 .rerun_closure(rerun)
@@ -159,7 +216,7 @@ fn reachable_trees(
                 .filter(|member| !seen.contains(member)),
         );
     }
-    Some(trees)
+    dirs
 }
 
 /// The nodes this node's failure would re-derive, or `None` when its
@@ -190,43 +247,24 @@ fn rerun_of(node: &Node) -> Option<&[NodeId]> {
     }
 }
 
-/// Which directory a node actually works in, as something two nodes can be
-/// compared on.
+/// Which directory a node works in, as the flow spells it.
 ///
-/// **Resolved, not compared as written** — which the return type now says
-/// rather than this comment. `a` and `./a` are one directory spelled two
-/// ways, and a string comparison puts both in the same wave, bypassing the
-/// one rule this whole feature rests on with a `./`. The same goes for `A`
-/// and `a` on the case-insensitive filesystem macOS ships by default, and
-/// for a symlink pointing at a directory already taken.
-///
-/// [`CanonicalTree`] answers all three, because it asks the filesystem
-/// rather than the spelling — and is the same type the lock is keyed off,
-/// so the wave and the lock cannot disagree about what one tree is. `None`
-/// when the filesystem cannot answer.
-///
-/// **No lexical fallback.** Falling back to the written form and calling
-/// two paths *different* would be safe only if a failure meant the
-/// directory was gone — nothing there for two nodes to corrupt. It does
-/// not mean that: a live directory can fail to resolve on a network
-/// filesystem timeout, a permission change on a component above it, an
-/// `ELOOP`, or a stale handle. Two nodes pointing through a symlink at one
-/// directory, one of which fails this moment, would then be read as
-/// different and put in the same wave — the exact collision the batch
-/// exists to prevent. The whole exclusion rests on this comparison, so
-/// when the comparison cannot be made the answer is "unknown", not
-/// "different".
-fn working_tree_of(cwd: &Path, node: &Node) -> Option<CanonicalTree> {
+/// Arithmetic on what was written, deliberately — resolving is
+/// [`Reachability::trees`]'s job, and doing it here would put a syscall
+/// inside the graph question.
+fn working_dir_of(cwd: &Path, node: &Node) -> PathBuf {
     match &node.cwd {
-        Some(relative) => CanonicalTree::resolve(&cwd.join(relative)).ok(),
-        None => CanonicalTree::resolve(cwd).ok(),
+        Some(relative) => cwd.join(relative),
+        None => cwd.to_path_buf(),
     }
 }
 
-/// Add a directory to the reservation, once.
-fn push(trees: &mut Vec<CanonicalTree>, dir: CanonicalTree) {
-    if !trees.contains(&dir) {
-        trees.push(dir);
+/// Add a directory to a reservation, once. Deduplicating here and again
+/// after resolving is not redundant: two spellings differ as written and
+/// are one directory once resolved.
+fn push<T: PartialEq>(dirs: &mut Vec<T>, dir: T) {
+    if !dirs.contains(&dir) {
+        dirs.push(dir);
     }
 }
 
@@ -323,9 +361,37 @@ mod tests {
     }
 
     /// The directories a node may name here. Made for real, because
-    /// `working_tree_of` asks the filesystem and a missing one is a
-    /// different answer now — `missing` is the one deliberately absent.
+    /// resolution asks the filesystem and a missing one is a different
+    /// answer — `missing` is the one deliberately absent.
     const DIRS: [&str; 3] = ["a", "b", "c"];
+
+    /// What a node reserves, as names — no filesystem, which is the point
+    /// of `Reachability::of` being separate from resolving it.
+    fn reserved_by(flow: &crate::model::Flow, id: &str) -> Vec<String> {
+        let graph = FlowGraph::build(flow).expect("acyclic");
+        let root = Path::new("/run");
+        let mut names: Vec<String> = Reachability::of(flow, &graph, root)
+            .0
+            .remove(&NodeId::from(id))
+            .expect("every node in the flow has a reservation")
+            .iter()
+            .map(|dir| {
+                dir.strip_prefix(root).map_or_else(
+                    |_| dir.display().to_string(),
+                    |rel| rel.display().to_string(),
+                )
+            })
+            .map(|name| {
+                if name.is_empty() {
+                    ".".to_string()
+                } else {
+                    name
+                }
+            })
+            .collect();
+        names.sort();
+        names
+    }
 
     fn batch_of(flow: &crate::model::Flow, waiting: &[&str], done: &[&str]) -> Batch {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -333,9 +399,10 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(sub)).expect("mkdir");
         }
         let graph = FlowGraph::build(flow).expect("acyclic");
+        let reach = Reachability::of(flow, &graph, dir.path());
         let mut waiting: Vec<NodeId> = waiting.iter().map(|s| NodeId::from(*s)).collect();
         let done: HashSet<NodeId> = done.iter().map(|s| NodeId::from(*s)).collect();
-        take_ready_batch(flow, &graph, dir.path(), &mut waiting, &done, flow.parallel)
+        take_ready_batch(flow, &reach, &mut waiting, &done, flow.parallel)
     }
 
     /// The ids a batch would run, for a test that only cares about those.
@@ -368,6 +435,51 @@ mod tests {
             batch,
             vec![NodeId::from("gate")],
             "the gate's repair could write in `b`, so `other` must wait"
+        );
+    }
+
+    /// **The reservation itself, with no filesystem in the question.**
+    ///
+    /// What a node reserves is a fact about the flow, so this asks it
+    /// directly rather than through a wave whose answer also depends on
+    /// three directories existing. The sibling tests below check that the
+    /// batcher acts on it; this one checks it is right — including the two
+    /// parts a wave test can only show indirectly, that the fixpoint keeps
+    /// going through a nested gate and that a repair reserves the run's
+    /// root no node named.
+    #[test]
+    fn a_reservation_is_the_fixpoint_over_repairs_plus_the_root_they_repair_in() {
+        //  side(c) --> inner(a, rerun: [side]) --> outer(b, rerun: [inner])
+        let flow = flow_of(&[
+            plain("side", "c"),
+            N {
+                id: "inner",
+                deps: &["side"],
+                cwd: "a",
+                rerun: Some(&["side"]),
+            },
+            N {
+                id: "outer",
+                deps: &["inner"],
+                cwd: "b",
+                rerun: Some(&["inner"]),
+            },
+        ]);
+
+        // One hop from `outer` is `rerun_closure([inner])` — inner and its
+        // descendants, so `a` and `b`. `c` is in only because inner is
+        // itself a gate and its own `rerun` names side: the hop the
+        // fixpoint takes and a single pass does not.
+        assert_eq!(
+            reserved_by(&flow, "outer"),
+            vec![".", "a", "b", "c"],
+            "the fixpoint stopped at outer's own closure"
+        );
+        assert_eq!(
+            reserved_by(&flow, "side"),
+            vec!["c"],
+            "no repair, so no closure and no root — a reservation must not \
+             grow into the whole graph"
         );
     }
 
