@@ -12,7 +12,8 @@ use crate::control::spec::{ControlCommand, Ordinal, ResolvedCommand, UseTarget};
 use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef};
 use crate::telegram::client::{Update, UpdateKind};
 use crate::telegram::command::{Resolution, absorb, resolve_command};
-use crate::test_support::workspace_with_agent_chat;
+use crate::test_support::{workspace_for_control, workspace_with_agent_chat};
+use crate::workspace::main_area::pane_tree::PaneId;
 
 fn message(update_id: i64, chat_id: i64, text: &str) -> Update {
     Update {
@@ -421,32 +422,22 @@ mod ask {
 /// reads the same field.
 mod unowned_slash {
     use super::*;
-    use daruda_acp::{SlashCommand, SlashCommandInput};
 
-    fn advertise(names: &[&str]) -> Vec<SlashCommand> {
-        names
-            .iter()
-            .map(|n| SlashCommand {
-                name: (*n).to_string(),
-                description: String::new(),
-                input: SlashCommandInput::NoInput,
-            })
-            .collect()
+    /// The pane every single-pane case in here asks about.
+    fn only_pane(fixture: &crate::test_support::ControlFixture, cx: &mut TestAppContext) -> PaneId {
+        fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target.pane)
     }
 
     #[gpui::test]
     async fn a_command_the_agent_advertises_goes_to_the_agent(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let target = fixture
-            .workspace
-            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let pane = only_pane(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
-            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-            view.update(cx, |v, _| {
-                v.session_config.available_commands = advertise(&["usage", "cost", "model"]);
-            });
+            ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
             assert!(
-                ws.agent_takes_slash_command(target.pane, "usage", cx),
+                ws.agent_takes_slash_command(pane, "usage", cx),
                 "the agent advertises /usage, so /usage is the agent's"
             );
         });
@@ -457,16 +448,11 @@ mod unowned_slash {
     #[gpui::test]
     async fn a_name_the_agent_does_not_have_stays_ours(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let target = fixture
-            .workspace
-            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let pane = only_pane(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
-            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-            view.update(cx, |v, _| {
-                v.session_config.available_commands = advertise(&["usage", "cost"]);
-            });
+            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
             assert!(
-                !ws.agent_takes_slash_command(target.pane, "lst", cx),
+                !ws.agent_takes_slash_command(pane, "lst", cx),
                 "a typo of /list is not one of the agent's, so daruda answers it"
             );
         });
@@ -478,15 +464,10 @@ mod unowned_slash {
     #[gpui::test]
     async fn an_agent_that_has_advertised_nothing_still_gets_it(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let target = fixture
-            .workspace
-            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let pane = only_pane(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
-            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-            view.update(cx, |v, _| {
-                v.session_config.available_commands.clear();
-            });
-            assert!(ws.agent_takes_slash_command(target.pane, "usage", cx));
+            ws.advertise_slash_commands_for_test(pane, &[], cx);
+            assert!(ws.agent_takes_slash_command(pane, "usage", cx));
         });
     }
 
@@ -497,6 +478,60 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         fixture.workspace.update(cx, |ws, cx| {
             assert!(ws.agent_takes_slash_command(9999, "usage", cx));
+        });
+    }
+
+    /// The same question with no target to ask it of. Having nowhere to send
+    /// `/usage` never made it daruda's, so an agent that advertises the name
+    /// still keeps the typo answer off it — the phone hears the real reason
+    /// (no target) instead of a suggestion for a command nobody wanted.
+    #[gpui::test]
+    async fn an_advertised_name_is_not_ruled_out_when_nothing_names_a_target(
+        cx: &mut TestAppContext,
+    ) {
+        let fixture = workspace_with_agent_chat(cx);
+        let pane = only_pane(&fixture, cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
+            assert!(
+                !ws.rules_out_slash_command("usage", cx),
+                "an agent advertises /usage, so daruda must not call it a typo"
+            );
+        });
+    }
+
+    /// The other side: with every list advertised and none naming it, daruda
+    /// really can rule the name out, and the suggestion is the useful answer.
+    #[gpui::test]
+    async fn a_name_no_agent_advertises_is_ruled_out(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let pane = only_pane(&fixture, cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
+            assert!(ws.rules_out_slash_command("lst", cx));
+        });
+    }
+
+    /// A cold pane rules nothing out, for the same reason it forwards: it has
+    /// not said what it has yet.
+    #[gpui::test]
+    async fn a_pane_that_has_advertised_nothing_rules_nothing_out(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let pane = only_pane(&fixture, cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(pane, &[], cx);
+            assert!(!ws.rules_out_slash_command("lst", cx));
+        });
+    }
+
+    /// A window with no agent chat rules the name out vacuously: with no
+    /// agent, no agent vocabulary holds it. The caller ANDs across windows, so
+    /// this window never overrides one that could claim the name.
+    #[gpui::test]
+    async fn a_window_with_no_agent_chat_rules_the_name_out(cx: &mut TestAppContext) {
+        let fixture = workspace_for_control(cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            assert!(ws.rules_out_slash_command("usage", cx));
         });
     }
 }

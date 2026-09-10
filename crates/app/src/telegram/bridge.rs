@@ -124,10 +124,9 @@ pub enum InboundAction {
     /// swallowed — a silently dropped message is the defect this replaces.
     ///
     /// Only for a name daruda *does* own, used wrongly (`/say` with no
-    /// argument), or for a name nobody can take because there is no target.
-    /// A name daruda does not own, with somewhere to send it, is
-    /// [`Self::UnknownSlash`] — the agent's command namespace is open and this
-    /// one is closed, so "not ours" cannot mean "nobody's".
+    /// argument). A name daruda does not own is [`Self::UnknownSlash`] or
+    /// [`Self::UnownedSlashNoTarget`] — the agent's command namespace is open
+    /// and this one is closed, so "not ours" cannot mean "nobody's".
     ReportParseError {
         error: crate::control::spec::ParseError,
     },
@@ -144,6 +143,20 @@ pub enum InboundAction {
         /// The message as sent, forwarded verbatim when the agent owns it.
         text: String,
         /// The nearest daruda command, for the answer when it does not.
+        suggestion: Option<&'static str>,
+    },
+    /// A `/name` daruda does not own, with nothing to aim it at.
+    ///
+    /// Not [`Self::ReportParseError`]: having no target says nothing about
+    /// whose command the name is, and answering "did you mean /use?" to the
+    /// agent's `/usage` is a claim this layer cannot support. The same
+    /// question [`Self::UnknownSlash`] asks of one pane is asked of every
+    /// pane, and only a vocabulary that rules the name out earns the
+    /// suggestion — otherwise the true answer is the missing target.
+    UnownedSlashNoTarget {
+        /// The name without its slash, to ask the agents about.
+        name: String,
+        /// The nearest daruda command, for the answer when none of them owns it.
         suggestion: Option<&'static str>,
     },
     /// An approval card's button was tapped.
@@ -578,13 +591,13 @@ impl BridgeCore {
                 },
                 None => InboundAction::InjectPrompt { pane, text },
             },
-            // Nowhere to send it, so the suggestion is the most useful answer
-            // left — and a typo of ours is the likeliest reason to be here
-            // with no target at all.
+            // Nowhere to send it. Which vocabulary the name belongs to is
+            // still not ours to decide, so the caller asks every pane before
+            // the answer picks between "no target" and "no such command".
             None => match unknown {
-                Some((input, suggestion)) => InboundAction::ReportParseError {
-                    error: crate::control::spec::ParseError::Unknown { input, suggestion },
-                },
+                Some((name, suggestion)) => {
+                    InboundAction::UnownedSlashNoTarget { name, suggestion }
+                }
                 None => InboundAction::NoTarget,
             },
         }
@@ -810,17 +823,18 @@ mod tests {
         );
     }
 
+    /// A typo is never swallowed. The answer is settled a layer up now — no
+    /// agent advertises `lst`, so the suggestion is daruda's to give — but the
+    /// suggestion has to reach that layer intact for it to be given at all.
     #[test]
-    fn a_typo_reports_instead_of_vanishing() {
+    fn a_typo_carries_its_suggestion_instead_of_vanishing() {
         let mut core = BridgeCore::new(true, Some(42), 0);
         let action = core.route(message(1, 42, "/lst", None)).action;
         assert_eq!(
             action,
-            InboundAction::ReportParseError {
-                error: crate::control::spec::ParseError::Unknown {
-                    input: "lst".into(),
-                    suggestion: Some("list"),
-                }
+            InboundAction::UnownedSlashNoTarget {
+                name: "lst".into(),
+                suggestion: Some("list"),
             }
         );
     }
@@ -846,6 +860,24 @@ mod tests {
                 suggestion: Some("use"),
             },
             "an agent command must reach the agent, not a typo answer"
+        );
+    }
+
+    /// The same slash with nothing to aim it at. daruda still cannot say the
+    /// name is a typo of one of its own — it never could — so the question is
+    /// handed on rather than answered with a suggestion for a command the
+    /// sender did not want.
+    #[test]
+    fn an_unowned_slash_with_no_target_is_still_not_ours_to_refuse() {
+        let mut core = BridgeCore::new(true, Some(42), 0);
+        let action = core.route(message(1, 42, "/usage", None)).action;
+        assert_eq!(
+            action,
+            InboundAction::UnownedSlashNoTarget {
+                name: "usage".into(),
+                suggestion: Some("use"),
+            },
+            "with no target the reason is the missing target, not a typo"
         );
     }
 

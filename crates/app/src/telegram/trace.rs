@@ -263,6 +263,7 @@ pub(crate) fn action_name(action: &InboundAction) -> &'static str {
         InboundAction::RunCommand { .. } => "run_command",
         InboundAction::ReportParseError { .. } => "report_parse_error",
         InboundAction::UnknownSlash { .. } => "unknown_slash",
+        InboundAction::UnownedSlashNoTarget { .. } => "unowned_slash_no_target",
         InboundAction::ResolveApproval { .. } => "resolve_approval",
         InboundAction::SelectTarget { .. } => "select_target",
         InboundAction::StaleListing => "stale_listing",

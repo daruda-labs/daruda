@@ -451,7 +451,11 @@ fn spawn_poll_task(cx: &mut App) {
                             suggestion,
                         },
                     ) => {
-                        let mut agents = false;
+                        // Defaults to the agent's: a window that is gone
+                        // answers nothing, and the delivery attempt below
+                        // reports `target_gone` far better than a typo answer
+                        // guessed from silence would.
+                        let mut agents = true;
                         dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
                             agents = ws.agent_takes_slash_command(pane.pane, &name, cx);
                         });
@@ -469,6 +473,28 @@ fn spawn_poll_task(cx: &mut App) {
                             );
                             send_command_reply(cx, &token, reply).await;
                         }
+                    }
+                    // The same slash with nothing to aim it at. Having no
+                    // target says nothing about whose command the name is, so
+                    // the vocabularies are still asked — and only a name every
+                    // one of them rules out is answered as a typo. Otherwise
+                    // the missing target is the real reason it went nowhere.
+                    (None, InboundAction::UnownedSlashNoTarget { name, suggestion }) => {
+                        let ours = agents_rule_out_slash(cx, &name);
+                        trace::delivery("slash.unowned.no_target", || {
+                            format!("name={name} ours={ours}")
+                        });
+                        let reply = if ours {
+                            super::command::render_parse_error(
+                                &crate::control::spec::ParseError::Unknown {
+                                    input: name,
+                                    suggestion,
+                                },
+                            )
+                        } else {
+                            cx.update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx))
+                        };
+                        send_command_reply(cx, &token, reply).await;
                     }
                     // A message-origin action (pairing, ignore, unsupported).
                     (None, action) => dispatch_action(action, cx),
@@ -554,9 +580,10 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
             // Handled inline in the poll loop, which is the only place that
             // can await the "that chat is gone" answer.
         }
-        InboundAction::UnknownSlash { .. } => {
-            // Same: settled in the poll loop, which can both read the pane's
-            // command list and await whichever answer that settles on.
+        InboundAction::UnknownSlash { .. } | InboundAction::UnownedSlashNoTarget { .. } => {
+            // Same: settled in the poll loop, which can both read the
+            // advertised command lists and await whichever answer that
+            // settles on.
         }
         InboundAction::RespondPermission { .. }
         | InboundAction::SelectTarget { .. }
@@ -693,6 +720,23 @@ fn dispatch_to_workspace(
             }
         });
     });
+}
+
+/// Whether every window rules `/name` out of its agents' vocabularies, so the
+/// typo answer is daruda's to give.
+///
+/// ANDed across windows: one agent that could claim the name settles it for
+/// all of them. With no window open the AND is vacuously true, which is the
+/// same reading a window with no agent chat gets — no agent, no agent
+/// vocabulary to hold the name.
+fn agents_rule_out_slash(cx: &mut gpui::AsyncApp, name: &str) -> bool {
+    let mut ours = true;
+    cx.update(|cx| {
+        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+            ours &= ws.rules_out_slash_command(name, cx);
+        });
+    });
+    ours
 }
 
 /// The plain-text fallback body for `header`/`tail`: verbatim, no escaping
@@ -1016,6 +1060,37 @@ mod tests {
         assert_ne!(applied_allow, applied_reject);
         assert_ne!(applied_allow, stale);
         assert_ne!(stale, gone);
+    }
+
+    /// The cross-window AND behind the no-target answer. One window's agent
+    /// advertises `/usage`; the other's has a full list that does not. The
+    /// name must stay the agents', or opening a second window would be enough
+    /// to answer the first window's agent command as a typo of `/use`.
+    #[gpui::test]
+    async fn one_windows_agent_keeps_the_name_for_every_window(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        for (fixture, commands) in [
+            (workspace_with_agent_chat(cx), ["usage", "model"]),
+            (workspace_with_agent_chat(cx), ["model", "cost"]),
+        ] {
+            let pane = fixture
+                .workspace
+                .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target.pane);
+            fixture.workspace.update(cx, |ws, cx| {
+                ws.advertise_slash_commands_for_test(pane, &commands, cx);
+            });
+        }
+
+        let mut async_cx = cx.to_async();
+        assert!(
+            !agents_rule_out_slash(&mut async_cx, "usage"),
+            "one window's agent advertises /usage, so no window may call it a typo"
+        );
+        assert!(
+            agents_rule_out_slash(&mut async_cx, "lst"),
+            "no agent anywhere has /lst, so the suggestion is daruda's to give"
+        );
     }
 
     #[test]

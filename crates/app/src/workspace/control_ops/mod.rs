@@ -394,11 +394,24 @@ impl Workspace {
     /// forwards too, so the answer comes from the delivery attempt, which can
     /// say `target_gone`, rather than from a guess here.
     pub(crate) fn agent_takes_slash_command(&self, pane: PaneId, name: &str, cx: &App) -> bool {
-        let Some(view) = self.agent_chat_view(pane) else {
-            return true;
-        };
-        let advertised = &view.read(cx).session_config.available_commands;
-        advertised.is_empty() || advertised.iter().any(|c| c.name == name)
+        match self.agent_chat_view(pane) {
+            Some(view) => claims_slash_command(view.read(cx), name),
+            None => true,
+        }
+    }
+
+    /// Whether this window can rule `/name` out of every agent's vocabulary —
+    /// asked when nothing names a target, so there is no one pane to ask.
+    ///
+    /// Only a positive ruling-out earns the typo answer. A window with no
+    /// agent chat at all rules the name out vacuously, which is the right
+    /// reading rather than a gap: with no agent, no agent vocabulary contains
+    /// it. The caller ANDs across windows, so one window that could claim the
+    /// name overrides every window that could not.
+    pub(crate) fn rules_out_slash_command(&self, name: &str, cx: &App) -> bool {
+        !self
+            .every_agent_chat()
+            .any(|(_, view)| claims_slash_command(view.read(cx), name))
     }
 
     /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
@@ -418,6 +431,37 @@ impl Workspace {
             Ok(StopDisposition::AlreadyIdle)
         }
     }
+
+    /// Test hook: put `names` on `pane`'s advertised command list. Slash
+    /// ownership turns on that one field, and a test outside
+    /// `crate::workspace` cannot reach the view that holds it.
+    #[cfg(test)]
+    pub(crate) fn advertise_slash_commands_for_test(
+        &self,
+        pane: PaneId,
+        names: &[&str],
+        cx: &mut App,
+    ) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, _| {
+            v.session_config.available_commands = names
+                .iter()
+                .map(|n| daruda_acp::SlashCommand {
+                    name: (*n).to_string(),
+                    description: String::new(),
+                    input: daruda_acp::SlashCommandInput::NoInput,
+                })
+                .collect();
+        });
+    }
+}
+
+/// Whether this pane's agent could claim `/name`: it advertises the name, or
+/// it has not advertised anything yet. The one predicate both slash-ownership
+/// questions aggregate — one pane's answer, and every pane's.
+fn claims_slash_command(view: &AgentChatView, name: &str) -> bool {
+    let advertised = &view.session_config.available_commands;
+    advertised.is_empty() || advertised.iter().any(|c| c.name == name)
 }
 
 /// The last assistant message this pane finished saying.
