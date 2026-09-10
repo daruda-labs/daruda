@@ -367,27 +367,31 @@ enum StreamKind {
     Thinking,
 }
 
-/// Append streamed text, extending the trailing item only when it is the same
-/// still-streaming kind **and** the same message (matching `message_id`, or both
-/// absent); otherwise a new message has started, so finalize the previous
-/// streaming block and start a fresh item. A change in `message_id` therefore
-/// splits two agent messages into separate items even with no tool call between
-/// them — the protocol's "a change in messageId indicates a new message"
-/// (`ContentChunk::message_id`). When the agent omits `message_id`, chunks merge
-/// by adjacency (legacy behaviour). Empty chunks (the agent emits a leading
-/// empty chunk per message) start the item without text.
-fn append_streaming(
-    items: &mut Vec<ChatItem>,
-    text: &str,
-    message_id: Option<String>,
+/// The still-streaming body this chunk continues, or `None` when it starts a
+/// new message.
+///
+/// The tail alone is not enough. Items reach `items` while a message is still
+/// streaming — a background subagent's tool call re-keyed onto this transcript
+/// by [`crate::native_subagents`], a permission request, a surfaced failure —
+/// and they sit between the message and its own later chunks. Stopping at the
+/// tail would start a fresh item there, and the message's markdown would then
+/// be parsed in pieces: a table row without its delimiter row is a paragraph of
+/// literal pipes, a `**` cut in half stays literal, and a fence splits across
+/// the box boundary.
+///
+/// Only a chunk that names its message can be reunited with it. Without a
+/// `message_id`, "same message" and "new message" are indistinguishable, so
+/// those keep merging by adjacency and never walk back past anything.
+fn streaming_body<'a>(
+    items: &'a mut [ChatItem],
+    message_id: Option<&str>,
     kind: StreamKind,
-    phase: MessagePhase,
-) {
-    if let Some(last) = items.last_mut() {
-        match (last, kind) {
+) -> Option<&'a mut String> {
+    for item in items.iter_mut().rev() {
+        match (item, kind) {
             (
                 ChatItem::AssistantText {
-                    text: prev,
+                    text,
                     streaming: true,
                     message_id: mid,
                     // Not matched on: the role was fixed when this message
@@ -396,23 +400,43 @@ fn append_streaming(
                     phase: _,
                 },
                 StreamKind::Assistant,
-            ) if *mid == message_id => {
-                prev.push_str(text);
-                return;
-            }
+            ) if mid.as_deref() == message_id => return Some(text),
             (
                 ChatItem::Thinking {
-                    text: prev,
+                    text,
                     streaming: true,
                     message_id: mid,
                 },
                 StreamKind::Thinking,
-            ) if *mid == message_id => {
-                prev.push_str(text);
-                return;
-            }
-            _ => {}
+            ) if mid.as_deref() == message_id => return Some(text),
+            // The three kinds that can be appended while a message streams. The
+            // walk stops at everything else, so it is bounded by what arrived
+            // during this message rather than by the conversation.
+            (ChatItem::ToolCall(_) | ChatItem::Permission(_) | ChatItem::Failure(_), _)
+                if message_id.is_some() => {}
+            _ => return None,
         }
+    }
+    None
+}
+
+/// Append streamed text to the message it belongs to (see [`streaming_body`]);
+/// when there is none, finalize the previous streaming block and start a fresh
+/// item. A change in `message_id` therefore splits two agent messages into
+/// separate items even with no tool call between them — the protocol's "a
+/// change in messageId indicates a new message" (`ContentChunk::message_id`).
+/// Empty chunks (the agent emits a leading empty chunk per message) start the
+/// item without text.
+fn append_streaming(
+    items: &mut Vec<ChatItem>,
+    text: &str,
+    message_id: Option<String>,
+    kind: StreamKind,
+    phase: MessagePhase,
+) {
+    if let Some(prev) = streaming_body(items, message_id.as_deref(), kind) {
+        prev.push_str(text);
+        return;
     }
     // A new message (different id, or a kind switch) begins: the previous
     // streaming block, if any, is now complete.
@@ -2002,6 +2026,152 @@ mod tests {
                 phase: Default::default(),
             }
         );
+    }
+
+    #[test]
+    fn a_background_tool_call_must_not_shatter_the_message_it_lands_in() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("**bo", "m1")),
+        );
+        // A background subagent's own call, re-keyed onto the parent transcript,
+        // lands between two chunks of the parent's still-streaming message.
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("subagent:s1:tool:t1", "Grep")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("ld**", "m1")),
+        );
+
+        assert_eq!(
+            assistant_texts(&items),
+            vec!["**bold**"],
+            "one agent message must stay one item, or its markdown is parsed in pieces"
+        );
+    }
+
+    /// Every assistant message in arrival order — what the renderer turns into
+    /// one markdown document each.
+    fn assistant_texts(items: &[ChatItem]) -> Vec<&str> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                ChatItem::AssistantText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_unnamed_message_still_merges_only_by_adjacency() {
+        // Without a messageId "same message" and "new message" cannot be told
+        // apart, so the walk-back must not happen — the second chunk could
+        // belong to a message the tool call started.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk("a")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "Grep")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk("b")),
+        );
+
+        assert_eq!(assistant_texts(&items), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_new_message_after_a_tool_call_still_starts_its_own_item() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("first", "m1")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "Grep")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("second", "m2")),
+        );
+
+        assert_eq!(assistant_texts(&items), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn the_walk_back_stops_at_a_turn_boundary() {
+        // A prompt ends the turn the message belonged to, and `finalize_streaming`
+        // settled it. A later chunk reusing the id must not reopen it.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("before", "m1")),
+        );
+        finalize_streaming(&mut items);
+        append_user_chunk(&mut items, "next prompt");
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("after", "m1")),
+        );
+
+        assert_eq!(assistant_texts(&items), vec!["before", "after"]);
+    }
+
+    #[test]
+    fn a_background_tool_call_must_not_shatter_a_thought_either() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentThoughtChunk(text_chunk_id("half a ", "t1")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("subagent:s1:tool:t1", "Grep")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentThoughtChunk(text_chunk_id("thought", "t1")),
+        );
+
+        let thoughts: Vec<&str> = items
+            .iter()
+            .filter_map(|i| match i {
+                ChatItem::Thinking { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thoughts, vec!["half a thought"]);
+    }
+
+    #[test]
+    fn many_interleaved_calls_still_reach_the_message() {
+        // What a fan-out of background subagents actually looks like: the
+        // parent's sentence streams while children keep reporting.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("| a | b |\n", "m1")),
+        );
+        for n in 0..32 {
+            apply_update(
+                &mut items,
+                &SessionUpdate::ToolCall(ToolCall::new(format!("c{n}"), "Grep")),
+            );
+        }
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("|---|---|", "m1")),
+        );
+
+        assert_eq!(assistant_texts(&items), vec!["| a | b |\n|---|---|"]);
     }
 
     #[test]
