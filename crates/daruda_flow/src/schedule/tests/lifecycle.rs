@@ -238,6 +238,6 @@ fn execute_takes_the_lock_outside_the_tree_and_the_copy_inside_it() {
     );
     assert!(
         seen.iter().all(|(_, inside)| *inside),
-        "MIGRATION(from v0.2.12): the compatibility copy must be there too: {seen:?}"
+        "MIGRATION(since 985e75dd): the compatibility copy must be there too: {seen:?}"
     );
 }

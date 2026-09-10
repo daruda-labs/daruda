@@ -98,11 +98,10 @@ fn execute_with(
             );
         }
     };
-    // MIGRATION(from v0.2.12): the legacy place too, for one release. An older
-    // build looks only
-    // there, so writing it is what stops that build starting a second run
-    // in a tree this one holds; and `run_status` reads it so a run *it*
-    // started stays resumable.
+    // MIGRATION(since 985e75dd): the legacy place too, for one release. An
+    // older build looks only there, so writing it is what stops that build
+    // starting a second run in a tree this one holds; and `run_status`
+    // reads it so a run *it* started stays resumable.
     //
     // The copy is inside the tree, so `git clean -fdx` can take it — and
     // then an older build sees a free tree and starts a second run in one

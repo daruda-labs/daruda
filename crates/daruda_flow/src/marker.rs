@@ -104,7 +104,9 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// evidence there is, so where the lock lives is part of this answer.
 ///
 /// **`lock_dir` is passed, not derived, and that is a hazard the caller
-/// owns.** `None` says the caller does not know where it is. It used to be `run_dir.parent()` — the runs directory, where the
+/// owns.** `None` says the caller does not know where it is.
+///
+/// It used to be `run_dir.parent()` — the runs directory, where the
 /// lock also lived. The lock has moved out of the working tree
 /// ([`crate::lock::lock_dir_for`]), so there is nothing left in `run_dir`
 /// to derive it from, and a caller naming the wrong directory would read
@@ -129,11 +131,10 @@ pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>
     // know where the lock is — said as an absent argument rather than as a
     // path with no lock in it, which would read the same as "free".
     //
-    // MIGRATION(from v0.2.12): the second read is the compatibility copy inside
-    // the tree,
-    // for a run an older build started — it wrote only there, and reading it
-    // is what keeps such a run resumable across the upgrade. Goes when
-    // `schedule::run` stops writing it.
+    // MIGRATION(since 985e75dd): the second read is the compatibility copy
+    // inside the tree, for a run an older build started — it wrote only
+    // there, and reading it is what keeps such a run resumable across the
+    // upgrade. Goes when `schedule::run` stops writing it.
     let holder = lock_dir
         .and_then(crate::lock::read_holder)
         .or_else(|| run_dir.parent().and_then(crate::lock::read_holder));

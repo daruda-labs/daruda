@@ -1,7 +1,8 @@
 //! Declarative flow engine over ACP: a YAML file describes a DAG of agent
-//! and command nodes, this crate parses it, validates it, and (from P2b on)
-//! runs it serially. GPUI-free — the host resolves launches and paths and
-//! hands this crate finished values.
+//! and command nodes, this crate parses it, validates it, and runs it a
+//! wave at a time — as many nodes at once as the flow's `parallel` allows,
+//! and never two that could write in one directory. GPUI-free — the host
+//! resolves launches and paths and hands this crate finished values.
 
 // What a host calls. `load` documents itself as "the one call a host
 // makes"; these are the rest of that contract — what a run needs, what it
