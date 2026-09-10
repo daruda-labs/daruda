@@ -27,6 +27,12 @@ pub(crate) fn parse(
         .map_err(|e| e.to_string().into())
 }
 
+/// daruda patch: a table's width is fixed by its delimiter row, so a body row
+/// with fewer cells is padded and one with more has the excess dropped (GFM
+/// §Tables). `mdast` reports each row's cells verbatim and carries the width
+/// only in `align`, so normalizing here is what keeps every row rectangular —
+/// otherwise the renderer divides the width by each row's own cell count and
+/// the column borders stop lining up between rows.
 fn parse_table_row(table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
     let mut row = TableRow::default();
     node.children.iter().for_each(|c| {
@@ -37,6 +43,10 @@ fn parse_table_row(table: &mut Table, node: &mdast::TableRow, cx: &mut NodeConte
             _ => {}
         };
     });
+    // A parsed table always has one align entry per column: `mdast` only emits
+    // `Table` once the delimiter row is read, and that row is what fills them.
+    row.children
+        .resize_with(table.column_aligns.len(), Default::default);
     table.children.push(row);
 }
 
@@ -435,6 +445,43 @@ mod tests {
 
     fn joined_text(p: &Paragraph) -> String {
         p.children.iter().map(|c| c.text.to_string()).collect()
+    }
+
+    /// Every row of a table, as cell texts.
+    fn table_rows(raw: &str) -> Vec<Vec<String>> {
+        let Node::Root { children } = parse_md(raw) else {
+            panic!("expected a root")
+        };
+        let Some(Node::Table(table)) = children.into_iter().next() else {
+            panic!("expected a leading table")
+        };
+        table
+            .children
+            .iter()
+            .map(|row| {
+                row.children
+                    .iter()
+                    .map(|c| joined_text(&c.children))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// GFM fixes a table's width at the delimiter row. A row that overruns it
+    /// used to render an extra column, and since each row divides the width by
+    /// its own cell count, the column borders stopped lining up between rows.
+    #[test]
+    fn a_row_wider_than_the_delimiter_row_loses_the_excess() {
+        let rows = table_rows("| a | b |\n|---|---|\n| 1 | 2 | 3 |\n");
+        assert_eq!(rows, vec![vec!["a", "b"], vec!["1", "2"]]);
+    }
+
+    /// The other direction of the same rule: a short row is padded, so its
+    /// cells stay under the headings they belong to.
+    #[test]
+    fn a_row_narrower_than_the_delimiter_row_is_padded() {
+        let rows = table_rows("| a | b | c |\n|---|---|---|\n| 1 |\n");
+        assert_eq!(rows, vec![vec!["a", "b", "c"], vec!["1", "", ""]]);
     }
 
     /// Two trailing spaces are a hard line break; `mdast` reports it as an

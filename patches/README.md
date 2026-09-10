@@ -437,6 +437,41 @@ overlay case, dropping the press/release match fails both link cases.
 
 ---
 
+## `crates/gpui_component/src/text/` — vendored, **a markdown table's columns line up**
+
+Applied in place, on the same terms as the sections above. Independent of the
+overlay patch above, in the same subtree.
+
+### Why
+
+GFM fixes a table's width at its delimiter row: a body row with fewer cells is
+padded, and one with more has the excess ignored. `mdast` does neither — it
+reports every row's cells verbatim and carries the width only in `Table::align`.
+The renderer then sized each row by that row's own cell count, so one overrunning
+row grew a column the header never had and shifted every border out of line with
+the rows above it.
+
+Column width itself was measured in **UTF-8 bytes**. A Korean cell is three bytes
+per character, so beside one, an ASCII column of commit hashes or identifiers was
+allotted a third of the share its text needs — narrow enough that a hash wrapped
+mid-token, one character per line.
+
+### What diverges
+
+| Patch | File | What |
+|---|---|---|
+| Rows are normalized to the delimiter row's width | `text/format/markdown.rs` (`parse_table_row`) | `resize_with(table.column_aligns.len(), ..)` after the row's cells are parsed — pads short rows, drops the excess from long ones, which is what GFM specifies. Done at parse time rather than in `render_table` because `column_aligns` is the one place the table's real width is known, and a rectangular tree means every consumer (render, `selected_text`, markdown round-trip) agrees without repeating the rule. Covered by `a_row_wider_than_the_delimiter_row_loses_the_excess` / `a_row_narrower_than_the_delimiter_row_is_padded` in that file's own `mod tests`. |
+| `Paragraph::text_len` counts characters | `text/node.rs` | `text.chars().count()` instead of `text.len()`. Its only sizing consumer is `render_table`'s per-column width; the other (`format/html.rs`) asks whether it is zero, which both spellings answer alike. |
+
+### Re-vendor procedure
+
+Copy the fresh upstream `format/markdown.rs` / `node.rs` in, then re-apply both
+rows above. The two parser tests fail loudly if the normalization is forgotten.
+Nothing fails automatically if `text_len` reverts to bytes — check it by hand, or
+render a table whose columns mix CJK prose with an ASCII identifier.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **six source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.

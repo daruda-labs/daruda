@@ -294,10 +294,14 @@ impl Paragraph {
     }
 
     /// Return length of children text.
+    /// daruda patch: characters, not UTF-8 bytes. Its one sizing consumer is
+    /// the table's per-column width, and a byte count reads a CJK column as
+    /// three times the text it is — so beside one, an ASCII column of hashes or
+    /// identifiers is starved to a third of its share and wraps mid-token.
     pub(crate) fn text_len(&self) -> usize {
         self.children
             .iter()
-            .map(|node| node.text.len())
+            .map(|node| node.text.chars().count())
             .sum::<usize>()
     }
 
