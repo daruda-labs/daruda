@@ -294,14 +294,10 @@ impl Paragraph {
     }
 
     /// Return length of children text.
-    /// daruda patch: characters, not UTF-8 bytes. Its one sizing consumer is
-    /// the table's per-column width, and a byte count reads a CJK column as
-    /// three times the text it is — so beside one, an ASCII column of hashes or
-    /// identifiers is starved to a third of its share and wraps mid-token.
     pub(crate) fn text_len(&self) -> usize {
         self.children
             .iter()
-            .map(|node| node.text.chars().count())
+            .map(|node| node.text.len())
             .sum::<usize>()
     }
 
@@ -1214,28 +1210,6 @@ impl Node {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
-        const DEFAULT_LENGTH: usize = 5;
-        const MAX_LENGTH: usize = 150;
-        let col_lens = match item {
-            Node::Table(table) => {
-                let mut col_lens = vec![];
-                for row in table.children.iter() {
-                    for (ix, cell) in row.children.iter().enumerate() {
-                        if col_lens.len() <= ix {
-                            col_lens.push(DEFAULT_LENGTH);
-                        }
-
-                        let len = cell.children.text_len();
-                        if len > col_lens[ix] {
-                            col_lens[ix] = len;
-                        }
-                    }
-                }
-                col_lens
-            }
-            _ => vec![],
-        };
-
         // Background-derived table lines instead of the fixed `border` color,
         // so the outer frame, row, and cell separators track the pane
         // background on any theme. White over a dark surface, black over a
@@ -1245,93 +1219,83 @@ impl Node {
         let line_color = options.tint(STRUCTURAL_LINE_ALPHA, cx);
 
         match item {
-            Node::Table(table) => div()
-                .pb(rems(1.))
-                .w_full()
-                .child(
-                    div()
-                        .id("table")
-                        .w_full()
-                        .border_1()
-                        .border_color(line_color)
-                        .rounded(cx.theme().radius)
-                        .children({
-                            let mut rows = Vec::with_capacity(table.children.len());
-                            for (row_ix, row) in table.children.iter().enumerate() {
-                                rows.push(
-                                    div()
-                                        .id("row")
-                                        .w_full()
-                                        .when(row_ix < table.children.len() - 1, |this| {
-                                            this.border_b_1()
-                                        })
-                                        .border_color(line_color)
-                                        .flex()
-                                        .flex_row()
-                                        .children({
-                                            let mut cells = Vec::with_capacity(row.children.len());
-                                            for (ix, cell) in row.children.iter().enumerate() {
-                                                let align = table.column_align(ix);
-                                                let is_last_col = ix == row.children.len() - 1;
-                                                let len = col_lens
-                                                    .get(ix)
-                                                    .copied()
-                                                    .unwrap_or(MAX_LENGTH)
-                                                    .min(MAX_LENGTH);
-
-                                                cells.push(
-                                                    div()
-                                                        .id("cell")
-                                                        .flex()
-                                                        .when(
-                                                            align == ColumnumnAlign::Center,
-                                                            |this| this.justify_center(),
-                                                        )
-                                                        .when(
-                                                            align == ColumnumnAlign::Right,
-                                                            |this| this.justify_end(),
-                                                        )
-                                                        .w(Length::Definite(relative(len as f32)))
-                                                        // Let the cell shrink to its proportional
-                                                        // width inside the flex row instead of
-                                                        // holding its min-content size; without
-                                                        // this the row overflows and cells never
-                                                        // reach a width the text can wrap into.
-                                                        .min_w_0()
-                                                        .px_2()
-                                                        .py_1()
-                                                        .when(!is_last_col, |this| {
-                                                            this.border_r_1()
-                                                                .border_color(line_color)
-                                                        })
-                                                        // Wrap the text (not `.truncate()`, which
-                                                        // forces `white-space: nowrap` + ellipsis):
-                                                        // a `min_w_0` inner div can shrink below its
-                                                        // content so the text wraps to the cell
-                                                        // width, while the cell's `justify_*` still
-                                                        // aligns it when it's narrower than the cell.
-                                                        .child(
-                                                            div()
-                                                                .min_w_0()
-                                                                .overflow_hidden()
-                                                                .child(cell.children.render(
-                                                                    options,
-                                                                    node_cx,
-                                                                    link_click_handler,
-                                                                    window,
-                                                                    cx,
-                                                                )),
-                                                        ),
-                                                )
-                                            }
-                                            cells
-                                        }),
-                                )
-                            }
-                            rows
-                        }),
-                )
-                .into_any_element(),
+            Node::Table(table) => {
+                let columns = table.column_aligns.len();
+                div()
+                    .pb(rems(1.))
+                    .w_full()
+                    .child(
+                        div()
+                            .id("table")
+                            .w_full()
+                            .border_1()
+                            .border_color(line_color)
+                            .rounded(cx.theme().radius)
+                            .overflow_hidden()
+                            // daruda patch: one grid over every cell, rather than a
+                            // flex row per table row. A column is then a track
+                            // sized once for the whole table — something separate
+                            // per-row flex containers cannot agree on, which is why
+                            // a column's borders used to land in a different place
+                            // on each row. `grid_cols` is `minmax(0, 1fr)`: equal
+                            // columns that shrink, so a short column keeps a whole
+                            // share and a hash in it no longer wraps mid-token.
+                            // Not `grid_cols_min_content` — the inline text answers
+                            // a min-content measure with its full single line, so
+                            // min-content tracks size the table to its longest line
+                            // and it overflows the pane instead of wrapping.
+                            .grid()
+                            .grid_cols(columns as u16)
+                            .children({
+                                let mut cells = Vec::with_capacity(table.children.len() * columns);
+                                for (row_ix, row) in table.children.iter().enumerate() {
+                                    for (ix, cell) in row.children.iter().enumerate() {
+                                        let align = table.column_align(ix);
+                                        cells.push(
+                                            div()
+                                                .id(("cell", row_ix * columns + ix))
+                                                .flex()
+                                                .flex_col()
+                                                .when(align == ColumnumnAlign::Center, |this| {
+                                                    this.items_center()
+                                                })
+                                                .when(align == ColumnumnAlign::Right, |this| {
+                                                    this.items_end()
+                                                })
+                                                // Separators on the leading edges only —
+                                                // the frame draws the outer ones, so no
+                                                // cell has to know that it is the last.
+                                                .when(ix > 0, |this| {
+                                                    this.border_l_1().border_color(line_color)
+                                                })
+                                                .when(row_ix > 0, |this| {
+                                                    this.border_t_1().border_color(line_color)
+                                                })
+                                                .px_2()
+                                                .py_1()
+                                                // Wrap the text (not `.truncate()`,
+                                                // which forces `white-space: nowrap`
+                                                // + ellipsis): a `min_w_0` inner div
+                                                // can shrink below its content, so
+                                                // the text wraps to the track width
+                                                // instead of overflowing it.
+                                                .child(div().min_w_0().overflow_hidden().child(
+                                                    cell.children.render(
+                                                        options,
+                                                        node_cx,
+                                                        link_click_handler,
+                                                        window,
+                                                        cx,
+                                                    ),
+                                                )),
+                                        )
+                                    }
+                                }
+                                cells
+                            }),
+                    )
+                    .into_any_element()
+            }
             _ => div().into_any_element(),
         }
     }

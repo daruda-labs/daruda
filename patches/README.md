@@ -451,24 +451,26 @@ The renderer then sized each row by that row's own cell count, so one overrunnin
 row grew a column the header never had and shifted every border out of line with
 the rows above it.
 
-Column width itself was measured in **UTF-8 bytes**. A Korean cell is three bytes
-per character, so beside one, an ASCII column of commit hashes or identifiers was
-allotted a third of the share its text needs — narrow enough that a hash wrapped
-mid-token, one character per line.
+Column width itself was a share proportional to the cell's text length, handed
+out inside a flex row **per table row** — so no two rows had to agree on where a
+column ends, and a column short enough to lose that contest (commit hashes,
+identifiers) was squeezed until it wrapped mid-token.
 
 ### What diverges
 
 | Patch | File | What |
 |---|---|---|
 | Rows are normalized to the delimiter row's width | `text/format/markdown.rs` (`parse_table_row`) | `resize_with(table.column_aligns.len(), ..)` after the row's cells are parsed — pads short rows, drops the excess from long ones, which is what GFM specifies. Done at parse time rather than in `render_table` because `column_aligns` is the one place the table's real width is known, and a rectangular tree means every consumer (render, `selected_text`, markdown round-trip) agrees without repeating the rule. Covered by `a_row_wider_than_the_delimiter_row_loses_the_excess` / `a_row_narrower_than_the_delimiter_row_is_padded` in that file's own `mod tests`. |
-| `Paragraph::text_len` counts characters | `text/node.rs` | `text.chars().count()` instead of `text.len()`. Its only sizing consumer is `render_table`'s per-column width; the other (`format/html.rs`) asks whether it is zero, which both spellings answer alike. |
+| One grid replaces a flex row per table row | `text/node.rs` (`render_table`) | Cells become direct children of a single `grid()` with `grid_cols(column_count)`, so a column is a track sized once for the whole table; per-row flex containers had no way to agree on one. Separators move onto the cells' leading edges (`ix > 0` → `border_l_1`, `row_ix > 0` → `border_t_1`) since the frame draws the outer ones — the same shape zed's markdown table uses (`crates/markdown/src/markdown.rs`). **Not** `grid_cols_min_content`: `minmax(min-content, 1fr)` asks each cell for a min-content width and the inline text answers with its whole single line, which sizes the table to its longest line and overflows the pane. `grid_cols` is `minmax(0, 1fr)` — equal tracks that shrink — with the cell's `min_w_0` inner div left in place so the text wraps into its track. This retires the `text_len`-based `col_lens`, and with it the only sizing consumer of that byte count. |
 
 ### Re-vendor procedure
 
 Copy the fresh upstream `format/markdown.rs` / `node.rs` in, then re-apply both
 rows above. The two parser tests fail loudly if the normalization is forgotten.
-Nothing fails automatically if `text_len` reverts to bytes — check it by hand, or
-render a table whose columns mix CJK prose with an ASCII identifier.
+Nothing fails automatically if the grid reverts to per-row flex — check it by
+rendering a table whose rows differ in cell count and whose columns mix CJK prose
+with an ASCII identifier (`--screenshot-scenario agent-chat` after seeding one
+into `shot_transcript.rs`).
 
 ---
 
