@@ -801,11 +801,7 @@ impl Workspace {
                             let telegram_first_response = view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
-                            ws.relay_telegram_first_response_effect(
-                                pane_id,
-                                telegram_first_response,
-                                cx,
-                            );
+                            ws.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
                             // Advance the activity span now that the event folded
                             // in. When this event drove the last busy→idle
                             // transition (the turn ended and no subagent is still
@@ -904,11 +900,7 @@ impl Workspace {
                                         cx,
                                     )
                                 });
-                                ws.relay_telegram_first_response_effect(
-                                    pane_id,
-                                    telegram_first_response,
-                                    cx,
-                                );
+                                ws.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
                                 // Connecting → Error clears the badge; dirty the
                                 // cached docks so it doesn't linger stale.
                                 ws.notify_status_docks(cx);

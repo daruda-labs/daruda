@@ -531,10 +531,13 @@ impl Workspace {
                     cx,
                 );
             }
-            // Unconditional: the turn's phone conversation ends here whether
-            // or not this completion had anything left to say.
-            self.close_phone_turn(pane_id, cx);
         }
+        // Every outcome, not just `Completed`: a turn that errored or was
+        // stopped has had its phone conversation ended too, and a ledger left
+        // behind outlives the turn it describes — the next turn on this pane
+        // is not the phone's, so nothing re-arms it, and its completion would
+        // be measured against a message from a turn that is long gone.
+        self.close_phone_turn(pane_id, cx);
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {
                 daruda_store::tasks::SessionEndReason::Stop

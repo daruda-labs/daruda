@@ -15,8 +15,8 @@ use super::super::rows::{FilterMatchIndex, LiveSubagentUnits, RowKind, project_w
 use super::super::tool_hierarchy::ToolHierarchy;
 use super::super::window_access::WindowAccess;
 use super::{
-    ActivityState, AgentChatView, AgentSessionStatus, TelegramFirstResponseEffect,
-    TelegramWatchAction, TurnOutcome, debug_list_trace_enabled,
+    ActivityState, AgentChatView, AgentSessionStatus, PhoneAckEffect, PhoneTurnAction, TurnOutcome,
+    debug_list_trace_enabled,
 };
 use crate::surface::strings as s;
 
@@ -30,7 +30,7 @@ impl AgentChatView {
         syntax_theme: &str,
         is_light: bool,
         cx: &mut Context<Self>,
-    ) -> TelegramFirstResponseEffect {
+    ) -> PhoneAckEffect {
         // Record the Workspace-resolved theme so a later fold expand can
         // materialize diff embeds without an event to carry it.
         self.set_syntax_theme(syntax_theme);
@@ -71,10 +71,10 @@ impl AgentChatView {
         // Returned to the Workspace pump after the model mutation, so it can
         // send the first phone-visible reply without letting this self-owned
         // pane reach into Workspace/Telegram state.
-        let mut telegram_first_response_effect = TelegramFirstResponseEffect::None;
+        let mut telegram_first_response_effect = PhoneAckEffect::None;
         // Decided per-arm below, applied once in the tail — see
-        // `TelegramWatchAction`.
-        let mut telegram_watch_action = TelegramWatchAction::None;
+        // `PhoneTurnAction`.
+        let mut phone_turn_action = PhoneTurnAction::None;
 
         match event {
             AcpEvent::ConnectProgress(phase) => {
@@ -239,13 +239,13 @@ impl AgentChatView {
                             .insert(parent, std::time::Instant::now());
                     }
                 }
-                telegram_watch_action = TelegramWatchAction::CheckUpdate;
+                phone_turn_action = PhoneTurnAction::CheckUpdate;
             }
             AcpEvent::PermissionRequested { id, request } => {
                 let item = permission_item(id, &request, &self.items);
                 self.items.push(item);
                 self.pending_permissions.insert(id);
-                telegram_watch_action = TelegramWatchAction::Clear;
+                phone_turn_action = PhoneTurnAction::Clear;
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
                 if self.activity.cancel_in_flight =>
@@ -263,7 +263,7 @@ impl AgentChatView {
                 // No further chunk for this turn can arrive, so the marker Stop
                 // pushed can take its final position.
                 self.settle_stop_marker();
-                telegram_watch_action = TelegramWatchAction::Clear;
+                phone_turn_action = PhoneTurnAction::Clear;
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::TurnEnded {
@@ -274,7 +274,7 @@ impl AgentChatView {
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
                 turn_settled = true;
-                telegram_watch_action = TelegramWatchAction::Finish;
+                phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the outcome; it fires only when the pane settles
                 // busy→idle (via `reconcile_activity`), which may trail this
                 // `end_turn` while trailing subagents finish.
@@ -348,7 +348,7 @@ impl AgentChatView {
                 // guarded arm above; here the turn was not being cancelled.)
                 self.settle_turn();
                 turn_settled = true;
-                telegram_watch_action = TelegramWatchAction::Finish;
+                phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the errored outcome; it fires (notification +
                 // backing-task done) on the busy→idle settle edge that
                 // `reconcile_activity` detects, same as a normal completion.
@@ -391,7 +391,7 @@ impl AgentChatView {
                 // is already dead.
                 self.settle_turn();
                 turn_settled = true;
-                telegram_watch_action = TelegramWatchAction::Finish;
+                phone_turn_action = PhoneTurnAction::Finish;
                 // Capture the failure outcome; it fires on the busy→idle settle
                 // edge (via `reconcile_activity`), same as a normal completion.
                 self.activity.pending_completion = Some(TurnOutcome::Errored);
@@ -415,22 +415,22 @@ impl AgentChatView {
                 self.handle = None;
             }
         }
-        // Single dispatch point for every arm's `telegram_watch_action` above
-        // — see `TelegramWatchAction`. Safe to run unconditionally after the
+        // Single dispatch point for every arm's `phone_turn_action` above
+        // — see `PhoneTurnAction`. Safe to run unconditionally after the
         // match: `Finish`'s "a final streaming text is resolved first"
         // behavior (see `finish_phone_turn`) needs
         // `settle_turn`'s finalize to have already run, which it has by now
         // since every arm that sets `Finish` also calls `settle_turn` earlier
         // in its own body.
-        match telegram_watch_action {
-            TelegramWatchAction::None => {}
-            TelegramWatchAction::Clear => self.clear_phone_turn(),
-            TelegramWatchAction::CheckUpdate => {
+        match phone_turn_action {
+            PhoneTurnAction::None => {}
+            PhoneTurnAction::Clear => self.clear_phone_turn(),
+            PhoneTurnAction::CheckUpdate => {
                 if let Some(outcome) = self.take_phone_first_response() {
-                    telegram_first_response_effect = TelegramFirstResponseEffect::Relay(outcome);
+                    telegram_first_response_effect = PhoneAckEffect::Relay(outcome);
                 }
             }
-            TelegramWatchAction::Finish => {
+            PhoneTurnAction::Finish => {
                 telegram_first_response_effect = self.finish_phone_turn();
             }
         }

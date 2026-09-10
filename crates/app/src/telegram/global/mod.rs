@@ -32,12 +32,12 @@ use daruda_store::persistence;
 /// Telegram long-poll duration per `getUpdates` call. Telegram
 /// recommends keeping this well under typical proxy/firewall idle
 /// timeouts.
-pub(super) const POLL_TIMEOUT_SECS: u64 = 25;
+const POLL_TIMEOUT_SECS: u64 = 25;
 
 /// Sleep between poll attempts while disabled, unpaired, or on a
 /// transient fetch error — mirrors `workspace/sync/limits.rs`'s
 /// `IDLE_RECHECK` idle-backoff idiom.
-pub(super) const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
+const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Process-wide Telegram bridge state.
 pub struct TelegramBridge {

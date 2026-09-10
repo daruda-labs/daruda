@@ -670,7 +670,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
                 assert!(!view.activity.was_busy);
                 assert!(view.activity.pending_completion.is_none());
-                assert!(!view.is_waiting_for_telegram_first_response());
+                assert!(!view.is_phone_turn_waiting());
                 pane
             })
         })

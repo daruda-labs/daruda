@@ -68,6 +68,17 @@ mod tests {
         cx.update(|cx| assert_eq!(sole_active_agent_chat(cx), None));
     }
 
+    /// The case the app is in before any window opens, and the one the
+    /// commit's "silence earns no conclusion" rule is really about: nothing
+    /// to ask means no typo answer, not a vacuous one.
+    #[gpui::test]
+    async fn no_window_at_all_rules_nothing_out(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            assert_eq!(slash_claim(cx, "usage"), SlashClaim::Unsaid);
+            assert!(!slash_claim(cx, "usage").rules_out());
+        });
+    }
+
     /// A claim in one window settles the name for every window — otherwise
     /// opening a second window would be enough to answer the first window's
     /// agent command as a typo.

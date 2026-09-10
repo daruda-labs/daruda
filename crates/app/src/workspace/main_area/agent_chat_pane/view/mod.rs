@@ -231,7 +231,7 @@ pub(in crate::workspace) enum PromptDispatch {
 /// [`AgentChatView::apply_event`] so the Workspace event pump can relay exactly
 /// one phone-visible acknowledgement.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) enum TelegramFirstResponseEffect {
+pub(in crate::workspace) enum PhoneAckEffect {
     None,
     Relay(FirstResponseOutcome),
     Fallback,
@@ -241,7 +241,7 @@ pub(in crate::workspace) enum TelegramFirstResponseEffect {
 /// event arm so the three lifecycle methods (clear/check/finish) each have
 /// exactly one call site instead of being duplicated at every arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum TelegramWatchAction {
+enum PhoneTurnAction {
     #[default]
     None,
     /// A permission card interrupted the turn, or a Stop's cancel-ack
@@ -564,7 +564,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// event pump, the periodic Telegram flush pump, and the completion
     /// relay. Transitions go through the methods in `view/queue_ops.rs`; the
     /// type itself is sealed.
-    telegram_turn: Option<PhoneTurn>,
+    phone_turn_state: Option<PhoneTurn>,
     /// Diff editors, mermaid diagrams, and tool-output images built async
     /// from the conversation's content — see [`AssetCache`].
     pub(in crate::workspace) assets: AssetCache,
@@ -754,7 +754,7 @@ impl AgentChatView {
             briefing: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
-            telegram_turn: None,
+            phone_turn_state: None,
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
             fold: FoldState::with_mode(defaults.fold_mode),

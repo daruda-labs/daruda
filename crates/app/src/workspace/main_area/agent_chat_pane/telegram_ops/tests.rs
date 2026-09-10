@@ -395,6 +395,78 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     });
 }
 
+/// A turn that did not complete still ends its phone conversation.
+///
+/// The leak this guards: the ledger was retired only on `Completed`, so an
+/// errored phone turn left `Answered{m1}` behind. The pane's *next* turn is
+/// an in-app one, which never re-arms the ledger — and its completion was
+/// then measured against `m1`, a message from a turn that was already over,
+/// and suppressed outright.
+#[gpui::test]
+async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::TestAppContext) {
+    let _outbound = cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    let (handle, workspace) = make_window(cx, &config);
+    cx.run_until_parked();
+
+    let pane_id = cx
+        .update_window(handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(std::env::temp_dir())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // A phone turn that said one thing, already relayed, then errored.
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view");
+        view.update(cx, |v, _| {
+            v.start_phone_turn_for_test(std::time::Instant::now());
+            v.items.push(daruda_acp::ChatItem::AssistantText {
+                text: "partial answer".to_string(),
+                streaming: false,
+                message_id: Some("m1".to_string()),
+                phase: Default::default(),
+            });
+            assert!(v.take_phone_first_response_for_test());
+        });
+        ws.fire_activity_completion(pane_id, super::super::view::TurnOutcome::Errored, cx);
+        assert!(
+            ws.agent_chat_view(pane_id)
+                .expect("view")
+                .read(cx)
+                .phone_turn()
+                .is_none(),
+            "an errored turn ends its phone conversation too"
+        );
+    });
+
+    // The next turn is nobody's phone turn, so its answer is news.
+    workspace.update(cx, |ws, cx| {
+        let (_, tail) = ws
+            .telegram_completion_parts(pane_id, cx)
+            .expect("a turn with no ledger owes the sender its answer");
+        assert_eq!(
+            tail,
+            super::TelegramTail::Markdown("partial answer".to_string()),
+            "with the stale ledger gone, nothing suppresses this"
+        );
+    });
+}
+
 /// Telegram reply acknowledgement paths on a pane with no live handle:
 /// queued replies get the queued notice; overdue first-response watches send a
 /// one-shot fallback ack; and a permission wait with no buttons also falls back
@@ -449,7 +521,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
             "the reply queues (never connected)"
         );
         assert!(
-            !view.read(cx).is_waiting_for_telegram_first_response(),
+            !view.read(cx).is_phone_turn_waiting(),
             "queuing alone must not arm the watch"
         );
     });
@@ -477,7 +549,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     workspace.read_with(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().unwrap();
         assert!(
-            !view.read(cx).is_waiting_for_telegram_first_response(),
+            !view.read(cx).is_phone_turn_waiting(),
             "the overdue fallback consumes the watch"
         );
     });

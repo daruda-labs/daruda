@@ -59,6 +59,50 @@ impl SlashClaim {
     }
 }
 
+#[cfg(test)]
+mod slash_claim_tests {
+    use super::SlashClaim::{self, Claims, Disclaims, Unsaid};
+
+    /// `merge` is folded over panes and again over windows, so the answer must
+    /// not depend on how the panes were grouped or ordered, and an empty fold
+    /// must come out `Unsaid`. Associative, commutative, idempotent, with
+    /// `Unsaid` as the identity — checked exhaustively, since there are nine
+    /// pairs.
+    #[test]
+    fn merge_is_a_semilattice_with_unsaid_as_identity() {
+        let all = [Claims, Disclaims, Unsaid];
+        for a in all {
+            assert_eq!(a.merge(Unsaid), a, "identity");
+            assert_eq!(a.merge(a), a, "idempotent");
+            for b in all {
+                assert_eq!(a.merge(b), b.merge(a), "commutative");
+                for c in all {
+                    assert_eq!(
+                        a.merge(b).merge(c),
+                        a.merge(b.merge(c)),
+                        "associative: grouping must not change the answer"
+                    );
+                }
+            }
+        }
+        // Precedence, stated once rather than inferred from the fold.
+        assert_eq!(Claims.merge(Disclaims), Claims, "a claim outranks a denial");
+        assert_eq!(
+            Disclaims.merge(Unsaid),
+            Disclaims,
+            "an answer outranks silence"
+        );
+    }
+
+    /// Only a positive denial earns the suggestion.
+    #[test]
+    fn only_disclaims_rules_out() {
+        assert!(SlashClaim::Disclaims.rules_out());
+        assert!(!SlashClaim::Claims.rules_out());
+        assert!(!SlashClaim::Unsaid.rules_out());
+    }
+}
+
 impl Workspace {
     /// Every agent-chat pane in this window, paired with the lane it lives in.
     ///
@@ -438,7 +482,7 @@ impl Workspace {
     /// about the population instead and scopes itself accordingly.
     pub(crate) fn agent_takes_slash_command(&self, pane: PaneId, name: &str, cx: &App) -> bool {
         match self.agent_chat_view(pane) {
-            Some(view) => slash_claim(view.read(cx), name) != SlashClaim::Disclaims,
+            Some(view) => pane_slash_claim(view.read(cx), name) != SlashClaim::Disclaims,
             None => true,
         }
     }
@@ -475,17 +519,24 @@ impl Workspace {
     /// What this window's agents say about `/name` — asked when nothing names
     /// a target, so there is no one pane to ask.
     ///
-    /// Scoped to [`Self::lane_agent_chats`], the same set
-    /// [`Self::fallback_agent_chat`] draws from. The orchestrator is excluded
-    /// from both: an unowned slash can only ever be delivered to a pane
-    /// `/list` offers, so a chat the phone is never shown must not decide the
-    /// answer — and being usually cold and hidden, it would decide every one.
+    /// Scoped to [`Self::lane_agent_chats`]: every lane's chats, minus the
+    /// orchestrator. The orchestrator exclusion is the part
+    /// [`Self::fallback_agent_chat`] shares — an unowned slash can only ever
+    /// be delivered to a pane `/list` offers, so a chat the phone is never
+    /// shown must not decide the answer, and being usually cold and hidden it
+    /// would decide every one.
+    ///
+    /// The lane scope deliberately does *not* match: a fallback target must
+    /// come from the lane the user is in, but a vocabulary answer is about
+    /// what the agents know, and `/list` offers every lane's chat. A
+    /// background lane that claims the name suppresses the typo answer, which
+    /// is the conservative direction.
     ///
     /// Folded rather than reduced to a bool because silence has to stay
     /// distinguishable: see [`SlashClaim`].
     pub(crate) fn slash_claim(&self, name: &str, cx: &App) -> SlashClaim {
         self.lane_agent_chats()
-            .map(|(_, view)| slash_claim(view.read(cx), name))
+            .map(|(_, view)| pane_slash_claim(view.read(cx), name))
             .fold(SlashClaim::Unsaid, SlashClaim::merge)
     }
 
@@ -531,10 +582,12 @@ impl Workspace {
     }
 }
 
-/// Whether this pane's agent could claim `/name`: it advertises the name, or
-/// it has not advertised anything yet. The one predicate both slash-ownership
-/// questions aggregate — one pane's answer, and every pane's.
-fn slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
+/// What one pane's agent says about `/name`: an empty advertised list is
+/// [`SlashClaim::Unsaid`] (the session has not spoken, which is neither a
+/// claim nor a denial), a list naming it is `Claims`, and any other list is
+/// `Disclaims`. The one predicate both slash-ownership questions aggregate —
+/// one pane's answer, and every pane's.
+fn pane_slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
     let advertised = &view.session_config.available_commands;
     if advertised.is_empty() {
         SlashClaim::Unsaid

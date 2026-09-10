@@ -10,9 +10,7 @@ use gpui::{Context, Window};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
-use super::view::{
-    EscapeOutcome, PromptDispatch, PromptId, PromptOrigin, TelegramFirstResponseEffect,
-};
+use super::view::{EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -45,18 +43,18 @@ impl Workspace {
         }
     }
 
-    pub(super) fn relay_telegram_first_response_effect(
+    pub(super) fn relay_phone_ack_effect(
         &self,
         pane_id: PaneId,
-        effect: TelegramFirstResponseEffect,
+        effect: PhoneAckEffect,
         cx: &Context<Self>,
     ) {
         match effect {
-            TelegramFirstResponseEffect::None => {}
-            TelegramFirstResponseEffect::Relay(outcome) => {
+            PhoneAckEffect::None => {}
+            PhoneAckEffect::Relay(outcome) => {
                 self.relay_first_response_to_telegram(pane_id, outcome, cx);
             }
-            TelegramFirstResponseEffect::Fallback => {
+            PhoneAckEffect::Fallback => {
                 self.relay_first_response_fallback_to_telegram(pane_id, cx);
             }
         }

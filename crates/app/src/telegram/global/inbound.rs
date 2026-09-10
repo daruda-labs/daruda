@@ -230,7 +230,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     // is no pane to put it on — which is exactly why this arm
                     // must never be reached with the adopt step skipped.
                     (None, InboundAction::Unaimed { text }) => {
-                        trace::delivery("unaimed", || {
+                        trace::delivery("text.unaimed", || {
                             format!("kind=text len={}", text.chars().count())
                         });
                         let reply = cx
@@ -289,13 +289,20 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     (
                         None,
                         InboundAction::UnaimedSlash {
-                            name, suggestion, ..
+                            name,
+                            text,
+                            suggestion,
                         },
                     ) => {
                         let ours =
                             cx.update(|cx| control_resolve::slash_claim(cx, &name).rules_out());
-                        trace::delivery("slash.unowned.no_target", || {
-                            format!("name={name} ours={ours}")
+                        // `text` is the message as sent, arguments and all,
+                        // and both answers below drop it — there is no pane
+                        // to put it on. Its length is traced for the same
+                        // reason the plain arm traces its own: a body that
+                        // went nowhere should leave a mark.
+                        trace::delivery("slash.unaimed", || {
+                            format!("name={name} ours={ours} len={}", text.chars().count())
                         });
                         let reply = if ours {
                             command::render_parse_error(
@@ -328,13 +335,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
     .detach();
 }
 
-/// How long one "unauthorized inbound" line suppresses the next.
-///
-/// A bot's username is publicly discoverable, so anyone can send it messages —
-/// and `ErrorReport::dedup` does *not* help here: `LogWriter` writes every
-/// report it is given, and `dedup_key` only merges toasts (see
-/// `workspace::error::toast`). Without a real window, a probing sender writes
-/// one NDJSON line per message and drowns genuine diagnostics./// Put `text` on `pane`, answering the sender when the pane is gone.
+/// Put `text` on `pane`, answering the sender when the pane is gone.
 ///
 /// The pane can be: a selection and a last-pinged target both outlive the pane
 /// they name, so the delivery is checked rather than assumed. Shared by the
@@ -652,6 +653,27 @@ mod tests {
                 text: "/usage".into(),
                 suggestion: Some("use"),
             }
+        );
+    }
+
+    /// Ambiguity has to survive the adopt step, not just be produced by it.
+    /// Two windows each offering their own lane resolve to no candidate, and
+    /// the action must come back untouched — rewriting it to a pane picked
+    /// from the two would start a turn in whichever the walk saw first.
+    #[gpui::test]
+    async fn an_ambiguous_app_hands_the_action_back_untouched(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        let _windows = [workspace_with_agent_chat(cx), workspace_with_agent_chat(cx)];
+        let mut async_cx = cx.to_async();
+
+        let action = InboundAction::Unaimed {
+            text: "ship it".into(),
+        };
+        assert_eq!(
+            adopt_fallback_target(action.clone(), &mut async_cx),
+            action,
+            "two candidates is not a target"
         );
     }
 

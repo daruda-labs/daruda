@@ -61,7 +61,13 @@ enum State {
     /// carried, when the agent named one; `None` covers a tool ack, the fixed
     /// fallback ack, and an agent that omits ids — none of which put the
     /// turn's answer on the phone, so the completion still owes one.
-    Answered { message_id: Option<String> },
+    ///
+    /// `items_len_at_start` is carried through unchanged: the completion
+    /// relay still needs to know where this turn's own output begins.
+    Answered {
+        message_id: Option<String>,
+        items_len_at_start: usize,
+    },
 }
 
 /// The phone's side of one turn: what the sender is owed, and what they have
@@ -165,18 +171,42 @@ impl PhoneTurn {
     /// `false` and keep the message they first reported: the completion asks
     /// about *that* message, and letting a later ack overwrite it would hand
     /// the sender a report they already have.
+    #[must_use = "the caller emits its ack only when this call is the one that answered"]
     pub(in crate::workspace) fn answer(&mut self, message_id: Option<String>) -> bool {
-        if !self.is_waiting() {
+        let State::Waiting {
+            items_len_at_start, ..
+        } = self.0
+        else {
             return false;
-        }
-        self.0 = State::Answered { message_id };
+        };
+        self.0 = State::Answered {
+            message_id,
+            items_len_at_start,
+        };
         true
     }
 
     /// Record the first response `outcome` as sent. Sugar over [`Self::answer`]
     /// so the id is never pulled out of the outcome at a call site.
+    #[must_use = "the caller emits its ack only when this call is the one that answered"]
     pub(in crate::workspace) fn answer_with(&mut self, outcome: &FirstResponseOutcome) -> bool {
         self.answer(outcome.message_id())
+    }
+
+    /// Where this turn's own output begins in `items`.
+    ///
+    /// The completion relay bounds its scan to it, so a turn that produced no
+    /// text of its own reports exactly that instead of handing the sender an
+    /// earlier turn's answer as if it were this one's.
+    pub(in crate::workspace) fn items_anchor(&self) -> usize {
+        match &self.0 {
+            State::Waiting {
+                items_len_at_start, ..
+            }
+            | State::Answered {
+                items_len_at_start, ..
+            } => *items_len_at_start,
+        }
     }
 
     /// Whether the phone already has `message_id` — the completion relay's
@@ -190,6 +220,7 @@ impl PhoneTurn {
             (
                 State::Answered {
                     message_id: Some(sent),
+                    ..
                 },
                 Some(reporting),
             ) => sent == reporting,

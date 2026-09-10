@@ -294,14 +294,25 @@ impl Workspace {
             ));
         };
         let view = view.read(cx);
+        // A phone turn reports only what *it* said. Without the anchor the
+        // scan runs back through the whole transcript, so a turn that
+        // produced no text of its own hands the sender an earlier turn's
+        // answer as though it were this one's. A turn the phone did not send
+        // has no anchor to bound it by — that gap is the same one every
+        // reader of this transcript has, and closing it needs a per-turn
+        // anchor kept for every turn, not just these.
+        let anchor = view.phone_turn().map_or(0, PhoneTurn::items_anchor);
         // Skips a message with no text for the same reason `first_response`
         // does: it would put an empty preview under the notification header.
-        let last_response = view.items.iter().rev().find_map(|item| match item {
-            daruda_acp::ChatItem::AssistantText {
-                text, message_id, ..
-            } if !text.trim().is_empty() => Some((text.as_str(), message_id.as_deref())),
-            _ => None,
-        });
+        let last_response = view.items[anchor.min(view.items.len())..]
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                daruda_acp::ChatItem::AssistantText {
+                    text, message_id, ..
+                } if !text.trim().is_empty() => Some((text.as_str(), message_id.as_deref())),
+                _ => None,
+            });
         match last_response {
             Some((_, message_id))
                 if view
@@ -332,7 +343,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        view.update(cx, |v, _| v.take_phone_turn());
+        view.update(cx, |v, _| v.end_phone_turn());
     }
 
     /// Relay a permission-wait ping with one button per option the agent
@@ -361,7 +372,7 @@ impl Workspace {
     ) {
         let is_telegram_first_response = self
             .agent_chat_view(pane_id)
-            .is_some_and(|view| view.read(cx).is_waiting_for_telegram_first_response());
+            .is_some_and(|view| view.read(cx).is_phone_turn_waiting());
         let buttons = permission_buttons(options);
         if buttons.is_empty() {
             if is_telegram_first_response {

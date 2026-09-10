@@ -1043,19 +1043,19 @@ fn mode_state_updates_replace_and_survive_config_refresh(cx: &mut gpui::TestAppC
 }
 
 #[gpui::test]
-fn start_telegram_watch_if_arms_only_for_telegram_origin(cx: &mut gpui::TestAppContext) {
+fn arm_phone_turn_if_arms_only_for_telegram_origin(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, _cx| {
-            view.start_telegram_watch_if(super::PromptOrigin::InApp);
+            view.arm_phone_turn_if(super::PromptOrigin::InApp);
             assert!(
-                !view.is_waiting_for_telegram_first_response(),
+                !view.is_phone_turn_waiting(),
                 "an in-app dispatch never arms the watch"
             );
 
-            view.start_telegram_watch_if(super::PromptOrigin::Telegram);
+            view.arm_phone_turn_if(super::PromptOrigin::Telegram);
             assert!(
-                view.is_waiting_for_telegram_first_response(),
+                view.is_phone_turn_waiting(),
                 "a telegram-origin dispatch arms the watch"
             );
         })
@@ -1074,14 +1074,14 @@ fn queued_telegram_prompt_arms_the_watch_only_once_drained(cx: &mut gpui::TestAp
             view.enqueue_prompt("from telegram".to_string(), super::PromptOrigin::Telegram)
                 .expect("room in the queue");
             assert!(
-                !view.is_waiting_for_telegram_first_response(),
+                !view.is_phone_turn_waiting(),
                 "queuing alone must not arm the watch"
             );
 
             view.set_turn_idle();
             view.drain_next_queued_prompt_for_test(cx);
             assert!(
-                view.is_waiting_for_telegram_first_response(),
+                view.is_phone_turn_waiting(),
                 "draining the telegram-origin prompt arms the watch"
             );
         })
@@ -1192,7 +1192,7 @@ fn queued_in_app_prompt_never_arms_the_watch(cx: &mut gpui::TestAppContext) {
 
             view.drain_next_queued_prompt_for_test(cx);
             assert!(
-                !view.is_waiting_for_telegram_first_response(),
+                !view.is_phone_turn_waiting(),
                 "an in-app-origin drain must not arm the watch"
             );
         })
@@ -1225,13 +1225,13 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
 
             assert_eq!(
                 effect,
-                super::TelegramFirstResponseEffect::Relay(super::FirstResponseOutcome::Text {
+                super::PhoneAckEffect::Relay(super::FirstResponseOutcome::Text {
                     text: "done".to_string(),
                     message_id: None,
                 })
             );
             assert!(
-                !view.is_waiting_for_telegram_first_response(),
+                !view.is_phone_turn_waiting(),
                 "the resolved watch is cleared at the terminal boundary"
             );
         })

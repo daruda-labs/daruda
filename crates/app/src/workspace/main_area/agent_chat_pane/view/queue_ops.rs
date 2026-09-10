@@ -11,8 +11,8 @@ use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
 use super::super::telegram_ops::PhoneTurn;
 use super::{
-    AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, PromptDispatch,
-    PromptId, PromptOrigin, QueuedPrompt, TelegramFirstResponseEffect, Turn,
+    AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, PhoneAckEffect,
+    PromptDispatch, PromptId, PromptOrigin, QueuedPrompt, Turn,
 };
 
 impl AgentChatView {
@@ -53,7 +53,7 @@ impl AgentChatView {
         &mut self,
         started_at: std::time::Instant,
     ) {
-        self.telegram_turn = Some(PhoneTurn::start(started_at, self.items.len()));
+        self.phone_turn_state = Some(PhoneTurn::start(started_at, self.items.len()));
     }
 
     /// Test-only hook: resolve the turn's first response exactly as the relay
@@ -140,7 +140,7 @@ impl AgentChatView {
                 started_at: std::time::Instant::now(),
             };
             self.echo_prompt(text, cx);
-            self.start_telegram_watch_if(origin);
+            self.arm_phone_turn_if(origin);
             PromptDispatch::SentNow
         } else {
             // Not connected yet (lazy connect happens on first focus), a turn is
@@ -164,9 +164,9 @@ impl AgentChatView {
     /// reaches the wire — called from both dispatch paths so it starts at the
     /// true dispatch point, never at enqueue time. No-op for
     /// [`PromptOrigin::InApp`].
-    pub(super) fn start_telegram_watch_if(&mut self, origin: PromptOrigin) {
+    pub(super) fn arm_phone_turn_if(&mut self, origin: PromptOrigin) {
         if origin == PromptOrigin::Telegram {
-            self.telegram_turn = Some(PhoneTurn::start(
+            self.phone_turn_state = Some(PhoneTurn::start(
                 std::time::Instant::now(),
                 self.items.len(),
             ));
@@ -175,8 +175,8 @@ impl AgentChatView {
 
     /// Whether this pane is still waiting to produce the first phone-visible
     /// response for a Telegram-origin prompt.
-    pub(in crate::workspace) fn is_waiting_for_telegram_first_response(&self) -> bool {
-        self.telegram_turn
+    pub(in crate::workspace) fn is_phone_turn_waiting(&self) -> bool {
+        self.phone_turn_state
             .as_ref()
             .is_some_and(PhoneTurn::is_waiting)
     }
@@ -186,51 +186,53 @@ impl AgentChatView {
     /// sent. `None` when the turn is not the phone's, or nothing qualifying
     /// has arrived yet.
     pub(super) fn take_phone_first_response(&mut self) -> Option<FirstResponseOutcome> {
-        let turn = self.telegram_turn.as_mut()?;
+        let turn = self.phone_turn_state.as_mut()?;
         let outcome = turn.first_response(&self.items)?;
-        // Borrowck: `first_response` borrows `items`, so the recording is a
-        // second lookup rather than a method call on the same borrow.
-        self.telegram_turn.as_mut()?.answer_with(&outcome);
+        // Always the answering call: `first_response` resolves only while the
+        // turn is waiting, which is the same condition `answer_with` checks.
+        debug_assert!(turn.answer_with(&outcome));
         Some(outcome)
     }
 
     /// Finish the turn's wait at a terminal boundary. A final streaming text is
     /// resolved first (because `settle_turn` has just finalized it); otherwise
     /// the old immediate "received" ack is used as the fallback.
-    pub(super) fn finish_phone_turn(&mut self) -> TelegramFirstResponseEffect {
+    pub(super) fn finish_phone_turn(&mut self) -> PhoneAckEffect {
         if let Some(outcome) = self.take_phone_first_response() {
-            return TelegramFirstResponseEffect::Relay(outcome);
+            return PhoneAckEffect::Relay(outcome);
         }
         if self.answer_phone_turn_without_agent_text() {
-            return TelegramFirstResponseEffect::Fallback;
+            return PhoneAckEffect::Fallback;
         }
-        TelegramFirstResponseEffect::None
+        PhoneAckEffect::None
     }
 
     /// Drop the turn superseded by a stronger phone-visible signal (currently
     /// a permission prompt) without emitting the generic fallback. Dropped,
     /// not answered: no report went out, so the completion still owes one.
     pub(super) fn clear_phone_turn(&mut self) {
-        self.telegram_turn = None;
+        self.phone_turn_state = None;
     }
 
-    /// Take the turn at the completion boundary, where its phone conversation
-    /// ends.
-    pub(in crate::workspace) fn take_phone_turn(&mut self) -> Option<PhoneTurn> {
-        self.telegram_turn.take()
+    /// End the turn at the completion boundary, where its phone conversation
+    /// ends. Returns nothing on purpose: [`Self::phone_turn`] is how the
+    /// ledger is read, and handing a value back here is what invites the
+    /// read-and-thereby-retire pattern this split removed.
+    pub(in crate::workspace) fn end_phone_turn(&mut self) {
+        self.phone_turn_state = None;
     }
 
     /// What the phone has been told, without ending the turn — the completion
     /// relay's question, asked before it knows whether it will send.
     pub(in crate::workspace) fn phone_turn(&self) -> Option<&PhoneTurn> {
-        self.telegram_turn.as_ref()
+        self.phone_turn_state.as_ref()
     }
 
     /// Record that a waiting turn was answered with something carrying no
     /// agent text (the fixed ack, or a tool note). Returns whether there was a
     /// waiting turn to answer, so the caller sends that ack exactly once.
     fn answer_phone_turn_without_agent_text(&mut self) -> bool {
-        self.telegram_turn
+        self.phone_turn_state
             .as_mut()
             .is_some_and(|turn| turn.answer(None))
     }
@@ -244,7 +246,7 @@ impl AgentChatView {
         timeout_secs: u64,
     ) -> bool {
         if !self
-            .telegram_turn
+            .phone_turn_state
             .as_ref()
             .is_some_and(|turn| turn.is_overdue(now, timeout_secs))
         {
@@ -427,7 +429,7 @@ impl AgentChatView {
         };
         let text = qp.text;
         self.echo_prompt(text.clone(), cx);
-        self.start_telegram_watch_if(qp.origin);
+        self.arm_phone_turn_if(qp.origin);
         Some(text)
     }
 
