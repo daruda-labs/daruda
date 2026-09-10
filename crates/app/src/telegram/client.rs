@@ -563,7 +563,10 @@ mod tests {
         // Telegram puts the token in the URL path and every HTTP client prints
         // the URL it failed on, so an unredacted error is a live credential —
         // and these errors are written to the on-disk log.
-        let token = "8966665968:AAH4Qfs8dEYGzgaqnYhxj5VR4WLcEIt_odY";
+        //
+        // Fake value in Telegram's `<bot_id>:<35 chars>` shape. Never paste a
+        // real token here: this file is committed to a public repository.
+        let token = "123456789:AA-this-is-not-a-real-bot-token-000";
         let raw = format!("{}: connection timed out", base_url(token, "getUpdates"));
 
         let ClientError::Http(message) = http_error(token, raw) else {
