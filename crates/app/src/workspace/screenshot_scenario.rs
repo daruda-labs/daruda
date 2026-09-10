@@ -326,6 +326,7 @@ pub(crate) fn drive(
         ScreenshotScenario::FlowPicker => {
             workspace.update(cx, |ws, cx| {
                 ws.open_flow_picker(
+                    ws.active,
                     crate::workspace::command::flow_picker::FlowPurpose::Validate,
                     cx,
                 );
