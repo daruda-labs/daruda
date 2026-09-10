@@ -211,6 +211,7 @@ mod tests {
         let tree = dir.path().join("tree");
         let run_dir = tree.join(".daruda/flow-runs/01J");
         std::fs::create_dir_all(&run_dir).expect("mkdir");
+        let tree = crate::lock::CanonicalTree::resolve(&tree).expect("the tree resolves");
         let lock_dir = crate::lock::lock_dir_for(&dir.path().join("locks"), &tree);
         std::fs::create_dir_all(&lock_dir).expect("mkdir");
         // Left behind by a process that is gone, the way `RunLock` writes it.

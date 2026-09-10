@@ -184,7 +184,7 @@ fn execute_takes_the_lock_outside_the_tree_and_the_copy_inside_it() {
 
     impl Watcher {
         fn look(&self, ctx: &RunContext<'_>) {
-            let tree = ctx.cwd.canonicalize().expect("the tree resolves");
+            let tree = crate::lock::CanonicalTree::resolve(ctx.cwd).expect("the tree resolves");
             let outside = crate::lock::lock_dir_for(&LOCK_ROOT.with(|r| r.clone()), &tree);
             self.1.borrow_mut().push((
                 crate::lock::read_holder(&outside).is_some(),

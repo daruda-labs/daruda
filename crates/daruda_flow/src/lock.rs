@@ -140,6 +140,45 @@ impl RunLock {
     }
 }
 
+/// A working tree's path, resolved.
+///
+/// The whole exclusion rests on two spellings of one tree comparing equal,
+/// and the only thing that makes them is `canonicalize`. Naming the
+/// resolved form is what keeps that from being a sentence in a doc comment
+/// that a third caller never reads: a `&Path` cannot be passed where this
+/// is wanted, so forgetting to resolve does not compile.
+///
+/// [`Self::unchecked`] is the way out, for a path that was resolved
+/// somewhere else already. Deliberately not private — the point is to make
+/// the requirement visible at the call site, not unreachable. A caller
+/// writing `unchecked` has said they thought about it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CanonicalTree(PathBuf);
+
+impl CanonicalTree {
+    /// Ask the filesystem. The error is the filesystem's own — a permission
+    /// denied read as "no such directory" sends the reader looking for the
+    /// wrong thing.
+    pub fn resolve(tree: &Path) -> std::io::Result<Self> {
+        tree.canonicalize().map(Self)
+    }
+
+    /// Take a path already known to be resolved. The caller owes that.
+    pub fn unchecked(tree: PathBuf) -> Self {
+        Self(tree)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for CanonicalTree {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// Where a working tree's lock pair lives under the host's lock root.
 ///
 /// **A directory per tree, not a file per tree.** [`take`] pairs `.lock`
@@ -153,8 +192,9 @@ impl RunLock {
 /// to the run still holding it. Readable too, which matters the one time
 /// someone has to look.
 ///
-/// `tree` is expected canonical — the caller resolves it, because two
-/// spellings of one tree must not become two locks.
+/// `tree` is a [`CanonicalTree`] rather than a `&Path` because two
+/// spellings of one tree must not become two locks, and a doc line saying
+/// so is only read by whoever already knew.
 ///
 /// A prefix becomes a component of its own rather than being dropped.
 /// Nothing on unix produces one, so this changes no path daruda builds
@@ -162,11 +202,11 @@ impl RunLock {
 /// directory, which is the collision the whole function exists to avoid.
 /// Untested here — Windows is not a target yet, and `Path` on unix does
 /// not parse a drive letter as a prefix to test it with.
-pub fn lock_dir_for(root: &Path, tree: &Path) -> PathBuf {
+pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     let mut out = root.to_path_buf();
     // The root component is dropped so the result stays under `root`:
     // joining an absolute path would replace it.
-    for part in tree.components() {
+    for part in tree.as_path().components() {
         use std::path::Component as C;
         match part {
             C::Normal(name) => out.push(name),
@@ -589,8 +629,8 @@ mod tests {
     #[test]
     fn each_tree_gets_its_own_lock_directory() {
         let root = Path::new("/data/flow-locks");
-        let one = lock_dir_for(root, Path::new("/Users/me/repo-a"));
-        let two = lock_dir_for(root, Path::new("/Users/me/repo-b"));
+        let one = lock_dir_for(root, &CanonicalTree::unchecked("/Users/me/repo-a".into()));
+        let two = lock_dir_for(root, &CanonicalTree::unchecked("/Users/me/repo-b".into()));
         assert_eq!(one, Path::new("/data/flow-locks/Users/me/repo-a"));
         assert_ne!(one, two);
         assert!(one.starts_with(root), "the mirror must stay under the root");
@@ -602,10 +642,13 @@ mod tests {
     #[test]
     fn a_tree_at_the_filesystem_root_still_lands_under_the_lock_root() {
         let root = Path::new("/data/flow-locks");
-        let at_root = lock_dir_for(root, Path::new("/"));
+        let at_root = lock_dir_for(root, &CanonicalTree::unchecked("/".into()));
         assert_eq!(at_root, root);
         assert!(at_root.starts_with(root));
-        assert_ne!(at_root, lock_dir_for(root, Path::new("/a")));
+        assert_ne!(
+            at_root,
+            lock_dir_for(root, &CanonicalTree::unchecked("/a".into()))
+        );
     }
 
     /// The same tree always names the same directory — two processes have to
@@ -613,8 +656,8 @@ mod tests {
     #[test]
     fn the_same_tree_always_names_the_same_directory() {
         let root = Path::new("/data/flow-locks");
-        let tree = Path::new("/Users/me/repo");
-        assert_eq!(lock_dir_for(root, tree), lock_dir_for(root, tree));
+        let tree = CanonicalTree::unchecked("/Users/me/repo".into());
+        assert_eq!(lock_dir_for(root, &tree), lock_dir_for(root, &tree));
     }
 
     /// All of them or none: a partial hold would let the caller act on a

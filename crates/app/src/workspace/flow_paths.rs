@@ -160,7 +160,7 @@ pub(in crate::workspace) fn locks_root() -> PathBuf {
 /// "where is this tree's lock" would drift into the app reporting every live
 /// run as idle.
 pub(in crate::workspace) fn lane_lock_dir(lane_cwd: &Path) -> Option<PathBuf> {
-    let tree = lane_cwd.canonicalize().ok()?;
+    let tree = daruda_flow::lock::CanonicalTree::resolve(lane_cwd).ok()?;
     Some(daruda_flow::lock::lock_dir_for(&locks_root(), &tree))
 }
 

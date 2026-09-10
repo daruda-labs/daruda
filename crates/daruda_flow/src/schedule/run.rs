@@ -84,10 +84,8 @@ fn execute_with(
     // not become two locks. Unresolvable is not a tree this run can be sure
     // it excludes anything in, so it refuses rather than guessing — the same
     // call the batcher makes about a node's directory.
-    let tree = match request.cwd.canonicalize() {
+    let tree = match crate::lock::CanonicalTree::resolve(&request.cwd) {
         Ok(tree) => tree,
-        // The error as the filesystem gave it: a permission denied read as
-        // "no such directory" sends the reader looking for the wrong thing.
         Err(source) => {
             return not_started(
                 request,
