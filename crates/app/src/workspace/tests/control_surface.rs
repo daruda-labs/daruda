@@ -12,8 +12,10 @@ use crate::control::spec::{ControlCommand, Ordinal, ResolvedCommand, UseTarget};
 use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef};
 use crate::telegram::client::{Update, UpdateKind};
 use crate::telegram::command::{Resolution, absorb, resolve_command};
-use crate::test_support::{workspace_for_control, workspace_with_agent_chat};
+use crate::test_support::{ControlFixture, workspace_for_control, workspace_with_agent_chat};
+use crate::workspace::SlashClaim;
 use crate::workspace::main_area::pane_tree::PaneId;
+use gpui::AppContext as _;
 
 fn message(update_id: i64, chat_id: i64, text: &str) -> Update {
     Update {
@@ -116,7 +118,7 @@ async fn routing_observes_state_an_earlier_update_changed(cx: &mut TestAppContex
     // Before: the same plain text has nowhere to go.
     assert_eq!(
         core.route(message(1, 42, "add tests too")).action,
-        InboundAction::NoTarget {
+        InboundAction::Unaimed {
             text: "add tests too".into()
         }
     );
@@ -204,7 +206,6 @@ mod ask {
     use super::*;
     use crate::control::result::PaneAnswer;
     use daruda_acp::ChatItem;
-    use gpui::AppContext as _;
 
     /// How the turn under test ended. Three outcomes, and `completed_normally`
     /// alone cannot name the third.
@@ -422,24 +423,41 @@ mod ask {
 /// say anything. The app's own active lane answers the question without a
 /// round trip; it is deliberately narrow, because guessing between two agents
 /// is worse than asking.
+/// Open one more chat in the lane the fixture already set up, and return its
+/// pane id. The fixture leaves focus on its terminal pane, so this makes the
+/// lane hold two chats with neither of them focused.
+fn second_chat(fixture: &ControlFixture, cx: &mut TestAppContext) -> PaneId {
+    cx.update_window(fixture.window.into(), |_, window, cx| {
+        fixture
+            .workspace
+            .update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+    })
+    .expect("window is live")
+}
+
+/// Give the fixture the hidden orchestrator chat a real session grows, so a
+/// test can check that a pane the phone is never shown stays out of the
+/// answers about panes it could be.
+fn seed_orchestrator(fixture: &ControlFixture, cx: &mut TestAppContext) -> PaneId {
+    let cwd = std::env::temp_dir();
+    cx.update_window(fixture.window.into(), |_, window, cx| {
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.seed_orchestrator_chat_pane_unrevealed_for_test(
+                ws.agents[0].id.clone(),
+                cwd,
+                daruda_store::accounts::AccountSelection::SystemDefault,
+                None,
+                window,
+                cx,
+            )
+            .expect("seeded")
+        })
+    })
+    .expect("window is live")
+}
+
 mod fallback_target {
     use super::*;
-    use gpui::AppContext as _;
-
-    /// Open one more chat in the lane the fixture already set up, and return
-    /// its pane id. The fixture leaves focus on its terminal pane, so this
-    /// makes the lane hold two chats with neither of them focused.
-    fn second_chat(
-        fixture: &crate::test_support::ControlFixture,
-        cx: &mut TestAppContext,
-    ) -> PaneId {
-        cx.update_window(fixture.window.into(), |_, window, cx| {
-            fixture
-                .workspace
-                .update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
-        })
-        .expect("window is live")
-    }
 
     /// The fixture focuses its terminal, so this is the "only chat in the
     /// lane" branch — the one that actually fires after a restart, when the
@@ -447,9 +465,7 @@ mod fallback_target {
     #[gpui::test]
     async fn the_active_lanes_only_chat_is_the_fallback(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let expected = fixture
-            .workspace
-            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let expected = fixture.pane_ref(cx);
         assert_eq!(
             fixture
                 .workspace
@@ -516,17 +532,10 @@ mod fallback_target {
 mod unowned_slash {
     use super::*;
 
-    /// The pane every single-pane case in here asks about.
-    fn only_pane(fixture: &crate::test_support::ControlFixture, cx: &mut TestAppContext) -> PaneId {
-        fixture
-            .workspace
-            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target.pane)
-    }
-
     #[gpui::test]
     async fn a_command_the_agent_advertises_goes_to_the_agent(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
+        let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
             ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
             assert!(
@@ -541,7 +550,7 @@ mod unowned_slash {
     #[gpui::test]
     async fn a_name_the_agent_does_not_have_stays_ours(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
+        let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
             ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
             assert!(
@@ -557,7 +566,7 @@ mod unowned_slash {
     #[gpui::test]
     async fn an_agent_that_has_advertised_nothing_still_gets_it(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
+        let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
             ws.advertise_slash_commands_for_test(pane, &[], cx);
             assert!(ws.agent_takes_slash_command(pane, "usage", cx));
@@ -583,48 +592,87 @@ mod unowned_slash {
         cx: &mut TestAppContext,
     ) {
         let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
+        let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
             ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
+            assert_eq!(ws.slash_claim("usage", cx), SlashClaim::Claims);
+            assert!(!ws.slash_claim("usage", cx).rules_out());
+        });
+    }
+
+    /// The other side: an agent that has advertised its list and does not name
+    /// it really does rule it out, and the suggestion is the useful answer.
+    #[gpui::test]
+    async fn a_name_an_advertised_agent_lacks_is_ruled_out(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let pane = fixture.pane();
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
+            assert!(ws.slash_claim("lst", cx).rules_out());
+        });
+    }
+
+    /// A cold pane abstains rather than claiming. The regression this guards:
+    /// as a claim it vetoed every name for the whole window, and a restored
+    /// chat stays `Idle` until first focus — so after a restart, the state
+    /// this whole path exists for, almost every pane is cold.
+    #[gpui::test]
+    async fn a_cold_pane_abstains_instead_of_vetoing_an_advertised_one(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let advertised = fixture.pane();
+        let cold = second_chat(&fixture, cx);
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(advertised, &["usage", "cost"], cx);
+            ws.advertise_slash_commands_for_test(cold, &[], cx);
+            assert_eq!(ws.slash_claim("lst", cx), SlashClaim::Disclaims);
             assert!(
-                !ws.rules_out_slash_command("usage", cx),
-                "an agent advertises /usage, so daruda must not call it a typo"
+                ws.slash_claim("lst", cx).rules_out(),
+                "one silent pane must not overrule one that answered"
+            );
+            assert_eq!(
+                ws.slash_claim("usage", cx),
+                SlashClaim::Claims,
+                "a claim still settles it over both"
             );
         });
     }
 
-    /// The other side: with every list advertised and none naming it, daruda
-    /// really can rule the name out, and the suggestion is the useful answer.
+    /// Silence on its own earns no conclusion in either direction: no agent
+    /// chat at all, and every session still cold, both answer `Unsaid`, and
+    /// the phone hears the missing target rather than a typo claim daruda
+    /// cannot support.
     #[gpui::test]
-    async fn a_name_no_agent_advertises_is_ruled_out(cx: &mut TestAppContext) {
+    async fn silence_alone_rules_nothing_out(cx: &mut TestAppContext) {
+        let bare = workspace_for_control(cx);
+        bare.workspace.update(cx, |ws, cx| {
+            assert_eq!(ws.slash_claim("usage", cx), SlashClaim::Unsaid);
+            assert!(!ws.slash_claim("usage", cx).rules_out());
+        });
+
+        let cold = workspace_with_agent_chat(cx);
+        let pane = cold.pane();
+        cold.workspace.update(cx, |ws, cx| {
+            ws.advertise_slash_commands_for_test(pane, &[], cx);
+            assert_eq!(ws.slash_claim("usage", cx), SlashClaim::Unsaid);
+        });
+    }
+
+    /// The orchestrator's vocabulary must not decide an answer about panes it
+    /// is not one of: an unowned slash can only be delivered to a chat
+    /// `/list` offers, and the hidden orchestrator is never one. Left in, and
+    /// usually cold, it would answer `Unsaid` for every name.
+    #[gpui::test]
+    async fn the_orchestrators_vocabulary_is_not_consulted(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
+        let pane = fixture.pane();
+        let orchestrator = seed_orchestrator(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
             ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
-            assert!(ws.rules_out_slash_command("lst", cx));
-        });
-    }
-
-    /// A cold pane rules nothing out, for the same reason it forwards: it has
-    /// not said what it has yet.
-    #[gpui::test]
-    async fn a_pane_that_has_advertised_nothing_rules_nothing_out(cx: &mut TestAppContext) {
-        let fixture = workspace_with_agent_chat(cx);
-        let pane = only_pane(&fixture, cx);
-        fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &[], cx);
-            assert!(!ws.rules_out_slash_command("lst", cx));
-        });
-    }
-
-    /// A window with no agent chat rules the name out vacuously: with no
-    /// agent, no agent vocabulary holds it. The caller ANDs across windows, so
-    /// this window never overrides one that could claim the name.
-    #[gpui::test]
-    async fn a_window_with_no_agent_chat_rules_the_name_out(cx: &mut TestAppContext) {
-        let fixture = workspace_for_control(cx);
-        fixture.workspace.update(cx, |ws, cx| {
-            assert!(ws.rules_out_slash_command("usage", cx));
+            ws.advertise_slash_commands_for_test(orchestrator, &[], cx);
+            assert!(
+                ws.slash_claim("lst", cx).rules_out(),
+                "the lane chat answered; the hidden orchestrator does not get a vote"
+            );
         });
     }
 }

@@ -125,7 +125,7 @@ pub enum InboundAction {
     ///
     /// Only for a name daruda *does* own, used wrongly (`/say` with no
     /// argument). A name daruda does not own is [`Self::UnknownSlash`] or
-    /// [`Self::UnownedSlashNoTarget`] — the agent's command namespace is open
+    /// [`Self::UnaimedSlash`] — the agent's command namespace is open
     /// and this one is closed, so "not ours" cannot mean "nobody's".
     ReportParseError {
         error: crate::control::spec::ParseError,
@@ -145,7 +145,7 @@ pub enum InboundAction {
         /// The nearest daruda command, for the answer when it does not.
         suggestion: Option<&'static str>,
     },
-    /// A `/name` daruda does not own, with nothing to aim it at.
+    /// A `/name` daruda does not own that this layer could not aim.
     ///
     /// Not [`Self::ReportParseError`]: having no target says nothing about
     /// whose command the name is, and answering "did you mean /use?" to the
@@ -153,7 +153,7 @@ pub enum InboundAction {
     /// question [`Self::UnknownSlash`] asks of one pane is asked of every
     /// pane, and only a vocabulary that rules the name out earns the
     /// suggestion — otherwise the true answer is the missing target.
-    UnownedSlashNoTarget {
+    UnaimedSlash {
         /// The name without its slash, to ask the agents about.
         name: String,
         /// The message as sent, so the caller can still deliver it if the
@@ -177,10 +177,11 @@ pub enum InboundAction {
     /// buttons — scrolling back to an old listing and tapping is ordinary use,
     /// not a decision to consume.
     StaleListing,
-    /// Plain text with no reply-to, no selection, and no prior ping. Carries
-    /// the message so the caller can still deliver it if the app's own active
-    /// lane supplies the target this layer lacked.
-    NoTarget {
+    /// Plain text this layer could not aim: no reply-to, no selection, no
+    /// prior ping. Carries the message, because the app's own active lane can
+    /// still supply the target — "unaimed", not "undeliverable", and a caller
+    /// that reads it as terminal drops the message.
+    Unaimed {
         text: String,
     },
     /// An update shape this bridge does not act on. Distinct from
@@ -602,12 +603,12 @@ impl BridgeCore {
             // still not ours to decide, so the caller asks every pane before
             // the answer picks between "no target" and "no such command".
             None => match unknown {
-                Some((name, suggestion)) => InboundAction::UnownedSlashNoTarget {
+                Some((name, suggestion)) => InboundAction::UnaimedSlash {
                     name,
                     text,
                     suggestion,
                 },
-                None => InboundAction::NoTarget { text },
+                None => InboundAction::Unaimed { text },
             },
         }
     }
@@ -841,7 +842,7 @@ mod tests {
         let action = core.route(message(1, 42, "/lst", None)).action;
         assert_eq!(
             action,
-            InboundAction::UnownedSlashNoTarget {
+            InboundAction::UnaimedSlash {
                 name: "lst".into(),
                 text: "/lst".into(),
                 suggestion: Some("list"),
@@ -883,7 +884,7 @@ mod tests {
         let action = core.route(message(1, 42, "/usage", None)).action;
         assert_eq!(
             action,
-            InboundAction::UnownedSlashNoTarget {
+            InboundAction::UnaimedSlash {
                 name: "usage".into(),
                 text: "/usage".into(),
                 suggestion: Some("use"),
@@ -914,7 +915,7 @@ mod tests {
         let action = core.route(message(1, 42, "hello", None)).action;
         assert_eq!(
             action,
-            InboundAction::NoTarget {
+            InboundAction::Unaimed {
                 text: "hello".into()
             }
         );
@@ -1110,7 +1111,7 @@ mod tests {
         // because silence reads as the bot being broken.
         assert_eq!(
             result.action,
-            InboundAction::NoTarget {
+            InboundAction::Unaimed {
                 text: "hello".into()
             }
         );

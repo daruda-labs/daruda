@@ -655,7 +655,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                     .update(cx, |view, _| {
                         view.activity.was_busy = true;
                         view.activity.pending_completion = Some(TurnOutcome::Completed);
-                        view.start_telegram_first_response_watch_for_test(
+                        view.start_phone_turn_for_test(
                             std::time::Instant::now()
                                 - std::time::Duration::from_secs(FIRST_RESPONSE_FALLBACK_SECS + 1),
                         );

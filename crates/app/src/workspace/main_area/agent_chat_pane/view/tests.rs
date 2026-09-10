@@ -1205,7 +1205,7 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
     window
         .update(cx, |view, _window, cx| {
             view.set_turn_in_flight();
-            view.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            view.start_phone_turn_for_test(std::time::Instant::now());
             view.items.push(daruda_acp::ChatItem::AssistantText {
                 text: "done".to_string(),
                 streaming: true,

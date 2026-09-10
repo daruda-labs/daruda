@@ -57,6 +57,15 @@ impl ControlFixture {
     pub(crate) fn pane(&self) -> u64 {
         self.pane.expect("this fixture opened an agent chat pane")
     }
+
+    /// The same pane as a cross-window [`PaneRef`], which is what every
+    /// bridge-facing surface routes by.
+    pub(crate) fn pane_ref(&self, cx: &TestAppContext) -> crate::telegram::bridge::PaneRef {
+        crate::telegram::bridge::PaneRef {
+            workspace: self.workspace.read_with(cx, |ws, _| ws.uuid()),
+            pane: self.pane(),
+        }
+    }
 }
 
 /// A registered workspace window holding one agent-chat pane.

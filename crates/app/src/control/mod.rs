@@ -16,5 +16,6 @@ pub(crate) mod ask;
 pub(crate) mod exec;
 pub(crate) mod guards;
 pub(crate) mod mcp;
+pub(crate) mod resolve;
 pub(crate) mod result;
 pub(crate) mod spec;

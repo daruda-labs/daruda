@@ -71,7 +71,7 @@ impl AgentChatView {
         // Stop can be the only terminal transition a live resource link gets;
         // the agent is allowed to never acknowledge the cooperative cancel.
         self.reconcile_tool_images(&ReconcileScope::All, cx);
-        self.clear_telegram_first_response_watch();
+        self.clear_phone_turn();
         // Stop cancels the running turn but PRESERVES the queue: move everything
         // buffered before this Stop into the parked queue rather than dropping
         // it. Parked prompts do NOT auto-drain — they live outside

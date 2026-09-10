@@ -20,6 +20,45 @@ use crate::workspace::main_area::agent_chat_pane::view::{
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_store::project::{LaneRef, ProjectId};
 
+/// What an agent says about a `/name` daruda does not own.
+///
+/// Three-valued because the two questions asked of it want different things
+/// from the middle. "The session has not advertised yet" cannot claim the
+/// name, but it cannot rule it out either, and folding that into either
+/// answer makes one of the callers wrong: as a claim, one cold pane vetoes
+/// every name for the whole window — and after a restart every pane but the
+/// focused one is cold, since a restored chat stays `Idle` until first focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlashClaim {
+    /// The agent advertises the name. It is not ours to answer.
+    Claims,
+    /// The agent has advertised its list and the name is not on it.
+    Disclaims,
+    /// Nobody has said — cold, connecting, or no agent at all. An abstention:
+    /// it never outvotes an agent that did answer, and on its own it earns no
+    /// conclusion in either direction.
+    Unsaid,
+}
+
+impl SlashClaim {
+    /// Fold two answers. A claim anywhere settles it; failing that a
+    /// disclaimer counts; silence yields to either.
+    pub(crate) fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Claims, _) | (_, Self::Claims) => Self::Claims,
+            (Self::Disclaims, _) | (_, Self::Disclaims) => Self::Disclaims,
+            (Self::Unsaid, Self::Unsaid) => Self::Unsaid,
+        }
+    }
+
+    /// Whether this answer earns the typo suggestion: some agent positively
+    /// ruled the name out, and none claimed it. Silence alone never does —
+    /// the honest answer with no evidence is the missing target.
+    pub(crate) fn rules_out(self) -> bool {
+        self == Self::Disclaims
+    }
+}
+
 impl Workspace {
     /// Every agent-chat pane in this window, paired with the lane it lives in.
     ///
@@ -387,15 +426,19 @@ impl Workspace {
     /// answering "unknown command" for one the menu would happily complete is
     /// the surface disagreeing with itself.
     ///
-    /// An *empty* list also forwards. Empty means the session has not said yet
-    /// (a pane that is cold, or connecting), which is not the same as "it does
-    /// not have that command" — and a name daruda does not own is far more
-    /// likely the agent's than a typo of one of ours. A pane that is not there
-    /// forwards too, so the answer comes from the delivery attempt, which can
-    /// say `target_gone`, rather than from a guess here.
+    /// A pane that has not advertised yet forwards too — [`SlashClaim::Unsaid`]
+    /// is not "it does not have that command", and a name daruda does not own
+    /// is far likelier the agent's than a typo of one of ours. So does a pane
+    /// that is not there, so the answer comes from the delivery attempt, which
+    /// can say `target_gone`, rather than from a guess here.
+    ///
+    /// Asked about a *named* pane, so it answers about that pane whatever it
+    /// is — including the orchestrator's, which can be `last_pinged` and so
+    /// can be the target of a reply. [`Self::rules_out_slash_command`] asks
+    /// about the population instead and scopes itself accordingly.
     pub(crate) fn agent_takes_slash_command(&self, pane: PaneId, name: &str, cx: &App) -> bool {
         match self.agent_chat_view(pane) {
-            Some(view) => claims_slash_command(view.read(cx), name),
+            Some(view) => slash_claim(view.read(cx), name) != SlashClaim::Disclaims,
             None => true,
         }
     }
@@ -429,18 +472,21 @@ impl Workspace {
         })
     }
 
-    /// Whether this window can rule `/name` out of every agent's vocabulary —
-    /// asked when nothing names a target, so there is no one pane to ask.
+    /// What this window's agents say about `/name` — asked when nothing names
+    /// a target, so there is no one pane to ask.
     ///
-    /// Only a positive ruling-out earns the typo answer. A window with no
-    /// agent chat at all rules the name out vacuously, which is the right
-    /// reading rather than a gap: with no agent, no agent vocabulary contains
-    /// it. The caller ANDs across windows, so one window that could claim the
-    /// name overrides every window that could not.
-    pub(crate) fn rules_out_slash_command(&self, name: &str, cx: &App) -> bool {
-        !self
-            .every_agent_chat()
-            .any(|(_, view)| claims_slash_command(view.read(cx), name))
+    /// Scoped to [`Self::lane_agent_chats`], the same set
+    /// [`Self::fallback_agent_chat`] draws from. The orchestrator is excluded
+    /// from both: an unowned slash can only ever be delivered to a pane
+    /// `/list` offers, so a chat the phone is never shown must not decide the
+    /// answer — and being usually cold and hidden, it would decide every one.
+    ///
+    /// Folded rather than reduced to a bool because silence has to stay
+    /// distinguishable: see [`SlashClaim`].
+    pub(crate) fn slash_claim(&self, name: &str, cx: &App) -> SlashClaim {
+        self.lane_agent_chats()
+            .map(|(_, view)| slash_claim(view.read(cx), name))
+            .fold(SlashClaim::Unsaid, SlashClaim::merge)
     }
 
     /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
@@ -488,9 +534,15 @@ impl Workspace {
 /// Whether this pane's agent could claim `/name`: it advertises the name, or
 /// it has not advertised anything yet. The one predicate both slash-ownership
 /// questions aggregate — one pane's answer, and every pane's.
-fn claims_slash_command(view: &AgentChatView, name: &str) -> bool {
+fn slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
     let advertised = &view.session_config.available_commands;
-    advertised.is_empty() || advertised.iter().any(|c| c.name == name)
+    if advertised.is_empty() {
+        SlashClaim::Unsaid
+    } else if advertised.iter().any(|c| c.name == name) {
+        SlashClaim::Claims
+    } else {
+        SlashClaim::Disclaims
+    }
 }
 
 /// The last assistant message this pane finished saying.

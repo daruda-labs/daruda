@@ -263,11 +263,11 @@ pub(crate) fn action_name(action: &InboundAction) -> &'static str {
         InboundAction::RunCommand { .. } => "run_command",
         InboundAction::ReportParseError { .. } => "report_parse_error",
         InboundAction::UnknownSlash { .. } => "unknown_slash",
-        InboundAction::UnownedSlashNoTarget { .. } => "unowned_slash_no_target",
+        InboundAction::UnaimedSlash { .. } => "unaimed_slash",
         InboundAction::ResolveApproval { .. } => "resolve_approval",
         InboundAction::SelectTarget { .. } => "select_target",
         InboundAction::StaleListing => "stale_listing",
-        InboundAction::NoTarget { .. } => "no_target",
+        InboundAction::Unaimed { .. } => "unaimed",
         InboundAction::Unsupported => "unsupported",
     }
 }
@@ -384,7 +384,7 @@ mod tests {
             action_name(&InboundAction::Ignore),
             action_name(&InboundAction::Paired { chat_id: 1 }),
             action_name(&InboundAction::StaleListing),
-            action_name(&InboundAction::NoTarget {
+            action_name(&InboundAction::Unaimed {
                 text: String::new(),
             }),
             action_name(&InboundAction::Unsupported),

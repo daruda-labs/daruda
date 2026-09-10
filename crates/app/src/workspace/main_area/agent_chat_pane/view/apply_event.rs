@@ -418,20 +418,20 @@ impl AgentChatView {
         // Single dispatch point for every arm's `telegram_watch_action` above
         // — see `TelegramWatchAction`. Safe to run unconditionally after the
         // match: `Finish`'s "a final streaming text is resolved first"
-        // behavior (see `finish_telegram_first_response_watch`) needs
+        // behavior (see `finish_phone_turn`) needs
         // `settle_turn`'s finalize to have already run, which it has by now
         // since every arm that sets `Finish` also calls `settle_turn` earlier
         // in its own body.
         match telegram_watch_action {
             TelegramWatchAction::None => {}
-            TelegramWatchAction::Clear => self.clear_telegram_first_response_watch(),
+            TelegramWatchAction::Clear => self.clear_phone_turn(),
             TelegramWatchAction::CheckUpdate => {
-                if let Some(outcome) = self.take_telegram_first_response() {
+                if let Some(outcome) = self.take_phone_first_response() {
                     telegram_first_response_effect = TelegramFirstResponseEffect::Relay(outcome);
                 }
             }
             TelegramWatchAction::Finish => {
-                telegram_first_response_effect = self.finish_telegram_first_response_watch();
+                telegram_first_response_effect = self.finish_phone_turn();
             }
         }
         // Gate the reconciles on what the event actually changed: diff editors

@@ -34,7 +34,7 @@ use super::render::{
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
-use super::telegram_ops::{FirstResponseOutcome, TelegramTurn};
+use super::telegram_ops::{FirstResponseOutcome, PhoneTurn};
 use super::transcript_defaults::TranscriptDefaults;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::state::FoldEditorState;
@@ -557,13 +557,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
     pub(in crate::workspace) pending_permissions: HashSet<u64>,
-    /// The phone's side of the in-flight turn — see [`TelegramTurn`]. Armed
-    /// the instant a Telegram-origin prompt dispatches, moved to `Answered`
-    /// once a report goes out, and `None` when the turn is not the phone's,
-    /// was consumed by a permission request, or has been completed. Read by
-    /// the connect-ops event pump, the periodic Telegram flush pump, and the
-    /// completion relay.
-    telegram_turn: Option<TelegramTurn>,
+    /// The phone's side of the in-flight turn — see [`PhoneTurn`]. Armed the
+    /// instant a Telegram-origin prompt dispatches, answered once a report
+    /// goes out, and `None` when the turn is not the phone's, was consumed by
+    /// a permission request, or has been completed. Read by the connect-ops
+    /// event pump, the periodic Telegram flush pump, and the completion
+    /// relay. Transitions go through the methods in `view/queue_ops.rs`; the
+    /// type itself is sealed.
+    telegram_turn: Option<PhoneTurn>,
     /// Diff editors, mermaid diagrams, and tool-output images built async
     /// from the conversation's content — see [`AssetCache`].
     pub(in crate::workspace) assets: AssetCache,

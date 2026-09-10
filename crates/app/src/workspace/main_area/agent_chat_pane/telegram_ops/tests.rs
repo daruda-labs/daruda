@@ -30,120 +30,6 @@ fn should_defer_only_when_enabled_and_active() {
     assert!(!super::should_defer_relay(true, true, 0));
 }
 
-fn tool_call(title: &str) -> daruda_acp::ChatItem {
-    use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
-    daruda_acp::ChatItem::ToolCall(ToolCallItem {
-        id: "tool-1".to_string(),
-        title: title.to_string(),
-        kind: ToolKindView::Edit,
-        tool_name: None,
-        status: ToolStatusView::InProgress,
-        diffs: Vec::new(),
-        output: Vec::new(),
-        raw_input: None,
-        parent_tool_id: None,
-        exit: None,
-    })
-}
-
-fn assistant_text(text: &str, streaming: bool) -> daruda_acp::ChatItem {
-    daruda_acp::ChatItem::AssistantText {
-        text: text.to_string(),
-        streaming,
-        message_id: None,
-        phase: Default::default(),
-    }
-}
-
-fn thinking(text: &str) -> daruda_acp::ChatItem {
-    daruda_acp::ChatItem::Thinking {
-        text: text.to_string(),
-        streaming: false,
-        message_id: None,
-    }
-}
-
-#[test]
-fn telegram_turn_resolve_covers_text_tool_anchor_and_ignored_items() {
-    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
-    let items = vec![thinking("pondering"), assistant_text("partial", true)];
-    assert_eq!(watch.resolve(&items), None);
-
-    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
-    let items = vec![thinking("hmm"), assistant_text("done", false)];
-    assert_eq!(
-        watch.resolve(&items),
-        Some(super::FirstResponseOutcome::Text {
-            text: "done".to_string(),
-            message_id: None,
-        })
-    );
-
-    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
-    let items = vec![thinking("hmm"), tool_call("Write /tmp/x.rs")];
-    assert_eq!(
-        watch.resolve(&items),
-        Some(super::FirstResponseOutcome::Tool {
-            tool_title: Some("Write /tmp/x.rs".to_string())
-        })
-    );
-
-    // A prior turn's completed AssistantText, present *before* the watch's
-    // anchor point, must not be mistaken for this turn's first response.
-    let items = vec![assistant_text("previous turn's answer", false)];
-    let watch = super::TelegramTurn::start(std::time::Instant::now(), items.len());
-    assert_eq!(watch.resolve(&items), None);
-}
-
-/// The ledger's whole reason to exist: two relays report one turn, and this
-/// is where they agree. Identity, not text — the completion reports the last
-/// message and the question is whether that is the one already sent.
-#[test]
-fn already_sent_answers_only_for_the_very_message_that_went_out() {
-    let waiting = super::TelegramTurn::start(std::time::Instant::now(), 0);
-    assert!(
-        !waiting.already_sent(Some("m1")),
-        "nothing has gone out yet"
-    );
-
-    let answered = super::TelegramTurn::Answered {
-        message_id: Some("m1".to_string()),
-    };
-    assert!(answered.already_sent(Some("m1")), "the same message");
-    assert!(
-        !answered.already_sent(Some("m2")),
-        "a later message in the same turn is news"
-    );
-    assert!(
-        !answered.already_sent(None),
-        "an unnamed message cannot be matched, so it is reported"
-    );
-
-    // A tool ack, the fixed fallback ack, or an agent that omits ids: no agent
-    // text reached the phone, so the completion still owes one.
-    let acked_without_text = super::TelegramTurn::Answered { message_id: None };
-    assert!(!acked_without_text.already_sent(Some("m1")));
-    assert!(!acked_without_text.already_sent(None));
-}
-
-/// A turn already answered is not waiting, so neither pump can ack it twice.
-#[test]
-fn an_answered_turn_resolves_nothing_and_is_never_overdue() {
-    let answered = super::TelegramTurn::Answered {
-        message_id: Some("m1".to_string()),
-    };
-    assert_eq!(answered.resolve(&[assistant_text("more", false)]), None);
-    assert!(!answered.is_overdue(std::time::Instant::now(), 0));
-}
-
-#[test]
-fn is_overdue_boundary_at_exactly_the_timeout() {
-    let started = std::time::Instant::now();
-    let watch = super::TelegramTurn::start(started, 0);
-    assert!(!watch.is_overdue(started + std::time::Duration::from_secs(59), 60));
-    assert!(watch.is_overdue(started + std::time::Duration::from_secs(60), 60));
-}
-
 /// `queued_at` no longer participates in the push-time decision; a fresh
 /// timestamp is enough for every test entry here.
 fn mk_relay(kind: super::DeferKind) -> super::DeferredRelay {
@@ -476,10 +362,10 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
-            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            v.start_phone_turn_for_test(std::time::Instant::now());
             v.items.push(answer("m1", "## Usage\n48% used"));
             assert!(
-                v.take_telegram_first_response_for_test(),
+                v.take_phone_first_response_for_test(),
                 "the ack goes out for the turn's first message"
             );
         });
@@ -494,9 +380,9 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
-            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            v.start_phone_turn_for_test(std::time::Instant::now());
             v.items.push(answer("m2", "working on it"));
-            assert!(v.take_telegram_first_response_for_test());
+            assert!(v.take_phone_first_response_for_test());
             v.items.push(answer("m3", "here is the answer"));
         });
         let (_, tail) = ws
@@ -583,9 +469,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         - std::time::Duration::from_secs(super::FIRST_RESPONSE_FALLBACK_SECS + 1);
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view present");
-        view.update(cx, |v, _| {
-            v.start_telegram_first_response_watch_for_test(started)
-        });
+        view.update(cx, |v, _| v.start_phone_turn_for_test(started));
         ws.flush_telegram_first_response_fallbacks(cx);
     });
     cx.run_until_parked();
@@ -618,7 +502,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view present");
         view.update(cx, |v, _| {
-            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            v.start_phone_turn_for_test(std::time::Instant::now());
         });
         ws.relay_permission_wait_to_telegram(
             pane_id,
@@ -997,27 +881,4 @@ fn test_data_dir() -> std::path::PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!("daruda_telegram_ops_test_{id}"))
-}
-
-/// A message can carry no text at all — `daruda_acp` collapses a content block
-/// it cannot render to an empty string. Such a message must not become the
-/// reply the watch reports, or a notification arrives with nothing in it.
-#[test]
-fn a_reply_with_no_text_does_not_resolve_the_watch() {
-    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
-    let items = [assistant_text("", false)];
-    assert!(watch.resolve(&items).is_none());
-
-    let items = [
-        assistant_text("", false),
-        assistant_text("real answer", false),
-    ];
-    assert_eq!(
-        watch.resolve(&items),
-        Some(super::FirstResponseOutcome::Text {
-            text: "real answer".to_string(),
-            message_id: None,
-        }),
-        "the watch waits for a message that has something to say"
-    );
 }

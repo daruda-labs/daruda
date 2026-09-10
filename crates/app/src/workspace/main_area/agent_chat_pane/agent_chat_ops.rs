@@ -531,6 +531,9 @@ impl Workspace {
                     cx,
                 );
             }
+            // Unconditional: the turn's phone conversation ends here whether
+            // or not this completion had anything left to say.
+            self.close_phone_turn(pane_id, cx);
         }
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {
