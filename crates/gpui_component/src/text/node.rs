@@ -994,6 +994,11 @@ const CODE_BLOCK_FILL_ALPHA: f32 = 0.05;
 /// cell separators, and the `<hr>` rule. One value so they read as one system.
 const STRUCTURAL_LINE_ALPHA: f32 = 0.28;
 
+/// Lift under a table's heading row, on the same surface-derived terms as the
+/// tints above. Its own constant rather than a shared one: what a heading is
+/// worth against the body is a separate judgement from what a code block is.
+const TABLE_HEADER_FILL_ALPHA: f32 = 0.05;
+
 /// How a single child of a `ListItem` should be laid out.
 ///
 /// Split out as a pure function because the render path only produces opaque
@@ -1248,7 +1253,12 @@ impl Node {
                             .grid_cols(columns as u16)
                             .children({
                                 let mut cells = Vec::with_capacity(table.children.len() * columns);
+                                // GFM's heading row, which `to_markdown` reads
+                                // the same way. Lifted and bolded so the body
+                                // reads as data under it rather than more rows.
+                                let header_fill = options.tint(TABLE_HEADER_FILL_ALPHA, cx);
                                 for (row_ix, row) in table.children.iter().enumerate() {
+                                    let is_header = row_ix == 0;
                                     for (ix, cell) in row.children.iter().enumerate() {
                                         let align = table.column_align(ix);
                                         cells.push(
@@ -1256,6 +1266,10 @@ impl Node {
                                                 .id(("cell", row_ix * columns + ix))
                                                 .flex()
                                                 .flex_col()
+                                                .when(is_header, |this| {
+                                                    this.bg(header_fill)
+                                                        .font_weight(FontWeight::BOLD)
+                                                })
                                                 .when(align == ColumnumnAlign::Center, |this| {
                                                     this.items_center()
                                                 })
@@ -1540,12 +1554,6 @@ impl Node {
     }
 }
 
-// NOTE: this crate's lib-test target does not build in-repo — the vendor trim
-// left two independent, pre-existing blockers (`tree.rs` uses `#[gpui::test]`
-// without `gpui/test-support` in dev-deps; `dock/state.rs` `include_str!`s a
-// trimmed `tests/fixtures/layout.json`). These tests are correct and run once
-// the harness is repaired; until then the render fix is verified visually, the
-// established practice for the sibling `TextView` render patches.
 #[cfg(test)]
 mod tests {
     use super::{
