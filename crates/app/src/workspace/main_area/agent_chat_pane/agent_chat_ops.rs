@@ -519,8 +519,18 @@ impl Workspace {
     ) {
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
-            let (header, tail) = self.telegram_completion_parts(pane_id, cx);
-            self.relay_or_defer_to_telegram(pane_id, DeferKind::Completion, header, tail, None, cx);
+            // `None` = the phone already has this turn's answer; the
+            // first-response relay sent the very message this would report.
+            if let Some((header, tail)) = self.telegram_completion_parts(pane_id, cx) {
+                self.relay_or_defer_to_telegram(
+                    pane_id,
+                    DeferKind::Completion,
+                    header,
+                    tail,
+                    None,
+                    cx,
+                );
+            }
         }
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {

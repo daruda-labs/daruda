@@ -10,8 +10,8 @@ use gpui::Context;
 use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
 use super::{
-    AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, FirstResponseWatch,
-    PromptDispatch, PromptId, PromptOrigin, QueuedPrompt, TelegramFirstResponseEffect, Turn,
+    AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, PromptDispatch,
+    PromptId, PromptOrigin, QueuedPrompt, TelegramFirstResponseEffect, TelegramTurn, Turn,
 };
 
 impl AgentChatView {
@@ -46,15 +46,22 @@ impl AgentChatView {
         self.drain_next_queued_prompt(cx)
     }
 
-    /// Test-only hook: arm the Telegram first-response watch without needing a
-    /// live ACP handle.
+    /// Test-only hook: arm the Telegram turn ledger without needing a live ACP
+    /// handle.
     #[cfg(test)]
     pub(in crate::workspace) fn start_telegram_first_response_watch_for_test(
         &mut self,
         started_at: std::time::Instant,
     ) {
-        self.telegram_first_response_watch =
-            Some(FirstResponseWatch::start(started_at, self.items.len()));
+        self.telegram_turn = Some(TelegramTurn::start(started_at, self.items.len()));
+    }
+
+    /// Test-only hook: resolve the turn's first response exactly as the relay
+    /// path does, so a test can reach `Answered` without an ACP session.
+    /// Returns whether anything resolved.
+    #[cfg(test)]
+    pub(in crate::workspace) fn take_telegram_first_response_for_test(&mut self) -> bool {
+        self.take_telegram_first_response().is_some()
     }
 
     /// Send `text` from the bottom-dock composer. Sugar over
@@ -153,13 +160,13 @@ impl AgentChatView {
         dispatch
     }
 
-    /// Arms the Telegram first-response watch the instant a Telegram-origin
-    /// prompt reaches the wire — called from both dispatch paths so the watch
-    /// starts at the true dispatch point, never at enqueue time. No-op for
+    /// Arms the Telegram turn ledger the instant a Telegram-origin prompt
+    /// reaches the wire — called from both dispatch paths so it starts at the
+    /// true dispatch point, never at enqueue time. No-op for
     /// [`PromptOrigin::InApp`].
     pub(super) fn start_telegram_watch_if(&mut self, origin: PromptOrigin) {
         if origin == PromptOrigin::Telegram {
-            self.telegram_first_response_watch = Some(FirstResponseWatch::start(
+            self.telegram_turn = Some(TelegramTurn::start(
                 std::time::Instant::now(),
                 self.items.len(),
             ));
@@ -169,54 +176,79 @@ impl AgentChatView {
     /// Whether this pane is still waiting to produce the first phone-visible
     /// response for a Telegram-origin prompt.
     pub(in crate::workspace) fn is_waiting_for_telegram_first_response(&self) -> bool {
-        self.telegram_first_response_watch.is_some()
+        matches!(self.telegram_turn, Some(TelegramTurn::Waiting { .. }))
     }
 
-    /// Resolve and clear the watch if a completed text reply or first tool
-    /// call has appeared since the watched prompt was echoed. `None` when
-    /// there's no watch or nothing qualifying yet.
+    /// Resolve the turn's first response if a completed text reply or first
+    /// tool call has appeared since its prompt was echoed. `None` when the
+    /// turn is not the phone's, or nothing qualifying has arrived yet.
+    ///
+    /// Moves the ledger to `Answered` rather than dropping it: what went out
+    /// here is exactly what the completion relay must not repeat.
     pub(super) fn take_telegram_first_response(&mut self) -> Option<FirstResponseOutcome> {
-        let watch = self.telegram_first_response_watch?;
-        let outcome = watch.resolve(&self.items)?;
-        self.telegram_first_response_watch = None;
+        let outcome = self.telegram_turn.as_ref()?.resolve(&self.items)?;
+        let message_id = match &outcome {
+            FirstResponseOutcome::Text { message_id, .. } => message_id.clone(),
+            FirstResponseOutcome::Tool { .. } => None,
+        };
+        self.telegram_turn = Some(TelegramTurn::Answered { message_id });
         Some(outcome)
     }
 
-    /// Finish the active watch at a terminal boundary. A final streaming text is
+    /// Finish the turn's wait at a terminal boundary. A final streaming text is
     /// resolved first (because `settle_turn` has just finalized it); otherwise
     /// the old immediate "received" ack is used as the fallback.
     pub(super) fn finish_telegram_first_response_watch(&mut self) -> TelegramFirstResponseEffect {
         if let Some(outcome) = self.take_telegram_first_response() {
             return TelegramFirstResponseEffect::Relay(outcome);
         }
-        if self.telegram_first_response_watch.take().is_some() {
+        if self.answer_telegram_turn_without_agent_text() {
             return TelegramFirstResponseEffect::Fallback;
         }
         TelegramFirstResponseEffect::None
     }
 
-    /// Clear a watch that was superseded by a stronger phone-visible signal
-    /// (currently a permission prompt) without emitting the generic fallback.
+    /// Drop the ledger for a turn superseded by a stronger phone-visible
+    /// signal (currently a permission prompt) without emitting the generic
+    /// fallback. Dropped, not answered: no report went out, so the completion
+    /// still owes the sender one.
     pub(super) fn clear_telegram_first_response_watch(&mut self) {
-        self.telegram_first_response_watch = None;
+        self.telegram_turn = None;
+    }
+
+    /// Take the turn's ledger at the completion boundary, where its phone
+    /// conversation ends.
+    pub(in crate::workspace) fn take_telegram_turn(&mut self) -> Option<TelegramTurn> {
+        self.telegram_turn.take()
+    }
+
+    /// Record that a waiting turn was answered with something carrying no
+    /// agent text (the fixed ack, or a tool note). Returns whether there was a
+    /// waiting turn to answer, so the caller sends that ack exactly once.
+    fn answer_telegram_turn_without_agent_text(&mut self) -> bool {
+        if !self.is_waiting_for_telegram_first_response() {
+            return false;
+        }
+        self.telegram_turn = Some(TelegramTurn::Answered { message_id: None });
+        true
     }
 
     /// Periodic safety net for turns that stay silent for the first-response
-    /// window. Returns true only once, clearing the watch so later flush ticks do
-    /// not repeat the fallback ack.
+    /// window. Returns true only once — the turn moves to `Answered`, so later
+    /// flush ticks do not repeat the fallback ack.
     pub(in crate::workspace) fn take_telegram_first_response_fallback_if_overdue(
         &mut self,
         now: std::time::Instant,
         timeout_secs: u64,
     ) -> bool {
-        if self
-            .telegram_first_response_watch
-            .is_some_and(|watch| watch.is_overdue(now, timeout_secs))
+        if !self
+            .telegram_turn
+            .as_ref()
+            .is_some_and(|turn| turn.is_overdue(now, timeout_secs))
         {
-            self.telegram_first_response_watch = None;
-            return true;
+            return false;
         }
-        false
+        self.answer_telegram_turn_without_agent_text()
     }
 
     /// Append `text` to the transcript as a `UserText` item and refresh the

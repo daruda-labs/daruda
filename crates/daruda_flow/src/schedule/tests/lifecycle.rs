@@ -245,6 +245,6 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
     );
     assert!(
         seen.iter().all(|(_, inside)| *inside),
-        "MIGRATION(since 985e75dd): the compatibility copy must be there too: {seen:?}"
+        "MIGRATION(985e75dd → remove in 0.3): the copy must be there too: {seen:?}"
     );
 }

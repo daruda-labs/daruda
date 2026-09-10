@@ -34,7 +34,7 @@ use super::render::{
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
-use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
+use super::telegram_ops::{FirstResponseOutcome, TelegramTurn};
 use super::transcript_defaults::TranscriptDefaults;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::state::FoldEditorState;
@@ -557,10 +557,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
     pub(in crate::workspace) pending_permissions: HashSet<u64>,
-    /// Armed the instant a Telegram-origin prompt dispatches; `None` once
-    /// resolved, consumed by a permission request, or the turn settles. Read
-    /// by the connect-ops event pump and the periodic Telegram flush pump.
-    telegram_first_response_watch: Option<FirstResponseWatch>,
+    /// The phone's side of the in-flight turn — see [`TelegramTurn`]. Armed
+    /// the instant a Telegram-origin prompt dispatches, moved to `Answered`
+    /// once a report goes out, and `None` when the turn is not the phone's,
+    /// was consumed by a permission request, or has been completed. Read by
+    /// the connect-ops event pump, the periodic Telegram flush pump, and the
+    /// completion relay.
+    telegram_turn: Option<TelegramTurn>,
     /// Diff editors, mermaid diagrams, and tool-output images built async
     /// from the conversation's content — see [`AssetCache`].
     pub(in crate::workspace) assets: AssetCache,
@@ -750,7 +753,7 @@ impl AgentChatView {
             briefing: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
-            telegram_first_response_watch: None,
+            telegram_turn: None,
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),
             fold: FoldState::with_mode(defaults.fold_mode),

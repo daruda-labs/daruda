@@ -64,19 +64,22 @@ fn thinking(text: &str) -> daruda_acp::ChatItem {
 }
 
 #[test]
-fn first_response_watch_resolve_covers_text_tool_anchor_and_ignored_items() {
-    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+fn telegram_turn_resolve_covers_text_tool_anchor_and_ignored_items() {
+    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
     let items = vec![thinking("pondering"), assistant_text("partial", true)];
     assert_eq!(watch.resolve(&items), None);
 
-    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
     let items = vec![thinking("hmm"), assistant_text("done", false)];
     assert_eq!(
         watch.resolve(&items),
-        Some(super::FirstResponseOutcome::Text("done".to_string()))
+        Some(super::FirstResponseOutcome::Text {
+            text: "done".to_string(),
+            message_id: None,
+        })
     );
 
-    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
     let items = vec![thinking("hmm"), tool_call("Write /tmp/x.rs")];
     assert_eq!(
         watch.resolve(&items),
@@ -88,14 +91,55 @@ fn first_response_watch_resolve_covers_text_tool_anchor_and_ignored_items() {
     // A prior turn's completed AssistantText, present *before* the watch's
     // anchor point, must not be mistaken for this turn's first response.
     let items = vec![assistant_text("previous turn's answer", false)];
-    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), items.len());
+    let watch = super::TelegramTurn::start(std::time::Instant::now(), items.len());
     assert_eq!(watch.resolve(&items), None);
+}
+
+/// The ledger's whole reason to exist: two relays report one turn, and this
+/// is where they agree. Identity, not text — the completion reports the last
+/// message and the question is whether that is the one already sent.
+#[test]
+fn already_sent_answers_only_for_the_very_message_that_went_out() {
+    let waiting = super::TelegramTurn::start(std::time::Instant::now(), 0);
+    assert!(
+        !waiting.already_sent(Some("m1")),
+        "nothing has gone out yet"
+    );
+
+    let answered = super::TelegramTurn::Answered {
+        message_id: Some("m1".to_string()),
+    };
+    assert!(answered.already_sent(Some("m1")), "the same message");
+    assert!(
+        !answered.already_sent(Some("m2")),
+        "a later message in the same turn is news"
+    );
+    assert!(
+        !answered.already_sent(None),
+        "an unnamed message cannot be matched, so it is reported"
+    );
+
+    // A tool ack, the fixed fallback ack, or an agent that omits ids: no agent
+    // text reached the phone, so the completion still owes one.
+    let acked_without_text = super::TelegramTurn::Answered { message_id: None };
+    assert!(!acked_without_text.already_sent(Some("m1")));
+    assert!(!acked_without_text.already_sent(None));
+}
+
+/// A turn already answered is not waiting, so neither pump can ack it twice.
+#[test]
+fn an_answered_turn_resolves_nothing_and_is_never_overdue() {
+    let answered = super::TelegramTurn::Answered {
+        message_id: Some("m1".to_string()),
+    };
+    assert_eq!(answered.resolve(&[assistant_text("more", false)]), None);
+    assert!(!answered.is_overdue(std::time::Instant::now(), 0));
 }
 
 #[test]
 fn is_overdue_boundary_at_exactly_the_timeout() {
     let started = std::time::Instant::now();
-    let watch = super::FirstResponseWatch::start(started, 0);
+    let watch = super::TelegramTurn::start(started, 0);
     assert!(!watch.is_overdue(started + std::time::Duration::from_secs(59), 60));
     assert!(watch.is_overdue(started + std::time::Duration::from_secs(60), 60));
 }
@@ -385,6 +429,84 @@ fn permission_buttons_exposes_every_option_and_maps_rejects() {
     );
 
     assert!(permission_buttons(&[]).is_empty());
+}
+
+/// The regression the turn ledger fixes, end to end through the real pane.
+///
+/// `/usage` from the phone produces exactly one assistant message and the turn
+/// ends. The first-response relay sent it; the completion relay would report
+/// the same message, so the sender got the identical text twice. With a second
+/// message the completion has news again and must still report.
+#[gpui::test]
+async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui::TestAppContext) {
+    let _outbound = cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    let (handle, workspace) = make_window(cx, &config);
+    cx.run_until_parked();
+
+    let pane_id = cx
+        .update_window(handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(std::env::temp_dir())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let answer = |id: &str, text: &str| daruda_acp::ChatItem::AssistantText {
+        text: text.to_string(),
+        streaming: false,
+        message_id: Some(id.to_string()),
+        phase: Default::default(),
+    };
+
+    // A phone turn that said one thing, already relayed as the first response.
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view");
+        view.update(cx, |v, _| {
+            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            v.items.push(answer("m1", "## Usage\n48% used"));
+            assert!(
+                v.take_telegram_first_response_for_test(),
+                "the ack goes out for the turn's first message"
+            );
+        });
+        assert_eq!(
+            ws.telegram_completion_parts(pane_id, cx),
+            None,
+            "the sender already has this turn's only message"
+        );
+    });
+
+    // Same pane, a turn that said something after the acked message.
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view");
+        view.update(cx, |v, _| {
+            v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+            v.items.push(answer("m2", "working on it"));
+            assert!(v.take_telegram_first_response_for_test());
+            v.items.push(answer("m3", "here is the answer"));
+        });
+        let (_, tail) = ws
+            .telegram_completion_parts(pane_id, cx)
+            .expect("a later message is news the sender does not have");
+        assert_eq!(
+            tail,
+            super::TelegramTail::Markdown("here is the answer".to_string())
+        );
+    });
 }
 
 /// Telegram reply acknowledgement paths on a pane with no live handle:
@@ -882,7 +1004,7 @@ fn test_data_dir() -> std::path::PathBuf {
 /// reply the watch reports, or a notification arrives with nothing in it.
 #[test]
 fn a_reply_with_no_text_does_not_resolve_the_watch() {
-    let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+    let watch = super::TelegramTurn::start(std::time::Instant::now(), 0);
     let items = [assistant_text("", false)];
     assert!(watch.resolve(&items).is_none());
 
@@ -892,7 +1014,10 @@ fn a_reply_with_no_text_does_not_resolve_the_watch() {
     ];
     assert_eq!(
         watch.resolve(&items),
-        Some(super::FirstResponseOutcome::Text("real answer".to_string())),
+        Some(super::FirstResponseOutcome::Text {
+            text: "real answer".to_string(),
+            message_id: None,
+        }),
         "the watch waits for a message that has something to say"
     );
 }

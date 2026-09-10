@@ -116,7 +116,9 @@ async fn routing_observes_state_an_earlier_update_changed(cx: &mut TestAppContex
     // Before: the same plain text has nowhere to go.
     assert_eq!(
         core.route(message(1, 42, "add tests too")).action,
-        InboundAction::NoTarget
+        InboundAction::NoTarget {
+            text: "add tests too".into()
+        }
     );
 
     // Act on `/use 1`, exactly as the loop would between two routes.
@@ -410,6 +412,97 @@ mod ask {
         cx.update(|cx| {
             assert_eq!(crate::control::ask::waiting_count_for_test(cx), 0);
         });
+    }
+}
+
+/// Where a phone message goes when nothing names a target.
+///
+/// The bridge's selection and last-pinged pane are in-memory, so every app
+/// restart drops them and the phone had to be re-aimed by hand before it could
+/// say anything. The app's own active lane answers the question without a
+/// round trip; it is deliberately narrow, because guessing between two agents
+/// is worse than asking.
+mod fallback_target {
+    use super::*;
+    use gpui::AppContext as _;
+
+    /// Open one more chat in the lane the fixture already set up, and return
+    /// its pane id. The fixture leaves focus on its terminal pane, so this
+    /// makes the lane hold two chats with neither of them focused.
+    fn second_chat(
+        fixture: &crate::test_support::ControlFixture,
+        cx: &mut TestAppContext,
+    ) -> PaneId {
+        cx.update_window(fixture.window.into(), |_, window, cx| {
+            fixture
+                .workspace
+                .update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .expect("window is live")
+    }
+
+    /// The fixture focuses its terminal, so this is the "only chat in the
+    /// lane" branch — the one that actually fires after a restart, when the
+    /// restored focus is on whatever the user last clicked.
+    #[gpui::test]
+    async fn the_active_lanes_only_chat_is_the_fallback(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let expected = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        assert_eq!(
+            fixture
+                .workspace
+                .read_with(cx, |ws, _| ws.fallback_agent_chat()),
+            Some(expected),
+            "one chat in the lane the user is in is not a guess"
+        );
+    }
+
+    /// Nothing to fall back to is still an honest answer — the phone hears
+    /// "no target" rather than reaching a pane that is not a chat.
+    #[gpui::test]
+    async fn a_lane_with_no_chat_has_no_fallback(cx: &mut TestAppContext) {
+        let fixture = workspace_for_control(cx);
+        assert_eq!(
+            fixture
+                .workspace
+                .read_with(cx, |ws, _| ws.fallback_agent_chat()),
+            None
+        );
+    }
+
+    /// Two chats and focus on neither: a pick between two agents would start
+    /// a turn in the wrong one, so the phone is told to choose instead.
+    #[gpui::test]
+    async fn two_chats_with_neither_focused_refuse_to_guess(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        second_chat(&fixture, cx);
+        assert_eq!(
+            fixture
+                .workspace
+                .read_with(cx, |ws, _| ws.fallback_agent_chat()),
+            None,
+            "two chats and no focus is ambiguous, not a coin flip"
+        );
+    }
+
+    /// Focus settles that ambiguity: the chat the user is actually in wins
+    /// over the other one, rather than whichever the pane list holds first.
+    #[gpui::test]
+    async fn a_focused_chat_wins_over_the_other_one(cx: &mut TestAppContext) {
+        let fixture = workspace_with_agent_chat(cx);
+        let second = second_chat(&fixture, cx);
+        fixture.workspace.update(cx, |ws, _| {
+            ws.active_runtime_mut().focused_pane_id = second;
+        });
+        assert_eq!(
+            fixture
+                .workspace
+                .read_with(cx, |ws, _| ws.fallback_agent_chat())
+                .map(|p| p.pane),
+            Some(second)
+        );
     }
 }
 

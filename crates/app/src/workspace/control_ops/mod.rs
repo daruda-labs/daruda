@@ -400,6 +400,35 @@ impl Workspace {
         }
     }
 
+    /// The agent chat a phone message falls back to when nothing names a
+    /// target: the active lane's focused pane when that pane is a chat,
+    /// otherwise that lane's only chat.
+    ///
+    /// Deliberately narrow. Two chats with focus on neither is ambiguous, and
+    /// guessing there would start a turn in the wrong agent — worse than
+    /// telling the sender to pick. The orchestrator is excluded for the same
+    /// reason `/list` excludes it: the phone is never shown it, so it must not
+    /// be reached by accident either.
+    pub(crate) fn fallback_agent_chat(&self) -> Option<PaneRef> {
+        let runtime = self.main_area.runtimes.get(&self.active)?;
+        let mut chats = runtime
+            .panes
+            .iter()
+            .filter(|p| p.agent_chat_view().is_some() && !self.is_orchestrator_pane(p.id));
+        let focused = runtime.focused_pane_id;
+        let pane = match chats.clone().find(|p| p.id == focused) {
+            Some(p) => p.id,
+            None => {
+                let only = chats.next()?;
+                chats.next().is_none().then_some(only.id)?
+            }
+        };
+        Some(PaneRef {
+            workspace: self.uuid(),
+            pane,
+        })
+    }
+
     /// Whether this window can rule `/name` out of every agent's vocabulary —
     /// asked when nothing names a target, so there is no one pane to ask.
     ///

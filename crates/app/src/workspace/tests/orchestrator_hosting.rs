@@ -660,8 +660,13 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                                 - std::time::Duration::from_secs(FIRST_RESPONSE_FALLBACK_SECS + 1),
                         );
                     });
-                ws.pulse_agent_chats(cx);
+                // Fallback pump first, completion second — the order the
+                // real pumps produce (a turn goes quiet, gets acked, then
+                // ends) and the one the turn ledger encodes: the completion
+                // closes the turn's phone conversation, so an ack owed to it
+                // has to have gone out already.
                 ws.flush_telegram_first_response_fallbacks(cx);
+                ws.pulse_agent_chats(cx);
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
                 assert!(!view.activity.was_busy);
                 assert!(view.activity.pending_completion.is_none());
@@ -680,8 +685,8 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
         assert_eq!(ping.pane.pane, pane);
     }
     workspace.update(cx, |ws, cx| {
-        ws.pulse_agent_chats(cx);
         ws.flush_telegram_first_response_fallbacks(cx);
+        ws.pulse_agent_chats(cx);
     });
     cx.run_until_parked();
     assert!(

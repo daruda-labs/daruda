@@ -231,72 +231,130 @@ fn permission_buttons(
         .collect()
 }
 
-/// What a chat item appended since a [`FirstResponseWatch`] started resolves
-/// to, if anything.
+/// What a chat item appended since a [`TelegramTurn`] was armed resolves to,
+/// if anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) enum FirstResponseOutcome {
     /// The agent's first visible reply was text.
-    Text(String),
+    ///
+    /// `message_id` names the assistant message it came from, when the agent
+    /// supplied one. It travels with the text because it identifies *that*
+    /// message: the completion relay reports the turn's last message, and
+    /// whether the sender already has it is a question about which message,
+    /// not about whether two previews happen to render the same.
+    Text {
+        text: String,
+        message_id: Option<String>,
+    },
     /// The agent went straight to a tool call with no preceding text.
     /// `tool_title` names it when the agent supplied a non-empty title.
     Tool { tool_title: Option<String> },
 }
 
-/// Tracks whether a pane's in-flight turn was dispatched from a phone-injected
-/// reply and, if so, since when — so the caller knows both whether to keep
-/// waiting and where in `items` to resume scanning from. Owned by
-/// `AgentChatView` as `Option<FirstResponseWatch>`; `None` means no phone-
-/// triggered turn is currently being watched.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) struct FirstResponseWatch {
-    started_at: std::time::Instant,
-    items_len_at_start: usize,
+/// The phone's side of one turn: what the sender is owed, and what they have
+/// already been given.
+///
+/// Owned by `AgentChatView` as `Option<TelegramTurn>`; `None` means the
+/// in-flight turn did not come from the phone, so nothing here applies.
+///
+/// This is a ledger, not a watch. It deliberately outlives the first response:
+/// two relays report this turn to the phone — the first response and the
+/// completion — and with nothing holding what the first one sent, a turn whose
+/// opening message is also its closing one is reported twice. Keeping the
+/// state through [`Self::Answered`] gives the pair the one thing it lacked,
+/// somewhere to agree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum TelegramTurn {
+    /// Nothing has gone out yet. `items_len_at_start` is where in `items` to
+    /// resume scanning (the length when this turn's prompt was echoed, so the
+    /// echoed `UserText` is never mistaken for a response); `started_at`
+    /// drives the fallback pump's overdue check.
+    Waiting {
+        started_at: std::time::Instant,
+        items_len_at_start: usize,
+    },
+    /// A first response has gone out. `message_id` names the assistant message
+    /// it carried, when the agent named one; `None` covers a tool ack, the
+    /// fixed fallback ack, and an agent that omits ids — none of which put the
+    /// turn's answer on the phone, so the completion still owes one.
+    Answered { message_id: Option<String> },
 }
 
-impl FirstResponseWatch {
-    /// Starts a watch anchored at `now`, scanning `items` from `items_len`
-    /// onward (the length of the pane's chat items at the moment this turn's
-    /// prompt was echoed — so the echoed `UserText` itself is never mistaken
-    /// for a response).
+impl TelegramTurn {
+    /// Arm a turn anchored at `now`, scanning `items` from `items_len` onward.
     pub(in crate::workspace) fn start(now: std::time::Instant, items_len: usize) -> Self {
-        Self {
+        Self::Waiting {
             started_at: now,
             items_len_at_start: items_len,
         }
     }
 
-    /// Whether `timeout_secs` has elapsed since this watch started with
-    /// nothing qualifying found yet — the periodic fallback pump's readiness
-    /// check.
+    /// Whether `timeout_secs` has elapsed with nothing qualifying found yet —
+    /// the periodic fallback pump's readiness check. A turn already answered
+    /// is never overdue.
     pub(in crate::workspace) fn is_overdue(
         &self,
         now: std::time::Instant,
         timeout_secs: u64,
     ) -> bool {
-        now.saturating_duration_since(self.started_at).as_secs() >= timeout_secs
+        match self {
+            Self::Waiting { started_at, .. } => {
+                now.saturating_duration_since(*started_at).as_secs() >= timeout_secs
+            }
+            Self::Answered { .. } => false,
+        }
     }
 
-    /// The first item appended since this watch started that resolves it, if
-    /// any — `None` means keep watching. A still-streaming `AssistantText`
-    /// and any `Thinking` item are skipped: reasoning isn't the visible
-    /// reply, and a text reply must be complete before it's worth sending
-    /// (see `daruda_acp::ChatItem::AssistantText`'s `streaming` field). A
-    /// settled message with no text is skipped too — `daruda_acp` collapses a
-    /// content block it cannot render to an empty string, and an empty
-    /// notification is worse than a late one.
+    /// Whether the phone already has `message_id` — the completion relay's
+    /// question, asked of the message it is about to report.
+    ///
+    /// An unnamed message never matches: without identity the honest answer is
+    /// "cannot tell", and repeating an answer is the lesser failure against
+    /// swallowing one.
+    pub(in crate::workspace) fn already_sent(&self, message_id: Option<&str>) -> bool {
+        match (self, message_id) {
+            (
+                Self::Answered {
+                    message_id: Some(sent),
+                },
+                Some(reporting),
+            ) => sent == reporting,
+            _ => false,
+        }
+    }
+
+    /// The first item appended since this turn was armed that resolves it, if
+    /// any — `None` means keep waiting, and a turn already answered resolves
+    /// nothing further. A still-streaming `AssistantText` and any `Thinking`
+    /// item are skipped: reasoning isn't the visible reply, and a text reply
+    /// must be complete before it's worth sending (see
+    /// `daruda_acp::ChatItem::AssistantText`'s `streaming` field). A settled
+    /// message with no text is skipped too — `daruda_acp` collapses a content
+    /// block it cannot render to an empty string, and an empty notification is
+    /// worse than a late one.
     pub(in crate::workspace) fn resolve(
         &self,
         items: &[daruda_acp::ChatItem],
     ) -> Option<FirstResponseOutcome> {
+        let Self::Waiting {
+            items_len_at_start, ..
+        } = self
+        else {
+            return None;
+        };
         items
-            .get(self.items_len_at_start..)?
+            .get(*items_len_at_start..)?
             .iter()
             .find_map(|item| match item {
                 daruda_acp::ChatItem::AssistantText {
                     text,
                     streaming: false,
+                    message_id,
                     ..
-                } if !text.trim().is_empty() => Some(FirstResponseOutcome::Text(text.clone())),
+                } if !text.trim().is_empty() => Some(FirstResponseOutcome::Text {
+                    text: text.clone(),
+                    message_id: message_id.clone(),
+                }),
                 daruda_acp::ChatItem::ToolCall(tool) => Some(FirstResponseOutcome::Tool {
                     tool_title: Some(tool.title.clone()).filter(|t| !t.is_empty()),
                 }),
@@ -341,40 +399,56 @@ impl Workspace {
     /// [`TelegramTail::Plain`] "finished responding" tail when the turn produced
     /// no assistant text (e.g. tool-only) or the view is gone — that fallback is
     /// plain i18n copy, not agent markdown, so it must not be parsed as such.
+    ///
+    /// `None` when the sender already has this answer: a phone-dispatched turn
+    /// whose last message is the very one the first-response relay sent has
+    /// nothing left to report, and repeating it puts the same text on the
+    /// phone twice. This is the only place the completion ping is built, so
+    /// the question cannot be answered anywhere else — or skipped.
+    ///
+    /// Takes the turn's phone ledger either way: the completion is where that
+    /// turn's phone conversation ends.
     pub(in crate::workspace) fn telegram_completion_parts(
         &self,
         pane_id: PaneId,
-        cx: &Context<Self>,
-    ) -> (String, TelegramTail) {
+        cx: &mut Context<Self>,
+    ) -> Option<(String, TelegramTail)> {
         let header = self.telegram_header(pane_id, cx);
-        let Some(view) = self.agent_chat_view(pane_id) else {
-            return (
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return Some((
                 self.pane_title(pane_id, cx),
                 TelegramTail::Plain(s::agent_notification_completed()),
-            );
+            ));
         };
-        let view = view.read(cx);
-        // Skips a message with no text for the same reason `resolve` does: it
-        // would put an empty preview under the notification header.
-        let last_response = view.items.iter().rev().find_map(|item| match item {
-            daruda_acp::ChatItem::AssistantText { text, .. } if !text.trim().is_empty() => {
-                Some(text.as_str())
-            }
-            _ => None,
-        });
-        match last_response {
-            Some(text) => (
-                header,
-                TelegramTail::Markdown(preview_for(
-                    text,
-                    &s::agent_notification_telegram_truncated_marker(),
+        view.update(cx, |v, _| {
+            // Skips a message with no text for the same reason `resolve` does:
+            // it would put an empty preview under the notification header.
+            let last_response = v.items.iter().rev().find_map(|item| match item {
+                daruda_acp::ChatItem::AssistantText {
+                    text, message_id, ..
+                } if !text.trim().is_empty() => Some((text.clone(), message_id.clone())),
+                _ => None,
+            });
+            let turn = v.take_telegram_turn();
+            match last_response {
+                Some((_, message_id))
+                    if turn.is_some_and(|t| t.already_sent(message_id.as_deref())) =>
+                {
+                    None
+                }
+                Some((text, _)) => Some((
+                    header,
+                    TelegramTail::Markdown(preview_for(
+                        &text,
+                        &s::agent_notification_telegram_truncated_marker(),
+                    )),
                 )),
-            ),
-            None => (
-                header,
-                TelegramTail::Plain(s::agent_notification_completed()),
-            ),
-        }
+                None => Some((
+                    header,
+                    TelegramTail::Plain(s::agent_notification_completed()),
+                )),
+            }
+        })
     }
 
     /// Relay a permission-wait ping with one button per option the agent
@@ -627,7 +701,7 @@ impl Workspace {
     ) {
         let header = self.telegram_header(pane_id, cx);
         let tail = match outcome {
-            FirstResponseOutcome::Text(text) => TelegramTail::Markdown(preview_for(
+            FirstResponseOutcome::Text { text, .. } => TelegramTail::Markdown(preview_for(
                 &text,
                 &s::agent_notification_telegram_truncated_marker(),
             )),

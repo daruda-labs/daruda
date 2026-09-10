@@ -98,10 +98,8 @@ fn execute_with(
             );
         }
     };
-    // MIGRATION(since 985e75dd): the legacy place too, for one release. An
-    // older build looks only there, so writing it is what stops that build
-    // starting a second run in a tree this one holds; and `run_status`
-    // reads it so a run *it* started stays resumable.
+    // MIGRATION(985e75dd → remove in 0.3): the legacy place too. Why, and
+    // where it is, belong to `lock::compat` — this is only the writer.
     //
     // The copy is inside the tree, so `git clean -fdx` can take it — and
     // then an older build sees a free tree and starts a second run in one
@@ -111,14 +109,14 @@ fn execute_with(
     // Watching for the deletion would buy back the rest, at the price of a
     // watcher living as long as the compatibility copy — which is one
     // release.
-    let legacy = request.run_dir.parent().unwrap_or(&request.cwd);
-    let lock_dirs = vec![
-        crate::lock::lock_dir_for(&request.lock_dir, &tree),
-        legacy.to_path_buf(),
-    ];
+    let legacy = crate::lock::compat::lock_dir(&request.run_dir);
+    let mut lock_dirs = vec![crate::lock::lock_dir_for(&request.lock_dir, &tree)];
+    lock_dirs.extend(legacy.map(Path::to_path_buf));
     // Before the locks, because a lock is a file inside one. Making a
     // directory claims nothing, so there is no race to lose here.
-    if let Err(source) = std::fs::create_dir_all(legacy) {
+    if let Some(legacy) = legacy
+        && let Err(source) = std::fs::create_dir_all(legacy)
+    {
         return not_started(
             request,
             RunOutcome::Io(FlowIoError {

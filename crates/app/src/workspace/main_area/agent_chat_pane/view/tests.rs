@@ -1225,9 +1225,10 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
 
             assert_eq!(
                 effect,
-                super::TelegramFirstResponseEffect::Relay(super::FirstResponseOutcome::Text(
-                    "done".to_string()
-                ))
+                super::TelegramFirstResponseEffect::Relay(super::FirstResponseOutcome::Text {
+                    text: "done".to_string(),
+                    message_id: None,
+                })
             );
             assert!(
                 !view.is_waiting_for_telegram_first_response(),

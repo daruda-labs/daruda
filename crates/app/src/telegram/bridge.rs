@@ -156,6 +156,9 @@ pub enum InboundAction {
     UnownedSlashNoTarget {
         /// The name without its slash, to ask the agents about.
         name: String,
+        /// The message as sent, so the caller can still deliver it if the
+        /// app's own active lane supplies the target this layer lacked.
+        text: String,
         /// The nearest daruda command, for the answer when none of them owns it.
         suggestion: Option<&'static str>,
     },
@@ -174,8 +177,12 @@ pub enum InboundAction {
     /// buttons — scrolling back to an old listing and tapping is ordinary use,
     /// not a decision to consume.
     StaleListing,
-    /// Plain text with no reply-to, no selection, and no prior ping.
-    NoTarget,
+    /// Plain text with no reply-to, no selection, and no prior ping. Carries
+    /// the message so the caller can still deliver it if the app's own active
+    /// lane supplies the target this layer lacked.
+    NoTarget {
+        text: String,
+    },
     /// An update shape this bridge does not act on. Distinct from
     /// [`Self::Ignore`], which means "we could have acted but chose not to" —
     /// this one is not about the sender at all, so it must not be answered
@@ -595,10 +602,12 @@ impl BridgeCore {
             // still not ours to decide, so the caller asks every pane before
             // the answer picks between "no target" and "no such command".
             None => match unknown {
-                Some((name, suggestion)) => {
-                    InboundAction::UnownedSlashNoTarget { name, suggestion }
-                }
-                None => InboundAction::NoTarget,
+                Some((name, suggestion)) => InboundAction::UnownedSlashNoTarget {
+                    name,
+                    text,
+                    suggestion,
+                },
+                None => InboundAction::NoTarget { text },
             },
         }
     }
@@ -834,6 +843,7 @@ mod tests {
             action,
             InboundAction::UnownedSlashNoTarget {
                 name: "lst".into(),
+                text: "/lst".into(),
                 suggestion: Some("list"),
             }
         );
@@ -875,6 +885,7 @@ mod tests {
             action,
             InboundAction::UnownedSlashNoTarget {
                 name: "usage".into(),
+                text: "/usage".into(),
                 suggestion: Some("use"),
             },
             "with no target the reason is the missing target, not a typo"
@@ -901,7 +912,12 @@ mod tests {
     fn plain_text_with_no_target_reports_instead_of_vanishing() {
         let mut core = BridgeCore::new(true, Some(42), 0);
         let action = core.route(message(1, 42, "hello", None)).action;
-        assert_eq!(action, InboundAction::NoTarget);
+        assert_eq!(
+            action,
+            InboundAction::NoTarget {
+                text: "hello".into()
+            }
+        );
     }
 
     #[test]
@@ -1092,7 +1108,12 @@ mod tests {
         let result = bridge.route(message(1, 1, "hello", None));
         // Not `Ignore`: an authorized message that reaches nothing is answered,
         // because silence reads as the bot being broken.
-        assert_eq!(result.action, InboundAction::NoTarget);
+        assert_eq!(
+            result.action,
+            InboundAction::NoTarget {
+                text: "hello".into()
+            }
+        );
     }
 
     /// The card stays on screen while the tool call waits, so tapping the

@@ -17,7 +17,7 @@ use daruda_store::observability::log_writer::LogWriter;
 
 use super::bridge::{
     BotPermissionOutcome, BridgeCore, BridgePing, CallbackEdit, InboundAction, Outbound,
-    OutboundMsg, PermissionDecision, RouteResult, TelegramTail,
+    OutboundMsg, PaneRef, PermissionDecision, RouteResult, TelegramTail,
 };
 use super::client;
 use super::keychain;
@@ -340,6 +340,7 @@ fn spawn_poll_task(cx: &mut App) {
                         answer_callback_id.is_some()
                     )
                 });
+                let action = adopt_fallback_target(action, cx);
 
                 match (answer_callback_id, action) {
                     // A permission button tap: apply the decision FIRST so the
@@ -425,7 +426,7 @@ fn spawn_poll_task(cx: &mut App) {
                         let reply = super::command::render_parse_error(&error);
                         send_command_reply(cx, &token, reply).await;
                     }
-                    (None, InboundAction::NoTarget) => {
+                    (None, InboundAction::NoTarget { .. }) => {
                         let reply = cx
                             .update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx));
                         send_command_reply(cx, &token, reply).await;
@@ -479,7 +480,12 @@ fn spawn_poll_task(cx: &mut App) {
                     // the vocabularies are still asked — and only a name every
                     // one of them rules out is answered as a typo. Otherwise
                     // the missing target is the real reason it went nowhere.
-                    (None, InboundAction::UnownedSlashNoTarget { name, suggestion }) => {
+                    (
+                        None,
+                        InboundAction::UnownedSlashNoTarget {
+                            name, suggestion, ..
+                        },
+                    ) => {
                         let ours = agents_rule_out_slash(cx, &name);
                         trace::delivery("slash.unowned.no_target", || {
                             format!("name={name} ours={ours}")
@@ -599,7 +605,7 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
         }
         InboundAction::RunCommand { .. }
         | InboundAction::ReportParseError { .. }
-        | InboundAction::NoTarget => {
+        | InboundAction::NoTarget { .. } => {
             // Answered inline in the poll loop, which is the only place that
             // can await the reply's send.
         }
@@ -720,6 +726,69 @@ fn dispatch_to_workspace(
             }
         });
     });
+}
+
+/// Give a targetless action the target the app itself is already pointing at.
+///
+/// The bridge's selection and last-pinged pane are in-memory, so a restart
+/// leaves the phone unable to reach anything until it is re-aimed by hand —
+/// even though the lane it was talking to is right there, restored. This is
+/// the last link in the chain `plain_text_target` walks, resolved here rather
+/// than in `route` because only this layer can read a workspace.
+///
+/// Both outcomes rejoin an arm that already exists, so nothing downstream
+/// learns a new shape: with a target, plain text is an `InjectPrompt` and an
+/// unowned slash is an `UnknownSlash` for that pane to claim.
+fn adopt_fallback_target(action: InboundAction, cx: &mut gpui::AsyncApp) -> InboundAction {
+    let adopted = match &action {
+        InboundAction::NoTarget { .. } | InboundAction::UnownedSlashNoTarget { .. } => {
+            sole_fallback_agent_chat(cx)
+        }
+        _ => return action,
+    };
+    let Some(pane) = adopted else {
+        return action;
+    };
+    trace::delivery("target.fallback", || {
+        format!(
+            "pane={} action={}",
+            trace::pane(pane),
+            trace::action_name(&action)
+        )
+    });
+    match action {
+        InboundAction::NoTarget { text } => InboundAction::InjectPrompt { pane, text },
+        InboundAction::UnownedSlashNoTarget {
+            name,
+            text,
+            suggestion,
+        } => InboundAction::UnknownSlash {
+            pane,
+            name,
+            text,
+            suggestion,
+        },
+        other => other,
+    }
+}
+
+/// The one agent chat the app is pointing at, across every window.
+///
+/// Exactly one candidate or none: two windows each offering their own active
+/// lane is the same ambiguity as two chats inside one lane, and the same
+/// answer — a message put on the wrong agent starts a turn nobody asked for,
+/// which is worse than telling the sender to run `/list`.
+fn sole_fallback_agent_chat(cx: &mut gpui::AsyncApp) -> Option<PaneRef> {
+    let mut candidates = Vec::new();
+    cx.update(|cx| {
+        WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+            candidates.extend(ws.fallback_agent_chat());
+        });
+    });
+    match candidates.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    }
 }
 
 /// Whether every window rules `/name` out of its agents' vocabularies, so the
@@ -1091,6 +1160,90 @@ mod tests {
             agents_rule_out_slash(&mut async_cx, "lst"),
             "no agent anywhere has /lst, so the suggestion is daruda's to give"
         );
+    }
+
+    /// The restart case the whole fallback exists for: the bridge knows of no
+    /// target, and the app's own active lane supplies one. Both targetless
+    /// actions rejoin the arms that already had a pane, so `/usage` reaches
+    /// the agent and plain text reaches the same chat.
+    #[gpui::test]
+    async fn a_targetless_action_adopts_the_apps_own_lane(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        let fixture = workspace_with_agent_chat(cx);
+        let expected = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let mut async_cx = cx.to_async();
+
+        assert_eq!(
+            adopt_fallback_target(
+                InboundAction::NoTarget {
+                    text: "ship it".into()
+                },
+                &mut async_cx,
+            ),
+            InboundAction::InjectPrompt {
+                pane: expected,
+                text: "ship it".into()
+            }
+        );
+        assert_eq!(
+            adopt_fallback_target(
+                InboundAction::UnownedSlashNoTarget {
+                    name: "usage".into(),
+                    text: "/usage".into(),
+                    suggestion: Some("use"),
+                },
+                &mut async_cx,
+            ),
+            InboundAction::UnknownSlash {
+                pane: expected,
+                name: "usage".into(),
+                text: "/usage".into(),
+                suggestion: Some("use"),
+            }
+        );
+    }
+
+    /// Two windows each offering their own active lane is the same ambiguity
+    /// as two chats in one lane. The action is handed back untouched, so the
+    /// phone hears "no target" instead of reaching a coin-flipped agent.
+    #[gpui::test]
+    async fn two_windows_each_with_a_lane_adopt_nothing(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        let _a = workspace_with_agent_chat(cx);
+        let _b = workspace_with_agent_chat(cx);
+        let mut async_cx = cx.to_async();
+
+        let action = InboundAction::NoTarget {
+            text: "ship it".into(),
+        };
+        assert_eq!(
+            adopt_fallback_target(action.clone(), &mut async_cx),
+            action,
+            "two candidates is not a target"
+        );
+    }
+
+    /// Every other action is returned as it came — the fallback must not
+    /// touch a decision that already named its pane.
+    #[gpui::test]
+    async fn an_action_that_already_has_a_target_is_untouched(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        let fixture = workspace_with_agent_chat(cx);
+        let pane = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
+        let mut async_cx = cx.to_async();
+
+        let action = InboundAction::InjectPrompt {
+            pane,
+            text: "already aimed".into(),
+        };
+        assert_eq!(adopt_fallback_target(action.clone(), &mut async_cx), action);
     }
 
     #[test]

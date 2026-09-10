@@ -7,7 +7,7 @@
 //! root the host names instead, one directory per tree
 //! ([`lock_dir_for`]). For one release a copy is also kept in the old
 //! in-tree place, so a build that only knows that place still excludes and
-//! is still excluded.
+//! is still excluded — [`compat`] owns that copy and says when it goes.
 //!
 //! A live holder is never reclaimed, however old it is. Age cannot tell a
 //! long run apart from a lock whose pid the OS has handed to something
@@ -226,6 +226,42 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
         }
     }
     out
+}
+
+/// The lock's old home, inside the working tree.
+///
+/// **MIGRATION(985e75dd → remove in 0.3).** Everything about the
+/// compatibility copy is here or tagged with that commit; grep it and
+/// delete the lot in one change. [`expiry`](self::tests) fails the build's
+/// tests once the version moves past 0.2, so "for one release" is a
+/// deadline the code keeps rather than a note someone has to remember.
+///
+/// **Why a module for one function.** The location was derived three times
+/// — the writer as `run_dir.parent().unwrap_or(cwd)`, the reader as
+/// `run_dir.parent()`, the app from its own layout — and the first two
+/// already disagreed about a run directory with no parent, one guessing the
+/// working tree root and the other reading nothing. The engine's two now
+/// share this; the app's is its own because only the app knows where it
+/// puts run directories, and it carries the same tag.
+///
+/// **Why it exists at all.** A build that predates the move looks only
+/// here. Writing the copy is what stops such a build starting a second run
+/// in a tree this one holds, and reading it is what keeps a run *it*
+/// started resumable across the upgrade.
+pub mod compat {
+    use std::path::Path;
+
+    /// Where the copy sits: the runs directory, which is the run
+    /// directory's parent.
+    ///
+    /// `None` for a run directory with no parent — there is no runs
+    /// directory then, and the caller has nothing to write a copy into or
+    /// read one from. Not a path to guess at: a copy placed somewhere the
+    /// old build does not look excludes nobody, and a lock file dropped
+    /// into a working tree root is litter an agent has to trip over.
+    pub fn lock_dir(run_dir: &Path) -> Option<&Path> {
+        run_dir.parent()
+    }
 }
 
 /// Every lock one run needs, held together and given back together.
@@ -654,6 +690,39 @@ mod tests {
             at_root,
             lock_dir_for(root, &CanonicalTree::unchecked("/a".into()))
         );
+    }
+
+    /// **The compatibility copy has a deadline, and this is what keeps it.**
+    ///
+    /// "For one release" is a note nobody is reminded of; a version bump is
+    /// something everybody does. This fails the moment daruda moves past
+    /// 0.2, which is the release the copy was written for — so the debt is
+    /// collected by the person holding the version bump rather than
+    /// discovered a year later by someone who cannot tell whether removing
+    /// it is safe.
+    ///
+    /// Delete this test together with what it guards, not on its own.
+    #[test]
+    fn the_compatibility_copy_has_not_outlived_the_release_it_was_written_for() {
+        assert!(
+            env!("CARGO_PKG_VERSION").starts_with("0.2."),
+            "daruda is {} — past the one release the in-tree lock copy was \
+             kept for. Delete `lock::compat`, everything tagged \
+             MIGRATION(985e75dd), and this test.",
+            env!("CARGO_PKG_VERSION"),
+        );
+    }
+
+    /// The two engine callers ask one function, so a run directory with no
+    /// parent cannot mean two things — the writer used to guess the working
+    /// tree root here while the reader read nothing.
+    #[test]
+    fn a_run_directory_with_no_parent_has_no_copy_rather_than_a_guessed_one() {
+        assert_eq!(
+            compat::lock_dir(Path::new("/runs/01J")),
+            Some(Path::new("/runs"))
+        );
+        assert_eq!(compat::lock_dir(Path::new("/")), None);
     }
 
     /// The same tree always names the same directory — two processes have to

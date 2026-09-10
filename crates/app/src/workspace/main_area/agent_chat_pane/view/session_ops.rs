@@ -717,7 +717,7 @@ impl AgentChatView {
         self.queue.paused_prompts.clear();
         self.queue.editing_prompt = None;
         self.pending_permissions.clear();
-        self.telegram_first_response_watch = None;
+        self.telegram_turn = None;
         self.queue.turn = Turn::Idle;
         self.activity.subagent_last_activity.clear();
         self.activity.activity_started_at = None;

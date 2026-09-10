@@ -244,7 +244,7 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
 /// Every other test here plants the compatibility copy inside the tree,
 /// which `lane_holder` reads only as a fallback — so all of them would
 /// still pass if the primary read were pointed at the wrong directory
-/// entirely. That fallback is due for deletion (MIGRATION since 985e75dd),
+/// entirely. That fallback is due for deletion (MIGRATION 985e75dd → 0.3),
 /// and nothing covered what is left when it goes.
 #[gpui::test]
 async fn a_lock_at_its_new_home_is_found_with_nothing_left_inside_the_tree(
