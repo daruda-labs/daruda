@@ -9,7 +9,7 @@
 use gpui::TestAppContext;
 
 use crate::control::spec::{ControlCommand, Ordinal, ResolvedCommand, UseTarget};
-use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef};
+use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef, Routed, Unaimed};
 use crate::telegram::client::{Update, UpdateKind};
 use crate::telegram::command::{Resolution, absorb, resolve_command};
 use crate::test_support::{ControlFixture, workspace_for_control, workspace_with_agent_chat};
@@ -34,7 +34,7 @@ async fn list_then_use_then_plain_text_reaches_the_selected_pane(cx: &mut TestAp
     let mut core = BridgeCore::new(true, Some(42), 0);
 
     // `/list` routes as a command, and its result fills the ordinal table.
-    let action = core.route(message(1, 42, "/list")).action;
+    let action = core.route(message(1, 42, "/list")).action.ready();
     assert_eq!(
         action,
         InboundAction::RunCommand {
@@ -58,7 +58,7 @@ async fn list_then_use_then_plain_text_reaches_the_selected_pane(cx: &mut TestAp
     assert_eq!(target.pane, fixture.pane());
 
     // Plain text now names that pane without a reply-to.
-    let action = core.route(message(2, 42, "add tests too")).action;
+    let action = core.route(message(2, 42, "add tests too")).action.ready();
     assert_eq!(
         action,
         InboundAction::InjectPrompt {
@@ -80,7 +80,8 @@ async fn say_by_ordinal_resolves_to_the_listed_pane(cx: &mut TestAppContext) {
         core.command_state_mut(),
     );
 
-    let InboundAction::RunCommand { command } = core.route(message(1, 42, "/say 1 go on")).action
+    let InboundAction::RunCommand { command } =
+        core.route(message(1, 42, "/say 1 go on")).action.ready()
     else {
         panic!("/say routes as a command");
     };
@@ -118,20 +119,21 @@ async fn routing_observes_state_an_earlier_update_changed(cx: &mut TestAppContex
     // Before: the same plain text has nowhere to go.
     assert_eq!(
         core.route(message(1, 42, "add tests too")).action,
-        InboundAction::Unaimed {
+        Routed::NeedsTarget(Unaimed::Text {
             text: "add tests too".into()
-        }
+        })
     );
 
     // Act on `/use 1`, exactly as the loop would between two routes.
-    let InboundAction::RunCommand { command } = core.route(message(2, 42, "/use 1")).action else {
+    let InboundAction::RunCommand { command } = core.route(message(2, 42, "/use 1")).action.ready()
+    else {
         panic!("/use routes as a command");
     };
     let _ = resolve_command(command, core.command_state_mut());
 
     // After: the identical text now resolves, without any reply-to.
     assert_eq!(
-        core.route(message(3, 42, "add tests too")).action,
+        core.route(message(3, 42, "add tests too")).action.ready(),
         InboundAction::InjectPrompt {
             pane: PaneRef {
                 workspace: fixture.workspace.read_with(cx, |ws, _| ws.uuid()),
@@ -158,7 +160,8 @@ async fn answering_a_command_does_not_steal_the_plain_text_target(cx: &mut TestA
     core.record_sent(7, pinged);
 
     // Answering `/list` walks the whole command path — resolve, run, absorb.
-    let InboundAction::RunCommand { command } = core.route(message(1, 42, "/list")).action else {
+    let InboundAction::RunCommand { command } = core.route(message(1, 42, "/list")).action.ready()
+    else {
         panic!("/list routes as a command");
     };
     let Resolution::Run(resolved, addressed) = resolve_command(command, core.command_state_mut())
@@ -170,7 +173,7 @@ async fn answering_a_command_does_not_steal_the_plain_text_target(cx: &mut TestA
 
     // The fallback is still the pinged pane, not anything the listing named.
     assert_eq!(
-        core.route(message(2, 42, "carry on")).action,
+        core.route(message(2, 42, "carry on")).action.ready(),
         InboundAction::InjectPrompt {
             pane: pinged,
             text: "carry on".into(),
@@ -186,7 +189,8 @@ async fn an_ordinal_with_no_listing_behind_it_is_refused(cx: &mut TestAppContext
     let _fixture = workspace_with_agent_chat(cx);
     let mut core = BridgeCore::new(true, Some(42), 0);
 
-    let InboundAction::RunCommand { command } = core.route(message(1, 42, "/say 1 go on")).action
+    let InboundAction::RunCommand { command } =
+        core.route(message(1, 42, "/say 1 go on")).action.ready()
     else {
         panic!("/say routes as a command");
     };

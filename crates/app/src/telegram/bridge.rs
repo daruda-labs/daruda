@@ -125,8 +125,8 @@ pub enum InboundAction {
     ///
     /// Only for a name daruda *does* own, used wrongly (`/say` with no
     /// argument). A name daruda does not own is [`Self::UnknownSlash`] or
-    /// [`Self::UnaimedSlash`] — the agent's command namespace is open
-    /// and this one is closed, so "not ours" cannot mean "nobody's".
+    /// [`Self::UnclaimedSlash`] — the agent's command namespace is open and
+    /// this one is closed, so "not ours" cannot mean "nobody's".
     ReportParseError {
         error: crate::control::spec::ParseError,
     },
@@ -145,20 +145,23 @@ pub enum InboundAction {
         /// The nearest daruda command, for the answer when it does not.
         suggestion: Option<&'static str>,
     },
-    /// A `/name` daruda does not own that this layer could not aim.
+    /// A `/name` daruda does not own, with nowhere to send it — the app had
+    /// no lane to offer either.
     ///
     /// Not [`Self::ReportParseError`]: having no target says nothing about
     /// whose command the name is, and answering "did you mean /use?" to the
-    /// agent's `/usage` is a claim this layer cannot support. The same
-    /// question [`Self::UnknownSlash`] asks of one pane is asked of every
-    /// pane, and only a vocabulary that rules the name out earns the
-    /// suggestion — otherwise the true answer is the missing target.
-    UnaimedSlash {
+    /// agent's `/usage` is a claim this layer cannot support. Whose it was is
+    /// still the agents' to settle; only a vocabulary that rules the name out
+    /// earns the suggestion, and otherwise the true answer is the missing
+    /// target.
+    ///
+    /// The message body is gone by here. [`Unaimed::Slash`] carried it as far
+    /// as a target could have been found; past that there is no pane to put
+    /// it on, and `aim` records its loss rather than letting an arm drop it
+    /// quietly.
+    UnclaimedSlash {
         /// The name without its slash, to ask the agents about.
         name: String,
-        /// The message as sent, so the caller can still deliver it if the
-        /// app's own active lane supplies the target this layer lacked.
-        text: String,
         /// The nearest daruda command, for the answer when none of them owns it.
         suggestion: Option<&'static str>,
     },
@@ -177,18 +180,72 @@ pub enum InboundAction {
     /// buttons — scrolling back to an old listing and tapping is ordinary use,
     /// not a decision to consume.
     StaleListing,
-    /// Plain text this layer could not aim: no reply-to, no selection, no
-    /// prior ping. Carries the message, because the app's own active lane can
-    /// still supply the target — "unaimed", not "undeliverable", and a caller
-    /// that reads it as terminal drops the message.
-    Unaimed {
-        text: String,
-    },
+    /// Plain text with nowhere to send it: no reply-to, no selection, no
+    /// prior ping, and no lane the app could offer either. Terminal — unlike
+    /// [`Unaimed::Text`], which is the same message before that last question
+    /// was asked.
+    NoTarget,
     /// An update shape this bridge does not act on. Distinct from
     /// [`Self::Ignore`], which means "we could have acted but chose not to" —
     /// this one is not about the sender at all, so it must not be answered
     /// and must not be logged as an unauthorized inbound.
     Unsupported,
+}
+
+/// A routed update that still needs a target before anything can be done
+/// with it.
+///
+/// The second axis of what `route` decides — *did we find somewhere to send
+/// this* — split out rather than mirrored into [`InboundAction`]. `route` is
+/// GPUI-free and cannot read a workspace, so it answers the first axis (is
+/// this a command, a slash, plain text) and hands this one on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unaimed {
+    /// Plain text: no reply-to, no selection, no prior ping.
+    Text { text: String },
+    /// A `/name` daruda does not own, in the same state.
+    Slash {
+        /// The name without its slash, to ask the agents about.
+        name: String,
+        /// The message as sent, forwarded verbatim if a target turns up.
+        text: String,
+        /// The nearest daruda command, for the answer when none is found.
+        suggestion: Option<&'static str>,
+    },
+}
+
+/// What `route` decided, before the target question is settled.
+///
+/// Two states, and only one of them can be acted on. The poll loop matches
+/// [`InboundAction`], which it can only obtain by passing this through the
+/// step that resolves a target — so skipping that step is a type error rather
+/// than a comment nobody reads. That matters because the skipped case is
+/// silent: the arms that would receive an unaimed action do nothing, so the
+/// sender's message would vanish with no answer at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Routed {
+    /// Nothing left to resolve.
+    Ready(InboundAction),
+    /// Needs the app's own active lane, or the terminal answer for not
+    /// finding one.
+    NeedsTarget(Unaimed),
+}
+
+impl Routed {
+    /// The settled half, for the tests whose case needs no target.
+    ///
+    /// Panics on one that still does: needing a target is the thing under
+    /// test wherever it happens, so those cases match on the variant instead
+    /// of unwrapping it.
+    #[cfg(test)]
+    pub(crate) fn ready(self) -> InboundAction {
+        match self {
+            Self::Ready(action) => action,
+            Self::NeedsTarget(unaimed) => {
+                panic!("expected a settled action, got {unaimed:?}")
+            }
+        }
+    }
 }
 
 /// `BridgeCore::route`'s full result: the action, plus whether
@@ -197,7 +254,7 @@ pub enum InboundAction {
 /// including `Ignore`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteResult {
-    pub action: InboundAction,
+    pub action: Routed,
     pub answer_callback_id: Option<String>,
     /// For a `Callback` update, the coordinates + current text of the
     /// tapped message so the caller can rewrite it (drop buttons +
@@ -448,7 +505,7 @@ impl BridgeCore {
         // re-delivers it immediately, in a tight loop, forever.
         if matches!(update.kind, UpdateKind::Unsupported) {
             return RouteResult {
-                action: InboundAction::Unsupported,
+                action: Routed::Ready(InboundAction::Unsupported),
                 answer_callback_id: None,
                 callback_edit: None,
             };
@@ -473,7 +530,7 @@ impl BridgeCore {
                 UpdateKind::Message { .. } | UpdateKind::Unsupported => (None, None),
             };
             return RouteResult {
-                action: InboundAction::Ignore,
+                action: Routed::Ready(InboundAction::Ignore),
                 answer_callback_id,
                 callback_edit,
             };
@@ -495,7 +552,7 @@ impl BridgeCore {
             // Answered above; the match is exhaustive without a wildcard so a
             // future variant cannot slip through unrouted.
             UpdateKind::Unsupported => RouteResult {
-                action: InboundAction::Unsupported,
+                action: Routed::Ready(InboundAction::Unsupported),
                 answer_callback_id: None,
                 callback_edit: None,
             },
@@ -506,7 +563,9 @@ impl BridgeCore {
                 message_id,
                 message_text,
             } => {
-                let action = self.route_callback(chat_id, data);
+                // A callback names its pane through the token it carries, so
+                // it never reaches the target question.
+                let action = Routed::Ready(self.route_callback(chat_id, data));
                 RouteResult {
                     action,
                     answer_callback_id: Some(callback_id),
@@ -525,7 +584,7 @@ impl BridgeCore {
         chat_id: i64,
         text: String,
         reply_to_message_id: Option<i64>,
-    ) -> InboundAction {
+    ) -> Routed {
         if self.authorized_chat_id.is_none()
             && let Some(code) = text.strip_prefix("/pair ")
         {
@@ -544,7 +603,7 @@ impl BridgeCore {
             });
             if dead {
                 self.pending_pair_code = None;
-                return InboundAction::Ignore;
+                return Routed::Ready(InboundAction::Ignore);
             }
 
             let matches = self
@@ -554,17 +613,17 @@ impl BridgeCore {
             if matches {
                 self.authorized_chat_id = Some(chat_id);
                 self.pending_pair_code = None;
-                return InboundAction::Paired { chat_id };
+                return Routed::Ready(InboundAction::Paired { chat_id });
             }
 
             if let Some(pending) = self.pending_pair_code.as_mut() {
                 pending.attempts += 1;
             }
-            return InboundAction::Ignore;
+            return Routed::Ready(InboundAction::Ignore);
         }
 
         if self.authorized_chat_id != Some(chat_id) {
-            return InboundAction::Ignore;
+            return Routed::Ready(InboundAction::Ignore);
         }
 
         // Parsing sits behind the gate on purpose: a listing names projects,
@@ -573,13 +632,13 @@ impl BridgeCore {
         // slash namespace is open and ours is closed, so only the pane can say
         // whether `/usage` is its command or a typo of `/use`.
         let unknown = match crate::control::spec::parse(&text) {
-            Ok(command) => return InboundAction::RunCommand { command },
+            Ok(command) => return Routed::Ready(InboundAction::RunCommand { command }),
             Err(crate::control::spec::ParseError::NotACommand) => None,
             Err(crate::control::spec::ParseError::Unknown { input, suggestion }) => {
                 Some((input, suggestion))
             }
             // A command we *do* own, used wrongly. Ours to answer.
-            Err(error) => return InboundAction::ReportParseError { error },
+            Err(error) => return Routed::Ready(InboundAction::ReportParseError { error }),
         };
 
         let reply_to = reply_to_message_id
@@ -590,7 +649,7 @@ impl BridgeCore {
             .command_state
             .plain_text_target(reply_to, self.last_pinged)
         {
-            Some(pane) => match unknown {
+            Some(pane) => Routed::Ready(match unknown {
                 Some((name, suggestion)) => InboundAction::UnknownSlash {
                     pane,
                     name,
@@ -598,18 +657,18 @@ impl BridgeCore {
                     suggestion,
                 },
                 None => InboundAction::InjectPrompt { pane, text },
-            },
-            // Nowhere to send it. Which vocabulary the name belongs to is
-            // still not ours to decide, so the caller asks every pane before
-            // the answer picks between "no target" and "no such command".
-            None => match unknown {
-                Some((name, suggestion)) => InboundAction::UnaimedSlash {
+            }),
+            // Nothing here names a target, and this layer cannot ask the app
+            // for one. Handed on rather than answered — both the target and,
+            // for a slash, whose command it is are still open questions.
+            None => Routed::NeedsTarget(match unknown {
+                Some((name, suggestion)) => Unaimed::Slash {
                     name,
                     text,
                     suggestion,
                 },
-                None => InboundAction::Unaimed { text },
-            },
+                None => Unaimed::Text { text },
+            }),
         }
     }
 
@@ -813,7 +872,7 @@ mod tests {
     #[test]
     fn commands_are_ignored_before_pairing() {
         let mut core = BridgeCore::new(true, None, 0);
-        let action = core.route(message(1, 999, "/list", None)).action;
+        let action = core.route(message(1, 999, "/list", None)).action.ready();
         assert_eq!(
             action,
             InboundAction::Ignore,
@@ -824,7 +883,7 @@ mod tests {
     #[test]
     fn an_authorized_command_routes_to_run_command() {
         let mut core = BridgeCore::new(true, Some(42), 0);
-        let action = core.route(message(1, 42, "/list", None)).action;
+        let action = core.route(message(1, 42, "/list", None)).action.ready();
         assert_eq!(
             action,
             InboundAction::RunCommand {
@@ -842,11 +901,11 @@ mod tests {
         let action = core.route(message(1, 42, "/lst", None)).action;
         assert_eq!(
             action,
-            InboundAction::UnaimedSlash {
+            Routed::NeedsTarget(Unaimed::Slash {
                 name: "lst".into(),
                 text: "/lst".into(),
                 suggestion: Some("list"),
-            }
+            })
         );
     }
 
@@ -861,7 +920,7 @@ mod tests {
         let mut core = BridgeCore::new(true, Some(42), 0);
         let target = pane(1, 10);
         core.command_state_mut().select(Some(target));
-        let action = core.route(message(1, 42, "/usage", None)).action;
+        let action = core.route(message(1, 42, "/usage", None)).action.ready();
         assert_eq!(
             action,
             InboundAction::UnknownSlash {
@@ -884,11 +943,11 @@ mod tests {
         let action = core.route(message(1, 42, "/usage", None)).action;
         assert_eq!(
             action,
-            InboundAction::UnaimedSlash {
+            Routed::NeedsTarget(Unaimed::Slash {
                 name: "usage".into(),
                 text: "/usage".into(),
                 suggestion: Some("use"),
-            },
+            }),
             "with no target the reason is the missing target, not a typo"
         );
     }
@@ -900,7 +959,7 @@ mod tests {
     fn our_own_command_used_wrongly_is_still_ours_to_answer() {
         let mut core = BridgeCore::new(true, Some(42), 0);
         core.command_state_mut().select(Some(pane(1, 10)));
-        let action = core.route(message(1, 42, "/say", None)).action;
+        let action = core.route(message(1, 42, "/say", None)).action.ready();
         assert_eq!(
             action,
             InboundAction::ReportParseError {
@@ -915,9 +974,9 @@ mod tests {
         let action = core.route(message(1, 42, "hello", None)).action;
         assert_eq!(
             action,
-            InboundAction::Unaimed {
+            Routed::NeedsTarget(Unaimed::Text {
                 text: "hello".into()
-            }
+            })
         );
     }
 
@@ -926,7 +985,10 @@ mod tests {
         let mut core = BridgeCore::new(true, Some(42), 0);
         let target = pane(1, 10);
         core.command_state_mut().select(Some(target));
-        let action = core.route(message(1, 42, "add tests too", None)).action;
+        let action = core
+            .route(message(1, 42, "add tests too", None))
+            .action
+            .ready();
         assert_eq!(
             action,
             InboundAction::InjectPrompt {
@@ -948,7 +1010,7 @@ mod tests {
             .command_state_mut()
             .listing_token(Ordinal(1))
             .expect("token");
-        let action = core.route(callback(1, 42, "cb", &token)).action;
+        let action = core.route(callback(1, 42, "cb", &token)).action.ready();
         assert_eq!(action, InboundAction::SelectTarget { pane: a });
     }
 
@@ -962,7 +1024,7 @@ mod tests {
             update_id: 9,
             kind: UpdateKind::Unsupported,
         });
-        assert_eq!(result.action, InboundAction::Unsupported);
+        assert_eq!(result.action.ready(), InboundAction::Unsupported);
         assert_eq!(result.answer_callback_id, None, "nothing to acknowledge");
         assert_eq!(core.current_offset(), 10);
     }
@@ -1020,7 +1082,7 @@ mod tests {
     fn unauthorized_message_with_no_pending_pair_is_ignored() {
         let mut bridge = BridgeCore::new(true, None, 0);
         let result = bridge.route(message(1, 999, "hello", None));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, None);
     }
 
@@ -1030,7 +1092,10 @@ mod tests {
         let code = bridge.new_pair_code();
 
         let result = bridge.route(message(1, 555, &format!("/pair {code}"), None));
-        assert_eq!(result.action, InboundAction::Paired { chat_id: 555 });
+        assert_eq!(
+            result.action.ready(),
+            InboundAction::Paired { chat_id: 555 }
+        );
         assert_eq!(bridge.authorized_chat_id, Some(555));
 
         // A follow-up message from the now-authorized chat routes as
@@ -1040,7 +1105,7 @@ mod tests {
         bridge.last_pinged = Some(pane(1, 1));
         let result = bridge.route(message(2, 555, "ping back", None));
         assert_eq!(
-            result.action,
+            result.action.ready(),
             InboundAction::InjectPrompt {
                 pane: pane(1, 1),
                 text: "ping back".to_string(),
@@ -1054,7 +1119,7 @@ mod tests {
         bridge.pending_pair_code = Some(fresh_pending_code("AB12CD"));
 
         let result = bridge.route(message(1, 42, "/pair ab12cd", None));
-        assert_eq!(result.action, InboundAction::Paired { chat_id: 42 });
+        assert_eq!(result.action.ready(), InboundAction::Paired { chat_id: 42 });
     }
 
     #[test]
@@ -1063,7 +1128,7 @@ mod tests {
         bridge.pending_pair_code = Some(fresh_pending_code("AB12CD"));
 
         let result = bridge.route(message(1, 42, "/pair WRONG1", None));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(bridge.authorized_chat_id, None);
     }
 
@@ -1079,7 +1144,7 @@ mod tests {
 
         let result = bridge.route(message(1, 1, "answer", Some(41)));
         assert_eq!(
-            result.action,
+            result.action.ready(),
             InboundAction::InjectPrompt {
                 pane: reply_target,
                 text: "answer".to_string(),
@@ -1095,7 +1160,7 @@ mod tests {
 
         let result = bridge.route(message(2, 1, "answer", Some(999)));
         assert_eq!(
-            result.action,
+            result.action.ready(),
             InboundAction::InjectPrompt {
                 pane: fallback,
                 text: "answer".to_string(),
@@ -1111,9 +1176,9 @@ mod tests {
         // because silence reads as the bot being broken.
         assert_eq!(
             result.action,
-            InboundAction::Unaimed {
+            Routed::NeedsTarget(Unaimed::Text {
                 text: "hello".into()
-            }
+            })
         );
     }
 
@@ -1129,7 +1194,10 @@ mod tests {
 
         for _ in 0..2 {
             assert_eq!(
-                bridge.route(callback(1, 42, "cbq-1", &approve)).action,
+                bridge
+                    .route(callback(1, 42, "cbq-1", &approve))
+                    .action
+                    .ready(),
                 InboundAction::ResolveApproval {
                     id: ApprovalId(1),
                     choice: ApprovalChoice::Approved,
@@ -1137,7 +1205,10 @@ mod tests {
             );
         }
         assert_eq!(
-            bridge.route(callback(2, 42, "cbq-2", &refuse)).action,
+            bridge
+                .route(callback(2, 42, "cbq-2", &refuse))
+                .action
+                .ready(),
             InboundAction::ResolveApproval {
                 id: ApprovalId(1),
                 choice: ApprovalChoice::Refused,
@@ -1151,7 +1222,10 @@ mod tests {
         let mut bridge = BridgeCore::new(true, Some(42), 0);
         let (approve, _refuse) = bridge.record_pending_approval(ApprovalId(1));
         assert_eq!(
-            bridge.route(callback(1, 99, "cbq-1", &approve)).action,
+            bridge
+                .route(callback(1, 99, "cbq-1", &approve))
+                .action
+                .ready(),
             InboundAction::Ignore
         );
     }
@@ -1168,7 +1242,7 @@ mod tests {
         let mut after = BridgeCore::new(true, Some(42), 0);
         let _ = after.record_pending_approval(ApprovalId(1));
         assert_eq!(
-            after.route(callback(1, 42, "cbq-1", &stale)).action,
+            after.route(callback(1, 42, "cbq-1", &stale)).action.ready(),
             InboundAction::Ignore
         );
     }
@@ -1193,7 +1267,8 @@ mod tests {
         assert!(matches!(
             bridge
                 .route(callback(1, 42, "cbq-1", "abcdef0123456789"))
-                .action,
+                .action
+                .ready(),
             InboundAction::RespondPermission { .. }
         ));
     }
@@ -1209,7 +1284,7 @@ mod tests {
 
         let result = bridge.route(callback(1, 1, "cbq-1", "tok-a"));
         assert_eq!(
-            result.action,
+            result.action.ready(),
             InboundAction::RespondPermission {
                 pane: target,
                 perm_id: 55,
@@ -1220,7 +1295,7 @@ mod tests {
 
         // Second tap on the same (now-consumed) token is a no-op.
         let result = bridge.route(callback(2, 1, "cbq-2", "tok-a"));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-2".to_string()));
     }
 
@@ -1228,7 +1303,7 @@ mod tests {
     fn callback_with_unknown_token_is_ignored_but_still_acked() {
         let mut bridge = BridgeCore::new(true, Some(1), 0);
         let result = bridge.route(callback(1, 1, "cbq-x", "never-registered"));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-x".to_string()));
     }
 
@@ -1236,7 +1311,7 @@ mod tests {
     fn callback_from_unauthorized_chat_is_ignored_but_still_acked() {
         let mut bridge = BridgeCore::new(true, Some(1), 0);
         let result = bridge.route(callback(1, 2, "cbq-y", "irrelevant"));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-y".to_string()));
     }
 
@@ -1245,11 +1320,11 @@ mod tests {
         let mut bridge = BridgeCore::new(false, Some(1), 0);
 
         let msg_result = bridge.route(message(1, 1, "hello", None));
-        assert_eq!(msg_result.action, InboundAction::Ignore);
+        assert_eq!(msg_result.action.ready(), InboundAction::Ignore);
         assert_eq!(msg_result.answer_callback_id, None);
 
         let cb_result = bridge.route(callback(2, 1, "cbq-z", "tok"));
-        assert_eq!(cb_result.action, InboundAction::Ignore);
+        assert_eq!(cb_result.action.ready(), InboundAction::Ignore);
         assert_eq!(cb_result.answer_callback_id, Some("cbq-z".to_string()));
     }
 
@@ -1289,7 +1364,7 @@ mod tests {
         assert!(!bridge.sent_pings.contains_key(&evicted_id));
         let result = bridge.route(message(1000, 1, "late reply", Some(evicted_id)));
         assert_eq!(
-            result.action,
+            result.action.ready(),
             InboundAction::InjectPrompt {
                 pane: pane(1, (SENT_PINGS_CAP + extra - 1) as u64),
                 text: "late reply".to_string(),
@@ -1484,7 +1559,7 @@ mod tests {
         assert!(!bridge.pending_permissions.contains_key(&first_reject_token));
 
         let result = bridge.route(callback(1, 1, "cbq-evicted", &first_allow_token));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(result.answer_callback_id, Some("cbq-evicted".to_string()));
     }
 
@@ -1518,12 +1593,12 @@ mod tests {
         let code = bridge.new_pair_code();
 
         let result = bridge.route(message(1, 42, "/pair WRONG1", None));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         let result = bridge.route(message(2, 42, "/pair WRONG2", None));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
 
         let result = bridge.route(message(3, 42, &format!("/pair {code}"), None));
-        assert_eq!(result.action, InboundAction::Paired { chat_id: 42 });
+        assert_eq!(result.action.ready(), InboundAction::Paired { chat_id: 42 });
         assert_eq!(bridge.authorized_chat_id, Some(42));
     }
 
@@ -1534,7 +1609,7 @@ mod tests {
 
         for i in 0..PAIR_CODE_MAX_ATTEMPTS {
             let result = bridge.route(message(i as i64, 42, "/pair WRONGCODE", None));
-            assert_eq!(result.action, InboundAction::Ignore);
+            assert_eq!(result.action.ready(), InboundAction::Ignore);
             assert_eq!(bridge.authorized_chat_id, None);
         }
 
@@ -1547,7 +1622,7 @@ mod tests {
             &format!("/pair {code}"),
             None,
         ));
-        assert_eq!(result.action, InboundAction::Ignore);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
         assert_eq!(bridge.authorized_chat_id, None);
         assert!(bridge.pending_pair_code.is_none());
     }

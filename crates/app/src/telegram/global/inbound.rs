@@ -15,7 +15,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
 use super::super::bridge::{
-    BotPermissionOutcome, CallbackEdit, InboundAction, PermissionDecision, RouteResult,
+    BotPermissionOutcome, CallbackEdit, InboundAction, PermissionDecision, RouteResult, Routed,
+    Unaimed,
 };
 use super::super::client;
 use super::super::command;
@@ -139,7 +140,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         answer_callback_id.is_some()
                     )
                 });
-                let action = adopt_fallback_target(action, cx);
+                let action = aim(action, cx);
 
                 match (answer_callback_id, action) {
                     // A permission button tap: apply the decision FIRST so the
@@ -225,14 +226,10 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         let reply = command::render_parse_error(&error);
                         send_command_reply(cx, &token, reply).await;
                     }
-                    // Reached only when `adopt_fallback_target` found nothing
-                    // to aim at. `text` is dropped here deliberately — there
-                    // is no pane to put it on — which is exactly why this arm
-                    // must never be reached with the adopt step skipped.
-                    (None, InboundAction::Unaimed { text }) => {
-                        trace::delivery("text.unaimed", || {
-                            format!("kind=text len={}", text.chars().count())
-                        });
+                    // Nowhere to send it, and `aim` already found the app had
+                    // no lane to offer either. It recorded the body it could
+                    // not place; what is left is telling the sender why.
+                    (None, InboundAction::NoTarget) => {
                         let reply = cx
                             .update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx));
                         send_command_reply(cx, &token, reply).await;
@@ -281,29 +278,15 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                             send_command_reply(cx, &token, reply).await;
                         }
                     }
-                    // The same slash with nothing to aim it at. Having no
+                    // The same slash, and the same missing target. Having no
                     // target says nothing about whose command the name is, so
                     // the vocabularies are still asked — and only a name every
                     // one of them rules out is answered as a typo. Otherwise
                     // the missing target is the real reason it went nowhere.
-                    (
-                        None,
-                        InboundAction::UnaimedSlash {
-                            name,
-                            text,
-                            suggestion,
-                        },
-                    ) => {
+                    (None, InboundAction::UnclaimedSlash { name, suggestion }) => {
                         let ours =
                             cx.update(|cx| control_resolve::slash_claim(cx, &name).rules_out());
-                        // `text` is the message as sent, arguments and all,
-                        // and both answers below drop it — there is no pane
-                        // to put it on. Its length is traced for the same
-                        // reason the plain arm traces its own: a body that
-                        // went nowhere should leave a mark.
-                        trace::delivery("slash.unaimed", || {
-                            format!("name={name} ours={ours} len={}", text.chars().count())
-                        });
+                        trace::delivery("slash.unclaimed", || format!("name={name} ours={ours}"));
                         let reply = if ours {
                             command::render_parse_error(
                                 &crate::control::spec::ParseError::Unknown {
@@ -394,7 +377,7 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
             // Handled inline in the poll loop, which is the only place that
             // can await the "that chat is gone" answer.
         }
-        InboundAction::UnknownSlash { .. } | InboundAction::UnaimedSlash { .. } => {
+        InboundAction::UnknownSlash { .. } | InboundAction::UnclaimedSlash { .. } => {
             // Same: settled in the poll loop, which can both read the
             // advertised command lists and await whichever answer that
             // settles on.
@@ -413,7 +396,7 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
         }
         InboundAction::RunCommand { .. }
         | InboundAction::ReportParseError { .. }
-        | InboundAction::Unaimed { .. } => {
+        | InboundAction::NoTarget => {
             // Answered inline in the poll loop, which is the only place that
             // can await the reply's send.
         }
@@ -536,7 +519,8 @@ fn dispatch_to_workspace(
     });
 }
 
-/// Give a targetless action the target the app itself is already pointing at.
+/// Settle the target question `route` could not, and with it the only thing
+/// standing between a routed update and being acted on.
 ///
 /// The bridge's selection and last-pinged pane are in-memory, so a restart
 /// leaves the phone unable to reach anything until it is re-aimed by hand —
@@ -544,39 +528,62 @@ fn dispatch_to_workspace(
 /// the last link in the chain `plain_text_target` walks, resolved here rather
 /// than in `route` because only this layer can read a workspace.
 ///
-/// Both outcomes rejoin an arm that already exists, so nothing downstream
-/// learns a new shape: with a target, plain text is an `InjectPrompt` and an
-/// unowned slash is an `UnknownSlash` for that pane to claim.
-fn adopt_fallback_target(action: InboundAction, cx: &mut gpui::AsyncApp) -> InboundAction {
-    let adopted = match &action {
-        InboundAction::Unaimed { .. } | InboundAction::UnaimedSlash { .. } => {
-            cx.update(control_resolve::sole_active_agent_chat)
+/// The only way to obtain an [`InboundAction`] from a [`Routed`], which is
+/// what makes skipping this a type error rather than a comment. With a target
+/// found, both cases rejoin an arm that already existed — plain text is an
+/// `InjectPrompt`, an unowned slash an `UnknownSlash` for that pane to claim.
+/// Without one, both become their terminal answer, and the message body they
+/// were carrying is recorded as lost here rather than dropped by whichever
+/// arm happened to receive it.
+fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
+    let unaimed = match routed {
+        Routed::Ready(action) => return action,
+        Routed::NeedsTarget(unaimed) => unaimed,
+    };
+    match (cx.update(control_resolve::sole_active_agent_chat), unaimed) {
+        (Some(pane), Unaimed::Text { text }) => {
+            trace::delivery("target.fallback", || {
+                format!("pane={} kind=text", trace::pane(pane))
+            });
+            InboundAction::InjectPrompt { pane, text }
         }
-        _ => return action,
-    };
-    let Some(pane) = adopted else {
-        return action;
-    };
-    trace::delivery("target.fallback", || {
-        format!(
-            "pane={} action={}",
-            trace::pane(pane),
-            trace::action_name(&action)
-        )
-    });
-    match action {
-        InboundAction::Unaimed { text } => InboundAction::InjectPrompt { pane, text },
-        InboundAction::UnaimedSlash {
-            name,
-            text,
-            suggestion,
-        } => InboundAction::UnknownSlash {
-            pane,
-            name,
-            text,
-            suggestion,
-        },
-        other => other,
+        (
+            Some(pane),
+            Unaimed::Slash {
+                name,
+                text,
+                suggestion,
+            },
+        ) => {
+            trace::delivery("target.fallback", || {
+                format!("pane={} kind=slash name={name}", trace::pane(pane))
+            });
+            InboundAction::UnknownSlash {
+                pane,
+                name,
+                text,
+                suggestion,
+            }
+        }
+        (None, Unaimed::Text { text }) => {
+            trace::delivery("target.none", || {
+                format!("kind=text len={}", text.chars().count())
+            });
+            InboundAction::NoTarget
+        }
+        (
+            None,
+            Unaimed::Slash {
+                name,
+                text,
+                suggestion,
+            },
+        ) => {
+            trace::delivery("target.none", || {
+                format!("kind=slash name={name} len={}", text.chars().count())
+            });
+            InboundAction::UnclaimedSlash { name, suggestion }
+        }
     }
 }
 
@@ -615,11 +622,11 @@ mod tests {
     }
 
     /// The restart case the whole fallback exists for: the bridge knows of no
-    /// target, and the app's own active lane supplies one. Both targetless
-    /// actions rejoin the arms that already had a pane, so `/usage` reaches
-    /// the agent and plain text reaches the same chat.
+    /// target, and the app's own active lane supplies one. Both cases rejoin
+    /// the arms that already had a pane, so `/usage` reaches the agent and
+    /// plain text reaches the same chat.
     #[gpui::test]
-    async fn a_targetless_action_adopts_the_apps_own_lane(cx: &mut TestAppContext) {
+    async fn a_targetless_update_adopts_the_apps_own_lane(cx: &mut TestAppContext) {
         use crate::test_support::workspace_with_agent_chat;
 
         let fixture = workspace_with_agent_chat(cx);
@@ -627,10 +634,10 @@ mod tests {
         let mut async_cx = cx.to_async();
 
         assert_eq!(
-            adopt_fallback_target(
-                InboundAction::Unaimed {
+            aim(
+                Routed::NeedsTarget(Unaimed::Text {
                     text: "ship it".into()
-                },
+                }),
                 &mut async_cx,
             ),
             InboundAction::InjectPrompt {
@@ -639,12 +646,12 @@ mod tests {
             }
         );
         assert_eq!(
-            adopt_fallback_target(
-                InboundAction::UnaimedSlash {
+            aim(
+                Routed::NeedsTarget(Unaimed::Slash {
                     name: "usage".into(),
                     text: "/usage".into(),
                     suggestion: Some("use"),
-                },
+                }),
                 &mut async_cx,
             ),
             InboundAction::UnknownSlash {
@@ -656,31 +663,48 @@ mod tests {
         );
     }
 
-    /// Ambiguity has to survive the adopt step, not just be produced by it.
-    /// Two windows each offering their own lane resolve to no candidate, and
-    /// the action must come back untouched — rewriting it to a pane picked
-    /// from the two would start a turn in whichever the walk saw first.
+    /// Ambiguity has to survive the aim step. Two windows each offering their
+    /// own lane resolve to no candidate, and the update must fall to its
+    /// terminal answer — picking one of the two would start a turn in
+    /// whichever the walk happened to see first.
     #[gpui::test]
-    async fn an_ambiguous_app_hands_the_action_back_untouched(cx: &mut TestAppContext) {
+    async fn an_ambiguous_app_falls_to_the_terminal_answer(cx: &mut TestAppContext) {
         use crate::test_support::workspace_with_agent_chat;
 
         let _windows = [workspace_with_agent_chat(cx), workspace_with_agent_chat(cx)];
         let mut async_cx = cx.to_async();
 
-        let action = InboundAction::Unaimed {
-            text: "ship it".into(),
-        };
         assert_eq!(
-            adopt_fallback_target(action.clone(), &mut async_cx),
-            action,
+            aim(
+                Routed::NeedsTarget(Unaimed::Text {
+                    text: "ship it".into()
+                }),
+                &mut async_cx,
+            ),
+            InboundAction::NoTarget,
             "two candidates is not a target"
+        );
+        assert_eq!(
+            aim(
+                Routed::NeedsTarget(Unaimed::Slash {
+                    name: "lst".into(),
+                    text: "/lst".into(),
+                    suggestion: Some("list"),
+                }),
+                &mut async_cx,
+            ),
+            InboundAction::UnclaimedSlash {
+                name: "lst".into(),
+                suggestion: Some("list"),
+            },
+            "the suggestion still reaches the layer that can use it"
         );
     }
 
-    /// Every other action is returned as it came — the fallback must not
-    /// touch a decision that already named its pane.
+    /// An update that already names its pane is handed straight back — `aim`
+    /// resolves the target question, it does not revisit a settled one.
     #[gpui::test]
-    async fn an_action_that_already_has_a_target_is_untouched(cx: &mut TestAppContext) {
+    async fn an_update_that_already_has_a_target_is_untouched(cx: &mut TestAppContext) {
         use crate::test_support::workspace_with_agent_chat;
 
         let fixture = workspace_with_agent_chat(cx);
@@ -691,6 +715,6 @@ mod tests {
             pane,
             text: "already aimed".into(),
         };
-        assert_eq!(adopt_fallback_target(action.clone(), &mut async_cx), action);
+        assert_eq!(aim(Routed::Ready(action.clone()), &mut async_cx), action);
     }
 }

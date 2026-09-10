@@ -25,7 +25,7 @@
 
 use daruda_store::project::LaneRef;
 
-use super::bridge::{InboundAction, Outbound, PaneRef, TelegramTail};
+use super::bridge::{InboundAction, Outbound, PaneRef, Routed, TelegramTail, Unaimed};
 use super::client::UpdateKind;
 
 use std::fs::{File, OpenOptions};
@@ -249,12 +249,21 @@ pub(crate) fn pane(pane: PaneRef) -> String {
     format!("{}/{}", pane.workspace.as_inner(), pane.pane)
 }
 
-/// A stable short name per routed action, for the `routed` line.
+/// A stable short name per routed decision, for the `routed` line.
 ///
-/// Lives here rather than on [`InboundAction`] because it is trace
-/// vocabulary, not routing policy: `bridge.rs` is a pure state machine and
-/// gains nothing from knowing how its decisions are spelled in a log.
-pub(crate) fn action_name(action: &InboundAction) -> &'static str {
+/// Named before the target question is settled, so it reports what `route`
+/// decided rather than what the update became — the `target.fallback` /
+/// `target.none` lines that follow say which way that went.
+///
+/// Lives here rather than on [`Routed`] because it is trace vocabulary, not
+/// routing policy: `bridge.rs` is a pure state machine and gains nothing from
+/// knowing how its decisions are spelled in a log.
+pub(crate) fn action_name(routed: &Routed) -> &'static str {
+    let action = match routed {
+        Routed::Ready(action) => action,
+        Routed::NeedsTarget(Unaimed::Text { .. }) => return "unaimed_text",
+        Routed::NeedsTarget(Unaimed::Slash { .. }) => return "unaimed_slash",
+    };
     match action {
         InboundAction::Ignore => "ignore",
         InboundAction::Paired { .. } => "paired",
@@ -263,11 +272,11 @@ pub(crate) fn action_name(action: &InboundAction) -> &'static str {
         InboundAction::RunCommand { .. } => "run_command",
         InboundAction::ReportParseError { .. } => "report_parse_error",
         InboundAction::UnknownSlash { .. } => "unknown_slash",
-        InboundAction::UnaimedSlash { .. } => "unaimed_slash",
+        InboundAction::UnclaimedSlash { .. } => "unclaimed_slash",
         InboundAction::ResolveApproval { .. } => "resolve_approval",
         InboundAction::SelectTarget { .. } => "select_target",
         InboundAction::StaleListing => "stale_listing",
-        InboundAction::Unaimed { .. } => "unaimed",
+        InboundAction::NoTarget => "no_target",
         InboundAction::Unsupported => "unsupported",
     }
 }
@@ -381,13 +390,21 @@ mod tests {
         // The `routed` line is only useful if two different decisions never
         // read the same; the match is exhaustive, so this is the other half.
         let names = [
-            action_name(&InboundAction::Ignore),
-            action_name(&InboundAction::Paired { chat_id: 1 }),
-            action_name(&InboundAction::StaleListing),
-            action_name(&InboundAction::Unaimed {
+            action_name(&Routed::Ready(InboundAction::Ignore)),
+            action_name(&Routed::Ready(InboundAction::Paired { chat_id: 1 })),
+            action_name(&Routed::Ready(InboundAction::StaleListing)),
+            action_name(&Routed::Ready(InboundAction::NoTarget)),
+            action_name(&Routed::Ready(InboundAction::Unsupported)),
+            // Both halves of the split: a decision that still needs a target
+            // must not read the same as the terminal answer it becomes.
+            action_name(&Routed::NeedsTarget(Unaimed::Text {
                 text: String::new(),
-            }),
-            action_name(&InboundAction::Unsupported),
+            })),
+            action_name(&Routed::NeedsTarget(Unaimed::Slash {
+                name: String::new(),
+                text: String::new(),
+                suggestion: None,
+            })),
         ];
         let mut unique = names.to_vec();
         unique.sort_unstable();

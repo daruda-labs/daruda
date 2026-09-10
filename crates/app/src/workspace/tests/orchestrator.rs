@@ -59,7 +59,10 @@ fn listed_targets(cx: &mut TestAppContext) -> Vec<PaneRef> {
 #[test]
 fn daruda_routes_as_a_command_with_its_text_verbatim() {
     let mut core = BridgeCore::new(true, Some(42), 0);
-    let action = core.route(message(1, 42, "/daruda make me a pane")).action;
+    let action = core
+        .route(message(1, 42, "/daruda make me a pane"))
+        .action
+        .ready();
     assert_eq!(
         action,
         InboundAction::RunCommand {
