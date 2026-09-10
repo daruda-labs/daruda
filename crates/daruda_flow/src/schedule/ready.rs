@@ -5,9 +5,10 @@
 
 use crate::NodeId;
 use crate::graph::FlowGraph;
+use crate::lock::CanonicalTree;
 use crate::model::{Flow, GateFail, Node, NodeKind};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The next set of nodes to run together: ready, in declaration order, at
 /// most `parallel` of them, and **no two able to reach one working
@@ -41,7 +42,7 @@ pub(super) fn take_ready_batch(
 ) -> Batch {
     let mut batch: Vec<NodeId> = Vec::new();
     let mut held: Vec<NodeId> = Vec::new();
-    let mut taken_dirs: Vec<PathBuf> = Vec::new();
+    let mut taken_dirs: Vec<CanonicalTree> = Vec::new();
     waiting.retain(|id| {
         if batch.len() >= parallel || !deps_are_done(flow, id, done) {
             return true;
@@ -130,8 +131,8 @@ fn reachable_trees(
     graph: &FlowGraph,
     cwd: &Path,
     id: &NodeId,
-) -> Option<Vec<PathBuf>> {
-    let mut trees: Vec<PathBuf> = Vec::new();
+) -> Option<Vec<CanonicalTree>> {
+    let mut trees: Vec<CanonicalTree> = Vec::new();
     let mut seen: HashSet<NodeId> = HashSet::new();
     let mut queue: Vec<NodeId> = vec![id.clone()];
     while let Some(next) = queue.pop() {
@@ -150,7 +151,7 @@ fn reachable_trees(
         // in a subdirectory still reaches the root when it repairs — and
         // the flow author cannot narrow that the way they can a node's own
         // `cwd`.
-        push(&mut trees, canonical(cwd)?);
+        push(&mut trees, CanonicalTree::resolve(cwd).ok()?);
         queue.extend(
             graph
                 .rerun_closure(rerun)
@@ -192,15 +193,17 @@ fn rerun_of(node: &Node) -> Option<&[NodeId]> {
 /// Which directory a node actually works in, as something two nodes can be
 /// compared on.
 ///
-/// **Resolved, not compared as written.** `a` and `./a` are one directory
-/// spelled two ways, and a string comparison puts both in the same wave —
-/// bypassing the one rule this whole feature rests on with a `./`. The
-/// same goes for `A` and `a` on the case-insensitive filesystem macOS
-/// ships by default, and for a symlink pointing at a directory already
-/// taken.
+/// **Resolved, not compared as written** — which the return type now says
+/// rather than this comment. `a` and `./a` are one directory spelled two
+/// ways, and a string comparison puts both in the same wave, bypassing the
+/// one rule this whole feature rests on with a `./`. The same goes for `A`
+/// and `a` on the case-insensitive filesystem macOS ships by default, and
+/// for a symlink pointing at a directory already taken.
 ///
-/// `canonicalize` answers all three, because it asks the filesystem rather
-/// than the spelling. `None` when it cannot answer.
+/// [`CanonicalTree`] answers all three, because it asks the filesystem
+/// rather than the spelling — and is the same type the lock is keyed off,
+/// so the wave and the lock cannot disagree about what one tree is. `None`
+/// when the filesystem cannot answer.
 ///
 /// **No lexical fallback.** Falling back to the written form and calling
 /// two paths *different* would be safe only if a failure meant the
@@ -213,21 +216,15 @@ fn rerun_of(node: &Node) -> Option<&[NodeId]> {
 /// exists to prevent. The whole exclusion rests on this comparison, so
 /// when the comparison cannot be made the answer is "unknown", not
 /// "different".
-fn working_tree_of(cwd: &Path, node: &Node) -> Option<PathBuf> {
+fn working_tree_of(cwd: &Path, node: &Node) -> Option<CanonicalTree> {
     match &node.cwd {
-        Some(relative) => canonical(&cwd.join(relative)),
-        None => canonical(cwd),
+        Some(relative) => CanonicalTree::resolve(&cwd.join(relative)).ok(),
+        None => CanonicalTree::resolve(cwd).ok(),
     }
 }
 
-/// The one call the comparison rests on, named so every site that resolves
-/// a directory for it reads the same.
-fn canonical(path: &Path) -> Option<PathBuf> {
-    std::fs::canonicalize(path).ok()
-}
-
 /// Add a directory to the reservation, once.
-fn push(trees: &mut Vec<PathBuf>, dir: PathBuf) {
+fn push(trees: &mut Vec<CanonicalTree>, dir: CanonicalTree) {
     if !trees.contains(&dir) {
         trees.push(dir);
     }
@@ -243,12 +240,14 @@ fn push(trees: &mut Vec<PathBuf>, dir: PathBuf) {
 /// `sub/`.
 ///
 /// Both directions, because the reservation may be made in either order.
-/// Sound on resolved paths only, which is what `working_tree_of` returns:
-/// `starts_with` compares components, so `/a/bc` does not contain `/a/b`.
-fn overlaps(dir: &Path, taken: &[PathBuf]) -> bool {
-    taken
-        .iter()
-        .any(|other| dir.starts_with(other) || other.starts_with(dir))
+/// Sound on resolved paths only, and [`CanonicalTree`] is what makes that a
+/// precondition the caller cannot skip rather than a line here: a `&Path`
+/// does not go where one is wanted. `starts_with` then compares components,
+/// so `/a/bc` does not contain `/a/b`.
+fn overlaps(dir: &CanonicalTree, taken: &[CanonicalTree]) -> bool {
+    taken.iter().any(|other| {
+        dir.as_path().starts_with(other.as_path()) || other.as_path().starts_with(dir.as_path())
+    })
 }
 
 /// Whether everything this node waits on has finished.
