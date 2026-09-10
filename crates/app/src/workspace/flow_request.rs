@@ -269,17 +269,12 @@ impl Workspace {
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
-            return Err(FlowSubmitError::NoLane);
-        };
+        let (cwd, tree) = self.lane_tree(lane_ref)?;
         let is_alive: fn(u32) -> bool = process_is_alive;
-        // Where this lane's lock lives, outside the tree. A lane whose path
-        // will not resolve has no lock directory to name, and `prepare`
-        // would read every run as `Unknown` — which is to say unresumable,
-        // silently. Refused here instead, where it can be reported.
-        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd) else {
-            return Err(FlowSubmitError::LaneUnresolvable { path: cwd.clone() });
-        };
+        // Where this lane's lock lives, outside the tree. Told to look
+        // anywhere else, `prepare` reads every run as `Unknown` — which is
+        // to say unresumable, silently.
+        let lock_dir = daruda_flow::lock::lock_dir_for(&self.lock_root, &tree);
         let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
             .map_err(FlowSubmitError::Resume)?;
 
@@ -331,6 +326,32 @@ impl Workspace {
         })
     }
 
+    /// The lane's working directory, and the tree every lock for it is
+    /// keyed off.
+    ///
+    /// **The one place either refusal is decided**, so starting a run and
+    /// picking one up answer "this lane's folder will not resolve" the same
+    /// way. The resume path had a localized refusal and the fresh one had
+    /// none: the engine resolves the tree too, but a submission that was
+    /// never made then reported as a run that failed on I/O, in the
+    /// filesystem's words rather than daruda's.
+    ///
+    /// Validation refuses on it as well. A flow that would run in a folder
+    /// nothing can read is not a flow with no problems, and a green ✓
+    /// followed by that refusal is the worse of the two answers.
+    fn lane_tree(
+        &self,
+        lane_ref: daruda_store::project::LaneRef,
+    ) -> Result<(PathBuf, daruda_flow::lock::CanonicalTree), FlowSubmitError> {
+        let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
+            return Err(FlowSubmitError::NoLane);
+        };
+        match daruda_flow::lock::CanonicalTree::resolve(&cwd) {
+            Ok(tree) => Ok((cwd, tree)),
+            Err(_) => Err(FlowSubmitError::LaneUnresolvable { path: cwd }),
+        }
+    }
+
     fn assemble_flow_request(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
@@ -340,9 +361,9 @@ impl Workspace {
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let Some(cwd) = self.lane_for(lane_ref).map(|lane| lane.path.clone()) else {
-            return Err(FlowSubmitError::NoLane);
-        };
+        // The tree is the engine's to derive from `cwd`; resolving it here
+        // is the pre-flight refusal, not a value this path needs.
+        let (cwd, _) = self.lane_tree(lane_ref)?;
         let text = std::fs::read_to_string(flow_path).map_err(|e| FlowSubmitError::Read {
             path: flow_path.to_path_buf(),
             message: e.to_string(),

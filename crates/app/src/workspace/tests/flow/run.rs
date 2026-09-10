@@ -97,6 +97,45 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
     );
 }
 
+/// **All three entry points refuse a vanished lane the same way.**
+///
+/// The failure this pins is a split answer, not a missing one: starting a
+/// run used to fall through to the engine, which resolves the tree too and
+/// reported it as a run that failed on I/O — the filesystem's words, and a
+/// run in the history for a submission that never happened. Resuming
+/// already said `LaneUnresolvable`. A reader comparing the two had no way
+/// to tell it was one cause.
+#[gpui::test]
+async fn a_lane_whose_folder_is_gone_is_refused_the_same_way_everywhere(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, super::ONE_AGENT);
+    let run_dir = crate::workspace::flow_paths::runs_dir(lane.path()).join("01J");
+    std::fs::remove_dir_all(lane.path()).expect("delete the lane out from under the workspace");
+
+    let refusals = ws.update(cx, |ws, cx| {
+        [
+            ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
+                .err(),
+            ws.check_flow(ws.active, &flow_path, None, cx).err(),
+            ws.build_resume_request(ws.active, &run_dir, cx).err(),
+        ]
+    });
+
+    for refusal in &refusals {
+        assert!(
+            matches!(
+                refusal,
+                Some(crate::workspace::flow_request::FlowSubmitError::LaneUnresolvable { path })
+                    if path == lane.path()
+            ),
+            "{refusal:?}"
+        );
+    }
+    assert!(
+        !crate::workspace::flow_paths::runs_dir(lane.path()).exists(),
+        "a refused submission created a run directory"
+    );
+}
+
 /// The picker lists the lane's flows, and only its flows. This is the one
 /// step between the palette entry and everything above it.
 #[gpui::test]
