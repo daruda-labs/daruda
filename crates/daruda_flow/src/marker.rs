@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn each_outcome_a_run_can_record_writes_its_own_marker() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let cases: [(RunOutcome, &str, RunStatus); 5] = [
+        let cases: [(RunOutcome, &str, RunStatus); 6] = [
             (RunOutcome::Done, "DONE", RunStatus::Done),
             (
                 RunOutcome::Failed {
@@ -276,6 +276,13 @@ mod tests {
                 RunOutcome::Canceled { node: None },
                 "CANCELED",
                 RunStatus::Canceled,
+            ),
+            (
+                RunOutcome::Stalled {
+                    nodes: vec!["design".into()],
+                },
+                "STALLED",
+                RunStatus::Stalled,
             ),
         ];
         for (outcome, name, status) in cases {
@@ -401,6 +408,33 @@ mod tests {
         for i in 0..3 {
             let unmarked = format!("01A{i:02}");
             assert!(left.contains(&unmarked), "{unmarked} was swept: {left:?}");
+        }
+    }
+
+    /// The other half of the retention rule, and the one a tidy-up is most
+    /// likely to undo: `STALLED` *is* a marker, so adding it to `has_marker`
+    /// alongside the other three reads as an omission being corrected — and
+    /// deletes runs a resume could still have finished. The counts are the
+    /// sibling test's, for the same reasons.
+    #[test]
+    fn a_sweep_keeps_stalled_runs_however_old_they_are() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for i in 0..3 {
+            let run_dir = run_dir_in(dir.path(), &format!("01A{i:02}"));
+            std::fs::write(run_dir.join(STALLED), "").expect("marker");
+        }
+        for i in 0..25 {
+            finished_run_in(dir.path(), &format!("01B{i:02}"));
+        }
+
+        let removed = sweep_old_runs(dir.path(), 20).expect("sweep");
+
+        assert_eq!(removed.len(), 5, "{removed:?}");
+        let left = surviving(dir.path());
+        assert_eq!(left.len(), 23, "{left:?}");
+        for i in 0..3 {
+            let stalled = format!("01A{i:02}");
+            assert!(left.contains(&stalled), "{stalled} was swept: {left:?}");
         }
     }
 

@@ -163,12 +163,19 @@ pub(crate) fn archive_unclaimed_outputs(
 mod tests {
     use super::*;
 
-    /// The three statuses that are not a killed run, and the one that is.
-    /// Stated as a table because the whole of decision ① is which of these
-    /// gets a button.
+    /// The two statuses a run can be picked up from, and the five it
+    /// cannot. Stated as a table because the whole of decision ① is which
+    /// of these gets a button.
+    ///
+    /// `Stalled` is the one worth spelling out: it is the only *written*
+    /// marker on the resumable side, so a reading that sorts by "did it
+    /// record an ending" puts it with `Failed` and takes the button away
+    /// from a run that lost nothing.
     #[test]
-    fn only_a_killed_run_is_one_to_continue() {
-        assert!(is_resumable(RunStatus::Crashed));
+    fn a_killed_or_stalled_run_is_one_to_continue() {
+        for pickable in [RunStatus::Crashed, RunStatus::Stalled] {
+            assert!(is_resumable(pickable), "{pickable:?}");
+        }
         for ended in [
             RunStatus::Done,
             RunStatus::Failed,
