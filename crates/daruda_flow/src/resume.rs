@@ -242,6 +242,11 @@ mod tests {
     /// `run_status` falls back to that copy so the upgrade does not make
     /// such a run unresumable.
     #[test]
+    /// MIGRATION(985e75dd → remove in 0.3): this test *is* the
+    /// compatibility fallback — the `lock_dir` it passes was never written,
+    /// so `Crashed` can only come from the copy in the tree. Delete it with
+    /// `lock::compat`, not before.
+    #[allow(clippy::doc_markdown)]
     fn a_lock_left_inside_the_tree_by_an_older_build_still_answers() {
         let dir = tempfile::tempdir().expect("tempdir");
         let runs = dir.path().join(".daruda/flow-runs");

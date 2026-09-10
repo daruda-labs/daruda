@@ -181,7 +181,7 @@ impl AsRef<Path> for CanonicalTree {
 
 /// Where a working tree's lock pair lives under the host's lock root.
 ///
-/// **A directory per tree, not a file per tree.** [`take`] pairs `.lock`
+/// **A directory per tree, not a file per tree.** `take` pairs `.lock`
 /// with `.lock.takeover` through `with_file_name`, so two trees sharing one
 /// directory would share one takeover guard — and a reclaim for either
 /// would refuse the other and report a holder belonging to neither.
@@ -231,10 +231,11 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
 /// The lock's old home, inside the working tree.
 ///
 /// **MIGRATION(985e75dd → remove in 0.3).** Everything about the
-/// compatibility copy is here or tagged with that commit; grep it and
-/// delete the lot in one change. [`expiry`](self::tests) fails the build's
-/// tests once the version moves past 0.2, so "for one release" is a
-/// deadline the code keeps rather than a note someone has to remember.
+/// compatibility copy is here or carries that tag; `grep -r 985e75dd`
+/// finds the lot, tests included, and they go in one change. A test beside
+/// this module fails once the version passes the release the copy was kept
+/// for, so the deadline is one the code keeps rather than a note someone
+/// has to remember.
 ///
 /// **Why a module for one function.** The location was derived three times
 /// — the writer as `run_dir.parent().unwrap_or(cwd)`, the reader as
@@ -256,9 +257,12 @@ pub mod compat {
     ///
     /// `None` for a run directory with no parent — there is no runs
     /// directory then, and the caller has nothing to write a copy into or
-    /// read one from. Not a path to guess at: a copy placed somewhere the
-    /// old build does not look excludes nobody, and a lock file dropped
-    /// into a working tree root is litter an agent has to trip over.
+    /// read one from. Not a path to guess at: the writer used to fall back
+    /// to the working tree root, where the copy is a stray lock file an
+    /// agent trips over, and where this build would never look for it
+    /// again. (It would still have excluded the *old* build, whose writer
+    /// guessed the same place — the reason not to guess is the litter and
+    /// the disagreement with the reader, not a hole in the exclusion.)
     pub fn lock_dir(run_dir: &Path) -> Option<&Path> {
         run_dir.parent()
     }
@@ -695,22 +699,71 @@ mod tests {
     /// **The compatibility copy has a deadline, and this is what keeps it.**
     ///
     /// "For one release" is a note nobody is reminded of; a version bump is
-    /// something everybody does. This fails the moment daruda moves past
-    /// 0.2, which is the release the copy was written for — so the debt is
-    /// collected by the person holding the version bump rather than
-    /// discovered a year later by someone who cannot tell whether removing
-    /// it is safe.
+    /// something everybody does. So the deadline is spelled as a version
+    /// and checked, and the debt is collected by whoever holds the bump
+    /// rather than found a year later by someone who cannot tell whether
+    /// removing it is safe.
     ///
-    /// Delete this test together with what it guards, not on its own.
+    /// **The exact version, not the minor line.** `985e75dd` is in no tag
+    /// — every released build through v0.2.12 predates the move — so the
+    /// copy first ships in [`LAST_RELEASE_WITH_THE_COPY`] and the one after
+    /// that can drop it. Allowing the whole 0.2 line instead would mean
+    /// twelve more patch releases carrying it, which is what this project's
+    /// history says actually happens: v0.2.0 through v0.2.12 with no minor
+    /// bump at all.
+    ///
+    /// Delete this test together with what it guards, not on its own. To
+    /// keep the copy for longer, raise the constant deliberately.
     #[test]
     fn the_compatibility_copy_has_not_outlived_the_release_it_was_written_for() {
+        let version = env!("CARGO_PKG_VERSION");
         assert!(
-            env!("CARGO_PKG_VERSION").starts_with("0.2."),
-            "daruda is {} — past the one release the in-tree lock copy was \
-             kept for. Delete `lock::compat`, everything tagged \
-             MIGRATION(985e75dd), and this test.",
-            env!("CARGO_PKG_VERSION"),
+            !past(version, LAST_RELEASE_WITH_THE_COPY),
+            "daruda is {version} — past {LAST_RELEASE_WITH_THE_COPY}, the \
+             release the in-tree lock copy was kept for. Delete \
+             `lock::compat` and everything `grep -r 985e75dd` finds, this \
+             test included.",
         );
+    }
+
+    /// The last release allowed to write the in-tree copy.
+    const LAST_RELEASE_WITH_THE_COPY: &str = "0.2.13";
+
+    /// Whether `version` is later than `limit`, compared as numbers.
+    ///
+    /// Not `str::starts_with` or `>`: `"0.2.9" > "0.2.13"` lexically, and a
+    /// prefix match cannot express "up to this patch". An unparseable
+    /// component sorts as 0, which fails safe — a pre-release like
+    /// `0.3.0-rc1` reads as `0.3.0` and trips the deadline at the bump,
+    /// which is when the decision is actually being made.
+    fn past(version: &str, limit: &str) -> bool {
+        fn parts(v: &str) -> [u32; 3] {
+            let mut out = [0; 3];
+            for (slot, text) in out.iter_mut().zip(v.split('.')) {
+                *slot = text
+                    .split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|digits| digits.parse().ok())
+                    .unwrap_or(0);
+            }
+            out
+        }
+        parts(version) > parts(limit)
+    }
+
+    /// The comparison the deadline rests on, including the two shapes a
+    /// string compare gets wrong.
+    #[test]
+    fn a_version_is_past_the_limit_only_when_it_is_numerically_later() {
+        assert!(!past("0.2.12", "0.2.13"));
+        assert!(!past("0.2.13", "0.2.13"));
+        assert!(past("0.2.14", "0.2.13"));
+        // Lexically "0.2.9" > "0.2.13" and "0.10.0" < "0.2.13".
+        assert!(!past("0.2.9", "0.2.13"));
+        assert!(past("0.10.0", "0.2.13"));
+        assert!(past("1.0.0", "0.2.13"));
+        // A pre-release trips it at the bump, not after it.
+        assert!(past("0.3.0-rc1", "0.2.13"));
     }
 
     /// The two engine callers ask one function, so a run directory with no

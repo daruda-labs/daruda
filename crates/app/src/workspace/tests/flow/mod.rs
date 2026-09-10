@@ -235,6 +235,12 @@ fn picker_rows(ws: &crate::workspace::Workspace) -> Vec<String> {
 
 /// A run directory that a killed process left: a journal, a spec, and no
 /// marker, with a lock naming a pid that is gone.
+///
+/// MIGRATION(985e75dd → remove in 0.3): the lock goes only in the tree,
+/// which is the compatibility copy — with no marker it is the only
+/// evidence, so every test that reaches `Resumable` through this helper
+/// does it through the fallback. Plant it under the workspace's
+/// `lock_root` as well when the copy goes.
 fn killed_run_in(lane: &std::path::Path) -> std::path::PathBuf {
     let runs = crate::workspace::flow_paths::runs_dir(lane);
     let run_dir = runs.join("0000000000000001-00000001-0001");

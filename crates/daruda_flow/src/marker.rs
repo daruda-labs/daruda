@@ -205,10 +205,12 @@ fn has_marker(run_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    /// These keep the lock beside the run directory, which is where the
-    /// compatibility copy lives — so they read through `run_status`'s
-    /// fallback as well as its primary path. The lock's real home outside
-    /// the tree has tests of its own below.
+    /// These pass the run directory's parent as `run_status`'s `lock_dir`,
+    /// so they read its **primary** path — at a location that happens to be
+    /// where the compatibility copy also lives. The fallback never runs
+    /// here, because the primary answers first; `crate::resume` has the
+    /// test that covers it. The lock's real home outside the tree has tests
+    /// of its own below.
     fn status_beside(run_dir: &std::path::Path, is_alive: super::IsAlive<'_>) -> super::RunStatus {
         super::run_status(run_dir, run_dir.parent(), is_alive)
     }

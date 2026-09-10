@@ -835,6 +835,8 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
             .request
     });
 
+    // MIGRATION(985e75dd → remove in 0.3): the compatibility copy, which
+    // is where `killed_run_in` plants it. Read the new home when it goes.
     let holder = daruda_flow::lock::read_holder(run_dir.parent().expect("runs dir"))
         .expect("the killed run left its lock");
     assert!(
