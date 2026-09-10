@@ -239,6 +239,41 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
     );
 }
 
+/// **The app finds a lock at its new home, with nothing at the old one.**
+///
+/// Every other test here plants the compatibility copy inside the tree,
+/// which `lane_holder` reads only as a fallback — so all of them would
+/// still pass if the primary read were pointed at the wrong directory
+/// entirely. That fallback is due for deletion (MIGRATION since 985e75dd),
+/// and nothing covered what is left when it goes.
+#[gpui::test]
+async fn a_lock_at_its_new_home_is_found_with_nothing_left_inside_the_tree(
+    cx: &mut TestAppContext,
+) {
+    let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let lock_dir = ws.update(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, lane.path())
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("create the lock dir");
+    // pid 1 is alive on every unix and is emphatically not this process.
+    std::fs::write(
+        lock_dir.join(".lock"),
+        "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+    )
+    .expect("plant a lock");
+
+    let holder = ws.update(cx, |ws, _| ws.lane_holder(lane.path()));
+
+    assert_eq!(holder.map(|h| h.pid), Some(1), "{lock_dir:?}");
+    assert!(
+        !crate::workspace::flow_paths::runs_dir(lane.path())
+            .join(".lock")
+            .exists(),
+        "the fallback answered, so this proves nothing about the new path"
+    );
+}
+
 /// The whole point of the app is lanes running in parallel, so two flows
 /// can be in flight at once. A single run handle meant the second submit
 /// displaced the first one's cancel token, and a run ending then settled —
