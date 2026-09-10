@@ -622,6 +622,15 @@ pub struct Workspace {
     /// Injected at construction time: production passes `default_data_dir()`,
     /// tests pass a per-test temp directory.
     pub(in crate::workspace) data_dir: std::path::PathBuf,
+    /// Where flow run locks live. Injected for the same reason `data_dir`
+    /// is, and it has to be a second field rather than derived from it:
+    /// production wants the **shared, profile-independent** root, so that a
+    /// release build and a debug build running flows in one checkout
+    /// exclude each other, and no rule turns one profile's data directory
+    /// into that. A test wants the opposite — its own — because taking
+    /// locks in the developer's real root litters it with mirrors of
+    /// temporary paths, and a suite that thought it was isolated was not.
+    pub(in crate::workspace) lock_root: std::path::PathBuf,
     /// Customizable bottom-dock panels — user-managed tabs of macro
     /// widgets. Loaded from `panels.json` on construction (or seeded
     /// with Claude/Codex/Gemini on first launch). Mutations route
@@ -1315,6 +1324,14 @@ impl Workspace {
                     .placeholder(crate::surface::strings::task_search_placeholder())
             }),
             skill_plugin_expanded: std::collections::HashSet::new(),
+            // The shared root in production; under the test's own data
+            // directory otherwise, so a suite takes no lock the developer's
+            // app could see and leaves nothing in their config directory.
+            lock_root: if for_test {
+                data_dir.join(flow_paths::LOCKS_DIR)
+            } else {
+                daruda_store::persistence::flow_lock_root()
+            },
             data_dir,
             right_dock: {
                 let ws = ws_weak.clone();

@@ -141,7 +141,7 @@ impl Workspace {
     ) -> Option<FlowHistory> {
         if self.flow_history.get(lane).is_none() {
             let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
-            let lock_dir = super::flow_paths::lane_lock_dir(&cwd);
+            let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
             let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd), lock_dir.as_deref());
             self.flow_history.put(lane, read);
         }

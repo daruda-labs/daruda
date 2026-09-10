@@ -277,7 +277,7 @@ impl Workspace {
         // will not resolve has no lock directory to name, and `prepare`
         // would read every run as `Unknown` — which is to say unresumable,
         // silently. Refused here instead, where it can be reported.
-        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&cwd) else {
+        let Some(lock_dir) = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd) else {
             return Err(FlowSubmitError::LaneUnresolvable { path: cwd.clone() });
         };
         let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
@@ -301,7 +301,7 @@ impl Workspace {
             run_dir: run_dir.to_path_buf(),
             // The root, not this lane's own directory: the engine names the
             // per-tree one, so the app and the engine share one derivation.
-            lock_dir: super::flow_paths::locks_root(),
+            lock_dir: self.lock_root.clone(),
             // The run's own directory: `run.yaml` inlined every file-backed
             // prompt and hint when it was written, so a resumed run resolves
             // nothing against the flow file's directory — which may not even
@@ -370,7 +370,7 @@ impl Workspace {
             pinned,
             loaded,
             run_dir: super::flow_paths::runs_dir(&cwd).join(self.next_run_id()),
-            lock_dir: super::flow_paths::locks_root(),
+            lock_dir: self.lock_root.clone(),
             flow_dir: flow_path
                 .parent()
                 .map(Path::to_path_buf)

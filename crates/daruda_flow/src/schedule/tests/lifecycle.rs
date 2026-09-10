@@ -170,24 +170,35 @@ fn a_request_with_a_relative_path_never_starts() {
     );
 }
 
-/// **The lock is where the app will look for it, and where an agent
-/// cannot reach.**
+/// **The lock is under the root the host handed over, not wherever the run
+/// happens to be.**
+///
+/// Which root that is stays the host's call — production puts it beyond
+/// every working tree (`Workspace::lock_root`), these tests put it under
+/// the tree that cleans it up. What the engine owes either way is to key
+/// it off the tree by `lock_dir_for` and place it there.
 ///
 /// Asserted while the run is going, because `execute` gives the lock back
 /// on the way out — the end state looks the same either way. Without this
 /// the whole move is only checked by the compatibility copy, which is the
 /// one part due to be deleted.
 #[test]
-fn execute_takes_the_lock_outside_the_tree_and_the_copy_inside_it() {
-    /// Looks at both places on each call, then delegates.
-    struct Watcher(FakeRunner, std::cell::RefCell<Vec<(bool, bool)>>);
+fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
+    /// Looks at both places on each call, then delegates. Carries the root
+    /// off the request rather than rebuilding it, so the test cannot agree
+    /// with itself about a path the engine was never given.
+    struct Watcher(
+        FakeRunner,
+        std::path::PathBuf,
+        std::cell::RefCell<Vec<(bool, bool)>>,
+    );
 
     impl Watcher {
         fn look(&self, ctx: &RunContext<'_>) {
             let tree = crate::lock::CanonicalTree::resolve(ctx.cwd).expect("the tree resolves");
-            let outside = crate::lock::lock_dir_for(&LOCK_ROOT.with(|r| r.clone()), &tree);
-            self.1.borrow_mut().push((
-                crate::lock::read_holder(&outside).is_some(),
+            let under_root = crate::lock::lock_dir_for(&self.1, &tree);
+            self.2.borrow_mut().push((
+                crate::lock::read_holder(&under_root).is_some(),
                 ctx.run_dir
                     .parent()
                     .and_then(crate::lock::read_holder)
@@ -217,24 +228,20 @@ fn execute_takes_the_lock_outside_the_tree_and_the_copy_inside_it() {
         }
     }
 
-    thread_local! {
-        static LOCK_ROOT: std::path::PathBuf =
-            std::env::temp_dir().join("daruda-flow-test-locks");
-    }
-
     let dir = tempfile::tempdir().expect("tempdir");
-    let watcher = Watcher(FakeRunner::new(), std::cell::RefCell::new(Vec::new()));
-    execute(
-        &request_for(CHAIN, dir.path()),
-        &watcher,
-        &CancelToken::default(),
+    let request = request_for(CHAIN, dir.path());
+    let watcher = Watcher(
+        FakeRunner::new(),
+        request.lock_dir.clone(),
+        std::cell::RefCell::new(Vec::new()),
     );
+    execute(&request, &watcher, &CancelToken::default());
 
-    let seen = watcher.1.borrow().clone();
+    let seen = watcher.2.borrow().clone();
     assert!(!seen.is_empty(), "no node ran, so nothing was observed");
     assert!(
-        seen.iter().all(|(outside, _)| *outside),
-        "the authoritative lock must be outside the tree for the whole run: {seen:?}"
+        seen.iter().all(|(under_root, _)| *under_root),
+        "the authoritative lock must sit under the given root for the whole run: {seen:?}"
     );
     assert!(
         seen.iter().all(|(_, inside)| *inside),

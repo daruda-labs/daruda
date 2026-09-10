@@ -150,7 +150,7 @@ impl Workspace {
         &self,
         cwd: &Path,
     ) -> Option<daruda_flow::lock::LockHolder> {
-        super::flow_paths::lane_lock_dir(cwd)
+        super::flow_paths::lane_lock_dir(&self.lock_root, cwd)
             .and_then(|dir| daruda_flow::lock::read_holder(&dir))
             .or_else(|| daruda_flow::lock::read_holder(&super::flow_paths::runs_dir(cwd)))
             .filter(|holder| super::flow_request::process_is_alive(holder.pid))

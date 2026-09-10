@@ -18,6 +18,12 @@ use crate::runner::{CancelToken, NodeFailure};
 use crate::testing::{FakeRunner, Step};
 use std::time::Duration;
 
+/// The per-repository directory the host owns; named here only so the test
+/// lock root can sit inside it.
+const REPO_DIR: &str = ".daruda";
+/// Where these tests put the root they hand the engine as `lock_dir`.
+const TEST_LOCKS_DIR: &str = "flow-test-locks";
+
 pub(super) const CHAIN: &str = "\
 version: 1
 defaults: { agent: { id: claude } }
@@ -212,13 +218,20 @@ pub(super) fn request_for_profile(
         pinned: Vec::new(),
         cwd: dir.to_path_buf(),
         run_dir: dir.join(".daruda/flow-runs/01J"),
-        // Outside the tree, like the host's — which is the whole point of
-        // where the lock now lives, and what
+        // Under the tree's own temporary directory, so the tree that owns
+        // it also cleans it up. A fixed path in `temp_dir()` was unique per
+        // test — `lock_dir_for` mirrors the tree, and every tree here is
+        // its own temporary directory — but nothing ever removed it, and
+        // a suite that leaves a thousand directories behind per run is one
+        // nobody notices leaving them somewhere worse.
+        //
+        // Inside `.daruda` rather than beside it, which is what keeps
         // `nothing_the_engine_makes_sits_outside_the_directory_it_hides`
-        // checks. Keyed off the tree by `lock_dir_for`, and every test's
-        // tree is its own temporary directory, so two tests cannot collide
-        // here.
-        lock_dir: std::env::temp_dir().join("daruda-flow-test-locks"),
+        // meaningful. Whether the root is outside the working tree at all
+        // is the *host's* choice and is tested there
+        // (`Workspace::lock_root`); what the engine owes is to put the lock
+        // under the root it was handed.
+        lock_dir: dir.join(REPO_DIR).join(TEST_LOCKS_DIR),
         flow_dir: dir.to_path_buf(),
         agents: std::collections::HashMap::from([(
             "claude".to_string(),
