@@ -7,7 +7,9 @@
 use gpui::Context;
 
 use crate::workspace::Workspace;
+use crate::workspace::layout::diff_policy::{ByPointer, Handle, PerFrame};
 use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot};
+use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {
     pub(in crate::workspace) fn prepare_left_dock_snapshot(
@@ -36,9 +38,6 @@ impl Workspace {
             );
         LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
-            active_project_name: self
-                .active_project()
-                .map(|p| gpui::SharedString::from(p.name.clone())),
             lanes: self.active_lanes().to_vec(),
             projects: {
                 let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
@@ -86,25 +85,25 @@ impl Workspace {
             },
             active: self.active,
             git_status_cache: self.git_status_cache.clone(),
-            git_stage_in_flight: self.git_stage_in_flight,
-            git_op_in_flight: self.git_op_in_flight,
+            git_stage_in_flight: self.git_lock_held(GitLock::Index),
+            git_op_in_flight: self.git_lock_held(GitLock::Repo),
             git_collapsed_dirs: self
                 .git_collapsed_dirs
                 .get(&self.active)
                 .cloned()
                 .unwrap_or_default(),
             git_changes_cursor: self.git_changes_cursor.get(&self.active).cloned(),
-            git_changes_panel_focus: self.git_changes_panel_focus.clone(),
+            git_changes_panel_focus: Handle(self.git_changes_panel_focus.clone()),
             focused_file_selection: self
                 .focused_file_view()
                 .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged)),
-            git_changes_scroll_handle: self.git_changes_scroll_handle.clone(),
-            lanes_scroll_handle: self.lanes_scroll_handle.clone(),
-            git_commit_input: self.git_commit_input.clone(),
-            files_panel_focus: self.file_tree.files_panel_focus.clone(),
-            files_scroll_handle: self.file_tree.files_scroll_handle.clone(),
+            git_changes_scroll_handle: Handle(self.git_changes_scroll_handle.clone()),
+            lanes_scroll_handle: Handle(self.lanes_scroll_handle.clone()),
+            git_commit_input: Handle(self.git_commit_input.clone()),
+            files_panel_focus: Handle(self.file_tree.files_panel_focus.clone()),
+            files_scroll_handle: Handle(self.file_tree.files_scroll_handle.clone()),
             files_icon_color_mode: self.mirrors.files_icon_color_mode.clone(),
-            cached_visible: self.cached_or_rebuild_visible(self.active_ref()),
+            cached_visible: ByPointer(self.cached_or_rebuild_visible(self.active_ref())),
             root_kind: self
                 .file_tree
                 .file_trees
@@ -129,7 +128,7 @@ impl Workspace {
                 }),
             agent_install_banner_visible: self.claude.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
-            workspace: self.left_dock.read(cx).workspace.clone(),
+            workspace: Handle(self.left_dock.read(cx).workspace.clone()),
         }
     }
 
@@ -270,7 +269,7 @@ impl Workspace {
             agent_config_options,
             queued_prompts,
             shell,
-            workspace: self.bottom_dock.read(cx).workspace.clone(),
+            workspace: Handle(self.bottom_dock.read(cx).workspace.clone()),
         }
     }
 
@@ -278,24 +277,6 @@ impl Workspace {
         &mut self,
         cx: &mut Context<Self>,
     ) -> RightDockSnapshot {
-        // Deliberate attribution seam: Tasks rows anchor to the task's
-        // recorded `worktree_path`, so this aggregate stays cwd-keyed
-        // while the left dock attributes by pane ownership
-        // (`aggregate_over_panes`). A session `cd`'d away from its lane
-        // path can therefore appear under different anchors in the two
-        // docks.
-        let claude_status_per_path = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .tasks
-            .iter()
-            .filter_map(|t| t.state.worktree_path().cloned())
-            .filter_map(|p| {
-                self.claude
-                    .claude_status
-                    .aggregate_for_cwd(&p)
-                    .map(|s| (p, s))
-            })
-            .collect();
         // Per-session status keyed by the `session_id` so the Tasks
         // tab's row renderer can paint a `⟳ / ● / ⚠` glyph next to
         // each row's session-id badge without dipping into
@@ -468,7 +449,7 @@ impl Workspace {
             .collect();
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
-            workspace: self.right_dock.read(cx).workspace.clone(),
+            workspace: Handle(self.right_dock.read(cx).workspace.clone()),
             usage: usage_sections,
             focused_agent_domain: pane_domain,
             usage_domain_override: self.claude.usage_domain_override,
@@ -478,21 +459,20 @@ impl Workspace {
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()
                 .snapshot_for(self.active_lane_root().as_deref()),
-            skill_search_input: self.skill_search_input.clone(),
+            skill_search_input: Handle(self.skill_search_input.clone()),
             skill_search_query: self.skill_search_input.read(cx).value().to_string(),
             skill_plugin_expanded: self.skill_plugin_expanded.clone(),
             tasks: cx
                 .global::<crate::agent::tasks_global::GlobalTasks>()
                 .0
                 .clone(),
-            task_search_input: self.task_search_input.clone(),
+            task_search_input: Handle(self.task_search_input.clone()),
             task_search_query: self.task_search_input.read(cx).value().to_string(),
             task_filter: self.task_filter,
-            claude_status_per_path,
             claude_status_per_session,
             tool_use_failure_counts,
-            now: chrono::Utc::now(),
-            right_panel_scroll_handle: self.right_panel_scroll_handle.clone(),
+            now: PerFrame(chrono::Utc::now()),
+            right_panel_scroll_handle: Handle(self.right_panel_scroll_handle.clone()),
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),

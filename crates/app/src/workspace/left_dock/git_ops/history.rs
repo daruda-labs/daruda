@@ -7,6 +7,7 @@ use gpui::{AppContext as _, Context, Window};
 use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
+use crate::workspace::left_dock::git_ops::lock::GitLock;
 use crate::workspace::{CommitChanges, CommitMode, PushChanges, Workspace};
 
 impl Workspace {
@@ -20,10 +21,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.git_op_in_flight {
+        // Refused here, not just at the claim in `do_commit_changes`: this path
+        // opens a confirm dialog, and asking the user to confirm work that will
+        // then be refused is worse than not offering it.
+        if self.git_lock_held(GitLock::Repo) {
             return;
         }
-
         // In amend mode the primary button (and Cmd+Enter) amends instead of
         // creating a new commit.
         if self.is_amend_mode() {
@@ -87,18 +90,13 @@ impl Workspace {
         };
         let active_ref = self.active;
 
-        self.git_op_in_flight = true;
-        self.sync_commit_buttons(cx);
-        cx.notify();
-
         let message_bg = message.clone();
         let repo_for_report = repo_root.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || crate::lane::git::git_commit(&repo_root, &message_bg),
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
-                ws.sync_commit_buttons(cx);
                 match result {
                     Ok(()) => {
                         let input = ws.git_commit_input.clone();
@@ -126,8 +124,7 @@ impl Workspace {
                     }
                 }
             },
-        )
-        .detach();
+        );
     }
 
     /// Whether the Commit split button is currently in amend mode.
@@ -144,7 +141,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_context_menu(window, cx);
-        if self.git_op_in_flight {
+        if self.git_lock_held(GitLock::Repo) {
             return;
         }
         if self.is_amend_mode() {
@@ -327,17 +324,12 @@ impl Workspace {
         };
         let active_ref = self.active;
 
-        self.git_op_in_flight = true;
-        self.sync_commit_buttons(cx);
-        cx.notify();
-
         let repo_for_report = repo_root.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || crate::lane::git::git_commit_amend(&repo_root, &message),
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
-                ws.sync_commit_buttons(cx);
                 match result {
                     Ok(()) => {
                         let input = ws.git_commit_input.clone();
@@ -368,8 +360,7 @@ impl Workspace {
                     }
                 }
             },
-        )
-        .detach();
+        );
     }
 
     /// Push the current branch to the remote (no action struct needed — for
@@ -390,7 +381,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.git_op_in_flight {
+        // Same reason as `on_commit_changes`: a confirm dialog must not be
+        // raised for work the claim in `do_push` would refuse.
+        if self.git_lock_held(GitLock::Repo) {
             return;
         }
         if self.git_repo_root_for(self.active).is_none() {
@@ -420,17 +413,12 @@ impl Workspace {
             return;
         };
 
-        self.git_op_in_flight = true;
-        self.sync_commit_buttons(cx);
-        cx.notify();
-
         let repo_for_report = repo_root.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || crate::lane::git::git_push(&repo_root),
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
-                ws.sync_commit_buttons(cx);
                 cx.notify();
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error_git_push_failed())
@@ -443,28 +431,20 @@ impl Workspace {
                     ws.report_error(report, cx);
                 }
             },
-        )
-        .detach();
+        );
     }
 
     /// Fetch from all remotes.
     pub(in crate::workspace) fn on_fetch(&mut self, cx: &mut Context<Self>) {
-        if self.git_op_in_flight {
-            return;
-        }
         let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
-        self.git_op_in_flight = true;
-        self.sync_commit_buttons(cx);
-        cx.notify();
         let repo_for_report = repo_root.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || crate::lane::git::git_fetch(&repo_root),
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
-                ws.sync_commit_buttons(cx);
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error_git_fetch_failed())
                         .severity(ErrorSeverity::Error)
@@ -477,29 +457,21 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Pull from the remote tracking branch.
     pub(in crate::workspace) fn on_pull(&mut self, cx: &mut Context<Self>) {
-        if self.git_op_in_flight {
-            return;
-        }
         let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
         let active_ref = self.active;
-        self.git_op_in_flight = true;
-        self.sync_commit_buttons(cx);
-        cx.notify();
         let repo_for_report = repo_root.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || crate::lane::git::git_pull(&repo_root),
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
-                ws.sync_commit_buttons(cx);
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(active_ref, cx);
@@ -517,7 +489,6 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 }

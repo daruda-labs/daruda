@@ -5,6 +5,7 @@
 //! active at a time. Docks are independent from the center pane
 //! split tree — they resize via drag handles but do not split.
 
+pub(in crate::workspace) mod diff_policy;
 pub(in crate::workspace) mod ops;
 pub(in crate::workspace) mod snap;
 
@@ -155,6 +156,21 @@ pub(super) struct Dock {
 }
 
 impl Dock {
+    /// Take `next` as this dock's staged snapshot, reporting whether its
+    /// content changed. The caller notifies only when it did.
+    ///
+    /// The assignment is deliberately unconditional: the diff decides whether
+    /// the dock *repaints*, never whether it holds fresh data. A field excluded
+    /// from the diff (`diff_policy::PerFrame` — the render clock) is excluded
+    /// precisely so it cannot force a repaint, so gating the assignment on the
+    /// diff too would freeze it at the last frame something else changed, and
+    /// the task-live tick would then repaint a stale clock.
+    pub(in crate::workspace) fn stage(&mut self, next: DockSnapshot) -> bool {
+        let changed = !self.snap.same_content_as(&next);
+        self.snap = next;
+        changed
+    }
+
     pub fn new(position: DockPosition, workspace: WeakEntity<Workspace>) -> Self {
         let (size, min_size, max_size) = match position {
             DockPosition::Left => (

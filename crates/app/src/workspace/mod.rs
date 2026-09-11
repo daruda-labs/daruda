@@ -591,8 +591,12 @@ pub struct Workspace {
         main_area::pane_tree::PaneId,
         Vec<main_area::agent_chat_pane::telegram_ops::DeferredRelay>,
     >,
-    /// True while a git commit or push operation is running. Prevents
-    /// duplicate submissions when the user double-clicks Commit/Push.
+    /// True while a repo-level git operation (commit / amend / push / pull /
+    /// fetch / init) is running — [`GitLock::Repo`]. Prevents duplicate
+    /// submissions when the user double-clicks Commit/Push. Written only by
+    /// `spawn_locked_git_work`; read it through `git_lock_held`.
+    ///
+    /// [`GitLock::Repo`]: left_dock::git_ops::lock::GitLock::Repo
     pub(in crate::workspace) git_op_in_flight: bool,
     /// Commit split button mode (Normal vs Amend). In `Amend` the primary
     /// button reads "Amend" (drives `git commit --amend`) and the dropdown
@@ -601,8 +605,11 @@ pub struct Workspace {
     /// prefilled message belongs to that lane's HEAD.
     pub(in crate::workspace) commit_mode: CommitMode,
     /// True while a staging operation (git add / restore-staged / add-all) is
-    /// running. Separate from `git_op_in_flight` so a stage click doesn't
-    /// block the commit button and vice versa.
+    /// running — [`GitLock::Index`]. Separate from `git_op_in_flight` so a stage
+    /// click doesn't block the commit button and vice versa. Written only by
+    /// `spawn_locked_git_work`; read it through `git_lock_held`.
+    ///
+    /// [`GitLock::Index`]: left_dock::git_ops::lock::GitLock::Index
     pub(in crate::workspace) git_stage_in_flight: bool,
     /// Per-lane set of collapsed dir groups in the Git Changes view.
     /// Keyed by the lane-relative dir string emitted by `group_by_dir`
@@ -1859,7 +1866,7 @@ impl Workspace {
             .map(|(id, view)| (id, view.clone()))
             .filter(|(_, v)| {
                 let vr = v.read(cx);
-                vr.activity.was_busy || vr.maybe_active()
+                vr.activity.span.is_busy() || vr.maybe_active()
             })
             .collect();
 
@@ -1873,10 +1880,10 @@ impl Workspace {
         for (pane_id, view) in &candidates {
             let edge = view.update(cx, |v, _| v.reconcile_activity(tick_now));
             // `reconcile_activity` just recomputed the busy level with `tick_now`
-            // and stored it in `was_busy`; read that instead of calling
+            // and stored it in `activity.span`; read that instead of calling
             // `is_busy()` again (a second O(items) `subagent_activity` scan with a
             // fresh `Instant::now()`) so the whole tick uses one consistent `now`.
-            if view.read(cx).activity.was_busy {
+            if view.read(cx).activity.span.is_busy() {
                 busy_ids.push(view.entity_id());
             }
             if let Some(outcome) = edge {

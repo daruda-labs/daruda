@@ -5,12 +5,14 @@
 //! Submodules by responsibility: [`status`] (refresh + commit-button sync +
 //! repo-root), [`file_view`] (pane-area file viewer), [`index`]
 //! (stage/unstage/discard), [`history`] (commit/amend/push/pull/fetch),
-//! [`nav`] (keyboard cursor + dir collapse), [`init`] (`git init`).
+//! [`nav`] (keyboard cursor + dir collapse), [`init`] (`git init`), [`lock`]
+//! (the exclusive-op locks every one of them claims).
 
 pub(in crate::workspace) mod file_view;
 pub(in crate::workspace) mod history;
 pub(in crate::workspace) mod index;
 pub(in crate::workspace) mod init;
+pub(in crate::workspace) mod lock;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod status;
 

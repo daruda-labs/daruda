@@ -15,8 +15,8 @@ use super::super::rows::{FilterMatchIndex, LiveSubagentUnits, RowKind, project_w
 use super::super::tool_hierarchy::ToolHierarchy;
 use super::super::window_access::WindowAccess;
 use super::{
-    ActivityState, AgentChatView, AgentSessionStatus, PhoneAckEffect, PhoneTurnAction, TurnOutcome,
-    debug_list_trace_enabled,
+    ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, PhoneAckEffect,
+    PhoneTurnAction, Replay, TurnOutcome, debug_list_trace_enabled,
 };
 use crate::surface::strings as s;
 
@@ -58,7 +58,7 @@ impl AgentChatView {
         // conversation and the `Update` arm narrows it.
         let mut reconcile_scope = ReconcileScope::All;
         // Set only when a `session/load` replay just finished (the `Connected`
-        // reply cleared `restoring`), so the tail runs the single catch-up.
+        // reply closed the gate), so the tail runs the single catch-up.
         let mut finished_restore = false;
         // Set when a turn just settled (natural completion or a session error).
         // The turn's streamed rows may have changed height via the *trailing*
@@ -115,14 +115,12 @@ impl AgentChatView {
                 self.session_capabilities = capabilities;
                 // A real resume (`session/load`) returns the same id we asked to
                 // load; a resume the agent couldn't load was downgraded to a fresh
-                // `session/new` with a NEW id. `self.restoring` was set
-                // optimistically at connect and can't tell those apart, so decide
-                // by id match — otherwise a downgraded resume keeps the prior
-                // session's title and skips fresh-session setup. Compare before
-                // overwriting `session_id`.
-                let resumed =
-                    self.restoring && self.session_id.as_deref() == Some(session_id.as_str());
-                self.restoring = false;
+                // `session/new` with a NEW id. The gate carries the id it asked
+                // for, so it can tell those apart — otherwise a downgraded resume
+                // keeps the prior session's title and skips fresh-session setup.
+                // Compare before overwriting `session_id`.
+                let resumed = self.replay.resumed(&session_id);
+                self.replay = Replay::Live;
                 // A resume's replayed `session/update`s already populated `items`
                 // by this point (see the comment above) — sync the baseline now
                 // so those replayed messages don't later look like a background
@@ -151,8 +149,7 @@ impl AgentChatView {
                     self.activity.subagent_last_activity.clear();
                     // Reset the activity-span tracker so a prior session's edge
                     // state / captured outcome can't leak into the fresh one.
-                    self.activity.activity_started_at = None;
-                    self.activity.was_busy = false;
+                    self.activity.span = ActivitySpan::Idle;
                     self.activity.pending_completion = None;
                     self.activity.cancel_in_flight = false;
                     // A fresh session gets its own chance to report a dropped-
@@ -214,7 +211,7 @@ impl AgentChatView {
                 // TurnEnded to trigger the normal completion relay).
                 if (touched_text || touched_tool)
                     && !self.queue.turn.is_in_flight()
-                    && !self.restoring
+                    && !self.replay.is_loading()
                 {
                     self.activity.post_turn_dirty_at = Some(std::time::Instant::now());
                 }
@@ -379,7 +376,7 @@ impl AgentChatView {
                 self.activity.cancel_in_flight = false;
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
-                self.restoring = false;
+                self.replay = Replay::Live;
                 // Whatever replayed before the failure is now the baseline —
                 // it was already delivered by the replay itself, not a
                 // background follow-up.
@@ -480,7 +477,7 @@ impl AgentChatView {
         // catch-up instead of a rebuild per replayed event. (The per-event
         // reconciles are unchanged, so replay cost is no better than live-
         // streaming the same events; this only removes the redundant rebuilds.)
-        if self.restoring {
+        if self.replay.is_loading() {
             return telegram_first_response_effect;
         }
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
@@ -529,12 +526,12 @@ impl AgentChatView {
     }
 
     /// Release a stuck replay gate: if a misbehaving adapter closes the event
-    /// stream mid-load without a `Connected`/`Error` to clear `restoring`, the
+    /// stream mid-load without a `Connected`/`Error` to close it, the
     /// accumulated items would never project. The pump calls this once its
-    /// loop exits so whatever arrived still renders. No-op when not restoring.
+    /// loop exits so whatever arrived still renders. No-op when not replaying.
     pub(in crate::workspace) fn abort_restore(&mut self, cx: &mut Context<Self>) {
-        if self.restoring {
-            self.restoring = false;
+        if self.replay.is_loading() {
+            self.replay = Replay::Live;
             // Whatever arrived before the stream closed is now the baseline —
             // it was already delivered by the (aborted) replay, not a
             // background follow-up.

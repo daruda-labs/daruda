@@ -419,10 +419,7 @@ impl Render for Workspace {
         // status pulse, which advances badge animation frames not present in
         // the snapshot and so keeps its explicit notify. Per Pitfall #10.
         self.left_dock.update(cx, |d, cx| {
-            let changed =
-                !matches!(&d.snap, DockSnapshot::Left(old) if !left_snap.content_differs(old));
-            if changed {
-                d.snap = DockSnapshot::Left(Box::new(left_snap));
+            if d.stage(DockSnapshot::Left(Box::new(left_snap))) {
                 cx.notify();
             }
         });
@@ -433,17 +430,12 @@ impl Render for Workspace {
         // by repainting on every 250 ms status-pulse tick (which leaves
         // this snapshot identical). Per root CLAUDE.md Pitfall #10.
         self.bottom_dock.update(cx, |d, cx| {
-            let unchanged = matches!(&d.snap, DockSnapshot::Bottom(old) if **old == bottom_snap);
-            if !unchanged {
-                d.snap = DockSnapshot::Bottom(Box::new(bottom_snap));
+            if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
                 cx.notify();
             }
         });
         self.right_dock.update(cx, |d, cx| {
-            let changed =
-                !matches!(&d.snap, DockSnapshot::Right(old) if !right_snap.content_differs(old));
-            if changed {
-                d.snap = DockSnapshot::Right(Box::new(right_snap));
+            if d.stage(DockSnapshot::Right(Box::new(right_snap))) {
                 cx.notify();
             }
         });

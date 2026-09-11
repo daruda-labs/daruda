@@ -234,7 +234,7 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
                 });
             }
         })
-        .child(indicator_cell(&task.state, snap.now, cx))
+        .child(indicator_cell(&task.state, *snap.now, cx))
         .child(title_cell(&task.title, theme::current(cx)))
         .children(duration)
         .children(session_badge)
@@ -408,9 +408,9 @@ fn duration_cell(
 ) -> Option<AnyElement> {
     let end = match &task.state {
         TaskState::Backlog => return None,
-        TaskState::Running { .. } => snap.now,
+        TaskState::Running { .. } => *snap.now,
         TaskState::Done { .. } | TaskState::Error { .. } | TaskState::Cancelled { .. } => {
-            task.finished_at.unwrap_or(snap.now)
+            task.finished_at.unwrap_or(*snap.now)
         }
     };
     let elapsed = (end - task.created_at).to_std().ok()?;

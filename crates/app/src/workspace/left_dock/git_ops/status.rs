@@ -9,6 +9,7 @@ use daruda_store::project::LaneRef;
 use gpui::Context;
 
 use crate::workspace::Workspace;
+use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {
     /// Repo root of the targeted lane, or `None` when it isn't
@@ -151,7 +152,7 @@ impl Workspace {
             .get(&self.active)
             .map(|s| s.staged.len())
             .unwrap_or(0);
-        let in_flight = self.git_op_in_flight;
+        let in_flight = self.git_lock_held(GitLock::Repo);
         // A normal commit needs staged changes; an amend can be message-only
         // (no staged changes), so amend mode only blocks while in flight.
         let commit_disabled = in_flight || (!self.is_amend_mode() && staged_count == 0);

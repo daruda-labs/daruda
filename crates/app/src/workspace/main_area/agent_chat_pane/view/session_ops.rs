@@ -21,7 +21,7 @@ use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
-use super::{ActivityOptionsTab, AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
+use super::{ActivityOptionsTab, ActivitySpan, AgentChatView, Turn, TurnOutcome};
 use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
@@ -706,7 +706,7 @@ impl AgentChatView {
 
     /// Shared teardown for a `/clear` reset and a post-`Error` retry: drop the
     /// live handle and event pump, wipe the conversation model + every runtime
-    /// cache. Does NOT touch `session_id`/`restoring`/`status` — the two
+    /// cache. Does NOT touch `session_id`/`replay`/`status` — the two
     /// callers differ there (fresh conversation vs. resume via `session/load`).
     fn teardown_transient_session_state(&mut self) {
         cancel_pending_permission(self);
@@ -720,8 +720,7 @@ impl AgentChatView {
         self.phone_turn_state = None;
         self.queue.turn = Turn::Idle;
         self.activity.subagent_last_activity.clear();
-        self.activity.activity_started_at = None;
-        self.activity.was_busy = false;
+        self.activity.span = ActivitySpan::Idle;
         self.activity.pending_completion = None;
         self.activity.cancel_in_flight = false;
         self.session_usage = None;
@@ -742,25 +741,30 @@ impl AgentChatView {
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
-        self.restoring = false;
         // `teardown_transient_session_state` already cleared `items`, so this
         // resets the baseline to 0 — a stray post-turn update queued before
         // teardown can't relay stale text into the fresh session.
         self.snap_post_turn_baseline();
-        self.status = AgentSessionStatus::Connecting;
         self.rebuild_rows(); // diff-splices list_state down to 0 rows
-        cx.notify();
+        // No resume target: a cleared conversation starts fresh.
+        self.begin_connect(None, cx);
     }
 
     /// Reconnect after a terminal `Error` without losing the conversation:
     /// same teardown as [`Self::reset_for_new_session`] but keeps `session_id`,
     /// so the reconnect resumes via `session/load` and replays the history.
-    pub(in crate::workspace) fn retry_for_reconnect(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// `resume` is the target the caller is about to reconnect with, passed in
+    /// rather than re-derived from `session_id` — the gate and the request it
+    /// gates are then decided in one place, by the caller that owns both.
+    pub(in crate::workspace) fn retry_for_reconnect(
+        &mut self,
+        resume: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.teardown_transient_session_state();
-        self.restoring = self.session_id.is_some();
-        self.status = AgentSessionStatus::Connecting;
         self.rebuild_rows();
-        cx.notify();
+        self.begin_connect(resume, cx);
     }
 
     /// Jump the conversation list to the bottom and re-engage `Tail` follow —

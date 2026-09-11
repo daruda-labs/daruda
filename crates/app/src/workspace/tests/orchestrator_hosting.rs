@@ -628,7 +628,8 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
 #[gpui::test]
 fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAppContext) {
     use crate::workspace::main_area::agent_chat_pane::{
-        telegram_ops::FIRST_RESPONSE_FALLBACK_SECS, view::TurnOutcome,
+        telegram_ops::FIRST_RESPONSE_FALLBACK_SECS,
+        view::{ActivitySpan, TurnOutcome},
     };
     let (window, workspace) = build_workspace(cx);
     let mut outbound =
@@ -653,7 +654,9 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                     .cloned()
                     .unwrap()
                     .update(cx, |view, _| {
-                        view.activity.was_busy = true;
+                        view.activity.span = ActivitySpan::Busy {
+                            started_at: std::time::Instant::now(),
+                        };
                         view.activity.pending_completion = Some(TurnOutcome::Completed);
                         view.start_phone_turn_for_test(
                             std::time::Instant::now()
@@ -668,7 +671,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                 ws.flush_telegram_first_response_fallbacks(cx);
                 ws.pulse_agent_chats(cx);
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
-                assert!(!view.activity.was_busy);
+                assert!(!view.activity.span.is_busy());
                 assert!(view.activity.pending_completion.is_none());
                 assert!(!view.is_phone_turn_waiting());
                 pane
