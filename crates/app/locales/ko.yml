@@ -442,7 +442,6 @@ agent_chat:
   tail_window_pair: "%{steps} · 호출 %{calls}"
   tail_window_tooltip: "응답에서 화면에 남길 최근 단계 수, 그리고 한 단계 안에서 보일 호출 수"
   tail_window_all: "전체"
-  tail_window_default: "기본값"
   tail_window_last: "%{count}개"
   tail_level_steps: "응답 안의 단계"
   tail_level_calls: "단계 안의 호출"

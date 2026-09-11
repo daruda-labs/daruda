@@ -21,43 +21,6 @@ use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWi
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// One entry of one level's list. `Default` is not a window value — it hands
-/// that level back to config, which is why the two cannot be one type: a level
-/// following `All` and a level pinned to `All` are different states.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum TailChoice {
-    Default,
-    Window(TailWindow),
-}
-
-impl TailChoice {
-    /// Element-id fragment. `default` cannot collide with a window: those key
-    /// off a step count.
-    fn token(self) -> String {
-        match self {
-            Self::Default => "default".to_string(),
-            Self::Window(window) => window.size().to_string(),
-        }
-    }
-
-    fn label(self) -> String {
-        match self {
-            Self::Default => s::agent_chat_tail_window_default(),
-            Self::Window(window) => tail_window_value(window),
-        }
-    }
-
-    /// Exactly one entry is checked per level: a following level marks
-    /// `Default`, so the list states *that* it follows config rather than
-    /// restating the value the chip already carries.
-    fn is_current(self, tail: PaneChoice<TailWindow>) -> bool {
-        match self {
-            Self::Default => tail.is_following(),
-            Self::Window(window) => tail.chosen() == Some(window),
-        }
-    }
-}
-
 /// Both levels' choices, as the chip and its two surfaces read them.
 #[derive(Clone, Copy)]
 pub(in crate::workspace::main_area::agent_chat_pane::render) struct TailChoices {
@@ -133,21 +96,22 @@ pub(super) fn tail_window_panel(
     .text_size(px(theme::agent_chat_font_size(cx)));
     for level in TailLevel::ALL {
         band = band.child(panel_heading(tail_level_heading(level), cx));
-        band = band.children(tail_window_choices().map(|choice| {
+        let shown = current.get(level).value();
+        band = band.children(tail_window_choices().map(|window| {
             let view = view.clone();
             radio(
                 SharedString::from(format!(
                     "agent-chat-tail-option-{}-{}-{pane_id}",
                     level.token(),
-                    choice.token()
+                    window.size()
                 )),
-                choice.label(),
+                tail_window_value(window),
                 (),
             )
-            .checked(choice.is_current(current.get(level)))
+            .checked(window == shown)
             .on_click(move |_, _window, app| {
                 if let Some(view) = view.upgrade() {
-                    view.update(app, |v, cx| apply_choice(v, level, choice, cx));
+                    view.update(app, |v, cx| v.set_tail_window(level, window, cx));
                 }
             })
         }));
@@ -155,32 +119,12 @@ pub(super) fn tail_window_panel(
     band.into_any_element()
 }
 
-/// The one place a picked entry becomes a state change, shared by the chip's
-/// menu and the panel's radio group so the two cannot drift on what an entry
-/// does.
-fn apply_choice(
-    view: &mut AgentChatView,
-    level: TailLevel,
-    choice: TailChoice,
-    cx: &mut Context<AgentChatView>,
-) {
-    match choice {
-        TailChoice::Default => view.reset_tail_window(level, cx),
-        TailChoice::Window(window) => view.set_tail_window(level, window, cx),
-    }
-}
-
 /// A level's entries in list order — one list behind both the dropdown and the
-/// panel's radio group. `Default` leads: it is the state the others depart
-/// from, and this axis has no footer button to hold it.
-fn tail_window_choices() -> impl Iterator<Item = TailChoice> {
-    std::iter::once(TailChoice::Default)
-        .chain(std::iter::once(TailChoice::Window(TailWindow::All)))
-        .chain(
-            TAIL_WINDOW_CHOICES
-                .into_iter()
-                .map(|n| TailChoice::Window(TailWindow::last(n))),
-        )
+/// panel's radio group. Every entry is a window, and the one checked is the
+/// level's effective value: a level that has picked nothing marks the window
+/// config gave it, so the list reads as "what this pane shows".
+fn tail_window_choices() -> impl Iterator<Item = TailWindow> {
+    std::iter::once(TailWindow::All).chain(TAIL_WINDOW_CHOICES.into_iter().map(TailWindow::last))
 }
 
 fn tail_level_heading(level: TailLevel) -> String {
@@ -216,14 +160,15 @@ fn build_tail_window_menu(
             let menu = menu.item(PopupMenuItem::label(SharedString::from(
                 tail_level_heading(level),
             )));
-            tail_window_choices().fold(menu, |m, choice| {
+            let shown = current.get(level).value();
+            tail_window_choices().fold(menu, |m, window| {
                 let view = view.clone();
                 m.item(
-                    PopupMenuItem::new(SharedString::from(choice.label()))
-                        .checked(choice.is_current(current.get(level)))
+                    PopupMenuItem::new(SharedString::from(tail_window_value(window)))
+                        .checked(window == shown)
                         .on_click(move |_, _window, app| {
                             if let Some(view) = view.upgrade() {
-                                view.update(app, |v, cx| apply_choice(v, level, choice, cx));
+                                view.update(app, |v, cx| v.set_tail_window(level, window, cx));
                             }
                         }),
                 )
@@ -318,23 +263,32 @@ mod tests {
         assert!(following(all).is_following());
     }
 
-    /// `All` is a value the user can pin; `Default` is the absence of a pin.
-    /// The list has to offer both, and check exactly one — per level.
+    /// The list states what the pane shows, so the checked entry is the
+    /// effective window whether the level picked it or inherited it from
+    /// config. A pane that has picked nothing must still mark one entry —
+    /// keying the check off `chosen()` left an untouched level blank.
     #[test]
-    fn the_list_separates_following_from_pinning_the_same_value() {
-        let checked = |tail| {
+    fn the_checked_entry_is_the_effective_window_however_it_got_there() {
+        let checked = |tail: PaneChoice<TailWindow>| {
+            let shown = tail.value();
             tail_window_choices()
-                .filter(|c| c.is_current(tail))
+                .filter(|w| *w == shown)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(
-            checked(PaneChoice::Seeded(TailWindow::All)),
-            vec![TailChoice::Default]
-        );
-        assert_eq!(
-            checked(PaneChoice::Chosen(TailWindow::All)),
-            vec![TailChoice::Window(TailWindow::All)]
-        );
+        for window in [TailWindow::All, TailWindow::last(TAIL_WINDOW_CHOICES[0])] {
+            assert_eq!(checked(PaneChoice::Seeded(window)), vec![window]);
+            assert_eq!(checked(PaneChoice::Chosen(window)), vec![window]);
+        }
+    }
+
+    /// A window config states that the list does not offer has nothing to
+    /// check — a hand-written `tail_window = 12` leaves every entry unmarked
+    /// rather than marking a neighbour.
+    #[test]
+    fn an_off_list_window_marks_nothing() {
+        let shown = TailWindow::Last(12);
+        assert!(!TAIL_WINDOW_CHOICES.contains(&12));
+        assert_eq!(tail_window_choices().filter(|w| *w == shown).count(), 0);
     }
 
     /// The dropdown and the panel's radio group are the same control in two
@@ -343,10 +297,9 @@ mod tests {
     #[test]
     fn the_menu_and_the_panel_offer_the_same_choices() {
         let choices: Vec<_> = tail_window_choices().collect();
-        assert_eq!(choices.len(), TAIL_WINDOW_CHOICES.len() + 2);
-        assert_eq!(choices[0], TailChoice::Default);
-        assert_eq!(choices[1], TailChoice::Window(TailWindow::All));
-        assert!(choices.iter().all(|c| !c.label().is_empty()));
+        assert_eq!(choices.len(), TAIL_WINDOW_CHOICES.len() + 1);
+        assert_eq!(choices[0], TailWindow::All, "the widest window leads");
+        assert!(choices.iter().all(|w| !tail_window_value(*w).is_empty()));
         // Each level heads its own copy of that list, and the two headings are
         // distinguishable — a shared heading would leave the flat menu unable
         // to say which level an entry belongs to.
@@ -359,24 +312,15 @@ mod tests {
         assert!(headings.iter().all(|h| !h.is_empty()));
     }
 
-    /// A level's choices answer only about that level.
+    /// Each level marks its own window, so one level's pick cannot move the
+    /// other's check.
     #[test]
-    fn one_levels_list_ignores_the_other_level() {
+    fn each_level_marks_its_own_window() {
         let split = choices(
             PaneChoice::Chosen(TailWindow::Last(3)),
             PaneChoice::Seeded(TailWindow::All),
         );
-        assert_eq!(
-            tail_window_choices()
-                .filter(|c| c.is_current(split.get(TailLevel::Steps)))
-                .collect::<Vec<_>>(),
-            vec![TailChoice::Window(TailWindow::Last(3))]
-        );
-        assert_eq!(
-            tail_window_choices()
-                .filter(|c| c.is_current(split.get(TailLevel::Calls)))
-                .collect::<Vec<_>>(),
-            vec![TailChoice::Default]
-        );
+        assert_eq!(split.get(TailLevel::Steps).value(), TailWindow::Last(3));
+        assert_eq!(split.get(TailLevel::Calls).value(), TailWindow::All);
     }
 }

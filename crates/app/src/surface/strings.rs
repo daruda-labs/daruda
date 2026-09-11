@@ -2418,12 +2418,6 @@ pub fn agent_chat_tail_window_all() -> String {
     rust_i18n::t!("agent_chat.tail_window_all").into_owned()
 }
 
-/// The tail axis's list has no footer button — its return to the configured
-/// default is the first entry of the radio list itself.
-pub fn agent_chat_tail_window_default() -> String {
-    rust_i18n::t!("agent_chat.tail_window_default").into_owned()
-}
-
 pub fn agent_chat_tail_window_last(count: usize) -> String {
     rust_i18n::t!("agent_chat.tail_window_last", count = count).into_owned()
 }

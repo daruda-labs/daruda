@@ -477,6 +477,11 @@ impl AgentChatView {
         }
     }
 
+    /// Pin one level's window. One-way, unlike the fold and filter axes: this
+    /// axis's list states the effective window rather than whether the level
+    /// follows config, so it has no entry to hand the level back with. A level
+    /// the user never picks still tracks config through
+    /// [`Self::reseed_transcript_defaults`].
     pub(in crate::workspace) fn set_tail_window(
         &mut self,
         level: TailLevel,
@@ -495,30 +500,6 @@ impl AgentChatView {
         self.reproject(cx);
         // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
-            self.persist_pane_prefs(cx);
-        }
-    }
-
-    /// Hand one level of the tail axis back to config. Not a pick of the
-    /// default's value: the pane follows every later config edit again on that
-    /// level, and the save below clears the stored override rather than writing
-    /// a new one.
-    pub(in crate::workspace) fn reset_tail_window(
-        &mut self,
-        level: TailLevel,
-        cx: &mut Context<Self>,
-    ) {
-        let default = self.defaults.tail.get(level);
-        let slot = self.tail_choice_mut(level);
-        let before = *slot;
-        slot.reset(default);
-        let changed = before != *slot;
-        let reveal_changed = self.fold.clear_tail_reveals(level);
-        if !changed && !reveal_changed {
-            return;
-        }
-        self.reproject(cx);
-        if changed {
             self.persist_pane_prefs(cx);
         }
     }

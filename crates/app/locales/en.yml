@@ -443,7 +443,6 @@ agent_chat:
   tail_window_pair: "%{steps} · %{calls} calls"
   tail_window_tooltip: "How many recent steps of a response stay on screen, and how many calls inside one of those steps"
   tail_window_all: "All"
-  tail_window_default: "Default"
   tail_window_last: "%{count}"
   tail_level_steps: "Steps in a response"
   tail_level_calls: "Calls in a step"

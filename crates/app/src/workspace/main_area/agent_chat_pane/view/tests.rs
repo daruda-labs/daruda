@@ -1742,10 +1742,12 @@ fn other_defaults() -> TranscriptDefaults {
     }
 }
 
-/// The one check that tells `Seeded(x)` from `Chosen(x)`: both panes hold the
+/// The one check that tells `Seeded(x)` from `Chosen(x)`: two levels hold the
 /// same value, and only the one that is *following* moves when config does.
+/// The tail axis offers no return, so a pick here is one-way — which is
+/// exactly why pinning the value already shown has to register as a pick.
 #[gpui::test]
-fn a_reset_axis_follows_the_next_default_but_an_equal_choice_does_not(
+fn a_following_level_takes_the_next_default_but_an_equal_choice_does_not(
     cx: &mut gpui::TestAppContext,
 ) {
     let window = make_test_view(cx);
@@ -1766,11 +1768,8 @@ fn a_reset_axis_follows_the_next_default_but_an_equal_choice_does_not(
                 "the level the user never picked follows the reseed"
             );
 
-            // The same pane, handed back: it lands on the default now in force,
-            // not on the one it was built with.
-            view.reset_tail_window(TailLevel::Steps, cx);
-            assert_eq!(view.tail_steps, PaneChoice::Seeded(TailWindow::Last(5)));
-
+            // A second edit: the pinned level still holds, and the untouched
+            // one keeps tracking rather than freezing on the first reseed.
             view.reseed_transcript_defaults(
                 &TranscriptDefaults {
                     tail: StepWindow {
@@ -1781,10 +1780,11 @@ fn a_reset_axis_follows_the_next_default_but_an_equal_choice_does_not(
                 },
                 cx,
             );
+            assert_eq!(view.tail_steps, PaneChoice::Chosen(TailWindow::All));
             assert_eq!(
-                view.tail_steps,
-                PaneChoice::Seeded(TailWindow::Last(3)),
-                "a reset pane tracks every later config edit"
+                view.tail_calls,
+                PaneChoice::Seeded(TailWindow::Last(1)),
+                "a level that never picked tracks every later config edit"
             );
         })
         .expect("view update");
@@ -1814,23 +1814,33 @@ fn the_reset_is_offered_on_a_chosen_default_and_withheld_while_following(
         .expect("view update");
 }
 
+/// A pick lands on the level it names and nowhere else — the two share one
+/// setter, so a mis-wired level would silently write its sibling. A fresh pane
+/// per level, because nothing un-picks this axis: reusing one would leave the
+/// first level pinned for the second's turn.
 #[gpui::test]
-fn resetting_the_tail_window_hands_the_level_back(cx: &mut gpui::TestAppContext) {
-    let window = make_test_view(cx);
-    window
-        .update(cx, |view, _window, cx| {
-            view.reseed_transcript_defaults(&other_defaults(), cx);
-            for level in TailLevel::ALL {
+fn a_pick_lands_on_the_level_it_names(cx: &mut gpui::TestAppContext) {
+    for level in TailLevel::ALL {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.reseed_transcript_defaults(&other_defaults(), cx);
                 view.set_tail_window(level, TailWindow::Last(1), cx);
-                view.reset_tail_window(level, cx);
                 assert_eq!(
                     view.tail_choice_for_test(level),
-                    PaneChoice::Seeded(other_defaults().tail.get(level)),
-                    "{level:?} lands on its own default, not the other level's"
+                    PaneChoice::Chosen(TailWindow::Last(1)),
+                    "{level:?} holds the window it was given"
                 );
-            }
-        })
-        .expect("view update");
+                for other in TailLevel::ALL.into_iter().filter(|l| *l != level) {
+                    assert_eq!(
+                        view.tail_choice_for_test(other),
+                        PaneChoice::Seeded(other_defaults().tail.get(other)),
+                        "{level:?}'s pick must not reach {other:?}"
+                    );
+                }
+            })
+            .expect("view update");
+    }
 }
 
 /// The axis's levels are independent: pinning one must not detach the other

@@ -77,6 +77,7 @@ pub(in crate::workspace) struct StepWindow {
 }
 
 impl StepWindow {
+    #[cfg(test)]
     pub(in crate::workspace) fn get(self, level: TailLevel) -> TailWindow {
         match level {
             TailLevel::Steps => self.steps,
