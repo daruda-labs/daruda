@@ -22,6 +22,10 @@ use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
 use super::{ActivityOptionsTab, ActivitySpan, AgentChatView, Turn, TurnOutcome};
+// Only `seed_transcript` parks a pane out of `Idle`, and only a devtools build
+// has one.
+#[cfg(feature = "devtools")]
+use super::AgentSessionStatus;
 use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
