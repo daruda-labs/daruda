@@ -1,35 +1,24 @@
 //! Raw Telegram Bot API HTTP client — `getUpdates` / `sendMessage` /
-//! `answerCallbackQuery` plus the minimal wire-format parsing the
-//! routing layer needs. GPUI-free and stateless: every function takes
-//! the bot token as an argument and does not remember anything
-//! between calls (no offset tracking, no session state). The routing
-//! state machine (`bridge.rs`) owns the offset and decides what to
-//! send; the GPUI poll loop (`global.rs`) owns the timer that calls
-//! these functions repeatedly.
+//! `answerCallbackQuery` / `editMessageText`, plus the wire-format parsing
+//! the routing layer needs.
 //!
-//! `get_updates` / `send_message` / `answer_callback` are called from
-//! `global.rs`'s poll loop, which owns the offset bookkeeping and
-//! feeds parsed `Update`s into `bridge::BridgeCore`.
+//! GPUI-free and stateless: the token is an argument, nothing is kept between
+//! calls. `bridge` owns the offset; `global`'s poll loop owns the timer.
 
 use std::io::Read;
 use std::time::Duration;
 
 use serde::Deserialize;
 
-/// Failure surface for the three Bot API calls. Mirrors
-/// `daruda_agent::http::FetchError`'s transport-vs-parse split:
-/// `Http` for transport/status failures (including Telegram's own
-/// `"ok": false` API-level errors), `Parse` for JSON decode or
-/// unexpected-shape failures.
+/// Failure surface for the Bot API calls, mirroring
+/// `daruda_agent::http::FetchError`'s transport-vs-parse split.
 #[derive(Debug)]
 pub enum ClientError {
-    /// Network error, DNS failure, TLS handshake failure, non-2xx
-    /// status, response body read error, or a Telegram `"ok": false`
-    /// API-level error (bad token, chat not found, etc). The wrapped
-    /// string is for logging.
+    /// Transport, TLS, non-2xx status, or a Telegram `"ok": false` reply.
+    /// One variant because the caller's recourse is the same for all of them.
     Http(String),
-    /// JSON could not be decoded, or the decoded shape didn't match
-    /// the expected schema (missing required fields, wrong types).
+    /// JSON that would not decode, or decoded to a shape this module does
+    /// not expect.
     Parse(String),
 }
 
@@ -54,13 +43,12 @@ pub struct Update {
 
 /// The two update shapes this bridge acts on, plus everything else.
 ///
-/// Telegram sends many kinds this bridge has nothing to do with — a photo or
-/// sticker (a message with no `text`), `edited_message`, `channel_post`, a
-/// callback whose message was deleted. They are carried as
-/// [`Self::Unsupported`] rather than dropped during parsing, because the
-/// routing layer advances the `getUpdates` offset from every update it sees:
-/// silently discarding one leaves the offset behind it, and Telegram
-/// re-delivers it immediately, forever.
+/// INVARIANT: every update Telegram sends reaches the routing layer, which
+/// advances the `getUpdates` offset from the ids it sees. A kind this bridge
+/// cannot act on — a sticker, an `edited_message`, a callback whose message
+/// was deleted — becomes [`Self::Unsupported`] rather than being dropped.
+/// Drop one and the offset stays behind it, so Telegram re-delivers that
+/// batch on every poll, forever.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateKind {
     Message {
@@ -122,12 +110,9 @@ pub(crate) fn inline_keyboard_json(keyboard: &InlineKeyboard) -> serde_json::Val
 /// but 1 MiB is still generous for a handful of text messages.
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 
-/// Extra wall-clock margin added on top of the caller's long-poll
-/// `timeout_s` when building the HTTP client timeout for
-/// `get_updates`. Telegram holds the connection open for up to
-/// `timeout_s` seconds before responding with an empty result; the
-/// HTTP timeout must exceed that or the request aborts before
-/// Telegram would have replied.
+/// Added to the caller's `timeout_s` for [`get_updates`]'s HTTP timeout.
+/// Telegram holds the connection for the full long poll before answering
+/// empty, so a transport timeout at exactly `timeout_s` would abort first.
 const LONG_POLL_MARGIN: Duration = Duration::from_secs(5);
 
 /// Timeout for the two non-long-poll calls (`sendMessage`,
@@ -152,21 +137,16 @@ const REDACTED_TOKEN: &str = "<redacted>";
 /// Strip the bot token out of a transport error before it becomes a
 /// [`ClientError`].
 ///
-/// Telegram carries the token in the URL path, and every HTTP client puts the
-/// URL it failed on into its `Display` — so the raw string is a live bot
-/// credential, and `crate::telegram::global` writes these errors to the
-/// on-disk log. Anyone who reads a log file, or attaches one to a bug report,
-/// would be handing over control of the bot.
+/// Telegram carries the token in the URL path and every HTTP client puts the
+/// URL it failed on into its `Display`, so the raw string is a live bot
+/// credential — and `crate::telegram::global` writes these to the on-disk log.
 fn http_error(token: &str, e: impl std::fmt::Display) -> ClientError {
     ClientError::Http(e.to_string().replace(token, REDACTED_TOKEN))
 }
 
-/// Long-poll for new updates starting after `offset`. `timeout_s` is
-/// passed straight through to Telegram as the long-poll duration; the
-/// underlying HTTP client waits `timeout_s + 5s` to give Telegram
-/// margin to respond before the transport gives up. Returns whatever
-/// Telegram hands back — this function does not track or advance an
-/// offset itself, that's the routing layer's job.
+/// Long-poll for updates after `offset`. `timeout_s` goes straight to
+/// Telegram as its long-poll duration; the transport waits
+/// [`LONG_POLL_MARGIN`] longer so it cannot give up first.
 pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Update>, ClientError> {
     // Tests must never hit the network: a real long-poll blocks teardown for
     // the poll timeout and 409-conflicts a running app polling the same
@@ -188,13 +168,12 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
     parse_updates(&body)
 }
 
-/// Send a text message, optionally with a `parse_mode` (e.g. `"HTML"` — see
-/// `crate::telegram::markdown`) and/or an inline keyboard attached. Returns
-/// the new message's `message_id`. A malformed `text` for the given
-/// `parse_mode` (e.g. an unclosed tag) makes Telegram reject the whole call
-/// with an `Http` error — the caller (`global.rs`'s send loop) is
-/// responsible for retrying with `parse_mode: None` if that happens, this
-/// function does not.
+/// Send a text message, optionally with a `parse_mode` (see
+/// `crate::telegram::markdown`) and an inline keyboard.
+///
+/// Text that is malformed for its `parse_mode` — an unclosed tag — makes
+/// Telegram reject the call outright. Retrying without the `parse_mode` is
+/// `global`'s send loop's job, not this function's.
 pub fn send_message(
     token: &str,
     chat_id: i64,
@@ -229,13 +208,11 @@ pub fn send_message(
 /// rather than trusted to each of them.
 const ANSWER_CALLBACK_MAX_CHARS: usize = 200;
 
-/// Acknowledge a callback-query button tap. Telegram requires this call after
-/// handling a tap or the client shows a loading spinner on the button
-/// indefinitely. When `text` is `Some`, Telegram also shows it as a brief toast
-/// notification to the user — this is the immediate "your tap registered"
-/// feedback; without it the spinner just clears silently.
+/// Acknowledge a callback-query button tap, optionally with a toast.
 ///
-/// `text` is truncated to [`ANSWER_CALLBACK_MAX_CHARS`] on a char boundary.
+/// Required after every tap: without it the phone spins on the button until
+/// Telegram times the query out. `text` is the "your tap registered" feedback
+/// and is clamped to [`ANSWER_CALLBACK_MAX_CHARS`] on a char boundary.
 pub fn answer_callback(
     token: &str,
     callback_id: &str,
@@ -256,13 +233,11 @@ pub fn answer_callback(
     parse_answer_callback_response(&body)
 }
 
-/// Replace a previously-sent message's text and drop its inline keyboard
-/// (omitting `reply_markup` removes the buttons). Used after a permission button
-/// is tapped: the prompt message is rewritten to show the resolved outcome so
-/// the phone reflects the decision and the now-consumed buttons disappear. Sent
-/// as plain text (no `parse_mode`) — `text` is composed from the message's own
-/// display text plus an outcome line, and re-parsing display text as HTML could
-/// misrender.
+/// Rewrite a sent message and drop its buttons — omitting `reply_markup` is
+/// what removes them. Answers a tapped permission prompt with its outcome.
+///
+/// Deliberately no `parse_mode`: `text` is built from the message's own
+/// display text, and re-parsing that as HTML would misrender it.
 pub fn edit_message_text(
     token: &str,
     chat_id: i64,
@@ -307,9 +282,8 @@ struct RawEnvelope {
     description: Option<String>,
 }
 
-/// Shared `"ok": false` → `ClientError::Http` check, used by all three
-/// endpoints' parsers. `fallback` supplies the error text for the rare
-/// case where Telegram sets `ok: false` but omits `description`.
+/// Shared `"ok": false` → [`ClientError::Http`] check. `fallback` covers the
+/// rare reply that sets `ok: false` and omits `description`.
 fn require_ok(ok: bool, description: Option<String>, fallback: &str) -> Result<(), ClientError> {
     if ok {
         Ok(())
@@ -356,12 +330,10 @@ struct RawChat {
     id: i64,
 }
 
-/// `message` is `Option` because Telegram documents `CallbackQuery.message`
-/// as optional — it is absent for callback queries originating from an
-/// inline query, or when the original message has since been deleted. A
-/// `getUpdates` batch containing such a callback alongside otherwise-normal
-/// updates must still parse; `parse_updates` skips this callback rather
-/// than failing the whole batch (see `parse_updates`).
+/// `message` is `Option` because Telegram documents it so: absent for an
+/// inline-query callback, or once the original message is deleted. Required
+/// here, one such callback would fail the whole batch's decode — see
+/// [`UpdateKind`].
 #[derive(Debug, Deserialize)]
 struct RawCallbackQuery {
     id: String,
@@ -379,18 +351,11 @@ struct RawCallbackMessage {
     text: Option<String>,
 }
 
-/// Decode a `getUpdates` response body into the recognized subset of
-/// updates. Split out from `get_updates` so tests can exercise it
-/// directly against string fixtures without a network mock (mirrors
-/// `daruda_agent::limits::parse_plan_limits`).
+/// Decode a `getUpdates` response body. Separate from [`get_updates`] so
+/// tests reach it with string fixtures and no network mock.
 ///
-/// A callback query whose `message` is absent (deleted original
-/// message, or an inline-query-originated callback) is skipped rather
-/// than treated as a parse failure — it's a normal, documented
-/// Telegram API shape. Failing the whole batch over one such callback
-/// would permanently wedge the poll loop: `get_updates` would return
-/// `Err`, `update_offset` would never advance past the batch, and the
-/// identical batch would be re-fetched and fail again on every poll.
+/// Every shape Telegram can send has to get through here, the whole batch
+/// with it — see [`UpdateKind`] for what one dropped update costs.
 fn parse_updates(body: &str) -> Result<Vec<Update>, ClientError> {
     let envelope: GetUpdatesEnvelope =
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
@@ -465,11 +430,7 @@ fn parse_send_message_response(body: &str) -> Result<i64, ClientError> {
         .ok_or_else(|| ClientError::Parse("sendMessage response missing result".to_string()))
 }
 
-/// Decode an `answerCallbackQuery` response body. Split out from
-/// `answer_callback` for the same reason `parse_updates` and
-/// `parse_send_message_response` are split out — so tests can
-/// exercise the error path directly against string fixtures without a
-/// network mock.
+/// Decode an `answerCallbackQuery` response body.
 fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
     let envelope: RawEnvelope =
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
@@ -480,8 +441,7 @@ fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
     )
 }
 
-/// Decode an `editMessageText` response body. Same `"ok"`-envelope shape and
-/// split-for-testability reasoning as [`parse_answer_callback_response`].
+/// Decode an `editMessageText` response body.
 fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
     let envelope: RawEnvelope =
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
@@ -492,10 +452,9 @@ fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
 mod tests {
     use super::*;
 
-    /// The regression this guards is a hang, not a wrong answer: an update the
-    /// parser dropped never reached `route`, so the offset stayed behind it and
-    /// Telegram re-delivered it immediately — a tight HTTP loop that also
-    /// stopped every later command from being seen. One sticker was enough.
+    /// The regression this guards is a hang, not a wrong answer: one dropped
+    /// sticker wedged the poll loop and took every later command with it.
+    /// [`UpdateKind`] has the why.
     #[test]
     fn an_update_this_bridge_cannot_act_on_still_carries_its_id() {
         let body = r#"{"ok":true,"result":[
@@ -560,10 +519,6 @@ mod tests {
 
     #[test]
     fn a_transport_error_never_carries_the_bot_token() {
-        // Telegram puts the token in the URL path and every HTTP client prints
-        // the URL it failed on, so an unredacted error is a live credential —
-        // and these errors are written to the on-disk log.
-        //
         // Fake value in Telegram's `<bot_id>:<35 chars>` shape. Never paste a
         // real token here: this file is committed to a public repository.
         let token = "123456789:AA-this-is-not-a-real-bot-token-000";
@@ -586,10 +541,6 @@ mod tests {
 
     #[test]
     fn get_updates_is_stubbed_under_test_no_network() {
-        // The long-poll must never touch the network in tests: a real
-        // `getUpdates` would block teardown for the poll timeout (and
-        // 409-conflict a running app polling the same token). The stub
-        // returns no updates without any HTTP call.
         let updates = get_updates("dummy-token", 0, 1).expect("stub returns Ok");
         assert!(
             updates.is_empty(),
@@ -687,14 +638,8 @@ mod tests {
 
     #[test]
     fn callback_query_without_message_does_not_fail_the_whole_batch() {
-        // Telegram documents `CallbackQuery.message` as optional (absent for
-        // inline-query-originated callbacks, or when the original message
-        // was deleted). A naive `message` field that's required would fail
-        // `serde_json::from_str` for the WHOLE envelope, dropping every
-        // update in the batch — including the unrelated, perfectly normal
-        // message update alongside it. This must not happen: the malformed
-        // callback this bridge cannot act on is classified `Unsupported`, and
-        // the normal update survives beside it.
+        // A required `message` field would fail the whole envelope's decode
+        // and take the normal update beside it — see `RawCallbackQuery`.
         let body = r#"{
             "ok": true,
             "result": [
@@ -788,8 +733,7 @@ mod tests {
         }"#;
 
         let updates = parse_updates(body).expect("parse ok");
-        // Not empty: a photo the bridge ignores still has to move the offset,
-        // or Telegram re-delivers it in a tight loop forever.
+        // Not empty: a photo the bridge ignores still has to move the offset.
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].update_id, 1);
         assert_eq!(updates[0].kind, UpdateKind::Unsupported);

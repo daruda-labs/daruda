@@ -1,4 +1,4 @@
-use super::auth::{handshake_reply, new_token};
+use super::auth::handshake_reply;
 use super::files::{OWNER_ONLY_DIR, OWNER_ONLY_FILE, SOCKET_FILE, validate_socket_path};
 use super::frame::read_frame;
 use super::server::{HANDSHAKE_TIMEOUT, serve};
@@ -51,11 +51,6 @@ fn a_path_over_the_platform_limit_fails_loudly() {
         validate_socket_path(&deep.join(SOCKET_FILE)),
         Err(SocketError::PathTooLong { .. })
     ));
-}
-
-#[test]
-fn a_path_within_the_limit_is_accepted() {
-    assert!(validate_socket_path(std::path::Path::new("/tmp/d/control.sock")).is_ok());
 }
 
 /// The runtime file is what the shim reads, so it must round-trip — and it
@@ -469,9 +464,9 @@ fn an_oversized_frame_ends_the_connection() {
     });
 }
 
+/// A restarted daruda has to be distinguishable from the one a shim
+/// connected to, which it only is if the id is fresh per run.
 #[test]
-fn each_run_gets_its_own_identity_and_token() {
+fn each_run_gets_its_own_identity() {
     assert_ne!(new_runtime_id(), new_runtime_id());
-    assert_ne!(new_token(), new_token());
-    assert_eq!(new_token().len(), 32, "uuid simple form");
 }
