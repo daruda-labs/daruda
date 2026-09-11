@@ -4,3 +4,4 @@
 
 pub mod attention;
 pub mod notifications;
+pub mod presence;

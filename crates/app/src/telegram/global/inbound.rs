@@ -100,11 +100,14 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // block for POLL_TIMEOUT_SECS, so a presence reading taken at the
             // top of the iteration would describe the wrong moment entirely.
             let app_active = trace::is_on().then(|| cx.update(|_cx| is_app_active()));
+            // `pid` because a debug build and an installed build can both hold
+            // a live bridge; without it a line cannot be attributed.
             trace::delivery("poll", || {
                 format!(
-                    "offset={offset} count={} app_active={}",
+                    "offset={offset} count={} app_active={} pid={}",
                     updates.len(),
-                    trace::opt(app_active)
+                    trace::opt(app_active),
+                    std::process::id(),
                 )
             });
 

@@ -6,6 +6,7 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod agent;
+mod app_presence;
 mod assets;
 mod bind_keys;
 mod bootstrap;

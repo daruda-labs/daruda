@@ -1461,6 +1461,26 @@ impl Workspace {
         })
         .detach();
 
+        // Presence is app-wide, so every window's activation edge folds into
+        // the one tracker. The deferred-flush pump observes too; this edge
+        // only makes the "absent since" timestamp precise.
+        cx.observe_window_activation(window, |_: &mut Workspace, window, cx| {
+            crate::app_presence::observe(cx);
+            crate::telegram::trace::state("window.activation", || {
+                format!(
+                    "pid={} window_id={:?} window_active={} app_active={} away_secs={}",
+                    std::process::id(),
+                    window.window_handle().window_id(),
+                    window.is_window_active(),
+                    crate::platform::attention::is_app_active(),
+                    crate::telegram::trace::opt(
+                        crate::app_presence::snapshot(cx).away_secs(std::time::Instant::now())
+                    ),
+                )
+            });
+        })
+        .detach();
+
         // Intercept `Cmd+Q` and red-cross close attempts so dirty
         // TaskEdit panes don't silently disappear. The callback returns
         // `false` to veto the close, spawns the async batch prompt, and

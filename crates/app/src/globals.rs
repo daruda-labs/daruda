@@ -9,6 +9,9 @@
 //! - `register_settings_observer` must precede `spawn_file_watch`
 //!   so the first watcher fanout never sees a half-initialised
 //!   observer chain.
+//! - `app_presence::init` must precede the first window: every
+//!   workspace subscribes its activation observer at construction,
+//!   and that observer folds into this global.
 //! - Every `init(cx)` helper is idempotent (`cx.has_global` guard).
 
 use crate::ui;
@@ -20,6 +23,7 @@ pub(crate) fn init_all(cx: &mut App) {
     // strings rendered during init use a reasonable language.
     apply_locale_str("auto");
     gpui_component::init(cx);
+    crate::app_presence::init(cx);
     ui::theme::DarudaTheme::init(cx);
     ui::theme::apply_daruda_palette(cx);
     crate::settings_store::SettingsStore::init(cx);

@@ -81,6 +81,10 @@ fn spawn_deferred_telegram_flush(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(15),
         |cx: &mut App| {
+            // Once per tick, not once per window: presence is one app-wide
+            // fact and this is the level-triggered safety net behind the
+            // per-window activation edges.
+            crate::app_presence::observe(cx);
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 ws.flush_deferred_telegram(cx);
                 ws.flush_telegram_first_response_fallbacks(cx);
