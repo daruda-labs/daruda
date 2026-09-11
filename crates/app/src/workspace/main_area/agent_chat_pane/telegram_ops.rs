@@ -105,41 +105,78 @@ pub(in crate::workspace) struct DeferredRelay {
 /// `BridgeCore`'s `SENT_PINGS_CAP` eviction in `telegram::bridge`.
 const MAX_DEFERRED_PER_PANE: usize = 20;
 
+/// Why a held ping may go out on this flush tick. These were one
+/// `app_active: bool`, which had to carry both "holding is switched off" and
+/// "nobody is at the app" — a conflation that let a single presence sample
+/// stand in for a decision it was never meant to make.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::workspace) enum ReleasePolicy {
+    /// Holding is off: the feature is disabled, or the quiet window is zero.
+    /// Setting it to zero therefore drains existing queues on the next flush
+    /// rather than leaving an always-ready but still-held foreground queue.
+    ReleaseAll,
+    /// Nobody is at the app, so there is nothing to spare the user from.
+    /// `idle_secs` does not gate this — it is carried for the trace, where it
+    /// is the reading that says whether the user was still at the machine.
+    Away { idle_secs: f64 },
+    /// The user is here; each ping waits out its own quiet window.
+    Present { idle_secs: f64, quiet_secs: u64 },
+}
+
+impl ReleasePolicy {
+    /// Trace rendering. `app_active` / `idle_secs` stay in the line so older
+    /// readers still parse it; `policy` names which reason actually applied.
+    pub(in crate::workspace) fn trace(self) -> String {
+        match self {
+            Self::ReleaseAll => "policy=release_all app_active=none".to_string(),
+            Self::Away { idle_secs } => {
+                format!("policy=away app_active=false idle_secs={idle_secs:.0}")
+            }
+            Self::Present {
+                idle_secs,
+                quiet_secs,
+            } => format!(
+                "policy=present app_active=true idle_secs={idle_secs:.0} \
+                 quiet_secs={quiet_secs}"
+            ),
+        }
+    }
+}
+
 /// Hold a presence-gated relay instead of sending now: the feature is on, the
-/// app is foreground, and the quiet window is positive. `quiet_secs == 0`
-/// means "do not hold" so changing the setting to zero releases existing
-/// queues on the next flush instead of creating an always-ready but still-held
-/// foreground queue. Whether a *held* ping is later actually delivered is
-/// decided per-entry by [`ready_to_deliver`] — this only gates whether it goes
-/// into the queue at all. Pure so it is unit-testable without a live
-/// `NSApplication`.
+/// user has not been confirmed away, and the quiet window is positive.
+/// Whether a *held* ping is later actually delivered is decided per-entry by
+/// [`ready_to_deliver`] — this only gates whether it goes into the queue at
+/// all. Pure so it is unit-testable without a live `NSApplication`.
 pub(in crate::workspace) fn should_defer_relay(
     enabled: bool,
-    app_active: bool,
+    confirmed_away: bool,
     quiet_secs: u64,
 ) -> bool {
-    enabled && app_active && quiet_secs > 0
+    enabled && !confirmed_away && quiet_secs > 0
 }
 
 /// Whether a held ping, queued at `queued_at`, is ready to actually go out now.
-/// The user leaving the app delivers immediately regardless of age — there's no
-/// reason to keep waiting once they're gone. While still foregrounded, delivery
-/// additionally requires BOTH: at least `quiet_secs` of real time since *this*
-/// ping was queued, AND at least `quiet_secs` of current system-input
-/// idleness — i.e. a full quiet window that starts at this ping's own settle
-/// time, not at whatever idle streak happened to precede it (a long turn the
-/// user watches without touching input must not itself burn down the window).
-/// Pure so it is unit-testable without a live `NSApplication`/HID query.
+/// An absent user delivers immediately regardless of age — there's no reason to
+/// keep waiting once they're gone. While they are still here, delivery requires
+/// BOTH: at least `quiet_secs` of real time since *this* ping was queued, AND
+/// at least `quiet_secs` of current system-input idleness — i.e. a full quiet
+/// window that starts at this ping's own settle time, not at whatever idle
+/// streak happened to precede it (a long turn the user watches without touching
+/// input must not itself burn down the window). Pure so it is unit-testable
+/// without a live `NSApplication`/HID query.
 pub(in crate::workspace) fn ready_to_deliver(
     queued_at: std::time::Instant,
     now: std::time::Instant,
-    app_active: bool,
-    idle_secs: f64,
-    quiet_secs: u64,
+    policy: ReleasePolicy,
 ) -> bool {
-    if !app_active {
+    let ReleasePolicy::Present {
+        idle_secs,
+        quiet_secs,
+    } = policy
+    else {
         return true;
-    }
+    };
     let quiet_secs = quiet_secs as f64;
     let elapsed_since_queued = now.saturating_duration_since(queued_at).as_secs_f64();
     elapsed_since_queued >= quiet_secs && idle_secs >= quiet_secs
@@ -185,9 +222,7 @@ pub(in crate::workspace) fn partition_deferred(
     queue: Vec<DeferredRelay>,
     live_perms: &HashSet<u64>,
     now: std::time::Instant,
-    app_active: bool,
-    idle_secs: f64,
-    quiet_secs: u64,
+    policy: ReleasePolicy,
 ) -> (Vec<DeferredRelay>, Vec<DeferredRelay>) {
     let mut ready = Vec::new();
     let mut still_holding = Vec::new();
@@ -197,7 +232,7 @@ pub(in crate::workspace) fn partition_deferred(
         {
             continue;
         }
-        if ready_to_deliver(entry.queued_at, now, app_active, idle_secs, quiet_secs) {
+        if ready_to_deliver(entry.queued_at, now, policy) {
             ready.push(entry);
         } else {
             still_holding.push(entry);
@@ -428,7 +463,7 @@ impl Workspace {
         let app_active = crate::platform::attention::is_app_active();
         let defer = should_defer_relay(
             self.telegram.defer_while_active,
-            app_active,
+            !app_active,
             self.telegram.active_idle_secs,
         );
         trace::delivery("relay.defer", || {

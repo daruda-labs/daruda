@@ -86,7 +86,7 @@ use command::picker_key::picker_keystroke;
 
 use daruda_terminal::TerminalConfig;
 
-use main_area::agent_chat_pane::telegram_ops::partition_deferred;
+use main_area::agent_chat_pane::telegram_ops::{ReleasePolicy, partition_deferred};
 
 // ----------------------------------------------------------------
 // Actions
@@ -1950,12 +1950,19 @@ impl Workspace {
         }
         let quiet_secs = self.telegram.active_idle_secs;
         if !self.telegram.defer_while_active || quiet_secs == 0 {
-            self.deliver_deferred_telegram(false, 0.0, quiet_secs, cx);
+            self.deliver_deferred_telegram(ReleasePolicy::ReleaseAll, cx);
             return;
         }
-        let app_active = crate::platform::attention::is_app_active();
         let idle_secs = crate::platform::attention::system_idle_seconds();
-        self.deliver_deferred_telegram(app_active, idle_secs, quiet_secs, cx);
+        let policy = if crate::platform::attention::is_app_active() {
+            ReleasePolicy::Present {
+                idle_secs,
+                quiet_secs,
+            }
+        } else {
+            ReleasePolicy::Away { idle_secs }
+        };
+        self.deliver_deferred_telegram(policy, cx);
     }
 
     /// Split out so tests can drive delivery without controlling live OS
@@ -1965,18 +1972,16 @@ impl Workspace {
     /// tick. Skips (and drops) panes that have since closed.
     pub(in crate::workspace) fn deliver_deferred_telegram(
         &mut self,
-        app_active: bool,
-        idle_secs: f64,
-        quiet_secs: u64,
+        policy: ReleasePolicy,
         cx: &mut Context<Self>,
     ) {
         let now = std::time::Instant::now();
         let pending = std::mem::take(&mut self.deferred_telegram);
         crate::telegram::trace::delivery("defer.flush", || {
             format!(
-                "panes={} app_active={app_active} idle_secs={idle_secs:.0} \
-                 quiet_secs={quiet_secs} active_lane={}",
+                "panes={} {} active_lane={}",
                 pending.len(),
+                policy.trace(),
                 crate::telegram::trace::lane_ref(self.active_ref())
             )
         });
@@ -1989,8 +1994,7 @@ impl Workspace {
             };
             let held = queue.len();
             let live_perms = view.read(cx).pending_permissions.clone();
-            let (ready, still_holding) =
-                partition_deferred(queue, &live_perms, now, app_active, idle_secs, quiet_secs);
+            let (ready, still_holding) = partition_deferred(queue, &live_perms, now, policy);
             // `held - ready - holding` is the third outcome `partition_deferred`
             // has and neither vector shows: a permission ping whose request was
             // answered in-app, dropped rather than delivered.

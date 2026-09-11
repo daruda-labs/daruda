@@ -23,11 +23,11 @@ fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::
 }
 
 #[test]
-fn should_defer_only_when_enabled_and_active() {
-    assert!(super::should_defer_relay(true, true, 60));
-    assert!(!super::should_defer_relay(true, false, 60));
-    assert!(!super::should_defer_relay(false, true, 60));
-    assert!(!super::should_defer_relay(true, true, 0));
+fn should_defer_only_when_enabled_and_the_user_is_not_confirmed_away() {
+    assert!(super::should_defer_relay(true, false, 60));
+    assert!(!super::should_defer_relay(true, true, 60));
+    assert!(!super::should_defer_relay(false, false, 60));
+    assert!(!super::should_defer_relay(true, false, 0));
 }
 
 /// `queued_at` no longer participates in the push-time decision; a fresh
@@ -44,6 +44,17 @@ fn mk_relay(kind: super::DeferKind) -> super::DeferredRelay {
 
 /// Any pane id — `push_deferred` only carries it into a trace line.
 const PANE: super::PaneId = 1;
+
+/// The user is gone; `idle_secs` is trace-only in this variant.
+const AWAY: super::ReleasePolicy = super::ReleasePolicy::Away { idle_secs: 0.0 };
+
+/// The user is here, idle for `idle_secs`, against a 60s quiet window.
+fn present(idle_secs: f64) -> super::ReleasePolicy {
+    super::ReleasePolicy::Present {
+        idle_secs,
+        quiet_secs: 60,
+    }
+}
 
 #[test]
 fn push_deferred_keeps_one_completion_but_accumulates_others() {
@@ -92,9 +103,9 @@ fn partition_deferred_filters_stale_permissions_and_holds_unready_entries() {
     // Only id 9 is outstanding, so the ping for the resolved id 7 is dropped
     // outright — not delivered, not held for later.
     let live: std::collections::HashSet<u64> = [9].into_iter().collect();
-    // `app_active: false` makes every non-stale entry immediately ready,
+    // An absent user makes every non-stale entry immediately ready,
     // isolating the staleness filter from the readiness check below.
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, false, 0.0, 60);
+    let (ready, still_holding) = super::partition_deferred(q, &live, now, AWAY);
     assert_eq!(ready.len(), 1);
     assert_eq!(ready[0].kind, DeferKind::Completion);
     assert!(still_holding.is_empty());
@@ -107,7 +118,7 @@ fn partition_deferred_filters_stale_permissions_and_holds_unready_entries() {
     // 7 and 9 are still outstanding; 8 was answered → its ping is dropped,
     // the other two both survive (a single live id could not express this).
     let live: std::collections::HashSet<u64> = [7, 9].into_iter().collect();
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, false, 0.0, 60);
+    let (ready, still_holding) = super::partition_deferred(q, &live, now, AWAY);
     assert_eq!(ready.len(), 2);
     assert_eq!(ready[0].kind, DeferKind::Permission { perm_id: 7 });
     assert_eq!(ready[1].kind, DeferKind::Permission { perm_id: 9 });
@@ -118,17 +129,22 @@ fn partition_deferred_filters_stale_permissions_and_holds_unready_entries() {
     // (already-past-threshold) idle reading alone.
     let q = vec![mk_relay(DeferKind::Completion)];
     let live = std::collections::HashSet::new();
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, true, 90.0, 60);
+    let (ready, still_holding) = super::partition_deferred(q, &live, now, present(90.0));
     assert!(ready.is_empty());
     assert_eq!(still_holding.len(), 1);
 }
 
 #[test]
-fn ready_to_deliver_covers_inactive_and_foreground_quiet_window_rules() {
+fn ready_to_deliver_covers_every_release_policy() {
     let now = std::time::Instant::now();
-    // Just queued, and idle_secs is 0 (input this instant) — would fail
-    // every other condition, but leaving the app delivers regardless.
-    assert!(super::ready_to_deliver(now, now, false, 0.0, 60));
+    // Just queued, and idle_secs is 0 (input this instant) — would fail every
+    // other condition, but neither an absent user nor holding-off waits.
+    assert!(super::ready_to_deliver(now, now, AWAY));
+    assert!(super::ready_to_deliver(
+        now,
+        now,
+        super::ReleasePolicy::ReleaseAll
+    ));
 
     let queued_at = std::time::Instant::now();
     let past_window = queued_at + std::time::Duration::from_secs(61);
@@ -138,26 +154,20 @@ fn ready_to_deliver_covers_inactive_and_foreground_quiet_window_rules() {
     assert!(super::ready_to_deliver(
         queued_at,
         past_window,
-        true,
-        90.0,
-        60
+        present(90.0)
     ));
     let already_quiet = past_window - std::time::Duration::from_secs(61);
     assert!(super::ready_to_deliver(
         already_quiet,
         past_window,
-        true,
-        60.0,
-        60
+        present(60.0)
     ));
     // Enough real time has passed, but `idle_secs` shows recent input
     // (the user came back and used the keyboard) → still held.
     assert!(!super::ready_to_deliver(
         queued_at,
         past_window,
-        true,
-        5.0,
-        60
+        present(5.0)
     ));
     // Not enough real time has passed yet, even though `idle_secs` alone
     // would clear the threshold — the ping's own quiet window hasn't
@@ -165,9 +175,7 @@ fn ready_to_deliver_covers_inactive_and_foreground_quiet_window_rules() {
     assert!(!super::ready_to_deliver(
         queued_at,
         queued_at + std::time::Duration::from_secs(5),
-        true,
-        90.0,
-        60
+        present(90.0)
     ));
 }
 
@@ -772,7 +780,7 @@ async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_an
     // `app_active: false` mirrors "presence already dropped" — every
     // non-stale entry is immediately ready regardless of age/idle.
     workspace.update(cx, |ws, cx| {
-        ws.deliver_deferred_telegram(false, 999.0, 60, cx);
+        ws.deliver_deferred_telegram(AWAY, cx);
     });
     cx.run_until_parked();
 
