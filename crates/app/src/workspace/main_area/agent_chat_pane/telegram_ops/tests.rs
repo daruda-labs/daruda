@@ -57,6 +57,69 @@ fn present(idle_secs: f64) -> super::ReleasePolicy {
 }
 
 #[test]
+fn away_grace_holds_a_five_second_blur_and_releases_sustained_absence() {
+    use crate::platform::presence::Presence;
+    use std::time::{Duration, Instant};
+
+    let t0 = Instant::now();
+    let grace = Duration::from_secs(daruda_config::TelegramConfig::default().away_grace_secs);
+    let away = Presence::Here.observe(false, t0);
+    let returned = away.observe(true, t0 + Duration::from_secs(5));
+    let away_again = returned.observe(false, t0 + Duration::from_secs(10));
+    let live = std::collections::HashSet::new();
+
+    for (presence, elapsed, should_release) in [
+        (away, 0, false),
+        (away, 5, false),
+        (returned, 20, false),
+        (away_again, 20, false),
+        (away, 15, true),
+        (away, 20, true),
+    ] {
+        let now = t0 + Duration::from_secs(elapsed);
+        let confirmed_away = presence.away_for_at_least(grace, now);
+        assert_eq!(
+            super::should_defer_relay(true, confirmed_away, 60),
+            !should_release
+        );
+        let policy = super::ReleasePolicy::for_presence(presence, now, grace, 0.0, 60);
+        let mut relay = mk_relay(super::DeferKind::Completion);
+        // Old backlog still needs presence or input-idle confirmation.
+        relay.queued_at = t0 - Duration::from_secs(120);
+        let (ready, holding) = super::partition_deferred(vec![relay], &live, now, policy);
+        assert_eq!(ready.len(), usize::from(should_release));
+        assert_eq!(holding.len(), usize::from(!should_release));
+    }
+
+    let now = t0 + Duration::from_secs(5);
+    let policy = super::ReleasePolicy::for_presence(away, now, grace, 0.0, 60);
+    let trace = policy.trace(away.away_secs(now));
+    assert!(trace.contains("policy=present app_active=false"));
+    assert!(trace.contains("away_secs=Some(5.0)"));
+}
+
+#[test]
+fn zero_away_grace_restores_immediate_release_only_while_absent() {
+    use crate::platform::presence::Presence;
+    use std::time::{Duration, Instant};
+
+    let now = Instant::now();
+    for (presence, expected) in [
+        (Presence::Here, present(0.0)),
+        (Presence::Here.observe(false, now), AWAY),
+    ] {
+        assert_eq!(
+            super::ReleasePolicy::for_presence(presence, now, Duration::ZERO, 0.0, 60),
+            expected
+        );
+        assert_eq!(
+            super::should_defer_relay(true, presence.away_for_at_least(Duration::ZERO, now), 60),
+            presence == Presence::Here
+        );
+    }
+}
+
+#[test]
 fn push_deferred_keeps_one_completion_but_accumulates_others() {
     use super::DeferKind;
     let mut q = Vec::new();
@@ -66,6 +129,68 @@ fn push_deferred_keeps_one_completion_but_accumulates_others() {
     assert_eq!(q.len(), 2);
     assert_eq!(q[0].kind, DeferKind::PostTurn);
     assert_eq!(q[1].kind, DeferKind::Completion);
+}
+
+#[gpui::test]
+async fn relay_rechecks_presence_before_sending_and_shares_it_with_flush(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::platform::presence::Presence;
+    use std::time::{Duration, Instant};
+
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    cx.update(crate::app_presence::init);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        let away = Presence::Away {
+            since: Instant::now() - Duration::from_secs(30),
+        };
+        crate::app_presence::seed_for_test(away, true, cx);
+        ws.relay_or_defer_to_telegram(
+            pane,
+            super::DeferKind::Completion,
+            "header".into(),
+            super::TelegramTail::Plain("held after return".into()),
+            None,
+            cx,
+        );
+        assert_eq!(crate::app_presence::snapshot(cx), Presence::Here);
+        ws.flush_deferred_telegram(cx);
+        assert_eq!(ws.deferred_telegram[&pane].len(), 1);
+        assert!(outbound.next().now_or_never().is_none());
+
+        crate::app_presence::seed_for_test(Presence::Here, false, cx);
+        ws.relay_post_turn_to_telegram(pane, "held during grace".into(), cx);
+        assert_eq!(ws.deferred_telegram[&pane].len(), 2);
+        assert!(outbound.next().now_or_never().is_none());
+
+        crate::app_presence::seed_for_test(away, false, cx);
+        ws.relay_post_turn_to_telegram(pane, "sent after grace".into(), cx);
+        let sent = expect_ping(outbound.next().now_or_never().flatten().unwrap());
+        assert_eq!(sent.pane.pane, pane);
+        ws.flush_deferred_telegram(cx);
+        assert!(ws.deferred_telegram.is_empty());
+        for _ in 0..2 {
+            assert_eq!(
+                expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                    .pane
+                    .pane,
+                pane
+            );
+        }
+        assert!(outbound.next().now_or_never().is_none());
+    });
 }
 
 #[test]

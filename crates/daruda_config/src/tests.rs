@@ -1316,6 +1316,7 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     cfg.telegram.authorized_chat_id = Some(999888777);
     cfg.telegram.defer_while_active = false;
     cfg.telegram.active_idle_secs = 5;
+    cfg.telegram.away_grace_secs = 30;
     crate::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
@@ -1323,6 +1324,11 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     assert_eq!(reloaded.telegram.authorized_chat_id, Some(999888777));
     assert!(!reloaded.telegram.defer_while_active);
     assert_eq!(reloaded.telegram.active_idle_secs, 5);
+    assert_eq!(reloaded.telegram.away_grace_secs, 30);
+
+    cfg.telegram.away_grace_secs = 0;
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+    assert_eq!(Config::load_from(&path).telegram.away_grace_secs, 0);
 }
 
 #[test]

@@ -7,9 +7,11 @@
 //! call into this file's `relay_*` methods; both are `impl Workspace` blocks.
 
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use gpui::Context;
 
+use crate::platform::presence::Presence;
 use crate::surface::strings as s;
 use crate::telegram::bridge::BotPermissionOutcome;
 use crate::telegram::bridge::TelegramTail;
@@ -115,29 +117,49 @@ pub(in crate::workspace) enum ReleasePolicy {
     /// Setting it to zero therefore drains existing queues on the next flush
     /// rather than leaving an always-ready but still-held foreground queue.
     ReleaseAll,
-    /// Nobody is at the app, so there is nothing to spare the user from.
+    /// Continuous absence has cleared the grace window.
     /// `idle_secs` does not gate this — it is carried for the trace, where it
     /// is the reading that says whether the user was still at the machine.
     Away { idle_secs: f64 },
-    /// The user is here; each ping waits out its own quiet window.
+    /// Absence is not confirmed; each ping waits out its own quiet window.
     Present { idle_secs: f64, quiet_secs: u64 },
 }
 
 impl ReleasePolicy {
+    pub(in crate::workspace) fn for_presence(
+        presence: Presence,
+        now: Instant,
+        grace: Duration,
+        idle_secs: f64,
+        quiet_secs: u64,
+    ) -> Self {
+        if presence.away_for_at_least(grace, now) {
+            Self::Away { idle_secs }
+        } else {
+            Self::Present {
+                idle_secs,
+                quiet_secs,
+            }
+        }
+    }
+
     /// Trace rendering. `app_active` / `idle_secs` stay in the line so older
     /// readers still parse it; `policy` names which reason actually applied.
-    pub(in crate::workspace) fn trace(self) -> String {
+    pub(in crate::workspace) fn trace(self, away_secs: Option<f64>) -> String {
         match self {
             Self::ReleaseAll => "policy=release_all app_active=none".to_string(),
             Self::Away { idle_secs } => {
-                format!("policy=away app_active=false idle_secs={idle_secs:.0}")
+                format!(
+                    "policy=away app_active=false idle_secs={idle_secs:.0} away_secs={away_secs:?}"
+                )
             }
             Self::Present {
                 idle_secs,
                 quiet_secs,
             } => format!(
-                "policy=present app_active=true idle_secs={idle_secs:.0} \
-                 quiet_secs={quiet_secs}"
+                "policy=present app_active={} idle_secs={idle_secs:.0} \
+                 quiet_secs={quiet_secs} away_secs={away_secs:?}",
+                away_secs.is_none()
             ),
         }
     }
@@ -403,7 +425,7 @@ impl Workspace {
         options: &[daruda_acp::PermissionChoice],
         tool_title: Option<&str>,
         raw_input_summary: Option<&str>,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let is_telegram_first_response = self
             .agent_chat_view(pane_id)
@@ -433,7 +455,7 @@ impl Workspace {
     }
 
     /// Presence-gated entry point for the completion / permission / post-turn
-    /// relays. While the user is present (app foreground) the composed ping is
+    /// relays. Until sustained absence is confirmed the composed ping is
     /// held per-pane; the periodic flush (`Workspace::flush_deferred_telegram`)
     /// later decides, per entry, when it's actually ready to go out (see
     /// `ready_to_deliver`). Otherwise it is sent immediately. First-response
@@ -446,7 +468,7 @@ impl Workspace {
         header: String,
         tail: TelegramTail,
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         // Preserve `relay_to_telegram`'s drop-when-not-ready semantics: never
         // stash (or send) a ping while disabled, unpaired, or before the
@@ -457,21 +479,27 @@ impl Workspace {
             });
             return;
         }
-        // One reading, shared by the decision and the trace: two calls could
-        // disagree, and a line describing a presence the decision never saw
-        // is worse than no line.
-        let app_active = crate::platform::attention::is_app_active();
+        // Activation callbacks are queued, so a newly focused window can
+        // still have a stale absence until this observation.
+        crate::app_presence::observe(cx);
+        let now = Instant::now();
+        let presence = crate::app_presence::snapshot(cx);
+        let away_secs = presence.away_secs(now);
+        let confirmed_away =
+            presence.away_for_at_least(Duration::from_secs(self.telegram.away_grace_secs), now);
         let defer = should_defer_relay(
             self.telegram.defer_while_active,
-            !app_active,
+            confirmed_away,
             self.telegram.active_idle_secs,
         );
         trace::delivery("relay.defer", || {
             format!(
-                "pane={pane_id} kind={kind:?} defer={defer} quiet_secs={} {} text={}",
+                "pane={pane_id} kind={kind:?} defer={defer} quiet_secs={} \
+                 away_secs={away_secs:?} away_grace_secs={} {} text={}",
                 self.telegram.active_idle_secs,
+                self.telegram.away_grace_secs,
                 trace::presence(
-                    app_active,
+                    away_secs.is_none(),
                     self.lane_ref_for_pane(pane_id),
                     self.active_ref()
                 ),
@@ -487,7 +515,7 @@ impl Workspace {
                     header,
                     tail,
                     permission,
-                    queued_at: std::time::Instant::now(),
+                    queued_at: now,
                 },
             );
         } else {
@@ -691,7 +719,7 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         delta: String,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let header = self.telegram_header(pane_id, cx);
         let body = format!(

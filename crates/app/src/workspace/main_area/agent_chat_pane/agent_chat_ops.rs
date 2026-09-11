@@ -375,7 +375,7 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         event: &daruda_acp::AcpEvent,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let daruda_acp::AcpEvent::PermissionRequested { id, request } = event else {
             return;

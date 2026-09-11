@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use gpui::{App, Global};
+use gpui::{App, Global, Window};
 
 use crate::platform::attention::is_app_active;
 use crate::platform::presence::Presence;
@@ -28,21 +28,51 @@ pub(crate) fn init(cx: &mut App) {
     }
     let state = Presence::Here.observe(is_app_active(), Instant::now());
     cx.set_global(AppPresence { state });
+    track_new_windows::<crate::ui::Root>(cx);
+    track_new_windows::<crate::welcome::WelcomeScreen>(cx);
 }
 
-/// Fold the current foreground state in. Called from every window's
-/// activation edge, which makes the absence timestamp precise, and from the
-/// deferred-flush pump, which is what actually guarantees correctness when
-/// no window reports a transition (every window minimized, say).
-///
-/// A missing global is a no-op: test fixtures build workspaces without
-/// `globals::init_all`, and a window activating then is not a presence fact
-/// anyone reads.
+/// Root wraps workspace and settings windows; WelcomeScreen is a bare root.
+/// Register at app startup so auxiliary windows participate without a Workspace.
+fn track_new_windows<T: 'static>(cx: &App) {
+    cx.observe_new::<T>(|_, window, cx| {
+        if let Some(window) = window {
+            cx.observe_window_activation(window, |_, window, cx| {
+                observe_window_activation(window, cx);
+            })
+            .detach();
+        }
+    })
+    .detach();
+}
+
+fn observe_window_activation(window: &Window, cx: &mut App) {
+    observe(cx);
+    crate::telegram::trace::state("window.activation", || {
+        let away_secs = snapshot(cx).away_secs(Instant::now());
+        format!(
+            "pid={} window_id={:?} window_active={} app_active={} away_secs={}",
+            std::process::id(),
+            window.window_handle().window_id(),
+            window.is_window_active(),
+            away_secs.is_none(),
+            crate::telegram::trace::opt(away_secs),
+        )
+    });
+}
+
+/// Observe on activation, before a new relay, and at each flush tick.
+/// Missing globals are a no-op for fixtures without the app startup sequence.
 pub(crate) fn observe(cx: &mut App) {
     if !cx.has_global::<AppPresence>() {
         return;
     }
-    let (active, now) = (is_app_active(), Instant::now());
+    let active = is_app_active();
+    #[cfg(test)]
+    let active = cx
+        .try_global::<TestPresenceSample>()
+        .map_or(active, |sample| sample.0);
+    let now = Instant::now();
     let presence = cx.global_mut::<AppPresence>();
     presence.state = presence.state.observe(active, now);
 }
@@ -53,6 +83,19 @@ pub(crate) fn observe(cx: &mut App) {
 pub(crate) fn snapshot(cx: &App) -> Presence {
     cx.try_global::<AppPresence>()
         .map_or(Presence::Here, |presence| presence.state)
+}
+
+#[cfg(test)]
+struct TestPresenceSample(bool);
+
+#[cfg(test)]
+impl Global for TestPresenceSample {}
+
+#[cfg(test)]
+pub(crate) fn seed_for_test(state: Presence, app_active: bool, cx: &mut App) {
+    init(cx);
+    cx.global_mut::<AppPresence>().state = state;
+    cx.set_global(TestPresenceSample(app_active));
 }
 
 #[cfg(test)]

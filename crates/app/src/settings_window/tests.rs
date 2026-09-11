@@ -37,6 +37,30 @@ fn build_window_with_config(
 }
 
 #[gpui::test]
+fn returning_to_settings_clears_tracked_absence_before_the_flush_pump(cx: &mut TestAppContext) {
+    use crate::platform::presence::Presence;
+    use std::time::{Duration, Instant};
+
+    cx.update(crate::app_presence::init);
+    let (handle, _settings) = build_window(cx);
+    cx.run_until_parked();
+    let mut vcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+    vcx.deactivate_window();
+    vcx.update(|window, cx| {
+        crate::app_presence::seed_for_test(
+            Presence::Away {
+                since: Instant::now() - Duration::from_secs(30),
+            },
+            true,
+            cx,
+        );
+        window.activate_window();
+    });
+    vcx.run_until_parked();
+    vcx.update(|_, cx| assert_eq!(crate::app_presence::snapshot(cx), Presence::Here));
+}
+
+#[gpui::test]
 fn validate_accepts_defaults(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.read_with(cx, |w, cx| {

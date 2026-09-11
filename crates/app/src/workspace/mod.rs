@@ -1461,26 +1461,6 @@ impl Workspace {
         })
         .detach();
 
-        // Presence is app-wide, so every window's activation edge folds into
-        // the one tracker. The deferred-flush pump observes too; this edge
-        // only makes the "absent since" timestamp precise.
-        cx.observe_window_activation(window, |_: &mut Workspace, window, cx| {
-            crate::app_presence::observe(cx);
-            crate::telegram::trace::state("window.activation", || {
-                format!(
-                    "pid={} window_id={:?} window_active={} app_active={} away_secs={}",
-                    std::process::id(),
-                    window.window_handle().window_id(),
-                    window.is_window_active(),
-                    crate::platform::attention::is_app_active(),
-                    crate::telegram::trace::opt(
-                        crate::app_presence::snapshot(cx).away_secs(std::time::Instant::now())
-                    ),
-                )
-            });
-        })
-        .detach();
-
         // Intercept `Cmd+Q` and red-cross close attempts so dirty
         // TaskEdit panes don't silently disappear. The callback returns
         // `false` to veto the close, spawns the async batch prompt, and
@@ -1954,14 +1934,13 @@ impl Workspace {
             return;
         }
         let idle_secs = crate::platform::attention::system_idle_seconds();
-        let policy = if crate::platform::attention::is_app_active() {
-            ReleasePolicy::Present {
-                idle_secs,
-                quiet_secs,
-            }
-        } else {
-            ReleasePolicy::Away { idle_secs }
-        };
+        let policy = ReleasePolicy::for_presence(
+            crate::app_presence::snapshot(cx),
+            std::time::Instant::now(),
+            std::time::Duration::from_secs(self.telegram.away_grace_secs),
+            idle_secs,
+            quiet_secs,
+        );
         self.deliver_deferred_telegram(policy, cx);
     }
 
@@ -1981,7 +1960,7 @@ impl Workspace {
             format!(
                 "panes={} {} active_lane={}",
                 pending.len(),
-                policy.trace(),
+                policy.trace(crate::app_presence::snapshot(cx).away_secs(now)),
                 crate::telegram::trace::lane_ref(self.active_ref())
             )
         });

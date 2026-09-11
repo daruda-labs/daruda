@@ -5,7 +5,7 @@
 //! half: how long that answer has held. This file is that half and nothing
 //! else, so it stays pure and testable without a live `NSApplication`.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// App presence, with absence carrying its own start time.
 ///
@@ -33,6 +33,14 @@ impl Presence {
         }
     }
 
+    /// A foreground sample never counts as absence, even with zero grace.
+    pub fn away_for_at_least(self, grace: Duration, now: Instant) -> bool {
+        match self {
+            Self::Here => false,
+            Self::Away { since } => now.saturating_duration_since(since) >= grace,
+        }
+    }
+
     /// Seconds of unbroken absence, or `None` while present.
     pub fn away_secs(self, now: Instant) -> Option<f64> {
         match self {
@@ -45,7 +53,6 @@ impl Presence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn leaving_the_foreground_stamps_when_absence_started() {
@@ -87,5 +94,20 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(Presence::Here.observe(true, t0), Presence::Here);
         assert_eq!(Presence::Here.away_secs(t0), None);
+    }
+
+    #[test]
+    fn sustained_absence_requires_the_full_grace_and_resets_on_return() {
+        let t0 = Instant::now();
+        let grace = Duration::from_secs(15);
+        let away = Presence::Here.observe(false, t0);
+        assert!(!away.away_for_at_least(grace, t0 - Duration::from_secs(1)));
+        assert!(!away.away_for_at_least(grace, t0 + grace - Duration::from_nanos(1)));
+        assert!(away.away_for_at_least(grace, t0 + grace));
+        assert!(away.away_for_at_least(Duration::ZERO, t0));
+
+        let returned = away.observe(true, t0 + Duration::from_secs(5));
+        assert!(!returned.away_for_at_least(grace, t0 + grace));
+        assert!(!returned.away_for_at_least(Duration::ZERO, t0 + grace));
     }
 }

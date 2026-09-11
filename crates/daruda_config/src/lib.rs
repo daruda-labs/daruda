@@ -701,6 +701,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "active_idle_secs",
             toml_edit::value(config.telegram.active_idle_secs as i64),
         );
+        t.insert(
+            "away_grace_secs",
+            toml_edit::value(config.telegram.away_grace_secs as i64),
+        );
         match config.telegram.authorized_chat_id {
             Some(id) => {
                 t.insert("authorized_chat_id", toml_edit::value(id));

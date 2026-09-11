@@ -28,6 +28,9 @@ pub struct TelegramConfig {
     /// touching input doesn't itself burn down the window — only quiet time
     /// *after* the turn settles counts.
     pub active_idle_secs: u64,
+    /// Continuous time out of the foreground before absence releases pings.
+    /// Zero allows immediate release on leaving the foreground.
+    pub away_grace_secs: u64,
 }
 
 impl Default for TelegramConfig {
@@ -37,6 +40,7 @@ impl Default for TelegramConfig {
             authorized_chat_id: None,
             defer_while_active: true,
             active_idle_secs: 60,
+            away_grace_secs: 15,
         }
     }
 }
@@ -73,6 +77,7 @@ authorized_chat_id = 123456789
         let cfg = TelegramConfig::default();
         assert!(cfg.defer_while_active);
         assert_eq!(cfg.active_idle_secs, 60);
+        assert_eq!(cfg.away_grace_secs, 15);
     }
 
     #[test]
@@ -84,5 +89,6 @@ authorized_chat_id = 123456789
         assert_eq!(cfg.authorized_chat_id, None);
         assert!(cfg.defer_while_active);
         assert_eq!(cfg.active_idle_secs, 60);
+        assert_eq!(cfg.away_grace_secs, 15);
     }
 }

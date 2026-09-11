@@ -9,9 +9,8 @@
 //! - `register_settings_observer` must precede `spawn_file_watch`
 //!   so the first watcher fanout never sees a half-initialised
 //!   observer chain.
-//! - `app_presence::init` must precede the first window: every
-//!   workspace subscribes its activation observer at construction,
-//!   and that observer folds into this global.
+//! - `app_presence::init` must precede the first window so its new-root
+//!   subscriptions cover workspace, settings, and welcome activation edges.
 //! - Every `init(cx)` helper is idempotent (`cx.has_global` guard).
 
 use crate::ui;
