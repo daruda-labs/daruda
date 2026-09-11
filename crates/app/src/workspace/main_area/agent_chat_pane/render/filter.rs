@@ -55,7 +55,7 @@ pub(super) fn display_filter_chip(
 pub(super) fn display_filter_chip_label(filter: PaneChoice<DisplayFilter>) -> String {
     axis_chip_label(
         s::agent_chat_filter_chip(&filter_value(filter.value())),
-        filter,
+        filter.is_following(),
     )
 }
 

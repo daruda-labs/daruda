@@ -52,6 +52,7 @@ impl AgentPreset {
             // they do.
             fold_mode: None,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             // Nor an environment, as a rule: what a given adapter needs to be
             // told is adapter-specific, so a preset states one only where

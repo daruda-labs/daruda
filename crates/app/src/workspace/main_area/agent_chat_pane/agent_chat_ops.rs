@@ -869,7 +869,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::rows::tail::TailWindow;
+        use super::rows::tail::{TailLevel, TailWindow};
         use crate::transcript::display_filter::FilterFacet;
         use crate::transcript::fold_mode::FoldPreset;
         use daruda_config::TAIL_WINDOW_CHOICES;
@@ -882,7 +882,9 @@ impl Workspace {
         view.update(cx, |v, cx| {
             v.set_fold_mode(FoldPreset::Summary.mode(), window, cx);
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
-            v.set_tail_window(TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
+            for level in TailLevel::ALL {
+                v.set_tail_window(level, TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
+            }
             v.set_activity_options_tab(tab, cx);
             v.screenshot_options_open = true;
         });
@@ -949,7 +951,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::rows::tail::TailWindow;
+        use super::rows::tail::{TailLevel, TailWindow};
         use crate::transcript::display_filter::FilterFacet;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
@@ -971,7 +973,9 @@ impl Workspace {
             // No tail: the window's own boundary has `agent-chat-tail`, and with
             // it engaged this transcript's remaining steps hold no filtered row,
             // so the chip would have nothing to offer and would not render.
-            v.set_tail_window(TailWindow::All, cx);
+            for level in TailLevel::ALL {
+                v.set_tail_window(level, TailWindow::All, cx);
+            }
             v.set_activity_options_tab(super::view::ActivityOptionsTab::Filter, cx);
             // The chip rides the response bar, which the filter popover would
             // cover — the popover has its own scenario (`agent-chat-options`).
@@ -991,7 +995,7 @@ impl Workspace {
     ) {
         use super::fold::FoldKey;
         use super::rows::RowKind;
-        use super::rows::tail::TailWindow;
+        use super::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -999,7 +1003,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_tail_window(TailWindow::Last(SHOT_TAIL_WINDOW), cx);
+            v.set_tail_window(TailLevel::Steps, TailWindow::Last(SHOT_TAIL_WINDOW), cx);
             // The boundary's own key, taken from the projection that just ran —
             // the run start is a property of the seed, not a constant.
             let run_start = v.rows.iter().find_map(|r| match r.kind {
@@ -1024,7 +1028,7 @@ impl Workspace {
     ) {
         use super::fold::FoldKey;
         use super::rows::RowKind;
-        use super::rows::tail::TailWindow;
+        use super::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1032,7 +1036,11 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_tail_window(TailWindow::Last(SHOT_GROUP_TAIL_WINDOW), cx);
+            v.set_tail_window(
+                TailLevel::Calls,
+                TailWindow::Last(SHOT_GROUP_TAIL_WINDOW),
+                cx,
+            );
             // The last group with a call behind its own boundary, taken from the
             // projection that just ran — which group that is belongs to the seed.
             let target = v.rows.iter().rev().find_map(|r| match &r.kind {
@@ -1058,7 +1066,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use super::fold::FoldKey;
-        use super::rows::tail::TailWindow;
+        use super::rows::tail::{TailLevel, TailWindow};
         use super::shot_transcript::SUBAGENT_PARENT_ID;
 
         self.open_agent_chat_pane_seeded(
@@ -1074,7 +1082,11 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_tail_window(TailWindow::Last(SHOT_GROUP_TAIL_WINDOW), cx);
+            v.set_tail_window(
+                TailLevel::Calls,
+                TailWindow::Last(SHOT_GROUP_TAIL_WINDOW),
+                cx,
+            );
             // A launch card defaults collapsed, and its children are only on
             // screen once it is open — the boundary lives among them.
             v.set_fold_for_shot(
@@ -1903,6 +1915,7 @@ mod tests {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             },
@@ -1930,6 +1943,7 @@ mod tests {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             },

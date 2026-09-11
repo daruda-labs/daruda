@@ -74,7 +74,7 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             "Claude".to_string(),
             None,
             super::super::transcript_defaults::TranscriptDefaults {
-                tail: super::super::rows::tail::TailWindow::All,
+                tail: super::super::rows::tail::StepWindow::default(),
                 fold_mode: crate::transcript::fold_mode::FoldMode::default(),
                 filter: crate::transcript::display_filter::DisplayFilter::default(),
             },
@@ -1722,7 +1722,7 @@ fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContex
 // ---------------------------------------------------------------------------
 
 use super::super::pane_choice::PaneChoice;
-use super::super::rows::tail::TailWindow;
+use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
 use super::super::transcript_defaults::TranscriptDefaults;
 use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 
@@ -1730,7 +1730,13 @@ use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 /// that lands on the *built-in* default instead of the one in force is caught.
 fn other_defaults() -> TranscriptDefaults {
     TranscriptDefaults {
-        tail: TailWindow::Last(5),
+        // Distinct per level, so a reset that hands back the wrong level's
+        // default is caught rather than landing on a value that happens to
+        // match.
+        tail: StepWindow {
+            steps: TailWindow::Last(5),
+            calls: TailWindow::Last(3),
+        },
         fold_mode: FoldPreset::Summary.mode(),
         filter: DisplayFilter::default().toggled(FilterFacet::Thinking),
     }
@@ -1746,29 +1752,37 @@ fn a_reset_axis_follows_the_next_default_but_an_equal_choice_does_not(
     window
         .update(cx, |view, _window, cx| {
             // Pin the value the pane already shows — a choice, not agreement.
-            view.set_tail_window(TailWindow::All, cx);
-            assert_eq!(view.tail, PaneChoice::Chosen(TailWindow::All));
+            view.set_tail_window(TailLevel::Steps, TailWindow::All, cx);
+            assert_eq!(view.tail_steps, PaneChoice::Chosen(TailWindow::All));
             view.reseed_transcript_defaults(&other_defaults(), cx);
             assert_eq!(
-                view.tail,
+                view.tail_steps,
                 PaneChoice::Chosen(TailWindow::All),
                 "a choice that happens to equal the old default is still a choice"
+            );
+            assert_eq!(
+                view.tail_calls,
+                PaneChoice::Seeded(TailWindow::Last(3)),
+                "the level the user never picked follows the reseed"
             );
 
             // The same pane, handed back: it lands on the default now in force,
             // not on the one it was built with.
-            view.reset_tail_window(cx);
-            assert_eq!(view.tail, PaneChoice::Seeded(TailWindow::Last(5)));
+            view.reset_tail_window(TailLevel::Steps, cx);
+            assert_eq!(view.tail_steps, PaneChoice::Seeded(TailWindow::Last(5)));
 
             view.reseed_transcript_defaults(
                 &TranscriptDefaults {
-                    tail: TailWindow::Last(3),
+                    tail: StepWindow {
+                        steps: TailWindow::Last(3),
+                        calls: TailWindow::Last(1),
+                    },
                     ..other_defaults()
                 },
                 cx,
             );
             assert_eq!(
-                view.tail,
+                view.tail_steps,
                 PaneChoice::Seeded(TailWindow::Last(3)),
                 "a reset pane tracks every later config edit"
             );
@@ -1801,14 +1815,58 @@ fn the_reset_is_offered_on_a_chosen_default_and_withheld_while_following(
 }
 
 #[gpui::test]
-fn resetting_the_tail_window_hands_the_axis_back(cx: &mut gpui::TestAppContext) {
+fn resetting_the_tail_window_hands_the_level_back(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
             view.reseed_transcript_defaults(&other_defaults(), cx);
-            view.set_tail_window(TailWindow::Last(1), cx);
-            view.reset_tail_window(cx);
-            assert_eq!(view.tail, PaneChoice::Seeded(other_defaults().tail));
+            for level in TailLevel::ALL {
+                view.set_tail_window(level, TailWindow::Last(1), cx);
+                view.reset_tail_window(level, cx);
+                assert_eq!(
+                    view.tail_choice_for_test(level),
+                    PaneChoice::Seeded(other_defaults().tail.get(level)),
+                    "{level:?} lands on its own default, not the other level's"
+                );
+            }
+        })
+        .expect("view update");
+}
+
+/// The axis's levels are independent: pinning one must not detach the other
+/// from config, which is the whole reason they are two choices rather than one
+/// over a pair.
+#[gpui::test]
+fn pinning_one_tail_level_leaves_the_other_following(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            view.set_tail_window(TailLevel::Calls, TailWindow::Last(10), cx);
+            assert_eq!(view.tail_calls, PaneChoice::Chosen(TailWindow::Last(10)));
+            assert!(
+                view.tail_steps.is_following(),
+                "the step level was never picked"
+            );
+
+            let next = TranscriptDefaults {
+                tail: StepWindow {
+                    steps: TailWindow::Last(2),
+                    calls: TailWindow::Last(2),
+                },
+                ..other_defaults()
+            };
+            view.reseed_transcript_defaults(&next, cx);
+            assert_eq!(
+                view.tail_steps,
+                PaneChoice::Seeded(TailWindow::Last(2)),
+                "the following level takes the new default"
+            );
+            assert_eq!(
+                view.tail_calls,
+                PaneChoice::Chosen(TailWindow::Last(10)),
+                "the pinned level keeps the user's window"
+            );
         })
         .expect("view update");
 }

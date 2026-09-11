@@ -139,6 +139,7 @@ fn agent_definition_field_round_trip() {
         default_model: Some("gpt-5-codex".to_string()),
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     };
@@ -157,6 +158,7 @@ fn per_agent_transcript_defaults_round_trip() {
         default_model: None,
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(3),
+        tail_window_calls: None,
         // The empty list is a value of its own here (an empty visible set), so
         // it has to survive the trip as `Some([])` rather than collapse to
         // `None` — see the field's doc.
@@ -182,6 +184,7 @@ fn per_agent_transcript_defaults_round_trip_through_a_catalog_entry() {
             default_model: None,
             fold_mode: Some(vec!["expanded".to_string()]),
             tail_window: Some(10),
+            tail_window_calls: None,
             display_filter: Some(vec!["prose".to_string()]),
             env: None,
         }),
@@ -190,6 +193,7 @@ fn per_agent_transcript_defaults_round_trip_through_a_catalog_entry() {
             overrides: PresetOverrides {
                 fold_mode: Some(vec!["summary".to_string()]),
                 tail_window: Some(1),
+                tail_window_calls: None,
                 display_filter: Some(Vec::new()),
                 ..PresetOverrides::default()
             },
@@ -264,6 +268,7 @@ fn default_model_round_trips_alongside_a_launch_sub_table() {
         default_model: Some("claude-opus-4".to_string()),
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     };
@@ -306,6 +311,7 @@ fn ssh_launch_toml_round_trips() {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     };
@@ -331,6 +337,7 @@ fn docker_launch_toml_round_trips() {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     };
@@ -966,6 +973,7 @@ fn env_round_trips_through_a_definition_and_a_catalog_entry() {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: Some(env.clone()),
     };
@@ -1094,6 +1102,7 @@ fn env_round_trips_alongside_a_launch_sub_table_and_the_scalar_keys() {
         default_model: Some("claude-opus-4".to_string()),
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(3),
+        tail_window_calls: None,
         display_filter: Some(Vec::new()),
         env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
     };

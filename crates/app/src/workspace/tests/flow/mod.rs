@@ -129,6 +129,7 @@ async fn a_flow_naming_an_unlaunchable_agent_is_refused_with_the_reason(cx: &mut
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
     });

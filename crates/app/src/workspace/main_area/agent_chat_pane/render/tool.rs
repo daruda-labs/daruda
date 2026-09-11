@@ -73,7 +73,9 @@ pub(super) struct CardContext<'a> {
     pub(super) boundary: TurnBoundary,
     pub(super) assets: RenderAssets<'a>,
     pub(super) fold: &'a FoldState,
-    pub(super) tail: TailWindow,
+    /// The call level of the recent-steps axis, for a subagent card's own
+    /// boundary among its children.
+    pub(super) call_window: TailWindow,
     pub(super) t: &'a theme::DarudaTheme,
     pub(super) dim: f32,
     pub(super) pane_id: PaneId,
@@ -96,7 +98,7 @@ pub(super) fn tool_card(
         boundary,
         assets,
         fold,
-        tail,
+        call_window,
         t,
         dim,
         pane_id,
@@ -380,7 +382,7 @@ pub(super) fn tool_card(
                 filter: filter_matches,
                 filter_revealed,
                 live_units,
-                tail,
+                calls: call_window,
                 revealed: tail_revealed,
             },
         );

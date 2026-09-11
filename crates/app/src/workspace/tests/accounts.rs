@@ -185,6 +185,7 @@ fn legacy_ssh_claude_agent() -> daruda_config::AgentDefinition {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     }
@@ -567,6 +568,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             model_id: None,
             content_width: daruda_store::project::SerializedChatContentWidth::Full,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,

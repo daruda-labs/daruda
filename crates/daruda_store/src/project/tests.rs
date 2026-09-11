@@ -185,6 +185,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -214,6 +215,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -242,6 +244,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         model_id: Some("opus".to_string()),
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -273,6 +276,7 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
         model_id: None,
         content_width: SerializedChatContentWidth::Reading,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -298,6 +302,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
         visible_kinds: None,
         fold_mode: None,
@@ -342,6 +347,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: Some(vec![
@@ -396,6 +402,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
+        tail_window_calls: Some(SerializedChatTailWindow::Last(2)),
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -406,9 +413,15 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         restored.tail_window,
         Some(SerializedChatTailWindow::Last(5))
     );
+    assert_eq!(
+        restored.tail_window_calls,
+        Some(SerializedChatTailWindow::Last(2)),
+        "the two levels round-trip independently"
+    );
 
     let all = SerializedAgentChatContent {
         tail_window: Some(SerializedChatTailWindow::All),
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -417,10 +430,24 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
     let json = serde_json::to_string(&all).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
     assert_eq!(restored.tail_window, Some(SerializedChatTailWindow::All));
+    assert_eq!(restored.tail_window_calls, None);
 
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert_eq!(legacy.tail_window, None);
+    assert_eq!(legacy.tail_window_calls, None);
+}
+
+/// A file written before the axis split states only `tail_window`. It restores
+/// as the step level it meant, and leaves the call level following config —
+/// never inheriting the step value, which would make the split unobservable on
+/// every pane that had ever pinned the axis.
+#[test]
+fn a_pre_split_pane_restores_its_step_level_and_leaves_the_calls_unset() {
+    let json = r#"{"cwd":"/repo/lane","tail_window":{"last":3}}"#;
+    let content: SerializedAgentChatContent = serde_json::from_str(json).unwrap();
+    assert_eq!(content.tail_window, Some(SerializedChatTailWindow::Last(3)));
+    assert_eq!(content.tail_window_calls, None);
 }
 
 /// Unknown preference tokens must not invalidate the surrounding pane state.
@@ -437,6 +464,7 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
     let content: SerializedAgentChatContent =
         serde_json::from_str(json).expect("an unknown token drops, it does not fail the pane");
     assert_eq!(content.tail_window, None, "unreadable → treated as unset");
+    assert_eq!(content.tail_window_calls, None);
     assert_eq!(content.content_width, SerializedChatContentWidth::Full);
     assert!(content.display_filter.is_some());
     assert!(content.fold_mode.is_some());
@@ -512,6 +540,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
@@ -544,6 +573,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             model_id: None,
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,
@@ -584,6 +614,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             model_id: None,
             content_width: SerializedChatContentWidth::Full,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,
@@ -1395,6 +1426,7 @@ fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
         model_id: None,
         content_width: SerializedChatContentWidth::Full,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         visible_kinds: Some(Vec::new()),
         fold_mode: None,

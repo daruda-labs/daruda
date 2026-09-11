@@ -650,8 +650,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// Per-pane content-column width mode. Persisted by the workspace snapshot;
     /// default `Full` keeps existing pane-wide wrapping.
     pub(in crate::workspace) content_width: ChatContentWidth,
-    /// Tail window and whether it still follows config.
-    pub(in crate::workspace) tail: PaneChoice<TailWindow>,
+    /// The recent-steps axis, one choice per level: how many work steps of a
+    /// response stay on screen, and how many calls inside one of those steps.
+    /// Two choices rather than one over a pair, so pinning the step level
+    /// leaves the call level following config.
+    pub(in crate::workspace) tail_steps: PaneChoice<TailWindow>,
+    pub(in crate::workspace) tail_calls: PaneChoice<TailWindow>,
     /// Display filter and whether it still follows config.
     pub(in crate::workspace) display_filter: PaneChoice<DisplayFilter>,
     /// The defaults the Workspace last resolved for this pane's agent. Kept so
@@ -828,7 +832,8 @@ impl AgentChatView {
             #[cfg(feature = "screenshot")]
             screenshot_options_open: false,
             content_width: ChatContentWidth::Full,
-            tail: PaneChoice::Seeded(defaults.tail),
+            tail_steps: PaneChoice::Seeded(defaults.tail.steps),
+            tail_calls: PaneChoice::Seeded(defaults.tail.calls),
             display_filter: PaneChoice::Seeded(defaults.filter),
             defaults,
             list_state: {

@@ -9,10 +9,13 @@
 //! Fold and Filter carry the same editors the chat pane opens (see
 //! [`crate::transcript::editor`]), so every value those keys can hold is one
 //! the row can state and edit — including a matrix with `"<turn>.<block>=<rule>"`
-//! cell overrides or a partial facet set. Recent steps is still a dropdown, and
-//! still the one axis that can load a size it cannot offer: a hand-written
-//! `tail_window = 12` gets its own selected entry and is written back verbatim
-//! while that entry stays picked.
+//! cell overrides or a partial facet set. Recent steps is two dropdowns, one
+//! per level of that axis (`tail_window` for a response's steps,
+//! `tail_window_calls` for the calls inside one), and still the one axis that
+//! can load a size it cannot offer: a hand-written `tail_window = 12` gets its
+//! own selected entry and is written back verbatim while that entry stays
+//! picked. Both levels share every helper below, so neither can offer a size
+//! the other refuses.
 
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
@@ -39,6 +42,8 @@ pub(in crate::settings_window) struct TranscriptRow {
     pub(in crate::settings_window) display_filter_loaded: Option<Vec<String>>,
     pub(in crate::settings_window) tail_window_select: Entity<SelectState>,
     pub(in crate::settings_window) tail_window_loaded: Option<u8>,
+    pub(in crate::settings_window) tail_window_calls_select: Entity<SelectState>,
+    pub(in crate::settings_window) tail_window_calls_loaded: Option<u8>,
 }
 
 /// Build the transcript half of a catalog row from the definition it loaded.
@@ -51,6 +56,12 @@ pub(in crate::settings_window) fn transcript_row(
         tail_options(),
         &tail_built_in(),
         definition.tail_window,
+        |size| tail_value(*size),
+    );
+    let tail_calls = picker(
+        tail_options(),
+        &tail_built_in(),
+        definition.tail_window_calls,
         |size| tail_value(*size),
     );
     TranscriptRow {
@@ -70,6 +81,10 @@ pub(in crate::settings_window) fn transcript_row(
         tail_window_loaded: tail.preserved,
         tail_window_select: cx
             .new(|cx| select::state_with_options(tail.options, Some(&tail.selected), window, cx)),
+        tail_window_calls_loaded: tail_calls.preserved,
+        tail_window_calls_select: cx.new(|cx| {
+            select::state_with_options(tail_calls.options, Some(&tail_calls.selected), window, cx)
+        }),
     }
 }
 
@@ -96,12 +111,17 @@ impl AgentCatalogRow {
     /// The `tail_window` this row writes, same built-in / preserved rules as
     /// [`Self::fold_mode`].
     pub(in crate::settings_window) fn tail_window(&self, cx: &gpui::App) -> Option<u8> {
-        let value = picked(&self.tail_window_select, cx)?;
-        match value.as_str() {
-            CUSTOM => self.tail_window_loaded,
-            size if size == tail_built_in() => None,
-            size => size.parse().ok(),
-        }
+        tail_key(&self.tail_window_select, self.tail_window_loaded, cx)
+    }
+
+    /// The `tail_window_calls` this row writes — the same axis one level in, so
+    /// the same rules and the same reader.
+    pub(in crate::settings_window) fn tail_window_calls(&self, cx: &gpui::App) -> Option<u8> {
+        tail_key(
+            &self.tail_window_calls_select,
+            self.tail_window_calls_loaded,
+            cx,
+        )
     }
 
     /// The `display_filter` this row writes, same built-in / preserved rules as
@@ -331,6 +351,19 @@ fn picker(
         selected: SharedString::from(selected),
         options,
         preserved: None,
+    }
+}
+
+/// The key one level of the tail axis writes: the picked size, nothing when it
+/// picked the built-in, or the preserved off-list size the [`CUSTOM`] entry
+/// stands for. Shared by both levels so a hand-written size is kept verbatim
+/// on either.
+fn tail_key(select: &Entity<SelectState>, loaded: Option<u8>, cx: &gpui::App) -> Option<u8> {
+    let value = picked(select, cx)?;
+    match value.as_str() {
+        CUSTOM => loaded,
+        size if size == tail_built_in() => None,
+        size => size.parse().ok(),
     }
 }
 

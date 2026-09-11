@@ -194,7 +194,10 @@ pub(in crate::workspace) fn render(
             usage: content.session_usage.as_ref(),
             has_items: !content.items.is_empty(),
             content_width: content.content_width,
-            tail: content.tail,
+            tail: tail_window::TailChoices {
+                steps: content.tail_steps,
+                calls: content.tail_calls,
+            },
             display_filter: content.display_filter,
             fold_mode: content.fold.mode_choice(),
             fold_editor: content.fold_editor,
@@ -776,7 +779,7 @@ fn render_agent_item(
             this.turn_boundary,
             RenderAssets::of(&this.assets),
             &this.fold,
-            this.tail.value(),
+            this.tail_calls.value(),
             t,
             this.dim_amount,
             agent_display_name(this),
@@ -806,7 +809,10 @@ fn render_item(
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
-    tail: TailWindow,
+    // The recent-steps axis's *call* level — the only one that reaches a
+    // rendered item, through the subagent card's own boundary. A response's
+    // step level is the row projection's business.
+    call_window: TailWindow,
     t: &theme::DarudaTheme,
     dim: f32,
     agent_label: &str,
@@ -851,7 +857,7 @@ fn render_item(
                 boundary,
                 assets,
                 fold,
-                tail,
+                call_window,
                 t,
                 dim,
                 pane_id,

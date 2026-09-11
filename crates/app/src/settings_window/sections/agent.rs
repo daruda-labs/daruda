@@ -440,6 +440,15 @@ impl SettingsWindow {
             .map(|body| {
                 Self::field_with_base(
                     body,
+                    s::settings_agent_field_tail_window_calls(),
+                    crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
+                    provenance.tail_window_calls_base.clone(),
+                    cx,
+                )
+            })
+            .map(|body| {
+                Self::field_with_base(
+                    body,
                     s::settings_agent_field_display_filter(),
                     filter_control,
                     provenance.display_filter_base.clone(),
@@ -572,6 +581,7 @@ impl SettingsWindow {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             },
@@ -595,6 +605,7 @@ pub(in crate::settings_window) struct RowProvenance {
     pub(in crate::settings_window) default_model_base: Option<String>,
     pub(in crate::settings_window) fold_mode_base: Option<String>,
     pub(in crate::settings_window) tail_window_base: Option<String>,
+    pub(in crate::settings_window) tail_window_calls_base: Option<String>,
     pub(in crate::settings_window) display_filter_base: Option<String>,
     pub(in crate::settings_window) env_base: Option<String>,
 }
@@ -611,6 +622,7 @@ impl RowProvenance {
             || self.default_model_base.is_some()
             || self.fold_mode_base.is_some()
             || self.tail_window_base.is_some()
+            || self.tail_window_calls_base.is_some()
             || self.display_filter_base.is_some()
             || self.env_base.is_some()
     }
@@ -635,6 +647,7 @@ impl AgentCatalogRow {
                 default_model_base: None,
                 fold_mode_base: None,
                 tail_window_base: None,
+                tail_window_calls_base: None,
                 display_filter_base: None,
                 env_base: None,
             };
@@ -670,6 +683,9 @@ impl AgentCatalogRow {
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             tail_window_base: self
                 .tail_window(cx)
+                .map(|_| s::settings_agent_override_preset_value_unset()),
+            tail_window_calls_base: self
+                .tail_window_calls(cx)
                 .map(|_| s::settings_agent_override_preset_value_unset()),
             display_filter_base: self
                 .display_filter()

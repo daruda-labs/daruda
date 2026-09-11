@@ -17,7 +17,7 @@ use super::super::fold::FoldKey;
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::RowKind;
-use super::super::rows::tail::TailWindow;
+use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
@@ -370,11 +370,24 @@ impl AgentChatView {
         // Remembered so a later reset can hand an axis back to *this* default
         // without the view resolving config on its own.
         self.defaults = *defaults;
-        let before = (self.tail, self.fold.mode(), self.display_filter);
-        self.tail.reseed(defaults.tail);
+        let before = (
+            self.tail_steps,
+            self.tail_calls,
+            self.fold.mode(),
+            self.display_filter,
+        );
+        self.tail_steps.reseed(defaults.tail.steps);
+        self.tail_calls.reseed(defaults.tail.calls);
         self.fold.reseed_mode(defaults.fold_mode);
         self.display_filter.reseed(defaults.filter);
-        if before == (self.tail, self.fold.mode(), self.display_filter) {
+        if before
+            == (
+                self.tail_steps,
+                self.tail_calls,
+                self.fold.mode(),
+                self.display_filter,
+            )
+        {
             return;
         }
         // A reseeded fold matrix moves every card's derived default, so the cards
@@ -382,7 +395,7 @@ impl AgentChatView {
         // [`Self::reconcile_embeds_after_fold`]. By handle, not a live borrow:
         // this arrives from `apply_config`'s global observer, which fires from
         // `flush_effects` with the window already back in `App::windows`.
-        if self.fold.mode() != before.1 {
+        if self.fold.mode() != before.2 {
             self.reconcile_embeds_after_fold(
                 &ReconcileScope::All,
                 &mut WindowAccess::ByHandle(self.window_handle),
@@ -436,19 +449,49 @@ impl AgentChatView {
         self.seed_transcript(items, window, cx);
     }
 
+    /// Both levels' resolved windows, as the projection takes them.
+    pub(in crate::workspace) fn step_windows(&self) -> StepWindow {
+        StepWindow {
+            steps: self.tail_steps.value(),
+            calls: self.tail_calls.value(),
+        }
+    }
+
+    /// One level's choice, by level — the tests assert per level, and a match
+    /// duplicated there could disagree with the one below.
+    #[cfg(test)]
+    pub(in crate::workspace) fn tail_choice_for_test(
+        &self,
+        level: TailLevel,
+    ) -> PaneChoice<TailWindow> {
+        match level {
+            TailLevel::Steps => self.tail_steps,
+            TailLevel::Calls => self.tail_calls,
+        }
+    }
+
+    fn tail_choice_mut(&mut self, level: TailLevel) -> &mut PaneChoice<TailWindow> {
+        match level {
+            TailLevel::Steps => &mut self.tail_steps,
+            TailLevel::Calls => &mut self.tail_calls,
+        }
+    }
+
     pub(in crate::workspace) fn set_tail_window(
         &mut self,
+        level: TailLevel,
         tail: TailWindow,
         cx: &mut Context<Self>,
     ) {
         // Choosing the seeded value still detaches the pane from config.
         let choice = PaneChoice::Chosen(tail);
-        let choice_changed = self.tail != choice;
-        let reveal_changed = self.fold.clear_tail_reveals();
+        let slot = self.tail_choice_mut(level);
+        let choice_changed = *slot != choice;
+        *slot = choice;
+        let reveal_changed = self.fold.clear_tail_reveals(level);
         if !choice_changed && !reveal_changed {
             return;
         }
-        self.tail = choice;
         self.reproject(cx);
         // A cleared reveal is transient, so only a new choice is worth a save.
         if choice_changed {
@@ -456,18 +499,26 @@ impl AgentChatView {
         }
     }
 
-    /// Hand the tail axis back to config. Not a pick of the default's value:
-    /// the pane follows every later config edit again, and the save below
-    /// clears the stored override rather than writing a new one.
-    pub(in crate::workspace) fn reset_tail_window(&mut self, cx: &mut Context<Self>) {
-        let before = self.tail;
-        self.tail.reset(self.defaults.tail);
-        let reveal_changed = self.fold.clear_tail_reveals();
-        if before == self.tail && !reveal_changed {
+    /// Hand one level of the tail axis back to config. Not a pick of the
+    /// default's value: the pane follows every later config edit again on that
+    /// level, and the save below clears the stored override rather than writing
+    /// a new one.
+    pub(in crate::workspace) fn reset_tail_window(
+        &mut self,
+        level: TailLevel,
+        cx: &mut Context<Self>,
+    ) {
+        let default = self.defaults.tail.get(level);
+        let slot = self.tail_choice_mut(level);
+        let before = *slot;
+        slot.reset(default);
+        let changed = before != *slot;
+        let reveal_changed = self.fold.clear_tail_reveals(level);
+        if !changed && !reveal_changed {
             return;
         }
         self.reproject(cx);
-        if before != self.tail {
+        if changed {
             self.persist_pane_prefs(cx);
         }
     }

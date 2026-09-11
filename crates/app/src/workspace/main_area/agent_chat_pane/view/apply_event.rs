@@ -589,7 +589,7 @@ impl AgentChatView {
             &self.fold,
             awaiting_response,
             &self.live_units,
-            self.tail.value(),
+            self.step_windows(),
             &self.filter_matches,
         );
 

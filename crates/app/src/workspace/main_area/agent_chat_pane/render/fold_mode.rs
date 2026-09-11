@@ -57,7 +57,7 @@ pub(super) fn fold_mode_chip(
 pub(super) fn fold_mode_chip_label(mode: PaneChoice<FoldMode>) -> String {
     axis_chip_label(
         s::agent_chat_fold_mode_chip(&mode_value(mode.value())),
-        mode,
+        mode.is_following(),
     )
 }
 

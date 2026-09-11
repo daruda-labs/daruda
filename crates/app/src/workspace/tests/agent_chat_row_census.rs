@@ -10,7 +10,7 @@ use daruda_acp::ChatItem;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
-use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+use crate::workspace::main_area::agent_chat_pane::rows::tail::{StepWindow, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::rows::{
     LiveSubagentUnits, RenderRow, RowKind, project,
 };
@@ -19,7 +19,7 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
 #[derive(Clone, Copy)]
 struct Lens {
     mode: FoldMode,
-    tail: TailWindow,
+    tail: StepWindow,
     filter: DisplayFilter,
 }
 
@@ -27,13 +27,18 @@ impl Lens {
     fn preset(preset: FoldPreset) -> Self {
         Self {
             mode: preset.mode(),
-            tail: TailWindow::All,
+            tail: StepWindow::default(),
             filter: DisplayFilter::default(),
         }
     }
 
+    /// Both levels of the recent-steps axis at once — the census measures the
+    /// window as a user sets it, not one level in isolation.
     fn tail(self, tail: TailWindow) -> Self {
-        Self { tail, ..self }
+        Self {
+            tail: StepWindow::uniform(tail),
+            ..self
+        }
     }
 
     fn filter(self, filter: DisplayFilter) -> Self {

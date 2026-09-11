@@ -1,4 +1,5 @@
-//! Controls how many trailing work steps remain visible in a response.
+//! Controls how many trailing work steps remain visible in a response, and
+//! how many calls remain visible inside one of those steps.
 
 use daruda_config::TAIL_WINDOW_ALL;
 
@@ -38,6 +39,57 @@ impl TailWindow {
 
     pub(in crate::workspace) fn hides(self, step_ix: usize, step_count: usize) -> bool {
         step_ix < self.hidden_steps(step_count)
+    }
+}
+
+/// Which level of the recent-steps axis a value belongs to. One enum rather
+/// than a pair of setters per level, so the panel's radio groups, the chip
+/// menu's sections, the element ids and the reveal invalidation all derive
+/// from one list.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum TailLevel {
+    /// A response's work steps — one top-level tool run each.
+    Steps,
+    /// The calls inside one step: a tool group's own, and a subagent card's
+    /// flattened children, which are one group of calls with no prose to split
+    /// them further.
+    Calls,
+}
+
+impl TailLevel {
+    pub(in crate::workspace) const ALL: [Self; 2] = [Self::Steps, Self::Calls];
+
+    /// Element-id and menu-section fragment.
+    pub(in crate::workspace) fn token(self) -> &'static str {
+        match self {
+            Self::Steps => "steps",
+            Self::Calls => "calls",
+        }
+    }
+}
+
+/// Both levels' resolved windows. The projection takes the pair rather than one
+/// window per call site, so a level cannot read the other's value by accident.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) struct StepWindow {
+    pub(in crate::workspace) steps: TailWindow,
+    pub(in crate::workspace) calls: TailWindow,
+}
+
+impl StepWindow {
+    pub(in crate::workspace) fn get(self, level: TailLevel) -> TailWindow {
+        match level {
+            TailLevel::Steps => self.steps,
+            TailLevel::Calls => self.calls,
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn uniform(window: TailWindow) -> Self {
+        Self {
+            steps: window,
+            calls: window,
+        }
     }
 }
 
@@ -83,6 +135,25 @@ mod tests {
     fn the_zero_sentinel_is_the_no_window_state() {
         assert_eq!(TailWindow::last(TAIL_WINDOW_ALL), TailWindow::All);
         assert_eq!(TailWindow::last(5), TailWindow::Last(5));
+    }
+
+    #[test]
+    fn a_pair_answers_per_level() {
+        let pair = StepWindow {
+            steps: TailWindow::Last(3),
+            calls: TailWindow::All,
+        };
+        assert_eq!(pair.get(TailLevel::Steps), TailWindow::Last(3));
+        assert_eq!(pair.get(TailLevel::Calls), TailWindow::All);
+    }
+
+    /// Every level the axis offers has to be reachable from `ALL` and carry a
+    /// distinct id fragment — the panel, the menu and the element ids are all
+    /// built from that list.
+    #[test]
+    fn every_level_is_listed_once_with_its_own_token() {
+        let tokens: Vec<_> = TailLevel::ALL.iter().map(|l| l.token()).collect();
+        assert_eq!(tokens, vec!["steps", "calls"]);
     }
 
     #[test]

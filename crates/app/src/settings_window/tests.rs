@@ -766,6 +766,7 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                     default_model: None,
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                 },
             }
@@ -811,6 +812,7 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             })
@@ -835,6 +837,7 @@ fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContex
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     });
@@ -863,6 +866,7 @@ fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppCon
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     });
@@ -896,6 +900,7 @@ fn hand_tuned_transcript_config() -> (Vec<String>, Vec<String>, daruda_config::C
         default_model: None,
         fold_mode: Some(fold_mode.clone()),
         tail_window: Some(12),
+        tail_window_calls: None,
         display_filter: Some(display_filter.clone()),
         env: None,
     };
@@ -1242,6 +1247,7 @@ fn an_untouched_axis_keeps_tokens_this_build_cannot_state(cx: &mut TestAppContex
         default_model: None,
         fold_mode: Some(stored_fold.clone()),
         tail_window: None,
+        tail_window_calls: None,
         display_filter: Some(stored_filter.clone()),
         env: None,
     };
@@ -1353,6 +1359,7 @@ fn an_agents_environment_survives_a_save_that_never_touched_it(cx: &mut TestAppC
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: Some(env.clone()),
     };
@@ -1708,6 +1715,7 @@ fn a_transcript_value_the_controls_state_loads_onto_them(cx: &mut TestAppContext
         default_model: None,
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(5),
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     };
@@ -1788,6 +1796,7 @@ fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppCon
                     default_model: None,
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                     env: None,
                 },
@@ -2181,6 +2190,7 @@ fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
         default_model: Some("legacy-model".to_string()),
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     });

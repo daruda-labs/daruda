@@ -75,7 +75,7 @@ fn turn_with_tools_nests_response_and_group() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -110,7 +110,7 @@ fn every_anchored_response_gets_a_bar() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -137,7 +137,7 @@ fn past_turn_collapses_current_expands() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -183,7 +183,7 @@ fn project_under(items: &[ChatItem], fold: &FoldState) -> Vec<RenderRow> {
         fold,
         false,
         &LiveSubagentUnits::of(items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     )
 }
@@ -284,7 +284,7 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -326,7 +326,7 @@ fn working_indicator_present_while_streaming() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -350,7 +350,7 @@ fn working_indicator_only_when_awaiting_response() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(!kinds(&rows).iter().any(|(k, _)| *k == "working"));
@@ -366,7 +366,7 @@ fn working_indicator_on_first_token_wait() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(kinds(&rows), vec![("user", false), ("working", false)]);
@@ -390,7 +390,7 @@ fn working_indicator_visible_when_response_collapsed() {
         &fold,
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let working = rows
@@ -422,7 +422,7 @@ fn conclusion_stays_visible_when_response_collapsed() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -456,7 +456,7 @@ fn conclusion_under_a_response_is_a_separately_foldable_item() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     // The final assistant block projects as a ConclusionItem (its own fold
@@ -483,7 +483,7 @@ fn trivial_reply_is_not_a_conclusion_item() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
@@ -511,7 +511,7 @@ fn only_the_last_assistant_message_is_the_conclusion() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -544,7 +544,7 @@ fn prose_before_a_trailing_tool_run_stays_visible_without_being_a_conclusion() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -586,7 +586,7 @@ fn a_trailing_answer_takes_the_conclusion_role_from_the_preamble() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -615,7 +615,7 @@ fn no_conclusion_row_when_run_has_no_assistant_text() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -648,7 +648,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let perm_row = rows
@@ -680,7 +680,7 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let perm_row = rows
@@ -734,7 +734,7 @@ fn a_pending_permission_outlives_every_fold_that_encloses_it() {
     );
 
     // The tail window's boundary, shut over the run the prompt sits in.
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert!(visible(&rows, 2), "the prompt survives a covered run");
     assert!(!visible(&rows, 1), "its neighbouring prose is covered");
     assert!(!visible(&rows, 3), "so is the call the window left out");
@@ -761,7 +761,7 @@ fn subagent_child_tool_calls_get_no_row() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -803,7 +803,7 @@ fn multiple_subagent_children_all_skip_and_parent_stays_single() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
@@ -837,7 +837,7 @@ fn orphan_child_keeps_its_row() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -1008,7 +1008,7 @@ fn live_subagent_units_stays_linear_over_a_long_tool_run() {
         &FoldState::default(),
         false,
         &units,
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let elapsed = started.elapsed();
@@ -1044,7 +1044,7 @@ fn project_all(items: &[ChatItem]) -> Vec<RenderRow> {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     )
 }
@@ -1124,7 +1124,7 @@ fn collapsed_response_surfaces_a_live_tool_group() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let header = rows
@@ -1158,7 +1158,7 @@ fn collapsed_response_hides_a_settled_tool_group() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let header = rows
@@ -1179,7 +1179,7 @@ fn lone_tool_call_is_not_grouped() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -1209,7 +1209,7 @@ fn in_progress_group_defaults_expanded() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     // group active (one tool in progress) → members visible.
@@ -1238,7 +1238,7 @@ fn group_member_visibility_follows_fold_override() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -1354,7 +1354,7 @@ fn collapsed_response_survivors_all_sit_at_the_run_indent() {
         &fold,
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
 
@@ -1395,7 +1395,7 @@ fn leading_run_without_a_user_anchor_still_gets_a_bar() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
 
@@ -1428,7 +1428,7 @@ fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -1465,7 +1465,7 @@ fn prose_in_front_of_a_run_stays_a_row_of_its_own() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert!(
@@ -1514,7 +1514,7 @@ fn consecutive_runs_each_get_their_own_group() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let starts: Vec<usize> = rows
@@ -1543,7 +1543,7 @@ fn a_response_without_tools_gets_no_group() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -1568,7 +1568,7 @@ fn a_run_earns_a_group_at_two_calls_not_one() {
             &FoldState::default(),
             false,
             &LiveSubagentUnits::of(items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             &DisplayFilter::default(),
         )
         .iter()
@@ -1646,7 +1646,7 @@ fn a_nested_child_between_two_calls_leaves_them_two_ungrouped_runs() {
 
     // The window's tally splits the same way: with room for one run it covers
     // the first call and keeps the second.
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     match tail_row(&rows).kind {
         RowKind::TailMore {
             hidden_steps,
@@ -1674,7 +1674,7 @@ fn the_running_group_expands_while_its_settled_sibling_folds() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let collapsed = |first: usize| {
@@ -1712,7 +1712,7 @@ fn turn_of_cycles(cycles: usize) -> Vec<ChatItem> {
     items
 }
 
-fn project_tail(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
+fn project_tail(items: &[ChatItem], tail: StepWindow) -> Vec<RenderRow> {
     project(
         items,
         &FoldState::default(),
@@ -1763,7 +1763,7 @@ fn the_window_counts_runs_the_filter_leaves_something_to_show() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::Last(2),
+        StepWindow::uniform(TailWindow::Last(2)),
         &only_reads(),
     );
 
@@ -1802,7 +1802,7 @@ fn the_window_counts_runs_the_filter_leaves_something_to_show() {
 fn a_window_keeps_only_the_last_runs_visible() {
     let items = turn_of_cycles(8);
     for (n, kept) in [(1usize, 1usize), (3, 3), (5, 5)] {
-        let rows = project_tail(&items, TailWindow::Last(n));
+        let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(n)));
         let vis = group_visibility(&rows);
         assert_eq!(vis.len(), 8, "every run keeps its bar at n={n}");
         assert_eq!(
@@ -1822,7 +1822,7 @@ fn a_window_keeps_only_the_last_runs_visible() {
 fn a_window_at_or_above_the_run_count_hides_nothing() {
     let items = turn_of_cycles(3);
     for tail in [TailWindow::Last(3), TailWindow::Last(10), TailWindow::All] {
-        let rows = project_tail(&items, tail);
+        let rows = project_tail(&items, StepWindow::uniform(tail));
         assert_eq!(group_visibility(&rows), vec![true; 3], "{tail:?}");
         let row = tail_row(&rows);
         assert!(row.hidden, "nothing to reveal → the row stays zero-height");
@@ -1840,7 +1840,7 @@ fn a_window_at_or_above_the_run_count_hides_nothing() {
 fn the_boundary_row_carries_the_kept_count_beside_the_hidden_one() {
     let items = turn_of_cycles(8);
     for n in [1usize, 3, 5] {
-        let rows = project_tail(&items, TailWindow::Last(n));
+        let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(n)));
         match tail_row(&rows).kind {
             RowKind::TailMore {
                 hidden_steps,
@@ -1857,7 +1857,20 @@ fn the_boundary_row_carries_the_kept_count_beside_the_hidden_one() {
 
 /// The group's calls only earn rows once the group is open, which is what makes
 /// the in-group window observable at all.
-fn project_open_group(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
+/// A turn projected with a window on the *call* level only, the response's own
+/// steps left whole — so whatever a group trims is attributable to that level
+/// alone.
+fn project_open_group_calls(items: &[ChatItem], calls: TailWindow) -> Vec<RenderRow> {
+    project_open_group(
+        items,
+        StepWindow {
+            steps: TailWindow::All,
+            calls,
+        },
+    )
+}
+
+fn project_open_group(items: &[ChatItem], tail: StepWindow) -> Vec<RenderRow> {
     project_open_group_under(
         items,
         &FoldState::with_mode(FoldPreset::Expanded.mode()),
@@ -1868,7 +1881,7 @@ fn project_open_group(items: &[ChatItem], tail: TailWindow) -> Vec<RenderRow> {
 fn project_open_group_under(
     items: &[ChatItem],
     fold: &FoldState,
-    tail: TailWindow,
+    tail: StepWindow,
 ) -> Vec<RenderRow> {
     project(
         items,
@@ -1936,7 +1949,7 @@ fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
 #[test]
 fn the_response_window_and_a_group_window_compose() {
     let items = turn_of_cycles(2);
-    let tail = TailWindow::Last(1);
+    let tail = StepWindow::uniform(TailWindow::Last(1));
 
     let shut = project_open_group(&items, tail);
     assert_eq!(
@@ -1985,13 +1998,84 @@ fn the_response_window_and_a_group_window_compose() {
     );
 }
 
+/// The two levels are one axis but two windows: narrowing the steps must not
+/// trim a kept run's calls, and narrowing the calls must not hide a run. One
+/// value drove both before, so either narrowing did both at once.
+#[test]
+fn the_two_levels_narrow_independently() {
+    // Four runs of two calls each: enough for both levels to have something to
+    // hold back, and few enough to assert every row by hand.
+    let items = turn_of_cycles(4);
+
+    let calls_only = project_open_group(
+        &items,
+        StepWindow {
+            steps: TailWindow::All,
+            calls: TailWindow::Last(1),
+        },
+    );
+    assert_eq!(
+        group_visibility(&calls_only),
+        vec![true; 4],
+        "a window on the calls hides no run"
+    );
+    assert_eq!(
+        call_visibility(&items, &calls_only),
+        vec![false, true, false, true, false, true, false, true],
+        "every group keeps only its last call"
+    );
+    assert_eq!(
+        tail_counts(&calls_only).0,
+        0,
+        "the response's own boundary has nothing to offer"
+    );
+    assert_eq!(group_tail_counts(&calls_only), (1, 1));
+
+    let steps_only = project_open_group(
+        &items,
+        StepWindow {
+            steps: TailWindow::Last(2),
+            calls: TailWindow::All,
+        },
+    );
+    assert_eq!(
+        group_visibility(&steps_only),
+        vec![false, false, true, true],
+        "a window on the steps hides the covered runs"
+    );
+    assert_eq!(
+        call_visibility(&items, &steps_only),
+        vec![false, false, false, false, true, true, true, true],
+        "and a kept run shows every call it holds"
+    );
+    assert_eq!(tail_counts(&steps_only).0, 2);
+    assert_eq!(
+        group_tail_counts(&steps_only),
+        (0, 2),
+        "no group boundary has anything to offer"
+    );
+}
+
+/// The response boundary's `(hidden, kept)` pair, read off the row that carries
+/// it — the step-level twin of [`group_tail_counts`].
+fn tail_counts(rows: &[RenderRow]) -> (usize, usize) {
+    match tail_row(rows).kind {
+        RowKind::TailMore {
+            hidden_steps,
+            kept_steps,
+            ..
+        } => (hidden_steps, kept_steps),
+        _ => unreachable!(),
+    }
+}
+
 /// The axis's whole point, one level in: a group is one step, so an open run of
 /// twenty calls used to ignore `Recent steps` entirely.
 #[test]
 fn a_window_trims_the_calls_inside_one_group() {
     let items = turn_of_one_group(8, false);
     for kept in [1usize, 3, 5] {
-        let rows = project_open_group(&items, TailWindow::Last(kept));
+        let rows = project_open_group_calls(&items, TailWindow::Last(kept));
         assert_eq!(
             call_visibility(&items, &rows),
             (0..8).map(|i| i >= 8 - kept).collect::<Vec<_>>(),
@@ -2009,7 +2093,7 @@ fn a_window_trims_the_calls_inside_one_group() {
 fn a_window_at_or_above_the_group_size_hides_nothing_inside_it() {
     let items = turn_of_one_group(3, false);
     for tail in [TailWindow::Last(3), TailWindow::Last(10), TailWindow::All] {
-        let rows = project_open_group(&items, tail);
+        let rows = project_open_group_calls(&items, tail);
         assert_eq!(call_visibility(&items, &rows), vec![true; 3], "{tail:?}");
         let row = group_tail_row(&rows);
         assert!(row.hidden, "nothing to reveal → the row stays zero-height");
@@ -2024,13 +2108,13 @@ fn a_window_at_or_above_the_group_size_hides_nothing_inside_it() {
 fn the_group_boundary_keeps_its_slot_as_the_window_changes() {
     let items = turn_of_one_group(4, false);
     let slots = |tail| {
-        project_open_group(&items, tail)
+        project_open_group_calls(&items, tail)
             .iter()
             .position(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
     };
     assert_eq!(slots(TailWindow::All), slots(TailWindow::Last(2)));
-    let a = project_open_group(&items, TailWindow::All);
-    let b = project_open_group(&items, TailWindow::Last(2));
+    let a = project_open_group_calls(&items, TailWindow::All);
+    let b = project_open_group_calls(&items, TailWindow::Last(2));
     assert!(
         a.iter().zip(&b).all(|(x, y)| x.same_slot(y)),
         "the projection differs only in what each row says and shows"
@@ -2042,7 +2126,11 @@ fn the_group_boundary_keeps_its_slot_as_the_window_changes() {
 #[test]
 fn a_collapsed_group_hides_its_own_boundary() {
     let items = turn_of_one_group(6, false);
-    let rows = project_open_group_under(&items, &FoldState::default(), TailWindow::Last(2));
+    let rows = project_open_group_under(
+        &items,
+        &FoldState::default(),
+        StepWindow::uniform(TailWindow::Last(2)),
+    );
     assert!(
         group_tail_row(&rows).hidden,
         "the settled group is folded, so its boundary is too"
@@ -2059,7 +2147,7 @@ fn an_ungrouped_call_gets_no_group_boundary() {
         tool("t0", ToolStatusView::Completed),
         asst("done"),
     ];
-    let rows = project_open_group(&items, TailWindow::Last(1));
+    let rows = project_open_group(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert!(
         !rows
             .iter()
@@ -2073,7 +2161,7 @@ fn an_ungrouped_call_gets_no_group_boundary() {
 #[test]
 fn opening_a_group_boundary_reveals_its_covered_calls() {
     let items = turn_of_one_group(5, false);
-    let tail = TailWindow::Last(2);
+    let tail = StepWindow::uniform(TailWindow::Last(2));
 
     let shut = project_open_group(&items, tail);
     assert_eq!(
@@ -2102,7 +2190,7 @@ fn opening_a_group_boundary_reveals_its_covered_calls() {
 fn a_live_covered_call_stays_surfaced_through_a_shut_group_boundary() {
     let mut items = turn_of_one_group(4, false);
     items[2] = tool("g0", ToolStatusView::InProgress);
-    let rows = project_open_group(&items, TailWindow::Last(1));
+    let rows = project_open_group(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert_eq!(
         call_visibility(&items, &rows),
         vec![true, false, false, true],
@@ -2131,7 +2219,7 @@ fn the_group_window_counts_calls_the_filter_leaves_something_to_show() {
         &FoldState::with_mode(FoldPreset::Expanded.mode()),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::Last(2),
+        StepWindow::uniform(TailWindow::Last(2)),
         &only_reads(),
     );
     assert_eq!(
@@ -2155,7 +2243,7 @@ fn a_reasoning_group_is_not_divided_by_the_step_axis() {
         });
     }
     items.push(asst("done"));
-    let rows = project_open_group(&items, TailWindow::Last(1));
+    let rows = project_open_group(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert!(
         !rows
             .iter()
@@ -2175,7 +2263,7 @@ fn a_reasoning_group_is_not_divided_by_the_step_axis() {
 #[test]
 fn a_response_without_tool_calls_gets_no_tail_row() {
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert!(
         !rows
             .iter()
@@ -2189,7 +2277,7 @@ fn a_response_without_tool_calls_gets_no_tail_row() {
 #[test]
 fn a_covered_run_takes_its_contents_with_it() {
     let items = turn_of_cycles(4);
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     // Three of the four runs are covered, so the kept range opens at the end of
     // the third — item 10, the last cycle's prose.
     for row in &rows {
@@ -2224,7 +2312,7 @@ fn revealing_the_tail_shows_every_run_again() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::Last(2),
+        StepWindow::uniform(TailWindow::Last(2)),
         &DisplayFilter::default(),
     );
     assert_eq!(group_visibility(&rows), vec![true; 6]);
@@ -2251,7 +2339,7 @@ fn a_collapsed_response_hides_its_tail_row_too() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::Last(2),
+        StepWindow::uniform(TailWindow::Last(2)),
         &DisplayFilter::default(),
     );
     assert!(tail_row(&rows).hidden, "nothing of a folded turn shows");
@@ -2261,7 +2349,7 @@ fn a_collapsed_response_hides_its_tail_row_too() {
 fn a_covered_run_with_a_running_tool_stays_surfaced() {
     let mut items = turn_of_cycles(4);
     items[2] = tool("t0", ToolStatusView::InProgress);
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert_eq!(
         group_visibility(&rows),
         vec![true, false, false, true],
@@ -2280,7 +2368,7 @@ fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
     items[2] = tool("t0", ToolStatusView::InProgress);
     let live = LiveSubagentUnits::of(&items);
 
-    let rows = project_tail(&items, TailWindow::Last(1));
+    let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     assert_eq!(
         group_visibility(&rows),
         vec![true, true],
@@ -2316,7 +2404,7 @@ fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
         &fold,
         false,
         &live,
-        TailWindow::Last(1),
+        StepWindow::uniform(TailWindow::Last(1)),
         &DisplayFilter::default(),
     );
     assert!(
@@ -2337,7 +2425,7 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::Last(2),
+        StepWindow::uniform(TailWindow::Last(2)),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -2361,7 +2449,7 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &only_reads(),
     );
     assert!(filtered_count(&filtered) > 0, "the filter still takes rows");
@@ -2374,11 +2462,11 @@ fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
 #[test]
 fn changing_the_window_keeps_every_row_in_its_slot() {
     let items = turn_of_cycles(8);
-    let all = project_tail(&items, TailWindow::All);
+    let all = project_tail(&items, StepWindow::uniform(TailWindow::All));
     for tail in [
-        TailWindow::Last(1),
-        TailWindow::Last(3),
-        TailWindow::Last(10),
+        StepWindow::uniform(TailWindow::Last(1)),
+        StepWindow::uniform(TailWindow::Last(3)),
+        StepWindow::uniform(TailWindow::Last(10)),
     ] {
         let rows = project_tail(&items, tail);
         assert_eq!(rows.len(), all.len(), "{tail:?} changes no row count");
@@ -2433,7 +2521,7 @@ fn project_filtered(items: &[ChatItem], filter: &DisplayFilter) -> Vec<RenderRow
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         filter,
     )
 }
@@ -2531,7 +2619,10 @@ fn no_axis_gives_a_card_child_a_row_of_its_own() {
     };
     for running in [false, true] {
         let items = turn_with_subagent(6, running);
-        for tail in [TailWindow::All, TailWindow::Last(1)] {
+        for tail in [
+            StepWindow::uniform(TailWindow::All),
+            StepWindow::uniform(TailWindow::Last(1)),
+        ] {
             for filter in [DisplayFilter::default(), only_reads()] {
                 for preset in FoldPreset::ALL {
                     assert_eq!(
@@ -2549,8 +2640,8 @@ fn no_axis_gives_a_card_child_a_row_of_its_own() {
     let many = turn_with_subagent(6, false);
     for tail in [TailWindow::All, TailWindow::Last(1)] {
         assert_eq!(
-            kinds(&project_tail(&one, tail)),
-            kinds(&project_tail(&many, tail)),
+            kinds(&project_tail(&one, StepWindow::uniform(tail))),
+            kinds(&project_tail(&many, StepWindow::uniform(tail))),
             "a card's children never move the row layer: {tail:?}"
         );
     }
@@ -2672,7 +2763,7 @@ fn revealing_the_filter_shows_what_it_covers() {
         &fold,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &only_tools,
     );
     let conclusion = rows
@@ -2713,7 +2804,7 @@ fn a_filter_and_a_fold_compose_rather_than_override_each_other() {
         &collapsed,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &only_tools,
     );
     for row in &rows {
@@ -2751,7 +2842,7 @@ fn a_collapsed_response_emptied_by_the_filter_still_offers_the_reveal() {
         &collapsed,
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::from_tokens(["tools"]),
     );
     assert!(
@@ -2780,7 +2871,7 @@ fn collapsing_the_response_does_not_move_the_tally() {
             fold,
             false,
             &LiveSubagentUnits::of(&items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             &only_tools,
         ))
     };
@@ -3024,7 +3115,7 @@ fn an_empty_assistant_reply_projects_no_row() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(kinds(&rows), vec![("user", false)]);
@@ -3047,7 +3138,7 @@ fn an_empty_message_projects_the_same_rows_as_no_message() {
             &FoldState::default(),
             false,
             &LiveSubagentUnits::of(items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             &DisplayFilter::default(),
         )
     };
@@ -3071,7 +3162,7 @@ fn an_empty_message_is_never_the_conclusion() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let visible_items: Vec<usize> = rows
@@ -3103,7 +3194,7 @@ fn an_empty_thinking_block_projects_no_row() {
         &FoldState::default(),
         false,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(
@@ -3140,7 +3231,7 @@ fn hiding_preambles_takes_their_rows_with_them() {
             &FoldState::default(),
             false,
             &LiveSubagentUnits::of(&items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             filter,
         )
         .iter()
@@ -3351,7 +3442,7 @@ fn revealing_the_filter_brings_the_group_bar_back() {
             fold,
             false,
             &LiveSubagentUnits::of(&items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             &no_reasoning,
         )
     };
@@ -3456,7 +3547,10 @@ fn diag_tail_population() {
         Err(_) => all,
     };
     let live = LiveSubagentUnits::of(&items);
-    for tail in [TailWindow::All, TailWindow::Last(5)] {
+    for tail in [
+        StepWindow::uniform(TailWindow::All),
+        StepWindow::uniform(TailWindow::Last(5)),
+    ] {
         let rows = project(
             &items,
             &FoldState::with_mode(preset.mode()),
@@ -3541,7 +3635,7 @@ fn the_working_indicator_survives_a_trailing_stop_marker() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::of(&items),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     let projected = kinds(&rows);
@@ -3564,7 +3658,7 @@ fn the_working_indicator_survives_a_trailing_stop_marker() {
         &FoldState::default(),
         true,
         &LiveSubagentUnits::default(),
-        TailWindow::All,
+        StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
     assert_eq!(kinds(&rows), vec![("working", false)]);
@@ -3588,7 +3682,7 @@ fn the_stop_marker_is_always_a_top_level_row() {
             &FoldState::default(),
             false,
             &LiveSubagentUnits::of(&items),
-            TailWindow::All,
+            StepWindow::uniform(TailWindow::All),
             &DisplayFilter::default(),
         );
         let markers: Vec<_> = rows
@@ -3743,7 +3837,7 @@ fn the_tally_counts_exactly_the_children_the_card_declines_to_render() {
                 filter: index,
                 filter_revealed: false,
                 live_units: live,
-                tail: TailWindow::All,
+                calls: TailWindow::All,
                 revealed: false,
             },
         );

@@ -1150,6 +1150,7 @@ fn write_transcript_defaults(
     table: &mut toml_edit::Table,
     fold_mode: Option<&[String]>,
     tail_window: Option<u8>,
+    tail_window_calls: Option<u8>,
     display_filter: Option<&[String]>,
 ) {
     if let Some(fold_mode) = fold_mode {
@@ -1157,6 +1158,9 @@ fn write_transcript_defaults(
     }
     if let Some(tail_window) = tail_window {
         table["tail_window"] = toml_edit::value(i64::from(tail_window));
+    }
+    if let Some(tail_window_calls) = tail_window_calls {
+        table["tail_window_calls"] = toml_edit::value(i64::from(tail_window_calls));
     }
     if let Some(display_filter) = display_filter {
         table["display_filter"] = string_array(display_filter);
@@ -1214,6 +1218,7 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 &mut table,
                 overrides.fold_mode.as_deref(),
                 overrides.tail_window,
+                overrides.tail_window_calls,
                 overrides.display_filter.as_deref(),
             );
             // Written whenever the row states one at all: an empty table is
@@ -1262,6 +1267,7 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 &mut table,
                 agent.fold_mode.as_deref(),
                 agent.tail_window,
+                agent.tail_window_calls,
                 agent.display_filter.as_deref(),
             );
             // Same rule as a preset override above: written whenever the

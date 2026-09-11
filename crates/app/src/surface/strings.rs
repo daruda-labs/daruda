@@ -2393,8 +2393,25 @@ pub fn agent_chat_tail_window_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.tail_window_chip", value = value).into_owned()
 }
 
+/// The chip's value slot when the axis's two levels hold different windows.
+/// A pane whose levels agree states the single value instead — see
+/// `tail_window_chip_label`.
+pub fn agent_chat_tail_window_pair(steps: &str, calls: &str) -> String {
+    rust_i18n::t!("agent_chat.tail_window_pair", steps = steps, calls = calls).into_owned()
+}
+
 pub fn agent_chat_tail_window_tooltip() -> String {
     rust_i18n::t!("agent_chat.tail_window_tooltip").into_owned()
+}
+
+/// Heading of the recent-steps panel's step-level group.
+pub fn agent_chat_tail_level_steps() -> String {
+    rust_i18n::t!("agent_chat.tail_level_steps").into_owned()
+}
+
+/// Heading of the recent-steps panel's call-level group.
+pub fn agent_chat_tail_level_calls() -> String {
+    rust_i18n::t!("agent_chat.tail_level_calls").into_owned()
 }
 
 pub fn agent_chat_tail_window_all() -> String {
@@ -4428,8 +4445,8 @@ pub fn settings_agent_section_transcript() -> String {
     rust_i18n::t!("settings.agent_section_transcript").into_owned()
 }
 
-/// One-line explanation of what the transcript group's three pickers set, and
-/// of what leaving them unset does.
+/// One-line explanation of what the transcript group's pickers set, and of
+/// what leaving them unset does.
 pub fn settings_agent_transcript_description() -> String {
     rust_i18n::t!("settings.agent_transcript_description").into_owned()
 }
@@ -4439,9 +4456,15 @@ pub fn settings_agent_field_fold_mode() -> String {
     rust_i18n::t!("settings.agent_field_fold_mode").into_owned()
 }
 
-/// Label for an agent catalog row's optional trailing-step-window override.
+/// Label for an agent catalog row's optional trailing-step-window override —
+/// the step level of the recent-steps axis.
 pub fn settings_agent_field_tail_window() -> String {
     rust_i18n::t!("settings.agent_field_tail_window").into_owned()
+}
+
+/// Label for the same override one level in: the calls inside a step.
+pub fn settings_agent_field_tail_window_calls() -> String {
+    rust_i18n::t!("settings.agent_field_tail_window_calls").into_owned()
 }
 
 /// Label for an agent catalog row's optional display-filter override.

@@ -2,11 +2,12 @@
 //! last-active timestamp, and the compact bar's state signal.
 
 use super::{
-    DisplayFilter, FoldMode, PaneChoice, TailWindow, context_meter, every_axis_follows_config,
+    DisplayFilter, FoldMode, PaneChoice, TailChoices, context_meter, every_axis_follows_config,
     format_token_count, last_active_tooltip, options_tooltip,
 };
 use crate::transcript::display_filter::FilterFacet;
 use crate::transcript::fold_mode::FoldPreset;
+use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use daruda_acp::{CostView, UsageView};
 use daruda_config::TAIL_WINDOW_CHOICES;
 
@@ -101,17 +102,34 @@ fn format_token_count_cases() {
     }
 }
 
-/// A pane nobody has touched: every axis still following config.
-fn following() -> (
-    PaneChoice<FoldMode>,
-    PaneChoice<DisplayFilter>,
-    PaneChoice<TailWindow>,
-) {
+/// A pane nobody has touched: every axis — and every level of the tail axis —
+/// still following config.
+fn following() -> (PaneChoice<FoldMode>, PaneChoice<DisplayFilter>, TailChoices) {
     (
         PaneChoice::Seeded(FoldMode::default()),
         PaneChoice::Seeded(DisplayFilter::default()),
-        PaneChoice::Seeded(TailWindow::All),
+        TailChoices {
+            steps: PaneChoice::Seeded(TailWindow::All),
+            calls: PaneChoice::Seeded(TailWindow::All),
+        },
     )
+}
+
+/// One level pinned, the other left following.
+fn tail_pinned(level_is_steps: bool) -> TailChoices {
+    let pinned = PaneChoice::Chosen(TailWindow::last(TAIL_WINDOW_CHOICES[0]));
+    let following = PaneChoice::Seeded(TailWindow::All);
+    if level_is_steps {
+        TailChoices {
+            steps: pinned,
+            calls: following,
+        }
+    } else {
+        TailChoices {
+            steps: following,
+            calls: pinned,
+        }
+    }
 }
 
 #[test]
@@ -142,11 +160,15 @@ fn any_single_overridden_axis_marks_the_compact_gear() {
         PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
         tail
     ));
-    assert!(!every_axis_follows_config(
-        fold,
-        filter,
-        PaneChoice::Chosen(TailWindow::last(TAIL_WINDOW_CHOICES[0]))
-    ));
+    // The tail axis has two levels, and either one alone takes the axis off
+    // config — a gear that only noticed the step level would leave a pinned
+    // call window invisible on a narrowed bar.
+    for level_is_steps in [true, false] {
+        assert!(
+            !every_axis_follows_config(fold, filter, tail_pinned(level_is_steps)),
+            "level_is_steps={level_is_steps}"
+        );
+    }
 }
 
 /// The gear replaces three labelled chips, so its tooltip has to carry all
@@ -157,7 +179,7 @@ fn the_compact_tooltip_names_every_axis() {
     let tip = options_tooltip(
         PaneChoice::Chosen(FoldMode::from_tokens(["auto", "last.tool=expanded"])),
         PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
-        PaneChoice::Chosen(TailWindow::last(TAIL_WINDOW_CHOICES[0])),
+        tail_pinned(true),
     );
     for value in [
         crate::surface::strings::agent_chat_fold_mode_custom(),

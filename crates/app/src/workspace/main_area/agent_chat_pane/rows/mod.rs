@@ -12,7 +12,7 @@ use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at};
 use super::fold::{FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
 use crate::transcript::display_filter::DisplayFilter;
-use tail::TailWindow;
+use tail::{StepWindow, TailWindow};
 
 /// Minimum consecutive same-kind items that earn a group header. Governs tool
 /// runs and thinking runs alike, so the two thresholds cannot drift apart.
@@ -264,7 +264,7 @@ pub(in crate::workspace) fn project(
     fold: &FoldState,
     awaiting_response: bool,
     live_units: &LiveSubagentUnits,
-    tail: TailWindow,
+    tail: StepWindow,
     filter: &DisplayFilter,
 ) -> Vec<RenderRow> {
     let hierarchy = ToolHierarchy::build(items);
@@ -288,7 +288,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
     fold: &FoldState,
     awaiting_response: bool,
     live_units: &LiveSubagentUnits,
-    tail: TailWindow,
+    tail: StepWindow,
     filter: &FilterMatchIndex,
 ) -> Vec<RenderRow> {
     let boundary = TurnBoundary::of(items);
@@ -410,7 +410,7 @@ struct ProjectionContext<'a> {
     boundary: TurnBoundary,
     hierarchy: &'a ToolHierarchy<'a>,
     live_units: &'a LiveSubagentUnits,
-    tail: TailWindow,
+    tail: StepWindow,
     filter: &'a FilterMatchIndex,
 }
 
@@ -563,7 +563,7 @@ impl LastProse {
 /// The third level — a subagent card's children ([`subagent`]) —
 /// deliberately does not come through here: its children own no row, so there
 /// is no `window_start` item index to hand back and no filter cut to tally, and
-/// it reads [`TailWindow`] directly instead.
+/// it reads the call level's [`TailWindow`] directly instead.
 ///
 /// `kept` is the window's population: counting every unit let one the filter
 /// emptied spend a slot, so `Recent steps: 3` put however many of the last three
@@ -633,7 +633,7 @@ impl UnitWindow {
                 span.clone().any(|j| context.filter.matches(&items[j])),
             ));
         }
-        Self::of_units(units.iter().copied(), run.start, context.tail)
+        Self::of_units(units.iter().copied(), run.start, context.tail.steps)
     }
 
     /// One group's window: one unit per call it holds. A group is a contiguous
@@ -643,7 +643,7 @@ impl UnitWindow {
         Self::of_units(
             group.map(move |j| (j + 1, context.filter.matches(&context.items[j]))),
             start,
-            context.tail,
+            context.tail.calls,
         )
     }
 

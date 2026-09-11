@@ -49,14 +49,14 @@ fn card_of(n: usize) -> Vec<ChatItem> {
 fn lens<'a>(
     filter: &'a FilterMatchIndex,
     live: &'a LiveSubagentUnits,
-    tail: TailWindow,
+    calls: TailWindow,
     revealed: bool,
 ) -> SubagentLens<'a> {
     SubagentLens {
         filter,
         filter_revealed: false,
         live_units: live,
-        tail,
+        calls,
         revealed,
     }
 }

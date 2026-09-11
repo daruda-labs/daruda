@@ -20,7 +20,7 @@ use gpui::{
 
 use super::super::filter::display_filter_chip_label;
 use super::super::fold_mode::fold_mode_chip_label;
-use super::super::tail_window::tail_window_chip_label;
+use super::super::tail_window::{TailChoices, tail_window_chip_label};
 use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::transcript::display_filter::DisplayFilter;
@@ -34,7 +34,6 @@ use crate::ui::{
     button_bare_on_surface, button_group,
 };
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
-use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::view::{
     ActivityOptionsTab, AgentChatView, ChatContentWidth,
 };
@@ -58,7 +57,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub usage: Option<&'a UsageView>,
     pub has_items: bool,
     pub content_width: ChatContentWidth,
-    pub tail: PaneChoice<TailWindow>,
+    pub tail: TailChoices,
     pub display_filter: PaneChoice<DisplayFilter>,
     pub fold_mode: PaneChoice<FoldMode>,
     /// The fold editor's own state — see `AgentChatView`.
@@ -239,7 +238,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
 fn every_axis_follows_config(
     fold: PaneChoice<FoldMode>,
     filter: PaneChoice<DisplayFilter>,
-    tail: PaneChoice<TailWindow>,
+    tail: TailChoices,
 ) -> bool {
     fold.is_following() && filter.is_following() && tail.is_following()
 }
@@ -251,7 +250,7 @@ fn every_axis_follows_config(
 fn options_tooltip(
     fold: PaneChoice<FoldMode>,
     filter: PaneChoice<DisplayFilter>,
-    tail: PaneChoice<TailWindow>,
+    tail: TailChoices,
 ) -> String {
     s::agent_chat_view_options_tooltip(
         &fold_mode_chip_label(fold),
@@ -308,7 +307,7 @@ fn activity_options_panel(
     mode: PaneChoice<FoldMode>,
     fold_editor: FoldEditorState,
     filter: PaneChoice<DisplayFilter>,
-    tail: PaneChoice<TailWindow>,
+    tail: TailChoices,
     active_tab: ActivityOptionsTab,
     window: &Window,
     cx: &mut Context<crate::ui::PopoverState>,

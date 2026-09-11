@@ -7,8 +7,8 @@
 //! card's renderer only has to iterate what it returns.
 //!
 //! A subagent contributes only tool calls, so a card's children are one group
-//! of calls with no prose to split them into steps: the step axis counts them
-//! the way a tool group counts its own.
+//! of calls with no prose to split them into steps: the axis's *call* level
+//! counts them the way a tool group counts its own.
 
 use daruda_acp::{ChatItem, ToolCallItem};
 
@@ -26,7 +26,10 @@ pub(in crate::workspace) struct SubagentLens<'a> {
     /// admits the whole card, descendants included.
     pub(in crate::workspace) filter_revealed: bool,
     pub(in crate::workspace) live_units: &'a LiveSubagentUnits,
-    pub(in crate::workspace) tail: TailWindow,
+    /// The axis's call level. A card's children are one group of calls, so
+    /// this is the same window a tool group's own boundary uses — never the
+    /// response-level step window.
+    pub(in crate::workspace) calls: TailWindow,
     /// The card's own boundary is open.
     pub(in crate::workspace) revealed: bool,
 }
@@ -80,12 +83,12 @@ impl<'a> SubagentChildren<'a> {
             })
             .collect();
         let count = collected.len();
-        let hidden = lens.tail.hidden_steps(count);
+        let hidden = lens.calls.hidden_steps(count);
         let shown = collected
             .into_iter()
             .enumerate()
             .filter_map(|(pos, (ix, call))| {
-                let covered = lens.tail.hides(pos, count);
+                let covered = lens.calls.hides(pos, count);
                 let live = tool_or_subtree_live(call, lens.live_units);
                 (!covered || lens.revealed || live).then_some(SubagentChild { ix, call })
             })

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use super::pane_choice::PaneChoice;
+use super::rows::tail::TailLevel;
 use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, TurnPosition};
 use crate::transcript::tool_category::ToolCategory;
 
@@ -234,15 +235,17 @@ impl FoldState {
         self.held_response = None;
     }
 
-    /// Every level of the recent-steps axis: a response's boundary, each tool
-    /// group's own, and each subagent card's. Changing the window invalidates
-    /// every reveal it granted.
-    pub(in crate::workspace) fn clear_tail_reveals(&mut self) -> bool {
-        self.clear_matching_overrides(|key| {
-            matches!(
-                key,
-                FoldKey::Tail(_) | FoldKey::ToolGroupTail(_) | FoldKey::SubagentTail(_)
-            )
+    /// The reveals one level of the recent-steps axis granted: the step level
+    /// owns a response's own boundary, the call level owns each tool group's
+    /// and each subagent card's. Changing a window invalidates every reveal it
+    /// granted — and only those, so narrowing the steps leaves a group the user
+    /// opened by hand still open.
+    pub(in crate::workspace) fn clear_tail_reveals(&mut self, level: TailLevel) -> bool {
+        self.clear_matching_overrides(|key| match level {
+            TailLevel::Steps => matches!(key, FoldKey::Tail(_)),
+            TailLevel::Calls => {
+                matches!(key, FoldKey::ToolGroupTail(_) | FoldKey::SubagentTail(_))
+            }
         })
     }
 
@@ -582,7 +585,7 @@ mod tests {
             true,
         );
 
-        assert!(state.clear_tail_reveals());
+        assert!(state.clear_tail_reveals(TailLevel::Steps));
         assert!(!state.is_expanded(&FoldKey::Tail(1), FoldContext::past(false)));
         assert!(!state.is_expanded(&FoldKey::Tail(9), FoldContext::past(false)));
         for key in [
@@ -590,8 +593,18 @@ mod tests {
             FoldKey::SubagentTail("t".into()),
         ] {
             assert!(
+                state.is_expanded(&key, FoldContext::past(false)),
+                "the step level does not own the call level's reveal: {key:?}"
+            );
+        }
+        assert!(state.clear_tail_reveals(TailLevel::Calls));
+        for key in [
+            FoldKey::ToolGroupTail("t".into()),
+            FoldKey::SubagentTail("t".into()),
+        ] {
+            assert!(
                 !state.is_expanded(&key, FoldContext::past(false)),
-                "one axis owns every level of its reveal: {key:?}"
+                "the call level owns both of its boundaries: {key:?}"
             );
         }
         assert!(

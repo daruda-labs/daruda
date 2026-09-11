@@ -71,7 +71,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         &FoldState::default(),
         false,
         &super::rows::LiveSubagentUnits::default(),
-        super::rows::tail::TailWindow::All,
+        super::rows::tail::StepWindow::default(),
         &crate::transcript::display_filter::DisplayFilter::default(),
     );
     // Inline assistant prose has no independent fold control.

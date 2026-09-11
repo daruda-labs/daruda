@@ -1791,6 +1791,7 @@ mod tests {
             default_model: None,
             fold_mode: None,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             env: None,
         }
@@ -1856,6 +1857,7 @@ mod tests {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             },
@@ -1871,6 +1873,7 @@ mod tests {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             },

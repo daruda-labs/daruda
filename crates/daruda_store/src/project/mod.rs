@@ -485,13 +485,23 @@ pub struct SerializedAgentChatContent {
         skip_serializing_if = "SerializedChatContentWidth::is_full"
     )]
     pub content_width: SerializedChatContentWidth,
-    /// Explicit pane tail choice; `None` continues following config.
+    /// Explicit pane tail choice for a response's work steps; `None` continues
+    /// following config.
     #[serde(
         default,
         deserialize_with = "lenient",
         skip_serializing_if = "Option::is_none"
     )]
     pub tail_window: Option<SerializedChatTailWindow>,
+    /// The same choice one level in — the calls inside a tool group or a
+    /// subagent card. Its own key, so a file written before the axis split
+    /// restores the step level it stated and leaves this one following config.
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tail_window_calls: Option<SerializedChatTailWindow>,
     /// Superseded by [`Self::visible_kinds`]; read, never written.
     ///
     /// It listed the same visible set, but wrote an empty list to mean

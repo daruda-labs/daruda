@@ -11,7 +11,7 @@ use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
-use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AgentSessionStatus, ChatContentWidth,
 };
@@ -596,6 +596,7 @@ fn codex_agent() -> daruda_config::AgentDefinition {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     }
@@ -612,7 +613,8 @@ struct RestoredChat {
     replaying: bool,
     dormant: bool,
     content_width: ChatContentWidth,
-    tail: PaneChoice<TailWindow>,
+    tail_steps: PaneChoice<TailWindow>,
+    tail_calls: PaneChoice<TailWindow>,
     display_filter: PaneChoice<DisplayFilter>,
     fold_mode: Option<FoldMode>,
 }
@@ -631,7 +633,8 @@ fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
                 replaying: view.is_replaying(),
                 dormant: view.handle.is_none(),
                 content_width: view.content_width,
-                tail: view.tail,
+                tail_steps: view.tail_steps,
+                tail_calls: view.tail_calls,
                 display_filter: view.display_filter,
                 fold_mode: view.fold.chosen_mode(),
             }
@@ -695,7 +698,10 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                 view.update(cx, |v, cx| {
                     v.session_title = Some("Investigate flaky test".to_string());
                     v.content_width = ChatContentWidth::Reading;
-                    v.tail = PaneChoice::Chosen(TailWindow::Last(3));
+                    // Different windows per level, so a save that collapsed the
+                    // axis back to one value would restore the wrong one.
+                    v.tail_steps = PaneChoice::Chosen(TailWindow::Last(3));
+                    v.tail_calls = PaneChoice::Chosen(TailWindow::Last(10));
                     // Distinct token vocabularies: each preference's tokens are
                     // unreadable to the others, so a crossed wire restores a
                     // default rather than the wrong-but-plausible value.
@@ -769,9 +775,14 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
             "per-pane reading-width mode must round-trip"
         );
         assert_eq!(
-            titled.tail,
+            titled.tail_steps,
             PaneChoice::Chosen(TailWindow::Last(3)),
             "per-pane tail window must round-trip as the user's own choice"
+        );
+        assert_eq!(
+            titled.tail_calls,
+            PaneChoice::Chosen(TailWindow::Last(10)),
+            "and each level keeps its own, not the other's"
         );
         assert_eq!(
             titled.display_filter,
@@ -824,7 +835,8 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
             .expect("the default-agent session keeps its persisted id");
         assert_eq!(kept.title.as_deref(), Some("Investigate flaky test"));
         assert_eq!(kept.content_width, ChatContentWidth::Reading);
-        assert_eq!(kept.tail, PaneChoice::Chosen(TailWindow::Last(3)));
+        assert_eq!(kept.tail_steps, PaneChoice::Chosen(TailWindow::Last(3)));
+        assert_eq!(kept.tail_calls, PaneChoice::Chosen(TailWindow::Last(10)));
         assert_eq!(
             kept.display_filter,
             PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose))
@@ -853,6 +865,7 @@ fn codex() -> daruda_config::AgentDefinition {
         default_model: None,
         fold_mode: None,
         tail_window: None,
+        tail_window_calls: None,
         display_filter: None,
         env: None,
     }
@@ -1406,7 +1419,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     let chosen = workspace.read_with(cx, |ws, _| agent_view(ws, chosen_id));
     cx.update_window(window_handle.into(), |_, window, cx| {
         chosen.update(cx, |v, cx| {
-            v.set_tail_window(TailWindow::Last(2), cx);
+            v.set_tail_window(TailLevel::Steps, TailWindow::Last(2), cx);
             v.toggle_display_facet(FilterFacet::Prose, cx);
             v.set_fold_mode(FoldPreset::Expanded.mode(), window, cx);
         });
@@ -1429,7 +1442,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     let untouched = workspace.read_with(cx, |ws, _| agent_view(ws, untouched_id));
     untouched.read_with(cx, |v, _| {
         assert_eq!(
-            v.tail,
+            v.tail_steps,
             PaneChoice::Seeded(TailWindow::Last(5)),
             "a reloaded tail window must reach an untouched pane"
         );
@@ -1448,9 +1461,15 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
 
     chosen.read_with(cx, |v, _| {
         assert_eq!(
-            v.tail,
+            v.tail_steps,
             PaneChoice::Chosen(TailWindow::Last(2)),
             "config must not overwrite a chosen tail window"
+        );
+        assert_eq!(
+            v.tail_calls,
+            PaneChoice::Seeded(TailWindow::All),
+            "the reload states no call level, so the level the user never picked \
+             follows it to the built-in rather than inheriting the step window"
         );
         assert_eq!(
             v.display_filter,
@@ -1528,12 +1547,14 @@ fn open_agent_chat_pane_on(
 }
 
 /// The three transcript axes a pane currently sits on, as one tuple: the tests
-/// below compare two panes against each other as well as against config.
+/// below compare two panes against each other as well as against config. The
+/// tail axis contributes its step level — the one `claude_entry_with`'s
+/// `tail_window` states.
 fn transcript_settings(
     view: &Entity<AgentChatView>,
     cx: &mut TestAppContext,
 ) -> (PaneChoice<TailWindow>, FoldMode, PaneChoice<DisplayFilter>) {
-    view.read_with(cx, |v, _| (v.tail, v.fold.mode(), v.display_filter))
+    view.read_with(cx, |v, _| (v.tail_steps, v.fold.mode(), v.display_filter))
 }
 
 /// A reload must resolve the defaults per pane, against that pane's own agent.
@@ -1889,7 +1910,7 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
             .expect("restored agent chat pane present")
             .read(cx);
         assert_eq!(
-            view.tail,
+            view.tail_steps,
             PaneChoice::Seeded(TailWindow::Last(5)),
             "the new config tail window must reach an untouched pane"
         );

@@ -108,6 +108,7 @@ fn agents_round_trip_through_toml() {
                 default_model: None,
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             }),
@@ -895,6 +896,47 @@ fold_mode = [\"summary\"]\n";
         Some(["summary".to_string()].as_slice())
     );
     assert_eq!(resolved[1].tail_window, Some(3));
+    // The legacy section never had a call-level key, so the lift cannot invent
+    // one: the level the old value meant is the step level, and the call level
+    // stays unstated and follows the built-in.
+    assert!(resolved.iter().all(|a| a.tail_window_calls.is_none()));
+}
+
+/// The axis's two levels are independent keys: an entry can state either, both
+/// or neither, and each survives a write-and-reload on its own.
+#[test]
+fn the_two_tail_levels_round_trip_as_separate_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[[agents]]
+         id = \"split\"\n         name = \"Split\"\n         command = \"npx -y some-acp\"\n         tail_window = 3\n         tail_window_calls = 10\n         [[agents]]
+         id = \"calls-only\"\n         name = \"Calls Only\"\n         command = \"npx -y some-acp\"\n         tail_window_calls = 1\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    let agents = cfg.resolved_agents();
+    assert_eq!(agents[0].tail_window, Some(3));
+    assert_eq!(agents[0].tail_window_calls, Some(10));
+    assert_eq!(
+        agents[1].tail_window, None,
+        "a row may state the call level alone"
+    );
+    assert_eq!(agents[1].tail_window_calls, Some(1));
+
+    patch_config_file_to(&cfg, &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("tail_window = 3"), "{text}");
+    assert!(text.contains("tail_window_calls = 10"), "{text}");
+    assert!(text.contains("tail_window_calls = 1"), "{text}");
+
+    let reloaded = Config::load_from(&path).resolved_agents();
+    assert_eq!(reloaded[0].tail_window, Some(3));
+    assert_eq!(reloaded[0].tail_window_calls, Some(10));
+    assert_eq!(reloaded[1].tail_window, None);
+    assert_eq!(reloaded[1].tail_window_calls, Some(1));
 }
 
 /// The lifted keys are never written back under `[agent]`, so the migration
@@ -1078,6 +1120,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     default_model: Some("gemini-2.5-pro".to_string()),
                     fold_mode: Some(vec!["summary".to_string()]),
                     tail_window: Some(3),
+                    tail_window_calls: None,
                     // An empty visible set, not an absent key.
                     display_filter: Some(Vec::new()),
                 },
@@ -1094,6 +1137,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 default_model: None,
                 fold_mode: Some(vec!["expanded".to_string()]),
                 tail_window: Some(10),
+                tail_window_calls: None,
                 display_filter: Some(vec!["prose".to_string(), "tools".to_string()]),
                 env: None,
             }),
@@ -1115,6 +1159,7 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                 default_model: Some("claude-opus-4".to_string()),
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
             }),
         ],

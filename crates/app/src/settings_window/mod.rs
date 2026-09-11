@@ -493,14 +493,18 @@ pub(super) struct AgentCatalogRow {
     /// The `display_filter` tokens this row loaded — same rule as
     /// `fold_mode_loaded`.
     pub(super) display_filter_loaded: Option<Vec<String>>,
-    /// Trailing-step window a fresh chat pane starts on. Still a dropdown, and
-    /// so still able to load a size it cannot offer.
+    /// Trailing-step window a fresh chat pane starts on, one picker per level
+    /// of that axis: this one for a response's work steps, the pair below for
+    /// the calls inside one of them. Still dropdowns, and so still able to load
+    /// a size they cannot offer.
     pub(super) tail_window_select: Entity<SelectState>,
     /// The size this row loaded when the dropdown above cannot state it. It
     /// backs that picker's configured-elsewhere entry and is written back
     /// verbatim while it stays picked, so an unrelated edit cannot flatten a
     /// hand-written value. `None` means the picker holds the whole value.
     pub(super) tail_window_loaded: Option<u8>,
+    pub(super) tail_window_calls_select: Entity<SelectState>,
+    pub(super) tail_window_calls_loaded: Option<u8>,
     /// The environment the adapter process launches with, as one
     /// `KEY=value` per line. Which of the three
     /// [`daruda_config::AgentDefinition::env`] states an empty field means
@@ -782,12 +786,14 @@ impl SettingsWindow {
                     ))
             }),
             tail_window_loaded: transcript.tail_window_loaded,
+            tail_window_calls_loaded: transcript.tail_window_calls_loaded,
             fold_mode: transcript.fold_mode,
             fold_mode_loaded: transcript.fold_mode_loaded,
             fold_editor: FoldEditorState::default(),
             display_filter: transcript.display_filter,
             display_filter_loaded: transcript.display_filter_loaded,
             tail_window_select: transcript.tail_window_select,
+            tail_window_calls_select: transcript.tail_window_calls_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
                     .placeholder("agent-id")
@@ -873,19 +879,23 @@ impl SettingsWindow {
                 },
             ));
         }
-        // The tail picker may shed a "Custom (from config)" entry by choosing
-        // one of the stated values. Rebuild the catalog from the committed
-        // config after a successful save so the hidden preserved value cannot
-        // be picked again later in the same Settings window.
-        subs.push(cx.subscribe_in(
-            &row.tail_window_select,
-            window,
-            |this, _state, ev: &select::ConfirmEvent, window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) && this.persist_agent_catalog(cx) {
-                    this.reload_agent_catalog_from_live(window, cx);
-                }
-            },
-        ));
+        // Either tail picker may shed a "Custom (from config)" entry by
+        // choosing one of the stated values. Rebuild the catalog from the
+        // committed config after a successful save so the hidden preserved
+        // value cannot be picked again later in the same Settings window.
+        for picker in [&row.tail_window_select, &row.tail_window_calls_select] {
+            subs.push(cx.subscribe_in(
+                picker,
+                window,
+                |this, _state, ev: &select::ConfirmEvent, window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_))
+                        && this.persist_agent_catalog(cx)
+                    {
+                        this.reload_agent_catalog_from_live(window, cx);
+                    }
+                },
+            ));
+        }
         // The row's id keys the cached vocabulary, so retyping it switches
         // both pickers to that agent's option lists.
         subs.push(cx.subscribe_in(
@@ -2346,6 +2356,7 @@ impl SettingsWindow {
                     default_model: row.default_model(cx),
                     fold_mode: row.fold_mode(),
                     tail_window: row.tail_window(cx),
+                    tail_window_calls: row.tail_window_calls(cx),
                     display_filter: row.display_filter(),
                     env,
                 },

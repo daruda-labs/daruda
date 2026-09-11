@@ -42,6 +42,7 @@ pub struct PresetOverrides {
     pub default_model: Option<String>,
     pub fold_mode: Option<Vec<String>>,
     pub tail_window: Option<u8>,
+    pub tail_window_calls: Option<u8>,
     pub display_filter: Option<Vec<String>>,
     /// Replaces the preset's environment wholesale — an empty list is a real
     /// value (the preset's own environment, cleared), so it cannot collapse
@@ -76,6 +77,9 @@ impl AgentEntry {
                 }
                 if let Some(tail_window) = overrides.tail_window {
                     definition.tail_window = Some(tail_window);
+                }
+                if let Some(tail_window_calls) = overrides.tail_window_calls {
+                    definition.tail_window_calls = Some(tail_window_calls);
                 }
                 if let Some(display_filter) = &overrides.display_filter {
                     definition.display_filter = Some(display_filter.clone());
@@ -160,6 +164,7 @@ impl AgentEntry {
                 default_model: definition.default_model.clone(),
                 fold_mode: definition.fold_mode.clone(),
                 tail_window: definition.tail_window,
+                tail_window_calls: definition.tail_window_calls,
                 display_filter: definition.display_filter.clone(),
                 // Diffed like `name` and `command`, not copied whole: a
                 // preset may state an environment of its own, and a row that
@@ -211,6 +216,8 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tail_window: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    tail_window_calls: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     env: Option<EnvRepr>,
@@ -234,6 +241,7 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
                     default_model: v.default_model,
                     fold_mode: v.fold_mode,
                     tail_window: v.tail_window,
+                    tail_window_calls: v.tail_window_calls,
                     display_filter: v.display_filter,
                     // Sanitized like a definition's own `env` (see
                     // `super::sanitized_env`): an override reaches the very
@@ -258,6 +266,7 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
+            tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
             env: v.env,
         });
@@ -277,6 +286,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                 default_model: overrides.default_model,
                 fold_mode: overrides.fold_mode,
                 tail_window: overrides.tail_window,
+                tail_window_calls: overrides.tail_window_calls,
                 display_filter: overrides.display_filter,
                 env: overrides.env.map(|env| env.into_iter().collect()),
                 ssh: None,
@@ -293,6 +303,7 @@ impl From<AgentEntry> for AgentEntryRepr {
                     default_model: repr.default_model,
                     fold_mode: repr.fold_mode,
                     tail_window: repr.tail_window,
+                    tail_window_calls: repr.tail_window_calls,
                     display_filter: repr.display_filter,
                     env: repr.env,
                     ssh: repr.ssh,
@@ -321,6 +332,7 @@ mod tests {
             default_model: None,
             fold_mode: None,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             env: None,
         }
@@ -378,6 +390,7 @@ mod tests {
                     default_model: Some("gemini-2.5-pro".to_string()),
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                 },
             },
@@ -393,6 +406,7 @@ mod tests {
                 default_model: Some("claude-opus-4".to_string()),
                 fold_mode: None,
                 tail_window: None,
+                tail_window_calls: None,
                 display_filter: None,
                 env: None,
             }),
@@ -475,6 +489,7 @@ mod tests {
                     default_model: None,
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                 },
             }
@@ -504,6 +519,7 @@ mod tests {
                     default_model: Some("gpt-5-codex".to_string()),
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                 },
             }
@@ -575,6 +591,7 @@ mod tests {
                     default_model: None,
                     fold_mode: None,
                     tail_window: None,
+                    tail_window_calls: None,
                     display_filter: None,
                 },
             }

@@ -362,6 +362,7 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
             id: ws.agents[0].id.clone(),
             name: "Renamed orchestrator".into(),
             tail_window: Some(3),
+            tail_window_calls: None,
             ..ws.agents[0].clone()
         };
         let mut config = daruda_config::Config {

@@ -3,7 +3,7 @@
 
 use daruda_config::{AgentDefinition, TAIL_WINDOW_DEFAULT};
 
-use super::rows::tail::TailWindow;
+use super::rows::tail::{StepWindow, TailWindow};
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::fold_mode::FoldMode;
 
@@ -18,7 +18,7 @@ use crate::transcript::fold_mode::FoldMode;
 /// value — there is no layer between the two.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct TranscriptDefaults {
-    pub(in crate::workspace) tail: TailWindow,
+    pub(in crate::workspace) tail: StepWindow,
     pub(in crate::workspace) fold_mode: FoldMode,
     pub(in crate::workspace) filter: DisplayFilter,
 }
@@ -31,14 +31,23 @@ impl TranscriptDefaults {
         let fold_tokens: &[String] = definition
             .and_then(|d| d.fold_mode.as_deref())
             .unwrap_or(&[]);
-        let tail = definition
-            .and_then(|d| d.tail_window)
-            .unwrap_or(TAIL_WINDOW_DEFAULT);
+        let tail = StepWindow {
+            steps: TailWindow::last(
+                definition
+                    .and_then(|d| d.tail_window)
+                    .unwrap_or(TAIL_WINDOW_DEFAULT),
+            ),
+            calls: TailWindow::last(
+                definition
+                    .and_then(|d| d.tail_window_calls)
+                    .unwrap_or(TAIL_WINDOW_DEFAULT),
+            ),
+        };
         // An empty list is a real visible set (nothing on screen), so only the
         // absent key falls through to the unfiltered default.
         let filter = definition.and_then(|d| d.display_filter.as_ref());
         Self {
-            tail: TailWindow::last(tail),
+            tail,
             fold_mode: FoldMode::from_tokens(fold_tokens.iter().map(String::as_str)),
             filter: filter.map_or_else(DisplayFilter::default, |tokens| {
                 DisplayFilter::from_stored(tokens)
@@ -68,7 +77,7 @@ mod tests {
     fn an_entry_that_states_nothing_yields_the_built_in_defaults() {
         for entry in [None, Some(definition())] {
             let defaults = TranscriptDefaults::resolve(entry.as_ref());
-            assert_eq!(defaults.tail, TailWindow::All);
+            assert_eq!(defaults.tail, StepWindow::default());
             assert_eq!(defaults.fold_mode, FoldMode::default());
             assert_eq!(defaults.filter, DisplayFilter::default());
         }
@@ -78,12 +87,19 @@ mod tests {
     fn every_axis_takes_the_value_the_entry_states() {
         let definition = AgentDefinition {
             tail_window: Some(3),
+            tail_window_calls: Some(10),
             fold_mode: Some(vec!["expanded".to_string()]),
             display_filter: Some(vec![FilterFacet::Tools.token().to_string()]),
             ..definition()
         };
         let defaults = TranscriptDefaults::resolve(Some(&definition));
-        assert_eq!(defaults.tail, TailWindow::Last(3));
+        assert_eq!(
+            defaults.tail,
+            StepWindow {
+                steps: TailWindow::Last(3),
+                calls: TailWindow::Last(10),
+            }
+        );
         assert_eq!(defaults.fold_mode, FoldPreset::Expanded.mode());
         assert_eq!(
             defaults.filter,
@@ -97,12 +113,40 @@ mod tests {
     fn one_axis_stated_leaves_the_others_built_in() {
         let definition = AgentDefinition {
             tail_window: Some(1),
+            tail_window_calls: None,
             ..definition()
         };
         let defaults = TranscriptDefaults::resolve(Some(&definition));
-        assert_eq!(defaults.tail, TailWindow::Last(1), "the stated one");
+        assert_eq!(
+            defaults.tail,
+            StepWindow {
+                steps: TailWindow::Last(1),
+                // The axis's own two levels are independent too: an entry that
+                // states the steps says nothing about the calls inside them.
+                calls: TailWindow::All,
+            },
+            "the stated one"
+        );
         assert_eq!(defaults.fold_mode, FoldMode::default(), "built-in");
         assert_eq!(defaults.filter, DisplayFilter::default(), "built-in");
+    }
+
+    /// Either level can be the only one stated.
+    #[test]
+    fn the_call_level_can_be_stated_alone() {
+        let definition = AgentDefinition {
+            tail_window: None,
+            tail_window_calls: Some(5),
+            ..definition()
+        };
+        let defaults = TranscriptDefaults::resolve(Some(&definition));
+        assert_eq!(
+            defaults.tail,
+            StepWindow {
+                steps: TailWindow::All,
+                calls: TailWindow::Last(5),
+            }
+        );
     }
 
     /// The filter's empty list is a value, not an absence: unchecking every box

@@ -701,8 +701,12 @@ impl Workspace {
                             // over whatever the adapter picks for itself.
                             let model_id = ac.model_id.clone();
                             let content_width = deserialize_chat_content_width(ac.content_width);
-                            // Missing pane choices retain the constructor's config seeds.
-                            let tail = ac.tail_window.map(deserialize_chat_tail_window);
+                            // Missing pane choices retain the constructor's config
+                            // seeds — which is also how a file written before the
+                            // tail axis split restores: it states the step level
+                            // and leaves the call level following config.
+                            let tail_steps = ac.tail_window.map(deserialize_chat_tail_window);
+                            let tail_calls = ac.tail_window_calls.map(deserialize_chat_tail_window);
                             // The current field wins; the superseded one is read
                             // only for a file written before the split, where an
                             // empty list meant "unfiltered" rather than "nothing".
@@ -725,8 +729,11 @@ impl Workspace {
                                 v.last_known_mode_id = mode_id;
                                 v.last_known_model_id = model_id;
                                 v.content_width = content_width;
-                                if let Some(tail) = tail {
-                                    v.tail = PaneChoice::Chosen(tail);
+                                if let Some(tail) = tail_steps {
+                                    v.tail_steps = PaneChoice::Chosen(tail);
+                                }
+                                if let Some(tail) = tail_calls {
+                                    v.tail_calls = PaneChoice::Chosen(tail);
                                 }
                                 if let Some(filter) = display_filter {
                                     v.display_filter = PaneChoice::Chosen(filter);
@@ -1026,7 +1033,8 @@ fn serialize_pane_content(
             model_id: v.last_known_model_id.clone(),
             content_width: serialize_chat_content_width(v.content_width),
             // Persist only explicit choices so untouched panes keep following config.
-            tail_window: v.tail.chosen().map(serialize_chat_tail_window),
+            tail_window: v.tail_steps.chosen().map(serialize_chat_tail_window),
+            tail_window_calls: v.tail_calls.chosen().map(serialize_chat_tail_window),
             // Superseded field: never written, so a file carrying it sheds it
             // on the first save after the split.
             display_filter: None,

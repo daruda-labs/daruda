@@ -46,9 +46,16 @@ pub struct AgentDefinition {
     /// the default a pane returns to; `None` means the built-in matrix, which
     /// an empty list also resolves to.
     pub fold_mode: Option<Vec<String>>,
-    /// Trailing-step window a fresh chat pane under this agent starts on.
-    /// `None` means [`TAIL_WINDOW_DEFAULT`].
+    /// Trailing-step window a fresh chat pane under this agent starts on —
+    /// how many of a response's work steps stay on screen. `None` means
+    /// [`TAIL_WINDOW_DEFAULT`].
     pub tail_window: Option<u8>,
+    /// The same window one level in: how many calls stay on screen inside a
+    /// tool group or a subagent card. A separate key because what reads well
+    /// depends on the level — a run of 30 greps is one step, and capping the
+    /// steps says nothing about capping its calls. `None` means
+    /// [`TAIL_WINDOW_DEFAULT`].
+    pub tail_window_calls: Option<u8>,
     /// Visible row kinds a fresh chat pane under this agent starts on. `None`
     /// means the unfiltered set; unlike `fold_mode`, an empty list is a real
     /// value naming an empty visible set, so the two cannot be collapsed.
@@ -343,6 +350,8 @@ struct AgentDefinitionRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tail_window: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    tail_window_calls: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     display_filter: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     env: Option<EnvRepr>,
@@ -476,6 +485,7 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
+            tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
             env: env_to_repr(v.env),
             ssh,
@@ -512,6 +522,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
+            tail_window_calls: v.tail_window_calls,
             display_filter: v.display_filter,
             env: env_from_repr(v.env),
         }
@@ -535,6 +546,7 @@ impl AgentDefinition {
             default_model: None,
             fold_mode: None,
             tail_window: None,
+            tail_window_calls: None,
             display_filter: None,
             env: None,
         }
