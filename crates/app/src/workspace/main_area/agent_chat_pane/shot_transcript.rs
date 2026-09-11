@@ -66,7 +66,12 @@ struct Cycle {
 /// run, so this renders as the response's conclusion.
 const CONCLUSION: &str = "The failure was a stale `rust-version` floor in `daruda_terminal`: CI pins 1.95, \
      the crate inherited nothing, and `incompatible_msrv` never fired at the call site. \
-     Declaring the floor and rebuilding gets the workspace green again.";
+     Declaring the floor and rebuilding gets the workspace green again.\n\n\
+     | Commit | Change | Result |\n\
+     | --- | --- | ---: |\n\
+     | `a1b2c3d4` | **Declare the Rust floor** so CI and local builds enforce the same supported APIs. | Passed |\n\
+     | `e5f6a7b8` | Rebuild the terminal and verify that the workspace checks pass with the pinned toolchain. | Passed |\n\
+     | `c9d0e1f2` | Check [contributor setup](https://example.invalid/setup) and the release notes. | Reviewed |";
 
 const PROMPT: &str = "why is the build failing on CI but not locally?";
 

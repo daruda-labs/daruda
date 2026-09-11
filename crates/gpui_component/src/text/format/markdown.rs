@@ -363,7 +363,10 @@ fn ast_to_node(
         }
         Node::ThematicBreak(_) => node::Node::Divider,
         Node::Table(val) => {
-            let mut table = Table::default();
+            let mut table = Table {
+                render_id: cx.next_table_render_id(),
+                ..Default::default()
+            };
             table.column_aligns = val
                 .align
                 .clone()

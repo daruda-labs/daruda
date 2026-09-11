@@ -8,7 +8,7 @@ use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
-    TextLayout, Window, point, px, quad,
+    TextLayout, TextRun, TextStyle, Window, point, px, quad,
 };
 
 use crate::{
@@ -58,6 +58,26 @@ impl InlineState {
 }
 
 impl Inline {
+    pub(super) fn text_runs(
+        text: &str,
+        highlights: &[(Range<usize>, HighlightStyle)],
+        text_style: &TextStyle,
+    ) -> Vec<TextRun> {
+        let mut runs = Vec::new();
+        let mut ix = 0;
+        for (range, highlight) in highlights {
+            if ix < range.start {
+                runs.push(text_style.clone().to_run(range.start - ix));
+            }
+            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
+            ix = range.end;
+        }
+        if ix < text.len() {
+            runs.push(text_style.clone().to_run(text.len() - ix));
+        }
+        runs
+    }
+
     pub(super) fn new(
         id: impl Into<ElementId>,
         state: Arc<Mutex<InlineState>>,
@@ -376,19 +396,7 @@ impl Element for Inline {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let text_style = window.text_style();
 
-        let mut runs = Vec::new();
-        let mut ix = 0;
-        for (range, highlight) in self.highlights.iter() {
-            if ix < range.start {
-                runs.push(text_style.clone().to_run(range.start - ix));
-            }
-            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
-            ix = range.end;
-        }
-        if ix < self.text.len() {
-            runs.push(text_style.to_run(self.text.len() - ix));
-        }
-
+        let runs = Self::text_runs(&self.text, &self.highlights, &text_style);
         self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
         let (layout_id, _) =
             self.styled_text

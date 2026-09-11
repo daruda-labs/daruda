@@ -486,7 +486,10 @@ fn parse_node(
                 let mut children = vec![];
                 consume_paragraph(&mut children, paragraph);
 
-                let mut table = Table::default();
+                let mut table = Table {
+                    render_id: cx.next_table_render_id(),
+                    ..Default::default()
+                };
                 for child in node.children.borrow().iter() {
                     match child.data {
                         NodeData::Element { ref name, .. }

@@ -26,6 +26,8 @@ use crate::{
 
 use super::{TextViewStyle, utils::list_item_prefix};
 
+mod table;
+
 #[allow(unused)]
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct LinkMark {
@@ -45,6 +47,33 @@ pub struct TextMark {
 }
 
 impl TextMark {
+    fn highlight(&self, options: NodeRenderOptions, cx: &App) -> HighlightStyle {
+        let mut highlight = HighlightStyle::default();
+        if self.bold {
+            highlight.font_weight = Some(FontWeight::BOLD);
+        }
+        if self.italic {
+            highlight.font_style = Some(FontStyle::Italic);
+        }
+        if self.strikethrough {
+            highlight.strikethrough = Some(gpui::StrikethroughStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
+        }
+        if self.code {
+            highlight.background_color = Some(options.tint(INLINE_CODE_TINT_ALPHA, cx));
+        }
+        if self.link.is_some() {
+            highlight.color = Some(cx.theme().link);
+            highlight.underline = Some(gpui::UnderlineStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
+        }
+        highlight
+    }
+
     pub fn bold(mut self) -> Self {
         self.bold = true;
         self
@@ -151,6 +180,25 @@ impl InlineNode {
         self.marks = marks;
         self
     }
+
+    /// Fold this node's marks into a run accumulator, `offset` being the byte
+    /// position its text starts at. The one place that decides where a
+    /// highlight lands, so measurement and paint cannot drift apart.
+    fn fold_highlights(
+        &self,
+        offset: usize,
+        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        options: NodeRenderOptions,
+        cx: &App,
+    ) -> Vec<(Range<usize>, HighlightStyle)> {
+        let mine = self.marks.iter().map(|(range, mark)| {
+            (
+                (offset + range.start)..(offset + range.end),
+                mark.highlight(options, cx),
+            )
+        });
+        gpui::combine_highlights(highlights, mine).collect()
+    }
 }
 
 /// The paragraph element, contains multiple text nodes.
@@ -210,11 +258,22 @@ impl Paragraph {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Table {
+    pub(crate) render_id: usize,
     pub children: Vec<TableRow>,
     pub column_aligns: Vec<ColumnumnAlign>,
 }
 
 impl Table {
+    pub(crate) fn column_count(&self) -> usize {
+        self.column_aligns.len().max(
+            self.children
+                .iter()
+                .map(|row| row.children.len())
+                .max()
+                .unwrap_or_default(),
+        )
+    }
+
     pub(crate) fn column_align(&self, index: usize) -> ColumnumnAlign {
         self.column_aligns.get(index).copied().unwrap_or_default()
     }
@@ -440,11 +499,18 @@ pub(crate) struct NodeContext {
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) code_block_render: Option<Arc<CodeBlockRenderFn>>,
     pub(crate) debug_inline_bounds: Option<Arc<DebugInlineBoundsFn>>,
+    pub(crate) next_table_render_id: usize,
 }
 
 impl NodeContext {
     pub(super) fn add_ref(&mut self, identifier: SharedString, link: LinkMark) {
         self.link_refs.insert(identifier, link);
+    }
+
+    pub(super) fn next_table_render_id(&mut self) -> usize {
+        let id = self.next_table_render_id;
+        self.next_table_render_id += 1;
+        id
     }
 }
 
@@ -672,44 +738,8 @@ impl Paragraph {
                 highlights.clear();
                 offset = 0;
             } else {
-                let mut node_highlights = vec![];
                 for (range, style) in &inline_node.marks {
-                    let inner_range = (offset + range.start)..(offset + range.end);
-
-                    let mut highlight = HighlightStyle::default();
-                    if style.bold {
-                        highlight.font_weight = Some(FontWeight::BOLD);
-                    }
-                    if style.italic {
-                        highlight.font_style = Some(FontStyle::Italic);
-                    }
-                    if style.strikethrough {
-                        highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                            thickness: gpui::px(1.),
-                            ..Default::default()
-                        });
-                    }
-                    if style.code {
-                        // Inline code: a background-derived translucent tint
-                        // instead of the chromatic `accent` (a scarce signal
-                        // color — active lane / focus / CTA — that reads as
-                        // noise repeated across inline-code spans). White over a
-                        // dark surface, black over a light one, picked by the
-                        // theme background lightness, so the chip reads one step
-                        // off the background on any theme and lets the pane
-                        // opacity show through. Mirrors the host's
-                        // `theme::agent_chat_tint` (tool cards).
-                        let tint = options.tint(INLINE_CODE_TINT_ALPHA, cx);
-                        highlight.background_color = Some(tint);
-                    }
-
                     if let Some(mut link_mark) = style.link.clone() {
-                        highlight.color = Some(cx.theme().link);
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
-                            ..Default::default()
-                        });
-
                         // convert link references, replace link
                         if let Some(identifier) = link_mark.identifier.as_ref() {
                             if let Some(mark) = node_cx.link_refs.get(identifier) {
@@ -717,13 +747,11 @@ impl Paragraph {
                             }
                         }
 
-                        links.push((inner_range.clone(), link_mark));
+                        links.push(((offset + range.start)..(offset + range.end), link_mark));
                     }
-
-                    node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = gpui::combine_highlights(highlights, node_highlights).collect();
+                highlights = inline_node.fold_highlights(offset, highlights, options, cx);
                 offset += text_len;
             }
             ix += 1;
@@ -986,7 +1014,9 @@ fn tint_over(surface: Hsla, alpha: f32) -> Hsla {
     }
 }
 
-/// Alpha of the tint filling an inline-code span.
+/// Alpha of the tint filling an inline-code span. A tint rather than the
+/// chromatic `accent`, which is a scarce signal colour — active lane, focus,
+/// CTA — and reads as noise once it repeats across every span in a paragraph.
 const INLINE_CODE_TINT_ALPHA: f32 = 0.08;
 /// Alpha of the tint filling a fenced code block.
 const CODE_BLOCK_FILL_ALPHA: f32 = 0.05;
@@ -1212,109 +1242,19 @@ impl Node {
         options: NodeRenderOptions,
         node_cx: &NodeContext,
         link_click_handler: Option<&Arc<LinkClickHandlerFn>>,
-        window: &mut Window,
-        cx: &mut App,
+        _window: &mut Window,
+        _cx: &mut App,
     ) -> impl IntoElement {
-        // Background-derived table lines instead of the fixed `border` color,
-        // so the outer frame, row, and cell separators track the pane
-        // background on any theme. White over a dark surface, black over a
-        // light one — the shared structural-line tint (same alpha as the
-        // code-block border + the `<hr>` rule). The fixed hairline is
-        // near-invisible against the agent-chat pane's mirrored terminal bg.
-        let line_color = options.tint(STRUCTURAL_LINE_ALPHA, cx);
-
         match item {
-            Node::Table(table) => {
-                let columns = table.column_aligns.len();
-                div()
-                    .pb(rems(1.))
-                    .w_full()
-                    .child(
-                        div()
-                            .id("table")
-                            .w_full()
-                            .border_1()
-                            .border_color(line_color)
-                            .rounded(cx.theme().radius)
-                            .overflow_hidden()
-                            // daruda patch: one grid over every cell, rather than a
-                            // flex row per table row. A column is then a track
-                            // sized once for the whole table — something separate
-                            // per-row flex containers cannot agree on, which is why
-                            // a column's borders used to land in a different place
-                            // on each row. `grid_cols` is `minmax(0, 1fr)`: equal
-                            // columns that shrink, so a short column keeps a whole
-                            // share and a hash in it no longer wraps mid-token.
-                            // Not `grid_cols_min_content` — the inline text answers
-                            // a min-content measure with its full single line, so
-                            // min-content tracks size the table to its longest line
-                            // and it overflows the pane instead of wrapping.
-                            .grid()
-                            .grid_cols(columns as u16)
-                            .children({
-                                let mut cells = Vec::with_capacity(table.children.len() * columns);
-                                // GFM's heading row, which `to_markdown` reads
-                                // the same way. Lifted and bolded so the body
-                                // reads as data under it rather than more rows.
-                                let header_fill = options.tint(TABLE_HEADER_FILL_ALPHA, cx);
-                                for (row_ix, row) in table.children.iter().enumerate() {
-                                    let is_header = row_ix == 0;
-                                    for (ix, cell) in row.children.iter().enumerate() {
-                                        let align = table.column_align(ix);
-                                        cells.push(
-                                            div()
-                                                .id(("cell", row_ix * columns + ix))
-                                                .flex()
-                                                .flex_col()
-                                                .when(is_header, |this| {
-                                                    this.bg(header_fill)
-                                                        .font_weight(FontWeight::BOLD)
-                                                })
-                                                // Both halves of the alignment: the block
-                                                // inside the track, and the lines inside the
-                                                // block. A cell whose text wraps fills its
-                                                // track, which leaves `items_*` nothing to
-                                                // move — only `text_*` reaches those lines.
-                                                .when(align == ColumnumnAlign::Center, |this| {
-                                                    this.items_center().text_center()
-                                                })
-                                                .when(align == ColumnumnAlign::Right, |this| {
-                                                    this.items_end().text_right()
-                                                })
-                                                // Separators on the leading edges only —
-                                                // the frame draws the outer ones, so no
-                                                // cell has to know that it is the last.
-                                                .when(ix > 0, |this| {
-                                                    this.border_l_1().border_color(line_color)
-                                                })
-                                                .when(row_ix > 0, |this| {
-                                                    this.border_t_1().border_color(line_color)
-                                                })
-                                                .px_2()
-                                                .py_1()
-                                                // Wrap the text (not `.truncate()`,
-                                                // which forces `white-space: nowrap`
-                                                // + ellipsis): a `min_w_0` inner div
-                                                // can shrink below its content, so
-                                                // the text wraps to the track width
-                                                // instead of overflowing it.
-                                                .child(div().min_w_0().overflow_hidden().child(
-                                                    cell.children.render(
-                                                        options,
-                                                        node_cx,
-                                                        link_click_handler,
-                                                        window,
-                                                        cx,
-                                                    ),
-                                                )),
-                                        )
-                                    }
-                                }
-                                cells
-                            }),
-                    )
-                    .into_any_element()
-            }
+            Node::Table(table) => div()
+                .id(("table-block", table.render_id))
+                .child(table::TableElement::new(
+                    table.clone(),
+                    options,
+                    node_cx.clone(),
+                    link_click_handler.cloned(),
+                ))
+                .into_any_element(),
             _ => div().into_any_element(),
         }
     }

@@ -3043,6 +3043,7 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-yaml",
  "tree-sitter-zig",
+ "unicode-linebreak",
  "unicode-segmentation",
  "uuid",
 ]

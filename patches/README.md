@@ -437,7 +437,7 @@ overlay case, dropping the press/release match fails both link cases.
 
 ---
 
-## `crates/gpui_component/src/text/` — vendored, **a markdown table's columns line up**
+## `crates/gpui_component/src/text/` — vendored, **intrinsic table columns**
 
 Applied in place, on the same terms as the sections above. Independent of the
 overlay patch above, in the same subtree.
@@ -461,16 +461,49 @@ identifiers) was squeezed until it wrapped mid-token.
 | Patch | File | What |
 |---|---|---|
 | Rows are normalized to the delimiter row's width | `text/format/markdown.rs` (`parse_table_row`) | `resize_with(table.column_aligns.len(), ..)` after the row's cells are parsed — pads short rows, drops the excess from long ones, which is what GFM specifies. Done at parse time rather than in `render_table` because `column_aligns` is the one place the table's real width is known, and a rectangular tree means every consumer (render, `selected_text`, markdown round-trip) agrees without repeating the rule. Covered by `a_row_wider_than_the_delimiter_row_loses_the_excess` / `a_row_narrower_than_the_delimiter_row_is_padded` in that file's own `mod tests`. |
-| One grid replaces a flex row per table row | `text/node.rs` (`render_table`) | Cells become direct children of a single `grid()` with `grid_cols(column_count)`, so a column is a track sized once for the whole table; per-row flex containers had no way to agree on one. Separators move onto the cells' leading edges (`ix > 0` → `border_l_1`, `row_ix > 0` → `border_t_1`) since the frame draws the outer ones — the same shape zed's markdown table uses (`crates/markdown/src/markdown.rs`). **Not** `grid_cols_min_content`: `minmax(min-content, 1fr)` asks each cell for a min-content width and the inline text answers with its whole single line, which sizes the table to its longest line and overflows the pane. `grid_cols` is `minmax(0, 1fr)` — equal tracks that shrink — with the cell's `min_w_0` inner div left in place so the text wraps into its track. This retires the `text_len`-based `col_lens`, and with it the only sizing consumer of that byte count. The heading row (`row_ix == 0`, which `to_markdown` already reads the same way) also takes a surface-derived lift and bold, so it reads as a heading rather than a first row — upstream styled it like any other, while both zed and daruda's own file-viewer table distinguish it. Column alignment sets `text_center`/`text_right` alongside upstream's `items_center`/`items_end`: the latter place the block inside the track, which moves nothing once a cell's text wraps and fills it — verified by rendering a `:-:` / `--:` table whose cells wrap. |
+| Shared intrinsic column widths | `text/node/table.rs`, `text/node/table/measure.rs` | Shape each cell with the inherited font, including bold headers and inline marks. Natural break opportunities are the intersection of `unicode-linebreak` and the pinned GPUI `LineWrapper` policy, so min-content never promises a break paint cannot use; shaped glyph positions give that minimum, and the widest forced line gives max-content. Take both maxima down each column and add padding and separators. The column count is the maximum of alignment metadata and row width, because parsed HTML has no GFM alignment vector. All rows use the shared minimum as their flex basis and `max - min` as their growth factor. Short unbreakable columns keep their width while prose receives extra room. When every column is unbreakable, distribute excess in proportion to their widths. |
+| Table-local overflow and chrome | `text/node/table.rs` | The full-width frame contains a horizontal scroll viewport and scrollbar. The inner table cannot shrink below the sum of its column minima, so narrow panes preserve identifiers. The viewport sets `restrict_scroll_to_axis`, without which GPUI spends a purely vertical wheel on the one axis that does scroll — reading past a table in a transcript would drag its columns sideways and leave them there (`reading_past_a_table_does_not_drag_its_columns`). Each cell states its own `min_w`, which retires flexbox's automatic minimum; left to `auto` that minimum is the text's unwrapped line, the same answer that rules out `grid_cols_min_content`. Rows stack as blocks; each flex row stretches its cells to a common height. Leading-edge separators, bold surface-tinted headers, and line-level center/right alignment remain in the cell renderer. |
+| Measurement and state agree with paint | `text/node.rs`, `text/inline.rs` | `TextMark::highlight`, `InlineNode::fold_highlights` and `Inline::text_runs` serve both measurement and painting, so a run's bytes, highlights and shaped glyphs come from one place. `TableElement` runs inside `request_layout` through `RenderOnce`, so nested font styles are active. GPUI's line-layout cache supplies reuse; no width cache needs separate invalidation on streaming, resizing, or font changes. The parser assigns tables stable document-order render IDs, keeping each scroll handle independent and preserving its offset when streaming reparses the AST. |
+
+The policy follows the intrinsic sizing model in
+[CSS automatic table layout](https://www.w3.org/TR/CSS22/tables.html#auto-table-layout)
+while retaining daruda's full-width tables. It does not implement HTML spans or
+the complete CSS table algorithm. GPUI's uniform grid templates cannot express
+these column widths, and its text min-content query returns an unwrapped line;
+neither `grid_cols` nor `grid_cols_min_content` supplies the required allocation.
+
+### What this leaves open
+
+**Only agent chat gets intrinsic columns.** Daruda's other markdown stack, the
+file viewer's `MdBlock` renderer, still gives every column an equal `flex_1`
+share (`file_view_pane/render/markdown/block.rs`, `render_table_cell`), so a
+commit hash in a README table can still wrap mid-token there. Before this patch
+the two stacks agreed — both were equal-width — and the divergence is a cost of
+landing the policy where the tables are, not a judgement that the file viewer
+should keep its own. Porting it means re-deriving these widths over `MdSpan`
+rather than `Paragraph`, so it is a separate change; the pair belongs in the
+shared conformance table in
+`file_view_pane/render/markdown/layout_tests.rs` once both sides can answer it.
+
+**Measurement costs a pass per frame.** `measure::columns` re-runs on every
+`TableElement` render. Shaping itself is free after the first frame — GPUI's
+line-layout cache keys on text, size and runs — but the cache-key string, the
+glyph-position index and the `unicode-linebreak` scan are rebuilt each time.
+That is bounded by the table's own size and has not shown up in practice;
+a table large enough to matter would want a width cache keyed on paragraph
+state or content.
 
 ### Re-vendor procedure
 
-Copy the fresh upstream `format/markdown.rs` / `node.rs` in, then re-apply both
-rows above. The two parser tests fail loudly if the normalization is forgotten.
-Nothing fails automatically if the grid reverts to per-row flex — check it by
-rendering a table whose rows differ in cell count and whose columns mix CJK prose
-with an ASCII identifier (`--screenshot-scenario agent-chat` after seeding one
-into `shot_transcript.rs`).
+Re-apply the parser normalization, the `node::table` module and delegation,
+the shared highlight/run builders, and the `unicode-linebreak` dependency.
+`cargo test -p gpui_component` is in the CI list, so a dropped patch fails the
+build rather than the eye. Run it and `cargo test -p daruda ui::markdown`:
+the table tests cover shared boundaries, intrinsic widths, HTML, resizing, font
+changes, empty cells, overflow, and streaming scroll preservation. The
+`agent-chat` screenshot scenario includes a commit table; capture it in wide and
+narrow windows to inspect the actual glyphs, separators, alignment, and scrollbar
+in both appearances.
 
 ---
 
