@@ -35,7 +35,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow
+  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -178,7 +178,7 @@ scripts/lint-no-eprintln.sh
 scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow
+  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -381,7 +381,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
 gpui_component  →  daruda_core                         # vendored; shares the text primitives
 ```
 
-`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above).
+`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above). Its **tests** are a separate question and do run in CI: the patches in `patches/README.md` carry daruda-authored tests, and nothing else would ever execute them.
 
 `ferrum_flow` is a vendored copy of `tu6ge/ferrum-flow` at `43b762ce` (Apache-2.0) — the node-graph canvas behind the flow editor. Vendored for the same reason and on the same terms: patched only where daruda hits a real defect, excluded from the same lint passes, reached only through `crate::ui::*`. It carries five source patches (`viewport.rs` — culling against a not-yet-measured drawable blanked the canvas on its only frame; `canvas.rs` — a read-only `viewport()` accessor so a test can assert where the canvas put the graph; and three in `plugins/port/interaction.rs` — a dragged wire coloured only its refusal so a port that would take the drop looked exactly like empty space, a release over empty space left a dangling line whose endpoint built a node the flow file has no place for, and a release re-ran the hit test against a smaller box than the one the wire's colour came from); like `gpui_component`'s, they live in the vendored tree and are listed in `patches/README.md`. Upstream takes `gpui` from crates.io, which resolves to a different crate instance than daruda's pinned zed git rev, so routing it through `gpui = { workspace = true }` is the whole point. It differs from `gpui_component` in one way: it declares `rust-version` and leaves `clippy::incompatible_msrv` armed, so a std API newer than CI's pinned toolchain is caught locally. Provenance, the re-vendor procedure, and why the unused plugin modules are kept rather than pruned (measured: 17% fewer lines buys 0.02s of compile time and costs three retained files on every re-vendor) are in `patches/README.md`.
 
