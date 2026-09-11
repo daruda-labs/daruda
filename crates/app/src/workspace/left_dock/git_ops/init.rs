@@ -6,6 +6,7 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::Context;
 
 use crate::workspace::Workspace;
+use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {
     /// Run `git init` in a non-git worktree, then re-probe so the
@@ -13,9 +14,6 @@ impl Workspace {
     /// Changes view starts surfacing changes immediately. No-op for
     /// lanes that are already git-backed.
     pub(in crate::workspace) fn init_git_repo(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        if self.git_op_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -27,17 +25,15 @@ impl Workspace {
             return;
         }
         let path = wt.path.clone();
-        self.git_op_in_flight = true;
-        cx.notify();
         let path_for_report = path.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Repo,
             cx,
             move || -> Result<Option<_>, crate::lane::git::GitError> {
                 crate::lane::git::git_init(&path)?;
                 Ok(crate::lane::git::probe_repo(&path))
             },
             move |ws, result, cx| {
-                ws.git_op_in_flight = false;
                 // Clears the Git view's disabled/loading state; the Ok(None)
                 // and Err arms have no other notify, so render here.
                 cx.notify();
@@ -96,7 +92,6 @@ impl Workspace {
                     }
                 }
             },
-        )
-        .detach();
+        );
     }
 }

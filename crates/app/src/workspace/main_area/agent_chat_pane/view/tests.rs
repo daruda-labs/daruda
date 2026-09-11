@@ -534,7 +534,10 @@ fn reconcile_activity_edges_and_completion_delivery(cx: &mut gpui::TestAppContex
             view.set_turn_in_flight();
             let edge = view.reconcile_activity(std::time::Instant::now());
             assert_eq!(edge, None, "the busy edge fires no completion");
-            assert!(view.activity.was_busy, "reconcile records the busy level");
+            assert!(
+                view.activity.span.is_busy(),
+                "reconcile records the busy level"
+            );
             assert!(
                 view.activity_elapsed().is_some(),
                 "the span start is stamped on idle->busy"
@@ -593,7 +596,7 @@ fn reconcile_activity_edges_and_completion_delivery(cx: &mut gpui::TestAppContex
             view.set_turn_in_flight();
             assert_eq!(view.reconcile_activity(std::time::Instant::now()), None);
             assert!(
-                view.activity.was_busy,
+                view.activity.span.is_busy(),
                 "the connect-time reconcile stamps the busy level"
             );
             view.activity.pending_completion = Some(super::TurnOutcome::Completed);
@@ -1242,24 +1245,27 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
 /// terminal resume signal. The same gate must also release on failure paths so
 /// replayed content is not left invisible.
 #[gpui::test]
-fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppContext) {
+fn replay_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppContext) {
     use daruda_acp::{AcpEvent, ChatItem};
 
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
-            // Simulate a resume mid-replay: gate set, items populated by the
-            // replayed updates, rows not yet projected.
-            view.restoring = true;
+            // Simulate a resume mid-replay: gate open on the id the load asked
+            // for, items populated by the replayed updates, rows not yet
+            // projected.
+            view.replay = super::Replay::Loading {
+                requested: "sess-1".into(),
+            };
             view.items = vec![ChatItem::UserText("q".into()), assistant_text_item("a")];
             view.rows.clear();
 
             // A non-terminal event during the replay must NOT rebuild rows.
             view.apply_event(AcpEvent::Notice("still loading".into()), "", false, cx);
-            assert!(view.restoring, "gate stays set until Connected/Error");
+            assert!(view.is_replaying(), "gate stays set until Connected/Error");
             assert!(
                 view.rows.is_empty(),
-                "row rebuild is coalesced while restoring"
+                "row rebuild is coalesced while replaying"
             );
             assert_eq!(view.items.len(), 2, "items still accumulate during replay");
 
@@ -1277,7 +1283,7 @@ fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppCon
                 false,
                 cx,
             );
-            assert!(!view.restoring, "Connected releases the gate");
+            assert!(!view.is_replaying(), "Connected releases the gate");
             assert_eq!(view.session_id.as_deref(), Some("sess-1"));
             assert!(
                 !view.rows.is_empty(),
@@ -1290,25 +1296,84 @@ fn restoring_gate_releases_on_connected_error_or_abort(cx: &mut gpui::TestAppCon
             );
 
             // A terminal Error mid-restore also clears the gate.
-            view.restoring = true;
+            view.replay = super::Replay::Loading {
+                requested: "sess-1".into(),
+            };
             view.apply_event(
                 AcpEvent::Error(daruda_acp::AcpFailure::unclassified("load rejected")),
                 "",
                 false,
                 cx,
             );
-            assert!(!view.restoring, "Error releases the restore gate");
+            assert!(!view.is_replaying(), "Error releases the restore gate");
 
             // The end-of-stream guard releases a gate stuck with no terminal
             // event, projecting whatever accumulated.
-            view.restoring = true;
+            view.replay = super::Replay::Loading {
+                requested: "sess-1".into(),
+            };
             view.items = vec![ChatItem::UserText("q".into())];
             view.rows.clear();
             view.abort_restore(cx);
-            assert!(!view.restoring, "abort_restore releases the gate");
+            assert!(!view.is_replaying(), "abort_restore releases the gate");
             assert!(
                 !view.rows.is_empty(),
                 "abort_restore projects the accumulated items"
+            );
+        })
+        .unwrap();
+}
+
+/// A `session/load` the agent cannot honour is silently downgraded to a fresh
+/// `session/new`, which answers with a *different* id. The gate carries the id
+/// it asked for, so that downgrade is detectable: the pane must run
+/// fresh-session setup instead of keeping the prior session's title.
+#[gpui::test]
+fn a_downgraded_resume_is_not_mistaken_for_a_real_one(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::AcpEvent;
+
+    fn connected(session_id: &str) -> AcpEvent {
+        AcpEvent::Connected {
+            program: None,
+            session_id: session_id.into(),
+            modes: None,
+            config_options: Vec::new(),
+            capabilities: Default::default(),
+            login_methods: Vec::new(),
+        }
+    }
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            // Arm the gate the way a connect does — through the seam, so this
+            // also pins that `begin_connect` opens it on the id it was handed.
+            view.begin_connect(Some("sess-old".into()), cx);
+            assert!(view.is_replaying(), "a resume target opens the gate");
+            view.session_title = Some("prior conversation".into());
+            // The agent answered the load with an id we never asked for.
+            view.apply_event(connected("sess-new"), "", false, cx);
+            assert_eq!(view.session_id.as_deref(), Some("sess-new"));
+            assert!(
+                view.session_title.is_none(),
+                "a downgraded resume runs fresh-session setup"
+            );
+
+            // The same reply against the id the load asked for is a real resume.
+            view.begin_connect(Some("sess-old".into()), cx);
+            view.session_title = Some("prior conversation".into());
+            view.apply_event(connected("sess-old"), "", false, cx);
+            assert_eq!(
+                view.session_title.as_deref(),
+                Some("prior conversation"),
+                "an honoured resume keeps the replayed session title"
+            );
+
+            // A fresh connect names no resume target, so it opens no gate.
+            view.begin_connect(None, cx);
+            assert!(
+                !view.is_replaying(),
+                "a fresh session/new has nothing to replay"
             );
         })
         .unwrap();
@@ -1519,7 +1584,7 @@ fn take_pending_post_turn_flushes_once(cx: &mut gpui::TestAppContext) {
 }
 
 /// After `snap_post_turn_baseline()` syncs the marker to a pre-populated
-/// history (as every `restoring = false` site does), a stray post-turn
+/// history (as every gate-closing site does), a stray post-turn
 /// update that arrives with no new assistant text must not resurrect the
 /// replayed conversation as a "background follow-up".
 #[gpui::test]

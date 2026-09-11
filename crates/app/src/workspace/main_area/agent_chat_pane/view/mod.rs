@@ -150,6 +150,66 @@ impl Turn {
     }
 }
 
+/// Whether a `session/load` replay is still streaming. `Loading` carries the id
+/// the load was *asked* for, which is what distinguishes a real resume from one
+/// the agent silently downgraded to a fresh `session/new` — that answers with a
+/// different id. Holding the id here rather than re-deriving the gate from
+/// `session_id` also makes "replaying, but no session to replay" unrepresentable.
+enum Replay {
+    Live,
+    Loading { requested: String },
+}
+
+impl Replay {
+    /// The gate a connect opens: `Some(id)` is a `session/load` whose replay
+    /// must be coalesced, `None` a fresh `session/new` with nothing to replay.
+    fn for_connect(resume: Option<String>) -> Self {
+        match resume {
+            Some(requested) => Self::Loading { requested },
+            None => Self::Live,
+        }
+    }
+
+    /// True while replayed events must accumulate without a per-event rebuild.
+    fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// True when `session_id` is the id this replay asked to load — a real
+    /// resume, as opposed to a load the agent downgraded to a fresh session.
+    fn resumed(&self, session_id: &str) -> bool {
+        matches!(self, Self::Loading { requested } if requested == session_id)
+    }
+}
+
+/// The pane's busy span, as of the last `reconcile_activity` tick. `Busy`
+/// carries the wall-clock start instant so the enum can't represent "busy with
+/// no start time" or "idle with one" — the level and the anchor move together
+/// on every edge, which is the only way they are ever written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(in crate::workspace) enum ActivitySpan {
+    #[default]
+    Idle,
+    Busy {
+        started_at: std::time::Instant,
+    },
+}
+
+impl ActivitySpan {
+    /// The edge-detection memory: whether the pane was busy at the last tick.
+    pub(in crate::workspace) fn is_busy(self) -> bool {
+        matches!(self, Self::Busy { .. })
+    }
+
+    /// How long the current span has been running, or `None` when idle.
+    fn elapsed(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Idle => None,
+            Self::Busy { started_at } => Some(started_at.elapsed()),
+        }
+    }
+}
+
 /// Terminal outcome of an activity span, captured when the turn/session ends
 /// but fired (notification + backing-task done) only when the pane actually
 /// settles busy→idle (which may trail `end_turn` while subagents finish).
@@ -405,14 +465,12 @@ pub(in crate::workspace) struct ActivityTracker {
     /// child tool-call event; keeps a subagent's badge "active" across the
     /// gaps between its sequential child calls (see [`SUBAGENT_QUIESCENCE`]).
     pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
-    /// Wall-clock start of the current busy span, set on idle→busy and cleared
-    /// on busy→idle. Anchors the working-indicator timer across the whole
-    /// span (turn + trailing subagents), not just the foreground turn.
-    pub(in crate::workspace) activity_started_at: Option<std::time::Instant>,
-    /// Whether the pane was busy at the last `reconcile_activity` tick — the
-    /// edge-detection memory turning the `is_busy` level signal into
-    /// idle→busy / busy→idle transitions.
-    pub(in crate::workspace) was_busy: bool,
+    /// The busy span as of the last `reconcile_activity` tick: both the
+    /// edge-detection memory that turns the `is_busy` level signal into
+    /// idle→busy / busy→idle transitions, and the wall-clock anchor the
+    /// working-indicator timer runs off. The anchor spans the whole run (turn
+    /// + trailing subagents), not just the foreground turn.
+    pub(in crate::workspace) span: ActivitySpan,
     /// Outcome captured when the turn/session ended, held until the pane
     /// actually settles busy→idle (may trail `end_turn` while subagents
     /// finish), so the completion signal fires at the true settle point.
@@ -521,10 +579,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// reapplied on every connect, so the pick outlives both the session it
     /// was made in and the app run.
     pub(in crate::workspace) last_known_model_id: Option<String>,
-    /// True while a resume (`session/load`) is replaying its history. While
-    /// set, `apply_event` accumulates items but skips the per-event rebuild +
-    /// notify (O(n²) over the replay) until `Connected` clears it.
-    pub(in crate::workspace) restoring: bool,
+    /// Whether a resume (`session/load`) is replaying its history. While
+    /// `Loading`, `apply_event` accumulates items but skips the per-event
+    /// rebuild + notify (O(n²) over the replay) until `Connected` clears it.
+    /// Module-private: outside `view/` the gate is opened only by naming the
+    /// resume target through [`Self::begin_connect`], and read through
+    /// [`Self::is_replaying`].
+    replay: Replay,
     /// Conversation render model, in arrival order. The event pump
     /// appends/folds into this; the renderer reads it.
     //
@@ -745,9 +806,9 @@ impl AgentChatView {
             agent_vocabulary_source: None,
             agent_name,
             // A restored pane connects lazily; the resume decision (and the
-            // `restoring` flag that coalesces the replay) is made at connect
-            // time by `maybe_connect_agent_chat`, not here.
-            restoring: false,
+            // replay gate that coalesces it) is made at connect time by
+            // `maybe_connect_agent_chat`, not here.
+            replay: Replay::Live,
             items: Vec::new(),
             handle: None,
             queue: PromptQueue::default(),
@@ -857,6 +918,32 @@ impl AgentChatView {
     pub(in crate::workspace) fn set_connecting(&mut self, cx: &mut Context<Self>) {
         self.status = AgentSessionStatus::Connecting;
         cx.notify();
+    }
+
+    /// Enter `Connecting` for a connect that is about to be spawned, arming the
+    /// replay gate from that connect's own resume target: `Some(id)` asks for
+    /// `session/load` of `id`, `None` for a fresh `session/new`.
+    ///
+    /// Taking the resume target as the argument is the point — the gate and the
+    /// request cannot disagree, because there is no way to open one without
+    /// naming the other. Distinct from [`Self::set_connecting`], which only
+    /// downgrades the status banner and must leave a live replay alone.
+    pub(in crate::workspace) fn begin_connect(
+        &mut self,
+        resume: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.replay = Replay::for_connect(resume);
+        self.status = AgentSessionStatus::Connecting;
+        cx.notify();
+    }
+
+    /// True while a `session/load` replay is still streaming — rows are being
+    /// accumulated rather than projected. The gate is module-private, so this is
+    /// how a test outside `view/` observes it (same shape as `turn_is_idle`).
+    #[cfg(test)]
+    pub(in crate::workspace) fn is_replaying(&self) -> bool {
+        self.replay.is_loading()
     }
 
     /// Enter the `Error` status carrying `message` and repaint. Self-notifying

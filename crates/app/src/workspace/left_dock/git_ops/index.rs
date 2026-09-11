@@ -12,6 +12,7 @@ use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
+use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {
     /// Stage a single file from the working tree into the index.
@@ -26,9 +27,6 @@ impl Workspace {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        if self.git_stage_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -39,15 +37,13 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_add(&wt_top, &path),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -66,8 +62,7 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Remove a file from the index (unstage), keeping working-tree changes.
@@ -80,9 +75,6 @@ impl Workspace {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        if self.git_stage_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -93,15 +85,13 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_restore_staged(&wt_top, &path),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -121,8 +111,7 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Stage every path in `paths` in one git invocation. Used by the
@@ -133,7 +122,7 @@ impl Workspace {
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
-        if self.git_stage_in_flight || paths.is_empty() {
+        if paths.is_empty() {
             return;
         }
         let target = LaneRef {
@@ -146,15 +135,13 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_add_paths(&wt_top, &paths),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -173,8 +160,7 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Unstage every path in `paths` in one git invocation. Companion to
@@ -185,7 +171,7 @@ impl Workspace {
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
-        if self.git_stage_in_flight || paths.is_empty() {
+        if paths.is_empty() {
             return;
         }
         let target = LaneRef {
@@ -198,15 +184,13 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_restore_staged_paths(&wt_top, &paths),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -226,15 +210,11 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Stage all unstaged and untracked files (`git add --all`).
     pub(in crate::workspace) fn stage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        if self.git_stage_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -245,14 +225,12 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let path_for_report = wt_top.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_add_all(&wt_top),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -270,15 +248,11 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Unstage all files (`git restore --staged .`).
     pub(in crate::workspace) fn unstage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        if self.git_stage_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -289,14 +263,12 @@ impl Workspace {
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.git_stage_in_flight = true;
-        cx.notify();
         let path_for_report = wt_top.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || crate::lane::git::git_restore_all_staged(&wt_top),
             move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
                         ws.refresh_git_status(target, cx);
@@ -315,8 +287,7 @@ impl Workspace {
                 }
                 cx.notify();
             },
-        )
-        .detach();
+        );
     }
 
     /// Open a confirm dialog before discarding working-tree changes for a
@@ -333,7 +304,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_context_menu(window, cx);
-        if self.git_stage_in_flight {
+        if self.git_lock_held(GitLock::Index) {
             return;
         }
         if !self
@@ -375,9 +346,6 @@ impl Workspace {
         is_untracked: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.git_stage_in_flight {
-            return;
-        }
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -396,11 +364,10 @@ impl Workspace {
         };
         let abs = paths.from_git_status(&path);
         let wt_rel_path = paths.to_wt_relative(&abs).unwrap_or(path);
-        self.git_stage_in_flight = true;
-        cx.notify();
         let path_for_report = wt_path.clone();
         let rel_for_report = wt_rel_path.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+        self.spawn_locked_git_work(
+            GitLock::Index,
             cx,
             move || {
                 if is_untracked {
@@ -409,32 +376,28 @@ impl Workspace {
                     crate::lane::git::git_discard_working(&wt_path, &wt_rel_path)
                 }
             },
-            move |ws, result, cx| {
-                ws.git_stage_in_flight = false;
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let title = if is_untracked {
-                            "git clean -f failed"
-                        } else {
-                            "git restore failed"
-                        };
-                        let report = ErrorReport::new(title)
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .with_context("file", redact_home(&rel_for_report))
-                            .dedup("git.discard")
-                            .build();
-                        ws.report_error(report, cx);
-                        cx.notify();
-                    }
+            move |ws, result, cx| match result {
+                Ok(()) => {
+                    ws.refresh_git_status(target, cx);
+                }
+                Err(e) => {
+                    let title = if is_untracked {
+                        "git clean -f failed"
+                    } else {
+                        "git restore failed"
+                    };
+                    let report = ErrorReport::new(title)
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&path_for_report))
+                        .with_context("file", redact_home(&rel_for_report))
+                        .dedup("git.discard")
+                        .build();
+                    ws.report_error(report, cx);
+                    cx.notify();
                 }
             },
-        )
-        .detach();
+        );
     }
 }

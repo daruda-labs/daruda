@@ -6,8 +6,8 @@
 use daruda_acp::{ChatItem, subagent_activity};
 
 use super::{
-    ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE, TurnOutcome,
-    post_turn_delta,
+    ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE,
+    TurnOutcome, post_turn_delta,
 };
 
 impl AgentChatView {
@@ -114,13 +114,13 @@ impl AgentChatView {
                 SUBAGENT_QUIESCENCE,
             )
             .any_running;
-        let edge = match (self.activity.was_busy, busy) {
-            (false, true) => {
-                self.activity.activity_started_at = Some(now);
+        match (self.activity.span, busy) {
+            (ActivitySpan::Idle, true) => {
+                self.activity.span = ActivitySpan::Busy { started_at: now };
                 None
             }
-            (true, false) => {
-                self.activity.activity_started_at = None;
+            (ActivitySpan::Busy { .. }, false) => {
+                self.activity.span = ActivitySpan::Idle;
                 // The run is over: the `subagent_last_activity` map is only
                 // meaningful during an active run (the `subagent N/M` indicator
                 // is hidden when idle, and a later subagent event re-populates
@@ -137,17 +137,16 @@ impl AgentChatView {
                 self.session_updated_at = Some(crate::surface::timestamp::now_rfc3339());
                 self.activity.pending_completion.take()
             }
-            _ => None,
-        };
-        self.activity.was_busy = busy;
-        edge
+            // Level unchanged: a running span keeps its original start instant.
+            (ActivitySpan::Idle, false) | (ActivitySpan::Busy { .. }, true) => None,
+        }
     }
 
     /// Elapsed time since the current activity span began (busy→…), or `None` when
     /// idle. Anchors the working-indicator timer to the whole activity span
     /// (turn + trailing subagents), replacing the turn-scoped `turn.started_at()`.
     pub(in crate::workspace) fn activity_elapsed(&self) -> Option<std::time::Duration> {
-        self.activity.activity_started_at.map(|t| t.elapsed())
+        self.activity.span.elapsed()
     }
 
     /// Count of subagents running *right now* (`total - settled`), for the

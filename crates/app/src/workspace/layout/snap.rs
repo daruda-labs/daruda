@@ -13,13 +13,12 @@
 //! Staging a plain-data snapshot avoids all re-entry and keeps the
 //! render closure free of entity borrows.
 
-use std::sync::Arc;
-
 use gpui::{FocusHandle, UniformListScrollHandle, WeakEntity};
 
 use crate::files::tree::EntryKind;
 use crate::workspace::left_dock::file_tree_ops::VisibleEntry;
 
+use super::diff_policy::{ByPointer, Handle, PerFrame};
 use crate::workspace::Workspace;
 
 // ----------------------------------------------------------------
@@ -78,15 +77,12 @@ pub(in crate::workspace) struct GroupSnapshot {
 
 /// Point-in-time copy of `Workspace` fields consumed by the left
 /// dock's `impl Render`.
+///
+/// Every field takes part in the notify-on-change diff unless it is wrapped in
+/// a [`diff_policy`](super::diff_policy) marker saying why it must not.
+#[derive(PartialEq)]
 pub(in crate::workspace) struct LeftDockSnapshot {
     pub left_dock_view: daruda_store::project::LeftDockView,
-    /// Display name of the active project. Superseded by per-project
-    /// headers driven off `projects` once the multi-project tree
-    /// landed; kept around so any pending consumer (status bar,
-    /// header rebuilds) can still read it. Unused inside the
-    /// lanes view itself.
-    #[allow(dead_code)]
-    pub active_project_name: Option<gpui::SharedString>,
     pub lanes: Vec<crate::lane::Lane>,
     /// Every project in the workspace, in `tab_order` order. Drives
     /// the multi-project tree render — each entry's `lanes` slice
@@ -115,20 +111,20 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// Focus handle bound to `key_context("GitChanges")`. Track this on
     /// the Git Changes body so its keyboard shortcuts fire only when
     /// the panel holds focus.
-    pub git_changes_panel_focus: FocusHandle,
+    pub git_changes_panel_focus: Handle<FocusHandle>,
     /// `(lane, path, staged)` of the focused file viewer's pane,
     /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
     pub focused_file_selection: Option<(daruda_store::project::LaneId, std::path::PathBuf, bool)>,
-    pub git_changes_scroll_handle: gpui::UniformListScrollHandle,
+    pub git_changes_scroll_handle: Handle<gpui::UniformListScrollHandle>,
     /// Scroll handle for the Lanes view card list — the body below the
     /// (fixed) view header. Shared with its scrollbar thumb overlay.
-    pub lanes_scroll_handle: gpui::ScrollHandle,
-    pub git_commit_input: gpui::Entity<crate::ui::InputPanel>,
-    pub files_panel_focus: FocusHandle,
-    pub files_scroll_handle: UniformListScrollHandle,
+    pub lanes_scroll_handle: Handle<gpui::ScrollHandle>,
+    pub git_commit_input: Handle<gpui::Entity<crate::ui::InputPanel>>,
+    pub files_panel_focus: Handle<FocusHandle>,
+    pub files_scroll_handle: Handle<UniformListScrollHandle>,
     pub files_icon_color_mode: daruda_config::IconColorMode,
-    pub cached_visible: Arc<Vec<VisibleEntry>>,
+    pub cached_visible: ByPointer<Vec<VisibleEntry>>,
     pub root_kind: Option<EntryKind>,
     /// Aggregate agent status per lane. Keyed by `LaneRef`
     /// so lane ids in distinct projects (each project numbers its
@@ -155,53 +151,27 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// lanes list. True when status is enabled in config but
     /// hooks aren't yet installed in `~/.claude/settings.json`.
     pub agent_install_banner_visible: bool,
-    pub workspace: WeakEntity<Workspace>,
+    pub workspace: Handle<WeakEntity<Workspace>>,
 }
 
 impl LeftDockSnapshot {
     /// True when the left-dock-relevant *content* differs from `prev`.
     ///
-    /// Hand-written (rather than a derived `PartialEq` like
-    /// `BottomDockSnapshot`) for two reasons:
-    /// - `cached_visible` is a stable `Arc` (see `cached_or_rebuild_visible`,
-    ///   which clones the cached `Arc` until invalidated) so it is compared
-    ///   by `Arc::ptr_eq` — O(1), with no need for `VisibleEntry: PartialEq`.
-    /// - GPUI handles (`FocusHandle` / `ScrollHandle` /
-    ///   `UniformListScrollHandle` / `Entity` / `WeakEntity`) are the same
-    ///   instance for the workspace's lifetime, so they are
-    ///   content-irrelevant and intentionally EXCLUDED: `git_changes_panel_focus`,
-    ///   `git_changes_scroll_handle`, `git_commit_input`, `files_panel_focus`,
-    ///   `files_scroll_handle`, `lanes_scroll_handle`, `workspace`.
-    ///   `active_project_name` is also excluded — it is
-    ///   `#[allow(dead_code)]`, unused by the render.
+    /// Derived rather than hand-written: a field added to this struct joins the
+    /// diff automatically, and one that must stay out says so at its own
+    /// declaration through a [`diff_policy`](super::diff_policy) wrapper. The
+    /// cost of forgetting is then an unnecessary repaint rather than a dock
+    /// that never repaints at all.
     ///
     /// Wired into left-dock render staging (`render/mod.rs`) as the
-    /// notify-on-change comparator: the cached dock is marked dirty only
-    /// when this reports a content difference. This is now the sole
-    /// left-dock invalidation mechanism — the manual `notify_left_dock()`
-    /// calls are gone; a plain workspace `cx.notify()` re-stages the
-    /// snapshot and lets this diff decide. (The status pulse is the one
-    /// exception: it dirties the dock directly to animate badges, whose
-    /// frames are not part of this snapshot.)
+    /// notify-on-change comparator: the cached dock is marked dirty only when
+    /// this reports a difference. This is the sole left-dock invalidation
+    /// mechanism — a plain workspace `cx.notify()` re-stages the snapshot and
+    /// lets this diff decide. (The status pulse is the one exception: it
+    /// dirties the dock directly to animate badges, whose frames are not part
+    /// of this snapshot.)
     pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
-        !std::sync::Arc::ptr_eq(&self.cached_visible, &prev.cached_visible)
-            || self.left_dock_view != prev.left_dock_view
-            || self.active != prev.active
-            || self.lanes != prev.lanes
-            || self.projects != prev.projects
-            || self.groups != prev.groups
-            || self.git_status_cache != prev.git_status_cache
-            || self.git_stage_in_flight != prev.git_stage_in_flight
-            || self.git_op_in_flight != prev.git_op_in_flight
-            || self.git_collapsed_dirs != prev.git_collapsed_dirs
-            || self.git_changes_cursor != prev.git_changes_cursor
-            || self.focused_file_selection != prev.focused_file_selection
-            || self.files_icon_color_mode != prev.files_icon_color_mode
-            || self.root_kind != prev.root_kind
-            || self.agent_status_per_lane != prev.agent_status_per_lane
-            || self.agent_per_session_per_lane != prev.agent_per_session_per_lane
-            || self.agent_active_session_id != prev.agent_active_session_id
-            || self.agent_install_banner_visible != prev.agent_install_banner_visible
+        self != prev
     }
 }
 
@@ -238,8 +208,8 @@ pub(in crate::workspace) struct QueuedPromptView {
 /// render staging compares each frame's snapshot against the last and
 /// only fires `cx.notify(bottom_dock)` when content actually changed,
 /// so the 250 ms status pulse (which leaves this snapshot identical)
-/// doesn't repaint the dock. `Entity`/`WeakEntity` handles compare by
-/// stable id, so they never spuriously trip the diff.
+/// doesn't repaint the dock. Fields that must stay out of that diff carry a
+/// [`diff_policy`](super::diff_policy) marker, same as the other two docks.
 #[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
     pub terminal_input_visible: bool,
@@ -293,7 +263,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.
     pub shell: crate::shell_quote::Shell,
-    pub workspace: WeakEntity<Workspace>,
+    pub workspace: Handle<WeakEntity<Workspace>>,
 }
 
 // ----------------------------------------------------------------
@@ -302,6 +272,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
 
 /// Point-in-time copy of `Workspace` fields consumed by the right
 /// dock's `impl Render`.
+#[derive(PartialEq)]
 pub(in crate::workspace) struct RightDockSnapshot {
     /// Active right-panel tab. The tab strip in the dock header reads
     /// this to highlight the current tab; the body match-arm reads it
@@ -310,7 +281,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Back-reference to the owning `Workspace`, mirrored from the
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
     /// `set_right_dock_view` without re-entering the dock context.
-    pub workspace: WeakEntity<Workspace>,
+    pub workspace: Handle<WeakEntity<Workspace>>,
     /// One section per auth domain worth showing, in `AccountRecipeId::all()`
     /// order. Empty when no provider is signed in, which the renderer replaces
     /// with a single notice.
@@ -348,7 +319,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub skills: crate::agent::skills::SkillsSnapshot,
     /// Search query input rendered atop the Skills tab. Entity is
     /// shared with the Workspace; the renderer just embeds it inline.
-    pub skill_search_input: gpui::Entity<crate::ui::InputState>,
+    pub skill_search_input: Handle<gpui::Entity<crate::ui::InputState>>,
     /// Captured search text at snap build time. Lowercase substring
     /// match against skill `name` and `frontmatter.description` filters
     /// every scope (Project / Personal / Plugin) simultaneously.
@@ -362,20 +333,12 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub tasks: daruda_store::tasks::TasksState,
     /// Search query input rendered atop the Tasks tab. Entity is
     /// shared with the Workspace; the renderer just embeds it inline.
-    pub task_search_input: gpui::Entity<crate::ui::InputState>,
+    pub task_search_input: Handle<gpui::Entity<crate::ui::InputState>>,
     /// Captured search text at snap build time. Lowercase substring
     /// match against `title / prompt / notes / branch_name`.
     pub task_search_query: String,
     /// Active Tasks-tab filter (Backlog / Running / Done / All).
     pub task_filter: daruda_store::tasks::TaskFilter,
-    /// Aggregate Claude session status per lane, keyed by the
-    /// lane's filesystem path so the Tasks tab can paint a
-    /// session badge next to each `Running` row without consulting
-    /// the workspace entity. Empty when the `claude_status.enable`
-    /// config flag is off.
-    #[allow(dead_code)]
-    pub claude_status_per_path:
-        std::collections::HashMap<std::path::PathBuf, daruda_agent::SessionStatus>,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
     /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
@@ -393,11 +356,11 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// `Utc::now()` per row would drift between calls within a single
     /// frame and break the `2m 14s → 2m 15s` invariant for sibling
     /// rows that update on the same tick.
-    pub now: chrono::DateTime<chrono::Utc>,
+    pub now: PerFrame<chrono::DateTime<chrono::Utc>>,
     /// Scroll handle shared between the right-panel body's
     /// `overflow_y_scroll` and the scrollbar thumb overlay. Cloned from
     /// `Workspace::right_panel_scroll_handle` each frame.
-    pub right_panel_scroll_handle: gpui::ScrollHandle,
+    pub right_panel_scroll_handle: Handle<gpui::ScrollHandle>,
     /// Snapshot of `Workspace::mcp` for the Tools tab renderer.
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity.
@@ -480,35 +443,19 @@ impl RestorableSession {
 }
 
 impl RightDockSnapshot {
-    /// Notify-on-change diff, like [`LeftDockSnapshot::content_differs`].
-    /// Excludes GPUI handles, the per-frame `now` (refreshed by the
-    /// task-live tick, not the snapshot), and the dead
-    /// `claude_status_per_path`.
+    /// Notify-on-change diff, derived for the reason spelled out on
+    /// [`LeftDockSnapshot::content_differs`]: a field joins the diff by
+    /// default, and one that must not says so at its own declaration.
+    ///
+    /// `now` is marked [`PerFrame`]: the staging step rebuilds it every frame,
+    /// so comparing it would repaint forever. It stays fresh because staging
+    /// assigns the snapshot unconditionally (`render/mod.rs`) — the diff gates
+    /// only the repaint. `flow_lane` is deliberately *not* marked even though
+    /// nothing draws it: the lane is what a resume click sends, so two lanes
+    /// whose runs happen to look alike must still re-stage the panel's
+    /// handlers.
     pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
-        self.right_dock_view != prev.right_dock_view
-            || self.usage != prev.usage
-            || self.focused_agent_domain != prev.focused_agent_domain
-            || self.usage_domain_override != prev.usage_domain_override
-            || self.activity != prev.activity
-            || self.recent_sessions != prev.recent_sessions
-            || self.usage_refresh_in_flight != prev.usage_refresh_in_flight
-            || self.skills != prev.skills
-            || self.skill_search_query != prev.skill_search_query
-            || self.skill_plugin_expanded != prev.skill_plugin_expanded
-            || self.tasks != prev.tasks
-            || self.task_search_query != prev.task_search_query
-            || self.task_filter != prev.task_filter
-            || self.claude_status_per_session != prev.claude_status_per_session
-            || self.tool_use_failure_counts != prev.tool_use_failure_counts
-            || self.mcp != prev.mcp
-            // In the diff though nothing draws it: the lane is what a
-            // resume click *sends*, so two lanes whose runs happen to look
-            // alike must still re-stage the panel's handlers.
-            || self.flow_lane != prev.flow_lane
-            || self.flows != prev.flows
-            || self.flow_history != prev.flow_history
-            || self.flow_files != prev.flow_files
-            || self.flows_with_unsaved_edits != prev.flows_with_unsaved_edits
+        self != prev
     }
 }
 
@@ -533,9 +480,26 @@ pub(in crate::workspace) enum DockSnapshot {
     None,
 }
 
+impl DockSnapshot {
+    /// Whether `other` is the same variant carrying the same *content* — the
+    /// question [`Dock::stage`] asks to decide whether to repaint.
+    pub(in crate::workspace) fn same_content_as(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Left(a), Self::Left(b)) => !b.content_differs(a),
+            (Self::Bottom(a), Self::Bottom(b)) => a == b,
+            (Self::Right(a), Self::Right(b)) => !b.content_differs(a),
+            // A different variant, or no prior snapshot at all, is always a
+            // change — there is nothing to compare against.
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::Arc;
 
     use gpui::{AppContext as _, ScrollHandle, TestAppContext, Window};
 
@@ -550,7 +514,6 @@ mod tests {
         });
         LeftDockSnapshot {
             left_dock_view: daruda_store::project::LeftDockView::default(),
-            active_project_name: None,
             lanes: Vec::new(),
             projects: Vec::new(),
             groups: Vec::new(),
@@ -560,22 +523,141 @@ mod tests {
             git_op_in_flight: false,
             git_collapsed_dirs: std::collections::HashSet::new(),
             git_changes_cursor: None,
-            git_changes_panel_focus: cx.focus_handle(),
+            git_changes_panel_focus: Handle(cx.focus_handle()),
             focused_file_selection: None,
-            git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
-            lanes_scroll_handle: ScrollHandle::new(),
-            git_commit_input,
-            files_panel_focus: cx.focus_handle(),
-            files_scroll_handle: UniformListScrollHandle::new(),
+            git_changes_scroll_handle: Handle(gpui::UniformListScrollHandle::new()),
+            lanes_scroll_handle: Handle(ScrollHandle::new()),
+            git_commit_input: Handle(git_commit_input),
+            files_panel_focus: Handle(cx.focus_handle()),
+            files_scroll_handle: Handle(UniformListScrollHandle::new()),
             files_icon_color_mode: daruda_config::IconColorMode::default(),
-            cached_visible: Arc::new(Vec::new()),
+            cached_visible: ByPointer(Arc::new(Vec::new())),
             root_kind: None,
             agent_status_per_lane: std::collections::HashMap::new(),
             agent_per_session_per_lane: std::collections::HashMap::new(),
             agent_active_session_id: None,
             agent_install_banner_visible: false,
-            workspace: WeakEntity::new_invalid(),
+            workspace: Handle(WeakEntity::new_invalid()),
         }
+    }
+
+    /// The right dock's counterpart to [`fixture`]. It had none: every one of
+    /// its 21 comparisons was unverified, in the dock whose exclusion list also
+    /// mixed handles with a per-frame clock. Data fields start empty so a test
+    /// mutates only the field it is about.
+    fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
+        let skill_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
+        let task_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
+        RightDockSnapshot {
+            right_dock_view: daruda_store::project::RightDockView::default(),
+            workspace: Handle(WeakEntity::new_invalid()),
+            usage: Vec::new(),
+            focused_agent_domain: crate::workspace::main_area::pane::AccountDomain::Any,
+            usage_domain_override: None,
+            activity: Vec::new(),
+            recent_sessions: Vec::new(),
+            usage_refresh_in_flight: false,
+            skills: crate::agent::skills::SkillsSnapshot::default(),
+            skill_search_input: Handle(skill_search_input),
+            skill_search_query: String::new(),
+            skill_plugin_expanded: std::collections::HashSet::new(),
+            tasks: daruda_store::tasks::TasksState::default(),
+            task_search_input: Handle(task_search_input),
+            task_search_query: String::new(),
+            task_filter: daruda_store::tasks::TaskFilter::default(),
+            claude_status_per_session: std::collections::HashMap::new(),
+            tool_use_failure_counts: std::collections::HashMap::new(),
+            now: PerFrame(chrono::Utc::now()),
+            right_panel_scroll_handle: Handle(ScrollHandle::new()),
+            mcp: crate::agent::mcp::McpSnapshot::default(),
+            flows: Vec::new(),
+            flow_lane: daruda_store::project::LaneRef::default(),
+            flow_history: None,
+            flow_files: Vec::new(),
+            flows_with_unsaved_edits: Vec::new(),
+        }
+    }
+
+    /// The contract the wrappers exist for: distinct handle instances and a
+    /// clock that advanced between frames must not report a change. `now` is
+    /// the only `PerFrame` field in the app, so this is its sole check —
+    /// without it the right dock would repaint on every single frame.
+    #[gpui::test]
+    fn right_identical_content_does_not_differ(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = right_fixture(window, cx);
+            let mut b = right_fixture(window, cx);
+            b.now = PerFrame(
+                a.now
+                    .checked_add_signed(chrono::Duration::seconds(1))
+                    .unwrap(),
+            );
+            assert!(
+                !a.content_differs(&b),
+                "distinct handles and an advanced clock are not content"
+            );
+            gpui::Empty
+        });
+    }
+
+    /// A `PerFrame` field is kept out of the diff so it cannot force a
+    /// repaint — which only works if staging still takes the fresh snapshot.
+    /// Gate the assignment on the diff as well and the right dock's clock
+    /// freezes at the last frame something else changed, so a Running task's
+    /// elapsed time stops advancing while the task-live tick repaints it four
+    /// times a second.
+    #[gpui::test]
+    fn staging_takes_the_fresh_snapshot_even_when_it_will_not_repaint(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let mut dock = super::super::Dock::new(
+                super::super::DockPosition::Right,
+                WeakEntity::new_invalid(),
+            );
+
+            let first = right_fixture(window, cx);
+            assert!(
+                dock.stage(DockSnapshot::Right(Box::new(first))),
+                "the first snapshot always counts as a change"
+            );
+
+            let mut later = right_fixture(window, cx);
+            let advanced = later
+                .now
+                .checked_add_signed(chrono::Duration::seconds(30))
+                .expect("30s past the fixture clock");
+            later.now = PerFrame(advanced);
+
+            assert!(
+                !dock.stage(DockSnapshot::Right(Box::new(later))),
+                "only the clock moved, so the dock must not repaint"
+            );
+            let DockSnapshot::Right(staged) = &dock.snap else {
+                panic!("the right snapshot is staged");
+            };
+            assert_eq!(
+                *staged.now, advanced,
+                "the refused repaint must still leave the fresh clock staged"
+            );
+            gpui::Empty
+        });
+    }
+
+    /// And the other half: an unwrapped field really is compared.
+    #[gpui::test]
+    fn right_content_change_differs(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = right_fixture(window, cx);
+            let mut b = right_fixture(window, cx);
+            b.task_filter = daruda_store::tasks::TaskFilter::Running;
+            assert!(
+                a.content_differs(&b),
+                "a changed Tasks filter must re-stage the panel"
+            );
+            gpui::Empty
+        });
     }
 
     #[gpui::test]
@@ -590,7 +672,7 @@ mod tests {
             // is cloned from the other, so clone `b`'s into a copy to model
             // the "cache reused" path.
             let b = LeftDockSnapshot {
-                cached_visible: a.cached_visible.clone(),
+                cached_visible: ByPointer(a.cached_visible.clone()),
                 ..b
             };
             assert!(
@@ -607,7 +689,7 @@ mod tests {
         cx.add_window(|window, cx| {
             let a = fixture(window, cx);
             let mut b = fixture(window, cx);
-            b.cached_visible = a.cached_visible.clone();
+            b.cached_visible = ByPointer(a.cached_visible.clone());
             b.agent_status_per_lane.insert(
                 daruda_store::project::LaneRef::default(),
                 daruda_agent::SessionStatus::Working,
@@ -626,7 +708,7 @@ mod tests {
         cx.add_window(|window, cx| {
             let a = fixture(window, cx);
             let mut b = fixture(window, cx);
-            b.cached_visible = a.cached_visible.clone();
+            b.cached_visible = ByPointer(a.cached_visible.clone());
             b.git_op_in_flight = true;
             assert!(
                 a.content_differs(&b),
@@ -642,7 +724,7 @@ mod tests {
         cx.add_window(|window, cx| {
             let a = fixture(window, cx);
             let mut b = fixture(window, cx);
-            b.cached_visible = a.cached_visible.clone();
+            b.cached_visible = ByPointer(a.cached_visible.clone());
             b.lanes.push(crate::lane::Lane::default_for_project(
                 0,
                 std::path::PathBuf::from("/tmp/scratch"),

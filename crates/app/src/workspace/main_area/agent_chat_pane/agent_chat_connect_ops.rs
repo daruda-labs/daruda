@@ -158,14 +158,12 @@ impl Workspace {
             (cwd, v.session_id.clone())
         };
         // Flip to `Connecting` before spawning so a second focus during the
-        // handshake doesn't start a duplicate session. Mark `restoring` when a
-        // resume is in flight so `apply_event` coalesces the load's replay.
+        // handshake doesn't start a duplicate session. `begin_connect` takes the
+        // same `resume` the spawn below gets, so the replay gate it opens can
+        // never name a different session than the one actually loaded.
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            let resuming = resume.is_some();
-            view.update(cx, |v, cx| {
-                v.restoring = resuming;
-                v.set_connecting(cx);
-            });
+            let resume = resume.clone();
+            view.update(cx, |v, cx| v.begin_connect(resume, cx));
             // Idle → Connecting is a dock-badge status change; dirty the cached
             // docks explicitly (see `notify_status_docks`).
             self.notify_status_docks(cx);
@@ -195,7 +193,7 @@ impl Workspace {
             (cwd, v.session_id.clone())
         };
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, cx| v.retry_for_reconnect(cx));
+            view.update(cx, |v, cx| v.retry_for_reconnect(resume.clone(), cx));
             // Error → Connecting is a dock-badge status change; dirty the cached
             // docks explicitly (see `notify_status_docks`).
             self.notify_status_docks(cx);
@@ -733,8 +731,7 @@ impl Workspace {
                                         // rather than entering the failed load's
                                         // closed command channel.
                                         v.handle = None;
-                                        v.restoring = false;
-                                        v.set_connecting(cx);
+                                        v.begin_connect(None, cx);
                                     });
                                 }
                                 let report = ErrorReport::new(
@@ -931,8 +928,7 @@ impl Workspace {
                                 // No load will happen now — release the replay
                                 // gate and return to a plain connecting state
                                 // before the fresh retry.
-                                v.restoring = false;
-                                v.set_connecting(cx);
+                                v.begin_connect(None, cx);
                             });
                         }
                         let report = ErrorReport::new(

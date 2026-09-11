@@ -6,12 +6,12 @@
 
 mod render;
 mod sections;
+mod spec;
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, HashSet};
-use std::ops::RangeBounds;
 
 use crate::ui::theme;
 use daruda_config::BuiltinSection;
@@ -276,7 +276,7 @@ pub(super) enum AgentCatalogItem {
     Unresolved(daruda_config::AgentEntry),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TextSetting {
     TerminalFontSize,
     TerminalLineHeight,
@@ -293,7 +293,7 @@ enum TextSetting {
     PanelsGridColumns,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectSetting {
     Language,
     TerminalPreset,
@@ -309,7 +309,7 @@ enum SelectSetting {
     OrchestratorAccount,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum BoolSetting {
     CursorBlinking,
     AgentUseModifierToSend,
@@ -320,6 +320,122 @@ pub(super) enum BoolSetting {
     ClaudeStatusEnabled,
     TelegramEnabled,
     OrchestratorEnabled,
+}
+
+// Rust has no reflection over enum variants, and the `spec` tables are looked
+// up by variant, so `ALL` is what lets a test prove every variant has exactly
+// one row. `ALL` is itself hand-written, so each is paired with an exhaustive
+// `match` that the compiler rejects until a new variant is added to the list
+// too — otherwise the missing row would only surface as a panic on the first
+// click of the new widget.
+impl TextSetting {
+    #[cfg(test)]
+    const ALL: [Self; 13] = [
+        Self::TerminalFontSize,
+        Self::TerminalLineHeight,
+        Self::TerminalCellWidth,
+        Self::EditorFontSize,
+        Self::EditorLineHeight,
+        Self::AgentChatFontSize,
+        Self::AgentChatLineHeight,
+        Self::WindowOpacity,
+        Self::ScrollbackMaxRows,
+        Self::TerminalInsetX,
+        Self::TerminalInsetY,
+        Self::ClipboardStreamingMaxBytes,
+        Self::PanelsGridColumns,
+    ];
+
+    /// Compile-time guard for `ALL`: this match is exhaustive, so a new
+    /// variant fails to build until it is listed above as well.
+    #[cfg(test)]
+    fn _all_is_exhaustive(self) {
+        match self {
+            Self::TerminalFontSize => (),
+            Self::TerminalLineHeight => (),
+            Self::TerminalCellWidth => (),
+            Self::EditorFontSize => (),
+            Self::EditorLineHeight => (),
+            Self::AgentChatFontSize => (),
+            Self::AgentChatLineHeight => (),
+            Self::WindowOpacity => (),
+            Self::ScrollbackMaxRows => (),
+            Self::TerminalInsetX => (),
+            Self::TerminalInsetY => (),
+            Self::ClipboardStreamingMaxBytes => (),
+            Self::PanelsGridColumns => (),
+        }
+    }
+}
+
+impl SelectSetting {
+    #[cfg(test)]
+    const ALL: [Self; 12] = [
+        Self::Language,
+        Self::TerminalPreset,
+        Self::UiPreset,
+        Self::TerminalFontFamily,
+        Self::EditorFontFamily,
+        Self::AgentChatFontFamily,
+        Self::CursorStyle,
+        Self::RenderMaxFps,
+        Self::SyntaxTheme,
+        Self::PreferredEditor,
+        Self::OrchestratorAgent,
+        Self::OrchestratorAccount,
+    ];
+
+    /// Compile-time guard for `ALL`: this match is exhaustive, so a new
+    /// variant fails to build until it is listed above as well.
+    #[cfg(test)]
+    fn _all_is_exhaustive(self) {
+        match self {
+            Self::Language => (),
+            Self::TerminalPreset => (),
+            Self::UiPreset => (),
+            Self::TerminalFontFamily => (),
+            Self::EditorFontFamily => (),
+            Self::AgentChatFontFamily => (),
+            Self::CursorStyle => (),
+            Self::RenderMaxFps => (),
+            Self::SyntaxTheme => (),
+            Self::PreferredEditor => (),
+            Self::OrchestratorAgent => (),
+            Self::OrchestratorAccount => (),
+        }
+    }
+}
+
+impl BoolSetting {
+    #[cfg(test)]
+    const ALL: [Self; 9] = [
+        Self::CursorBlinking,
+        Self::AgentUseModifierToSend,
+        Self::ShellClosePaneOnExit,
+        Self::WindowBlur,
+        Self::FilesShowHidden,
+        Self::FilesUseGitignore,
+        Self::ClaudeStatusEnabled,
+        Self::TelegramEnabled,
+        Self::OrchestratorEnabled,
+    ];
+
+    /// Compile-time guard for `ALL`: this match is exhaustive, so a new
+    /// variant fails to build until it is listed above as well.
+    #[cfg(test)]
+    fn _all_is_exhaustive(self) {
+        match self {
+            Self::CursorBlinking => (),
+            Self::AgentUseModifierToSend => (),
+            Self::ShellClosePaneOnExit => (),
+            Self::WindowBlur => (),
+            Self::FilesShowHidden => (),
+            Self::FilesUseGitignore => (),
+            Self::ClaudeStatusEnabled => (),
+            Self::TelegramEnabled => (),
+            Self::OrchestratorEnabled => (),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -585,26 +701,30 @@ impl SettingsWindow {
         )
     }
 
-    /// Build a text-input field, wire it to the standard submit /
-    /// clear-error subscription, and capture its focus handle — one call
-    /// site instead of three separately-located steps (construct, then
-    /// subscribe, then extract the handle) for every bounded text field.
+    /// Build one text setting's input from its [`spec`] row: the row supplies
+    /// the placeholder, the value to seed from `config`, and the section whose
+    /// tab cycle this handle joins. Call order is tab order, so the push
+    /// happens here rather than at the call site.
     fn new_text_field(
-        placeholder: &str,
-        default_value: String,
         setting: TextSetting,
+        config: &daruda_config::Config,
         window: &mut Window,
         cx: &mut Context<Self>,
         subs: &mut Vec<Subscription>,
-    ) -> (Entity<InputState>, FocusHandle) {
+        focus: &mut HashMap<BuiltinSection, Vec<FocusHandle>>,
+    ) -> Entity<InputState> {
+        let row = spec::text_spec(setting);
         let state = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(placeholder)
-                .default_value(default_value)
+                .placeholder(row.placeholder)
+                .default_value((row.show)(config))
         });
         subs.push(Self::subscribe_text_setting(&state, setting, window, cx));
-        let fh = state.read(cx).focus_handle(cx);
-        (state, fh)
+        focus
+            .entry(row.section)
+            .or_default()
+            .push(state.read(cx).focus_handle(cx));
+        state
     }
 
     fn agent_row_from_definition(
@@ -1197,150 +1317,102 @@ impl SettingsWindow {
         ));
         let mut section_focus_targets: HashMap<BuiltinSection, Vec<FocusHandle>> = HashMap::new();
 
-        let (terminal_font_size_input, font_size_fh) = Self::new_text_field(
-            "e.g. 13",
-            format!("{}", config.font.terminal.size),
+        let terminal_font_size_input = Self::new_text_field(
             TextSetting::TerminalFontSize,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(font_size_fh);
-        let (terminal_line_height_input, terminal_line_height_fh) = Self::new_text_field(
-            "e.g. 1.0",
-            format!("{}", config.font.terminal.line_height),
+        let terminal_line_height_input = Self::new_text_field(
             TextSetting::TerminalLineHeight,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(terminal_line_height_fh);
-        let (terminal_cell_width_input, terminal_cell_width_fh) = Self::new_text_field(
-            "e.g. 1.0",
-            format!("{}", config.font.terminal.cell_width),
+        let terminal_cell_width_input = Self::new_text_field(
             TextSetting::TerminalCellWidth,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(terminal_cell_width_fh);
-        let (editor_font_size_input, editor_font_size_fh) = Self::new_text_field(
-            "e.g. 13",
-            format!("{}", config.font.editor.size),
+        let editor_font_size_input = Self::new_text_field(
             TextSetting::EditorFontSize,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(editor_font_size_fh);
-        let (editor_line_height_input, editor_line_height_fh) = Self::new_text_field(
-            "e.g. 1.7",
-            format!("{}", config.font.editor.line_height),
+        let editor_line_height_input = Self::new_text_field(
             TextSetting::EditorLineHeight,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(editor_line_height_fh);
-        let (agent_chat_font_size_input, agent_chat_font_size_fh) = Self::new_text_field(
-            "e.g. 13",
-            format!("{}", config.font.agent_chat.size),
+        let agent_chat_font_size_input = Self::new_text_field(
             TextSetting::AgentChatFontSize,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(agent_chat_font_size_fh);
-        let (agent_chat_line_height_input, agent_chat_line_height_fh) = Self::new_text_field(
-            "e.g. 1.6",
-            format!("{}", config.font.agent_chat.line_height),
+        let agent_chat_line_height_input = Self::new_text_field(
             TextSetting::AgentChatLineHeight,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Font)
-            .or_default()
-            .push(agent_chat_line_height_fh);
-        let (opacity_input, opacity_fh) = Self::new_text_field(
-            "0.1 – 1.0",
-            format!("{}", config.window.opacity),
+        let opacity_input = Self::new_text_field(
             TextSetting::WindowOpacity,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Window)
-            .or_default()
-            .push(opacity_fh);
-        let (scrollback_input, scrollback_fh) = Self::new_text_field(
-            "e.g. 10000",
-            format!("{}", config.scrollback.max_rows),
+        let scrollback_input = Self::new_text_field(
             TextSetting::ScrollbackMaxRows,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Terminal)
-            .or_default()
-            .push(scrollback_fh);
-        let (inset_x_input, inset_x_fh) = Self::new_text_field(
-            "e.g. 4",
-            format!("{}", config.font.terminal.inset_x),
+        let inset_x_input = Self::new_text_field(
             TextSetting::TerminalInsetX,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Terminal)
-            .or_default()
-            .push(inset_x_fh);
-        let (inset_y_input, inset_y_fh) = Self::new_text_field(
-            "e.g. 2",
-            format!("{}", config.font.terminal.inset_y),
+        let inset_y_input = Self::new_text_field(
             TextSetting::TerminalInsetY,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Terminal)
-            .or_default()
-            .push(inset_y_fh);
-        let (clipboard_streaming_input, clipboard_streaming_fh) = Self::new_text_field(
-            "e.g. 10485760",
-            format!("{}", config.clipboard.streaming_max_bytes),
+        let clipboard_streaming_input = Self::new_text_field(
             TextSetting::ClipboardStreamingMaxBytes,
+            &config,
             window,
             cx,
             &mut input_subscriptions,
+            &mut section_focus_targets,
         );
-        section_focus_targets
-            .entry(BuiltinSection::Clipboard)
-            .or_default()
-            .push(clipboard_streaming_fh);
         // External editor select — "" (empty, the config default) means the
         // OS default handler; every other value is a `daruda_config::editor`
         // preset name.
@@ -1357,22 +1429,18 @@ impl SettingsWindow {
             );
             select::state_with_options(opts, Some(&preferred_editor), window, cx)
         });
-        let (panels_grid_columns_input, panels_grid_columns_fh) = Self::new_text_field(
-            "1 – 16",
-            format!("{}", config.panels.grid_columns),
-            TextSetting::PanelsGridColumns,
-            window,
-            cx,
-            &mut input_subscriptions,
-        );
         // Second (and last) text input on the merged Dock page — after
         // the Sidebar subsection's checkboxes (no text input) and before
         // the Bottom Dock subsection's own fields, so it's simply
         // appended to the same section's tab-cycle list.
-        section_focus_targets
-            .entry(BuiltinSection::Dock)
-            .or_default()
-            .push(panels_grid_columns_fh);
+        let panels_grid_columns_input = Self::new_text_field(
+            TextSetting::PanelsGridColumns,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
         // Never pre-filled with the real token (`default_value`) — a stored
         // secret is never re-displayed in a text field, so this field can't
         // go through `new_text_field` (which always sets a default value).
@@ -1778,25 +1846,8 @@ impl SettingsWindow {
         window.remove_window();
     }
 
-    /// Read, trim, and parse `input`'s value into `T`, rejecting values
-    /// outside `range`. Collapses the "read → trim → parse → range filter →
-    /// error" pattern repeated for every bounded numeric field below.
-    fn parse_bounded_field<T: std::str::FromStr + PartialOrd>(
-        input: &Entity<InputState>,
-        range: impl RangeBounds<T>,
-        err: impl FnOnce() -> SharedString,
-        cx: &gpui::App,
-    ) -> Result<T, SharedString> {
-        input
-            .read(cx)
-            .value()
-            .trim()
-            .parse::<T>()
-            .ok()
-            .filter(|v| range.contains(v))
-            .ok_or_else(err)
-    }
-
+    /// Commit one field's change, refusing it when the same field moved
+    /// underneath the window since it opened. Returns whether the write landed.
     fn apply_settings_patch(
         &mut self,
         patch: daruda_config::SettingsPatch,
@@ -1949,6 +2000,13 @@ impl SettingsWindow {
         cx.notify();
     }
 
+    /// Refresh the window's widgets after `patch`'s field changed underneath it
+    /// (another window saved, or `config.toml` was edited on disk).
+    ///
+    /// Table-driven for every simple setting: the row that owns the field says
+    /// how to read the new value and, for selects, whether the option list has
+    /// to be rebuilt with it. Only the editors whose widgets are whole
+    /// sub-forms are refreshed by hand below.
     fn load_settings_patch(
         &mut self,
         patch: &daruda_config::SettingsPatch,
@@ -1956,102 +2014,41 @@ impl SettingsWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let field = patch.field();
+
+        if let Some(spec) = spec::TEXT_SETTINGS
+            .iter()
+            .find(|spec| spec::text_field_id(spec) == field)
+        {
+            Self::set_input_value((spec.field)(self), (spec.show)(live), window, cx);
+            return;
+        }
+        if let Some(spec) = spec::SELECT_SETTINGS
+            .iter()
+            .find(|spec| spec::select_field_id(spec) == field)
+        {
+            let select = (spec.field)(self).clone();
+            match spec.load {
+                spec::SelectLoad::Value => {
+                    Self::set_select_value(&select, (spec.show)(live), window, cx);
+                }
+                spec::SelectLoad::Font => {
+                    let value = (spec.show)(live);
+                    Self::set_font_select_value(&select, value.clone(), &[&value], window, cx);
+                }
+                spec::SelectLoad::Rebuild(refresh) => refresh(self, window, cx),
+            }
+            return;
+        }
+        if let Some(spec) = spec::BOOL_SETTINGS
+            .iter()
+            .find(|spec| spec::bool_field_id(spec) == field)
+        {
+            (spec.set)(self, (spec.show)(live));
+            return;
+        }
+
         match patch {
-            daruda_config::SettingsPatch::GeneralLanguage(_) => Self::set_select_value(
-                &self.language_select,
-                live.general.language.clone(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::TerminalPreset(_) => Self::set_select_value(
-                &self.terminal_preset_select,
-                live.theme.terminal_preset.clone(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::UiPreset(_) => Self::set_select_value(
-                &self.ui_preset_select,
-                live.theme.ui_preset.clone(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::TerminalFontFamily(_) => Self::set_font_select_value(
-                &self.terminal_font_family_select,
-                live.font.terminal.family.clone(),
-                &[&live.font.terminal.family],
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::TerminalFontSize(_) => Self::set_input_value(
-                &self.terminal_font_size_input,
-                live.font.terminal.size,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::TerminalLineHeight(_) => Self::set_input_value(
-                &self.terminal_line_height_input,
-                live.font.terminal.line_height,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::TerminalCellWidth(_) => Self::set_input_value(
-                &self.terminal_cell_width_input,
-                live.font.terminal.cell_width,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::EditorFontFamily(_) => Self::set_font_select_value(
-                &self.editor_font_family_select,
-                live.font.editor.family.clone(),
-                &[&live.font.editor.family],
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::EditorFontSize(_) => Self::set_input_value(
-                &self.editor_font_size_input,
-                live.font.editor.size,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::EditorLineHeight(_) => Self::set_input_value(
-                &self.editor_line_height_input,
-                live.font.editor.line_height,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::AgentChatFontFamily(_) => Self::set_font_select_value(
-                &self.agent_chat_font_family_select,
-                live.font.agent_chat.family.clone(),
-                &[&live.font.agent_chat.family],
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::AgentChatFontSize(_) => Self::set_input_value(
-                &self.agent_chat_font_size_input,
-                live.font.agent_chat.size,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::AgentChatLineHeight(_) => Self::set_input_value(
-                &self.agent_chat_line_height_input,
-                live.font.agent_chat.line_height,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::CursorStyle(_) => {
-                let value = match live.cursor.style {
-                    daruda_config::CursorStyle::Block => "block",
-                    daruda_config::CursorStyle::Underline => "underline",
-                    daruda_config::CursorStyle::Bar => "bar",
-                };
-                Self::set_select_value(&self.cursor_style_select, value, window, cx);
-            }
-            daruda_config::SettingsPatch::CursorBlinking(_) => {
-                self.cursor_blinking = live.cursor.blinking;
-            }
-            daruda_config::SettingsPatch::AgentUseModifierToSend(_) => {
-                self.agent_use_modifier_to_send = live.agent.use_modifier_to_send;
-            }
             daruda_config::SettingsPatch::AgentCatalog(_) => {
                 self.refresh_orchestrator_agent_select(window, cx);
                 self.load_agent_catalog_from_config(live, window, cx);
@@ -2080,79 +2077,12 @@ impl SettingsWindow {
                         .push(row.label_input.read(cx).focus_handle(cx));
                 }
             }
-            daruda_config::SettingsPatch::RenderMaxFps(_) => Self::set_select_value(
-                &self.max_fps_select,
-                live.render.max_fps.to_string(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::ShellClosePaneOnExit(_) => {
-                self.close_pane_on_exit = live.shell.close_pane_on_exit;
-            }
-            daruda_config::SettingsPatch::WindowOpacity(_) => {
-                Self::set_input_value(&self.opacity_input, live.window.opacity, window, cx)
-            }
-            daruda_config::SettingsPatch::WindowBlur(_) => {
-                self.window_blur = live.window.blur;
-            }
-            daruda_config::SettingsPatch::ScrollbackMaxRows(_) => {
-                Self::set_input_value(&self.scrollback_input, live.scrollback.max_rows, window, cx)
-            }
-            daruda_config::SettingsPatch::TerminalInsetX(_) => {
-                Self::set_input_value(&self.inset_x_input, live.font.terminal.inset_x, window, cx)
-            }
-            daruda_config::SettingsPatch::TerminalInsetY(_) => {
-                Self::set_input_value(&self.inset_y_input, live.font.terminal.inset_y, window, cx)
-            }
-            daruda_config::SettingsPatch::FilesShowHidden(_) => {
-                self.files_show_hidden = live.left_dock.files_show_hidden;
-            }
-            daruda_config::SettingsPatch::FilesUseGitignore(_) => {
-                self.files_use_gitignore = live.left_dock.files_use_gitignore;
-            }
-            daruda_config::SettingsPatch::SyntaxTheme(_) => Self::set_select_value(
-                &self.syntax_theme_select,
-                live.file_viewer.syntax_theme.clone(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::ClipboardStreamingMaxBytes(_) => {
-                Self::set_input_value(
-                    &self.clipboard_streaming_input,
-                    live.clipboard.streaming_max_bytes,
-                    window,
-                    cx,
-                );
-            }
-            daruda_config::SettingsPatch::PreferredEditor(_) => Self::set_select_value(
-                &self.editor_select,
-                live.editor.preferred.clone(),
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::PanelsGridColumns(_) => Self::set_input_value(
-                &self.panels_grid_columns_input,
-                live.panels.grid_columns,
-                window,
-                cx,
-            ),
-            daruda_config::SettingsPatch::ClaudeStatusEnabled(_) => {
-                self.claude_status_enable = live.claude_status.enable;
-            }
-            daruda_config::SettingsPatch::TelegramEnabled(_) => {
-                self.telegram_enabled = live.telegram.enabled;
-            }
-            daruda_config::SettingsPatch::OrchestratorEnabled(_) => {
-                self.orchestrator_enabled = live.orchestrator.enabled;
-            }
-            daruda_config::SettingsPatch::OrchestratorAgentId(_) => {
-                self.refresh_orchestrator_agent_select(window, cx);
-            }
-            daruda_config::SettingsPatch::OrchestratorAccountId(_) => {
-                self.refresh_orchestrator_account_select(window, cx);
-            }
+            // Not shown by this window: the status-bar item list is toggled from
+            // the bar itself, and the Telegram chat id is set by pairing.
             daruda_config::SettingsPatch::ToggleStatusBarItem(_)
             | daruda_config::SettingsPatch::TelegramAuthorizedChatId(_) => {}
+            // Every remaining variant is covered by a `spec` row above.
+            _ => {}
         }
     }
 
@@ -2215,52 +2145,41 @@ impl SettingsWindow {
         input.update(cx, |input, cx| input.set_value(value, window, cx));
     }
 
+    /// Every config field this window owns, as patches carrying `config`'s
+    /// current values — the list `sync_external_settings` diffs to find what
+    /// changed underneath the window.
+    ///
+    /// Three entries are not `spec` rows because their editors are whole
+    /// sub-forms rather than a single widget. `TelegramAuthorizedChatId` is
+    /// deliberately absent: pairing owns it, so a change there is not a field
+    /// this window has to catch up with.
     fn settings_ui_patches(config: &daruda_config::Config) -> Vec<daruda_config::SettingsPatch> {
-        vec![
-            daruda_config::SettingsPatch::GeneralLanguage(config.general.language.clone()),
-            daruda_config::SettingsPatch::TerminalPreset(config.theme.terminal_preset.clone()),
-            daruda_config::SettingsPatch::UiPreset(config.theme.ui_preset.clone()),
-            daruda_config::SettingsPatch::TerminalFontFamily(config.font.terminal.family.clone()),
-            daruda_config::SettingsPatch::TerminalFontSize(config.font.terminal.size),
-            daruda_config::SettingsPatch::TerminalLineHeight(config.font.terminal.line_height),
-            daruda_config::SettingsPatch::TerminalCellWidth(config.font.terminal.cell_width),
-            daruda_config::SettingsPatch::EditorFontFamily(config.font.editor.family.clone()),
-            daruda_config::SettingsPatch::EditorFontSize(config.font.editor.size),
-            daruda_config::SettingsPatch::EditorLineHeight(config.font.editor.line_height),
-            daruda_config::SettingsPatch::AgentChatFontFamily(
-                config.font.agent_chat.family.clone(),
-            ),
-            daruda_config::SettingsPatch::AgentChatFontSize(config.font.agent_chat.size),
-            daruda_config::SettingsPatch::AgentChatLineHeight(config.font.agent_chat.line_height),
-            daruda_config::SettingsPatch::CursorStyle(config.cursor.style),
-            daruda_config::SettingsPatch::CursorBlinking(config.cursor.blinking),
-            daruda_config::SettingsPatch::AgentUseModifierToSend(config.agent.use_modifier_to_send),
-            daruda_config::SettingsPatch::AgentCatalog(config.agents.clone()),
-            daruda_config::SettingsPatch::SessionHosts {
-                entries: config.session_hosts.clone(),
-                tombstones: config.session_host_tombstones.clone(),
-            },
-            daruda_config::SettingsPatch::RenderMaxFps(config.render.max_fps),
-            daruda_config::SettingsPatch::ShellClosePaneOnExit(config.shell.close_pane_on_exit),
-            daruda_config::SettingsPatch::WindowOpacity(config.window.opacity),
-            daruda_config::SettingsPatch::WindowBlur(config.window.blur),
-            daruda_config::SettingsPatch::ScrollbackMaxRows(config.scrollback.max_rows),
-            daruda_config::SettingsPatch::TerminalInsetX(config.font.terminal.inset_x),
-            daruda_config::SettingsPatch::TerminalInsetY(config.font.terminal.inset_y),
-            daruda_config::SettingsPatch::FilesShowHidden(config.left_dock.files_show_hidden),
-            daruda_config::SettingsPatch::FilesUseGitignore(config.left_dock.files_use_gitignore),
-            daruda_config::SettingsPatch::SyntaxTheme(config.file_viewer.syntax_theme.clone()),
-            daruda_config::SettingsPatch::ClipboardStreamingMaxBytes(
-                config.clipboard.streaming_max_bytes,
-            ),
-            daruda_config::SettingsPatch::PreferredEditor(config.editor.preferred.clone()),
-            daruda_config::SettingsPatch::PanelsGridColumns(config.panels.grid_columns),
-            daruda_config::SettingsPatch::ClaudeStatusEnabled(config.claude_status.enable),
-            daruda_config::SettingsPatch::TelegramEnabled(config.telegram.enabled),
-            daruda_config::SettingsPatch::OrchestratorEnabled(config.orchestrator.enabled),
-            daruda_config::SettingsPatch::OrchestratorAgentId(config.orchestrator.agent_id.clone()),
-            daruda_config::SettingsPatch::OrchestratorAccountId(config.orchestrator.account_id),
-        ]
+        let mut patches: Vec<daruda_config::SettingsPatch> = Vec::with_capacity(
+            spec::TEXT_SETTINGS.len() + spec::SELECT_SETTINGS.len() + spec::BOOL_SETTINGS.len() + 2,
+        );
+        patches.extend(
+            spec::TEXT_SETTINGS
+                .iter()
+                .map(|spec| (spec.current)(config)),
+        );
+        patches.extend(
+            spec::SELECT_SETTINGS
+                .iter()
+                .map(|spec| (spec.current)(config)),
+        );
+        patches.extend(
+            spec::BOOL_SETTINGS
+                .iter()
+                .map(|spec| (spec.patch)((spec.show)(config))),
+        );
+        patches.push(daruda_config::SettingsPatch::AgentCatalog(
+            config.agents.clone(),
+        ));
+        patches.push(daruda_config::SettingsPatch::SessionHosts {
+            entries: config.session_hosts.clone(),
+            tombstones: config.session_host_tombstones.clone(),
+        });
+        patches
     }
 
     fn sync_external_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2300,6 +2219,9 @@ impl SettingsWindow {
         cx.notify();
     }
 
+    /// One select's chosen option, persisted. The option→patch mapping lives in
+    /// [`spec::SELECT_SETTINGS`]; a value the row does not recognise is ignored
+    /// rather than guessed at.
     fn persist_select_setting(
         &mut self,
         select: &Entity<SelectState>,
@@ -2313,178 +2235,34 @@ impl SettingsWindow {
         else {
             return;
         };
-        let patch = match setting {
-            SelectSetting::Language => daruda_config::SettingsPatch::GeneralLanguage(value),
-            SelectSetting::TerminalPreset => daruda_config::SettingsPatch::TerminalPreset(value),
-            SelectSetting::UiPreset => daruda_config::SettingsPatch::UiPreset(value),
-            SelectSetting::TerminalFontFamily => {
-                daruda_config::SettingsPatch::TerminalFontFamily(value)
-            }
-            SelectSetting::EditorFontFamily => {
-                daruda_config::SettingsPatch::EditorFontFamily(value)
-            }
-            SelectSetting::AgentChatFontFamily => {
-                daruda_config::SettingsPatch::AgentChatFontFamily(value)
-            }
-            SelectSetting::CursorStyle => {
-                let style = match value.as_str() {
-                    "underline" => daruda_config::CursorStyle::Underline,
-                    "bar" => daruda_config::CursorStyle::Bar,
-                    _ => daruda_config::CursorStyle::Block,
-                };
-                daruda_config::SettingsPatch::CursorStyle(style)
-            }
-            SelectSetting::RenderMaxFps => {
-                let Some(fps) = value.parse::<u32>().ok() else {
-                    return;
-                };
-                daruda_config::SettingsPatch::RenderMaxFps(fps)
-            }
-            SelectSetting::SyntaxTheme => daruda_config::SettingsPatch::SyntaxTheme(value),
-            SelectSetting::PreferredEditor => daruda_config::SettingsPatch::PreferredEditor(value),
-            SelectSetting::OrchestratorAgent => daruda_config::SettingsPatch::OrchestratorAgentId(
-                sections::orchestrator::agent_id_from_select(value),
-            ),
-            SelectSetting::OrchestratorAccount => {
-                daruda_config::SettingsPatch::OrchestratorAccountId(
-                    sections::orchestrator::account_id_from_select(&value),
-                )
-            }
+        let Some(patch) = (spec::select_spec(setting).read)(&value) else {
+            return;
         };
         self.apply_settings_patch(patch, cx);
     }
 
+    /// One checkbox's new state, persisted. Returns whether the write landed —
+    /// the caller mirrors the value onto its own field only then.
     pub(super) fn persist_bool_setting(
         &mut self,
         setting: BoolSetting,
         value: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let patch = match setting {
-            BoolSetting::CursorBlinking => daruda_config::SettingsPatch::CursorBlinking(value),
-            BoolSetting::AgentUseModifierToSend => {
-                daruda_config::SettingsPatch::AgentUseModifierToSend(value)
-            }
-            BoolSetting::ShellClosePaneOnExit => {
-                daruda_config::SettingsPatch::ShellClosePaneOnExit(value)
-            }
-            BoolSetting::WindowBlur => daruda_config::SettingsPatch::WindowBlur(value),
-            BoolSetting::FilesShowHidden => daruda_config::SettingsPatch::FilesShowHidden(value),
-            BoolSetting::FilesUseGitignore => {
-                daruda_config::SettingsPatch::FilesUseGitignore(value)
-            }
-            BoolSetting::ClaudeStatusEnabled => {
-                daruda_config::SettingsPatch::ClaudeStatusEnabled(value)
-            }
-            BoolSetting::TelegramEnabled => daruda_config::SettingsPatch::TelegramEnabled(value),
-            BoolSetting::OrchestratorEnabled => {
-                daruda_config::SettingsPatch::OrchestratorEnabled(value)
-            }
-        };
-        self.apply_settings_patch(patch, cx)
+        self.apply_settings_patch((spec::bool_spec(setting).patch)(value), cx)
     }
 
+    /// One text input's contents, persisted. The bounds and the message shown
+    /// when they are missed both come from the field's own row in
+    /// [`spec::TEXT_SETTINGS`], which is also what `validate` reads — so a live
+    /// edit and a whole-config draft cannot disagree about what is valid.
     fn persist_text_setting(
         &mut self,
         input: &Entity<InputState>,
         setting: TextSetting,
         cx: &mut Context<Self>,
     ) {
-        let patch = match setting {
-            TextSetting::TerminalFontSize => Self::parse_bounded_field(
-                input,
-                6.0..=72.0,
-                || SharedString::from(s::settings_err_font_size()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::TerminalFontSize),
-            TextSetting::TerminalLineHeight => Self::parse_bounded_field(
-                input,
-                0.5..=2.0,
-                || SharedString::from(s::settings_err_spacing()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::TerminalLineHeight),
-            TextSetting::TerminalCellWidth => Self::parse_bounded_field(
-                input,
-                0.5..=2.0,
-                || SharedString::from(s::settings_err_spacing()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::TerminalCellWidth),
-            TextSetting::EditorFontSize => Self::parse_bounded_field(
-                input,
-                6.0..=72.0,
-                || SharedString::from(s::settings_err_editor_font_size()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::EditorFontSize),
-            TextSetting::EditorLineHeight => Self::parse_bounded_field(
-                input,
-                0.5..=2.0,
-                || SharedString::from(s::settings_err_spacing()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::EditorLineHeight),
-            TextSetting::AgentChatFontSize => Self::parse_bounded_field(
-                input,
-                6.0..=72.0,
-                || SharedString::from(s::settings_err_agent_chat_font_size()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::AgentChatFontSize),
-            TextSetting::AgentChatLineHeight => Self::parse_bounded_field(
-                input,
-                0.5..=2.0,
-                || SharedString::from(s::settings_err_spacing()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::AgentChatLineHeight),
-            TextSetting::WindowOpacity => Self::parse_bounded_field(
-                input,
-                0.1..=1.0,
-                || SharedString::from(s::settings_err_opacity()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::WindowOpacity),
-            TextSetting::ScrollbackMaxRows => Self::parse_bounded_field(
-                input,
-                1_000..=500_000,
-                || SharedString::from(s::settings_err_scrollback()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::ScrollbackMaxRows),
-            TextSetting::TerminalInsetX => Self::parse_bounded_field(
-                input,
-                0.0..=32.0,
-                || SharedString::from(s::settings_err_inset()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::TerminalInsetX),
-            TextSetting::TerminalInsetY => Self::parse_bounded_field(
-                input,
-                0.0..=32.0,
-                || SharedString::from(s::settings_err_inset()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::TerminalInsetY),
-            TextSetting::ClipboardStreamingMaxBytes => Self::parse_bounded_field(
-                input,
-                4_096..=67_108_864,
-                || SharedString::from(s::settings_err_clipboard()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::ClipboardStreamingMaxBytes),
-            TextSetting::PanelsGridColumns => Self::parse_bounded_field(
-                input,
-                1..=16,
-                || SharedString::from(s::settings_err_grid_columns()),
-                cx,
-            )
-            .map(daruda_config::SettingsPatch::PanelsGridColumns),
-        };
-
-        match patch {
+        match (spec::text_spec(setting).parse)(input, cx) {
             Ok(patch) => {
                 self.apply_settings_patch(patch, cx);
             }
@@ -2683,107 +2461,39 @@ impl SettingsWindow {
         )
     }
 
+    /// The whole form as a `Config`, or the first field-level error.
+    ///
+    /// Every simple setting goes through its own row in `spec` — the same rows
+    /// `persist_*_setting` uses for a live edit — so the draft and the live edit
+    /// enforce one set of bounds and produce one set of values. Collected by
+    /// hand below: the two sub-form editors, whose validation the row shape
+    /// cannot express, and `telegram.authorized_chat_id`, which pairing owns.
     fn validate(&self, cx: &gpui::App) -> Result<daruda_config::Config, SharedString> {
         // Start from the snapshot taken at window-open time so fields not
         // exposed in the UI (e.g. [colors], [keybindings]) are preserved.
         let mut config = self.base_config.clone();
 
-        config.general.language = self
-            .language_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "auto".to_owned());
+        for spec in spec::TEXT_SETTINGS {
+            (spec.parse)((spec.field)(self), cx)?.apply_to(&mut config);
+        }
+        for spec in spec::SELECT_SETTINGS {
+            let selected = (spec.field)(self)
+                .read(cx)
+                .selected_value()
+                .and_then(|value| (spec.read)(value));
+            // A widget with nothing selected leaves the field as the open-time
+            // snapshot had it rather than inventing a value.
+            selected
+                .unwrap_or_else(|| (spec.current)(&config))
+                .apply_to(&mut config);
+        }
+        for spec in spec::BOOL_SETTINGS {
+            (spec.patch)((spec.get)(self)).apply_to(&mut config);
+        }
+        // `max_fps` is the one select whose accepted range is not the option
+        // list: a config edited by hand can carry anything, so re-clamp.
+        config.render.clamp();
 
-        config.theme.terminal_preset = self
-            .terminal_preset_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "default".to_owned());
-
-        config.theme.ui_preset = self
-            .ui_preset_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::ui_theme_presets::DEFAULT.to_owned());
-
-        config.font.terminal.family = self
-            .terminal_font_family_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::FontConfig::default().terminal.family);
-
-        config.font.terminal.size = Self::parse_bounded_field(
-            &self.terminal_font_size_input,
-            6.0..=72.0,
-            || SharedString::from(s::settings_err_font_size()),
-            cx,
-        )?;
-        config.font.terminal.line_height = Self::parse_bounded_field(
-            &self.terminal_line_height_input,
-            0.5..=2.0,
-            || SharedString::from(s::settings_err_spacing()),
-            cx,
-        )?;
-        config.font.terminal.cell_width = Self::parse_bounded_field(
-            &self.terminal_cell_width_input,
-            0.5..=2.0,
-            || SharedString::from(s::settings_err_spacing()),
-            cx,
-        )?;
-        config.font.editor.family = self
-            .editor_font_family_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::FontConfig::default().editor.family);
-        config.font.editor.size = Self::parse_bounded_field(
-            &self.editor_font_size_input,
-            6.0..=72.0,
-            || SharedString::from(s::settings_err_editor_font_size()),
-            cx,
-        )?;
-        config.font.editor.line_height = Self::parse_bounded_field(
-            &self.editor_line_height_input,
-            0.5..=2.0,
-            || SharedString::from(s::settings_err_spacing()),
-            cx,
-        )?;
-        config.font.agent_chat.family = self
-            .agent_chat_font_family_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::FontConfig::default().agent_chat.family);
-        config.font.agent_chat.size = Self::parse_bounded_field(
-            &self.agent_chat_font_size_input,
-            6.0..=72.0,
-            || SharedString::from(s::settings_err_agent_chat_font_size()),
-            cx,
-        )?;
-        config.font.agent_chat.line_height = Self::parse_bounded_field(
-            &self.agent_chat_line_height_input,
-            0.5..=2.0,
-            || SharedString::from(s::settings_err_spacing()),
-            cx,
-        )?;
-
-        config.cursor.style = match self
-            .cursor_style_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.as_ref())
-        {
-            Some("underline") => daruda_config::CursorStyle::Underline,
-            Some("bar") => daruda_config::CursorStyle::Bar,
-            _ => daruda_config::CursorStyle::Block,
-        };
-        config.cursor.blinking = self.cursor_blinking;
-
-        config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
         config.agents = self.collect_agent_catalog(cx)?;
 
         // Session host registry: `label` must be unique across the whole
@@ -2802,77 +2512,6 @@ impl SettingsWindow {
         );
         config.session_hosts = session_hosts;
 
-        config.render.max_fps = self
-            .max_fps_select
-            .read(cx)
-            .selected_value()
-            .and_then(|s| s.as_ref().parse::<u32>().ok())
-            .unwrap_or(config.render.max_fps);
-        config.render.clamp();
-
-        config.shell.close_pane_on_exit = self.close_pane_on_exit;
-
-        config.window.opacity = Self::parse_bounded_field(
-            &self.opacity_input,
-            0.1..=1.0,
-            || SharedString::from(s::settings_err_opacity()),
-            cx,
-        )?;
-        config.window.blur = self.window_blur;
-
-        config.scrollback.max_rows = Self::parse_bounded_field(
-            &self.scrollback_input,
-            1_000..=500_000,
-            || SharedString::from(s::settings_err_scrollback()),
-            cx,
-        )?;
-
-        config.font.terminal.inset_x = Self::parse_bounded_field(
-            &self.inset_x_input,
-            0.0..=32.0,
-            || SharedString::from(s::settings_err_inset()),
-            cx,
-        )?;
-        config.font.terminal.inset_y = Self::parse_bounded_field(
-            &self.inset_y_input,
-            0.0..=32.0,
-            || SharedString::from(s::settings_err_inset()),
-            cx,
-        )?;
-
-        config.left_dock.files_show_hidden = self.files_show_hidden;
-        config.left_dock.files_use_gitignore = self.files_use_gitignore;
-
-        config.file_viewer.syntax_theme = self
-            .syntax_theme_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| daruda_config::FileViewerConfig::default().syntax_theme);
-
-        config.clipboard.streaming_max_bytes = Self::parse_bounded_field(
-            &self.clipboard_streaming_input,
-            4_096..=67_108_864,
-            || SharedString::from(s::settings_err_clipboard()),
-            cx,
-        )?;
-
-        config.editor.preferred = self
-            .editor_select
-            .read(cx)
-            .selected_value()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-
-        config.panels.grid_columns = Self::parse_bounded_field(
-            &self.panels_grid_columns_input,
-            1..=16,
-            || SharedString::from(s::settings_err_grid_columns()),
-            cx,
-        )?;
-
-        config.claude_status.enable = self.claude_status_enable;
-
         // `authorized_chat_id` is managed asynchronously by pairing/unpairing.
         // Re-read it here so draft detection never treats a completed pairing
         // as a local form edit.
@@ -2880,7 +2519,6 @@ impl SettingsWindow {
             .user_arc()
             .telegram
             .authorized_chat_id;
-        config.telegram.enabled = self.telegram_enabled;
 
         Ok(config)
     }

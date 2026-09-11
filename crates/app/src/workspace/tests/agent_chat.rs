@@ -609,7 +609,7 @@ struct RestoredChat {
     agent_id: String,
     session_id: Option<String>,
     title: Option<String>,
-    restoring: bool,
+    replaying: bool,
     dormant: bool,
     content_width: ChatContentWidth,
     tail: PaneChoice<TailWindow>,
@@ -628,7 +628,7 @@ fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
                 agent_id: view.agent_id.clone(),
                 session_id: view.session_id.clone(),
                 title: view.session_title.clone(),
-                restoring: view.restoring,
+                replaying: view.is_replaying(),
                 dormant: view.handle.is_none(),
                 content_width: view.content_width,
                 tail: view.tail,
@@ -759,7 +759,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
             "persisted title must round-trip (seeds the tab label before load)"
         );
         assert!(
-            !titled.restoring,
+            !titled.replaying,
             "a restored dormant pane is not yet loading"
         );
         assert!(titled.dormant, "no live session until first focus connects");
