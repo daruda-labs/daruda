@@ -20,9 +20,17 @@
 //!   Today only `serde` would qualify, and it stays out until something
 //!   here actually needs it.
 //! - **Two or more consumers.** Code used by exactly one crate belongs in
-//!   that crate; moving it here only makes it harder to find.
-//! - **Pure.** No I/O, no globals, no environment. `&str`/value in,
-//!   value out — so it stays callable from a background executor.
+//!   that crate; moving it here only makes it harder to find. A *registry* —
+//!   one table every crate has to agree on — is weighed as a whole rather
+//!   than entry by entry, since what it buys is that no entry is spelled
+//!   anywhere else.
+//! - **Pure, except for reading the environment.** No I/O, no globals:
+//!   `&str`/value in, value out, so it stays callable from a background
+//!   executor. Reading an environment variable is admitted because it is a
+//!   thread-safe read and the names are exactly the kind of table every crate
+//!   has to spell identically. **Writing one is not** — `set_var` is unsound
+//!   once the process is multi-threaded, so a site that sets a default stays
+//!   where it can prove the process is still single-threaded.
 //!
 //! A "core" name invites drift into a junk drawer. These criteria are the
 //! guard, and they are enforced by review rather than tooling: if a
