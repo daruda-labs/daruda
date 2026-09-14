@@ -507,6 +507,47 @@ in both appearances.
 
 ---
 
+## `crates/gpui_component/locales/ko.yml` — vendored, **an added file, not a patch**
+
+The only Korean the vendored widgets have. Upstream's `locales/ui.yml` carries
+`en` / `zh-CN` / `zh-HK` / `it`, so `gpui_component::set_locale("ko")` fell all
+the way back to English and a Korean window showed "Cut / Copy / Paste / Select
+All" in every text input's right-click menu, "Cancel" on every confirm dialog,
+and "Search..." in the command-history list.
+
+### Why it is not a source patch
+
+`rust_i18n::i18n!("locales", …)` in `src/lib.rs` does not name its files. The
+macro globs `CARGO_MANIFEST_DIR/locales/**/*.{yml,yaml,json,toml}` at expansion
+time and merges every match by locale (rust-i18n-support 3.1.5,
+`load_locales`). A new file is therefore picked up with **no vendored `.rs`
+change**, and re-vendoring `ui.yml` cannot collide with it: upstream owns that
+file and its four locales, daruda owns this one and `ko`.
+
+Runtime injection was the alternative and is not available: the store is a
+private `static _RUST_I18N_BACKEND` inside whichever crate called `i18n!`, with
+no `set_backend`, and `t!` expands to `crate::_rust_i18n_t!` — so the app's
+`t!` can only ever see the app's own backend.
+
+### Re-vendor procedure
+
+Copy `ui.yml` from upstream as usual and leave this file alone. Then check the
+key sets still line up — an upstream-added key silently renders English:
+
+```sh
+diff <(grep -oE '^  [^ ].*:$' crates/gpui_component/locales/ui.yml | sort) \
+     <(grep -oE '^  [^ ].*:$' crates/gpui_component/locales/ko.yml | sort)
+```
+
+### Editing it leaves a stale binary
+
+cargo does not track a proc-macro's file reads, so changing only a locale file
+rebuilds nothing and the old strings stay compiled in — measured, not assumed.
+`touch crates/gpui_component/src/lib.rs` (or `cargo clean -p gpui_component`)
+forces the re-read. The same holds for `crates/app/locales/`.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **six source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.

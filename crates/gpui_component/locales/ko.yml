@@ -1,0 +1,104 @@
+# Korean translations for the vendored widgets — daruda-authored, not upstream.
+#
+# Kept in its own file rather than as `ko:` rows inside `ui.yml` so that
+# re-vendoring stays the pure file copy `patches/README.md` describes: upstream
+# owns `ui.yml`, daruda owns this one, and neither overwrites the other.
+# `rust_i18n::i18n!("locales", …)` in `src/lib.rs` globs the whole directory
+# (rust-i18n-support `load_locales`), so no vendored source needed a change.
+#
+# Wording follows `crates/app/locales/ko.yml` where the two overlap — "복사",
+# "붙여넣기", "모두 선택", "취소", "확인" are the app's own terms for the same
+# actions, and a user meets both in one window.
+#
+# NOTE: cargo does not treat this file as a build input. Editing it alone
+# leaves a stale binary; touch a `.rs` under this crate (or `cargo clean -p
+# gpui_component`) to force the macro to re-read it.
+_version: 2
+Calendar:
+  week.0:
+    ko: 일
+  week.1:
+    ko: 월
+  week.2:
+    ko: 화
+  week.3:
+    ko: 수
+  week.4:
+    ko: 목
+  week.5:
+    ko: 금
+  week.6:
+    ko: 토
+  month.January:
+    ko: 1월
+  month.February:
+    ko: 2월
+  month.March:
+    ko: 3월
+  month.April:
+    ko: 4월
+  month.May:
+    ko: 5월
+  month.June:
+    ko: 6월
+  month.July:
+    ko: 7월
+  month.August:
+    ko: 8월
+  month.September:
+    ko: 9월
+  month.October:
+    ko: 10월
+  month.November:
+    ko: 11월
+  month.December:
+    ko: 12월
+DatePicker:
+  placeholder:
+    ko: "날짜 선택"
+Select:
+  placeholder:
+    ko: "선택하세요"
+Dock:
+  Unnamed:
+    ko: "이름 없음"
+  Close:
+    ko: 닫기
+  Zoom In:
+    ko: 확대
+  Zoom Out:
+    ko: 축소
+  Collapse:
+    ko: 접기
+  Expand:
+    ko: 펼치기
+Dialog:
+  ok:
+    ko: 확인
+  cancel:
+    ko: 취소
+List:
+  search_placeholder:
+    ko: "검색…"
+Input:
+  Replace:
+    ko: 바꾸기
+  Replace All:
+    ko: "모두 바꾸기"
+  Cut:
+    ko: 잘라내기
+  Copy:
+    ko: 복사
+  Paste:
+    ko: 붙여넣기
+  Select All:
+    ko: "모두 선택"
+  Go to Definition:
+    ko: "정의로 이동"
+  Show Code Actions:
+    ko: "코드 작업 표시"
+Settings:
+  search_placeholder:
+    ko: "검색…"
+  Reset All:
+    ko: "모두 초기화"
