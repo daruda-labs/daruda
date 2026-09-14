@@ -1,5 +1,8 @@
-//! Optional diagnostic that replays a captured ACP log through the real mapper
-//! and row projection. It does nothing unless `DARUDA_CENSUS_LOG` is set.
+//! Replays a captured ACP log through the real mapper and row projection: a
+//! report of what the capture costs, then the projection invariants asserted
+//! against it. Does nothing unless `DARUDA_CENSUS_LOG` is set, so the rules it
+//! shares with `pinned` are what CI actually runs; this is the wider check to
+//! reach for when a capture shows something the fixtures do not.
 //!
 //! ```text
 //! DARUDA_CENSUS_LOG=~/.daruda/logs/debug/acp-wire-codex-acp.log \
@@ -118,6 +121,18 @@ fn census() {
     );
 
     print_step_samples(&items);
+
+    // The counts above are a report; this is the part that can fail. A capture
+    // reaches shapes no fixture was transcribed from, so it is the widest test
+    // of the rules `pinned` holds the fixtures to.
+    let violations = super::invariant_violations(&items);
+    assert!(
+        violations.is_empty(),
+        "{}: {}",
+        path.display(),
+        violations.join("; ")
+    );
+    println!("-- invariants: ok --");
 }
 
 fn print_step_samples(items: &[ChatItem]) {

@@ -3,14 +3,15 @@
 use daruda_acp::ChatItem;
 
 use super::fixture::{claude_session, codex_session};
-use super::{Lens, per_turn_as_last, per_turn_settled, rows, turn_bounds, visible_per_turn};
+use super::{
+    Lens, TAIL_N, invariant_violations, per_turn_as_last, per_turn_settled, rows, turn_bounds,
+    visible_per_turn,
+};
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{StepWindow, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, project};
-
-const TAIL_N: u8 = 5;
 
 /// Codex rows per turn under each projection mode.
 ///
@@ -213,5 +214,33 @@ fn every_visible_row_is_accounted_for_by_a_turn() {
     for items in [codex_session(), claude_session()] {
         let total = rows(&items, auto).iter().filter(|r| !r.hidden).count();
         assert_eq!(per_turn_settled(&items, auto).iter().sum::<usize>(), total);
+    }
+}
+
+/// The budgets above pin what these two shapes cost; this pins what no shape
+/// may do. Both fixtures run it so a rule broken on one adapter's ordering
+/// cannot pass on the other's.
+#[test]
+fn neither_fixture_breaks_a_projection_invariant() {
+    for (label, items) in [("codex", codex_session()), ("claude", claude_session())] {
+        let violations = invariant_violations(&items);
+        assert!(violations.is_empty(), "{label}: {}", violations.join("; "));
+    }
+}
+
+/// A turn's prefix is a transcript in its own right, so the rules have to hold
+/// while a run is still arriving — the state the pinned budgets only sample at
+/// turn boundaries.
+#[test]
+fn a_partial_transcript_breaks_no_invariant_either() {
+    for (label, items) in [("codex", codex_session()), ("claude", claude_session())] {
+        for end in turn_bounds(&items) {
+            let violations = invariant_violations(&items[..end]);
+            assert!(
+                violations.is_empty(),
+                "{label} truncated at {end}: {}",
+                violations.join("; ")
+            );
+        }
     }
 }

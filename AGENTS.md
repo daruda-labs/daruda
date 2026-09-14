@@ -6,6 +6,31 @@ architecture notes, verification expectations, and common pitfalls.
 
 Claude Code reads `CLAUDE.md`, which imports this file with `@AGENTS.md`.
 
+## Where to read first
+
+This file is long and the rule that decides a change is rarely the one
+nearest the top. Find the row for what you are about to touch and read
+those first; the rest of this file is reference you come back to.
+
+Paths point at files that live beside the code and go deeper than this
+one. A `CLAUDE.md` under `crates/` is loaded automatically when you open
+a file near it, but it is worth reading up front — it is where that
+subsystem's real constraints are written down.
+
+| Working on… | Read |
+|---|---|
+| **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
+| **Terminal, VT parsing, PTY, scrollback** | `crates/daruda_terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
+| **Agent chat, ACP, adapters, wire log** | `crates/daruda_acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
+| **A widget, a modal, anything visual** | `crates/app/src/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfall](#pitfall-prevention-rules) 10 (render cost) |
+| **Workspace layout — tabs, panes, docks** | `crates/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
+| **Any string a user will see** | `crates/app/locales/CLAUDE.md` |
+| **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
+| **Anything written to disk or keyed per profile** | [Cross-profile data isolation](#cross-profile-data-isolation) |
+| **A failure path — error, toast, log** | [Error reporting](#error-reporting) |
+| **Checking a change actually renders** | [Visual verification](#visual-verification) · [Driving the captured state](#driving-the-captured-state) |
+| **GPUI entity lifecycle, async re-entry** | [Pitfalls](#pitfall-prevention-rules) 5 (reentrancy), 10 (render cost) · zed at the pinned rev (Pitfall 6) |
+
 ## Workflow
 
 ### Branch & commit
