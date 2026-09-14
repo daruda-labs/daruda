@@ -284,7 +284,10 @@ fn scope_section(
     // across so the user gets a quick sense of catalogue size.
     let count_text: SharedString = if matches!(scope, SkillScope::Plugin) {
         let plugins = count_unique_plugins(skills);
-        SharedString::from(format!("{} skills · {} plugins", skills.len(), plugins))
+        SharedString::from(strings::skills_count_chip_with_plugins(
+            skills.len(),
+            plugins,
+        ))
     } else {
         SharedString::from(format!("{}", skills.len()))
     };

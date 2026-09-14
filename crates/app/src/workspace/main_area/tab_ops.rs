@@ -1049,13 +1049,7 @@ impl Workspace {
 
         let detail = dirty
             .iter()
-            .map(|(_, t, draft)| {
-                if *draft {
-                    format!("• {} (new task)", t)
-                } else {
-                    format!("• {}", t)
-                }
-            })
+            .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -1135,13 +1129,7 @@ impl Workspace {
 
         let detail = dirty
             .iter()
-            .map(|(_, t, draft)| {
-                if *draft {
-                    format!("• {} (new task)", t)
-                } else {
-                    format!("• {}", t)
-                }
-            })
+            .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
             .collect::<Vec<_>>()
             .join("\n");
 

@@ -27,10 +27,9 @@ pub fn open_delete_mcp_server_confirm(
     };
     let workspace = cx.weak_entity();
     let body = format!(
-        "{}\n\nServer: {}\nFile: {}",
+        "{}\n\n{}",
         strings::mcp_delete_body_prefix(),
-        name,
-        path.display(),
+        strings::mcp_delete_body_detail(&name, &path.display().to_string()),
     );
 
     open_confirm_dialog(

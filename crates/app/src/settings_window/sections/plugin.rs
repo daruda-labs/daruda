@@ -261,11 +261,7 @@ impl SettingsWindow {
             .plugin_selected
             .as_deref()
             .is_some_and(|sel| sel == group.plugin_id);
-        let count_text = SharedString::from(if group.skill_count == 1 {
-            "1 skill".to_string()
-        } else {
-            format!("{} skills", group.skill_count)
-        });
+        let count_text = SharedString::from(s::settings_plugin_skill_count(group.skill_count));
         let row_id = SharedString::from(format!("settings-plugin-master-{}", group.plugin_id));
         let plugin_id = group.plugin_id.clone();
 
@@ -782,13 +778,15 @@ impl SettingsWindow {
             let _ = this.update(cx, |this, cx| {
                 this.plugin_ops_in_flight.remove(&plugin_id);
                 if let Err(e) = result {
-                    let verb = match action {
-                        crate::agent::skills::plugin_ops::PluginAction::Install => "install",
-                        crate::agent::skills::plugin_ops::PluginAction::Uninstall => "uninstall",
+                    let text = match action {
+                        crate::agent::skills::plugin_ops::PluginAction::Install => {
+                            s::settings_plugin_install_failed(&plugin_id, &e.to_string())
+                        }
+                        crate::agent::skills::plugin_ops::PluginAction::Uninstall => {
+                            s::settings_plugin_uninstall_failed(&plugin_id, &e.to_string())
+                        }
                     };
-                    this.plugin_last_error = Some(SharedString::from(format!(
-                        "plugin {verb} {plugin_id}: {e}"
-                    )));
+                    this.plugin_last_error = Some(SharedString::from(text));
                 }
                 // Update the Plugin scope of the `SkillsState` Global
                 // directly: the FSEvent stream lags the CLI's atomic

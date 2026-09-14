@@ -70,8 +70,11 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
         let task = g.get(&threshold_id).unwrap();
         match &task.state {
             TaskState::Error { message, .. } => {
-                assert!(
-                    message.starts_with("tool_use_failure x"),
+                assert_eq!(
+                    message,
+                    &crate::surface::strings::task_error_tool_use_failure(
+                        daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD
+                    ),
                     "expected escalation message, got {message}"
                 );
             }
@@ -204,7 +207,10 @@ fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut Tes
         let t = g.get(&id).unwrap();
         match &t.state {
             TaskState::Error { message, .. } => {
-                assert_eq!(message, "session error");
+                assert_eq!(
+                    message,
+                    &crate::surface::strings::task_error_session_failed()
+                );
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -269,7 +275,10 @@ fn apply_agent_chat_task_ended_matches_cwd_and_maps_reason(cx: &mut TestAppConte
         );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
         match &g.get(&error_id).unwrap().state {
-            TaskState::Error { message, .. } => assert_eq!(message, "session error"),
+            TaskState::Error { message, .. } => assert_eq!(
+                message,
+                &crate::surface::strings::task_error_session_failed()
+            ),
             other => panic!("expected Error, got {other:?}"),
         }
 

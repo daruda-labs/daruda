@@ -50,7 +50,9 @@ pub(super) struct TextSpec {
     pub(super) setting: TextSetting,
     /// Which settings page the input sits on — also its tab-cycle bucket.
     pub(super) section: BuiltinSection,
-    pub(super) placeholder: &'static str,
+    /// Hint text for the empty input. A thunk rather than a `&'static str`
+    /// because the wording is localized and the table is a `const`.
+    pub(super) placeholder: fn() -> String,
     pub(super) field: fn(&SettingsWindow) -> &Entity<InputState>,
     /// The current value, formatted the way the input displays it. Used both to
     /// seed the widget at construction and to refresh it when the config
@@ -67,7 +69,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalFontSize,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 13",
+        placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.terminal_font_size_input,
         show: |c| c.font.terminal.size.to_string(),
         current: |c| SettingsPatch::TerminalFontSize(c.font.terminal.size),
@@ -79,7 +81,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalLineHeight,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 1.0",
+        placeholder: || s::settings_placeholder_example("1.0"),
         field: |w| &w.terminal_line_height_input,
         show: |c| c.font.terminal.line_height.to_string(),
         current: |c| SettingsPatch::TerminalLineHeight(c.font.terminal.line_height),
@@ -91,7 +93,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalCellWidth,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 1.0",
+        placeholder: || s::settings_placeholder_example("1.0"),
         field: |w| &w.terminal_cell_width_input,
         show: |c| c.font.terminal.cell_width.to_string(),
         current: |c| SettingsPatch::TerminalCellWidth(c.font.terminal.cell_width),
@@ -103,7 +105,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::EditorFontSize,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 13",
+        placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.editor_font_size_input,
         show: |c| c.font.editor.size.to_string(),
         current: |c| SettingsPatch::EditorFontSize(c.font.editor.size),
@@ -120,7 +122,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::EditorLineHeight,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 1.7",
+        placeholder: || s::settings_placeholder_example("1.7"),
         field: |w| &w.editor_line_height_input,
         show: |c| c.font.editor.line_height.to_string(),
         current: |c| SettingsPatch::EditorLineHeight(c.font.editor.line_height),
@@ -132,7 +134,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::AgentChatFontSize,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 13",
+        placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.agent_chat_font_size_input,
         show: |c| c.font.agent_chat.size.to_string(),
         current: |c| SettingsPatch::AgentChatFontSize(c.font.agent_chat.size),
@@ -149,7 +151,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::AgentChatLineHeight,
         section: BuiltinSection::Font,
-        placeholder: "e.g. 1.6",
+        placeholder: || s::settings_placeholder_example("1.6"),
         field: |w| &w.agent_chat_line_height_input,
         show: |c| c.font.agent_chat.line_height.to_string(),
         current: |c| SettingsPatch::AgentChatLineHeight(c.font.agent_chat.line_height),
@@ -161,7 +163,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::WindowOpacity,
         section: BuiltinSection::Window,
-        placeholder: "0.1 – 1.0",
+        placeholder: || s::settings_placeholder_range("0.1", "1.0"),
         field: |w| &w.opacity_input,
         show: |c| c.window.opacity.to_string(),
         current: |c| SettingsPatch::WindowOpacity(c.window.opacity),
@@ -173,7 +175,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::ScrollbackMaxRows,
         section: BuiltinSection::Terminal,
-        placeholder: "e.g. 10000",
+        placeholder: || s::settings_placeholder_example("10000"),
         field: |w| &w.scrollback_input,
         show: |c| c.scrollback.max_rows.to_string(),
         current: |c| SettingsPatch::ScrollbackMaxRows(c.scrollback.max_rows),
@@ -190,7 +192,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalInsetX,
         section: BuiltinSection::Terminal,
-        placeholder: "e.g. 4",
+        placeholder: || s::settings_placeholder_example("4"),
         field: |w| &w.inset_x_input,
         show: |c| c.font.terminal.inset_x.to_string(),
         current: |c| SettingsPatch::TerminalInsetX(c.font.terminal.inset_x),
@@ -202,7 +204,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalInsetY,
         section: BuiltinSection::Terminal,
-        placeholder: "e.g. 2",
+        placeholder: || s::settings_placeholder_example("2"),
         field: |w| &w.inset_y_input,
         show: |c| c.font.terminal.inset_y.to_string(),
         current: |c| SettingsPatch::TerminalInsetY(c.font.terminal.inset_y),
@@ -214,7 +216,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::ClipboardStreamingMaxBytes,
         section: BuiltinSection::Clipboard,
-        placeholder: "e.g. 10485760",
+        placeholder: || s::settings_placeholder_example("10485760"),
         field: |w| &w.clipboard_streaming_input,
         show: |c| c.clipboard.streaming_max_bytes.to_string(),
         current: |c| SettingsPatch::ClipboardStreamingMaxBytes(c.clipboard.streaming_max_bytes),
@@ -231,7 +233,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::PanelsGridColumns,
         section: BuiltinSection::Dock,
-        placeholder: "1 – 16",
+        placeholder: || s::settings_placeholder_range("1", "16"),
         field: |w| &w.panels_grid_columns_input,
         show: |c| c.panels.grid_columns.to_string(),
         current: |c| SettingsPatch::PanelsGridColumns(c.panels.grid_columns),
@@ -527,6 +529,27 @@ pub(super) fn bool_spec(setting: BoolSetting) -> &'static BoolSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every row's placeholder has to reach a real locale key. `t!` answers a
+    /// miss with the key path itself, which renders as `settings.foo` in the
+    /// field — visible only while the input is empty, so nothing else catches
+    /// it. The number is asserted too: a typo'd `%{value}` drops it silently.
+    #[test]
+    fn every_text_row_placeholder_resolves() {
+        for row in TEXT_SETTINGS {
+            let text = (row.placeholder)();
+            assert!(
+                !text.starts_with("settings."),
+                "{:?} placeholder fell through to its key: {text}",
+                row.setting
+            );
+            assert!(
+                text.chars().any(|c| c.is_ascii_digit()),
+                "{:?} placeholder lost its sample value: {text}",
+                row.setting
+            );
+        }
+    }
 
     /// The `expect` in each lookup is only safe while every variant has exactly
     /// one row. `ALL` is the enum's own list, so adding a variant without a row

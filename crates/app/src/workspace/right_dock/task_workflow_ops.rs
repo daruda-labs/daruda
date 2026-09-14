@@ -158,7 +158,7 @@ impl Workspace {
             new_path: new_path.clone(),
             repo_root: repo_root.clone(),
             base_ref: self.resolve_lane_base_ref(base_ref),
-            description: Some(format!("task: {}", task.title)),
+            description: Some(crate::surface::strings::task_lane_description(&task.title)),
             // Task-driven lanes have no create-form host picker — they stay
             // at `Lane::git`'s default (unanswered/Local), same as before
             // this task added the field.
@@ -301,7 +301,7 @@ impl Workspace {
                         self.fail_task_dispatch(
                             task_id,
                             worktree_path,
-                            format!("write prompt: {e}"),
+                            crate::surface::strings::task_error_write_prompt(&e.to_string()),
                             cx,
                         );
                         return;
@@ -344,7 +344,7 @@ impl Workspace {
             self.fail_task_dispatch(
                 task_id,
                 worktree_path,
-                "prompt could not reach the pane (pane closed)".to_string(),
+                crate::surface::strings::task_error_prompt_undelivered(),
                 cx,
             );
             return;
@@ -445,7 +445,7 @@ impl Workspace {
                     let ids = std::mem::take(&mut t.session_ids);
                     t.state = daruda_store::tasks::TaskState::Error {
                         worktree_path: path_for_state,
-                        message: "lane gone".into(),
+                        message: crate::surface::strings::task_error_lane_gone(),
                     };
                     t.updated_at = Utc::now();
                     ids
@@ -587,7 +587,7 @@ impl Workspace {
                         daruda_store::tasks::SessionEndReason::Error => {
                             daruda_store::tasks::TaskState::Error {
                                 worktree_path,
-                                message: "session error".into(),
+                                message: crate::surface::strings::task_error_session_failed(),
                             }
                         }
                         other => daruda_store::tasks::TaskState::Done {
@@ -650,7 +650,7 @@ impl Workspace {
                     daruda_store::tasks::SessionEndReason::Error => {
                         daruda_store::tasks::TaskState::Error {
                             worktree_path,
-                            message: "session error".into(),
+                            message: crate::surface::strings::task_error_session_failed(),
                         }
                     }
                     other => daruda_store::tasks::TaskState::Done {
@@ -713,7 +713,7 @@ impl Workspace {
         let count = *count;
         if count >= daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD {
             self.claude.tool_use_failure_counts.remove(session_id);
-            let message = format!("tool_use_failure x{count}");
+            let message = crate::surface::strings::task_error_tool_use_failure(count);
             self.escalate_task_session_to_error(session_id, message, cx);
         }
     }
@@ -772,12 +772,13 @@ impl Workspace {
             // observable. The session counter has already been
             // cleared by the caller, so we don't escalate again
             // when the next failure arrives.
-            let report =
-                ErrorReport::new(crate::surface::strings::error_task_escalation_orphan())
+            let report = ErrorReport::new(crate::surface::strings::error_task_escalation_orphan())
                 .severity(ErrorSeverity::Warning)
-                .message(format!(
-                    "session {session_id} hit the escalation threshold but no Running task owns it ({message})"
-                ))
+                .message(
+                    crate::surface::strings::error_task_escalation_orphan_detail(
+                        session_id, &message,
+                    ),
+                )
                 .at(file!(), line!())
                 .with_context("session", session_id)
                 .with_context("escalation", &message)

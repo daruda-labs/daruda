@@ -1140,6 +1140,48 @@ pub fn task_action_view_error() -> String {
 pub fn task_error_dialog_title() -> String {
     rust_i18n::t!("task.error_dialog_title").into_owned()
 }
+/// The `TaskState::Error.message` wordings daruda itself writes. The row
+/// renders this after its `Error:` prefix, so it has to read as a sentence
+/// fragment rather than a log line.
+pub fn task_error_lane_gone() -> String {
+    rust_i18n::t!("task.error_lane_gone").into_owned()
+}
+pub fn task_error_prompt_undelivered() -> String {
+    rust_i18n::t!("task.error_prompt_undelivered").into_owned()
+}
+pub fn task_error_session_failed() -> String {
+    rust_i18n::t!("task.error_session_failed").into_owned()
+}
+/// Escalation wording — why daruda ended the task itself. Keeps the ACP stop
+/// reason verbatim so it still matches what the adapter reported.
+pub fn task_error_tool_use_failure(count: u32) -> String {
+    rust_i18n::t!("task.error_tool_use_failure", count => count).into_owned()
+}
+pub fn task_error_write_prompt(error: &str) -> String {
+    rust_i18n::t!("task.error_write_prompt", error => error).into_owned()
+}
+
+/// One line of the "save before closing?" listing. Both the bullet and the
+/// draft marker live in the key so a locale can move or drop either.
+pub fn task_close_dirty_line(title: &str, is_draft: bool) -> String {
+    if is_draft {
+        rust_i18n::t!("task.close_dirty_line_draft", title => title).into_owned()
+    } else {
+        rust_i18n::t!("task.close_dirty_line", title => title).into_owned()
+    }
+}
+
+/// Which panes the batch save could not write, under
+/// [`task_batch_save_failed_title`].
+pub fn task_batch_save_failed_detail(count: usize, panes: &str) -> String {
+    rust_i18n::t!("task.batch_save_failed_detail", count => count, panes => panes).into_owned()
+}
+
+/// Sublabel daruda gives a worktree it created for a task — it shows on the
+/// sidebar row wherever the user has not written their own description.
+pub fn task_lane_description(title: &str) -> String {
+    rust_i18n::t!("task.lane_description", title => title).into_owned()
+}
 /// OK-button label on the View error alert dialog.
 pub fn task_error_dialog_close() -> String {
     rust_i18n::t!("common.btn_close").into_owned()
@@ -1678,6 +1720,18 @@ pub fn file_viewer_loading() -> String {
 }
 pub fn file_viewer_binary() -> String {
     rust_i18n::t!("file_viewer.binary").into_owned()
+}
+/// Body text when a git-backed view is asked for outside a repository.
+pub fn file_viewer_err_no_git_repo() -> String {
+    rust_i18n::t!("file_viewer.err_no_git_repo").into_owned()
+}
+/// Body text when a staged path resolves outside the repo it was staged in.
+pub fn file_viewer_err_staged_outside_repo(path: &str, root: &str) -> String {
+    rust_i18n::t!("file_viewer.err_staged_outside_repo", path => path, root => root).into_owned()
+}
+/// Tab title for a path with no file-name component.
+pub fn file_viewer_untitled_tab_title() -> String {
+    rust_i18n::t!("file_viewer.untitled_tab_title").into_owned()
 }
 pub fn file_viewer_deleted() -> String {
     rust_i18n::t!("file_viewer.deleted").into_owned()
@@ -3935,6 +3989,15 @@ pub fn settings_overwrite_external_value() -> String {
 pub fn settings_search_placeholder() -> String {
     rust_i18n::t!("settings.search_placeholder").into_owned()
 }
+/// Placeholder for a numeric setting shown as one sample value. The number is
+/// data, so only the "e.g." carrier is translated.
+pub fn settings_placeholder_example(value: &str) -> String {
+    rust_i18n::t!("settings.placeholder_example", value => value).into_owned()
+}
+/// Placeholder for a numeric setting whose whole accepted range fits the field.
+pub fn settings_placeholder_range(min: &str, max: &str) -> String {
+    rust_i18n::t!("settings.placeholder_range", min => min, max => max).into_owned()
+}
 pub fn settings_group_general() -> String {
     rust_i18n::t!("settings.group_general").into_owned()
 }
@@ -4350,6 +4413,12 @@ pub fn settings_agent_name_placeholder() -> String {
 pub fn settings_agent_field_command() -> String {
     rust_i18n::t!("settings.agent_field_command").into_owned()
 }
+pub fn settings_agent_id_placeholder() -> String {
+    rust_i18n::t!("settings.agent_id_placeholder").into_owned()
+}
+pub fn settings_agent_command_placeholder() -> String {
+    rust_i18n::t!("settings.agent_command_placeholder").into_owned()
+}
 
 /// Label for the transport-kind select (`daruda_config::AgentLaunch`'s three
 /// variants) in an agent catalog row.
@@ -4668,6 +4737,14 @@ pub fn settings_session_host_field_target() -> String {
 pub fn settings_session_host_field_container() -> String {
     rust_i18n::t!("settings.session_host_field_container").into_owned()
 }
+/// Placeholders for the target / container fields, shared by the session-host
+/// table and the agent catalog's deprecated SSH / Docker transports.
+pub fn settings_session_host_target_placeholder() -> String {
+    rust_i18n::t!("settings.session_host_target_placeholder").into_owned()
+}
+pub fn settings_session_host_container_placeholder() -> String {
+    rust_i18n::t!("settings.session_host_container_placeholder").into_owned()
+}
 pub fn settings_session_host_add() -> String {
     rust_i18n::t!("settings.session_host_add").into_owned()
 }
@@ -4796,6 +4873,22 @@ pub fn settings_plugin_skill_body_loading() -> String {
 }
 pub fn settings_plugin_skill_body_error() -> String {
     rust_i18n::t!("settings.plugin_skill_body_error").into_owned()
+}
+/// Subtitle on a plugin row. The singular branch lives here rather than at the
+/// call site because which counts need their own wording is a locale fact.
+pub fn settings_plugin_skill_count(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("settings.plugin_skill_count_one").into_owned()
+    } else {
+        rust_i18n::t!("settings.plugin_skill_count", count => count).into_owned()
+    }
+}
+/// Inline banner shown when a `claude plugin` run fails.
+pub fn settings_plugin_install_failed(id: &str, error: &str) -> String {
+    rust_i18n::t!("settings.plugin_install_failed", id => id, error => error).into_owned()
+}
+pub fn settings_plugin_uninstall_failed(id: &str, error: &str) -> String {
+    rust_i18n::t!("settings.plugin_uninstall_failed", id => id, error => error).into_owned()
 }
 
 // About section — app version + self-update controls
@@ -5552,6 +5645,12 @@ pub fn skills_search_placeholder() -> String {
 pub fn skills_search_empty_prefix() -> String {
     rust_i18n::t!("skills.search_empty_prefix").into_owned()
 }
+/// Count chip on the Plugin scope header — plugin skills are spread across
+/// several plugins, so the chip carries both numbers.
+pub fn skills_count_chip_with_plugins(skills: usize, plugins: usize) -> String {
+    rust_i18n::t!("skills.count_chip_with_plugins", skills => skills, plugins => plugins)
+        .into_owned()
+}
 /// Glyph for the in-field clear button. Rendered on the trailing edge of
 /// the search input only while the query is non-empty.
 pub const SKILLS_SEARCH_CLEAR_ICON: &str = "✕";
@@ -5815,6 +5914,12 @@ pub fn mcp_delete_body_prefix() -> String {
     rust_i18n::t!("mcp.delete_body_prefix").into_owned()
 }
 
+/// Which server, and where it lives — the second paragraph of that body. One
+/// key rather than two labels so a locale can reorder or relabel both lines.
+pub fn mcp_delete_body_detail(name: &str, path: &str) -> String {
+    rust_i18n::t!("mcp.delete_body_detail", name => name, path => path).into_owned()
+}
+
 /// Validation messages for the AddModal / EditModal banner.
 pub fn mcp_name_empty() -> String {
     rust_i18n::t!("common.name_required").into_owned()
@@ -5930,6 +6035,8 @@ error_string!(
 error_string!(error_git_add_all_failed, "error.git_add_all_failed");
 error_string!(error_git_add_failed, "error.git_add_failed");
 error_string!(error_git_add_paths_failed, "error.git_add_paths_failed");
+error_string!(error_git_clean_failed, "error.git_clean_failed");
+error_string!(error_git_restore_failed, "error.git_restore_failed");
 error_string!(
     error_git_commit_amend_failed,
     "error.git_commit_amend_failed"
@@ -6008,6 +6115,17 @@ error_string!(error_status_bar_save_failed, "error.status_bar_save_failed");
 error_string!(error_tasks_require_git_repo, "error.tasks_require_git_repo");
 error_string!(error_tasks_save_failed, "error.tasks_save_failed");
 error_string!(error_task_escalation_orphan, "error.task_escalation_orphan");
+/// Toast body under [`error_task_escalation_orphan`]. The title alone does not
+/// say which session, and this report is the only trace of the dropped
+/// escalation.
+pub fn error_task_escalation_orphan_detail(session: &str, escalation: &str) -> String {
+    rust_i18n::t!(
+        "error.task_escalation_orphan_detail",
+        session => session,
+        escalation => escalation
+    )
+    .into_owned()
+}
 
 pub fn error_mcp_reload_failed(source: &str) -> String {
     rust_i18n::t!("error.mcp_reload_failed", source = source).into_owned()

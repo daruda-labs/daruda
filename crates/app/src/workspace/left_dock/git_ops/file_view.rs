@@ -91,7 +91,9 @@ fn abs_pane_path(lane_root: &std::path::Path, path: &std::path::Path) -> PathBuf
 fn title_for_file_path(path: &std::path::Path) -> gpui::SharedString {
     path.file_name()
         .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| gpui::SharedString::from("(file)"))
+        .unwrap_or_else(|| {
+            gpui::SharedString::from(crate::surface::strings::file_viewer_untitled_tab_title())
+        })
 }
 
 fn markdown_raw_line_scroll_offset(line: usize, cx: &gpui::App) -> gpui::Point<gpui::Pixels> {

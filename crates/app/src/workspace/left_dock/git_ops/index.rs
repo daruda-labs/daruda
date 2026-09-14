@@ -382,9 +382,9 @@ impl Workspace {
                 }
                 Err(e) => {
                     let title = if is_untracked {
-                        "git clean -f failed"
+                        app_strings::error_git_clean_failed()
                     } else {
-                        "git restore failed"
+                        app_strings::error_git_restore_failed()
                     };
                     let report = ErrorReport::new(title)
                         .severity(ErrorSeverity::Error)

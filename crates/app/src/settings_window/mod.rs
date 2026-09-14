@@ -727,7 +727,7 @@ impl SettingsWindow {
         let row = spec::text_spec(setting);
         let state = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(row.placeholder)
+                .placeholder((row.placeholder)())
                 .default_value((row.show)(config))
         });
         subs.push(Self::subscribe_text_setting(&state, setting, window, cx));
@@ -803,7 +803,7 @@ impl SettingsWindow {
             tail_window_calls_select: transcript.tail_window_calls_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("agent-id")
+                    .placeholder(s::settings_agent_id_placeholder())
                     .default_value(id)
             }),
             name_input: cx.new(|cx_state| {
@@ -813,7 +813,7 @@ impl SettingsWindow {
             }),
             command_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("command --acp")
+                    .placeholder(s::settings_agent_command_placeholder())
                     .default_value(command)
             }),
             transport_select: cx.new(|cx| {
@@ -826,12 +826,12 @@ impl SettingsWindow {
             }),
             host_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("user@host")
+                    .placeholder(s::settings_session_host_target_placeholder())
                     .default_value(host)
             }),
             container_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("container-name")
+                    .placeholder(s::settings_session_host_container_placeholder())
                     .default_value(container)
             }),
             default_mode_select: cx.new(|cx| {
@@ -1138,12 +1138,12 @@ impl SettingsWindow {
             }),
             target_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("user@host")
+                    .placeholder(s::settings_session_host_target_placeholder())
                     .default_value(target.to_string())
             }),
             container_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder("container-name")
+                    .placeholder(s::settings_session_host_container_placeholder())
                     .default_value(container.to_string())
             }),
         }

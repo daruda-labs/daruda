@@ -92,7 +92,9 @@ fn load_raw(
 
     let bytes: Result<Vec<u8>, String> = if staged {
         if repo_root.is_none() {
-            return LoadOutcome::plain(PaneFileContent::Error("No git repository root".to_owned()));
+            return LoadOutcome::plain(PaneFileContent::Error(
+                crate::surface::strings::file_viewer_err_no_git_repo(),
+            ));
         }
         // git show :path requires a repo-root-relative path.
         // `path` is absolute (set at the left-dock entry point); strip the repo root
@@ -102,11 +104,12 @@ fn load_raw(
             match path.strip_prefix(r) {
                 Ok(rel) => rel.to_path_buf(),
                 Err(_) => {
-                    return LoadOutcome::plain(PaneFileContent::Error(format!(
-                        "staged path {} is not inside repo root {}",
-                        path.display(),
-                        r.display()
-                    )));
+                    return LoadOutcome::plain(PaneFileContent::Error(
+                        crate::surface::strings::file_viewer_err_staged_outside_repo(
+                            &path.display().to_string(),
+                            &r.display().to_string(),
+                        ),
+                    ));
                 }
             }
         } else {
@@ -208,7 +211,7 @@ fn load_diff(
     diagram_dark: bool,
 ) -> PaneFileContent {
     if repo_root.is_none() {
-        return PaneFileContent::Error("No git repository root".to_owned());
+        return PaneFileContent::Error(crate::surface::strings::file_viewer_err_no_git_repo());
     }
 
     // Untracked files produce no output from `git diff`; use --no-index to

@@ -34,13 +34,7 @@ impl Workspace {
 
             let detail = dirty
                 .iter()
-                .map(|(_, t, draft)| {
-                    if *draft {
-                        format!("• {} (new task)", t)
-                    } else {
-                        format!("• {}", t)
-                    }
-                })
+                .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -107,10 +101,9 @@ impl Workspace {
             .join(", ");
         let report = ErrorReport::new(crate::surface::strings::task_batch_save_failed_title())
             .severity(ErrorSeverity::Warning)
-            .message(format!(
-                "{} pane(s) had invalid input and were not saved: {}",
+            .message(crate::surface::strings::task_batch_save_failed_detail(
                 failed.len(),
-                listing,
+                &listing,
             ))
             .at(file!(), line!())
             .dedup("tasks.batch_save")

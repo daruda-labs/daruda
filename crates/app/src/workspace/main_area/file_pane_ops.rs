@@ -128,7 +128,9 @@ impl Workspace {
         let cached_title = path
             .file_name()
             .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| gpui::SharedString::from("(file)"));
+            .unwrap_or_else(|| {
+                gpui::SharedString::from(crate::surface::strings::file_viewer_untitled_tab_title())
+            });
 
         let search_input = cx.new(|cx_state| {
             crate::ui::InputState::new(window, cx_state)
