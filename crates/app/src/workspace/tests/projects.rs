@@ -164,6 +164,45 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// `HistoryBuffer` has no cap and `finalize_remove_lane` is the only other
+/// place anything prunes it, so a project closed with history behind it would
+/// hold every line for the rest of the session.
+#[gpui::test]
+fn close_active_project_drops_the_input_history_of_its_lanes(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = "/tmp/daruda_close_input_history";
+    std::fs::create_dir_all(root).unwrap();
+    let project = daruda_store::project::Project::from_path(root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let active = ws.active;
+            ws.input_history
+                .entry(active)
+                .or_default()
+                .push("cargo test");
+            assert!(ws.input_history.contains_key(&active));
+
+            ws.close_active_project(window, cx);
+
+            assert!(
+                !ws.input_history.keys().any(|k| k.project == active.project),
+                "input_history must drop entries belonging to the closed project"
+            );
+        });
+    })
+    .unwrap();
+}
+
 #[gpui::test]
 fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mut TestAppContext) {
     // Safety net: if every surviving project is somehow lane-less

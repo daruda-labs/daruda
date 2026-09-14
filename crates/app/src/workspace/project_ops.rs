@@ -305,6 +305,12 @@ impl Workspace {
             .retain(|key, _| key.project != project_id);
         self.git_changes_cursor
             .retain(|key, _| key.project != project_id);
+        // `HistoryBuffer` keeps every line ever submitted with no cap, and
+        // nothing else prunes it — `finalize_remove_lane` is the only other
+        // site, so a closed project's lanes would hold theirs for the rest of
+        // the session.
+        self.input_history
+            .retain(|key, _| key.project != project_id);
         // Five FileTreeContext caches keyed by LaneRef — drop every
         // entry belonging to the removed project. The notify watchers
         // stop when their entries drop; the gitignore matchers and
