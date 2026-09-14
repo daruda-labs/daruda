@@ -21,6 +21,7 @@ pub enum SettingsFieldId {
     CursorStyle,
     CursorBlinking,
     AgentUseModifierToSend,
+    AgentUseReadingWidth,
     AgentCatalog,
     SessionHosts,
     RenderMaxFps,
@@ -64,6 +65,7 @@ impl SettingsFieldId {
             Self::CursorStyle => "cursor.style",
             Self::CursorBlinking => "cursor.blinking",
             Self::AgentUseModifierToSend => "agent.use_modifier_to_send",
+            Self::AgentUseReadingWidth => "agent.use_reading_width",
             Self::AgentCatalog => "agents",
             Self::SessionHosts => "session_hosts",
             Self::RenderMaxFps => "render.max_fps",
@@ -110,6 +112,7 @@ pub enum SettingsPatch {
     CursorStyle(CursorStyle),
     CursorBlinking(bool),
     AgentUseModifierToSend(bool),
+    AgentUseReadingWidth(bool),
     AgentCatalog(Vec<AgentEntry>),
     SessionHosts {
         entries: Vec<SessionHostEntry>,
@@ -159,6 +162,7 @@ impl SettingsPatch {
             Self::CursorStyle(_) => SettingsFieldId::CursorStyle,
             Self::CursorBlinking(_) => SettingsFieldId::CursorBlinking,
             Self::AgentUseModifierToSend(_) => SettingsFieldId::AgentUseModifierToSend,
+            Self::AgentUseReadingWidth(_) => SettingsFieldId::AgentUseReadingWidth,
             Self::AgentCatalog(_) => SettingsFieldId::AgentCatalog,
             Self::SessionHosts { .. } => SettingsFieldId::SessionHosts,
             Self::RenderMaxFps(_) => SettingsFieldId::RenderMaxFps,
@@ -204,6 +208,7 @@ impl SettingsPatch {
             Self::CursorStyle(value) => config.cursor.style = *value,
             Self::CursorBlinking(value) => config.cursor.blinking = *value,
             Self::AgentUseModifierToSend(value) => config.agent.use_modifier_to_send = *value,
+            Self::AgentUseReadingWidth(value) => config.agent.use_reading_width = *value,
             Self::AgentCatalog(value) => config.agents = value.clone(),
             Self::SessionHosts {
                 entries,
@@ -267,6 +272,9 @@ impl SettingsPatch {
             Self::CursorBlinking(_) => left.cursor.blinking != right.cursor.blinking,
             Self::AgentUseModifierToSend(_) => {
                 left.agent.use_modifier_to_send != right.agent.use_modifier_to_send
+            }
+            Self::AgentUseReadingWidth(_) => {
+                left.agent.use_reading_width != right.agent.use_reading_width
             }
             Self::AgentCatalog(_) => left.agents != right.agents,
             Self::SessionHosts { .. } => {

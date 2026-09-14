@@ -189,6 +189,20 @@ impl SettingsWindow {
                 s::settings_label_syntax_theme(),
                 crate::ui::select::select(&self.syntax_theme_select, cx, 0),
             ))
+            .child(checkbox_row(
+                checkbox(
+                    "settings-agent-use-reading-width",
+                    s::settings_label_agent_use_reading_width(),
+                    0,
+                )
+                .checked(self.agent_use_reading_width)
+                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                    if this.persist_bool_setting(BoolSetting::AgentUseReadingWidth, *checked, cx) {
+                        this.agent_use_reading_width = *checked;
+                        cx.notify();
+                    }
+                })),
+            ))
             .into_any_element()
     }
 

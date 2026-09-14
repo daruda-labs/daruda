@@ -229,17 +229,27 @@ pub(in crate::workspace) enum ActivityState {
     AwaitingPermission,
 }
 
-/// AgentChat conversation content-column width mode. `Full` preserves the
-/// existing pane-wide layout; `Reading` constrains each row to the configured
-/// reading width.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// AgentChat conversation content-column width mode. `Reading` constrains each
+/// row to the configured reading width; `Full` spends the whole pane.
+///
+/// Deliberately no `Default`: which one a pane starts on is `agent
+/// .use_reading_width`'s answer, and a type-level default would be a second
+/// place to state it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum ChatContentWidth {
-    #[default]
     Full,
     Reading,
 }
 
 impl ChatContentWidth {
+    pub(in crate::workspace) fn from_config(use_reading_width: bool) -> Self {
+        if use_reading_width {
+            Self::Reading
+        } else {
+            Self::Full
+        }
+    }
+
     pub(in crate::workspace) fn is_reading(self) -> bool {
         matches!(self, Self::Reading)
     }
@@ -647,9 +657,14 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) screenshot_fold_open: bool,
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) screenshot_options_open: bool,
-    /// Per-pane content-column width mode. Persisted by the workspace snapshot;
-    /// default `Full` keeps existing pane-wide wrapping.
+    /// Per-pane content-column width mode, seeded from
+    /// `agent.use_reading_width` and persisted only once the pane's own toggle
+    /// has moved it (see `SerializedAgentChatContent::content_width`).
     pub(in crate::workspace) content_width: ChatContentWidth,
+    /// Whether [`Self::content_width`] is still the seeded value. A pane that
+    /// never touched the toggle follows config across reloads and restarts;
+    /// one that did keeps its own answer.
+    pub(in crate::workspace) content_width_chosen: bool,
     /// The recent-steps axis, one choice per level: how many work steps of a
     /// response stay on screen, and how many calls inside one of those steps.
     /// Two choices rather than one over a pair, so pinning the step level
@@ -831,7 +846,8 @@ impl AgentChatView {
             screenshot_fold_open: false,
             #[cfg(feature = "screenshot")]
             screenshot_options_open: false,
-            content_width: ChatContentWidth::Full,
+            content_width: defaults.content_width,
+            content_width_chosen: false,
             tail_steps: PaneChoice::Seeded(defaults.tail.steps),
             tail_calls: PaneChoice::Seeded(defaults.tail.calls),
             display_filter: PaneChoice::Seeded(defaults.filter),

@@ -536,6 +536,11 @@ pub struct Workspace {
     /// Syntect theme name for syntax highlighting in the file viewer.
     /// Updated on every config reload; threaded into background load tasks.
     pub(in crate::workspace) syntax_theme: String,
+    /// Width mode a fresh agent-chat pane starts on. The one mirror of
+    /// `daruda_config::AgentConfig::use_reading_width`, resolved here so the
+    /// pane-creation and config-reload paths cannot read it differently.
+    pub(in crate::workspace) agent_content_width:
+        crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth,
     /// When true, clicking a file in the left dock reuses the single
     /// existing file-viewer tab instead of opening one per file.
     /// Mirrors `daruda_config::FileViewerConfig::preview_tab`.
@@ -1272,6 +1277,10 @@ impl Workspace {
             window_user_label: None,
             shell_program: config.shell.program.clone(),
             syntax_theme: config.file_viewer.syntax_theme.clone(),
+            agent_content_width:
+                crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth::from_config(
+                    config.agent.use_reading_width,
+                ),
             file_viewer_preview_tab: config.file_viewer.preview_tab,
             preferred_editor: config.editor.preferred.clone(),
             notifications: config.notifications.clone(),

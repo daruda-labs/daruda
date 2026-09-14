@@ -427,6 +427,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.agent.use_modifier_to_send,
     },
     BoolSpec {
+        setting: BoolSetting::AgentUseReadingWidth,
+        get: |w| w.agent_use_reading_width,
+        set: |w, v| w.agent_use_reading_width = v,
+        patch: SettingsPatch::AgentUseReadingWidth,
+        show: |c| c.agent.use_reading_width,
+    },
+    BoolSpec {
         setting: BoolSetting::ShellClosePaneOnExit,
         get: |w| w.close_pane_on_exit,
         set: |w, v| w.close_pane_on_exit = v,
@@ -611,6 +618,7 @@ mod tests {
             | SettingsPatch::CursorStyle(_)
             | SettingsPatch::CursorBlinking(_)
             | SettingsPatch::AgentUseModifierToSend(_)
+            | SettingsPatch::AgentUseReadingWidth(_)
             | SettingsPatch::RenderMaxFps(_)
             | SettingsPatch::ShellClosePaneOnExit(_)
             | SettingsPatch::WindowOpacity(_)

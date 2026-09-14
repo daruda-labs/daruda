@@ -688,6 +688,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "input_max_rows",
             toml_edit::value(i64::from(config.agent.input_max_rows)),
         );
+        t.insert(
+            "use_reading_width",
+            toml_edit::value(config.agent.use_reading_width),
+        );
         remove_legacy_agent_keys(t);
     });
 
@@ -951,6 +955,12 @@ fn patch_settings_document(
             t.insert(
                 "use_modifier_to_send",
                 toml_edit::value(config.agent.use_modifier_to_send),
+            );
+        }),
+        SettingsPatch::AgentUseReadingWidth(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "use_reading_width",
+                toml_edit::value(config.agent.use_reading_width),
             );
         }),
         SettingsPatch::AgentCatalog(_) => replace_agents(doc, &config.agents),

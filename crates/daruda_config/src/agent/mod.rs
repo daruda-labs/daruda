@@ -629,9 +629,13 @@ pub struct AgentConfig {
     /// then clips and scrolls. Clamped to
     /// [`INPUT_MAX_ROWS_MIN`]..=[`INPUT_MAX_ROWS_MAX`] at load time.
     pub input_max_rows: u8,
-    /// Fixed content-column width used when an AgentChat pane is toggled into
-    /// reading-width mode. Clamped to
-    /// [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
+    /// Whether a fresh AgentChat pane starts in reading-width mode. Seeds the
+    /// pane; the per-pane toggle still wins, and a pane that has used it keeps
+    /// its own choice across restarts.
+    pub use_reading_width: bool,
+    /// Fixed content-column width used when an AgentChat pane is in
+    /// reading-width mode — the column [`Self::use_reading_width`] turns on.
+    /// Clamped to [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
     pub reading_width: f32,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
@@ -675,6 +679,8 @@ pub const READING_WIDTH_MIN: f32 = 360.0;
 pub const READING_WIDTH_MAX: f32 = 2400.0;
 /// Default readable-content column width for AgentChat.
 pub const READING_WIDTH_DEFAULT: f32 = 700.0;
+/// Whether a fresh AgentChat pane starts held to that column.
+pub const USE_READING_WIDTH_DEFAULT: bool = true;
 
 /// Sentinel meaning every work step is visible.
 pub const TAIL_WINDOW_ALL: u8 = 0;
@@ -691,6 +697,7 @@ impl Default for AgentConfig {
             legacy_display_filter: None,
             use_modifier_to_send: false,
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
+            use_reading_width: USE_READING_WIDTH_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }

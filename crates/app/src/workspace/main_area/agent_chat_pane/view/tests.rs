@@ -75,6 +75,7 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
             None,
             super::super::transcript_defaults::TranscriptDefaults {
                 tail: super::super::rows::tail::StepWindow::default(),
+                content_width: super::ChatContentWidth::Reading,
                 fold_mode: crate::transcript::fold_mode::FoldMode::default(),
                 filter: crate::transcript::display_filter::DisplayFilter::default(),
             },
@@ -1730,6 +1731,7 @@ use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 /// that lands on the *built-in* default instead of the one in force is caught.
 fn other_defaults() -> TranscriptDefaults {
     TranscriptDefaults {
+        content_width: super::super::view::ChatContentWidth::Full,
         // Distinct per level, so a reset that hands back the wrong level's
         // default is caught rather than landing on a value that happens to
         // match.
@@ -1810,6 +1812,78 @@ fn the_reset_is_offered_on_a_chosen_default_and_withheld_while_following(
 
             view.reset_fold_mode(window, cx);
             assert!(view.fold.mode_choice().is_following());
+        })
+        .expect("view update");
+}
+
+/// The width follows `agent.use_reading_width` until the pane's own toggle
+/// answers, and then stops — the same seeded/chosen split the transcript axes
+/// get, kept as a flag because the toggle has only two states to move between.
+#[gpui::test]
+fn the_width_follows_config_until_the_pane_toggles_it(cx: &mut gpui::TestAppContext) {
+    use super::super::view::ChatContentWidth;
+
+    let reading = TranscriptDefaults {
+        content_width: ChatContentWidth::Reading,
+        ..other_defaults()
+    };
+    let full = TranscriptDefaults {
+        content_width: ChatContentWidth::Full,
+        ..other_defaults()
+    };
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&reading, cx);
+            assert_eq!(view.content_width, ChatContentWidth::Reading);
+            view.reseed_transcript_defaults(&full, cx);
+            assert_eq!(
+                view.content_width,
+                ChatContentWidth::Full,
+                "an untouched pane takes the new config value"
+            );
+
+            view.toggle_content_width(cx);
+            assert_eq!(view.content_width, ChatContentWidth::Reading);
+            view.reseed_transcript_defaults(&full, cx);
+            assert_eq!(
+                view.content_width,
+                ChatContentWidth::Reading,
+                "config must not overwrite the pane's own toggle"
+            );
+        })
+        .expect("view update");
+}
+
+/// Toggling back to the configured value is still a choice: the pane stops
+/// following config, exactly as pinning an axis to its own default does.
+#[gpui::test]
+fn toggling_back_to_the_configured_width_still_detaches(cx: &mut gpui::TestAppContext) {
+    use super::super::view::ChatContentWidth;
+
+    let reading = TranscriptDefaults {
+        content_width: ChatContentWidth::Reading,
+        ..other_defaults()
+    };
+    let full = TranscriptDefaults {
+        content_width: ChatContentWidth::Full,
+        ..other_defaults()
+    };
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.reseed_transcript_defaults(&reading, cx);
+            view.toggle_content_width(cx); // → Full
+            view.toggle_content_width(cx); // → Reading, the configured value
+            assert_eq!(view.content_width, ChatContentWidth::Reading);
+            view.reseed_transcript_defaults(&full, cx);
+            assert_eq!(
+                view.content_width,
+                ChatContentWidth::Reading,
+                "a round trip through the toggle is still an answer"
+            );
         })
         .expect("view update");
 }

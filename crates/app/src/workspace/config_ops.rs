@@ -42,6 +42,10 @@ impl Workspace {
         self.shell_program = config.shell.program.clone();
         let syntax_theme_changed = self.syntax_theme != config.file_viewer.syntax_theme;
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
+        self.agent_content_width =
+            crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth::from_config(
+                config.agent.use_reading_width,
+            );
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         // The agent-chat diff header names this editor in its open-externally
         // tooltip, so a change has to dirty those cached views below.
@@ -84,8 +88,10 @@ impl Workspace {
                     view.agent_name = name;
                     cx.notify();
                 }
-                let defaults =
-                    TranscriptDefaults::resolve(self.agents.iter().find(|a| a.id == view.agent_id));
+                let defaults = TranscriptDefaults::resolve(
+                    self.agents.iter().find(|a| a.id == view.agent_id),
+                    self.agent_content_width,
+                );
                 view.reseed_transcript_defaults(&defaults, cx);
             });
         }

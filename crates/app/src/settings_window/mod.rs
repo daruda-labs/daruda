@@ -105,6 +105,10 @@ pub struct SettingsWindow {
     // Cursor
     cursor_style_select: Entity<SelectState>,
     cursor_blinking: bool,
+    /// Whether a fresh agent-chat pane holds its prose to the reading column.
+    /// On the General page beside the themes: it is a reading preference, not
+    /// an agent one, and applies to every agent.
+    agent_use_reading_width: bool,
     // Agent
     agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
@@ -313,6 +317,7 @@ enum SelectSetting {
 pub(super) enum BoolSetting {
     CursorBlinking,
     AgentUseModifierToSend,
+    AgentUseReadingWidth,
     ShellClosePaneOnExit,
     WindowBlur,
     FilesShowHidden,
@@ -408,9 +413,10 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::CursorBlinking,
         Self::AgentUseModifierToSend,
+        Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
@@ -427,6 +433,7 @@ impl BoolSetting {
         match self {
             Self::CursorBlinking => (),
             Self::AgentUseModifierToSend => (),
+            Self::AgentUseReadingWidth => (),
             Self::ShellClosePaneOnExit => (),
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
@@ -1736,6 +1743,7 @@ impl SettingsWindow {
             cursor_blinking: config.cursor.blinking,
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
+            agent_use_reading_width: config.agent.use_reading_width,
             agent_catalog,
             agent_vocabulary,
             session_host_rows,

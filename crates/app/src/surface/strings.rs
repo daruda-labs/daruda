@@ -4036,6 +4036,12 @@ pub fn settings_label_syntax_theme() -> String {
     rust_i18n::t!("settings.label_syntax_theme").into_owned()
 }
 
+/// General-page checkbox: whether a fresh agent-chat pane starts held to the
+/// `agent.reading_width` column.
+pub fn settings_label_agent_use_reading_width() -> String {
+    rust_i18n::t!("settings.label_agent_use_reading_width").into_owned()
+}
+
 pub fn settings_syntax_theme_daruda() -> String {
     rust_i18n::t!("settings.syntax_theme_daruda").into_owned()
 }

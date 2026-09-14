@@ -775,6 +775,7 @@ settings:
   label_show_hidden: "Show Hidden Files"
   label_use_gitignore: "Respect .gitignore"
   label_syntax_theme: "Syntax Theme"
+  label_agent_use_reading_width: "Hold agent chat to the reading column"
   syntax_theme_daruda: "Daruda (Recommended)"
   syntax_theme_one_dark: "One"
   syntax_theme_tokyo_night: "Tokyo Night"

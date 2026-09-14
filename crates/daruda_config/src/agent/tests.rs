@@ -25,6 +25,28 @@ fn connect_mode_priority_is_just_the_agent_default() {
     );
 }
 
+/// On by default, so a fresh pane reads as a column rather than a full-width
+/// wall of prose. `false` is the interesting direction to round-trip: it is the
+/// value a `#[serde(default)]` container would silently restore to `true`.
+#[test]
+fn use_reading_width_defaults_on_and_round_trips_when_turned_off() {
+    assert!(AgentConfig::default().use_reading_width);
+
+    let cfg = AgentConfig {
+        use_reading_width: false,
+        ..AgentConfig::default()
+    };
+    let toml_str = toml::to_string(&cfg).expect("serialize");
+    let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
+    assert!(!back.use_reading_width);
+
+    let omitted: AgentConfig = toml::from_str("").expect("deserialize");
+    assert!(
+        omitted.use_reading_width,
+        "an absent key is the default, not `false`"
+    );
+}
+
 #[test]
 fn use_modifier_to_send_defaults_false_and_round_trips() {
     // Default matches Zed's agent panel: Enter sends, Shift+Enter newline.

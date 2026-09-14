@@ -183,7 +183,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         account_id: Some(id),
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
@@ -213,7 +213,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         account_id: None,
         mode_id: Some("acceptEdits".to_string()),
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
@@ -242,7 +242,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         account_id: None,
         mode_id: None,
         model_id: Some("opus".to_string()),
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
@@ -264,9 +264,13 @@ fn agent_chat_content_round_trip_preserves_model_id() {
     assert_eq!(legacy.mode_id, Some("acceptEdits".to_string()));
 }
 
+/// Both widths survive a save, and an absent key means "follow config". Both
+/// have to be *written*: the pane that turned reading width off says as much as
+/// the one that turned it on, and skipping either would read back as unset and
+/// silently take the config value instead.
 #[test]
-fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
-    let content = SerializedAgentChatContent {
+fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
+    let base = SerializedAgentChatContent {
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
         title: None,
@@ -274,20 +278,42 @@ fn agent_chat_content_width_round_trips_and_legacy_defaults_to_full() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Reading,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
     };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.content_width, SerializedChatContentWidth::Reading);
+    for width in [
+        SerializedChatContentWidth::Full,
+        SerializedChatContentWidth::Reading,
+    ] {
+        let content = SerializedAgentChatContent {
+            content_width: Some(width),
+            ..base.clone()
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.content_width,
+            Some(width),
+            "{width:?} must survive"
+        );
+    }
+
+    let json = serde_json::to_string(&base).unwrap();
+    assert!(
+        !json.contains("content_width"),
+        "a pane that never chose writes no key: {json}"
+    );
 
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(legacy.content_width, SerializedChatContentWidth::Full);
+    assert_eq!(
+        legacy.content_width, None,
+        "a file written before the key existed follows config"
+    );
 }
 
 #[test]
@@ -300,7 +326,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
@@ -345,7 +371,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
@@ -400,7 +426,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
         tail_window_calls: Some(SerializedChatTailWindow::Last(2)),
         display_filter: None,
@@ -465,7 +491,7 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
         serde_json::from_str(json).expect("an unknown token drops, it does not fail the pane");
     assert_eq!(content.tail_window, None, "unreadable → treated as unset");
     assert_eq!(content.tail_window_calls, None);
-    assert_eq!(content.content_width, SerializedChatContentWidth::Full);
+    assert_eq!(content.content_width, None, "unreadable → follows config");
     assert!(content.display_filter.is_some());
     assert!(content.fold_mode.is_some());
     assert_eq!(
@@ -503,7 +529,7 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
     let content: SerializedAgentChatContent =
         serde_json::from_str(mistyped).expect("a mistyped preference drops, it does not fail");
     assert_eq!(content.tail_window, None);
-    assert_eq!(content.content_width, SerializedChatContentWidth::Full);
+    assert_eq!(content.content_width, None, "unreadable → follows config");
     assert_eq!(
         content.display_filter, None,
         "unreadable → treated as unset"
@@ -538,7 +564,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,
@@ -571,7 +597,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             account_id: None,
             mode_id: None,
             model_id: None,
-            content_width: SerializedChatContentWidth::Full,
+            content_width: None,
             tail_window: None,
             tail_window_calls: None,
             display_filter: None,
@@ -612,7 +638,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             account_id: None,
             mode_id: None,
             model_id: None,
-            content_width: SerializedChatContentWidth::Full,
+            content_width: None,
             tail_window: None,
             tail_window_calls: None,
             display_filter: None,
@@ -1424,7 +1450,7 @@ fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
         account_id: None,
         mode_id: None,
         model_id: None,
-        content_width: SerializedChatContentWidth::Full,
+        content_width: None,
         tail_window: None,
         tail_window_calls: None,
         display_filter: None,

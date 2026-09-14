@@ -477,14 +477,16 @@ pub struct SerializedAgentChatContent {
     /// has been made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
-    /// Per-pane AgentChat content width mode. Missing in pre-feature state
-    /// files, defaulting to `Full` so existing panes keep using the whole pane.
+    /// Explicit pane content-width choice; `None` continues following
+    /// `agent.use_reading_width`. Both variants are written once chosen — the
+    /// pane that turned reading width *off* has as much to say as the one that
+    /// turned it on, and skipping either would read back as the config value.
     #[serde(
         default,
         deserialize_with = "lenient",
-        skip_serializing_if = "SerializedChatContentWidth::is_full"
+        skip_serializing_if = "Option::is_none"
     )]
-    pub content_width: SerializedChatContentWidth,
+    pub content_width: Option<SerializedChatContentWidth>,
     /// Explicit pane tail choice for a response's work steps; `None` continues
     /// following config.
     #[serde(
@@ -544,19 +546,14 @@ where
     Ok(T::deserialize(value).unwrap_or_default())
 }
 
-/// Serializable mirror of the app-side AgentChat content-width mode.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Serializable mirror of the app-side AgentChat content-width mode. Carries
+/// no `Default`: which width a pane starts on is config's answer, and a stored
+/// value only ever means the user overrode it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SerializedChatContentWidth {
-    #[default]
     Full,
     Reading,
-}
-
-impl SerializedChatContentWidth {
-    fn is_full(&self) -> bool {
-        matches!(self, Self::Full)
-    }
 }
 
 /// Serializable mirror of the AgentChat tail window.

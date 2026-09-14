@@ -1,33 +1,43 @@
-//! The transcript-presentation defaults a chat pane starts on, as the pane's
-//! own agent entry states them.
+//! The transcript-presentation defaults a chat pane starts on, as config
+//! states them.
 
 use daruda_config::{AgentDefinition, TAIL_WINDOW_DEFAULT};
 
 use super::rows::tail::{StepWindow, TailWindow};
+use super::view::ChatContentWidth;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::fold_mode::FoldMode;
 
-/// Tail window, fold mode and display filter as the resolved config states
-/// them. One type because the three are always derived together and always
-/// applied together — at pane creation and again on every live config reload —
-/// so a fourth setting cannot be added to one path and forgotten in the other.
+/// What a chat pane's presentation starts on, as the resolved config states it.
+/// One type because these are always derived together and always applied
+/// together — at pane creation and again on every live config reload — so a
+/// further setting cannot be added to one path and forgotten in the other.
 ///
-/// Each axis is stated per-agent, because what reads well depends on what the
-/// agent emits: one agent produces no reasoning at all, another produces it
-/// constantly. An axis the entry does not state falls straight to the built-in
-/// value — there is no layer between the two.
+/// The three transcript axes are stated per-agent, because what reads well
+/// depends on what the agent emits: one agent produces no reasoning at all,
+/// another produces it constantly. An axis the entry does not state falls
+/// straight to the built-in value — there is no layer between the two.
+/// [`Self::content_width`] is the exception: it is app-wide, since how wide a
+/// column reads is a property of the reader rather than of the agent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct TranscriptDefaults {
     pub(in crate::workspace) tail: StepWindow,
     pub(in crate::workspace) fold_mode: FoldMode,
     pub(in crate::workspace) filter: DisplayFilter,
+    pub(in crate::workspace) content_width: ChatContentWidth,
 }
 
 impl TranscriptDefaults {
     /// Resolve for the agent a pane runs under. `definition` is that agent's
     /// catalog entry, or `None` for an id no longer in the catalog — which
     /// resolves the same as an entry that states nothing of its own.
-    pub(in crate::workspace) fn resolve(definition: Option<&AgentDefinition>) -> Self {
+    /// `content_width` is app-wide, so it arrives already resolved — the
+    /// Workspace holds the one mirror of `agent.use_reading_width`, the way it
+    /// holds `syntax_theme`.
+    pub(in crate::workspace) fn resolve(
+        definition: Option<&AgentDefinition>,
+        content_width: ChatContentWidth,
+    ) -> Self {
         let fold_tokens: &[String] = definition
             .and_then(|d| d.fold_mode.as_deref())
             .unwrap_or(&[]);
@@ -48,6 +58,7 @@ impl TranscriptDefaults {
         let filter = definition.and_then(|d| d.display_filter.as_ref());
         Self {
             tail,
+            content_width,
             fold_mode: FoldMode::from_tokens(fold_tokens.iter().map(String::as_str)),
             filter: filter.map_or_else(DisplayFilter::default, |tokens| {
                 DisplayFilter::from_stored(tokens)
@@ -76,7 +87,7 @@ mod tests {
     #[test]
     fn an_entry_that_states_nothing_yields_the_built_in_defaults() {
         for entry in [None, Some(definition())] {
-            let defaults = TranscriptDefaults::resolve(entry.as_ref());
+            let defaults = TranscriptDefaults::resolve(entry.as_ref(), ChatContentWidth::Reading);
             assert_eq!(defaults.tail, StepWindow::default());
             assert_eq!(defaults.fold_mode, FoldMode::default());
             assert_eq!(defaults.filter, DisplayFilter::default());
@@ -92,7 +103,7 @@ mod tests {
             display_filter: Some(vec![FilterFacet::Tools.token().to_string()]),
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition));
+        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -116,7 +127,7 @@ mod tests {
             tail_window_calls: None,
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition));
+        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -139,7 +150,7 @@ mod tests {
             tail_window_calls: Some(5),
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition));
+        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -157,8 +168,8 @@ mod tests {
             display_filter: Some(Vec::new()),
             ..definition()
         };
-        let empty = TranscriptDefaults::resolve(Some(&emptied)).filter;
-        let absent = TranscriptDefaults::resolve(None).filter;
+        let empty = TranscriptDefaults::resolve(Some(&emptied), ChatContentWidth::Reading).filter;
+        let absent = TranscriptDefaults::resolve(None, ChatContentWidth::Reading).filter;
         assert_ne!(empty, absent);
         assert!(absent.shows_everything());
         assert!(
@@ -179,7 +190,7 @@ mod tests {
             ..definition()
         };
         assert_eq!(
-            TranscriptDefaults::resolve(Some(&emptied)).fold_mode,
+            TranscriptDefaults::resolve(Some(&emptied), ChatContentWidth::Reading).fold_mode,
             FoldMode::default()
         );
     }
@@ -195,7 +206,7 @@ mod tests {
             ]),
             ..definition()
         };
-        let mode = TranscriptDefaults::resolve(Some(&tuned)).fold_mode;
+        let mode = TranscriptDefaults::resolve(Some(&tuned), ChatContentWidth::Reading).fold_mode;
         assert_eq!(mode.preset(), None, "a matrix, not a preset");
         assert_eq!(
             mode.rule(
@@ -213,7 +224,7 @@ mod tests {
             ..definition()
         };
         assert_eq!(
-            TranscriptDefaults::resolve(Some(&narrowed)).filter,
+            TranscriptDefaults::resolve(Some(&narrowed), ChatContentWidth::Reading).filter,
             thinking_only()
         );
     }

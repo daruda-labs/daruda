@@ -373,7 +373,7 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         ws.apply_config(&config, cx);
         let view = ws.agent_chat_view(pane).unwrap().read(cx);
         assert_eq!(view.agent_name, agent.name);
-        assert_eq!(view.defaults, crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent)));
+        assert_eq!(view.defaults, crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.agent_content_width));
         assert_eq!(view.syntax_theme(), config.file_viewer.syntax_theme);
     });
 }

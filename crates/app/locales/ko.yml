@@ -774,6 +774,7 @@ settings:
   label_show_hidden: "숨긴 파일 표시"
   label_use_gitignore: ".gitignore 적용"
   label_syntax_theme: "구문 테마"
+  label_agent_use_reading_width: "에이전트 채팅을 읽기 너비로 제한"
   syntax_theme_daruda: "Daruda (추천)"
   syntax_theme_one_dark: "One"
   syntax_theme_tokyo_night: "Tokyo Night"

@@ -352,14 +352,18 @@ impl AgentChatView {
     /// measurements and persist the pane-local preference.
     pub(in crate::workspace) fn toggle_content_width(&mut self, cx: &mut Context<Self>) {
         self.content_width = self.content_width.toggle();
+        // Using the toggle is what takes this pane off `use_reading_width` —
+        // including a toggle that lands back on the configured value, which is
+        // still a statement about this pane.
+        self.content_width_chosen = true;
         self.list_state.remeasure();
         cx.notify();
         self.persist_pane_prefs(cx);
     }
 
-    /// Follow a reloaded config: every transcript preference the user has not
+    /// Follow a reloaded config: every presentation preference the user has not
     /// picked for this pane moves to the new default, and the ones they did
-    /// pick stay. The single site that applies all three, so a pane open across
+    /// pick stay. The single site that applies them all, so a pane open across
     /// a config edit ends up where a freshly restored one would. Nothing is
     /// persisted — a seed is not a choice.
     pub(in crate::workspace) fn reseed_transcript_defaults(
@@ -375,20 +379,30 @@ impl AgentChatView {
             self.tail_calls,
             self.fold.mode(),
             self.display_filter,
+            self.content_width,
         );
         self.tail_steps.reseed(defaults.tail.steps);
         self.tail_calls.reseed(defaults.tail.calls);
         self.fold.reseed_mode(defaults.fold_mode);
         self.display_filter.reseed(defaults.filter);
+        if !self.content_width_chosen {
+            self.content_width = defaults.content_width;
+        }
         if before
             == (
                 self.tail_steps,
                 self.tail_calls,
                 self.fold.mode(),
                 self.display_filter,
+                self.content_width,
             )
         {
             return;
+        }
+        // A width change reflows every row, so the cached heights are stale —
+        // the same invalidation the pane's own toggle does.
+        if self.content_width != before.4 {
+            self.list_state.remeasure();
         }
         // A reseeded fold matrix moves every card's derived default, so the cards
         // it just opened owe the same embed pass a fold click does — see

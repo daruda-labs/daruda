@@ -700,7 +700,8 @@ impl Workspace {
                             // Same for the model: the lazy connect reapplies it
                             // over whatever the adapter picks for itself.
                             let model_id = ac.model_id.clone();
-                            let content_width = deserialize_chat_content_width(ac.content_width);
+                            let content_width =
+                                ac.content_width.map(deserialize_chat_content_width);
                             // Missing pane choices retain the constructor's config
                             // seeds — which is also how a file written before the
                             // tail axis split restores: it states the step level
@@ -728,7 +729,10 @@ impl Workspace {
                             content.view.update(cx, |v, _| {
                                 v.last_known_mode_id = mode_id;
                                 v.last_known_model_id = model_id;
-                                v.content_width = content_width;
+                                if let Some(width) = content_width {
+                                    v.content_width = width;
+                                    v.content_width_chosen = true;
+                                }
                                 if let Some(tail) = tail_steps {
                                     v.tail_steps = PaneChoice::Chosen(tail);
                                 }
@@ -1031,7 +1035,11 @@ fn serialize_pane_content(
             account_id: ac.account.to_persisted(),
             mode_id: v.last_known_mode_id.clone(),
             model_id: v.last_known_model_id.clone(),
-            content_width: serialize_chat_content_width(v.content_width),
+            // Written only once the pane's own toggle has moved it, so an
+            // untouched pane keeps following `agent.use_reading_width`.
+            content_width: v
+                .content_width_chosen
+                .then(|| serialize_chat_content_width(v.content_width)),
             // Persist only explicit choices so untouched panes keep following config.
             tail_window: v.tail_steps.chosen().map(serialize_chat_tail_window),
             tail_window_calls: v.tail_calls.chosen().map(serialize_chat_tail_window),
