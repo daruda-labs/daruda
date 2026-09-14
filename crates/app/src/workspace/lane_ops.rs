@@ -330,16 +330,7 @@ impl Workspace {
         // running, the cache holds stale paths, and the gitignore matcher
         // leaks. Dropping the entries also drops the embedded
         // `RecommendedWatcher`, stopping the kernel-side watch.
-        self.file_tree.file_trees.remove(&target);
-        self.file_tree.file_watchers.remove(&target);
-        self.file_tree.files_reload_queues.remove(&target);
-        self.file_tree.files_visible_cache.remove(&target);
-        self.file_tree.files_gitignore_index.remove(&target);
-        self.git_status_in_flight.remove(&target);
-        self.git_status_pending_repeat.remove(&target);
-        self.git_status_cache.remove(&target);
-        self.git_collapsed_dirs.remove(&target);
-        self.git_changes_cursor.remove(&target);
+        self.lane_scoped.remove(&target);
         // Bottom-dock drafts are keyed per pane: drop the entry for every
         // pane in the removed lane; clear `input_owner` if it pointed at
         // one of them.
@@ -352,7 +343,6 @@ impl Workspace {
             }
             self.forget_pane_input_draft(*pane_id);
         }
-        self.input_history.remove(&target);
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }

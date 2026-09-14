@@ -22,10 +22,10 @@ impl Workspace {
     }
 
     /// Kick off a background `git status` for `target` and update
-    /// `git_status_cache` when done. No-op for non-git worktrees.
+    /// the lane's cached status when done. No-op for non-git worktrees.
     ///
     /// Concurrency guard: at most one in-flight task per lane. A second call
-    /// while one runs sets `git_status_pending_repeat`, which the in-flight
+    /// while one runs sets `fetch_pending_repeat`, which the in-flight
     /// task drains by re-invoking itself once before returning. This collapses
     /// watcher-event bursts into at most two invocations (the running one + a
     /// repeat capturing everything that landed during the run).
@@ -42,9 +42,10 @@ impl Workspace {
             return;
         }
 
-        if !self.git_status_in_flight.insert(target) {
+        let git = &mut self.lane_scoped_mut(target).git;
+        if std::mem::replace(&mut git.fetch_in_flight, true) {
             // Already running — request a re-fire on completion.
-            self.git_status_pending_repeat.insert(target);
+            git.fetch_pending_repeat = true;
             return;
         }
 
@@ -53,7 +54,9 @@ impl Workspace {
             cx,
             move || crate::lane::git::git_status(&path),
             move |ws, result, cx| {
-                ws.git_status_in_flight.remove(&target);
+                if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                    state.git.fetch_in_flight = false;
+                }
                 match result {
                     Ok(data) => {
                         // Propagate an external branch switch into the lane's
@@ -61,7 +64,7 @@ impl Workspace {
                         // `Lane.kind.branch` instead of re-probing on render,
                         // so this refresh is the only path keeping it current.
                         ws.reconcile_lane_branch(target, data.branch.as_deref(), cx);
-                        ws.git_status_cache.insert(target, data);
+                        ws.lane_scoped_mut(target).git.status = Some(data);
                         // Refreshed status updates the file badges.
                         ws.invalidate_visible_files_cache(target);
                         // …and each open file pane's own badge + mode strip,
@@ -90,7 +93,11 @@ impl Workspace {
                 cx.notify();
                 // Drain the repeat slot — re-fire once for events that
                 // landed while the previous run was busy.
-                if ws.git_status_pending_repeat.remove(&target) {
+                if ws
+                    .lane_scoped
+                    .get_mut(&target)
+                    .is_some_and(|state| std::mem::take(&mut state.git.fetch_pending_repeat))
+                {
                     ws.refresh_git_status(target, cx);
                 }
             },
@@ -148,8 +155,7 @@ impl Workspace {
     /// primary button.
     pub(in crate::workspace) fn sync_commit_buttons(&mut self, cx: &mut Context<Self>) {
         let staged_count = self
-            .git_status_cache
-            .get(&self.active)
+            .lane_git(self.active)
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let in_flight = self.git_lock_held(GitLock::Repo);

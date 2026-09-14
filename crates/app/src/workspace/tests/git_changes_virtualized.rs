@@ -69,14 +69,11 @@ fn dock_showing_changes(
         })
         .unwrap();
     ws.update(cx, |ws, _| {
-        ws.git_status_cache.insert(
-            active,
-            crate::lane::git::GitStatusData {
-                branch: Some("main".into()),
-                unstaged: files,
-                ..Default::default()
-            },
-        );
+        ws.lane_scoped_mut(active).git.status = Some(crate::lane::git::GitStatusData {
+            branch: Some("main".into()),
+            unstaged: files,
+            ..Default::default()
+        });
     });
     cx.run_until_parked();
     cx.update_window(w.into(), |_, window, _| window.refresh())
@@ -158,14 +155,11 @@ fn rows_built_for(cx: &mut TestAppContext, n: usize) -> usize {
         })
         .unwrap();
     ws.update(cx, |ws, _| {
-        ws.git_status_cache.insert(
-            active,
-            crate::lane::git::GitStatusData {
-                branch: Some("main".into()),
-                unstaged: changed_files(n),
-                ..Default::default()
-            },
-        );
+        ws.lane_scoped_mut(active).git.status = Some(crate::lane::git::GitStatusData {
+            branch: Some("main".into()),
+            unstaged: changed_files(n),
+            ..Default::default()
+        });
     });
     cx.run_until_parked();
 

@@ -120,7 +120,7 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
             let tree = crate::files::tree::FileTree::new(std::path::PathBuf::from(
                 "/tmp/daruda_close_release",
             ));
-            ws.file_tree.file_trees.insert(active, tree);
+            ws.lane_scoped_mut(active).files.tree = Some(tree);
             let pane_ids: Vec<_> = ws
                 .active_runtime()
                 .tabs
@@ -153,11 +153,9 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 "closed project's panes must be unregistered from the tracker"
             );
             assert!(
-                !ws.file_tree
-                    .file_trees
-                    .keys()
+                !ws.lane_file_tree_refs()
                     .any(|k| k.project == active.project),
-                "file_trees must drop entries belonging to the closed project"
+                "file trees must drop entries belonging to the closed project"
             );
         });
     })
@@ -186,17 +184,14 @@ fn close_active_project_drops_the_input_history_of_its_lanes(cx: &mut TestAppCon
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
-            ws.input_history
-                .entry(active)
-                .or_default()
-                .push("cargo test");
-            assert!(ws.input_history.contains_key(&active));
+            ws.lane_scoped_mut(active).input_history.push("cargo test");
+            assert!(ws.lane_scoped[&active].input_history.has_entries());
 
             ws.close_active_project(window, cx);
 
             assert!(
-                !ws.input_history.keys().any(|k| k.project == active.project),
-                "input_history must drop entries belonging to the closed project"
+                !ws.lane_scoped.keys().any(|k| k.project == active.project),
+                "scoped state, including input history, must drop with the closed project"
             );
         });
     })

@@ -169,15 +169,14 @@ impl MergeModal {
         }
 
         // Pre-check: target lane must be clean.
-        // NOTE: git_status_cache may be stale if the target changed after
+        // NOTE: cached git status may be stale if the target changed after
         // the last refresh. git itself will still reject a dirty target
         // (GitError::Exit), so no data is corrupted — this pre-check is
         // only a best-effort UX improvement for a friendlier error message.
         let target_is_dirty = if let Some(ws) = self.workspace.upgrade() {
             let target_ref = self.target_ref();
             ws.read(cx)
-                .git_status_cache
-                .get(&target_ref)
+                .lane_git(target_ref)
                 .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty())
         } else {
             false

@@ -109,7 +109,7 @@ never imports from `workspace/`.
 
 The Workspace entity and its subsystems.
 
-- **Entity & actions** — `Workspace` struct, construction (`new_with_project`), config apply, `on_*` action shims, command palette + history picker, modal openers (`dialog_helpers`), persistence (save/restore/rebuild + `LaneRuntime`), status-bar snapshot, lane create/remove/activate. Holds `projects: Vec<Project>` + `groups: Vec<SerializedGroup>` + `active: LaneRef`; per-lane caches (`git_status_cache`, `file_tree.*`, etc.) key by `LaneRef` rather than `LaneId`.
+- **Entity & actions** — `Workspace` struct, construction (`new_with_project`), config apply, `on_*` action shims, command palette + history picker, modal openers (`dialog_helpers`), persistence (save/restore/rebuild + `LaneRuntime`), status-bar snapshot, lane create/remove/activate. Holds `projects: Vec<Project>` + `groups: Vec<SerializedGroup>` + `active: LaneRef`; `lane_scoped: HashMap<LaneRef, LaneScoped>` owns per-lane git state, file data/watchers, and input history.
 - **`project_ops.rs` / `group_ops.rs` / `project_palette_ops.rs`** — Project CRUD (add / close / delete-on-disk / rename + `window_open_policy`), Group CRUD (add/rename/recolor/collapse/delete + `move_project_to_group`), and palette dialog plumbing (`New Group`, `Rename Project`, `Move Project to Group…`).
 - **`layout/`** — `Dock` entity (left/bottom/right; named `left_dock`/`right_dock`/`bottom_dock` on `Workspace`), divider + dock drag ops, plain-data snapshots for re-entrancy-safe render.
 - **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, TaskEdit prompt-file watcher, and the recursive `PaneLayout` renderer. Sub-domains: `file_view_pane/` (file viewer), `task_edit_pane/` (task form), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
@@ -158,6 +158,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Pure data / algorithm, no GPUI | `lane/`, `agent/mod.rs`, `workspace/main_area/pane_tree.rs`, `daruda_project`, `daruda_config` |
 | GPUI render only | `agent/<view>.rs`, `workspace/left_dock/<view>/`, `workspace/render/` |
 | Workspace action handler | `workspace/mod.rs` (tab/pane/focus) · `workspace/lane_ops.rs` · `workspace/layout/ops.rs` |
+| Workspace data discarded on lane/project teardown | `workspace/lane_scoped.rs::LaneScoped`; runtimes and flow runs retain their own lifecycle containers |
 | New pane content kind | `main_area/pane.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/mod.rs` constructor |
 | New modal / text input in modal | See G9. |
 | Reusable widget | `crate::ui`. Never inline `div().flex().hover(...).on_mouse_down(...)` at call site. |

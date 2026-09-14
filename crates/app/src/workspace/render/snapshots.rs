@@ -84,15 +84,28 @@ impl Workspace {
                 groups
             },
             active: self.active,
-            git_status_cache: self.git_status_cache.clone(),
+            git_status_cache: self
+                .lane_scoped
+                .iter()
+                .filter_map(|(target, state)| {
+                    state
+                        .git
+                        .status
+                        .as_ref()
+                        .map(|status| (*target, status.clone()))
+                })
+                .collect(),
             git_stage_in_flight: self.git_lock_held(GitLock::Index),
             git_op_in_flight: self.git_lock_held(GitLock::Repo),
             git_collapsed_dirs: self
-                .git_collapsed_dirs
+                .lane_scoped
                 .get(&self.active)
-                .cloned()
+                .map(|state| state.git.collapsed_dirs.clone())
                 .unwrap_or_default(),
-            git_changes_cursor: self.git_changes_cursor.get(&self.active).cloned(),
+            git_changes_cursor: self
+                .lane_scoped
+                .get(&self.active)
+                .and_then(|state| state.git.cursor.clone()),
             git_changes_panel_focus: Handle(self.git_changes_panel_focus.clone()),
             focused_file_selection: self
                 .focused_file_view()
@@ -105,9 +118,7 @@ impl Workspace {
             files_icon_color_mode: self.mirrors.files_icon_color_mode.clone(),
             cached_visible: ByPointer(self.cached_or_rebuild_visible(self.active_ref())),
             root_kind: self
-                .file_tree
-                .file_trees
-                .get(&self.active_ref())
+                .lane_file_tree(self.active_ref())
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
             agent_status_per_lane,

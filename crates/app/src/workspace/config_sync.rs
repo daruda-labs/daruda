@@ -25,7 +25,7 @@ pub(in crate::workspace) struct ConfigMirrors {
     pub files_show_hidden: bool,
 
     /// Mirror of `daruda_config::LeftDockConfig::files_use_gitignore`.
-    /// When true, `walk_into` consults `files_gitignore_index` per row.
+    /// When true, `walk_into` consults the lane's gitignore matcher per row.
     pub files_use_gitignore: bool,
 
     /// Mirror of `daruda_config::LeftDockConfig::file_icon_color_mode`.

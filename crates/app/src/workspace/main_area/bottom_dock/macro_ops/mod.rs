@@ -519,9 +519,8 @@ impl Workspace {
         // we just pushed.
         let lane_ref = self.active_ref();
         let history_text = trimmed.trim().to_owned();
-        self.input_history
-            .entry(lane_ref)
-            .or_default()
+        self.lane_scoped_mut(lane_ref)
+            .input_history
             .push(&history_text);
         // Submitted text is no longer a draft — drop the saved entry for
         // the pane whose text is visible (`input_owner`) so returning to
@@ -550,7 +549,7 @@ impl Workspace {
     /// Returns `true` when history navigation in `dir` is possible for the
     /// currently active lane. Called from the `on_history_navigate` hook to
     /// decide whether to consume ↑/↓ before deferring `do_history_navigate`.
-    /// Reading `self.input_history` is safe here (hook fires inside
+    /// Reading the lane's history is safe here (hook fires inside
     /// `terminal_input`'s update; `self` is `Workspace`, a different entity).
     pub(in crate::workspace) fn history_navigate_possible(
         &self,
@@ -567,9 +566,10 @@ impl Workspace {
             return true;
         }
         let lane_ref = self.active_ref();
-        let Some(buf) = self.input_history.get(&lane_ref) else {
+        let Some(state) = self.lane_scoped.get(&lane_ref) else {
             return false;
         };
+        let buf = &state.input_history;
         match dir {
             crate::ui::HistoryDir::Up => buf.has_entries(),
             crate::ui::HistoryDir::Down => buf.is_navigating(),
@@ -624,7 +624,7 @@ impl Workspace {
             return;
         }
         let lane_ref = self.active_ref();
-        let buf = self.input_history.entry(lane_ref).or_default();
+        let buf = &mut self.lane_scoped_mut(lane_ref).input_history;
         let new_text = match dir {
             crate::ui::HistoryDir::Up => buf.prev(&current).map(str::to_owned),
             crate::ui::HistoryDir::Down => buf.forward().map(str::to_owned),

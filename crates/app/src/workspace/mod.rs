@@ -47,6 +47,7 @@ pub(in crate::workspace) mod flow_runs;
 mod group_ops;
 pub(in crate::workspace) mod group_select_modal;
 mod lane_ops;
+mod lane_scoped;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;
@@ -456,29 +457,16 @@ pub struct Workspace {
     /// snapshot that needs it is rebuilt every frame, and a directory listing
     /// per frame is not what a panel costs.
     pub(in crate::workspace) flow_list: flow_cache::LaneCache<Vec<flow_paths::FoundFlow>>,
-    /// Cached git status per (project, lane). Refreshed when the
-    /// Git Changes view is activated or after a commit. Only entries
-    /// that have been fetched at least once are present; missing =
-    /// "not yet loaded".
-    pub(in crate::workspace) git_status_cache:
-        HashMap<daruda_store::project::LaneRef, crate::lane::git::GitStatusData>,
-    /// Left-dock Files view state — per-lane lazy tree, watcher,
-    /// gitignore matcher, scroll handle, keyboard cursor. Grouped
-    /// into one struct so the 12 sub-fields don't clutter
-    /// `Workspace`'s top level. See [`left_dock::file_tree_context::FileTreeContext`].
+    /// Lazy per-lane state, removed together by lane and project teardown.
+    pub(in crate::workspace) lane_scoped:
+        HashMap<daruda_store::project::LaneRef, lane_scoped::LaneScoped>,
+    /// Shared Files panel polling, focus, selection, and scrolling.
+    /// Per-lane data and watchers live in `lane_scoped`.
     pub(in crate::workspace) file_tree: left_dock::file_tree_context::FileTreeContext,
     /// Single source of truth for live-reloaded config mirror state.
     /// `apply_config` is the only update site (other than per-field
     /// toggle methods like `toggle_files_show_hidden`).
     pub(in crate::workspace) mirrors: ConfigMirrors,
-    /// Per-lane "git status currently running" guard. Watcher
-    /// events can arrive faster than `git status` can complete on a
-    /// large repo; this keeps at most one in-flight task per lane.
-    pub(in crate::workspace) git_status_in_flight: HashSet<daruda_store::project::LaneRef>,
-    /// Set of lanes that asked for a status refresh while one was
-    /// already running. Drained by the in-flight task on completion,
-    /// re-firing once to capture intervening changes.
-    pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::LaneRef>,
     /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
     pub(in crate::workspace) git_changes_scroll_handle: gpui::UniformListScrollHandle,
     /// Scroll handle for the Lanes view card list — shared with the
@@ -616,19 +604,6 @@ pub struct Workspace {
     ///
     /// [`GitLock::Index`]: left_dock::git_ops::lock::GitLock::Index
     pub(in crate::workspace) git_stage_in_flight: bool,
-    /// Per-lane set of collapsed dir groups in the Git Changes view.
-    /// Keyed by the lane-relative dir string emitted by `group_by_dir`
-    /// (e.g. `"src/workspace/left_dock"`). In-memory only — collapse state
-    /// resets on app restart by design.
-    pub(in crate::workspace) git_collapsed_dirs:
-        std::collections::HashMap<daruda_store::project::LaneRef, HashSet<String>>,
-    /// Per-lane keyboard cursor in the Git Changes view, stored as
-    /// the file's repo-root-relative path (the same shape git status
-    /// porcelain emits, so it round-trips into stage/unstage/diff ops
-    /// without conversion). Path-keyed (not index-keyed) so refreshes
-    /// that re-sort the list keep the cursor on the same file.
-    pub(in crate::workspace) git_changes_cursor:
-        std::collections::HashMap<daruda_store::project::LaneRef, std::path::PathBuf>,
     /// Focus handle for the Git Changes panel body. Bound to
     /// `key_context("GitChanges")` so the four arrow / Space / Enter
     /// keybindings only fire when the panel holds focus — otherwise
@@ -793,16 +768,6 @@ pub struct Workspace {
     /// re-enter the window via `cx.update_window` when they need to
     /// update widgets whose setters require `&mut Window`.
     pub(in crate::workspace) window_handle: gpui::AnyWindowHandle,
-    /// Per-lane bottom-dock input history. Keyed by `LaneRef` (same as
-    /// every other per-lane workspace cache) to prevent cross-project
-    /// collisions: `LaneId` is a per-project monotonic counter, so two
-    /// different projects can share the same raw id. Populated by
-    /// `send_terminal_input`; navigated via the ↑/↓
-    /// `on_history_navigate` hook installed on `terminal_input`.
-    pub(in crate::workspace) input_history: std::collections::HashMap<
-        daruda_store::project::LaneRef,
-        crate::lane::history::HistoryBuffer,
-    >,
     /// Per-pane unsent draft text for the shared bottom-dock input. Keyed
     /// by the workspace-global `PaneId` of the input-capable pane
     /// (Terminal / AgentChat) the text was typed for. Swapped in/out by
@@ -836,6 +801,42 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub(in crate::workspace) fn lane_git(
+        &self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&crate::lane::git::GitStatusData> {
+        self.lane_scoped.get(&target)?.git.status.as_ref()
+    }
+
+    pub(in crate::workspace) fn lane_scoped_mut(
+        &mut self,
+        target: daruda_store::project::LaneRef,
+    ) -> &mut lane_scoped::LaneScoped {
+        self.lane_scoped.entry(target).or_default()
+    }
+
+    pub(in crate::workspace) fn lane_file_tree(
+        &self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&crate::files::tree::FileTree> {
+        self.lane_scoped.get(&target)?.files.tree.as_ref()
+    }
+
+    pub(in crate::workspace) fn lane_file_tree_mut(
+        &mut self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&mut crate::files::tree::FileTree> {
+        self.lane_scoped.get_mut(&target)?.files.tree.as_mut()
+    }
+
+    pub(in crate::workspace) fn lane_file_tree_refs(
+        &self,
+    ) -> impl Iterator<Item = daruda_store::project::LaneRef> + '_ {
+        self.lane_scoped
+            .iter()
+            .filter_map(|(target, state)| state.files.tree.as_ref().map(|_| *target))
+    }
+
     #[allow(dead_code)]
     pub fn new(
         config: &daruda_config::Config,
@@ -1033,7 +1034,7 @@ impl Workspace {
                 // entry guard as `on_completion_accept`: the hook fires inside
                 // `InputState`'s update, so we cannot call `terminal_input.update`
                 // or `terminal_input.read` synchronously (CLAUDE.md pitfall #5).
-                // Reading `ws.read(app).input_history` is fine — Workspace is a
+                // Reading the workspace's lane history is fine — Workspace is a
                 // different entity from terminal_input.
                 .on_history_navigate(move |dir, window, app| {
                     let Some(ws) = ws_for_history.upgrade() else {
@@ -1249,21 +1250,14 @@ impl Workspace {
             flow_history: flow_cache::LaneCache::default(),
             flow_list: flow_cache::LaneCache::default(),
             flow_config: config.flow.clone(),
-            git_status_cache: HashMap::new(),
+            lane_scoped: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
-                file_trees: HashMap::new(),
-                files_visible_cache: HashMap::new(),
-                file_watchers: HashMap::new(),
-                files_reload_queues: HashMap::new(),
                 files_watcher_poll: None,
                 files_panel_focus: cx.focus_handle(),
                 files_selection: None,
-                files_gitignore_index: HashMap::new(),
                 files_scroll_handle: gpui::UniformListScrollHandle::new(),
             },
             mirrors: ConfigMirrors::from_config(config),
-            git_status_in_flight: HashSet::new(),
-            git_status_pending_repeat: HashSet::new(),
             git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
@@ -1296,8 +1290,6 @@ impl Workspace {
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
-            git_collapsed_dirs: std::collections::HashMap::new(),
-            git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,
@@ -1401,7 +1393,6 @@ impl Workspace {
             }),
             last_update_toast_version: None,
             window_handle: window.window_handle(),
-            input_history: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
             input_owner: None,
             port_scan_status: sync::ports::PortScanStatus::Pending,

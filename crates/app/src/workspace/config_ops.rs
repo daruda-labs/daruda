@@ -157,7 +157,7 @@ impl Workspace {
         let theme_changed = self.mirrors.ui_preset != new_mirrors.ui_preset;
         self.mirrors = new_mirrors;
         if filter_changed {
-            let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
+            let refs: Vec<_> = self.lane_file_tree_refs().collect();
             for wt_ref in refs {
                 self.invalidate_visible_files_cache(wt_ref);
             }

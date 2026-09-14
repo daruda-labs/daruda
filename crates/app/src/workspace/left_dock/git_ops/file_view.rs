@@ -176,7 +176,7 @@ impl Workspace {
             return by_abs;
         };
         let repo_root = self.git_repo_root_for(target);
-        for (rel, status) in build_status_index(self.git_status_cache.get(&target)) {
+        for (rel, status) in build_status_index(self.lane_git(target)) {
             if let Some(repo) = repo_root.as_ref() {
                 by_abs.insert(repo.join(&rel), status);
             }
@@ -192,7 +192,7 @@ impl Workspace {
     /// stamps it on open (including onto a reused tab) and
     /// [`Self::sync_file_pane_statuses`] re-stamps every open pane on each git
     /// refresh. Openers deliberately do **not** pass a status in — it is a
-    /// projection of `git_status_cache`, so a caller-supplied copy could only
+    /// projection of the lane's cached status, so a caller-supplied copy could only
     /// ever be the same value or a staler one. Four of the eight call sites
     /// had no way to know it and passed `None`, which since the toolbar's mode
     /// strip started gating the Changes segment on `is_some()` meant a changed
@@ -263,7 +263,7 @@ impl Workspace {
         // Always dedupe: clicking the same file activates its existing tab.
         if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, staged) {
             // Re-stamp the tab being reused. It was opened against an older
-            // `git_status_cache`, and the toolbar's mode strip reads
+            // the lane's cached status, and the toolbar's mode strip reads
             // `file_status` to decide whether Changes is offered at all.
             if let Some(fc) = self.file_content_mut_for_pane(pane_id)
                 && fc.view.file_status != file_status

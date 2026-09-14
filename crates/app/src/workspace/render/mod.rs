@@ -399,7 +399,7 @@ impl Render for Workspace {
 
         // Ensure the file tree is primed before snapshotting its state.
         let active_ref = self.active_ref();
-        if !self.file_tree.file_trees.contains_key(&active_ref) {
+        if self.lane_file_tree(active_ref).is_none() {
             self.ensure_file_tree(active_ref, cx);
         }
 

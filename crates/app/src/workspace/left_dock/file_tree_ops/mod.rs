@@ -8,7 +8,7 @@
 //! `cx.background_executor()` so the UI thread never blocks.
 //!
 //! `cached_or_rebuild_visible` flattens the tree into the linear list
-//! `uniform_list` consumes, memoised in `files_visible_cache`. The cache
+//! `uniform_list` consumes, memoised in the lane's visible cache. The cache
 //! is invalidated only at fixed trigger points (toggle expand, load
 //! result, watcher event, focused-file-viewer change, activate_lane, git
 //! status update, config change); other `cx.notify()` calls read the
@@ -98,21 +98,19 @@ impl Workspace {
             return;
         }
 
-        let needs_load = match self.file_tree.file_trees.get(&wt_ref) {
+        let needs_load = match self.lane_file_tree(wt_ref) {
             Some(tree) => tree
                 .entry(tree.root_id)
                 .map(|e| matches!(e.kind, EntryKind::UnloadedDir))
                 .unwrap_or(false),
             None => {
-                self.file_tree
-                    .file_trees
-                    .insert(wt_ref, FileTree::new(root.clone()));
+                self.lane_scoped_mut(wt_ref).files.tree = Some(FileTree::new(root.clone()));
                 true
             }
         };
 
         if needs_load {
-            if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref)
+            if let Some(tree) = self.lane_file_tree_mut(wt_ref)
                 && let Some(entry) = tree.entry_mut(EntryId(0))
                 && matches!(entry.kind, EntryKind::UnloadedDir)
             {
@@ -124,12 +122,20 @@ impl Workspace {
 
         // Start a watcher on first touch. The watcher is GPUI-free; the
         // polling task belongs to Workspace and is created lazily.
-        if !self.file_tree.file_watchers.contains_key(&wt_ref) {
+        if !self
+            .lane_scoped
+            .get(&wt_ref)
+            .is_some_and(|state| state.files.watcher.is_some())
+        {
             self.spawn_files_watcher(wt_ref, root.clone(), cx);
         }
         // Build the gitignore matcher once on a background thread;
         // rebuilt when `.gitignore` changes.
-        if !self.file_tree.files_gitignore_index.contains_key(&wt_ref) {
+        if !self
+            .lane_scoped
+            .get(&wt_ref)
+            .is_some_and(|state| state.files.gitignore.is_some())
+        {
             self.kick_gitignore_build(wt_ref, root.clone(), cx);
         }
     }
@@ -146,11 +152,11 @@ impl Workspace {
     /// (watcher-driven, catches an active lane going missing mid-session,
     /// which `ensure_file_tree` never reaches once a tree exists).
     pub(in crate::workspace) fn teardown_unavailable_lane_state(&mut self, wt_ref: LaneRef) {
-        self.file_tree.file_watchers.remove(&wt_ref);
-        self.file_tree.file_trees.remove(&wt_ref);
-        self.file_tree.files_reload_queues.remove(&wt_ref);
-        self.file_tree.files_gitignore_index.remove(&wt_ref);
-        self.invalidate_visible_files_cache(wt_ref);
+        if let Some(state) = self.lane_scoped.get_mut(&wt_ref) {
+            // Stop the watcher before discarding data from the unavailable root.
+            state.files.watcher = None;
+            state.files = Default::default();
+        }
     }
 
     pub(in crate::workspace) fn toggle_files_expand(
@@ -160,7 +166,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let to_load: Option<PathBuf> = {
-            let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) else {
+            let Some(tree) = self.lane_file_tree_mut(wt_ref) else {
                 return;
             };
             let now_expanded = tree.toggle_expand(entry_id);
@@ -220,7 +226,7 @@ impl Workspace {
             cx,
             move || GitignoreSet::build(&root),
             move |ws, gi_set, cx| {
-                ws.file_tree.files_gitignore_index.insert(wt_ref, gi_set);
+                ws.lane_scoped_mut(wt_ref).files.gitignore = Some(gi_set);
                 ws.invalidate_visible_files_cache(wt_ref);
                 cx.notify();
             },
@@ -256,7 +262,7 @@ impl Workspace {
                 return;
             }
         };
-        self.file_tree.file_watchers.insert(wt_ref, watcher);
+        self.lane_scoped_mut(wt_ref).files.watcher = Some(watcher);
         if self.file_tree.files_watcher_poll.is_none() {
             let task = cx.spawn(async move |this, cx| {
                 loop {
@@ -280,7 +286,10 @@ impl Workspace {
     /// per-lane reload queue.
     pub(in crate::workspace) fn drain_files_watcher_events(&mut self, cx: &mut Context<Self>) {
         let mut events: Vec<(LaneRef, DebouncedEvent)> = Vec::new();
-        for (wt_ref, watcher) in &self.file_tree.file_watchers {
+        for (wt_ref, state) in &self.lane_scoped {
+            let Some(watcher) = &state.files.watcher else {
+                continue;
+            };
             while let Ok(ev) = watcher.events_rx.try_recv() {
                 events.push((*wt_ref, ev));
             }
@@ -300,7 +309,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if wt_ref != self.active {
-            if let Some(t) = self.file_tree.file_trees.get_mut(&wt_ref) {
+            if let Some(t) = self.lane_file_tree_mut(wt_ref) {
                 t.dirty = true;
             }
             return;
@@ -313,23 +322,19 @@ impl Workspace {
         // this doesn't blind us; a rare `.git/HEAD`-only change is
         // recovered via the manual "Refresh Git Status" command.
         let should_refresh_git_status = event_has_non_git_path(&ev);
-        let root = self
-            .file_tree
-            .file_trees
-            .get(&wt_ref)
-            .map(|t| t.root.clone());
+        let root = self.lane_file_tree(wt_ref).map(|t| t.root.clone());
         let bulk_pending = self
-            .file_tree
-            .files_reload_queues
+            .lane_scoped
             .get(&wt_ref)
+            .and_then(|state| state.files.reload_queue.as_ref())
             .is_some_and(|q| q.pending_bulk);
         match ev {
             DebouncedEvent::Bulk => {
                 let q = self
-                    .file_tree
-                    .files_reload_queues
-                    .entry(wt_ref)
-                    .or_default();
+                    .lane_scoped_mut(wt_ref)
+                    .files
+                    .reload_queue
+                    .get_or_insert_default();
                 q.pending_bulk = true;
                 q.pending_parents.clear();
                 q.pending_seen.clear();
@@ -340,7 +345,7 @@ impl Workspace {
                 // Modify events arrive as a separate Changed event and
                 // reload the parent normally.
                 let Some(root) = root.clone() else { return };
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) {
+                if let Some(tree) = self.lane_file_tree_mut(wt_ref) {
                     for abs in paths {
                         if let Ok(rel) = abs.strip_prefix(&root) {
                             tree.remove_subtree(rel);
@@ -379,10 +384,10 @@ impl Workspace {
                     self.invalidate_visible_files_cache(wt_ref);
                 }
                 let q = self
-                    .file_tree
-                    .files_reload_queues
-                    .entry(wt_ref)
-                    .or_default();
+                    .lane_scoped_mut(wt_ref)
+                    .files
+                    .reload_queue
+                    .get_or_insert_default();
                 for p in paths {
                     let parent = p
                         .parent()
@@ -423,10 +428,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let q = self
-            .file_tree
-            .files_reload_queues
-            .entry(wt_ref)
-            .or_default();
+            .lane_scoped_mut(wt_ref)
+            .files
+            .reload_queue
+            .get_or_insert_default();
         if q.running {
             return;
         }
@@ -438,7 +443,7 @@ impl Workspace {
             loop {
                 let task = this
                     .update(cx, |ws, _| {
-                        let q = ws.file_tree.files_reload_queues.get_mut(&wt_ref)?;
+                        let q = ws.lane_scoped.get_mut(&wt_ref)?.files.reload_queue.as_mut()?;
                         if q.pending_bulk {
                             q.pending_bulk = false;
                             return Some(ReloadTask::Bulk);
@@ -460,7 +465,7 @@ impl Workspace {
                         // the queue's serial guarantee holds.
                         let plan = this
                             .update(cx, |ws, _| {
-                                let tree = ws.file_tree.file_trees.get(&wt_ref)?;
+                                let tree = ws.lane_file_tree(wt_ref)?;
                                 let mut targets: Vec<(EntryId, PathBuf)> =
                                     vec![(tree.root_id, tree.root.clone())];
                                 for &eid in tree.expanded_ids() {
@@ -504,7 +509,7 @@ impl Workspace {
                     ReloadTask::Parent(abs) => {
                         let parent_id = this
                             .update(cx, |ws, _| {
-                                let tree = ws.file_tree.file_trees.get(&wt_ref)?;
+                                let tree = ws.lane_file_tree(wt_ref)?;
                                 let rel = abs.strip_prefix(&tree.root).ok()?;
                                 tree.id_for_path(rel)
                             })
@@ -552,9 +557,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let dirty = self
-            .file_tree
-            .file_trees
-            .get_mut(&wt_ref)
+            .lane_file_tree_mut(wt_ref)
             .map(|t| {
                 let was = t.dirty;
                 t.dirty = false;
@@ -565,10 +568,10 @@ impl Workspace {
             return;
         }
         let q = self
-            .file_tree
-            .files_reload_queues
-            .entry(wt_ref)
-            .or_default();
+            .lane_scoped_mut(wt_ref)
+            .files
+            .reload_queue
+            .get_or_insert_default();
         q.pending_bulk = true;
         q.pending_parents.clear();
         q.pending_seen.clear();
@@ -608,18 +611,16 @@ impl Workspace {
     ) {
         let error_msg = match result {
             Ok(loaded) => {
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) {
+                if let Some(tree) = self.lane_file_tree_mut(wt_ref) {
                     tree.apply_dir_load(parent_id, loaded);
                 }
                 None
             }
             Err(e) => {
                 let is_root = self
-                    .file_tree
-                    .file_trees
-                    .get(&wt_ref)
+                    .lane_file_tree(wt_ref)
                     .is_some_and(|t| t.root_id == parent_id);
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref)
+                if let Some(tree) = self.lane_file_tree_mut(wt_ref)
                     && let Some(entry) = tree.entry_mut(parent_id)
                     && matches!(entry.kind, EntryKind::PendingDir)
                 {
@@ -723,7 +724,9 @@ impl Workspace {
     /// Drop the cached visible list for `wt_ref`. Trigger sites are
     /// enumerated in the module-level doc comment.
     pub(in crate::workspace) fn invalidate_visible_files_cache(&mut self, wt_ref: LaneRef) {
-        self.file_tree.files_visible_cache.remove(&wt_ref);
+        if let Some(state) = self.lane_scoped.get_mut(&wt_ref) {
+            state.files.visible_cache = None;
+        }
     }
 
     /// Return the cached `Arc<Vec<VisibleEntry>>` for `wt_ref`,
@@ -732,22 +735,24 @@ impl Workspace {
         &mut self,
         wt_ref: LaneRef,
     ) -> Arc<Vec<VisibleEntry>> {
-        if let Some(cached) = self.file_tree.files_visible_cache.get(&wt_ref) {
+        if let Some(cached) = self
+            .lane_scoped
+            .get(&wt_ref)
+            .and_then(|state| state.files.visible_cache.as_ref())
+        {
             return cached.clone();
         }
         let visible = self.build_visible_for(wt_ref);
         let arc = Arc::new(visible);
-        self.file_tree
-            .files_visible_cache
-            .insert(wt_ref, arc.clone());
+        self.lane_scoped_mut(wt_ref).files.visible_cache = Some(arc.clone());
         arc
     }
 
     fn build_visible_for(&self, wt_ref: LaneRef) -> Vec<VisibleEntry> {
-        let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
+        let Some(tree) = self.lane_file_tree(wt_ref) else {
             return Vec::new();
         };
-        let status_index = build_status_index(self.git_status_cache.get(&wt_ref));
+        let status_index = build_status_index(self.lane_git(wt_ref));
         // Keyboard cursor only counts on the active lane; switching
         // lanes clears the cursor.
         let keyboard_focus = if wt_ref == self.active {
@@ -756,7 +761,9 @@ impl Workspace {
             None
         };
         let gitignore = if self.mirrors.files_use_gitignore {
-            self.file_tree.files_gitignore_index.get(&wt_ref)
+            self.lane_scoped
+                .get(&wt_ref)
+                .and_then(|state| state.files.gitignore.as_ref())
         } else {
             None
         };
@@ -779,7 +786,7 @@ impl Workspace {
     /// and request a render. Wired to `FilesToggleHidden`.
     pub(in crate::workspace) fn toggle_files_show_hidden(&mut self, cx: &mut Context<Self>) {
         self.mirrors.files_show_hidden = !self.mirrors.files_show_hidden;
-        let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
+        let refs: Vec<_> = self.lane_file_tree_refs().collect();
         for wt_ref in refs {
             self.invalidate_visible_files_cache(wt_ref);
         }
@@ -845,7 +852,7 @@ impl Workspace {
             return;
         };
         let (kind, path, tree_root) = {
-            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
+            let Some(tree) = self.lane_file_tree(wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -871,7 +878,7 @@ impl Workspace {
             return;
         };
         let should_toggle = {
-            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
+            let Some(tree) = self.lane_file_tree(wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -892,7 +899,7 @@ impl Workspace {
             return;
         };
         let should_toggle = {
-            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
+            let Some(tree) = self.lane_file_tree(wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -925,7 +932,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let invalidated = {
-            let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) else {
+            let Some(tree) = self.lane_file_tree_mut(wt_ref) else {
                 return;
             };
             if !tree.is_expanded(entry_id) {

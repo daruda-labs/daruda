@@ -48,7 +48,7 @@ fn child_id_by_name(
 ) -> crate::files::tree::EntryId {
     ws.read_with(cx, |ws, _| {
         let id = ws.active_ref();
-        let tree = ws.file_tree.file_trees.get(&id).expect("file tree exists");
+        let tree = ws.lane_file_tree(id).expect("file tree exists");
         for entry in tree.child_entries(tree.root_id) {
             if entry.name == name {
                 return entry.id;
@@ -72,7 +72,7 @@ async fn file_tree_loads_root_and_lazy_children(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        let tree = ws.file_tree.file_trees.get(&id).expect("tree");
+        let tree = ws.lane_file_tree(id).expect("tree");
         let names: Vec<&str> = tree
             .child_entries(tree.root_id)
             .map(|e| e.name.as_str())
@@ -96,7 +96,7 @@ async fn file_tree_loads_root_and_lazy_children(cx: &mut TestAppContext) {
     // `sub` has no children loaded yet (UnloadedDir).
     let sub_id = child_id_by_name(&ws, cx, "sub");
     ws.read_with(cx, |ws, _| {
-        let tree = &ws.file_tree.file_trees[&id];
+        let tree = ws.lane_file_tree(id).unwrap();
         let entry = tree.entry(sub_id).unwrap();
         assert_eq!(entry.kind, EntryKind::UnloadedDir);
         assert!(tree.child_ids(sub_id).is_empty());
@@ -113,7 +113,7 @@ async fn file_tree_loads_root_and_lazy_children(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        let tree = &ws.file_tree.file_trees[&id];
+        let tree = ws.lane_file_tree(id).unwrap();
         let entry = tree.entry(sub_id).unwrap();
         assert_eq!(entry.kind, EntryKind::Dir);
         let names: Vec<&str> = tree
@@ -300,14 +300,14 @@ async fn watcher_event_updates_tree_invalidates_cache_and_collapses_git_refresh(
             cx,
         );
         assert!(
-            ws.git_status_in_flight.contains(&ws.active_ref()),
+            ws.lane_scoped[&ws.active_ref()].git.fetch_in_flight,
             "watcher event must kick git status refresh"
         );
     });
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        let tree = &ws.file_tree.file_trees[&id];
+        let tree = ws.lane_file_tree(id).unwrap();
         let names: Vec<&str> = tree
             .child_entries(tree.root_id)
             .map(|e| e.name.as_str())
@@ -328,14 +328,14 @@ async fn watcher_event_updates_tree_invalidates_cache_and_collapses_git_refresh(
         ws.refresh_git_status(target, cx);
         ws.refresh_git_status(target, cx);
         ws.refresh_git_status(target, cx);
-        assert!(ws.git_status_in_flight.contains(&target));
-        assert!(ws.git_status_pending_repeat.contains(&target));
+        assert!(ws.lane_scoped[&target].git.fetch_in_flight);
+        assert!(ws.lane_scoped[&target].git.fetch_pending_repeat);
     });
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         let target = ws.active_ref();
-        assert!(!ws.git_status_in_flight.contains(&target));
-        assert!(!ws.git_status_pending_repeat.contains(&target));
+        assert!(!ws.lane_scoped[&target].git.fetch_in_flight);
+        assert!(!ws.lane_scoped[&target].git.fetch_pending_repeat);
     });
 }
 
@@ -366,10 +366,8 @@ async fn inactive_lane_event_marks_dirty_then_replays_on_activation(cx: &mut Tes
                 inactive_path.clone(),
             ));
         }
-        ws.file_tree.file_trees.insert(
-            inactive_ref,
-            crate::files::tree::FileTree::new(inactive_path),
-        );
+        ws.lane_scoped_mut(inactive_ref).files.tree =
+            Some(crate::files::tree::FileTree::new(inactive_path));
     });
 
     ws.update(cx, |ws, cx| {
@@ -383,10 +381,13 @@ async fn inactive_lane_event_marks_dirty_then_replays_on_activation(cx: &mut Tes
     });
 
     ws.read_with(cx, |ws, _| {
-        let tree = &ws.file_tree.file_trees[&inactive_ref];
+        let tree = ws.lane_file_tree(inactive_ref).unwrap();
         assert!(tree.dirty, "inactive lane must record dirty=true");
         // No reload queue work created.
-        let q = ws.file_tree.files_reload_queues.get(&inactive_ref);
+        let q = ws
+            .lane_scoped
+            .get(&inactive_ref)
+            .and_then(|state| state.files.reload_queue.as_ref());
         assert!(q.is_none_or(|q| !q.is_running_for_test()));
     });
 
@@ -409,7 +410,7 @@ async fn inactive_lane_event_marks_dirty_then_replays_on_activation(cx: &mut Tes
     );
 
     ws.read_with(cx, |ws, _| {
-        let tree = &ws.file_tree.file_trees[&inactive_ref];
+        let tree = ws.lane_file_tree(inactive_ref).unwrap();
         assert!(!tree.dirty, "dirty flag must clear after replay");
         let names: Vec<&str> = tree
             .child_entries(tree.root_id)
@@ -531,24 +532,24 @@ async fn keyboard_selection_moves_activates_and_collapses(cx: &mut TestAppContex
     });
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
-        assert!(ws.file_tree.file_trees[&id].is_expanded(sub_id));
+        assert!(ws.lane_file_tree(id).unwrap().is_expanded(sub_id));
     });
 
     ws.update(cx, |ws, cx| ws.collapse_at_files_selection(cx));
     ws.read_with(cx, |ws, _| {
-        assert!(!ws.file_tree.file_trees[&id].is_expanded(sub_id));
+        assert!(!ws.lane_file_tree(id).unwrap().is_expanded(sub_id));
     });
 
     ws.update(cx, |ws, cx| ws.toggle_files_expand(id, sub_id, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
-        assert!(ws.file_tree.file_trees[&id].is_expanded(sub_id));
+        assert!(ws.lane_file_tree(id).unwrap().is_expanded(sub_id));
     });
 
     ws.update(cx, |ws, cx| ws.collapse_files_subtree(id, sub_id, cx));
     ws.read_with(cx, |ws, _| {
         assert!(
-            !ws.file_tree.file_trees[&id].is_expanded(sub_id),
+            !ws.lane_file_tree(id).unwrap().is_expanded(sub_id),
             "Alt+click collapse must drop the dir from expanded"
         );
     });
@@ -587,12 +588,16 @@ async fn finalize_remove_lane_clears_per_lane_state(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        assert!(ws.file_tree.file_trees.contains_key(&removable_ref));
-        assert!(ws.file_tree.file_watchers.contains_key(&removable_ref));
+        assert!(ws.lane_file_tree(removable_ref).is_some());
         assert!(
-            ws.file_tree
-                .files_gitignore_index
-                .contains_key(&removable_ref)
+            ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.watcher.is_some())
+        );
+        assert!(
+            ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.gitignore.is_some())
         );
     });
 
@@ -604,25 +609,28 @@ async fn finalize_remove_lane_clears_per_lane_state(cx: &mut TestAppContext) {
     .unwrap();
 
     ws.read_with(cx, |ws, _| {
-        assert!(!ws.file_tree.file_trees.contains_key(&removable_ref));
-        assert!(!ws.file_tree.file_watchers.contains_key(&removable_ref));
+        assert!(ws.lane_file_tree(removable_ref).is_none());
         assert!(
-            !ws.file_tree
-                .files_gitignore_index
-                .contains_key(&removable_ref)
+            !ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.watcher.is_some())
         );
         assert!(
-            !ws.file_tree
-                .files_reload_queues
-                .contains_key(&removable_ref)
+            !ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.gitignore.is_some())
         );
         assert!(
-            !ws.file_tree
-                .files_visible_cache
-                .contains_key(&removable_ref)
+            !ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.reload_queue.is_some())
         );
-        assert!(!ws.git_status_in_flight.contains(&removable_ref));
-        assert!(!ws.git_status_pending_repeat.contains(&removable_ref));
+        assert!(
+            !ws.lane_scoped
+                .get(&removable_ref)
+                .is_some_and(|state| state.files.visible_cache.is_some())
+        );
+        assert!(!ws.lane_scoped.contains_key(&removable_ref));
     });
 }
 
@@ -824,11 +832,13 @@ async fn ensure_file_tree_skips_unavailable_lane_and_tears_down_watcher(cx: &mut
 
     ws.read_with(cx, |ws, _| {
         assert!(
-            !ws.file_tree.file_trees.contains_key(&id),
+            ws.lane_file_tree(id).is_none(),
             "unavailable lane must not get a file tree"
         );
         assert!(
-            !ws.file_tree.file_watchers.contains_key(&id),
+            !ws.lane_scoped
+                .get(&id)
+                .is_some_and(|state| state.files.watcher.is_some()),
             "unavailable lane must not get a watcher"
         );
     });
@@ -841,11 +851,13 @@ async fn ensure_file_tree_skips_unavailable_lane_and_tears_down_watcher(cx: &mut
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         assert!(
-            ws.file_tree.file_trees.contains_key(&id),
+            ws.lane_file_tree(id).is_some(),
             "present lane gets a file tree"
         );
         assert!(
-            ws.file_tree.file_watchers.contains_key(&id),
+            ws.lane_scoped
+                .get(&id)
+                .is_some_and(|state| state.files.watcher.is_some()),
             "present lane gets a watcher"
         );
     });
@@ -858,11 +870,13 @@ async fn ensure_file_tree_skips_unavailable_lane_and_tears_down_watcher(cx: &mut
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         assert!(
-            !ws.file_tree.file_trees.contains_key(&id),
+            ws.lane_file_tree(id).is_none(),
             "tree torn down once the lane root is missing"
         );
         assert!(
-            !ws.file_tree.file_watchers.contains_key(&id),
+            !ws.lane_scoped
+                .get(&id)
+                .is_some_and(|state| state.files.watcher.is_some()),
             "watcher torn down once the lane root is missing"
         );
     });
@@ -881,9 +895,7 @@ async fn root_and_late_load_errors_update_availability_and_toasts(cx: &mut TestA
     ws.update(cx, |ws, cx| {
         // Seed a tree so `apply_dir_load_result` resolves `is_root`.
         let root = ws.lane_for(id).unwrap().path.clone();
-        ws.file_tree
-            .file_trees
-            .insert(id, FileTree::new(root.clone()));
+        ws.lane_scoped_mut(id).files.tree = Some(FileTree::new(root.clone()));
         // A root load that comes back NotFound is the detection site.
         // `EntryId(0)` is the `root_id` `FileTree::new` assigns to the
         // root node, so passing it here marks this as a root load.
@@ -911,7 +923,7 @@ async fn root_and_late_load_errors_update_availability_and_toasts(cx: &mut TestA
 
         // Seed a tree so `apply_dir_load_result` resolves `is_root`.
         ws.set_lane_availability(id, LaneAvailability::Present);
-        ws.file_tree.file_trees.insert(id, FileTree::new(root));
+        ws.lane_scoped_mut(id).files.tree = Some(FileTree::new(root));
         // A transient/unknown I/O failure on the root must NOT flip the
         // lane (the directory likely still exists) — instead it surfaces
         // as a normal Error toast so a real I/O failure is not swallowed.
@@ -929,7 +941,7 @@ async fn root_and_late_load_errors_update_availability_and_toasts(cx: &mut TestA
             "a transient root I/O error must keep the lane Present (no teardown)"
         );
         assert!(
-            ws.file_tree.file_trees.contains_key(&id),
+            ws.lane_file_tree(id).is_some(),
             "a Present lane keeps its tree — no teardown on a transient error"
         );
         let has_error_toast = ws
@@ -944,7 +956,7 @@ async fn root_and_late_load_errors_update_availability_and_toasts(cx: &mut TestA
         // tree whose root_id is EntryId(0) so a non-root parent_id
         // makes this a *child* load, exercising the late-arrival path.
         let root = ws.lane_for(id).unwrap().path.clone();
-        ws.file_tree.file_trees.insert(id, FileTree::new(root));
+        ws.lane_scoped_mut(id).files.tree = Some(FileTree::new(root));
         ws.set_lane_availability(id, LaneAvailability::Missing);
 
         // A child load (parent_id != root_id) that lands after the lane
@@ -982,9 +994,11 @@ async fn mid_session_root_vanish_tears_down_tree_and_reconciles_project(cx: &mut
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
-        assert!(ws.file_tree.file_trees.contains_key(&id), "tree exists");
+        assert!(ws.lane_file_tree(id).is_some(), "tree exists");
         assert!(
-            ws.file_tree.file_watchers.contains_key(&id),
+            ws.lane_scoped
+                .get(&id)
+                .is_some_and(|state| state.files.watcher.is_some()),
             "watcher exists"
         );
         assert_eq!(
@@ -1017,11 +1031,13 @@ async fn mid_session_root_vanish_tears_down_tree_and_reconciles_project(cx: &mut
             "root NotFound flips the lane non-Present"
         );
         assert!(
-            !ws.file_tree.file_trees.contains_key(&id),
+            ws.lane_file_tree(id).is_none(),
             "teardown removes the stale tree"
         );
         assert!(
-            !ws.file_tree.file_watchers.contains_key(&id),
+            !ws.lane_scoped
+                .get(&id)
+                .is_some_and(|state| state.files.watcher.is_some()),
             "teardown removes the watcher so it stops firing reload spam"
         );
         assert_eq!(
@@ -1594,8 +1610,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     // Re-opening lands in the dedupe branch. Move the cache out from under the
     // pane first, so only a re-stamp there can bring it back in line.
     ws.update(cx, |ws, _cx| {
-        ws.git_status_cache
-            .insert(id, crate::lane::git::GitStatusData::default());
+        ws.lane_scoped_mut(id).git.status = Some(crate::lane::git::GitStatusData::default());
     });
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {

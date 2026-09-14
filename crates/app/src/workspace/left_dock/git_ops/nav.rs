@@ -12,16 +12,16 @@ impl Workspace {
     /// Defers to `ordered_visible_paths` so render-order changes apply to
     /// `↑↓` nav too.
     fn git_changes_visible_paths(&self) -> Vec<PathBuf> {
-        let Some(s) = self.git_status_cache.get(&self.active) else {
+        let Some(s) = self.lane_git(self.active) else {
             return Vec::new();
         };
         let Some(wt) = self.active_lane() else {
             return Vec::new();
         };
         let collapsed = self
-            .git_collapsed_dirs
+            .lane_scoped
             .get(&self.active)
-            .cloned()
+            .map(|state| state.git.collapsed_dirs.clone())
             .unwrap_or_default();
         crate::workspace::left_dock::git_changes::ordered_visible_paths(s, &collapsed, &wt.paths())
     }
@@ -39,7 +39,7 @@ impl Workspace {
             project: self.active.project,
             lane: lane_id,
         };
-        self.git_changes_cursor.insert(target, path);
+        self.lane_scoped_mut(target).git.cursor = Some(path);
         cx.notify();
     }
 
@@ -58,8 +58,9 @@ impl Workspace {
         }
         let active_ref = self.active;
         let current_idx = self
-            .git_changes_cursor
+            .lane_scoped
             .get(&active_ref)
+            .and_then(|state| state.git.cursor.as_ref())
             .and_then(|p| visible.iter().position(|v| v == p));
         let new_idx: usize = match (current_idx, delta) {
             (None, d) if d >= 0 => 0,
@@ -69,8 +70,7 @@ impl Workspace {
                 ((i as isize + d).rem_euclid(len)) as usize
             }
         };
-        self.git_changes_cursor
-            .insert(active_ref, visible[new_idx].clone());
+        self.lane_scoped_mut(active_ref).git.cursor = Some(visible[new_idx].clone());
         cx.notify();
     }
 
@@ -80,10 +80,14 @@ impl Workspace {
     pub(in crate::workspace) fn toggle_git_changes_cursor_stage(&mut self, cx: &mut Context<Self>) {
         let active_ref = self.active;
         let active_id = self.active.lane;
-        let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
+        let Some(cursor) = self
+            .lane_scoped
+            .get(&active_ref)
+            .and_then(|state| state.git.cursor.clone())
+        else {
             return;
         };
-        let Some(s) = self.git_status_cache.get(&active_ref) else {
+        let Some(s) = self.lane_git(active_ref) else {
             return;
         };
         let is_staged = s.staged.iter().any(|e| e.path == cursor);
@@ -102,10 +106,14 @@ impl Workspace {
     ) {
         let active_ref = self.active;
         let active_id = self.active.lane;
-        let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
+        let Some(cursor) = self
+            .lane_scoped
+            .get(&active_ref)
+            .and_then(|state| state.git.cursor.clone())
+        else {
             return;
         };
-        let Some(s) = self.git_status_cache.get(&active_ref) else {
+        let Some(s) = self.lane_git(active_ref) else {
             return;
         };
         let staged_entry = s.staged.iter().find(|e| e.path == cursor);
@@ -138,7 +146,7 @@ impl Workspace {
             project: self.active.project,
             lane: lane_id,
         };
-        let set = self.git_collapsed_dirs.entry(target).or_default();
+        let set = &mut self.lane_scoped_mut(target).git.collapsed_dirs;
         if !set.remove(&dir) {
             set.insert(dir);
         }
