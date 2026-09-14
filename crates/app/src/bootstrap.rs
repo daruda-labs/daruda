@@ -9,6 +9,7 @@
 
 use crate::hooks;
 use crate::windows::{build_window_options, open_welcome_window};
+#[cfg(debug_assertions)]
 use daruda_core::process_env;
 use gpui::{Application, QuitMode};
 

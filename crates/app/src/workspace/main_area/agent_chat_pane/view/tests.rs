@@ -2,6 +2,8 @@ use super::super::fold::{FoldContext, FoldKey};
 use super::super::rows::RowKind;
 use crate::transcript::fold_mode::FoldPreset;
 
+mod transitions;
+
 fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
     daruda_acp::ChatItem::AssistantText {
         text: text.to_string(),
@@ -62,6 +64,10 @@ pub(in crate::workspace::main_area::agent_chat_pane) fn make_test_view(
     cx: &mut gpui::TestAppContext,
 ) -> gpui::WindowHandle<super::AgentChatView> {
     crate::test_support::init_gpui_component(cx);
+    add_test_view(cx)
+}
+
+fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::AgentChatView> {
     cx.add_window(|window, cx| {
         super::AgentChatView::new(
             0,
