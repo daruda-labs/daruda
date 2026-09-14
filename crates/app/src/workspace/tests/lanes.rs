@@ -1164,3 +1164,75 @@ fn closing_last_tab_of_only_lane_closes_window(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A flow run holds a cancel token and the thread running it, and the only
+/// place that hands either back is the run ending on its own. Removing the
+/// lane out from under it would leave the run working a directory `git
+/// worktree remove` just deleted, with nothing left on screen to stop it.
+#[gpui::test]
+fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
+    use crate::workspace::flow_request::FlowSource;
+    use crate::workspace::flow_runs::{RunHandle, RunStage};
+
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_remove_lane_running_flow");
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    // A worktree whose root differs from the repo root — `Lane::git` derives
+    // `is_main` from those being equal, and `lane_removable` refuses a main.
+    let checkout = root.join("wt-feat");
+    let target = ws.update(cx, |ws, _| {
+        let project_id = ws.active_ref().project;
+        let lane_id = ws.active_lanes().last().map(|l| l.id).unwrap_or(0) + 1;
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes.push(crate::lane::Lane::git(
+                lane_id,
+                checkout.clone(),
+                Some("feat".into()),
+                root.clone(),
+                checkout.clone(),
+                1,
+            ));
+        }
+        daruda_store::project::LaneRef {
+            project: project_id,
+            lane: lane_id,
+        }
+    });
+
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.validate_remove_lane(target).is_ok(),
+            "the lane is removable while nothing is running in it"
+        );
+    });
+
+    ws.update(cx, |ws, _| {
+        let run_dir = checkout.join("run");
+        ws.runs.insert(
+            target,
+            RunHandle::seeded(
+                run_dir.clone(),
+                FlowSource::Resumed { run_dir },
+                RunStage::Starting,
+            ),
+        );
+    });
+
+    ws.read_with(cx, |ws, _| {
+        let err = ws
+            .validate_remove_lane(target)
+            .expect_err("a running flow blocks removal");
+        assert_eq!(err, crate::surface::strings::remove_lane_err_flow_running());
+    });
+}

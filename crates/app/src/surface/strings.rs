@@ -2833,6 +2833,9 @@ pub fn remove_lane_err_not_found() -> String {
 pub fn remove_lane_err_not_git() -> String {
     rust_i18n::t!("modal.remove_lane_err_not_git").into_owned()
 }
+pub fn remove_lane_err_flow_running() -> String {
+    rust_i18n::t!("modal.remove_lane_err_flow_running").into_owned()
+}
 pub fn remove_lane_removing() -> String {
     rust_i18n::t!("modal.remove_lane_removing").into_owned()
 }

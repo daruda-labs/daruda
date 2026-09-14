@@ -242,6 +242,14 @@ impl Workspace {
         if !Self::lane_removable(wt) {
             return Err(crate::surface::strings::remove_lane_err_cannot_remove());
         }
+        // A run's cancel token and its thread are only handed back when the
+        // run ends on its own, so removing the lane would leave it working a
+        // checkout `git worktree remove` just deleted with no way left to stop
+        // it. Refusing matches what the shell-out does anyway: `git worktree
+        // remove` fails on a dirty checkout, and a running flow makes one.
+        if self.runs.is_running(target) {
+            return Err(crate::surface::strings::remove_lane_err_flow_running());
+        }
         let repo_root = match &wt.kind {
             daruda_store::project::LaneKind::Git { repo_root, .. } => repo_root.clone(),
             _ => return Err(crate::surface::strings::remove_lane_err_not_git()),
