@@ -136,6 +136,10 @@ pub struct FlowGraph {
     /// Declaration order, used to break topological ties so the same flow
     /// always runs in the same sequence.
     order: HashMap<NodeId, usize>,
+    /// Execution order, settled at build time. Kept rather than recomputed:
+    /// it is a pure function of a graph that cannot change, and `build`
+    /// already works it out to reject a cycle.
+    topological: Vec<NodeId>,
 }
 
 impl FlowGraph {
@@ -163,25 +167,22 @@ impl FlowGraph {
             }
         }
 
-        let this = Self {
+        let mut this = Self {
             graph,
             index,
             order,
+            topological: Vec::new(),
         };
-        // Reject a cycle at build time so every later query can assume a DAG.
-        this.try_topological_order()?;
+        // Reject a cycle at build time so every later query can assume a
+        // DAG — and keep what that check produced.
+        this.topological = this.try_topological_order()?;
         Ok(this)
     }
 
     /// Execution order: dependencies first, ties broken by declaration
     /// order.
     pub fn topological_order(&self) -> Vec<NodeId> {
-        match self.try_topological_order() {
-            Ok(order) => order,
-            // `build` rejects cyclic graphs, so no `FlowGraph` can reach
-            // this arm. Panicking beats silently returning a partial order.
-            Err(_) => unreachable!("FlowGraph::build rejects cyclic graphs"),
-        }
+        self.topological.clone()
     }
 
     /// Kahn's algorithm with a declaration-ordered ready set, so the result
@@ -268,9 +269,10 @@ impl FlowGraph {
         for root in roots {
             wanted.extend(self.descendants(root));
         }
-        self.topological_order()
-            .into_iter()
-            .filter(|id| wanted.contains(id))
+        self.topological
+            .iter()
+            .filter(|id| wanted.contains(*id))
+            .cloned()
             .collect()
     }
 
