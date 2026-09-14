@@ -15,6 +15,19 @@ the working tree, and step 3 asks one to create a file.
 `DARUDA_FLOW_AGENT` overrides the adapter command; unset, it launches the
 same one the app does.
 
+Every command node inherits the host environment after credential stripping
+and receives three run-context values:
+
+| Variable | Value |
+|---|---|
+| `DARUDA_FLOW_RUN_DIR` | Absolute directory holding this run's record and artifacts |
+| `DARUDA_FLOW_NODE_ID` | The command node's flow id |
+| `DARUDA_FLOW_ATTEMPT` | One-based attempt number |
+
+Flow scripts can use these directly, for example
+`test -s "$DARUDA_FLOW_RUN_DIR/result.json"`. Their canonical names live in
+`daruda_core::process_env`; the runner owns injection and meaning.
+
 **1 to 5 passed against a real agent on 2026-08-10**, along with the
 cancel and cleanliness checks below. **6 and 7 have not been run against a
 real agent at all** — every box under them is outstanding. The list stays

@@ -14,6 +14,7 @@ test-support = []
 
 [dependencies]
 base64 = "0.22"
+daruda_core = { path = "../daruda_core" }
 daruda_store = { path = "../daruda_store" }
 ghostty_vt = { path = "../ghostty_vt" }
 gpui = { workspace = true }

@@ -24,13 +24,11 @@
 //!   one table every crate has to agree on — is weighed as a whole rather
 //!   than entry by entry, since what it buys is that no entry is spelled
 //!   anywhere else.
-//! - **Pure, except for reading the environment.** No I/O, no globals:
-//!   `&str`/value in, value out, so it stays callable from a background
-//!   executor. Reading an environment variable is admitted because it is a
-//!   thread-safe read and the names are exactly the kind of table every crate
-//!   has to spell identically. **Writing one is not** — `set_var` is unsound
-//!   once the process is multi-threaded, so a site that sets a default stays
-//!   where it can prove the process is still single-threaded.
+//! - **Pure by default; one explicit process boundary.** Modules take values
+//!   in and return values out. [`process_env`] may read only its registered
+//!   names, without caching. It never writes: `set_var` is unsound once the
+//!   process is multi-threaded, so bootstrap writes stay where the caller can
+//!   prove the process is still single-threaded.
 //!
 //! A "core" name invites drift into a junk drawer. These criteria are the
 //! guard, and they are enforced by review rather than tooling: if a
@@ -38,4 +36,5 @@
 
 pub mod git;
 pub mod language;
+pub mod process_env;
 pub mod text;

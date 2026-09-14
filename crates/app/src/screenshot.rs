@@ -16,12 +16,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use daruda_core::process_env;
 use gpui::{AnyWindowHandle, App, AppContext as _, Pixels, Size, px, size};
 
 use crate::workspace::screenshot_scenario::ScreenshotScenario;
-
-/// Env var overriding the post-launch settle delay (milliseconds).
-const SETTLE_ENV: &str = "DARUDA_SCREENSHOT_SETTLE_MS";
 
 /// CLI flag fixing the captured window size, e.g. `--screenshot-size 1280x800`.
 const SIZE_FLAG: &str = "--screenshot-size";
@@ -144,14 +142,6 @@ fn parse_themes_from(mut args: impl Iterator<Item = String>) -> Vec<ScreenshotTh
     Vec::new()
 }
 
-/// Resolve the settle delay from an optional env value (milliseconds),
-/// falling back to [`SETTLE_DELAY`] when absent or unparseable.
-fn settle_delay_from(env: Option<&str>) -> Duration {
-    env.and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(SETTLE_DELAY)
-}
-
 /// Parse a `WxH` size string (e.g. `1280x800`) into a pixel size. Both
 /// dimensions must be positive integers.
 fn parse_size_str(s: &str) -> Option<Size<Pixels>> {
@@ -201,7 +191,7 @@ pub(crate) fn schedule_capture(
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
-        let settle = settle_delay_from(std::env::var(SETTLE_ENV).ok().as_deref());
+        let settle = process_env::read_millis_or(process_env::SCREENSHOT_SETTLE_MS, SETTLE_DELAY);
         cx.background_executor().timer(settle).await;
 
         // The scenario is applied once; the theme loop then re-themes the open
@@ -671,17 +661,6 @@ mod tests {
         assert!(parse_themes(&["daruda"]).is_empty());
         assert!(parse_themes(&["daruda", "--screenshot-theme", "blue"]).is_empty());
         assert!(parse_themes(&["daruda", "--screenshot-theme"]).is_empty());
-    }
-
-    #[test]
-    fn settle_delay_falls_back_when_absent_or_bad() {
-        assert_eq!(settle_delay_from(None), SETTLE_DELAY);
-        assert_eq!(settle_delay_from(Some("abc")), SETTLE_DELAY);
-    }
-
-    #[test]
-    fn settle_delay_uses_env_milliseconds() {
-        assert_eq!(settle_delay_from(Some("500")), Duration::from_millis(500));
     }
 
     #[test]

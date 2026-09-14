@@ -102,7 +102,7 @@ fn only_the_orchestrators_pane_is_offered_the_control_server(cx: &mut TestAppCon
     let env = described["env"].as_array().expect("env");
     let offered_token = env
         .iter()
-        .find(|e| e["name"] == crate::control::mcp::shim::TOKEN_ENV)
+        .find(|e| e["name"] == daruda_core::process_env::CONTROL_TOKEN.name())
         .and_then(|e| e["value"].as_str())
         .map(str::to_owned)
         .unwrap_or_else(|| panic!("the shim authenticates with a token: {described}"));

@@ -1557,7 +1557,10 @@ mod tests {
         let server = McpServer::Stdio(
             McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
                 .args(vec!["--mcp".to_string()])
-                .env(vec![EnvVariable::new("DARUDA_CONTROL_TOKEN", "tok")]),
+                .env(vec![EnvVariable::new(
+                    daruda_core::process_env::CONTROL_TOKEN.name(),
+                    "tok",
+                )]),
         );
         let request = build_new_session_request(PathBuf::from("/tmp"), vec![server.clone()]);
         assert_eq!(request.mcp_servers, vec![server]);
@@ -1572,7 +1575,10 @@ mod tests {
         let server = McpServer::Stdio(
             McpServerStdio::new("daruda-abc", "/usr/local/bin/daruda")
                 .args(vec![String::from("--mcp")])
-                .env(vec![EnvVariable::new("DARUDA_CONTROL_TOKEN", "tok")]),
+                .env(vec![EnvVariable::new(
+                    daruda_core::process_env::CONTROL_TOKEN.name(),
+                    "tok",
+                )]),
         );
         let request = build_load_session_request(
             SessionId::from("sess-1"),

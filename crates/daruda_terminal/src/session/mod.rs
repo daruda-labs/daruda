@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use daruda_core::process_env;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use ghostty_vt::{Error, Rgb, Terminal};
@@ -2093,7 +2094,7 @@ impl TerminalSession {
         // duplicated block in scrollback. Pop the re-entered tail lines,
         // gated on content equality so nothing is lost. Must run before the
         // watermark re-anchor below so it anchors to the post-pop tail.
-        if !self.alt_screen && std::env::var_os("DARUDA_NO_SEAM_DEDUP").is_none() {
+        if !self.alt_screen && !process_env::NO_SEAM_DEDUP.is_present() {
             self.pop_verified_reentered_lines();
         }
         // Ghostty reflows soft-wrapped rows on resize, so

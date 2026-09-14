@@ -1737,6 +1737,7 @@ name = "daruda_flow"
 version = "0.2.12"
 dependencies = [
  "daruda_acp",
+ "daruda_core",
  "humantime",
  "humantime-serde",
  "libc",
@@ -1775,6 +1776,7 @@ version = "0.2.12"
 dependencies = [
  "base64",
  "criterion",
+ "daruda_core",
  "daruda_store",
  "ghostty_vt",
  "gpui",

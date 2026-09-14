@@ -26,6 +26,7 @@ subsystem's real constraints are written down.
 | **Workspace layout — tabs, panes, docks** | `crates/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
 | **Any string a user will see** | `crates/app/locales/CLAUDE.md` |
 | **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
+| **A daruda-owned environment variable** | `daruda_core::process_env` · [`lint-env-literals.sh`](./scripts/lint-env-literals.sh) |
 | **Anything written to disk or keyed per profile** | [Cross-profile data isolation](#cross-profile-data-isolation) |
 | **A failure path — error, toast, log** | [Error reporting](#error-reporting) |
 | **Checking a change actually renders** | [Visual verification](#visual-verification) · [Driving the captured state](#driving-the-captured-state) |
@@ -64,6 +65,8 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
+./scripts/lint-env-literals.sh
+./scripts/lint-env-literals.sh --self-test
 ./scripts/lint-file-size.sh
 ./scripts/lint-mark-dirty-direct-call.sh
 ./scripts/lint-fold-header.sh
@@ -207,6 +210,8 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
+scripts/lint-env-literals.sh
+scripts/lint-env-literals.sh --self-test
 scripts/lint-file-size.sh
 scripts/lint-mark-dirty-direct-call.sh
 scripts/lint-fold-header.sh
@@ -216,7 +221,7 @@ scripts/lint-comment-length.sh
 cargo run -p gen_acp_presets -- --check
 ```
 
-Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, and the package-scoped `cargo test` list above. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, and the package-scoped `cargo test` list above. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 
@@ -393,6 +398,7 @@ Input:  GPUI KeyDown → TerminalInput → stdin_tx → PTY → Shell
 
 ```
 daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
+             |                   →  daruda_core
              →  daruda_config     →  daruda_store  →  daruda_core
              →  daruda_store
              →  daruda_agent      →  daruda_store
@@ -416,7 +422,7 @@ Interactive Markdown has two independent rendering stacks. The file viewer uses 
 
 `daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 
-`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow and enforced by review, not tooling (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — today only `serde` would qualify, and it stays out until something here needs it. Beyond dependencies: **two or more consumers, pure** (no I/O, no globals, background-executor safe). Anything failing one of those belongs in its own crate. Two carve-outs, both stated in the crate's own module doc rather than only here: a *registry* — one table every crate has to agree on — is weighed as a whole rather than entry by entry, and **reading** an environment variable is admitted (a thread-safe read) while **writing** one is not, because `set_var` is unsound once the process is multi-threaded. Current contents: `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
+`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — today only `serde` would qualify, and it stays out until something here needs it. Modules are **pure by default**: values in, values out, no filesystem/network I/O or hidden caches. The explicit process-boundary exception is `process_env`: its opaque `Key` type permits reads of registered daruda-owned names only. It does not write or cache values; bootstrap writes stay where the caller can prove the process is single-threaded, because `set_var` is unsafe once other threads may access the environment. `scripts/lint-env-literals.sh` enforces single spelling in first-party Rust, including examples and tests. Current contents: `process_env` — the environment-name registry and read boundary; `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
 
 #### Cross-profile data isolation
 

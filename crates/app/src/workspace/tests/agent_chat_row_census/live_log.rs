@@ -12,6 +12,7 @@
 //! ```
 
 use daruda_acp::ChatItem;
+use daruda_core::process_env;
 
 use super::{Lens, per_turn_as_last, per_turn_settled, turn_bounds};
 use crate::transcript::display_filter::DisplayFilter;
@@ -56,11 +57,13 @@ fn skeleton(items: &[ChatItem]) -> String {
 
 #[test]
 fn census() {
-    let Some(path) = std::env::var_os("DARUDA_CENSUS_LOG") else {
+    let Some(path) = process_env::CENSUS_LOG.read_os() else {
         return;
     };
     let path = std::path::PathBuf::from(path);
-    let agent_id = std::env::var("DARUDA_CENSUS_AGENT").unwrap_or_else(|_| "claude".into());
+    let agent_id = process_env::CENSUS_AGENT
+        .read_utf8()
+        .unwrap_or_else(|_| "claude".into());
     let replay = daruda_acp::replay_log(&path, &agent_id).expect("census log replayable");
     let items = replay.items;
 

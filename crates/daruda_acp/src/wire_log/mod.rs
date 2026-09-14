@@ -16,7 +16,10 @@
 //! |---|---|---|
 //! | `DARUDA_ACP_WIRE_LOG` | unset (tap off) | slim log path; the app sets it in debug builds |
 //! | `DARUDA_ACP_WIRE_LOG_MAX_FIELD` | `512` | spill threshold in bytes; `0` disables elision |
-//! | `DARUDA_ACP_WIRE_LOG_PAYLOADS` | on | `0`/`off`/`false` drops payloads instead of writing the sidecar |
+//! | `DARUDA_ACP_WIRE_LOG_PAYLOADS` | on | `0`/`off`/`false`/`no` drops payloads instead of writing the sidecar |
+//!
+//! The canonical names live in `daruda_core::process_env`; value parsing and
+//! wire-log behavior remain here with the feature that owns them.
 
 use std::path::{Path, PathBuf};
 

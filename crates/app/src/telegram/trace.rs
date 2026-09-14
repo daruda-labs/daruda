@@ -23,6 +23,7 @@
 //! Never trace the bot token or a live pairing code — this file is plain
 //! text and outlives the session. Token state is traced as a boolean.
 
+use daruda_core::process_env;
 use daruda_store::project::LaneRef;
 
 use super::bridge::{InboundAction, Outbound, PaneRef, Routed, TelegramTail, Unaimed};
@@ -35,11 +36,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-/// Env var naming the trace file. Unset (or unopenable) → trace off.
-pub(crate) const TRACE_ENV: &str = "DARUDA_TELEGRAM_LOG";
-
-/// Default file name a debug build's `bootstrap` points [`TRACE_ENV`] at,
-/// beside the NDJSON logs.
+/// Default file name a debug build's `bootstrap` points
+/// [`process_env::TELEGRAM_LOG`] at, beside the NDJSON logs.
 #[cfg(debug_assertions)]
 pub(crate) const TRACE_FILE_NAME: &str = "telegram.log";
 
@@ -73,7 +71,7 @@ static SINK: OnceLock<Option<Mutex<File>>> = OnceLock::new();
 /// The trace file, opened once per process on first use.
 fn sink() -> Option<&'static Mutex<File>> {
     SINK.get_or_init(|| {
-        let path = std::env::var_os(TRACE_ENV)?;
+        let path = process_env::TELEGRAM_LOG.read_os()?;
         open(Path::new(&path))
     })
     .as_ref()

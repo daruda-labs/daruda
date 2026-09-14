@@ -9,6 +9,7 @@
 
 use crate::hooks;
 use crate::windows::{build_window_options, open_welcome_window};
+use daruda_core::process_env;
 use gpui::{Application, QuitMode};
 
 /// Returns `Some(exit_code)` when invoked as `daruda --hook
@@ -53,28 +54,28 @@ pub(crate) fn init_observability() {
     // Set BEFORE `LogWriter::init`, which spawns the log-writer worker thread —
     // afterwards the process is multi-threaded and `set_var` would be unsound.
     #[cfg(debug_assertions)]
-    if std::env::var_os("DARUDA_ACP_WIRE_LOG").is_none()
+    if !process_env::ACP_WIRE_LOG.is_present()
         && let Some(dir) = daruda_store::observability::log_writer::log_dir()
     {
         // SAFETY: reached before `LogWriter::init` (below) spawns any thread and
         // after `shell_env` on the main thread, so the process is still
         // single-threaded — no other thread can read the environment concurrently.
         unsafe {
-            std::env::set_var("DARUDA_ACP_WIRE_LOG", dir.join("acp-wire.log"));
+            std::env::set_var(process_env::ACP_WIRE_LOG.name(), dir.join("acp-wire.log"));
         }
     }
     // Dev-build Telegram trace, on the same terms as the wire tap above and
     // for the same reason: the bridge's per-message traffic and gate
     // transitions belong in their own file, not in the NDJSON error log.
     #[cfg(debug_assertions)]
-    if std::env::var_os(crate::telegram::trace::TRACE_ENV).is_none()
+    if !process_env::TELEGRAM_LOG.is_present()
         && let Some(dir) = daruda_store::observability::log_writer::log_dir()
     {
         // SAFETY: same single-threaded window as the wire-tap `set_var` above —
         // before `LogWriter::init` spawns the log-writer thread.
         unsafe {
             std::env::set_var(
-                crate::telegram::trace::TRACE_ENV,
+                process_env::TELEGRAM_LOG.name(),
                 dir.join(crate::telegram::trace::TRACE_FILE_NAME),
             );
         }

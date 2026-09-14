@@ -178,7 +178,7 @@ pub(crate) fn mcp_server(cx: &App) -> Option<daruda_acp::McpServer> {
         // The token travels in the session's environment, never in a file
         // another local process could read.
         vec![(
-            crate::control::mcp::shim::TOKEN_ENV.to_owned(),
+            daruda_core::process_env::CONTROL_TOKEN.name().to_owned(),
             surface.gate.rotate(),
         )],
     ))

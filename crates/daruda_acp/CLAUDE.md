@@ -105,7 +105,9 @@ jq 'select(.id == 4821)' acp-wire-codex-acp.payload.jsonl
 ```
 
 `DARUDA_ACP_WIRE_LOG_MAX_FIELD=0` restores unelided raw lines;
-`DARUDA_ACP_WIRE_LOG_PAYLOADS=0` drops payloads instead of writing the sidecar.
+`DARUDA_ACP_WIRE_LOG_PAYLOADS=0` drops payloads instead of writing the sidecar
+(`off`, `false`, and `no` are equivalent). Canonical daruda-owned environment
+names live in `daruda_core::process_env`; their feature semantics stay here.
 On the first session of each process run both files rotate into a `prev/`
 sibling directory under the same file names, so a rotated capture stays
 replayable (`agent_id_from_path` and the sidecar both derive from the name).

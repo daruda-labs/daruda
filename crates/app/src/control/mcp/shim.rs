@@ -15,6 +15,7 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+use daruda_core::process_env;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
@@ -27,13 +28,6 @@ use crate::control::mcp::socket::{MAX_FRAME_BYTES, Runtime, runtime_path};
 /// `orchestrator::mcp_server` spawns with it. Two literals would let the app
 /// hand the agent a command line this binary no longer recognises.
 pub(crate) const SUBCOMMAND: &str = "--mcp";
-
-/// Environment variable carrying this session's token.
-///
-/// The session's environment, not a file: `session/new` hands it to the agent,
-/// which passes it to the shim it spawns — so the secret never lands anywhere
-/// another local process can read.
-pub(crate) const TOKEN_ENV: &str = "DARUDA_CONTROL_TOKEN";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ShimError {
@@ -60,7 +54,7 @@ impl std::fmt::Display for ShimError {
         match self {
             Self::NotRunning => write!(f, "daruda is not running"),
             Self::RuntimeUnreadable => write!(f, "daruda's control runtime file is unreadable"),
-            Self::NoToken => write!(f, "{TOKEN_ENV} is not set"),
+            Self::NoToken => write!(f, "{} is not set", process_env::CONTROL_TOKEN.name()),
             Self::Unauthorized => write!(f, "daruda refused the control token"),
             Self::RuntimeChanged => write!(f, "daruda restarted; reconnect"),
             Self::Disconnected => write!(f, "daruda closed the control connection"),
@@ -181,7 +175,8 @@ pub(crate) fn run() -> i32 {
 }
 
 fn connect_and_relay() -> Result<(), ShimError> {
-    let token = std::env::var(TOKEN_ENV)
+    let token = process_env::CONTROL_TOKEN
+        .read_utf8()
         .ok()
         .filter(|t| !t.trim().is_empty())
         .ok_or(ShimError::NoToken)?;

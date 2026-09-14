@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use daruda_acp::{
     AcpSessionHandle, ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView,
 };
+use daruda_core::process_env;
 use daruda_store::project::PaneCwd;
 use gpui::{
     AnyWindowHandle, App, Bounds, Context, FocusHandle, Focusable, FollowMode, ListAlignment,
@@ -79,7 +80,7 @@ fn post_turn_delta(items: &[ChatItem], relayed: usize) -> Option<(String, usize)
 fn debug_list_trace_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("DARUDA_DEBUG_AGENT_LIST").is_some())
+    *ENABLED.get_or_init(|| process_env::DEBUG_AGENT_LIST.is_present())
 }
 
 /// A user-visible milestone of the one-time Node.js runtime provisioning shown

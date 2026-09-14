@@ -25,6 +25,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use daruda_core::process_env;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::App;
@@ -35,12 +36,6 @@ const REPLAY_FLAG: &str = "--replay-acp-log";
 /// CLI flag overriding which dialect reads the capture. Only consulted when the
 /// log's own `initialize` did not name a program daruda recognises.
 const AGENT_FLAG: &str = "--replay-agent";
-
-/// The wire tap's own output path — set automatically in debug builds.
-const WIRE_LOG_ENV: &str = "DARUDA_ACP_WIRE_LOG";
-
-/// Env var overriding the post-launch settle delay (milliseconds).
-const SETTLE_ENV: &str = "DARUDA_REPLAY_SETTLE_MS";
 
 /// How long to let the workspace settle (async project/git/lane restore) before
 /// opening a pane — a pane cannot open until there is an accessible lane.
@@ -79,12 +74,6 @@ fn parse_agent_from(mut args: impl Iterator<Item = String>) -> Option<String> {
         }
     }
     None
-}
-
-fn settle_delay_from(var: Option<&str>) -> Duration {
-    var.and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(SETTLE_DELAY)
 }
 
 /// Replay `path` now, synchronously.
@@ -138,7 +127,7 @@ pub(crate) struct Loaded {
 /// have a lane to open a pane in.
 pub(crate) fn schedule_seed(loaded: Loaded, cx: &mut App) {
     cx.spawn(async move |cx| {
-        let settle = settle_delay_from(std::env::var(SETTLE_ENV).ok().as_deref());
+        let settle = process_env::read_millis_or(process_env::REPLAY_SETTLE_MS, SETTLE_DELAY);
         cx.background_executor().timer(settle).await;
         cx.update(|cx| seed_pane(loaded, cx));
     })
@@ -153,7 +142,7 @@ pub(crate) fn schedule_seed(loaded: Loaded, cx: &mut App) {
 /// the recovery copy lives. The move is silent, so say it loudly even though
 /// the load above has already read the file.
 fn warn_if_the_tap_writes_here(path: &Path) {
-    let Some(tap) = std::env::var_os(WIRE_LOG_ENV) else {
+    let Some(tap) = process_env::ACP_WIRE_LOG.read_os() else {
         return;
     };
     let tap = PathBuf::from(tap);
@@ -167,10 +156,11 @@ fn warn_if_the_tap_writes_here(path: &Path) {
         }
         _ => return,
     };
+    let wire_log_env = process_env::ACP_WIRE_LOG.name();
     println!(
-        "replay: WARNING — the wire tap ({WIRE_LOG_ENV}) writes to {}. Any \
+        "replay: WARNING — the wire tap ({wire_log_env}) writes to {}. Any \
          session started in this run rotates its log there, so this capture is \
-         {fate}. Copy it elsewhere, or point {WIRE_LOG_ENV} at another \
+         {fate}. Copy it elsewhere, or point {wire_log_env} at another \
          directory, to keep it.",
         tap.display()
     );
@@ -290,16 +280,5 @@ mod tests {
         );
         assert_eq!(parse_agent_from(args(&["daruda", AGENT_FLAG])), None);
         assert_eq!(parse_agent_from(args(&["daruda", "--replay-agent="])), None);
-    }
-
-    #[test]
-    fn the_settle_delay_falls_back_on_junk() {
-        assert_eq!(settle_delay_from(Some("500")), Duration::from_millis(500));
-        assert_eq!(
-            settle_delay_from(Some("  750 ")),
-            Duration::from_millis(750)
-        );
-        assert_eq!(settle_delay_from(Some("soon")), SETTLE_DELAY);
-        assert_eq!(settle_delay_from(None), SETTLE_DELAY);
     }
 }

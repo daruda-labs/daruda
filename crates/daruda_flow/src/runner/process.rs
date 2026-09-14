@@ -11,17 +11,13 @@ use crate::model::AgentSpec;
 use crate::runner::{
     CANCELED, CancelToken, NodeFailure, NodeRunner, RunContext, RunResult, canceled, sleep,
 };
+use daruda_core::process_env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// A command node is a shell line, not an argv: the design's flagship gate
 /// pipes and quotes, and this repo already builds shell strings elsewhere.
 const SHELL: &str = "sh";
-
-/// What a node's script orients itself by.
-const RUN_DIR_VAR: &str = "DARUDA_FLOW_RUN_DIR";
-const NODE_ID_VAR: &str = "DARUDA_FLOW_NODE_ID";
-const ATTEMPT_VAR: &str = "DARUDA_FLOW_ATTEMPT";
 
 /// Runs a command node. Holds the credentials to strip because that is a
 /// property of the whole run, not of any one node: the union of every
@@ -120,9 +116,9 @@ impl ProcessRunner {
         cmd.arg("-c")
             .arg(run)
             .current_dir(ctx.cwd)
-            .env(RUN_DIR_VAR, ctx.run_dir)
-            .env(NODE_ID_VAR, ctx.node_id.as_str())
-            .env(ATTEMPT_VAR, ctx.attempt.to_string());
+            .env(process_env::FLOW_RUN_DIR.name(), ctx.run_dir)
+            .env(process_env::FLOW_NODE_ID.name(), ctx.node_id.as_str())
+            .env(process_env::FLOW_ATTEMPT.name(), ctx.attempt.to_string());
         for name in &self.strip_env {
             cmd.env_remove(name);
         }
@@ -466,9 +462,12 @@ mod tests {
     #[test]
     fn a_command_is_told_which_run_node_and_attempt_it_is() {
         let dir = tempfile::tempdir().expect("tempdir");
+        let node_id = process_env::FLOW_NODE_ID.name();
+        let attempt = process_env::FLOW_ATTEMPT.name();
+        let run_dir = process_env::FLOW_RUN_DIR.name();
         let result = run_command_in(
             dir.path(),
-            &format!("echo \"${NODE_ID_VAR} ${ATTEMPT_VAR} ${RUN_DIR_VAR}\""),
+            &format!("echo \"${node_id} ${attempt} ${run_dir}\""),
         );
 
         let log = read_log(&result);

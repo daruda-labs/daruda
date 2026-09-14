@@ -21,6 +21,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use daruda_core::process_env;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -128,10 +129,6 @@ pub fn save_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> s
     Ok(())
 }
 
-/// Env var that overrides the data directory wholesale. For tests,
-/// CI, or portable installs.
-pub(crate) const DARUDA_DATA_DIR_ENV: &str = "DARUDA_DATA_DIR";
-
 /// Default daruda data directory. Resolution order:
 ///
 /// 1. `DARUDA_DATA_DIR` env — full override, used verbatim.
@@ -150,8 +147,8 @@ pub(crate) const DARUDA_DATA_DIR_ENV: &str = "DARUDA_DATA_DIR";
 /// lives in `default_data_dir_from` so tests can exercise every branch
 /// without touching process state.
 pub fn default_data_dir() -> PathBuf {
-    let override_env = std::env::var(DARUDA_DATA_DIR_ENV).ok();
-    let profile_env = std::env::var(crate::profile::DARUDA_PROFILE_ENV).ok();
+    let override_env = process_env::DATA_DIR.read_utf8().ok();
+    let profile_env = process_env::PROFILE.read_utf8().ok();
 
     // This is the one legitimate caller `clippy.toml`'s `disallowed-methods`
     // entry for `dirs::config_dir` refers to — every other daruda-owned
@@ -194,7 +191,7 @@ pub fn profile_suffix() -> Option<&'static str> {
 /// stay isolated), otherwise lands under the shared `daruda/node` regardless of
 /// the active profile.
 pub fn node_install_dir() -> PathBuf {
-    if let Some(dir) = std::env::var(DARUDA_DATA_DIR_ENV).ok().as_deref() {
+    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
         let trimmed = dir.trim();
         if !trimmed.is_empty() {
             return PathBuf::from(trimmed).join("node");
@@ -222,7 +219,7 @@ pub fn node_install_dir() -> PathBuf {
 /// two suites pointed at different data directories are not sharing a
 /// working tree either.
 pub fn flow_lock_root() -> PathBuf {
-    if let Some(dir) = std::env::var(DARUDA_DATA_DIR_ENV).ok().as_deref() {
+    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
         let trimmed = dir.trim();
         if !trimmed.is_empty() {
             return PathBuf::from(trimmed).join("flow-locks");

@@ -14,6 +14,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use agent_client_protocol::{AcpAgent, LineDirection};
+use daruda_core::process_env;
 use serde_json::Value;
 
 use super::{DEFAULT_BASE_STEM, UNRECORDED_ID, payload_marker, payload_sidecar_path};
@@ -44,16 +45,16 @@ static PAYLOAD_IDS: AtomicU64 = AtomicU64::new(1);
 /// into the file name so concurrent sessions from different agents land in
 /// separate files instead of interleaving in one.
 pub(crate) fn attach(agent: AcpAgent, agent_id: &str) -> AcpAgent {
-    let Some(base) = std::env::var_os("DARUDA_ACP_WIRE_LOG") else {
+    let Some(base) = process_env::ACP_WIRE_LOG.read_os() else {
         return agent;
     };
     let path = wire_log_path_for(Path::new(&base), agent_id);
     let Some(slim) = open_log(&path) else {
         return agent;
     };
-    let cap = max_field_cap(std::env::var_os("DARUDA_ACP_WIRE_LOG_MAX_FIELD").as_deref());
+    let cap = max_field_cap(process_env::ACP_WIRE_LOG_MAX_FIELD.read_os().as_deref());
     let sidecar = (cap > 0
-        && sidecar_enabled(std::env::var_os("DARUDA_ACP_WIRE_LOG_PAYLOADS").as_deref()))
+        && sidecar_enabled(process_env::ACP_WIRE_LOG_PAYLOADS.read_os().as_deref()))
     .then(|| open_log(&payload_sidecar_path(&path)))
     .flatten();
 

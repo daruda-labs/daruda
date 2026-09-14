@@ -6,8 +6,7 @@
 
 use std::sync::OnceLock;
 
-/// Environment variable that overrides the build-cfg profile.
-pub(crate) const DARUDA_PROFILE_ENV: &str = "DARUDA_PROFILE";
+use daruda_core::process_env;
 
 /// Profile name that keeps the legacy (un-suffixed) data path.
 /// `persistence::default_data_dir_from` pattern-matches against this
@@ -24,7 +23,7 @@ pub fn active_profile() -> &'static str {
 }
 
 fn resolve_profile() -> &'static str {
-    resolve_profile_from(std::env::var(DARUDA_PROFILE_ENV).ok().as_deref())
+    resolve_profile_from(process_env::PROFILE.read_utf8().ok().as_deref())
 }
 
 /// Pure resolver — does not read the environment. Public to the

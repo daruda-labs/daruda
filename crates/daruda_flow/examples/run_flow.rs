@@ -12,6 +12,7 @@
 //! `DARUDA_FLOW_AGENT` overrides the adapter command (default: the ACP
 //! client's own, which is what the app launches).
 
+use daruda_core::process_env;
 use daruda_flow::event::FlowEvent;
 use daruda_flow::request::{Budget, RunRequest};
 use daruda_flow::runner::{AcpRunner, CancelToken, ProcessRunner, Runners};
@@ -63,7 +64,8 @@ fn main() {
     );
 
     let launch = daruda_acp::LaunchSpec {
-        command: std::env::var("DARUDA_FLOW_AGENT")
+        command: process_env::FLOW_AGENT
+            .read_utf8()
             .unwrap_or_else(|_| daruda_acp::AdapterCommand::default().0),
         strip_env: Vec::new(),
     };
