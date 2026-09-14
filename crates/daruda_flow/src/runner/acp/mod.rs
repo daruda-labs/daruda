@@ -95,14 +95,14 @@ impl AcpRunner {
     }
 
     /// How long a cancelled turn is given to end itself before the session is
-    /// dropped. Only a test has reason to shorten [`CANCEL_GRACE`].
+    /// dropped. Only a test has reason to shorten `CANCEL_GRACE`.
     pub fn with_grace(mut self, grace: Duration) -> Self {
         self.grace = grace;
         self
     }
 
     /// How long a requested setting has to be confirmed. Only a test has
-    /// reason to shorten [`SETTINGS_BUDGET`].
+    /// reason to shorten `SETTINGS_BUDGET`.
     pub fn with_settings_budget(mut self, budget: Duration) -> Self {
         self.settings_budget = budget;
         self

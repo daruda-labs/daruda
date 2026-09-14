@@ -3,7 +3,7 @@
 //! `on_fail` policy until it passes or gives up.
 //!
 //! How many run at once is the flow's `parallel`, and which of them may
-//! overlap is [`ready::take_ready_batch`]'s answer — nodes that could
+//! overlap is `ready::take_ready_batch`'s answer — nodes that could
 //! write in one directory never share a wave.
 
 use crate::NodeId;
@@ -194,22 +194,14 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
 
     let mut outcome = RunOutcome::Done;
 
-    // A worklist over the topological order rather than a walk down it.
+    // A worklist, not a walk: it makes "which nodes could start now" a
+    // question the loop asks rather than assumes, which is what running two
+    // at once needs.
     //
-    // The two are the same thing while one node runs at a time: the order
-    // is Kahn's with a declaration-ordered ready set, so taking the first
-    // *ready* node out of it yields exactly that order back. What the
-    // worklist adds is the question "which nodes could start now" as
-    // something the loop asks rather than something it assumes — which is
-    // what running two at once will need.
-    //
-    // Nodes an earlier process finished start out done. Not skipped inside
-    // `drive`: a gate's repair re-runs nodes *because* they already ran,
-    // and a blanket skip there would turn every repair into a no-op.
-    // A pin is the user's promise that this output is already valid, so the
-    // node is done before the run starts. Kept out of `already_passed`: that
-    // one means "a crash left this finished", which is a different story for
-    // the record to tell.
+    // Nodes an earlier process finished, and pinned ones, start out done —
+    // not skipped inside `drive`, where a blanket skip would turn every
+    // repair into a no-op. Pins stay out of `already_passed`, which means
+    // "a crash left this finished".
     let mut done: HashSet<NodeId> = run
         .already_passed
         .iter()
@@ -243,23 +235,14 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
             // refuses those — so this is a graph nobody could have handed
             // us, and the run ends on whatever `outcome` already holds.
             ready::Batch::Exhausted => break,
-            // Nothing could start and the scheduler said why. Reported as
-            // its own outcome rather than left to `Done`: the run stopped
-            // with work still to do, and a `break` here would hand back a
-            // success for nodes that never ran.
-            //
-            // A cancel or a spent budget outranks it — either is a reason
-            // the run was going to stop anyway, and naming the hold
-            // instead would blame the filesystem for a decision made
+            // Its own outcome, not `Done`: the run stopped with work still
+            // to do. A cancel or a spent budget outranks it — naming the
+            // hold would blame the filesystem for a decision made
             // elsewhere.
             //
-            // No loop around this. A hold that leaves other work runnable
-            // never gets here — the node stays in `waiting` and the next
-            // wave asks again — so the only hold this arm sees is one with
-            // nothing left to make progress against, where re-asking is
-            // either a spin or an arbitrary sleep. The recoverable half is
-            // instead that `Stalled` is resumable (`crate::resume`), which
-            // costs the run nothing it had already done.
+            // No loop here. A hold that leaves other work runnable never
+            // reaches this arm, so re-asking would be a spin; the recovery
+            // is that `Stalled` resumes (`crate::resume`).
             ready::Batch::Held(nodes) => {
                 outcome = run
                     .stop_before_more_work()

@@ -95,7 +95,7 @@ fn resolve(token: &str, ctx: &TemplateContext<'_>) -> Option<String> {
 /// would be a second answer to that — the kind that stays right until one of
 /// them changes.
 ///
-/// Scans the same way [`render`] does, so an unterminated `{{` or a token that
+/// Scans the same way `render` does, so an unterminated `{{` or a token that
 /// is not an output reference is copied through rather than swallowed. Only
 /// exact matches move: a node called `design` is not `design2`.
 pub fn rename_output_refs(text: &str, from: &NodeId, to: &NodeId) -> String {

@@ -143,15 +143,9 @@ impl RunLock {
 /// A working tree's path, resolved.
 ///
 /// The whole exclusion rests on two spellings of one tree comparing equal,
-/// and the only thing that makes them is `canonicalize`. Naming the
-/// resolved form is what keeps that from being a sentence in a doc comment
-/// that a third caller never reads: a `&Path` cannot be passed where this
-/// is wanted, so forgetting to resolve does not compile.
-///
-/// [`Self::unchecked`] is the way out, for a path that was resolved
-/// somewhere else already. Deliberately not private — the point is to make
-/// the requirement visible at the call site, not unreachable. A caller
-/// writing `unchecked` has said they thought about it.
+/// and only `canonicalize` makes them. A type rather than a doc line, so
+/// forgetting to resolve does not compile. [`Self::unchecked`] is the way
+/// out and is deliberately public — writing it says you thought about it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CanonicalTree(PathBuf);
 
@@ -186,22 +180,13 @@ impl AsRef<Path> for CanonicalTree {
 /// directory would share one takeover guard — and a reclaim for either
 /// would refuse the other and report a holder belonging to neither.
 ///
-/// The tree's own path, mirrored. Deterministic forever, which a hash
-/// cannot promise: `DefaultHasher`'s output is explicitly not stable across
-/// Rust versions, and a lock whose name moved on upgrade would be invisible
-/// to the run still holding it. Readable too, which matters the one time
-/// someone has to look.
+/// The tree's own path, mirrored, not hashed: `DefaultHasher` is not
+/// stable across Rust versions, and a lock whose name moved on upgrade
+/// would be invisible to the run holding it.
 ///
-/// `tree` is a [`CanonicalTree`] rather than a `&Path` because two
-/// spellings of one tree must not become two locks, and a doc line saying
-/// so is only read by whoever already knew.
-///
-/// A prefix becomes a component of its own rather than being dropped.
-/// Nothing on unix produces one, so this changes no path daruda builds
-/// today; on Windows dropping it would map `C:\a` and `D:\a` onto one
-/// directory, which is the collision the whole function exists to avoid.
-/// Untested here — Windows is not a target yet, and `Path` on unix does
-/// not parse a drive letter as a prefix to test it with.
+/// A prefix becomes a component of its own rather than being dropped —
+/// nothing on unix produces one, but dropping it would map `C:\a` and
+/// `D:\a` onto one directory. Untested; Windows is not a target yet.
 pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     let mut out = root.to_path_buf();
     // The root component is dropped so the result stays under `root`:
@@ -228,41 +213,23 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     out
 }
 
-/// The lock's old home, inside the working tree.
+/// The lock's old home, inside the working tree, so a build predating the
+/// move still excludes and is still excluded.
 ///
-/// **MIGRATION(985e75dd → remove in 0.3).** Everything about the
-/// compatibility copy is here or carries that tag; `grep -r 985e75dd`
-/// finds the lot, tests included, and they go in one change. A test beside
-/// this module fails once the version passes the release the copy was kept
-/// for, so the deadline is one the code keeps rather than a note someone
-/// has to remember.
-///
-/// **Why a module for one function.** The location was derived three times
-/// — the writer as `run_dir.parent().unwrap_or(cwd)`, the reader as
-/// `run_dir.parent()`, the app from its own layout — and the first two
-/// already disagreed about a run directory with no parent, one guessing the
-/// working tree root and the other reading nothing. The engine's two now
-/// share this; the app's is its own because only the app knows where it
-/// puts run directories, and it carries the same tag.
-///
-/// **Why it exists at all.** A build that predates the move looks only
-/// here. Writing the copy is what stops such a build starting a second run
-/// in a tree this one holds, and reading it is what keeps a run *it*
-/// started resumable across the upgrade.
+/// MIGRATION(985e75dd → remove in 0.3): `grep -r 985e75dd` finds the lot,
+/// tests included, and a test below fails once the version passes the
+/// release the copy was kept for. A module for one function because the
+/// engine derived that location twice and the two disagreed; the app's
+/// third derivation stays its own, since only it knows where it puts run
+/// directories.
 pub mod compat {
     use std::path::Path;
 
-    /// Where the copy sits: the runs directory, which is the run
-    /// directory's parent.
+    /// Where the copy sits: the runs directory, the run directory's parent.
     ///
-    /// `None` for a run directory with no parent — there is no runs
-    /// directory then, and the caller has nothing to write a copy into or
-    /// read one from. Not a path to guess at: the writer used to fall back
-    /// to the working tree root, where the copy is a stray lock file an
-    /// agent trips over, and where this build would never look for it
-    /// again. (It would still have excluded the *old* build, whose writer
-    /// guessed the same place — the reason not to guess is the litter and
-    /// the disagreement with the reader, not a hole in the exclusion.)
+    /// `None` when there is no parent, rather than the guess the writer
+    /// used to make — a lock dropped in a working tree root is litter, and
+    /// the reader never looked there anyway.
     pub fn lock_dir(run_dir: &Path) -> Option<&Path> {
         run_dir.parent()
     }
@@ -284,10 +251,9 @@ impl RunLocks {
     /// the set and act on trees it never took, so anything already taken is
     /// released before the refusal goes back.
     ///
-    /// Deduplicated as well as sorted. `RunLock::acquire` refuses a
-    /// directory that already has a lock, and it does not except the lock
-    /// this same call just placed — so one name given twice would refuse
-    /// the run against itself.
+    /// Deduplicated as well as sorted: `RunLock::acquire` does not except
+    /// the lock this same call just placed, so one name given twice would
+    /// refuse the run against itself.
     pub fn acquire(
         dirs: &[PathBuf],
         run_id: &str,
@@ -317,14 +283,11 @@ impl RunLocks {
     /// still released — a leaked lock is recovered by the next run's
     /// reclaim, and stopping early would leak more than it reported.
     ///
-    /// **The directory stays.** A lock root accumulates one empty directory
-    /// per tree a flow has ever run in, and removing it here looks like the
-    /// obvious tidy-up — but `acquire` makes the directory and then takes
-    /// the lock inside it as two steps, so a release that removed the
-    /// directory between another run's two steps would fail that run with
-    /// `NotFound`. Refusing a run to save an empty directory is the wrong
-    /// trade; the set is bounded by how many working trees the user has,
-    /// and every one of them is a directory they already have.
+    /// INVARIANT: the directory stays. Removing it looks like the obvious
+    /// tidy-up, but `acquire` makes the directory and takes the lock inside
+    /// it as two steps — a release landing between another run's two would
+    /// fail that run with `NotFound`. The leftovers are bounded by how many
+    /// working trees the user has.
     pub fn release(self) -> Result<(), FlowIoError> {
         let mut first = None;
         for lock in self.0 {
@@ -697,23 +660,10 @@ mod tests {
     }
 
     /// **The compatibility copy has a deadline, and this is what keeps it.**
-    ///
-    /// "For one release" is a note nobody is reminded of; a version bump is
-    /// something everybody does. So the deadline is spelled as a version
-    /// and checked, and the debt is collected by whoever holds the bump
-    /// rather than found a year later by someone who cannot tell whether
-    /// removing it is safe.
-    ///
-    /// **The exact version, not the minor line.** `985e75dd` is in no tag
-    /// — every released build through v0.2.12 predates the move — so the
-    /// copy first ships in [`LAST_RELEASE_WITH_THE_COPY`] and the one after
-    /// that can drop it. Allowing the whole 0.2 line instead would mean
-    /// twelve more patch releases carrying it, which is what this project's
-    /// history says actually happens: v0.2.0 through v0.2.12 with no minor
-    /// bump at all.
-    ///
-    /// Delete this test together with what it guards, not on its own. To
-    /// keep the copy for longer, raise the constant deliberately.
+    /// A version bump is something everybody does; a note about "one
+    /// release" is not. The exact patch, not the 0.2 line — this project
+    /// shipped v0.2.0 through v0.2.12 without a minor bump. Delete with
+    /// what it guards; to keep the copy longer, raise the constant.
     #[test]
     fn the_compatibility_copy_has_not_outlived_the_release_it_was_written_for() {
         let version = env!("CARGO_PKG_VERSION");
@@ -729,13 +679,10 @@ mod tests {
     /// The last release allowed to write the in-tree copy.
     const LAST_RELEASE_WITH_THE_COPY: &str = "0.2.13";
 
-    /// Whether `version` is later than `limit`, compared as numbers.
-    ///
-    /// Not `str::starts_with` or `>`: `"0.2.9" > "0.2.13"` lexically, and a
-    /// prefix match cannot express "up to this patch". An unparseable
-    /// component sorts as 0, which fails safe — a pre-release like
-    /// `0.3.0-rc1` reads as `0.3.0` and trips the deadline at the bump,
-    /// which is when the decision is actually being made.
+    /// Whether `version` is later than `limit`, as numbers — `"0.2.9" >
+    /// "0.2.13"` lexically. An unparseable component reads as 0, so
+    /// `0.3.0-rc1` trips the deadline at the bump, which is when the
+    /// decision is being made.
     fn past(version: &str, limit: &str) -> bool {
         fn parts(v: &str) -> [u32; 3] {
             let mut out = [0; 3];

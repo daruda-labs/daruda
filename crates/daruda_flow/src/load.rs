@@ -45,7 +45,7 @@ pub fn profiles(text: &str) -> Result<Vec<String>, FlowError> {
 /// A flow that resolved and whose graph built, beside whatever the
 /// graph-dependent rules refused about it.
 ///
-/// Both halves are real, and that is the whole point: [`validate::validate`]
+/// Both halves are real, and that is the whole point: `validate::validate`
 /// runs *on* a resolved flow and a built graph, so every issue it reports is
 /// about a flow that can be drawn. An editor can show the picture and the
 /// problem together, where [`load`] has to choose one.

@@ -173,15 +173,10 @@ fn a_request_with_a_relative_path_never_starts() {
 /// **The lock is under the root the host handed over, not wherever the run
 /// happens to be.**
 ///
-/// Which root that is stays the host's call — production puts it beyond
-/// every working tree (`Workspace::lock_root`), these tests put it under
-/// the tree that cleans it up. What the engine owes either way is to key
-/// it off the tree by `lock_dir_for` and place it there.
-///
-/// Asserted while the run is going, because `execute` gives the lock back
-/// on the way out — the end state looks the same either way. Without this
-/// the whole move is only checked by the compatibility copy, which is the
-/// one part due to be deleted.
+/// Which root stays the host's call; what the engine owes is to key it off
+/// the tree by `lock_dir_for`. Asserted mid-run, because `execute` gives
+/// the lock back on the way out and the end state looks the same either
+/// way.
 #[test]
 fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
     /// Looks at both places on each call, then delegates. Carries the root

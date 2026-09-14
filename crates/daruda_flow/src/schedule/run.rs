@@ -73,17 +73,11 @@ fn execute_with(
 
     // Outside the working tree, under the host's lock root.
     //
-    // It used to sit in the runs directory, covered by the `.gitignore`
-    // below. That put the one file this whole exclusion rests on inside the
-    // tree the exclusion protects — and `git clean -fdx` deletes ignored
-    // files, so an agent tidying its own worktree could remove the lock
-    // while the run still held the tree. `take` succeeds on a missing file,
-    // so the next run would walk straight in.
-    //
-    // The tree's own path resolved, because two spellings of one tree must
-    // not become two locks. Unresolvable is not a tree this run can be sure
-    // it excludes anything in, so it refuses rather than guessing — the same
-    // call the batcher makes about a node's directory.
+    // INVARIANT: never inside the tree it guards. `git clean -fdx` deletes
+    // ignored files, so an agent tidying its worktree could remove the lock
+    // while the run still held it, and `take` succeeds on a missing file.
+    // Resolved, because two spellings must not become two locks; an
+    // unresolvable tree is refused rather than guessed at.
     let tree = match crate::lock::CanonicalTree::resolve(&request.cwd) {
         Ok(tree) => tree,
         Err(source) => {
@@ -101,14 +95,10 @@ fn execute_with(
     // MIGRATION(985e75dd → remove in 0.3): the legacy place too. Why, and
     // where it is, belong to `lock::compat` — this is only the writer.
     //
-    // The copy is inside the tree, so `git clean -fdx` can take it — and
-    // then an older build sees a free tree and starts a second run in one
-    // this run holds. That window is what the move closes for every build
-    // that knows the new place, and all it leaves is the older one; before
-    // the move the same `git clean` freed the tree for *any* build.
-    // Watching for the deletion would buy back the rest, at the price of a
-    // watcher living as long as the compatibility copy — which is one
-    // release.
+    // `git clean -fdx` can still take this copy, leaving an older build
+    // able to start a second run here. The move closed that window for
+    // every build that knows the new place; this is the remainder, and it
+    // dies with the copy.
     let legacy = crate::lock::compat::lock_dir(&request.run_dir);
     let mut lock_dirs = vec![crate::lock::lock_dir_for(&request.lock_dir, &tree)];
     lock_dirs.extend(legacy.map(Path::to_path_buf));

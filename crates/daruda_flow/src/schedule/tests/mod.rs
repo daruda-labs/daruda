@@ -219,18 +219,11 @@ pub(super) fn request_for_profile(
         cwd: dir.to_path_buf(),
         run_dir: dir.join(".daruda/flow-runs/01J"),
         // Under the tree's own temporary directory, so the tree that owns
-        // it also cleans it up. A fixed path in `temp_dir()` was unique per
-        // test — `lock_dir_for` mirrors the tree, and every tree here is
-        // its own temporary directory — but nothing ever removed it, and
-        // a suite that leaves a thousand directories behind per run is one
-        // nobody notices leaving them somewhere worse.
-        //
-        // Inside `.daruda` rather than beside it, which is what keeps
+        // it cleans it up — a fixed path in `temp_dir()` was unique per
+        // test but nothing ever removed it. Inside `.daruda`, which keeps
         // `nothing_the_engine_makes_sits_outside_the_directory_it_hides`
-        // meaningful. Whether the root is outside the working tree at all
-        // is the *host's* choice and is tested there
-        // (`Workspace::lock_root`); what the engine owes is to put the lock
-        // under the root it was handed.
+        // meaningful; whether the root is outside the tree at all is the
+        // host's choice, tested there.
         lock_dir: dir.join(REPO_DIR).join(TEST_LOCKS_DIR),
         flow_dir: dir.to_path_buf(),
         agents: std::collections::HashMap::from([(

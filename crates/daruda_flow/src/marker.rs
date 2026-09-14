@@ -104,17 +104,11 @@ fn marker_name(outcome: &RunOutcome) -> Option<&'static str> {
 /// What state a run directory is in. With no marker the lock is the only
 /// evidence there is, so where the lock lives is part of this answer.
 ///
-/// **`lock_dir` is passed, not derived, and that is a hazard the caller
-/// owns.** `None` says the caller does not know where it is.
-///
-/// It used to be `run_dir.parent()` — the runs directory, where the
-/// lock also lived. The lock has moved out of the working tree
-/// ([`crate::lock::lock_dir_for`]), so there is nothing left in `run_dir`
-/// to derive it from, and a caller naming the wrong directory would read
-/// every live run as `Unknown` with nothing saying so: no marker, no
-/// `Running`, no `Crashed`, and therefore nothing resumable. That is why
-/// `crate::resume` has a test that a crashed run is still resumable through
-/// this function rather than only through the files it writes.
+/// INVARIANT: `lock_dir` is passed, not derived, and naming the wrong one
+/// reads every live run as `Unknown` — no marker, no holder, nothing
+/// resumable — with neither the compiler nor a file-level test saying so.
+/// `None` says the caller does not know where it is. `crate::resume` has
+/// the test that walks the whole path.
 pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>) -> RunStatus {
     if run_dir.join(DONE).is_file() {
         return RunStatus::Done;
@@ -169,10 +163,9 @@ pub const DEFAULT_KEEP_RUNS: usize = 20;
 /// it is never a candidate however old it is, and never counts against `keep`.
 /// Reading no lock is why this takes no `is_alive`.
 ///
-/// Newest is decided by directory name, which is chronological only because
-/// the host names run directories with ULIDs (the app makes the run-id, the
-/// engine only receives `run_dir`). A host using a different id
-/// scheme would silently have this delete the wrong ones.
+/// Newest is by directory name, chronological only because the host names
+/// run directories with ULIDs — another id scheme would silently delete
+/// the wrong ones.
 pub fn sweep_old_runs(runs_dir: &Path, keep: usize) -> std::io::Result<Vec<PathBuf>> {
     let mut finished: Vec<PathBuf> = std::fs::read_dir(runs_dir)?
         .filter_map(Result::ok)

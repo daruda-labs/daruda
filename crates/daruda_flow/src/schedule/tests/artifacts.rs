@@ -612,11 +612,10 @@ fn nothing_the_engine_makes_sits_outside_the_directory_it_hides() {
 /// test builds its own directory layout; this one asks about a run that
 /// `execute` actually set up.
 ///
-/// MIGRATION(985e75dd → remove in 0.3): it reads the lock at
-/// `run_dir.parent()`, which is the compatibility copy — mid-run there is
-/// no marker, so the copy is the only evidence and this fails the moment
-/// `execute` stops writing it. Point it at the request's own `lock_dir`
-/// then, the way `tests::flow::run`'s app-side test already does.
+/// MIGRATION(985e75dd → remove in 0.3): reads the lock at
+/// `run_dir.parent()`, the compatibility copy — mid-run that is the only
+/// evidence, so this fails when `execute` stops writing it. Point it at
+/// the request's own `lock_dir` then.
 #[test]
 fn a_run_in_flight_reads_as_running_in_the_layout_execute_builds() {
     /// Asks the question mid-run, when there is no marker yet and the lock

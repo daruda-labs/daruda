@@ -29,16 +29,11 @@ pub const RUN_SPEC_FILE: &str = "run.yaml";
 
 /// Whether a run may be picked up.
 ///
-/// A run that stopped without deciding to. `Crashed` is one — no marker,
-/// and the lock's holder is gone — and `Stalled` is the other: the
-/// scheduler could not place a node, so nothing was in flight and the
-/// journal is whole. A run that failed or was canceled ended the way its
-/// policy said to, and continuing one of those is a different verb —
-/// offering both behind one button would leave nobody able to predict
-/// which happened.
-///
-/// One function so the engine and the host cannot disagree about what the
-/// button means, and so widening it later is one edit.
+/// A run that stopped without deciding to: `Crashed` (no marker, holder
+/// gone) and `Stalled` (nothing in flight, journal whole). Failed and
+/// canceled ended the way their policy said to, and continuing one of
+/// those is a different verb. One function so the engine and the host
+/// cannot disagree about what the button means.
 pub fn is_resumable(status: RunStatus) -> bool {
     matches!(status, RunStatus::Crashed | RunStatus::Stalled)
 }
@@ -164,13 +159,9 @@ mod tests {
     use super::*;
 
     /// The two statuses a run can be picked up from, and the five it
-    /// cannot. Stated as a table because the whole of decision ① is which
-    /// of these gets a button.
-    ///
-    /// `Stalled` is the one worth spelling out: it is the only *written*
-    /// marker on the resumable side, so a reading that sorts by "did it
-    /// record an ending" puts it with `Failed` and takes the button away
-    /// from a run that lost nothing.
+    /// cannot. `Stalled` is the one worth spelling out — the only *written*
+    /// marker on the resumable side, so sorting by "did it record an
+    /// ending" takes the button away from a run that lost nothing.
     #[test]
     fn a_killed_or_stalled_run_is_one_to_continue() {
         for pickable in [RunStatus::Crashed, RunStatus::Stalled] {
@@ -206,12 +197,9 @@ mod tests {
 
     /// **The guard for the lock's move out of the working tree.**
     ///
-    /// `run_status` reads the lock at a directory it is handed rather than
-    /// one it derives, so a caller naming the wrong one gets `Unknown` for
-    /// every run — no marker, no holder, nothing resumable — and neither
-    /// the compiler nor a file-level test would say so. This asserts the
-    /// whole path a resume actually takes: the lock where the engine now
-    /// puts it, read back through `prepare`.
+    /// Asserts the whole path a resume takes — the lock where the engine
+    /// now puts it, read back through `prepare`. Nothing else catches a
+    /// caller handing `run_status` the wrong directory.
     #[test]
     fn a_crashed_run_is_still_resumable_with_the_lock_outside_the_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
