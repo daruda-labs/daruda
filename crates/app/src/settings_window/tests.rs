@@ -2,6 +2,8 @@ use super::*;
 use daruda_config::BuiltinSection;
 use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
+mod failure_reporting;
+
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;
 use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};

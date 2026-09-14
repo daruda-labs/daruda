@@ -661,9 +661,11 @@ mod tests {
             | SettingsPatch::OrchestratorAgentId(_)
             | SettingsPatch::OrchestratorAccountId(_) => Coverage::Row,
             SettingsPatch::AgentCatalog(_) | SettingsPatch::SessionHosts { .. } => Coverage::ByHand,
-            // The status-bar item list is toggled from the bar itself and the
-            // Telegram chat id is written by pairing — neither is a field of
-            // this window.
+            // Neither is a *field* of this window: the status-bar item list is
+            // toggled from the bar itself, and the Telegram chat id is owned by
+            // pairing. The Notifications section does write the chat id (Unpair)
+            // and render it, but from `telegram_authorized_chat_id`, which
+            // `adopt_external_settings` mirrors — not from this reload table.
             SettingsPatch::ToggleStatusBarItem(_) | SettingsPatch::TelegramAuthorizedChatId(_) => {
                 Coverage::NotShown
             }

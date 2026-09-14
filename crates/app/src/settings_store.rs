@@ -184,6 +184,15 @@ impl SettingsStore {
         self.writer._temp_dir = Some(temp_dir);
         self.user = Arc::new(cfg);
     }
+
+    /// The temp `config.toml` a test store writes through. Lets a test
+    /// corrupt that file to drive the persistence-failure branch of
+    /// [`Self::apply_patch`] without a fake writer.
+    #[cfg(test)]
+    #[doc(hidden)]
+    pub fn writer_path_for_testing(&self) -> &Path {
+        &self.writer.path
+    }
 }
 
 /// Spawn the `config.toml` watcher and refresh the global on debounced reloads.

@@ -26,6 +26,8 @@ const NAME_TOAST: &str = "toast";
 /// CLI token for the Settings-window scenario. Bare opens the default section;
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
+/// CLI token for the Settings window showing a failed action's banner.
+const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
@@ -136,6 +138,10 @@ pub(crate) enum ScreenshotScenario {
     Toast,
     /// Open the Settings window at the given section.
     Settings(BuiltinSection),
+    /// The same window with an action's failure banner up. Every Settings
+    /// action that cannot be carried out reports through this one alert, and
+    /// no unit test can look at it — only that the field behind it was set.
+    SettingsError,
     /// Deploy the focused pane's right-click menu. The only way to eyeball
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
@@ -262,6 +268,7 @@ impl ScreenshotScenario {
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
+            NAME_SETTINGS_ERROR => Some(Self::SettingsError),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
@@ -377,6 +384,13 @@ pub(crate) fn drive(
             // is worse than no scenario.
             workspace.update(cx, |ws, cx| ws.probe_auth_statuses(cx));
             crate::windows::open_settings_window(section, window, cx);
+        }
+        ScreenshotScenario::SettingsError => {
+            crate::windows::open_settings_window(BuiltinSection::Notifications, window, cx);
+            if let Some(settings) = crate::window_registry::WindowRegistry::settings(cx) {
+                // SILENT-OK: the window was opened on the line above
+                let _ = settings.update(cx, |this, _window, cx| this.seed_error_for_shot(cx));
+            }
         }
         ScreenshotScenario::PaneContextMenu => {
             workspace.update(cx, |ws, cx| {
@@ -570,6 +584,15 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("settings:notifications"),
             Some(ScreenshotScenario::Settings(BuiltinSection::Notifications))
+        );
+    }
+
+    #[test]
+    fn the_settings_error_token_is_its_own_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("settings-error"),
+            Some(ScreenshotScenario::SettingsError),
+            "the hyphenated token must not be read as a `settings:<slug>` section"
         );
     }
 

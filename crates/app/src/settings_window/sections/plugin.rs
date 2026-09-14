@@ -14,6 +14,7 @@ use super::super::{
 use crate::agent::skills::plugins::{PluginAvailability, PluginInstall};
 use crate::agent::skills::{Skill, SkillInvocation};
 use crate::surface::strings as s;
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 use std::collections::{BTreeMap, HashSet};
@@ -174,20 +175,11 @@ impl SettingsWindow {
         let groups = group_plugins_for_settings(&plugin_skills);
         let in_flight = self.plugin_ops_in_flight.clone();
 
-        let mut header_col = div()
+        let header_col = div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_plugin(), cx));
-        if let Some(err) = self.plugin_last_error.clone() {
-            header_col = header_col.child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(theme::ERROR)
-                    .child(err),
-            );
-        }
-
         let master = self.plugin_master_pane(&groups, cx);
         let detail = self.plugin_detail_pane(
             &groups,
@@ -759,7 +751,7 @@ impl SettingsWindow {
             // Duplicate click while a previous spawn is still running.
             return;
         }
-        self.plugin_last_error = None;
+        self.error = None;
         cx.notify();
 
         let plugin_id_for_task = plugin_id.clone();
@@ -776,36 +768,66 @@ impl SettingsWindow {
                 .await;
             // SILENT-OK: settings modal may close before async defer fires
             let _ = this.update(cx, |this, cx| {
-                this.plugin_ops_in_flight.remove(&plugin_id);
-                if let Err(e) = result {
-                    let text = match action {
-                        crate::agent::skills::plugin_ops::PluginAction::Install => {
-                            s::settings_plugin_install_failed(&plugin_id, &e.to_string())
-                        }
-                        crate::agent::skills::plugin_ops::PluginAction::Uninstall => {
-                            s::settings_plugin_uninstall_failed(&plugin_id, &e.to_string())
-                        }
-                    };
-                    this.plugin_last_error = Some(SharedString::from(text));
-                }
-                // Update the Plugin scope of the `SkillsState` Global
-                // directly: the FSEvent stream lags the CLI's atomic
-                // `installed_plugins.json` write, and depending on
-                // `WindowRegistry::for_each_workspace` would silently
-                // do nothing when no Workspace is open (e.g. user
-                // running Settings from the welcome window). Direct
-                // mutation triggers `observe_global::<SkillsState>` on
-                // every observer — every open Workspace's Skills tab
-                // and this Settings page's render path both re-paint
-                // off the same source of truth.
-                use gpui::BorrowAppContext as _;
-                let personal = crate::agent::skills::scan::skills_personal_dir();
-                cx.update_global::<crate::agent::skills::SkillsState, _>(|state, _| {
-                    state.reload_scope(crate::agent::skills::SkillScope::Plugin, None, &personal);
-                });
-                cx.notify();
+                this.finish_plugin_op(&plugin_id, action, result, cx);
             });
         })
         .detach();
+    }
+
+    /// Fold one finished plugin op back into the window: drop its in-flight
+    /// marker, report a failure, and republish the skills snapshot.
+    ///
+    /// Split from the spawn above so the outcome handling is reachable without
+    /// running the `claude` CLI.
+    pub(in crate::settings_window) fn finish_plugin_op(
+        &mut self,
+        plugin_id: &str,
+        action: crate::agent::skills::plugin_ops::PluginAction,
+        result: Result<String, crate::agent::skills::plugin_ops::PluginOpError>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.plugin_ops_in_flight.remove(plugin_id);
+        match result {
+            // Clears rather than leaves the previous banner standing, matching
+            // every other action here: the banner reports the last thing the
+            // user asked for, and this one worked.
+            Ok(_) => self.error = None,
+            Err(e) => {
+                let text = match action {
+                    crate::agent::skills::plugin_ops::PluginAction::Install => {
+                        s::settings_plugin_install_failed(plugin_id, &e.to_string())
+                    }
+                    crate::agent::skills::plugin_ops::PluginAction::Uninstall => {
+                        s::settings_plugin_uninstall_failed(plugin_id, &e.to_string())
+                    }
+                };
+                self.report_section_error(
+                    text,
+                    ErrorReport::new("Plugin operation failed")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("plugin", plugin_id.to_owned())
+                        .dedup("settings.plugin_op"),
+                    cx,
+                );
+            }
+        }
+        // Update the Plugin scope of the `SkillsState` Global
+        // directly: the FSEvent stream lags the CLI's atomic
+        // `installed_plugins.json` write, and depending on
+        // `WindowRegistry::for_each_workspace` would silently
+        // do nothing when no Workspace is open (e.g. user
+        // running Settings from the welcome window). Direct
+        // mutation triggers `observe_global::<SkillsState>` on
+        // every observer — every open Workspace's Skills tab
+        // and this Settings page's render path both re-paint
+        // off the same source of truth.
+        use gpui::BorrowAppContext as _;
+        let personal = crate::agent::skills::scan::skills_personal_dir();
+        cx.update_global::<crate::agent::skills::SkillsState, _>(|state, _| {
+            state.reload_scope(crate::agent::skills::SkillScope::Plugin, None, &personal);
+        });
+        cx.notify();
     }
 }

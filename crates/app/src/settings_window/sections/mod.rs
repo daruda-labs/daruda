@@ -432,15 +432,103 @@ impl SettingsWindow {
             .into_any_element()
     }
 
+    /// Store the token typed into the field, then empty the field.
+    fn save_telegram_token(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+        self.save_telegram_token_with(crate::telegram::keychain::write_token, window, cx);
+    }
+
+    /// [`Self::save_telegram_token`] with the credential-store write supplied
+    /// by the caller. A parameter because `keychain::write_token` reaches the
+    /// real OS credential store with no test guard of its own (unlike
+    /// `read_token`), so a test must be able to stand in for it.
+    pub(super) fn save_telegram_token_with(
+        &mut self,
+        write: impl FnOnce(&str) -> std::io::Result<()>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let token = self
+            .telegram_token_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if token.is_empty() {
+            return;
+        }
+        match write(&token) {
+            Ok(()) => {
+                self.telegram_token_configured = true;
+                self.telegram_token_input.update(cx, |input, cx_state| {
+                    input.set_value(String::new(), window, cx_state);
+                });
+                self.error = None;
+                cx.notify();
+            }
+            // The token stays in the field: nothing was stored, so retrying is
+            // the next thing the user will want and retyping it is not.
+            Err(e) => self.report_section_error(
+                s::settings_err_telegram_token_save(&e.to_string()),
+                ErrorReport::new("Telegram token was not stored")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("settings.telegram.token_save"),
+                cx,
+            ),
+        }
+    }
+
+    /// Forget the stored token, so the bridge has nothing to poll with.
+    fn clear_telegram_token(&mut self, cx: &mut gpui::Context<Self>) {
+        self.clear_telegram_token_with(crate::telegram::keychain::delete_token, cx);
+    }
+
+    /// [`Self::clear_telegram_token`] with the credential-store delete supplied
+    /// by the caller — same reason as [`Self::save_telegram_token_with`].
+    pub(super) fn clear_telegram_token_with(
+        &mut self,
+        delete: impl FnOnce() -> std::io::Result<()>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match delete() {
+            Ok(()) => {
+                self.telegram_token_configured = false;
+                self.error = None;
+                cx.notify();
+            }
+            Err(e) => self.report_section_error(
+                s::settings_err_telegram_token_clear(&e.to_string()),
+                ErrorReport::new("Telegram token was not removed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("settings.telegram.token_clear"),
+                cx,
+            ),
+        }
+    }
+
+    /// Drop the paired chat, so the bridge stops accepting that phone.
+    ///
+    /// Forced rather than conflict-checked: pairing is written by the bridge's
+    /// poll loop, so `base_config` may legitimately be behind the live value
+    /// and a conflict prompt here would only ask the user to confirm the
+    /// pairing they are trying to remove.
+    pub(super) fn unpair_telegram(&mut self, cx: &mut gpui::Context<Self>) {
+        self.apply_settings_patch_force_as(
+            daruda_config::SettingsPatch::TelegramAuthorizedChatId(None),
+            s::settings_err_telegram_unpair,
+            cx,
+        );
+    }
+
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let t = theme::current(cx);
         let body_color = t.text_primary;
         let telegram_enabled = self.telegram_enabled;
         let token_configured = self.telegram_token_configured;
-        let authorized_chat_id = crate::settings_store::SettingsStore::global(cx)
-            .user_arc()
-            .telegram
-            .authorized_chat_id;
+        let authorized_chat_id = self.telegram_authorized_chat_id;
         let pair_code = self.telegram_pair_code.clone();
 
         div()
@@ -485,29 +573,7 @@ impl SettingsWindow {
                         )
                         .on_click(cx.listener(
                             |this, _: &ClickEvent, window, cx| {
-                                let token = this
-                                    .telegram_token_input
-                                    .read(cx)
-                                    .value()
-                                    .trim()
-                                    .to_string();
-                                if token.is_empty() {
-                                    return;
-                                }
-                                match crate::telegram::keychain::write_token(&token) {
-                                    Ok(()) => {
-                                        this.telegram_token_configured = true;
-                                        this.telegram_token_input.update(cx, |input, cx_state| {
-                                            input.set_value(String::new(), window, cx_state);
-                                        });
-                                    }
-                                    Err(_) => {
-                                        // `keychain::write_token` already logs the
-                                        // failure via `LogWriter::log` — nothing left
-                                        // to do here beyond the UI state below.
-                                    }
-                                }
-                                cx.notify();
+                                this.save_telegram_token(window, cx);
                             },
                         )),
                     )
@@ -525,15 +591,7 @@ impl SettingsWindow {
                             )
                             .on_click(cx.listener(
                                 |this, _: &ClickEvent, _window, cx| {
-                                    // `keychain::delete_token` already logs any
-                                    // failure via `LogWriter::log`. Only flip the
-                                    // "configured" state on success — but still
-                                    // notify unconditionally, matching the other
-                                    // Telegram button handlers.
-                                    if crate::telegram::keychain::delete_token().is_ok() {
-                                        this.telegram_token_configured = false;
-                                    }
-                                    cx.notify();
+                                    this.clear_telegram_token(cx);
                                 },
                             )),
                         )
@@ -609,24 +667,6 @@ impl SettingsWindow {
                                 None => s::settings_telegram_not_paired(),
                             }),
                     )
-                    .child(
-                        // The bridge's poll loop pairs a phone in the background
-                        // (via `/pair <code>`) — this section only re-reads
-                        // `authorized_chat_id` when IT re-renders, and nothing
-                        // currently subscribes this window to that background
-                        // change. This button forces a repaint with no state
-                        // mutation of its own, so the status line above picks up
-                        // whatever `SettingsStore`'s live config already has.
-                        button(
-                            "settings-telegram-check-pairing",
-                            s::settings_telegram_check_pairing(),
-                        )
-                        .on_click(cx.listener(
-                            |_this, _: &ClickEvent, _window, cx| {
-                                cx.notify();
-                            },
-                        )),
-                    )
                     .when(authorized_chat_id.is_some(), |row| {
                         row.child(
                             button_danger(
@@ -634,29 +674,8 @@ impl SettingsWindow {
                                 s::settings_telegram_unpair(),
                             )
                             .on_click(cx.listener(
-                                |_this, _: &ClickEvent, _window, cx| {
-                                    use gpui::BorrowAppContext as _;
-                                    let result = cx
-                                        .update_global::<crate::settings_store::SettingsStore, _>(
-                                            |store, _| {
-                                                store.apply_patch(
-                                                    daruda_config::SettingsPatch::TelegramAuthorizedChatId(
-                                                        None,
-                                                    ),
-                                                )
-                                            },
-                                        );
-                                    if let Err(e) = result {
-                                        LogWriter::log(
-                                            ErrorReport::new("Failed to clear Telegram pairing")
-                                                .severity(ErrorSeverity::Warning)
-                                                .message(e)
-                                                .at(file!(), line!())
-                                                .dedup("telegram.unpair")
-                                                .build(),
-                                        );
-                                    }
-                                    cx.notify();
+                                |this, _: &ClickEvent, _window, cx| {
+                                    this.unpair_telegram(cx);
                                 },
                             )),
                         )
@@ -711,9 +730,11 @@ impl SettingsWindow {
                                     s::error_modal_button_copy()
                                 },
                             )
-                            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                                this.copy_botfather_commands(cx);
-                            })),
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, _window, cx| {
+                                    this.copy_botfather_commands(cx);
+                                },
+                            )),
                         ),
                     ),
             )

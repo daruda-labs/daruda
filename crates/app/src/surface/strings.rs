@@ -3816,6 +3816,28 @@ pub fn settings_accounts_authentication_in_progress() -> String {
 pub fn settings_accounts_workspace_required() -> String {
     rust_i18n::t!("settings.accounts_workspace_required").into_owned()
 }
+/// Settings-window banner for an action that could not be carried out. Each
+/// wraps the raw diagnostic (a `daruda_config` persistence message, an OS
+/// credential-store stderr line, an `io::Error`) in a sentence aimed at the
+/// user, since those diagnostics are English-only developer text.
+pub fn settings_err_save_settings(error: &str) -> String {
+    rust_i18n::t!("settings.err_save_settings", error => error).into_owned()
+}
+pub fn settings_err_telegram_unpair(error: &str) -> String {
+    rust_i18n::t!("settings.err_telegram_unpair", error => error).into_owned()
+}
+pub fn settings_err_telegram_token_save(error: &str) -> String {
+    rust_i18n::t!("settings.err_telegram_token_save", error => error).into_owned()
+}
+pub fn settings_err_telegram_token_clear(error: &str) -> String {
+    rust_i18n::t!("settings.err_telegram_token_clear", error => error).into_owned()
+}
+pub fn settings_err_accounts_save_default(error: &str) -> String {
+    rust_i18n::t!("settings.err_accounts_save_default", error => error).into_owned()
+}
+pub fn settings_err_accounts_remove(error: &str) -> String {
+    rust_i18n::t!("settings.err_accounts_remove", error => error).into_owned()
+}
 /// Status-bar dropdown's Cancel row next to the in-progress indicator —
 /// dispatches `Workspace::cancel_pending_login`. Reuses the shared
 /// `common.btn_cancel` copy (no domain-specific wording needed).
@@ -4302,9 +4324,6 @@ pub fn settings_telegram_not_paired() -> String {
 }
 pub fn settings_telegram_paired(chat_id: i64) -> String {
     rust_i18n::t!("settings.telegram_paired", chat_id = chat_id).into_owned()
-}
-pub fn settings_telegram_check_pairing() -> String {
-    rust_i18n::t!("settings.telegram_check_pairing").into_owned()
 }
 pub fn settings_telegram_generate_code() -> String {
     rust_i18n::t!("settings.telegram_generate_code").into_owned()

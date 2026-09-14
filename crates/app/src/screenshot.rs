@@ -513,7 +513,7 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
     );
     // Settings is a separate window; capture it instead of the workspace.
     match scenario {
-        ScreenshotScenario::Settings(_) => {
+        ScreenshotScenario::Settings(_) | ScreenshotScenario::SettingsError => {
             crate::window_registry::WindowRegistry::settings_window(cx)
         }
         ScreenshotScenario::CommandPalette

@@ -22,9 +22,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use daruda_store::accounts::{AccountId, AccountRecipeId, ManagedAccount};
+use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::{
@@ -160,19 +159,18 @@ fn row_header(
         })
 }
 
-/// Log an I/O failure without surfacing a toast — the Settings window
-/// has no `Workspace::report_error`; `LogWriter::log` is the documented
-/// fallback for GPUI-free / pre-Workspace error sites (see project
-/// CLAUDE.md §Error reporting).
-fn log_io_error(title: &str, dedup: &str, err: &std::io::Error) {
-    LogWriter::log(
-        ErrorReport::new(title)
-            .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
-            .with_context("error", format!("{err}"))
-            .dedup(dedup)
-            .build(),
-    );
+/// How an account edit reaches disk: the mutation runs against the loaded
+/// state, then the whole file is rewritten under a lock.
+///
+/// A parameter rather than a direct [`daruda_store::accounts::mutate_accounts`]
+/// call because that one addresses the running profile's real `accounts.json` —
+/// a test driving these paths would rewrite the developer's own account list.
+type PersistAccounts<'a> =
+    &'a dyn Fn(&mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState>;
+
+/// The production [`PersistAccounts`].
+fn persist_accounts(mutate: &mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState> {
+    daruda_store::accounts::mutate_accounts(|state| mutate(state)).map(|(state, ())| state)
 }
 
 impl SettingsWindow {
@@ -391,14 +389,11 @@ impl SettingsWindow {
     /// `add_managed_account` resolves a login command for it.
     fn start_add_account(&mut self, recipe: AccountRecipeId, cx: &mut gpui::Context<Self>) {
         let Some((handle, weak)) = WindowRegistry::first_workspace(cx) else {
-            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
-            cx.notify();
-            LogWriter::log(
-                ErrorReport::new("Add-account login has no open Workspace window to run against")
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("settings.accounts.add_no_workspace")
-                    .build(),
+            self.report_no_workspace(
+                "Add-account login has no open Workspace window to run against",
+                "settings.accounts.add_no_workspace",
+                None,
+                cx,
             );
             return;
         };
@@ -413,21 +408,22 @@ impl SettingsWindow {
                 false
             }
         });
-        if !matches!(&result, Ok(true)) {
-            self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
-            cx.notify();
-        }
-        if let Err(e) = result {
-            LogWriter::log(
-                ErrorReport::new(
-                    "Failed to start add-account login: target Workspace window is gone",
-                )
-                .message(e.to_string())
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("settings.accounts.add_target_window_gone")
-                .build(),
-            );
+        // `Ok(false)` is the entity behind a live window handle being gone,
+        // `Err` the window itself — one banner, two records.
+        match result {
+            Ok(true) => {}
+            Ok(false) => self.report_no_workspace(
+                "Add-account login: the target Workspace entity was released",
+                "settings.accounts.add_target_entity_gone",
+                None,
+                cx,
+            ),
+            Err(e) => self.report_no_workspace(
+                "Failed to start add-account login: target Workspace window is gone",
+                "settings.accounts.add_target_window_gone",
+                Some(e.to_string()),
+                cx,
+            ),
         }
     }
 
@@ -508,13 +504,11 @@ impl SettingsWindow {
     /// Surface "no Workspace window" inline in Settings and log why.
     fn report_no_workspace(
         &mut self,
-        title: String,
-        dedup: String,
+        title: impl Into<String>,
+        dedup: impl Into<String>,
         detail: Option<String>,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.error = Some(SharedString::from(s::settings_accounts_workspace_required()));
-        cx.notify();
         let mut report = ErrorReport::new(title)
             .severity(ErrorSeverity::Warning)
             .at(file!(), line!())
@@ -522,7 +516,7 @@ impl SettingsWindow {
         if let Some(detail) = detail {
             report = report.message(detail);
         }
-        LogWriter::log(report.build());
+        self.report_section_error(s::settings_accounts_workspace_required(), report, cx);
     }
 
     /// Immediate (no confirm) — sets which account new panes of `recipe`
@@ -534,15 +528,26 @@ impl SettingsWindow {
         account: Option<AccountId>,
         cx: &mut gpui::Context<Self>,
     ) {
-        let state = match daruda_store::accounts::mutate_accounts(|state| {
-            apply_default_choice(state, recipe, account);
-        }) {
-            Ok((state, ())) => state,
+        self.set_default_account_with(recipe, account, &persist_accounts, cx);
+    }
+
+    /// [`Self::set_default_account`] against a caller-supplied persist step.
+    pub(in crate::settings_window) fn set_default_account_with(
+        &mut self,
+        recipe: AccountRecipeId,
+        account: Option<AccountId>,
+        persist: PersistAccounts<'_>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let state = match persist(&mut |state| apply_default_choice(state, recipe, account)) {
+            Ok(state) => state,
             Err(e) => {
-                log_io_error(
+                self.report_account_io_error(
+                    s::settings_err_accounts_save_default(&e.to_string()),
                     "Failed to save accounts.json after set-default",
                     "settings.accounts.save_default_failed",
                     &e,
+                    cx,
                 );
                 return;
             }
@@ -553,6 +558,28 @@ impl SettingsWindow {
         self.accounts = state.clone();
         accounts_global::replace(cx, state);
         cx.notify();
+    }
+
+    /// An `accounts.json` write that did not land: banner plus log entry.
+    /// `text` is the sentence the user reads, `title`/`dedup` the record a
+    /// reviewer greps for.
+    fn report_account_io_error(
+        &mut self,
+        text: String,
+        title: &'static str,
+        dedup: &'static str,
+        err: &std::io::Error,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.report_section_error(
+            text,
+            ErrorReport::new(title)
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .with_context("error", format!("{err}"))
+                .dedup(dedup),
+            cx,
+        );
     }
 
     /// G9 confirm dialog before delete — destructive, and (per the
@@ -598,33 +625,53 @@ impl SettingsWindow {
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
-        let (state, removed) = match daruda_store::accounts::mutate_accounts(|state| {
+        self.remove_account_with(account_id, &persist_accounts, cx);
+    }
+
+    /// [`Self::remove_account`] against a caller-supplied persist step.
+    pub(in crate::settings_window) fn remove_account_with(
+        &mut self,
+        account_id: AccountId,
+        persist: PersistAccounts<'_>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut removed: Option<ManagedAccount> = None;
+        let state = match persist(&mut |state| {
             let Some(account) = state.find(account_id).cloned() else {
-                return false;
+                return;
             };
-            // The account's own auth domain owns the removal — its config dir plus
-            // whatever OS credential entry is scoped to it.
-            daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
             state.accounts.retain(|a| a.id != account_id);
             state.default_by_recipe.retain(|_, id| *id != account_id);
-            true
+            removed = Some(account);
         }) {
-            Ok((state, removed)) => (state, removed),
+            Ok(state) => state,
             Err(e) => {
-                log_io_error(
+                // The mutation ran before the write that failed, so the list on
+                // disk still names this account — which is why the cleanup
+                // below has not happened yet and must not.
+                self.report_account_io_error(
+                    s::settings_err_accounts_remove(&e.to_string()),
                     "Failed to save accounts.json after delete",
                     "settings.accounts.save_delete_failed",
                     &e,
+                    cx,
                 );
                 return;
             }
         };
-        if !removed {
+        // Already gone — another window deleted it between the click and the
+        // load. Nothing of ours to clean up, but the reloaded list still is.
+        let Some(account) = removed else {
             self.accounts = state.clone();
             accounts_global::replace(cx, state);
             cx.notify();
             return;
-        }
+        };
+        // The account's own auth domain owns the removal — its config dir plus
+        // whatever OS credential entry is scoped to it. Only now: `cleanup` is
+        // irreversible, so running it before the shorter list was written would
+        // leave a live entry pointing at a home that is already gone.
+        daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
         // Reset every pane pinned to this account back to the system
         // default (+ prune its per-account usage cache) in every open
         // Workspace window — this is pane/cache state the Global doesn't
