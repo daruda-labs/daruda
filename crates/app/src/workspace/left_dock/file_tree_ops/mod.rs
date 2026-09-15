@@ -122,19 +122,19 @@ impl Workspace {
 
         // Start a watcher on first touch. The watcher is GPUI-free; the
         // polling task belongs to Workspace and is created lazily.
-        if !self
+        if self
             .lane_scoped
             .get(&wt_ref)
-            .is_some_and(|state| state.files.watcher.is_some())
+            .is_none_or(|state| state.files.watcher.is_none())
         {
             self.spawn_files_watcher(wt_ref, root.clone(), cx);
         }
         // Build the gitignore matcher once on a background thread;
         // rebuilt when `.gitignore` changes.
-        if !self
+        if self
             .lane_scoped
             .get(&wt_ref)
-            .is_some_and(|state| state.files.gitignore.is_some())
+            .is_none_or(|state| state.files.gitignore.is_none())
         {
             self.kick_gitignore_build(wt_ref, root.clone(), cx);
         }

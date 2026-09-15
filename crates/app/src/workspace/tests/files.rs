@@ -611,24 +611,24 @@ async fn finalize_remove_lane_clears_per_lane_state(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         assert!(ws.lane_file_tree(removable_ref).is_none());
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&removable_ref)
-                .is_some_and(|state| state.files.watcher.is_some())
+                .is_none_or(|state| state.files.watcher.is_none())
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&removable_ref)
-                .is_some_and(|state| state.files.gitignore.is_some())
+                .is_none_or(|state| state.files.gitignore.is_none())
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&removable_ref)
-                .is_some_and(|state| state.files.reload_queue.is_some())
+                .is_none_or(|state| state.files.reload_queue.is_none())
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&removable_ref)
-                .is_some_and(|state| state.files.visible_cache.is_some())
+                .is_none_or(|state| state.files.visible_cache.is_none())
         );
         assert!(!ws.lane_scoped.contains_key(&removable_ref));
     });
@@ -836,9 +836,9 @@ async fn ensure_file_tree_skips_unavailable_lane_and_tears_down_watcher(cx: &mut
             "unavailable lane must not get a file tree"
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&id)
-                .is_some_and(|state| state.files.watcher.is_some()),
+                .is_none_or(|state| state.files.watcher.is_none()),
             "unavailable lane must not get a watcher"
         );
     });
@@ -874,9 +874,9 @@ async fn ensure_file_tree_skips_unavailable_lane_and_tears_down_watcher(cx: &mut
             "tree torn down once the lane root is missing"
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&id)
-                .is_some_and(|state| state.files.watcher.is_some()),
+                .is_none_or(|state| state.files.watcher.is_none()),
             "watcher torn down once the lane root is missing"
         );
     });
