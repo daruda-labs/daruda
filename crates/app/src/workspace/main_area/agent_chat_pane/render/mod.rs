@@ -785,6 +785,7 @@ fn render_agent_item(
             this.turn_boundary,
             RenderAssets::of(&this.assets),
             &this.fold,
+            &this.activity.tool_started_at,
             this.tail_calls.value(),
             t,
             this.dim_amount,
@@ -815,6 +816,7 @@ fn render_item(
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
     fold: &FoldState,
+    tool_started_at: &std::collections::HashMap<String, std::time::Instant>,
     // The recent-steps axis's *call* level — the only one that reaches a
     // rendered item, through the subagent card's own boundary. A response's
     // step level is the row projection's business.
@@ -863,6 +865,7 @@ fn render_item(
                 boundary,
                 assets,
                 fold,
+                tool_started_at,
                 call_window,
                 t,
                 dim,

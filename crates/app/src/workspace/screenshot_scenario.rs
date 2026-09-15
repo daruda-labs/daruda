@@ -45,6 +45,9 @@ const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
 /// issue count, a failure policy, a dropped pin's reason, inherited defaults.
 const NAME_FLOW_GRAPH_AUTHORING: &str = "flow-graph-authoring";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
+const NAME_AGENT_CHAT_TRANSPORT_CLOSED: &str = "agent-chat-transport-closed";
+const NAME_AGENT_CHAT_PACKAGE_NETWORK: &str = "agent-chat-package-network";
+const NAME_AGENT_CHAT_PACKAGE_INVALID: &str = "agent-chat-package-invalid";
 /// CLI token for an empty agent-chat pane with its view options open.
 const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
@@ -59,6 +62,7 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
+const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
 const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
 /// CLI token for the tail window's boundary row, closed.
 const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
@@ -178,6 +182,9 @@ pub(crate) enum ScreenshotScenario {
     /// An agent-chat pane parked on an expired login: the connect banner with
     /// its remedy buttons, and the failure card the conversation ends on.
     AgentChatFailure,
+    /// A disconnected adapter with localized recovery copy and a retry button.
+    AgentChatTransportClosed,
+    AgentChatPreparationFailure(daruda_acp::preparation::PreparationKind),
     /// A fresh agent-chat pane before the first prompt, with view options open.
     AgentChatEmpty,
     /// A settled transcript in the default state. The only way to look at the
@@ -203,6 +210,10 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// A tool card whose call is still running, its group open. The badge's
+    /// live state is the one a settled seed cannot reach, and it is the only
+    /// state that carries a number — which only a capture can judge.
+    AgentChatRunningTool,
     /// The plan region mid-run: one step done, one running, one still to come.
     /// Its four states are icons carrying meaning by shape, which a unit test
     /// cannot judge — only a capture shows whether they read apart.
@@ -288,6 +299,13 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
             NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
+            NAME_AGENT_CHAT_TRANSPORT_CLOSED => Some(Self::AgentChatTransportClosed),
+            NAME_AGENT_CHAT_PACKAGE_NETWORK => Some(Self::AgentChatPreparationFailure(
+                daruda_acp::preparation::PreparationKind::Network,
+            )),
+            NAME_AGENT_CHAT_PACKAGE_INVALID => Some(Self::AgentChatPreparationFailure(
+                daruda_acp::preparation::PreparationKind::InvalidPackage,
+            )),
             NAME_AGENT_CHAT_EMPTY => Some(Self::AgentChatEmpty),
             NAME_AGENT_CHAT => Some(Self::AgentChat),
             NAME_AGENT_CHAT_WORKING => Some(Self::AgentChatWorking),
@@ -295,6 +313,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
+            NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
@@ -447,7 +466,38 @@ pub(crate) fn drive(
             });
         }
         ScreenshotScenario::AgentChatFailure => {
-            workspace.update(cx, |ws, cx| ws.open_agent_chat_failure_for_shot(window, cx));
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_failure_for_shot(
+                    daruda_acp::AcpFailure::AuthRequired {
+                        message: "Authentication required".into(),
+                    },
+                    window,
+                    cx,
+                )
+            });
+        }
+        ScreenshotScenario::AgentChatTransportClosed => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_failure_for_shot(
+                    daruda_acp::AcpFailure::TransportClosed {
+                        message: "Incoming transport closed".into(),
+                    },
+                    window,
+                    cx,
+                )
+            });
+        }
+        ScreenshotScenario::AgentChatPreparationFailure(kind) => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_failure_for_shot(
+                    daruda_acp::AcpFailure::AdapterInstall {
+                        kind,
+                        message: "npm setup failed".into(),
+                    },
+                    window,
+                    cx,
+                )
+            });
         }
         ScreenshotScenario::AgentChatEmpty => {
             workspace.update(cx, |ws, cx| ws.open_agent_chat_empty_for_shot(window, cx));
@@ -478,6 +528,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatInterrupted => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatRunningTool => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_running_tool_for_shot(window, cx)
             });
         }
         ScreenshotScenario::AgentChatPlan => {
@@ -680,6 +735,10 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-failure"),
             Some(ScreenshotScenario::AgentChatFailure)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-transport-closed"),
+            Some(ScreenshotScenario::AgentChatTransportClosed)
         );
     }
 

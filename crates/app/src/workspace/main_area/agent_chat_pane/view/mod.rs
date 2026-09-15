@@ -476,6 +476,13 @@ pub(in crate::workspace) struct ActivityTracker {
     /// child tool-call event; keeps a subagent's badge "active" across the
     /// gaps between its sequential child calls (see [`SUBAGENT_QUIESCENCE`]).
     pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
+    /// When each tool call was first reported, by tool id. The protocol carries
+    /// no timestamp and the mapper is deliberately clock-free, so the host
+    /// records the first sighting here — the same shape as
+    /// `subagent_last_activity`, and the only source a card's "how long has this
+    /// been running" can have. A replayed conversation has no entries, which is
+    /// consistent: `settle_run_state` leaves it nothing live to time.
+    pub(in crate::workspace) tool_started_at: HashMap<String, std::time::Instant>,
     /// The busy span as of the last `reconcile_activity` tick: both the
     /// edge-detection memory that turns the `is_busy` level signal into
     /// idle→busy / busy→idle transitions, and the wall-clock anchor the

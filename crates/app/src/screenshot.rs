@@ -535,6 +535,8 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::FlowAsking
         | ScreenshotScenario::FlowDeleteConfirm
         | ScreenshotScenario::AgentChatFailure
+        | ScreenshotScenario::AgentChatTransportClosed
+        | ScreenshotScenario::AgentChatPreparationFailure(_)
         | ScreenshotScenario::AgentChatEmpty
         | ScreenshotScenario::AgentChat
         | ScreenshotScenario::OrchestratorChip
@@ -543,6 +545,7 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::AgentChatNarrowed
         | ScreenshotScenario::AgentChatFold
         | ScreenshotScenario::AgentChatInterrupted
+        | ScreenshotScenario::AgentChatRunningTool
         | ScreenshotScenario::AgentChatPlan
         | ScreenshotScenario::AgentChatPlanStopped
         | ScreenshotScenario::AgentChatTail

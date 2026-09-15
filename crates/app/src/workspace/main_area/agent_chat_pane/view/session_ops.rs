@@ -458,6 +458,32 @@ impl AgentChatView {
         self.reproject(cx);
     }
 
+    /// Reproject after a capture-only model edit.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn reproject_for_shot(&mut self, cx: &mut Context<Self>) {
+        self.reproject(cx);
+    }
+
+    /// Put the transcript's last tool call back in flight for a capture, aged by
+    /// `age` so the badge shows a real number. Model-only: the caller opens the
+    /// fold the card needs and reprojects.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn start_last_tool_for_shot(&mut self, age: std::time::Duration) {
+        let Some(id) = self.items.iter_mut().rev().find_map(|item| match item {
+            ChatItem::ToolCall(tc) => {
+                tc.status = daruda_acp::ToolStatusView::InProgress;
+                Some(tc.id.clone())
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        let started = std::time::Instant::now()
+            .checked_sub(age)
+            .unwrap_or_else(std::time::Instant::now);
+        self.activity.tool_started_at.insert(id, started);
+    }
+
     /// Seed the plan region for a capture, expanded so its entries are on
     /// screen (a settled seed would otherwise arrive collapsed).
     #[cfg(feature = "screenshot")]

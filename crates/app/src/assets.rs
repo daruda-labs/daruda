@@ -73,7 +73,7 @@ impl AssetSource for DarudaAssets {
             "icons/agents/vtcode.svg" => icon!("agents/vtcode.svg"),
 
             // ── UI controls ───────────────────────────────────────────────
-            "icons/ui/cancel.svg" => icon!("ui/cancel.svg"),
+            "icons/ui/block.svg" => icon!("ui/block.svg"),
             "icons/ui/check-circle.svg" => icon!("ui/check-circle.svg"),
             "icons/ui/check.svg" => icon!("ui/check.svg"),
             "icons/ui/chrome-reader-mode.svg" => icon!("ui/chrome-reader-mode.svg"),
@@ -215,7 +215,7 @@ mod tests {
     use super::*;
 
     const UI_ICON_PATHS: &[&str] = &[
-        "icons/ui/cancel.svg",
+        "icons/ui/block.svg",
         "icons/ui/check-circle.svg",
         "icons/ui/check.svg",
         "icons/ui/chrome-reader-mode.svg",

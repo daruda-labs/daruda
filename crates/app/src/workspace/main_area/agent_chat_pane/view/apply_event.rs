@@ -229,6 +229,12 @@ impl AgentChatView {
                     // but reports no id) the scope stays `All` — always correct,
                     // just more expensive.
                     reconcile_scope = ReconcileScope::Tool(tool_id.to_string());
+                    // First sighting starts the call's clock; later progress
+                    // updates for the same id must not restart it.
+                    self.activity
+                        .tool_started_at
+                        .entry(tool_id.to_string())
+                        .or_insert_with(std::time::Instant::now);
                     // Bump the subagent (parent) whose child just produced this
                     // tool-call event, so its run span stays "active" across the
                     // gaps between the subagent's sequential child calls. Only
@@ -375,15 +381,16 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::Error(failure) => {
+                let message = super::super::agent_chat_helpers::failure_message(&failure);
                 let error_message = match &self.cwd {
                     Some(PaneCwd::Remote(_)) => {
                         format!(
                             "{}\n\n{}",
-                            failure.message(),
+                            message,
                             s::agent_chat_remote_connect_error_hint()
                         )
                     }
-                    _ => failure.message().to_owned(),
+                    _ => message,
                 };
                 self.status = AgentSessionStatus::Error {
                     message: error_message,
@@ -568,20 +575,15 @@ impl AgentChatView {
         }
     }
 
-    /// End-of-stream safety-net predicate: true while `status` is a
-    /// non-terminal connecting state. Normally the stream never closes before
-    /// `Connected`/`Error` fires, but a connection task that panics (or is
-    /// dropped before its `Err` path runs) closes it silently, stranding the
-    /// pane on "Connecting…" forever with no retry affordance. When this is
-    /// true, the pump feeds a real `AcpEvent::Error` through `apply_event`
-    /// instead of setting `status` directly, so the failure gets the exact
-    /// same handling as any other terminal error.
-    pub(in crate::workspace) fn is_still_connecting(&self) -> bool {
+    /// Clean EOF while idle has no pending request to fail. A closed event
+    /// stream must still retire the handle and offer a reconnect.
+    pub(in crate::workspace) fn needs_disconnect_error(&self) -> bool {
         matches!(
             self.status,
             AgentSessionStatus::PreparingRuntime(_)
                 | AgentSessionStatus::Connecting
                 | AgentSessionStatus::Handshaking(_)
+                | AgentSessionStatus::Connected
         )
     }
 

@@ -1,17 +1,17 @@
 //! The one status vocabulary the agent chat draws.
 //!
-//! A run's rollup and a plan step answer the same question — how is this
-//! going, and how did it end — so they share one table rather than each
-//! picking its own mark. They used to disagree: a running run was a text `●`
-//! while a running plan step was its own glyph, so the plan header and the
-//! plan row under it described one step two ways.
+//! A run's rollup, a plan step and a tool call all answer the same question —
+//! how is this going, and how did it end — so they share one table rather than
+//! each picking its own mark. They used to disagree: a running run was a text
+//! `●`, a running plan step its own glyph, a finished tool call the word
+//! "Done", so one turn described itself three ways.
 //!
-//! [`StatusIcon`] is that shared vocabulary, and the two domain enums convert
-//! into it. Neither can pick a mark the other cannot; adding a state means
-//! adding it here, once.
+//! [`StatusIcon`] is that shared vocabulary, and the three domain enums convert
+//! into it. None can pick a mark the others cannot; adding a state means adding
+//! it here, once.
 
-use daruda_acp::PlanStatus;
-use gpui::{AnyElement, App, Hsla, IntoElement, div, prelude::*};
+use daruda_acp::{PlanStatus, ToolStatusView};
+use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::pulse_opacity;
 use crate::ui::theme;
@@ -21,12 +21,14 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 // Material Symbols, daruda's own icon set (see `assets.rs`). One family for the
 // whole vocabulary, and the shape carries the state so colour is reinforcement
 // rather than the only channel (`DESIGN.md`) — which is also why a stopped step
-// (`cancel`, a ✕) and a failed one (`error`, a `!`) are different marks and not
-// one mark in two colours.
+// (`block`, a ⊘) and a failed one (`error`, a `!`) are different marks and not
+// one mark in two colours. The outcome marks take the family's filled cut so
+// they hold their shape at `xsmall`; `radio-button-*` has no filled variant and
+// needs none — an unreached step *should* read as an empty ring.
 const ICON_RUNNING: &str = "icons/ui/radio-button-checked.svg";
 const ICON_OK: &str = "icons/ui/check-circle.svg";
 const ICON_PENDING: &str = "icons/ui/radio-button-unchecked.svg";
-const ICON_CANCELLED: &str = "icons/ui/cancel.svg";
+const ICON_CANCELLED: &str = "icons/ui/block.svg";
 const ICON_PARTIAL: &str = "icons/ui/warning.svg";
 const ICON_FAILED: &str = "icons/ui/error.svg";
 
@@ -62,6 +64,20 @@ impl From<PlanStatus> for StatusIcon {
             PlanStatus::Completed => Self::Ok,
             PlanStatus::Pending => Self::Pending,
             PlanStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+impl From<ToolStatusView> for StatusIcon {
+    fn from(status: ToolStatusView) -> Self {
+        match status {
+            // `Pending` reads as running for the same reason the badge did: the
+            // adapter marks every call `Pending` until a progress ping many
+            // tools never get (see `ToolStatusView::is_live`).
+            ToolStatusView::Pending | ToolStatusView::InProgress => Self::Running,
+            ToolStatusView::Completed => Self::Ok,
+            ToolStatusView::Failed => Self::Failed,
+            ToolStatusView::Cancelled => Self::Cancelled,
         }
     }
 }
@@ -113,17 +129,62 @@ pub(super) fn status_icon(
     dim: f32,
     cx: &App,
 ) -> AnyElement {
+    mark(icon.into(), None, t, dim, cx)
+}
+
+/// [`status_icon`] with the live state's age beside it. The number is the
+/// liveness signal, so the mark stays solid: a counter says *how long* as well
+/// as *still going*, which a blink cannot, and two moving signals on one row
+/// read as noise. `age` is ignored unless the state is live — a settled mark
+/// has nothing left to count.
+pub(super) fn status_icon_with_age(
+    icon: impl Into<StatusIcon>,
+    age: Option<std::time::Duration>,
+    t: &theme::DarudaTheme,
+    dim: f32,
+    cx: &App,
+) -> AnyElement {
     let icon = icon.into();
+    mark(icon, icon.is_live().then_some(age).flatten(), t, dim, cx)
+}
+
+fn mark(
+    icon: StatusIcon,
+    age: Option<std::time::Duration>,
+    t: &theme::DarudaTheme,
+    dim: f32,
+    cx: &App,
+) -> AnyElement {
+    let color = icon.color(t, dim, cx);
+    // A counter already carries the motion, so the mark beside it stays solid.
+    let blink = icon.is_live() && age.is_none();
     div()
         .flex_none()
-        .when(icon.is_live(), |el| el.opacity(pulse_opacity(cx)))
-        .child(
-            Icon::empty()
-                .path(icon.asset())
-                .xsmall()
-                .text_color(icon.color(t, dim, cx)),
-        )
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::GAP_SM))
+        .when(blink, |el| el.opacity(pulse_opacity(cx)))
+        .child(Icon::empty().path(icon.asset()).xsmall().text_color(color))
+        .children(age.map(|age| {
+            div()
+                .flex_none()
+                .text_color(color)
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(SharedString::from(format_age(age)))
+        }))
         .into_any_element()
+}
+
+/// `"5s"` under a minute, `"1m05s"` at or over — the same shape the working
+/// indicator's run timer uses, so the two read as one unit of measure.
+fn format_age(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    }
 }
 
 #[cfg(test)]

@@ -15,12 +15,12 @@ use gpui::{
 };
 
 use super::RenderAssets;
-use super::chrome::pulse_dots;
 use super::diff::diff_block;
 use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine, window_boundary_row};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
+use super::status_icon::status_icon_with_age;
 use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -61,8 +61,8 @@ struct OutputBlockContext<'a> {
 /// way. The nested diffs are independently foldable.
 /// Everything a card reads that does not change as it recurses into a
 /// subagent's flattened children. Bundled because both call paths — the row
-/// renderer and the recursion itself — otherwise restate the same twelve
-/// arguments in the same order, which is the copy CLAUDE.md's extraction rule
+/// renderer and the recursion itself — otherwise restate the same long
+/// argument list in the same order, which is the copy CLAUDE.md's extraction rule
 /// is about.
 #[derive(Clone, Copy)]
 pub(super) struct CardContext<'a> {
@@ -73,6 +73,10 @@ pub(super) struct CardContext<'a> {
     pub(super) boundary: TurnBoundary,
     pub(super) assets: RenderAssets<'a>,
     pub(super) fold: &'a FoldState,
+    /// When each live call was first reported, so a card can show its age. Read
+    /// by id rather than resolved per card: the map is the pane's, and a card
+    /// cannot reach the view during render (Pitfall 5).
+    pub(super) tool_started_at: &'a std::collections::HashMap<String, std::time::Instant>,
     /// The call level of the recent-steps axis, for a subagent card's own
     /// boundary among its children.
     pub(super) call_window: TailWindow,
@@ -98,6 +102,7 @@ pub(super) fn tool_card(
         boundary,
         assets,
         fold,
+        tool_started_at,
         call_window,
         t,
         dim,
@@ -119,15 +124,12 @@ pub(super) fn tool_card(
     // descendant is live the unit is still working, so the badge reads
     // in-progress until the whole subtree settles.
     let effective_status = effective_tool_status(tc, live_units);
-    let (badge_text, badge_fg) = tool_status_badge(effective_status, t, dim, cx);
-    // A live tool gets animated trailing dots (Running. / .. / ...) so the
-    // in-progress state reads as live, not just a static amber label. `Pending`
-    // counts as live too (see `ToolStatusView::is_live`).
-    let badge_text = if effective_status.is_live() {
-        SharedString::from(format!("{badge_text}{}", pulse_dots(cx)))
-    } else {
-        badge_text
-    };
+    // The status reads as a mark from the shared vocabulary (`status_icon`), so
+    // a group bar's verdict and its cards' agree. A live call carries its age
+    // beside the mark: the ticking number is the liveness signal the animated
+    // trailing dots used to be, and it answers "how long" as well. The word the
+    // badge used to spell stays reachable as the mark's tooltip.
+    let status_word = tool_status_badge(effective_status);
 
     // Header: a tool-kind icon + a short label — the agent's own tool name
     // (Bash/Grep/…) when it surfaced one, else the fixed-vocabulary kind label
@@ -184,10 +186,16 @@ pub(super) fn tool_card(
     }
     let header = header.trailing(
         div()
+            .id(("agent-chat-tool-status", ix))
             .flex_none()
-            .text_color(badge_fg)
-            .text_size(font_size)
-            .child(badge_text)
+            .child(status_icon_with_age(
+                effective_status,
+                tool_started_at.get(&tc.id).map(std::time::Instant::elapsed),
+                t,
+                dim,
+                cx,
+            ))
+            .tooltip(crate::ui::tooltip::text(status_word))
             .into_any_element(),
     );
 
@@ -766,37 +774,20 @@ fn exit_badge_label(exit: &Option<CommandExit>) -> Option<String> {
 }
 
 /// Map a tool status to its badge label + colour.
-fn tool_status_badge(
-    status: ToolStatusView,
-    t: &theme::DarudaTheme,
-    dim: f32,
-    cx: &App,
-) -> (SharedString, Hsla) {
+/// The word behind the status mark — the mark's tooltip, so an icon-only badge
+/// does not cost the localized reading.
+fn tool_status_badge(status: ToolStatusView) -> SharedString {
     match status {
         // `Pending` and `InProgress` both read as "running": the adapter marks
         // every call `Pending` until an SDK progress ping (which many tools
         // never get), and a live `Pending` always means an in-flight call in the
-        // active turn (see `ToolStatusView::is_live`). Amber accent so a running
-        // tool reads stronger than a settled green ✓ / red ✗; `tool_card`
-        // appends animated dots to the label.
-        ToolStatusView::Pending | ToolStatusView::InProgress => (
-            s::agent_chat_tool_status_running().into(),
-            t.status_executing_tool_dark,
-        ),
-        ToolStatusView::Completed => (
-            s::agent_chat_tool_status_done().into(),
-            t.file_diff_stat_add,
-        ),
-        ToolStatusView::Failed => (
-            s::agent_chat_tool_status_failed().into(),
-            t.banner_error_text,
-        ),
-        // Stopped before settling — muted like Pending (no error red, no
-        // success green): it neither failed nor completed.
-        ToolStatusView::Cancelled => (
-            s::agent_chat_tool_status_cancelled().into(),
-            theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
-        ),
+        // active turn (see `ToolStatusView::is_live`).
+        ToolStatusView::Pending | ToolStatusView::InProgress => {
+            s::agent_chat_tool_status_running().into()
+        }
+        ToolStatusView::Completed => s::agent_chat_tool_status_done().into(),
+        ToolStatusView::Failed => s::agent_chat_tool_status_failed().into(),
+        ToolStatusView::Cancelled => s::agent_chat_tool_status_cancelled().into(),
     }
 }
 

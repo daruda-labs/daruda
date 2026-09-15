@@ -14,4 +14,4 @@ mod working_indicator;
 
 pub(super) use activity_bar::{ActivityBarProps, activity_bar};
 pub(super) use status_banner::status_banner;
-pub(super) use working_indicator::{pulse_dots, working_indicator};
+pub(super) use working_indicator::working_indicator;

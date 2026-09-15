@@ -37,6 +37,10 @@ const SHOT_TAIL_WINDOW: usize = 3;
 /// tests assert both sides.
 #[cfg(feature = "screenshot")]
 pub(super) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
+/// Age the running-tool capture backdates its call to, so the badge shows a
+/// number rather than the `0s` a just-started call would.
+#[cfg(feature = "screenshot")]
+const SHOT_RUNNING_TOOL_AGE: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// The catalog's default agent id — the first entry, or the built-in Claude id
 /// if the catalog is somehow empty (the config layer guarantees non-empty, so
@@ -805,43 +809,34 @@ impl Workspace {
         resolve_restored_agent(&self.agents, persisted_agent_id)
     }
 
-    /// Open a fresh pane under the session's last-chosen agent (falling back
-    /// to the catalog default). Thin wrapper over
-    /// [`Self::open_agent_chat_pane_with_agent`].
-    /// Park an agent-chat pane on an expired-login failure — the
-    /// `--screenshot-scenario agent-chat-failure` entry point.
-    ///
-    /// Both affordances at once, because they are separately reachable and
-    /// separately breakable: the connect banner's pair, and the failure card
-    /// the conversation actually ends on. Pair it with a dark terminal preset
-    /// and `--screenshot-theme light` to reproduce the combination where the
-    /// pane background and the window theme disagree.
+    /// Seed failure copy and its remedy before focus can start a real adapter.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_failure_for_shot(
         &mut self,
+        failure: daruda_acp::AcpFailure,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_agent_chat_pane(window, cx);
-        let pane_id = self.active_runtime().focused_pane_id;
-        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
-            return;
-        };
-        view.update(cx, |v, cx| {
-            v.items.push(daruda_acp::ChatItem::UserText(
-                "why is the build failing?".to_string(),
-            ));
-            v.items.push(daruda_acp::ChatItem::Failure(
-                daruda_acp::AcpFailure::AuthRequired {
-                    message: "Authentication required".to_string(),
-                },
-            ));
-            v.set_error(
-                "Authentication required".to_string(),
-                daruda_acp::Remedy::Reauthenticate,
-                cx,
-            );
-        });
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(
+                    vec![
+                        daruda_acp::ChatItem::UserText("why is the build failing?".to_string()),
+                        daruda_acp::ChatItem::Failure(failure.clone()),
+                    ],
+                    window,
+                    cx,
+                );
+                v.set_error(
+                    super::agent_chat_helpers::failure_message(&failure),
+                    failure.remedy(),
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
     }
 
     /// Open an empty agent-chat pane with view options open.
@@ -1077,6 +1072,31 @@ impl Workspace {
             let Some(gid) = target else { return };
             v.set_fold_for_shot(FoldKey::ToolGroup(gid.clone()), true, window, cx);
             v.set_fold_for_shot(FoldKey::ToolGroupTail(gid), reveal, window, cx);
+        });
+    }
+
+    /// Open the seed with its last tool call still running and its group open,
+    /// so a capture shows the one badge state no settled seed reaches: the live
+    /// mark with its age beside it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_running_tool_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::transcript::fold_mode::FoldMode;
+
+        self.open_agent_chat_transcript_for_shot(window, cx);
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            // Expand first: the preset reprojects, and the started call has to
+            // be in a projection that shows cards for its badge to render.
+            v.set_fold_mode(FoldMode::from_tokens(["expanded"]), window, cx);
+            v.start_last_tool_for_shot(SHOT_RUNNING_TOOL_AGE);
+            v.reproject_for_shot(cx);
         });
     }
 

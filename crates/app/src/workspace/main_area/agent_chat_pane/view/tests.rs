@@ -1430,6 +1430,106 @@ fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut gpui::TestAppCon
         .unwrap();
 }
 
+#[gpui::test]
+fn transport_eof_localizes_and_preserves_the_session_for_reconnect(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.session_id = Some("saved-session".into());
+            view.status = super::AgentSessionStatus::Connected;
+            assert!(view.needs_disconnect_error());
+            view.set_turn_in_flight();
+            view.apply_event(
+                daruda_acp::AcpEvent::Error(daruda_acp::AcpFailure::TransportClosed {
+                    message: "Incoming transport closed".into(),
+                }),
+                "",
+                false,
+                cx,
+            );
+            let super::AgentSessionStatus::Error { message, remedy } = &view.status else {
+                panic!("EOF must terminate the session");
+            };
+            assert_eq!(*remedy, daruda_acp::Remedy::Retry);
+            assert_eq!(
+                message,
+                &crate::surface::strings::agent_chat_transport_closed()
+            );
+            assert_ne!(message, "Incoming transport closed");
+            assert_eq!(view.session_id.as_deref(), Some("saved-session"));
+            assert!(view.turn_is_idle());
+            assert!(view.handle.is_none());
+            assert!(
+                !view.needs_disconnect_error(),
+                "do not emit a duplicate terminal failure"
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn preparation_failure_releases_replay_without_losing_the_resume_target(
+    cx: &mut gpui::TestAppContext,
+) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.session_id = Some("saved-session".into());
+            view.begin_connect(Some("saved-session".into()), cx);
+            assert!(view.is_replaying());
+            view.apply_event(
+                daruda_acp::AcpEvent::Error(daruda_acp::AcpFailure::AdapterInstall {
+                    kind: daruda_acp::preparation::PreparationKind::Network,
+                    message: "npm ENOTFOUND".into(),
+                }),
+                "",
+                false,
+                cx,
+            );
+            assert!(!view.is_replaying());
+            assert!(view.turn_is_idle());
+            assert!(view.handle.is_none());
+            assert_eq!(view.session_id.as_deref(), Some("saved-session"));
+            let super::AgentSessionStatus::Error { message, remedy } = &view.status else {
+                panic!("preparation failure must terminate the attempt");
+            };
+            assert_eq!(*remedy, daruda_acp::Remedy::Retry);
+            assert_eq!(
+                message,
+                &crate::surface::strings::agent_chat_adapter_install_failed()
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn invalid_package_has_localized_guidance_without_a_misleading_retry(
+    cx: &mut gpui::TestAppContext,
+) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.apply_event(
+                daruda_acp::AcpEvent::Error(daruda_acp::AcpFailure::AdapterInstall {
+                    kind: daruda_acp::preparation::PreparationKind::InvalidPackage,
+                    message: "unsupported bin entry".into(),
+                }),
+                "",
+                false,
+                cx,
+            );
+            let super::AgentSessionStatus::Error { message, remedy } = &view.status else {
+                panic!("invalid package must surface a failure");
+            };
+            assert_ne!(*remedy, daruda_acp::Remedy::Retry);
+            assert_eq!(
+                message,
+                &crate::surface::strings::agent_chat_adapter_setup_required()
+            );
+        })
+        .unwrap();
+}
+
 /// `/clear` resets the local session model before the workspace starts the
 /// fresh connection.
 #[gpui::test]
@@ -2266,4 +2366,56 @@ fn late_content_does_not_strand_the_stop_marker_above_it(cx: &mut gpui::TestAppC
             );
         })
         .expect("view update");
+}
+
+/// A tool call's elapsed time is measured from the first update that named it,
+/// not from any field the protocol carries — `ToolCallItem` has no timestamp,
+/// and the mapper is deliberately clock-free. The first sighting wins, so a
+/// long-running call's later progress updates don't reset its age.
+#[gpui::test]
+fn a_tool_calls_age_runs_from_its_first_update(cx: &mut gpui::TestAppContext) {
+    use agent_client_protocol::schema::v1::{SessionUpdate, ToolCall, ToolCallUpdate};
+    use daruda_acp::AcpEvent;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.apply_event(
+                AcpEvent::Update(Box::new(SessionUpdate::ToolCall(ToolCall::new(
+                    "t1", "Bash",
+                )))),
+                "",
+                false,
+                cx,
+            );
+            let first = view
+                .activity
+                .tool_started_at
+                .get("t1")
+                .copied()
+                .expect("a seen call is being timed");
+
+            // A later progress update must not restart the clock.
+            view.apply_event(
+                AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                    ToolCallUpdate::new("t1", Default::default()),
+                ))),
+                "",
+                false,
+                cx,
+            );
+            let second = view
+                .activity
+                .tool_started_at
+                .get("t1")
+                .copied()
+                .expect("still timed");
+            assert_eq!(first, second, "a later update must not restart the clock");
+
+            assert!(
+                !view.activity.tool_started_at.contains_key("never-seen"),
+                "a call nothing reported has no age to show"
+            );
+        })
+        .unwrap();
 }
