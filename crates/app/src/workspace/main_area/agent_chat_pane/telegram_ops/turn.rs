@@ -131,11 +131,10 @@ impl PhoneTurn {
     /// `daruda_acp` collapses a content block it cannot render to an empty
     /// string, and an empty notification is worse than a late one.
     ///
-    /// A query: it decides nothing. [`Self::answer`] is what records.
-    pub(in crate::workspace) fn first_response(
-        &self,
-        items: &[ChatItem],
-    ) -> Option<FirstResponseOutcome> {
+    /// Private: resolving without recording is what lets the same response go
+    /// out again on every later event, so [`Self::take_first_response`] is the
+    /// only way to reach it.
+    fn first_response(&self, items: &[ChatItem]) -> Option<FirstResponseOutcome> {
         let State::Waiting {
             items_len_at_start, ..
         } = &self.0
@@ -186,11 +185,20 @@ impl PhoneTurn {
         true
     }
 
-    /// Record the first response `outcome` as sent. Sugar over [`Self::answer`]
-    /// so the id is never pulled out of the outcome at a call site.
-    #[must_use = "the caller emits its ack only when this call is the one that answered"]
-    pub(in crate::workspace) fn answer_with(&mut self, outcome: &FirstResponseOutcome) -> bool {
-        self.answer(outcome.message_id())
+    /// Resolve this turn's first response and record it as sent, in one step.
+    ///
+    /// The relay's only entry point. Resolving is a query and recording is a
+    /// transition, and a caller able to take the first without the second
+    /// would re-send the same response on every later event — so they are not
+    /// separable here. [`Self::answer`] stays the single write into
+    /// `Answered`; a `false` from it means the turn was not waiting after all,
+    /// and nothing is reported.
+    pub(in crate::workspace) fn take_first_response(
+        &mut self,
+        items: &[ChatItem],
+    ) -> Option<FirstResponseOutcome> {
+        let outcome = self.first_response(items)?;
+        self.answer(outcome.message_id()).then_some(outcome)
     }
 
     /// Where this turn's own output begins in `items`.
@@ -276,24 +284,24 @@ mod tests {
 
     #[test]
     fn first_response_covers_text_tool_anchor_and_ignored_items() {
-        let turn = PhoneTurn::start(std::time::Instant::now(), 0);
+        let mut turn = PhoneTurn::start(std::time::Instant::now(), 0);
         let items = vec![thinking("pondering"), assistant_text("partial", true)];
-        assert_eq!(turn.first_response(&items), None);
+        assert_eq!(turn.take_first_response(&items), None);
 
-        let turn = PhoneTurn::start(std::time::Instant::now(), 0);
+        let mut turn = PhoneTurn::start(std::time::Instant::now(), 0);
         let items = vec![thinking("hmm"), assistant_text("done", false)];
         assert_eq!(
-            turn.first_response(&items),
+            turn.take_first_response(&items),
             Some(FirstResponseOutcome::Text {
                 text: "done".to_string(),
                 message_id: None,
             })
         );
 
-        let turn = PhoneTurn::start(std::time::Instant::now(), 0);
+        let mut turn = PhoneTurn::start(std::time::Instant::now(), 0);
         let items = vec![thinking("hmm"), tool_call("Write /tmp/x.rs")];
         assert_eq!(
-            turn.first_response(&items),
+            turn.take_first_response(&items),
             Some(FirstResponseOutcome::Tool {
                 tool_title: Some("Write /tmp/x.rs".to_string())
             })
@@ -302,8 +310,23 @@ mod tests {
         // A prior turn's completed AssistantText, present *before* the watch's
         // anchor point, must not be mistaken for this turn's first response.
         let items = vec![assistant_text("previous turn's answer", false)];
-        let turn = PhoneTurn::start(std::time::Instant::now(), items.len());
-        assert_eq!(turn.first_response(&items), None);
+        let mut turn = PhoneTurn::start(std::time::Instant::now(), items.len());
+        assert_eq!(turn.take_first_response(&items), None);
+    }
+
+    /// Resolving is also recording, so the same items resolve exactly once.
+    /// Separating the two is what let every later event re-send one response.
+    #[test]
+    fn taking_a_first_response_records_it_so_the_next_take_finds_nothing() {
+        let mut turn = PhoneTurn::start(std::time::Instant::now(), 0);
+        let items = vec![assistant_text("done", false)];
+        assert!(turn.take_first_response(&items).is_some());
+        assert_eq!(
+            turn.take_first_response(&items),
+            None,
+            "a second take on the same turn reports nothing"
+        );
+        assert!(!turn.is_waiting(), "the take is what answered it");
     }
 
     /// The ledger's whole reason to exist: two relays report one turn, and this
@@ -338,9 +361,9 @@ mod tests {
     /// A turn already answered is not waiting, so neither pump can ack it twice.
     #[test]
     fn an_answered_turn_resolves_nothing_and_is_never_overdue() {
-        let answered = already_answered(Some("m1"));
+        let mut answered = already_answered(Some("m1"));
         assert_eq!(
-            answered.first_response(&[assistant_text("more", false)]),
+            answered.take_first_response(&[assistant_text("more", false)]),
             None
         );
         assert!(!answered.is_overdue(std::time::Instant::now(), 0));

@@ -186,12 +186,9 @@ impl AgentChatView {
     /// sent. `None` when the turn is not the phone's, or nothing qualifying
     /// has arrived yet.
     pub(super) fn take_phone_first_response(&mut self) -> Option<FirstResponseOutcome> {
-        let turn = self.phone_turn_state.as_mut()?;
-        let outcome = turn.first_response(&self.items)?;
-        // Always the answering call: `first_response` resolves only while the
-        // turn is waiting, which is the same condition `answer_with` checks.
-        debug_assert!(turn.answer_with(&outcome));
-        Some(outcome)
+        self.phone_turn_state
+            .as_mut()?
+            .take_first_response(&self.items)
     }
 
     /// Finish the turn's wait at a terminal boundary. A final streaming text is

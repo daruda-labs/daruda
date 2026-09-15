@@ -382,6 +382,36 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     });
 }
 
+/// One turn, one ack. `first_response` is a pure query, so the answering
+/// transition is the only thing stopping the next event from resolving the
+/// same response again — which the phone receives as a duplicate ack.
+#[gpui::test]
+async fn a_turns_first_response_answers_it_once(cx: &mut gpui::TestAppContext) {
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let pane_id = fixture.pane();
+
+    fixture.workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane_id).cloned().expect("view");
+        view.update(cx, |v, _| {
+            v.start_phone_turn_for_test(std::time::Instant::now());
+            v.items.push(daruda_acp::ChatItem::AssistantText {
+                text: "on it".to_string(),
+                streaming: false,
+                message_id: Some("m1".to_string()),
+                phase: Default::default(),
+            });
+            assert!(
+                v.take_phone_first_response_for_test(),
+                "the turn's first response is the one ack that goes out"
+            );
+            assert!(
+                !v.take_phone_first_response_for_test(),
+                "a later event on the same turn must not resolve a second ack"
+            );
+        });
+    });
+}
+
 /// A turn that did not complete still ends its phone conversation.
 ///
 /// The leak this guards: the ledger was retired only on `Completed`, so an
