@@ -687,6 +687,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// [`Self::rebuild_rows`] on every change. The virtualized list indexes
     /// over this. Derived cache — single rebuild site.
     pub(in crate::workspace) rows: Vec<RenderRow>,
+    /// The activity level `rows` was projected under — the key of that cache's
+    /// one time-dependent input. `activity_state()` reads the clock (a trailing
+    /// subagent stays busy until its quiescence window lapses), so the working
+    /// indicator can go stale with no model change to trigger a rebuild. Keeping
+    /// the key lets [`Self::reproject_if_activity_changed`] restore the
+    /// projection whichever path moved the level.
+    pub(in crate::workspace) rows_activity: ActivityState,
     /// Which subagent units still have work running, derived from `items` in one
     /// pass. Read by the projection *and* by every tool card's badge, so it is
     /// cached here rather than recomputed per query. Derived cache — rebuilt in
@@ -864,6 +871,7 @@ impl AgentChatView {
                 state
             },
             rows: Vec::new(),
+            rows_activity: ActivityState::Idle,
             live_units: LiveSubagentUnits::default(),
             filter_matches: FilterMatchIndex::default(),
             turn_boundary: Default::default(),

@@ -596,7 +596,10 @@ impl AgentChatView {
         let old = std::mem::take(&mut self.rows);
         // The inline working indicator means "answering" — suppress it while
         // blocked on a permission prompt (the card + footer already say so).
-        let awaiting_response = matches!(self.activity_state(), ActivityState::Working);
+        // Recorded as the projection's key, not just consumed: see
+        // `rows_activity`.
+        self.rows_activity = self.activity_state();
+        let awaiting_response = matches!(self.rows_activity, ActivityState::Working);
         // Single rebuild site for the subagent-liveness index too: the projection
         // and every tool card's badge read this one, instead of each re-deriving
         // it by scanning `items`.

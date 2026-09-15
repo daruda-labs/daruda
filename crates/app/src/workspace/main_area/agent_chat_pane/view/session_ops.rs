@@ -333,7 +333,7 @@ impl AgentChatView {
 
     /// Re-derive the row projection and reflow the list. The one sequence every
     /// transcript-preference change ends in, since all of them feed `project`.
-    fn reproject(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn reproject(&mut self, cx: &mut Context<Self>) {
         self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();

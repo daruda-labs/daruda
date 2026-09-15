@@ -5,6 +5,8 @@
 
 use daruda_acp::{ChatItem, subagent_activity};
 
+use gpui::Context;
+
 use super::{
     ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE,
     TurnOutcome, post_turn_delta,
@@ -140,6 +142,22 @@ impl AgentChatView {
             // Level unchanged: a running span keeps its original start instant.
             (ActivitySpan::Idle, false) | (ActivitySpan::Busy { .. }, true) => None,
         }
+    }
+
+    /// Restore the row projection if the activity level has moved since it was
+    /// built. Cheap when nothing changed (one `activity_state()` call), so the
+    /// pulse can call it every tick.
+    ///
+    /// The working indicator is the one projected row whose input is the clock
+    /// rather than the model: a trailing subagent stays busy until its
+    /// quiescence window lapses, and no event announces that. Without this the
+    /// row outlives the run — while the footer's Stop button, which reads
+    /// `is_busy()` live, has already flipped back to Send.
+    pub(in crate::workspace) fn reproject_if_activity_changed(&mut self, cx: &mut Context<Self>) {
+        if self.rows_activity == self.activity_state() {
+            return;
+        }
+        self.reproject(cx);
     }
 
     /// Elapsed time since the current activity span began (busy→…), or `None` when

@@ -2247,3 +2247,92 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
 
     let _ = std::fs::remove_dir_all(&project_root);
 }
+
+/// The inline "Working…" row is projected from `activity_state()`, which is a
+/// *time-dependent* predicate: a trailing subagent counts as busy until its
+/// last activity falls out of the quiescence window. Nothing mutates the model
+/// when that window lapses — the projected row simply goes stale — so the
+/// pulse tick that notices the settle is the only thing that can drop it.
+///
+/// The lapse is constructed by backdating the timestamp rather than sleeping
+/// out the real window; the end state is the same one the clock reaches.
+#[gpui::test]
+async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tool = |id: &str, parent: Option<&str>| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_string(),
+            title: id.to_string(),
+            kind: ToolKindView::Read,
+            tool_name: None,
+            // Settled: the only thing holding the pane busy is the parent's
+            // quiescence window, which is what makes the settle time-driven.
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: parent.map(str::to_string),
+            exit: None,
+        })
+    };
+    let working = |ws: &Workspace, id: PaneId, cx: &gpui::App| {
+        agent_view(ws, id)
+            .read(cx)
+            .rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::WorkingIndicator))
+    };
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(std::env::temp_dir())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+
+            let view = agent_view(ws, id);
+            view.update(cx, |v, cx| {
+                v.items = vec![tool("task-1", None), tool("child-1", Some("task-1"))];
+                v.activity
+                    .subagent_last_activity
+                    .insert("task-1".into(), std::time::Instant::now());
+                // A benign event projects the rows while the subagent is live.
+                v.apply_event(daruda_acp::AcpEvent::Notice("tick".into()), "", false, cx);
+            });
+            assert!(
+                working(ws, id, cx),
+                "a live subagent puts the indicator on screen"
+            );
+            // Observe busy first so the tick has an edge to detect.
+            ws.pulse_agent_chats(cx);
+
+            // The subagent's quiescence window lapses, with no event to say so.
+            view.update(cx, |v, _| {
+                let lapsed = std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(20))
+                    .expect("the monotonic clock has 20s of history");
+                v.activity
+                    .subagent_last_activity
+                    .insert("task-1".into(), lapsed);
+            });
+            ws.pulse_agent_chats(cx);
+
+            assert!(
+                !working(ws, id, cx),
+                "the settle tick must drop the row the run no longer earns"
+            );
+        });
+    })
+    .expect("window is live");
+}
