@@ -135,7 +135,6 @@ welcome:
 
 # Menus — top-level names
 menu:
-  app: "Daruda"
   file: "파일"
   view: "보기"
   edit: "편집"
@@ -704,18 +703,9 @@ git:
   cancel_amend: "Amend 취소"
   amend_needs_message: "Amend할 커밋 메시지를 입력하세요."
   detached_label: "분리됨"
-  section_staged: "스테이지됨"
-  section_changes: "변경"
   stage_all: "모두 스테이지"
   unstage_all: "모두 언스테이지"
   fetch_btn: "페치"
-  pull_btn: "풀"
-
-# Agent chat
-agent:
-  chat_label_user: "사용자"
-  chat_label_agent: "에이전트"
-  chat_label_system: "시스템"
 
 # Settings panel
 settings:
@@ -737,7 +727,6 @@ settings:
   section_cursor: "커서"
   section_shell: "쉘"
   section_window: "윈도우"
-  section_theme: "테마"
   section_terminal: "터미널"
   section_dock: "독"
   section_sidebar: "사이드바"
@@ -771,14 +760,12 @@ settings:
   cursor_block: "블록"
   cursor_underline: "밑줄"
   cursor_bar: "막대"
-  label_theme: "프리셋"
   label_language: "언어"
   language_auto: "자동 (시스템)"
   language_en: "English"
   language_ko: "한국어"
   label_terminal_theme: "터미널 프리셋"
   label_ui_theme: "UI 테마"
-  ui_theme_phase3_tooltip: "Phase 3에서 더 많은 테마가 추가될 예정입니다."
   label_scrollback: "스크롤백 줄 수"
   err_scrollback: "스크롤백은 1,000에서 500,000 사이의 숫자여야 합니다."
   label_max_fps: "화면 갱신 빈도"
@@ -960,7 +947,6 @@ settings:
   plugin_detail_unknown: "—"
   plugin_skill_view: "보기"
   plugin_skill_description: "설명"
-  plugin_skill_invocation: "호출 방법"
   plugin_skill_argument_hint: "인수 힌트"
   plugin_skill_allowed_tools: "허용된 도구"
   plugin_skill_paths: "경로"
@@ -1082,9 +1068,7 @@ skills:
   empty_project: "프로젝트 스킬 없음 — 새로 만들어 Claude에게 프로젝트별 워크플로우를 가르치세요."
   empty_personal: "개인 스킬이 아직 없습니다."
   empty_plugin: "설치된 플러그인 스킬 없음. Claude Code의 `/plugin` 명령으로 플러그인을 설치하세요."
-  plugin_available: "사용 가능"
   overrides_personal: "개인 재정의"
-  file_gone: "삭제됨"
   new_title: "새 스킬"
   edit_title: "스킬 편집"
   delete_title: "스킬을 삭제할까요?"
@@ -1103,7 +1087,6 @@ skills:
   name_leading: "이름은 하이픈이나 밑줄로 시작할 수 없습니다."
   name_too_long: "이름은 64자 이하여야 합니다."
   name_duplicate: "이 범위에 동일한 이름의 스킬이 이미 존재합니다."
-  description_too_long_hint: "설명이 1536자를 초과합니다 — Claude Code에서 잘릴 수 있습니다."
   no_project_hint: "프로젝트 스킬은 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
   invoke_title: "스킬 실행"
   empty_plugin_picker: "이 그룹에서 실행할 스킬이 없습니다."
@@ -1300,8 +1283,6 @@ terminal:
   lane_non_git_hint: "여러 워크트리를 사용하려면 Git 저장소를 여세요."
   panels_no_active_tab: "탭을 선택하세요."
   panels_no_tabs: "탭이 없습니다. [+]를 클릭해 만드세요."
-  search_no_matches: "일치 없음"
-  search_regex_error: "정규식 오류"
   task_backlog: "대기"
   task_cancelled: "취소됨"
   task_done_prefix: "완료"

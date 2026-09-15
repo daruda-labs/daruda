@@ -19,8 +19,6 @@ pub(in crate::workspace) use self::snap::{
 use crate::ui::theme;
 use gpui::{IntoElement, Render, WeakEntity, div, prelude::*, px};
 
-use crate::surface::strings;
-
 use crate::workspace::Workspace;
 
 /// Where a dock sits relative to the center panes.
@@ -35,31 +33,16 @@ pub(super) enum DockPosition {
 // Panel trait
 // ----------------------------------------------------------------
 
-/// Identity contract for a dock panel. Implement this on a unit
-/// struct (or a struct with config data) and register it via
-/// `Dock::add_panel` — no enum variant required.
-pub(super) trait Panel {
-    fn panel_name(&self) -> &'static str;
-    #[allow(dead_code)]
-    fn panel_icon(&self) -> &'static str;
-}
+/// Marker for a registered dock view. Labels and icons belong to the tab
+/// strips (`left_dock/view_tabs.rs`, `right_dock/view_tabs.rs`); a panel is
+/// only ever counted, so the trait carries no methods.
+pub(super) trait Panel {}
 
 /// Object-safe version of `Panel`. `Dock` stores `Vec<Box<dyn PanelHandle>>`
 /// so heterogeneous panel types can coexist without an enum.
-pub(super) trait PanelHandle: Send + Sync {
-    fn name(&self) -> &'static str;
-    #[allow(dead_code)]
-    fn icon(&self) -> &'static str;
-}
+pub(super) trait PanelHandle: Send + Sync {}
 
-impl<T: Panel + Send + Sync> PanelHandle for T {
-    fn name(&self) -> &'static str {
-        self.panel_name()
-    }
-    fn icon(&self) -> &'static str {
-        self.panel_icon()
-    }
-}
+impl<T: Panel + Send + Sync> PanelHandle for T {}
 
 // ----------------------------------------------------------------
 // Built-in panel types
@@ -76,50 +59,15 @@ pub(super) struct MacrosPanel;
 /// Right-dock agent chat panel.
 pub(super) struct AgentChatPanel;
 
-impl Panel for LanesPanel {
-    fn panel_name(&self) -> &'static str {
-        strings::DOCK_PANEL_WORKTREES
-    }
-    fn panel_icon(&self) -> &'static str {
-        "⊞"
-    }
-}
+impl Panel for LanesPanel {}
 
-impl Panel for GitChangesPanel {
-    fn panel_name(&self) -> &'static str {
-        strings::DOCK_PANEL_GIT
-    }
-    fn panel_icon(&self) -> &'static str {
-        "⎇"
-    }
-}
+impl Panel for GitChangesPanel {}
 
-impl Panel for FilesPanel {
-    fn panel_name(&self) -> &'static str {
-        strings::DOCK_PANEL_FILES
-    }
-    fn panel_icon(&self) -> &'static str {
-        "◧"
-    }
-}
+impl Panel for FilesPanel {}
 
-impl Panel for MacrosPanel {
-    fn panel_name(&self) -> &'static str {
-        strings::DOCK_PANEL_MACROS
-    }
-    fn panel_icon(&self) -> &'static str {
-        "⌨"
-    }
-}
+impl Panel for MacrosPanel {}
 
-impl Panel for AgentChatPanel {
-    fn panel_name(&self) -> &'static str {
-        strings::DOCK_PANEL_AGENT_TASKS
-    }
-    fn panel_icon(&self) -> &'static str {
-        "◨"
-    }
-}
+impl Panel for AgentChatPanel {}
 
 // ----------------------------------------------------------------
 // Dock
@@ -139,12 +87,6 @@ pub(super) struct Dock {
     /// Registered panels. Heterogeneous via `PanelHandle` — adding a new
     /// panel type requires no enum change, only `add_panel(MyPanel)`.
     pub panels: Vec<Box<dyn PanelHandle>>,
-    /// Index into `panels`. Tab-based docks (left = left_dock_view,
-    /// right = right_dock_view) drive selection from `Workspace`
-    /// state instead, so this index is currently exercised by the
-    /// panel-registration tests only.
-    #[allow(dead_code)]
-    pub active_panel: usize,
     /// Back-reference to the owning `Workspace`. Read by `Workspace::render`
     /// when staging each `DockSnapshot` so event handlers in left/right dock and bottom
     /// renderers can route calls back to `Workspace` without going through
@@ -198,14 +140,14 @@ impl Dock {
             min_size,
             max_size,
             panels: Vec::new(),
-            active_panel: 0,
             workspace,
             snap: DockSnapshot::None,
         }
     }
 
-    /// Register a panel. Panels are displayed in registration order;
-    /// `active_panel` indexes into this list.
+    /// Register a panel. Which view is *shown* comes from `Workspace`
+    /// (`left_dock_view` / `right_dock_view`); the list only records how many
+    /// a dock has, which is what the layout pass reads.
     pub fn add_panel<P: Panel + Send + Sync + 'static>(&mut self, panel: P) {
         self.panels.push(Box::new(panel));
     }
@@ -224,15 +166,6 @@ impl Dock {
     #[allow(dead_code)]
     pub fn resize(&mut self, new_size: f32) {
         self.size = new_size.clamp(self.min_size, self.max_size);
-    }
-
-    /// Name of the currently-active panel, or `""` when the panel list is empty.
-    #[allow(dead_code)]
-    pub fn active_panel_name(&self) -> &'static str {
-        self.panels
-            .get(self.active_panel)
-            .map(|p| p.name())
-            .unwrap_or("")
     }
 }
 
@@ -326,21 +259,11 @@ mod tests {
         gpui::WeakEntity::new_invalid()
     }
 
-    struct TestPanel {
-        name: &'static str,
-        icon: &'static str,
-    }
+    struct TestPanel;
 
-    impl Panel for TestPanel {
-        fn panel_name(&self) -> &'static str {
-            self.name
-        }
-        fn panel_icon(&self) -> &'static str {
-            self.icon
-        }
-    }
+    impl Panel for TestPanel {}
 
-    // SAFETY: unit struct with only &'static str fields — safe to share across threads.
+    // SAFETY: fieldless unit struct — safe to share across threads.
     unsafe impl Send for TestPanel {}
     unsafe impl Sync for TestPanel {}
 
@@ -383,39 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn add_panel_appends_in_order() {
+    fn add_panel_appends_one_entry_each() {
         let mut dock = Dock::new(DockPosition::Left, dummy_weak());
-        dock.add_panel(TestPanel {
-            name: "A",
-            icon: "a",
-        });
-        dock.add_panel(TestPanel {
-            name: "B",
-            icon: "b",
-        });
-        dock.add_panel(TestPanel {
-            name: "C",
-            icon: "c",
-        });
+        dock.add_panel(TestPanel);
+        dock.add_panel(TestPanel);
+        dock.add_panel(TestPanel);
         assert_eq!(dock.panels.len(), 3);
-        assert_eq!(dock.panels[0].name(), "A");
-        assert_eq!(dock.panels[1].name(), "B");
-        assert_eq!(dock.panels[2].name(), "C");
-    }
-
-    #[test]
-    fn active_panel_name_follows_active_panel_index() {
-        let mut dock = Dock::new(DockPosition::Left, dummy_weak());
-        dock.add_panel(TestPanel {
-            name: "First",
-            icon: "1",
-        });
-        dock.add_panel(TestPanel {
-            name: "Second",
-            icon: "2",
-        });
-        assert_eq!(dock.active_panel_name(), "First");
-        dock.active_panel = 1;
-        assert_eq!(dock.active_panel_name(), "Second");
     }
 }

@@ -1163,9 +1163,8 @@ impl Workspace {
                     let mut d = layout::Dock::new(layout::DockPosition::Left, ws);
                     d.resize(config.left_dock.left_default_width);
                     d.is_open = !config.left_dock.left_collapsed_by_default;
-                    // Register the three left-dock view panels in the same order
-                    // as `view_tabs::entries()` so `active_panel` and the
-                    // tab strip always agree on which view is shown.
+                    // Register the three left-dock views. Only the count is
+                    // read (by the layout pass); the tab strip owns selection.
                     d.add_panel(layout::LanesPanel);
                     d.add_panel(layout::GitChangesPanel);
                     d.add_panel(layout::FilesPanel);

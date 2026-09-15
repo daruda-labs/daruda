@@ -469,17 +469,6 @@ pub fn move_project_group_modal_title() -> String {
 }
 
 // ============================================================================
-// Dock panel labels — kept as &'static str because panel_name() -> &'static str
-// ============================================================================
-
-pub const DOCK_PANEL_AGENT_TASKS: &str = "Agent Tasks";
-pub const DOCK_PANEL_FILES: &str = "Files";
-pub const DOCK_PANEL_GIT: &str = "Git";
-pub const DOCK_PANEL_MACROS: &str = "Macros";
-pub const DOCK_PANEL_OUTPUT: &str = "Output";
-pub const DOCK_PANEL_WORKTREES: &str = "Projects";
-
-// ============================================================================
 // Right panel tab labels
 // ============================================================================
 
@@ -2668,10 +2657,6 @@ pub const FILE_VIEWER_SEARCH_CLEAR: &str = "✕";
 
 /// Checkmark glyph rendered inside a checked checkbox.
 pub const UI_CHECKMARK: &str = "✓";
-/// Generic loading placeholder used in list widgets while items are fetched.
-pub fn ui_loading() -> String {
-    rust_i18n::t!("common.loading").into_owned()
-}
 /// Keystroke-input hint shown while waiting for keystrokes to be recorded.
 pub fn keystroke_hint_recording() -> String {
     rust_i18n::t!("ui.keystroke_hint_recording").into_owned()
@@ -2687,9 +2672,6 @@ pub fn keystroke_hint_idle() -> String {
 
 pub fn files_header_label() -> String {
     rust_i18n::t!("ui.files_header").into_owned()
-}
-pub fn files_refresh_tooltip() -> String {
-    rust_i18n::t!("common.refresh").into_owned()
 }
 pub const FILES_REFRESH_GLYPH: &str = "⟳";
 pub fn files_loading() -> String {
@@ -2716,17 +2698,6 @@ pub fn ctx_copy_path() -> String {
 pub fn ctx_edit_description() -> String {
     rust_i18n::t!("ctx.edit_description").into_owned()
 }
-pub fn ctx_edit_remote_cwd() -> String {
-    rust_i18n::t!("ctx.edit_remote_cwd").into_owned()
-}
-/// Hover tooltip on the "Set Remote Path…" context-menu item. The lane owns
-/// this setting, so every pane for it — not just ones created afterward —
-/// picks it up on its next connect (`resolve_session_command` re-resolves
-/// the lane's host fresh each time); only a session already live keeps
-/// running on the path it connected with until it reconnects.
-pub fn ctx_edit_remote_cwd_hint() -> String {
-    rust_i18n::t!("ctx.edit_remote_cwd_hint").into_owned()
-}
 /// The lane owns this setting, so every pane for it — not just ones created
 /// afterward — picks it up on its next connect
 /// (`resolve_session_command` re-resolves the lane's host fresh each time);
@@ -2743,9 +2714,6 @@ pub fn edit_description_modal_title() -> String {
 }
 pub fn edit_description_placeholder() -> String {
     rust_i18n::t!("modal.edit_description_placeholder").into_owned()
-}
-pub fn edit_remote_cwd_modal_title() -> String {
-    rust_i18n::t!("modal.edit_remote_cwd_title").into_owned()
 }
 pub fn edit_remote_cwd_placeholder() -> String {
     rust_i18n::t!("modal.edit_remote_cwd_placeholder").into_owned()
@@ -3433,14 +3401,6 @@ pub fn git_amend_needs_message() -> String {
 pub fn git_detached_label() -> String {
     rust_i18n::t!("git.detached_label").into_owned()
 }
-/// Section header for staged files in the Git Changes panel.
-pub fn git_section_staged() -> String {
-    rust_i18n::t!("git.section_staged").into_owned()
-}
-/// Section header for unstaged / untracked files in the Git Changes panel.
-pub fn git_section_changes() -> String {
-    rust_i18n::t!("git.section_changes").into_owned()
-}
 /// Button label to stage all unstaged files at once.
 pub fn git_stage_all() -> String {
     rust_i18n::t!("git.stage_all").into_owned()
@@ -3452,10 +3412,6 @@ pub fn git_unstage_all() -> String {
 /// Button label for the fetch action in the git remote bar.
 pub fn git_fetch_btn() -> String {
     rust_i18n::t!("git.fetch_btn").into_owned()
-}
-/// Button label for the pull action in the git remote bar.
-pub fn git_pull_btn() -> String {
-    rust_i18n::t!("git.pull_btn").into_owned()
 }
 /// Context menu — stage a single file.
 pub fn ctx_git_stage() -> String {
@@ -3481,19 +3437,6 @@ pub fn ctx_git_commit_amend() -> String {
 // ----------------------------------------------------------------
 // Agent chat — role labels
 // ----------------------------------------------------------------
-
-/// Chat label for messages authored by the user.
-pub fn agent_chat_label_user() -> String {
-    rust_i18n::t!("agent.chat_label_user").into_owned()
-}
-/// Chat label for messages authored by the agent.
-pub fn agent_chat_label_agent() -> String {
-    rust_i18n::t!("agent.chat_label_agent").into_owned()
-}
-/// Chat label for system / tool messages injected into the chat stream.
-pub fn agent_chat_label_system() -> String {
-    rust_i18n::t!("agent.chat_label_system").into_owned()
-}
 
 // ----------------------------------------------------------------
 // Settings panel
@@ -3996,12 +3939,6 @@ pub fn settings_label_window_opacity() -> String {
 pub fn settings_label_window_blur() -> String {
     rust_i18n::t!("settings.label_window_blur").into_owned()
 }
-pub fn settings_cancel() -> String {
-    rust_i18n::t!("common.btn_cancel").into_owned()
-}
-pub fn settings_save() -> String {
-    rust_i18n::t!("common.btn_save").into_owned()
-}
 pub fn settings_external_change(path: &str) -> String {
     rust_i18n::t!("settings.external_change", path => path).into_owned()
 }
@@ -4068,12 +4005,6 @@ pub fn settings_cursor_underline() -> String {
 pub fn settings_cursor_bar() -> String {
     rust_i18n::t!("settings.cursor_bar").into_owned()
 }
-pub fn settings_section_theme() -> String {
-    rust_i18n::t!("settings.section_theme").into_owned()
-}
-pub fn settings_label_theme() -> String {
-    rust_i18n::t!("settings.label_theme").into_owned()
-}
 pub fn settings_label_language() -> String {
     rust_i18n::t!("settings.label_language").into_owned()
 }
@@ -4091,9 +4022,6 @@ pub fn settings_label_terminal_theme() -> String {
 }
 pub fn settings_label_ui_theme() -> String {
     rust_i18n::t!("settings.label_ui_theme").into_owned()
-}
-pub fn settings_ui_theme_phase3_tooltip() -> String {
-    rust_i18n::t!("settings.ui_theme_phase3_tooltip").into_owned()
 }
 pub fn settings_section_terminal() -> String {
     rust_i18n::t!("settings.section_terminal").into_owned()
@@ -4856,9 +4784,6 @@ pub fn settings_plugin_skill_view() -> String {
 }
 pub fn settings_plugin_skill_description() -> String {
     rust_i18n::t!("settings.plugin_skill_description").into_owned()
-}
-pub fn settings_plugin_skill_invocation() -> String {
-    rust_i18n::t!("settings.plugin_skill_invocation").into_owned()
 }
 pub fn settings_plugin_skill_argument_hint() -> String {
     rust_i18n::t!("settings.plugin_skill_argument_hint").into_owned()
@@ -5687,12 +5612,6 @@ pub fn skills_empty_personal() -> String {
 pub fn skills_empty_plugin() -> String {
     rust_i18n::t!("skills.empty_plugin").into_owned()
 }
-/// Chip text on plugin rows discovered through a registered
-/// marketplace but not yet `/plugin install`-ed. Surfacing them lets
-/// the user browse the catalog.
-pub fn skills_plugin_available() -> String {
-    rust_i18n::t!("skills.plugin_available").into_owned()
-}
 /// Tooltip / chip text when a project skill shadows a personal one.
 pub fn skills_overrides_personal() -> String {
     rust_i18n::t!("skills.overrides_personal").into_owned()
@@ -5780,9 +5699,6 @@ pub fn skills_name_too_long() -> String {
 }
 pub fn skills_name_duplicate() -> String {
     rust_i18n::t!("skills.name_duplicate").into_owned()
-}
-pub fn skills_description_too_long_hint() -> String {
-    rust_i18n::t!("skills.description_too_long_hint").into_owned()
 }
 pub fn skills_no_project_hint() -> String {
     rust_i18n::t!("skills.no_project_hint").into_owned()
@@ -6009,11 +5925,6 @@ pub fn toast_button_details() -> String {
 /// Glyph for the dismiss ✕ button. Same character as the title-bar
 /// pane close, separate constant so a future redesign can split them.
 pub const TOAST_BUTTON_DISMISS: &str = "×";
-/// Transient one-second affordance shown after `[Copy]` is clicked so
-/// the user has visual confirmation the clipboard write happened.
-pub fn toast_button_copied() -> String {
-    rust_i18n::t!("common.btn_copied").into_owned()
-}
 
 macro_rules! error_string {
     ($name:ident, $key:literal) => {

@@ -136,7 +136,6 @@ welcome:
 
 # Menus — top-level names
 menu:
-  app: "Daruda"
   file: "File"
   view: "View"
   edit: "Edit"
@@ -705,18 +704,9 @@ git:
   cancel_amend: "Cancel Amend"
   amend_needs_message: "Enter a commit message to amend."
   detached_label: "detached"
-  section_staged: "Staged"
-  section_changes: "Changes"
   stage_all: "Stage All"
   unstage_all: "Unstage All"
   fetch_btn: "Fetch"
-  pull_btn: "Pull"
-
-# Agent chat
-agent:
-  chat_label_user: "You"
-  chat_label_agent: "Agent"
-  chat_label_system: "System"
 
 # Settings panel
 settings:
@@ -738,7 +728,6 @@ settings:
   section_cursor: "CURSOR"
   section_shell: "SHELL"
   section_window: "WINDOW"
-  section_theme: "THEME"
   section_terminal: "TERMINAL"
   section_dock: "DOCK"
   section_sidebar: "SIDEBAR"
@@ -772,14 +761,12 @@ settings:
   cursor_block: "Block"
   cursor_underline: "Underline"
   cursor_bar: "Bar"
-  label_theme: "Preset"
   label_language: "Language"
   language_auto: "Auto (system)"
   language_en: "English"
   language_ko: "Korean (한국어)"
   label_terminal_theme: "Terminal Preset"
   label_ui_theme: "UI Theme"
-  ui_theme_phase3_tooltip: "More themes coming in Phase 3."
   label_scrollback: "Scrollback Lines"
   err_scrollback: "Scrollback must be a number between 1 000 and 500 000."
   label_max_fps: "Refresh Rate"
@@ -961,7 +948,6 @@ settings:
   plugin_detail_unknown: "—"
   plugin_skill_view: "View"
   plugin_skill_description: "Description"
-  plugin_skill_invocation: "Invocation"
   plugin_skill_argument_hint: "Argument hint"
   plugin_skill_allowed_tools: "Allowed tools"
   plugin_skill_paths: "Paths"
@@ -1083,9 +1069,7 @@ skills:
   empty_project: "No project skills — create one to teach Claude a project-specific workflow."
   empty_personal: "No personal skills yet."
   empty_plugin: "No plugin skills installed. Install a plugin via Claude Code's `/plugin` command."
-  plugin_available: "available"
   overrides_personal: "overrides personal"
-  file_gone: "deleted"
   new_title: "New skill"
   edit_title: "Edit skill"
   delete_title: "Delete skill?"
@@ -1104,7 +1088,6 @@ skills:
   name_leading: "Name cannot start with a hyphen or underscore."
   name_too_long: "Name must be 64 characters or fewer."
   name_duplicate: "A skill with this name already exists in this scope."
-  description_too_long_hint: "Description over 1536 characters — Claude Code may truncate it."
   no_project_hint: "Project skills require an active worktree. Open a project to enable this scope."
   invoke_title: "Run skill"
   empty_plugin_picker: "No skills to invoke from this group."
@@ -1301,8 +1284,6 @@ terminal:
   lane_non_git_hint: "Open a Git repository to use multiple worktrees."
   panels_no_active_tab: "Select a tab."
   panels_no_tabs: "No tabs. Click [+] to create one."
-  search_no_matches: "no matches"
-  search_regex_error: "regex error"
   task_backlog: "Backlog"
   task_cancelled: "Cancelled"
   task_done_prefix: "Done"
