@@ -132,9 +132,22 @@ impl AgentChatView {
                 // child is live — so clearing the timestamps cannot change
                 // `any_running`.
                 self.activity.subagent_last_activity.clear();
-                // Same bound, same reason: `settle_run_state` has made every
-                // call terminal by now, so no card is still owed a number.
-                self.activity.tool_started_at.clear();
+                // Bound the start-time map by what is still live, not by this
+                // edge: the edge is a subagent's window lapsing, and a
+                // *top-level* call is invisible to `is_busy`, so one can still
+                // be running here. Dropping its clock would blank the counter
+                // its card is showing and restart it at `0s`.
+                let live: std::collections::HashSet<&str> = self
+                    .items
+                    .iter()
+                    .filter_map(|item| match item {
+                        ChatItem::ToolCall(tc) if tc.status.is_live() => Some(tc.id.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                self.activity
+                    .tool_started_at
+                    .retain(|id, _| live.contains(id.as_str()));
                 // The adapter can't be the only source of "last active": it
                 // sends `updatedAt` only alongside a *changed* session title,
                 // so the value would freeze once the title settles.
@@ -146,16 +159,12 @@ impl AgentChatView {
         }
     }
 
-    /// Advance the activity span and restore anything derived from it — the one
-    /// entry point every production caller takes, so neither half can be done
-    /// without the other.
-    ///
-    /// The working indicator is the one projected row whose input is the clock
-    /// rather than the model: a trailing subagent stays busy until its
-    /// quiescence window lapses, and no event announces that. Reconciling
-    /// without reprojecting leaves the row outliving its run — while the
-    /// footer's Stop button, which reads `is_busy()` live, has already flipped
-    /// back to Send.
+    /// Advance the activity span and restore what is projected from it — one
+    /// entry point, so neither half can be done without the other. The working
+    /// indicator is projected from a *clock*-dependent level (a trailing
+    /// subagent stays busy until its window lapses, with nothing to announce
+    /// it), so reconciling alone leaves the row outliving its run while the
+    /// footer's Stop button, reading `is_busy()` live, has flipped back to Send.
     pub(in crate::workspace) fn tick_activity(
         &mut self,
         now: std::time::Instant,
@@ -169,10 +178,11 @@ impl AgentChatView {
     }
 
     /// [`Self::activity_state`] read off the span [`Self::reconcile_activity`]
-    /// just stored, rather than recomputed. O(1) where the live form is an
-    /// O(items) scan with its own `Instant::now()`, so the tick stays one scan
-    /// and one `now` — the same reason `pulse_agent_chats` reads the span back
-    /// instead of calling `is_busy()` a second time.
+    /// just stored — O(1) where the live form is an O(items) scan with its own
+    /// `now`. Only the *reader* may use it: `rebuild_rows` writes
+    /// `rows_activity` from the live form because it also runs where no
+    /// reconcile preceded it (`respond_permission`, `abort_restore`) and the
+    /// span is stale there. That asymmetry is what makes the two converge.
     fn settled_activity_state(&self) -> ActivityState {
         if self.has_pending_permission() {
             return ActivityState::AwaitingPermission;

@@ -526,7 +526,7 @@ fn render_row(
 /// Human-readable elapsed time. `"5s"` under a minute, `"1m05s"` at or over.
 /// Shared so the run timer in the working indicator and a tool call's age in
 /// its badge are one unit of measure rather than two that happen to agree.
-pub(super) fn format_elapsed(d: std::time::Duration) -> String {
+fn format_elapsed(d: std::time::Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
         format!("{secs}s")
@@ -902,6 +902,24 @@ fn render_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Covers both consumers — the working indicator's run timer and a tool
+    /// call's age — since they call this one function.
+    #[test]
+    fn format_elapsed_cases() {
+        for (secs, expected) in [
+            (0, "0s"),
+            (5, "5s"),
+            (60, "1m00s"),
+            (65, "1m05s"),
+            (600, "10m00s"),
+        ] {
+            assert_eq!(
+                format_elapsed(std::time::Duration::from_secs(secs)),
+                expected
+            );
+        }
+    }
 
     fn row(kind: RowKind, hidden: bool) -> RenderRow {
         RenderRow::at(kind, hidden, 0)

@@ -109,7 +109,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn working_indicato
 
 #[cfg(test)]
 mod tests {
-    use super::{format_elapsed, running_tool_title, single_line_title};
+    use super::{running_tool_title, single_line_title};
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
@@ -159,21 +159,5 @@ mod tests {
             tool("c3", ToolStatusView::Pending),
         ];
         assert_eq!(running_tool_title(&items), Some("Tool c3".to_owned()));
-    }
-
-    #[test]
-    fn format_elapsed_cases() {
-        for (secs, expected) in [
-            (0, "0s"),
-            (5, "5s"),
-            (60, "1m00s"),
-            (65, "1m05s"),
-            (600, "10m00s"),
-        ] {
-            assert_eq!(
-                format_elapsed(std::time::Duration::from_secs(secs)),
-                expected
-            );
-        }
     }
 }

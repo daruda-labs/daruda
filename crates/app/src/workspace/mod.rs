@@ -1878,7 +1878,7 @@ impl Workspace {
         let mut post_turn_relays: Vec<(main_area::pane_tree::PaneId, String)> = Vec::new();
         for (pane_id, view) in &candidates {
             let edge = view.update(cx, |v, cx| v.tick_activity(tick_now, cx));
-            // `reconcile_activity` just recomputed the busy level with `tick_now`
+            // `tick_activity` just recomputed the busy level with `tick_now`
             // and stored it in `activity.span`; read that instead of calling
             // `is_busy()` again (a second O(items) `subagent_activity` scan with a
             // fresh `Instant::now()`) so the whole tick uses one consistent `now`.

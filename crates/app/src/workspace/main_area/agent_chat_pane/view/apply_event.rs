@@ -229,29 +229,33 @@ impl AgentChatView {
                     // but reports no id) the scope stays `All` — always correct,
                     // just more expensive.
                     reconcile_scope = ReconcileScope::Tool(tool_id.to_string());
-                    // First sighting starts the call's clock; later progress
-                    // updates for the same id must not restart it. Skipped
-                    // while replaying for the same reason the post-turn stamp
-                    // above is: a replayed call did not start now.
+                    // Both wall-clock stamps below are skipped while replaying,
+                    // for the same reason the post-turn stamp above is: a
+                    // replayed event did not happen now. Stamping them would
+                    // read the restored conversation as busy — and the pump's
+                    // `tick_activity` would then reproject mid-load, which is
+                    // exactly what the replay gate coalesces away.
                     if !self.replay.is_loading() {
+                        // First sighting starts the call's clock; later progress
+                        // updates for the same id must not restart it.
                         self.activity
                             .tool_started_at
                             .entry(tool_id.to_string())
                             .or_insert_with(std::time::Instant::now);
-                    }
-                    // Bump the subagent (parent) whose child just produced this
-                    // tool-call event, so its run span stays "active" across the
-                    // gaps between the subagent's sequential child calls. Only
-                    // child tools carry a `parent_tool_id`; a top-level tool has
-                    // none, so nothing is bumped for the turn's own work.
-                    let parent = self.items.iter().rev().find_map(|it| match it {
-                        ChatItem::ToolCall(tc) if tc.id == tool_id => tc.parent_tool_id.clone(),
-                        _ => None,
-                    });
-                    if let Some(parent) = parent {
-                        self.activity
-                            .subagent_last_activity
-                            .insert(parent, std::time::Instant::now());
+                        // Bump the subagent (parent) whose child just produced
+                        // this event, so its run span stays "active" across the
+                        // gaps between its sequential child calls. Only child
+                        // tools carry a `parent_tool_id`; a top-level tool has
+                        // none, so nothing is bumped for the turn's own work.
+                        let parent = self.items.iter().rev().find_map(|it| match it {
+                            ChatItem::ToolCall(tc) if tc.id == tool_id => tc.parent_tool_id.clone(),
+                            _ => None,
+                        });
+                        if let Some(parent) = parent {
+                            self.activity
+                                .subagent_last_activity
+                                .insert(parent, std::time::Instant::now());
+                        }
                     }
                 }
                 phone_turn_action = PhoneTurnAction::CheckUpdate;

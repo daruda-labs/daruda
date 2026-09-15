@@ -2419,3 +2419,94 @@ fn a_tool_calls_age_runs_from_its_first_update(cx: &mut gpui::TestAppContext) {
         })
         .unwrap();
 }
+
+/// The settle edge is time-driven — a trailing subagent's window lapsing — and
+/// a *top-level* call is invisible to `is_busy`, so the edge can arrive while
+/// one is still running. Bounding the start-time map there must not take the
+/// clock out from under a card that is still showing it: the counter would
+/// vanish mid-run, then the next update would restart it from `0s`.
+#[gpui::test]
+fn a_settle_edge_keeps_the_clock_of_a_call_that_is_still_running(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::ToolStatusView;
+
+    let lapsed = |secs| {
+        std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(secs))
+            .expect("the monotonic clock has history")
+    };
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            view.items = vec![
+                tool_call("task-1", ToolStatusView::Completed, None),
+                tool_call("child-1", ToolStatusView::Completed, Some("task-1")),
+                tool_call("bash-1", ToolStatusView::InProgress, None),
+            ];
+            view.activity
+                .subagent_last_activity
+                .insert("task-1".into(), std::time::Instant::now());
+            view.activity
+                .tool_started_at
+                .insert("bash-1".into(), lapsed(30));
+            view.activity
+                .tool_started_at
+                .insert("child-1".into(), lapsed(30));
+            view.reconcile_activity(std::time::Instant::now());
+
+            // The subagent's window lapses with the top-level call still live.
+            view.activity
+                .subagent_last_activity
+                .insert("task-1".into(), lapsed(20));
+            view.reconcile_activity(std::time::Instant::now());
+
+            assert!(
+                view.activity.tool_started_at.contains_key("bash-1"),
+                "a running call keeps the clock its card is showing"
+            );
+            assert!(
+                !view.activity.tool_started_at.contains_key("child-1"),
+                "a settled call is dropped — the map stays bounded"
+            );
+        })
+        .unwrap();
+}
+
+/// A replay re-states history; none of it happened now. The subagent stamp and
+/// the tool clock are the two places an `Update` reads the wall clock, so both
+/// have to skip it — otherwise a restored conversation reads busy, and the
+/// pump's `tick_activity` reprojects in the middle of the load the gate exists
+/// to coalesce.
+#[gpui::test]
+fn a_replay_stamps_neither_clock(cx: &mut gpui::TestAppContext) {
+    use agent_client_protocol::schema::v1::{SessionUpdate, ToolCallUpdate};
+    use daruda_acp::{AcpEvent, ToolStatusView};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.begin_connect(Some("sess-1".into()), cx);
+            view.items = vec![
+                tool_call("task-1", ToolStatusView::Completed, None),
+                tool_call("child-1", ToolStatusView::InProgress, Some("task-1")),
+            ];
+            view.apply_event(
+                AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                    ToolCallUpdate::new("child-1", Default::default()),
+                ))),
+                "",
+                false,
+                cx,
+            );
+
+            assert!(
+                view.activity.subagent_last_activity.is_empty(),
+                "a replayed subagent event did not happen now"
+            );
+            assert!(
+                view.activity.tool_started_at.is_empty(),
+                "a replayed call did not start now"
+            );
+        })
+        .unwrap();
+}
