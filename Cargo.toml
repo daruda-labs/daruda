@@ -52,6 +52,10 @@ todo = "deny"
 # Activates the clippy.toml `disallowed-methods` entries; without this the
 # disallowed_methods lint stays allow-by-default and those entries never fire.
 disallowed_methods = "deny"
+# `debug_assert!` is stripped from release builds, so a state transition placed
+# inside one silently stops happening where it matters. Not on by default at any
+# level, so it has to be named here.
+debug_assert_with_mut_call = "deny"
 
 [profile.dev]
 split-debuginfo = "unpacked"
