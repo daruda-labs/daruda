@@ -9,20 +9,41 @@
 //! Notification Center under the "Script Editor" identity — visible
 //! and dismissible by the user, which is the goal.
 //!
+//! Tests replace the OS boundary with a thread-local recording fake. Besides
+//! preventing external side effects, thread-local storage keeps parallel test
+//! cases from consuming each other's notifications.
+//!
 //! The call shells out and detaches; we never wait for the user to
 //! dismiss. Concurrency is unbounded by design (one notification per
 //! pane event), but `osascript` is cheap (~50 ms cold, fork+exec) and
 //! macOS itself coalesces duplicates in Notification Center.
 
+#[cfg(test)]
+use std::cell::RefCell;
+#[cfg(not(test))]
 use std::process::{Command, Stdio};
 
+#[cfg(not(test))]
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+#[cfg(not(test))]
 use daruda_store::observability::log_writer::LogWriter;
+
+#[cfg(test)]
+thread_local! {
+    static RECORDED_NOTIFICATIONS: RefCell<Vec<(String, String)>> = const {
+        RefCell::new(Vec::new())
+    };
+}
 
 /// Fire one desktop notification. Both `title` and `body` may contain
 /// arbitrary UTF-8; double-quotes and backslashes are escaped so the
 /// generated AppleScript stays well-formed regardless of payload.
 pub fn show(title: &str, body: &str) {
+    deliver(title, body);
+}
+
+#[cfg(not(test))]
+fn deliver(title: &str, body: &str) {
     let script = format!(
         r#"display notification "{}" with title "{}""#,
         escape_applescript(body),
@@ -49,6 +70,20 @@ pub fn show(title: &str, body: &str) {
                 .build(),
         );
     }
+}
+
+#[cfg(test)]
+fn deliver(title: &str, body: &str) {
+    RECORDED_NOTIFICATIONS.with(|notifications| {
+        notifications
+            .borrow_mut()
+            .push((title.to_string(), body.to_string()));
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn take_recorded_for_test() -> Vec<(String, String)> {
+    RECORDED_NOTIFICATIONS.with(|notifications| std::mem::take(&mut *notifications.borrow_mut()))
 }
 
 /// Escape `\` and `"` so the AppleScript string literal stays valid.
@@ -81,5 +116,18 @@ mod tests {
     #[test]
     fn escape_passes_through_newlines() {
         assert_eq!(escape_applescript("line1\nline2"), "line1\nline2");
+    }
+
+    #[test]
+    fn test_backend_records_without_cross_call_residue() {
+        let _ = take_recorded_for_test();
+
+        show("Agent", "Agent finished responding");
+
+        assert_eq!(
+            take_recorded_for_test(),
+            vec![("Agent".to_string(), "Agent finished responding".to_string())]
+        );
+        assert!(take_recorded_for_test().is_empty());
     }
 }
