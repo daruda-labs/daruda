@@ -41,9 +41,9 @@ pub struct PresenceConfig {
 impl Default for PresenceConfig {
     fn default() -> Self {
         Self {
-            away_grace_secs: 15,
-            away_idle_secs: 60,
-            away_idle_foreground_secs: 300,
+            away_grace_secs: 10,
+            away_idle_secs: 30,
+            away_idle_foreground_secs: 180,
         }
     }
 }
@@ -64,9 +64,9 @@ mod tests {
     #[test]
     fn defaults_put_the_foreground_bar_above_the_blurred_one() {
         let cfg = PresenceConfig::default();
-        assert_eq!(cfg.away_grace_secs, 15);
-        assert_eq!(cfg.away_idle_secs, 60);
-        assert_eq!(cfg.away_idle_foreground_secs, 300);
+        assert_eq!(cfg.away_grace_secs, 10);
+        assert_eq!(cfg.away_idle_secs, 30);
+        assert_eq!(cfg.away_idle_foreground_secs, 180);
         assert!(cfg.away_idle_foreground_secs > cfg.away_idle_secs);
     }
 
@@ -83,7 +83,7 @@ mod tests {
         // A foreground bar already above the blurred one is left alone.
         let mut ordered = PresenceConfig::default();
         ordered.clamp();
-        assert_eq!(ordered.away_idle_foreground_secs, 300);
+        assert_eq!(ordered.away_idle_foreground_secs, 180);
     }
 
     #[test]
@@ -91,12 +91,12 @@ mod tests {
         let cfg: PresenceConfig = toml::from_str("away_idle_secs = 0\n").unwrap();
         assert_eq!(cfg.away_idle_secs, 0);
         // Unspecified fields fall back to their defaults via `#[serde(default)]`.
-        assert_eq!(cfg.away_grace_secs, 15);
-        assert_eq!(cfg.away_idle_foreground_secs, 300);
+        assert_eq!(cfg.away_grace_secs, 10);
+        assert_eq!(cfg.away_idle_foreground_secs, 180);
 
         let reparsed: PresenceConfig = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(reparsed.away_idle_secs, 0);
-        assert_eq!(reparsed.away_grace_secs, 15);
-        assert_eq!(reparsed.away_idle_foreground_secs, 300);
+        assert_eq!(reparsed.away_grace_secs, 10);
+        assert_eq!(reparsed.away_idle_foreground_secs, 180);
     }
 }

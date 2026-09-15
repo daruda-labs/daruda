@@ -1412,16 +1412,16 @@ fn a_new_presence_key_outranks_the_retired_telegram_one() {
 #[test]
 fn explicit_presence_defaults_outrank_legacy_telegram_keys_across_save_paths() {
     for source in [
-        "[telegram]\nenabled = true\nonly_when_away = true\ndefer_while_active = false\nactive_idle_secs = 90\naway_grace_secs = 30\n[presence]\naway_grace_secs = 15\naway_idle_secs = 60\n",
-        "telegram = { enabled = true, only_when_away = true, defer_while_active = false, active_idle_secs = 90, away_grace_secs = 30 }\npresence = { away_grace_secs = 15, away_idle_secs = 60 }\n",
+        "[telegram]\nenabled = true\nonly_when_away = true\ndefer_while_active = false\nactive_idle_secs = 90\naway_grace_secs = 30\n[presence]\naway_grace_secs = 10\naway_idle_secs = 30\n",
+        "telegram = { enabled = true, only_when_away = true, defer_while_active = false, active_idle_secs = 90, away_grace_secs = 30 }\npresence = { away_grace_secs = 10, away_idle_secs = 30 }\n",
     ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, source).unwrap();
         let assert_defaults = |cfg: &Config| {
             assert!(cfg.telegram.only_when_away);
-            assert_eq!(cfg.presence.away_grace_secs, 15);
-            assert_eq!(cfg.presence.away_idle_secs, 60);
+            assert_eq!(cfg.presence.away_grace_secs, 10);
+            assert_eq!(cfg.presence.away_idle_secs, 30);
         };
 
         assert_defaults(&Config::load_from(&path));
@@ -1450,7 +1450,7 @@ fn partial_presence_migration_fills_only_missing_keys() {
     assert!(!cfg.telegram.only_when_away);
     assert_eq!(cfg.presence.away_grace_secs, 30);
     assert_eq!(cfg.presence.away_idle_secs, 60);
-    assert_eq!(cfg.presence.away_idle_foreground_secs, 300);
+    assert_eq!(cfg.presence.away_idle_foreground_secs, 180);
 }
 
 #[test]

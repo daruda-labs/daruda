@@ -1035,9 +1035,9 @@ async fn mid_session_root_vanish_tears_down_tree_and_reconciles_project(cx: &mut
             "teardown removes the stale tree"
         );
         assert!(
-            !ws.lane_scoped
+            ws.lane_scoped
                 .get(&id)
-                .is_some_and(|state| state.files.watcher.is_some()),
+                .is_none_or(|state| state.files.watcher.is_none()),
             "teardown removes the watcher so it stops firing reload spam"
         );
         assert_eq!(

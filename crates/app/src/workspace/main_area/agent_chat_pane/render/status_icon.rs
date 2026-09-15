@@ -126,11 +126,9 @@ pub(super) fn status_icon(
     mark(icon.into(), None, t, dim, cx)
 }
 
-/// [`status_icon`] with the live state's age beside it. The number is the
-/// liveness signal, so the mark stays solid: a counter says *how long* as well
-/// as *still going*, which a blink cannot, and two moving signals on one row
-/// read as noise. `age` is ignored unless the state is live — a settled mark
-/// has nothing left to count.
+/// [`status_icon`] for a surface that knows how long a live state has been
+/// going. `age` is ignored unless the state is live — a settled mark has
+/// nothing left to count.
 pub(super) fn status_icon_with_age(
     icon: impl Into<StatusIcon>,
     age: Option<std::time::Duration>,
@@ -138,15 +136,28 @@ pub(super) fn status_icon_with_age(
     dim: f32,
     cx: &App,
 ) -> AnyElement {
-    let icon = icon.into();
-    mark(icon, age.filter(|_| icon.is_live()), t, dim, cx)
+    mark(icon.into(), age, t, dim, cx)
 }
 
-/// Whether the mark blinks. A live state does — unless a counter beside it is
-/// already carrying the motion, in which case a second moving signal on one row
-/// is noise and the mark stays solid.
-fn should_blink(icon: StatusIcon, age: Option<std::time::Duration>) -> bool {
-    icon.is_live() && age.is_none()
+/// What the status slot draws.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Slot {
+    /// The mark. `blink` while the state is still happening and nothing else
+    /// on the row is carrying that.
+    Mark { blink: bool },
+    /// The age alone, for a live state whose start is known. It *replaces* the
+    /// mark rather than joining it: a ticking number already says "running",
+    /// and says how long as well, so drawing both is one signal too many.
+    Age(std::time::Duration),
+}
+
+fn slot(icon: StatusIcon, age: Option<std::time::Duration>) -> Slot {
+    match age.filter(|_| icon.is_live()) {
+        Some(age) => Slot::Age(age),
+        None => Slot::Mark {
+            blink: icon.is_live(),
+        },
+    }
 }
 
 fn mark(
@@ -157,23 +168,17 @@ fn mark(
     cx: &App,
 ) -> AnyElement {
     let color = icon.color(t, dim, cx);
-    let blink = should_blink(icon, age);
-    div()
-        .flex_none()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::GAP_SM))
-        .when(blink, |el| el.opacity(pulse_opacity(cx)))
-        .child(Icon::empty().path(icon.asset()).small().text_color(color))
-        .children(age.map(|age| {
-            div()
-                .flex_none()
-                .text_color(color)
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(format_elapsed(age)))
-        }))
-        .into_any_element()
+    let base = div().flex_none().text_color(color);
+    match slot(icon, age) {
+        Slot::Age(age) => base
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .child(SharedString::from(format_elapsed(age)))
+            .into_any_element(),
+        Slot::Mark { blink } => base
+            .when(blink, |el| el.opacity(pulse_opacity(cx)))
+            .child(Icon::empty().path(icon.asset()).small().text_color(color))
+            .into_any_element(),
+    }
 }
 
 #[cfg(test)]
@@ -210,18 +215,23 @@ mod tests {
         assert_eq!(assets.len(), all.len(), "two states share one asset");
     }
 
-    /// The rule `should_blink` exists for: `is_live()` alone would keep the
-    /// mark blinking next to its own counter.
+    /// A known age replaces the mark; without one the mark stands, blinking
+    /// only while the state is still happening.
     #[test]
-    fn a_mark_with_a_counter_beside_it_stays_solid() {
-        let age = Some(std::time::Duration::from_secs(12));
-        assert!(should_blink(StatusIcon::Running, None), "live, no counter");
-        assert!(
-            !should_blink(StatusIcon::Running, age),
-            "live with a counter: the number carries the motion"
+    fn an_age_replaces_the_mark_it_would_otherwise_blink() {
+        let age = std::time::Duration::from_secs(12);
+        assert_eq!(slot(StatusIcon::Running, Some(age)), Slot::Age(age));
+        assert_eq!(
+            slot(StatusIcon::Running, None),
+            Slot::Mark { blink: true },
+            "live with no age: the mark carries the motion"
         );
-        assert!(!should_blink(StatusIcon::Ok, None), "settled, no counter");
-        assert!(!should_blink(StatusIcon::Ok, age), "settled never blinks");
+        assert_eq!(
+            slot(StatusIcon::Ok, Some(age)),
+            Slot::Mark { blink: false },
+            "a settled state has nothing to count"
+        );
+        assert_eq!(slot(StatusIcon::Ok, None), Slot::Mark { blink: false });
     }
 
     #[test]

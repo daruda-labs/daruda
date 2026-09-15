@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn the_five_presence_states_map_to_the_intended_verdicts() {
         let t0 = Instant::now();
-        let r = rule(15, 60, 300);
+        let r = rule(10, 30, 180);
         let now = t0 + Duration::from_secs(600);
         let cases = [
             ("working in daruda", true, 0, false),
@@ -216,8 +216,8 @@ mod tests {
             // The logged incident: blurred past the grace, machine still in use.
             ("working in another app", false, 16, false),
             // The case a blur-required rule cannot reach.
-            ("walked away, daruda frontmost", true, 300, true),
-            ("walked away, another app frontmost", false, 300, true),
+            ("walked away, daruda frontmost", true, 180, true),
+            ("walked away, another app frontmost", false, 180, true),
         ];
         for (name, app_active, idle_secs, want) in cases {
             let signal =
