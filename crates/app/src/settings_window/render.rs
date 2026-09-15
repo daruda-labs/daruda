@@ -36,7 +36,17 @@ impl Render for SettingsWindow {
         let body = self.render_section_body(cx);
         let sidebar = self.render_sidebar_nav(cx);
 
+        // Both, not one or the other: a conflict is a standing question about a
+        // field, an error is the report on the action just taken. Rendering the
+        // conflict *instead of* the error silently dropped the second.
         let mut body_with_error = div().flex().flex_col();
+        if let Some(err) = self.error.as_ref() {
+            body_with_error = body_with_error.child(
+                div()
+                    .pb(px(theme::MODAL_PANEL_GAP))
+                    .child(crate::ui::alert::error("settings-error", err.clone())),
+            );
+        }
         if let Some(conflict) = self.conflict.as_ref() {
             body_with_error = body_with_error.child(
                 div()
@@ -79,12 +89,6 @@ impl Render for SettingsWindow {
                                 )),
                             ),
                     ),
-            );
-        } else if let Some(err) = self.error.as_ref() {
-            body_with_error = body_with_error.child(
-                div()
-                    .pb(px(theme::MODAL_PANEL_GAP))
-                    .child(crate::ui::alert::error("settings-error", err.clone())),
             );
         }
         body_with_error = body_with_error.child(body);

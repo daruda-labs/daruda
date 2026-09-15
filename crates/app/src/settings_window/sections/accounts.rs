@@ -159,16 +159,12 @@ fn row_header(
         })
 }
 
-/// How an account edit reaches disk: the mutation runs against the loaded
-/// state, then the whole file is rewritten under a lock.
+/// The production persist step for an account edit: the mutation runs against
+/// the loaded state, then the whole file is rewritten under a lock.
 ///
-/// A parameter rather than a direct [`daruda_store::accounts::mutate_accounts`]
-/// call because that one addresses the running profile's real `accounts.json` —
-/// a test driving these paths would rewrite the developer's own account list.
-type PersistAccounts<'a> =
-    &'a dyn Fn(&mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState>;
-
-/// The production [`PersistAccounts`].
+/// Passed as a parameter rather than called directly because it addresses the
+/// running profile's real `accounts.json` — a test driving these paths would
+/// rewrite the developer's own account list.
 fn persist_accounts(mutate: &mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState> {
     daruda_store::accounts::mutate_accounts(|state| mutate(state)).map(|(state, ())| state)
 }
@@ -528,7 +524,7 @@ impl SettingsWindow {
         account: Option<AccountId>,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.set_default_account_with(recipe, account, &persist_accounts, cx);
+        self.set_default_account_with(recipe, account, persist_accounts, cx);
     }
 
     /// [`Self::set_default_account`] against a caller-supplied persist step.
@@ -536,7 +532,7 @@ impl SettingsWindow {
         &mut self,
         recipe: AccountRecipeId,
         account: Option<AccountId>,
-        persist: PersistAccounts<'_>,
+        persist: impl Fn(&mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState>,
         cx: &mut gpui::Context<Self>,
     ) {
         let state = match persist(&mut |state| apply_default_choice(state, recipe, account)) {
@@ -625,14 +621,14 @@ impl SettingsWindow {
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
-        self.remove_account_with(account_id, &persist_accounts, cx);
+        self.remove_account_with(account_id, persist_accounts, cx);
     }
 
     /// [`Self::remove_account`] against a caller-supplied persist step.
     pub(in crate::settings_window) fn remove_account_with(
         &mut self,
         account_id: AccountId,
-        persist: PersistAccounts<'_>,
+        persist: impl Fn(&mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState>,
         cx: &mut gpui::Context<Self>,
     ) {
         let mut removed: Option<ManagedAccount> = None;

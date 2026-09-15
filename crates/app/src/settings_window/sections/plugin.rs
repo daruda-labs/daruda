@@ -788,9 +788,9 @@ impl SettingsWindow {
     ) {
         self.plugin_ops_in_flight.remove(plugin_id);
         match result {
-            // Clears rather than leaves the previous banner standing, matching
-            // every other action here: the banner reports the last thing the
-            // user asked for, and this one worked.
+            // The banner reports the outcome of the last action, whichever it
+            // was, so a success clears whatever the previous one left. Every
+            // other action in this window behaves the same way.
             Ok(_) => self.error = None,
             Err(e) => {
                 let text = match action {

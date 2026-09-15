@@ -209,7 +209,7 @@ mod accounts {
         win.update(cx, |w, cx| {
             w.remove_account_with(
                 id,
-                &|mutate| mutate_accounts_in(data.path(), |s| mutate(s)).map(|(s, ())| s),
+                |mutate| mutate_accounts_in(data.path(), |s| mutate(s)).map(|(s, ())| s),
                 cx,
             );
         });
@@ -232,7 +232,7 @@ mod accounts {
         win.update(cx, |w, cx| {
             w.remove_account_with(
                 id,
-                &|mutate| {
+                |mutate| {
                     let mut edited = state.clone();
                     mutate(&mut edited);
                     Err(std::io::Error::other("accounts.json could not be written"))
@@ -262,7 +262,11 @@ mod accounts {
             w.set_default_account_with(
                 AccountRecipeId::Claude,
                 Some(id),
-                &|_| Err(std::io::Error::other("accounts.json could not be written")),
+                |mutate| {
+                    let mut edited = AccountsState::default();
+                    mutate(&mut edited);
+                    Err(std::io::Error::other("accounts.json could not be written"))
+                },
                 cx,
             );
         });
@@ -368,5 +372,70 @@ fn a_plugin_op_that_lands_leaves_no_banner(cx: &mut TestAppContext) {
     win.read_with(cx, |w, _| {
         assert!(w.error.is_none());
         assert!(w.plugin_ops_in_flight.is_empty());
+    });
+}
+
+/// An external edit and a failed action are different questions — "someone
+/// else changed this" versus "what you just clicked did not happen" — and both
+/// can be live at once. The banner area used to render the conflict *instead
+/// of* the error, which put the failure back where this module started: in the
+/// log only.
+#[gpui::test]
+fn a_failure_and_a_pending_conflict_are_both_live(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, paired_config(42));
+
+    // A local draft on a field, then the same field edited underneath it.
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontSize(20.0))
+                .expect("external edit");
+        });
+    });
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::TerminalFontSize, cx);
+    });
+    win.read_with(cx, |w, _| {
+        assert!(w.conflict.is_some(), "conflict is pending")
+    });
+
+    // Now an unrelated action fails while that choice is still outstanding.
+    break_settings_persistence(cx);
+    win.update(cx, |w, cx| w.unpair_telegram(cx));
+
+    win.read_with(cx, |w, _| {
+        assert!(w.conflict.is_some(), "the choice is still outstanding");
+        assert!(
+            w.error.is_some(),
+            "and the failed unpair must be reported alongside it"
+        );
+    });
+}
+
+/// "Open Config File" created the directory first and opened the URL either
+/// way, so a `create_dir_all` that failed handed the OS a path to a file that
+/// could not be there: the editor opened nothing and the window said nothing.
+#[gpui::test]
+fn a_config_file_that_cannot_be_reached_is_reported(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    let opened = win.update(cx, |w, cx| {
+        w.open_config_file_with(|_| Err(std::io::Error::other("read-only file system")), cx)
+    });
+
+    assert!(
+        !opened,
+        "there is nothing to open, so nothing must be opened"
+    );
+    win.read_with(cx, |w, _| {
+        assert!(w.error.is_some(), "and the user must be told why");
     });
 }

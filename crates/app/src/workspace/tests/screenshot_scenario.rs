@@ -116,6 +116,32 @@ async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
     });
 }
 
+/// The banner seed is the whole point of this scenario, and the only thing
+/// that could quietly drop it is the settings window not being in the registry
+/// by the time `drive` looks — which is exactly what the `SILENT-OK` there
+/// assumes cannot happen.
+#[gpui::test]
+async fn drive_settings_error_raises_the_banner(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::SettingsError, &workspace, window, cx);
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        let settings = crate::window_registry::WindowRegistry::settings(cx)
+            .expect("settings-error scenario should open the Settings window");
+        let banner = settings
+            .update(cx, |this, _window, _cx| this.error_for_test().cloned())
+            .expect("settings window is live");
+        assert!(
+            banner.is_some(),
+            "the scenario must leave a banner for the capture to show"
+        );
+    });
+}
+
 /// The one hazard in the long-label seed: it must swap the *label* of a real
 /// candidate, not fabricate a row. A synthetic `lane_ref` would render fine
 /// and then activate nothing when the row is picked.

@@ -828,6 +828,7 @@ settings:
   err_grid_columns: "매크로 그리드 열 수는 1에서 16 사이의 정수여야 합니다."
   err_save_settings: "설정을 저장하지 못했습니다: %{error}"
   err_telegram_unpair: "Telegram 페어링을 해제하지 못했습니다: %{error}"
+  err_open_config: "설정 파일에 접근하지 못했습니다: %{error}"
   err_telegram_token_save: "봇 토큰을 시스템 자격 증명 저장소에 저장하지 못했습니다: %{error}"
   err_telegram_token_clear: "봇 토큰을 시스템 자격 증명 저장소에서 삭제하지 못했습니다: %{error}"
   err_accounts_save_default: "기본 계정을 저장하지 못했습니다: %{error}"

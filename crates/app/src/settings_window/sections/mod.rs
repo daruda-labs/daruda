@@ -29,7 +29,6 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{checkbox, checkbox_row, field_row};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, IntoElement, div, prelude::*, px};
 
@@ -441,6 +440,10 @@ impl SettingsWindow {
     /// by the caller. A parameter because `keychain::write_token` reaches the
     /// real OS credential store with no test guard of its own (unlike
     /// `read_token`), so a test must be able to stand in for it.
+    ///
+    /// A failure lands in the log twice on purpose — once from the keychain
+    /// layer with the raw tool stderr, once from here with the action the user
+    /// was denied. Different questions when triaging.
     pub(super) fn save_telegram_token_with(
         &mut self,
         write: impl FnOnce(&str) -> std::io::Result<()>,
@@ -791,27 +794,48 @@ impl SettingsWindow {
     fn render_open_config_button(cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div().flex().flex_row().child(
             button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
-                |_this, _: &ClickEvent, _window, cx| {
-                    let path = daruda_config::config_path();
-                    if let Some(parent) = path.parent()
-                        && let Err(e) = std::fs::create_dir_all(parent)
-                    {
-                        LogWriter::log(
-                            ErrorReport::new(
-                                crate::surface::strings::error_create_config_dir_failed(),
-                            )
-                            .severity(ErrorSeverity::Warning)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(parent))
-                            .dedup("config.mkdir")
-                            .build(),
-                        );
-                    }
-                    cx.open_url(&path_to_file_url(&path));
+                |this, _: &ClickEvent, _window, cx| {
+                    this.open_config_file(cx);
                 },
             )),
         )
+    }
+
+    /// Hand `config.toml` to the user's editor, creating its directory first.
+    fn open_config_file(&mut self, cx: &mut gpui::Context<Self>) {
+        self.open_config_file_with(|dir| std::fs::create_dir_all(dir), cx);
+    }
+
+    /// [`Self::open_config_file`] with the directory step supplied by the
+    /// caller — the real one addresses `config_path()`, and the success branch
+    /// hands a URL to the OS, neither of which a test may do.
+    ///
+    /// Returns whether the file was handed over. A failed directory step stops
+    /// there: the path cannot name a file, so opening it would show the user an
+    /// editor doing nothing instead of the reason.
+    pub(in crate::settings_window) fn open_config_file_with(
+        &mut self,
+        ensure_dir: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let path = daruda_config::config_path();
+        if let Some(parent) = path.parent()
+            && let Err(e) = ensure_dir(parent)
+        {
+            self.report_section_error(
+                s::settings_err_open_config(&e.to_string()),
+                ErrorReport::new(crate::surface::strings::error_create_config_dir_failed())
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(parent))
+                    .dedup("config.mkdir"),
+                cx,
+            );
+            return false;
+        }
+        cx.open_url(&path_to_file_url(&path));
+        true
     }
 }
 

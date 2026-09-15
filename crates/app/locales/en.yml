@@ -829,6 +829,7 @@ settings:
   err_grid_columns: "Macro grid columns must be a whole number between 1 and 16."
   err_save_settings: "Could not save your settings: %{error}"
   err_telegram_unpair: "Could not clear the Telegram pairing: %{error}"
+  err_open_config: "Could not reach the config file: %{error}"
   err_telegram_token_save: "Could not save the bot token to the system credential store: %{error}"
   err_telegram_token_clear: "Could not remove the bot token from the system credential store: %{error}"
   err_accounts_save_default: "Could not save the default account: %{error}"

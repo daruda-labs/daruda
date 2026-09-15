@@ -3826,6 +3826,9 @@ pub fn settings_err_save_settings(error: &str) -> String {
 pub fn settings_err_telegram_unpair(error: &str) -> String {
     rust_i18n::t!("settings.err_telegram_unpair", error => error).into_owned()
 }
+pub fn settings_err_open_config(error: &str) -> String {
+    rust_i18n::t!("settings.err_open_config", error => error).into_owned()
+}
 pub fn settings_err_telegram_token_save(error: &str) -> String {
     rust_i18n::t!("settings.err_telegram_token_save", error => error).into_owned()
 }
