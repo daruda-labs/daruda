@@ -81,6 +81,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/compress.svg" => icon!("ui/compress.svg"),
             "icons/ui/content-copy.svg" => icon!("ui/content-copy.svg"),
             "icons/ui/difference.svg" => icon!("ui/difference.svg"),
+            "icons/ui/error.svg" => icon!("ui/error.svg"),
             "icons/ui/expand.svg" => icon!("ui/expand.svg"),
             "icons/ui/filter-alt.svg" => icon!("ui/filter-alt.svg"),
             "icons/ui/filter-alt-off.svg" => icon!("ui/filter-alt-off.svg"),
@@ -93,6 +94,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/skip-next.svg" => icon!("ui/skip-next.svg"),
             "icons/ui/unfold-less.svg" => icon!("ui/unfold-less.svg"),
             "icons/ui/unfold-more.svg" => icon!("ui/unfold-more.svg"),
+            "icons/ui/warning.svg" => icon!("ui/warning.svg"),
             "icons/ui/width-wide.svg" => icon!("ui/width-wide.svg"),
 
             // ── Folders ──────────────────────────────────────────────────
@@ -221,6 +223,7 @@ mod tests {
         "icons/ui/compress.svg",
         "icons/ui/content-copy.svg",
         "icons/ui/difference.svg",
+        "icons/ui/error.svg",
         "icons/ui/expand.svg",
         "icons/ui/filter-alt.svg",
         "icons/ui/filter-alt-off.svg",
@@ -233,6 +236,7 @@ mod tests {
         "icons/ui/skip-next.svg",
         "icons/ui/unfold-less.svg",
         "icons/ui/unfold-more.svg",
+        "icons/ui/warning.svg",
         "icons/ui/width-wide.svg",
     ];
 

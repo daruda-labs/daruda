@@ -20,6 +20,7 @@ mod mermaid;
 /// `mermaid-lightbox` capture scenario can drive it directly.
 pub(in crate::workspace) mod mermaid_lightbox;
 mod plan;
+mod status_icon;
 mod tail_row;
 mod tail_window;
 mod tool;
@@ -595,6 +596,7 @@ fn response_bar(
             filter_revealed || this.filter_matches.matches(item)
         }),
         t,
+        this.dim_amount,
         cx,
     ));
     // Borderless section bar, matching the block headers — section headers stay
@@ -684,8 +686,12 @@ fn tool_group_bar(
     // `count` is the group's structural span; what the row offers is the part of
     // it the display filter keeps.
     let label = s::agent_chat_tool_group_count(kept_tools(this, run, filter_revealed));
-    let header =
-        FoldHeader::with_title(group_title(label, this, cx)).trailing(rollup_glyph(rollup, t, cx));
+    let header = FoldHeader::with_title(group_title(label, this, cx)).trailing(rollup_glyph(
+        rollup,
+        t,
+        this.dim_amount,
+        cx,
+    ));
     // Borderless section bar, same as the response bar.
     FoldRow::section(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),

@@ -5,20 +5,12 @@ use daruda_acp::{PlanEntryView, PlanStatus};
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::fold_header::{FoldHeader, FoldRow, FoldToggle, SummaryLine};
-use super::pulse_opacity;
+use super::status_icon::status_icon;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Icon, IconName, Sizable as _, button_bare};
+use crate::ui::{ButtonVariants as _, IconName, button_bare};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
-
-// Material Symbols, daruda's own icon set (see `assets.rs`). One family for the
-// whole checklist so the four states read as one vocabulary; the shape carries
-// the state and the colour only reinforces it.
-const ICON_COMPLETED: &str = "icons/ui/check-circle.svg";
-const ICON_IN_PROGRESS: &str = "icons/ui/radio-button-checked.svg";
-const ICON_PENDING: &str = "icons/ui/radio-button-unchecked.svg";
-const ICON_CANCELLED: &str = "icons/ui/cancel.svg";
 
 /// `(completed, total)`; callers guard empty plans before colour logic.
 fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
@@ -27,26 +19,6 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
         .filter(|e| e.status == PlanStatus::Completed)
         .count();
     (done, plan.len())
-}
-
-/// Status icon plus colour. Shape distinguishes the four states on its own, so
-/// the colour is reinforcement rather than the only channel (`DESIGN.md`).
-fn plan_status_icon(
-    status: PlanStatus,
-    t: &theme::DarudaTheme,
-    dim: f32,
-    cx: &App,
-) -> (&'static str, Hsla) {
-    let muted = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
-    match status {
-        // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
-        PlanStatus::Completed => (ICON_COMPLETED, t.file_diff_stat_add),
-        PlanStatus::InProgress => (ICON_IN_PROGRESS, t.status_executing_tool_dark),
-        PlanStatus::Pending => (ICON_PENDING, muted),
-        // Stopped before it finished — muted like Pending (no error red): it
-        // neither failed nor completed, and the ✕ says which.
-        PlanStatus::Cancelled => (ICON_CANCELLED, muted),
-    }
 }
 
 /// Content colour for one plan entry. Settled work recedes; work that is still
@@ -118,19 +90,12 @@ pub(super) fn plan_region(
             .into_any_element(),
     );
 
-    // The live-step dot is this header's status badge, so it sits right-anchored
-    // in the trailing slot like every other header's rollup glyph — and, like
+    // The live-step mark is this header's status badge, so it sits right-anchored
+    // in the trailing slot like every other header's rollup — same table, so the
+    // header and the row below it cannot describe one step two ways — and, like
     // them, it reads the same in both fold states.
     if active_step.is_some() {
-        header = header.trailing(
-            div()
-                .flex_none()
-                .opacity(pulse_opacity(cx))
-                .text_color(t.status_executing_tool_dark)
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from("●"))
-                .into_any_element(),
-        );
+        header = header.trailing(status_icon(PlanStatus::InProgress, t, dim, cx));
     }
 
     // Once complete, offer an explicit dismiss control; stop propagation so it
@@ -208,7 +173,6 @@ fn plan_list(
         .px(px(theme::AGENT_CHAT_PAD_X))
         .pb(px(theme::AGENT_CHAT_PAD_Y));
     for entry in plan {
-        let (icon, icon_color) = plan_status_icon(entry.status, t, dim, cx);
         let in_progress = entry.status == PlanStatus::InProgress;
         list = list.child(
             div()
@@ -225,13 +189,7 @@ fn plan_list(
                     row.bg(theme::dim_toward_gray(theme::SELECTION_BG, dim))
                         .rounded_sm()
                 })
-                .child(
-                    div()
-                        .flex_none()
-                        // In-progress icon pulses; settled ones stay solid.
-                        .when(in_progress, |g| g.opacity(pulse_opacity(cx)))
-                        .child(Icon::empty().path(icon).xsmall().text_color(icon_color)),
-                )
+                .child(status_icon(entry.status, t, dim, cx))
                 .child(
                     div()
                         .flex_1()

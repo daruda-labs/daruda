@@ -22,7 +22,6 @@ use gpui::{
     prelude::*, px,
 };
 
-use super::pulse_opacity;
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, DisclosureAxis, disclosure};
@@ -550,35 +549,21 @@ pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
         .into_any_element()
 }
 
-/// The standard trailing-slot glyph summarizing a run's outcome. Every header
+/// The standard trailing-slot mark summarizing a run's outcome. Every header
 /// that represents a whole response carries exactly one — the response bar, the
 /// tool-group bar, and a top-level assistant block (which *is* the whole response
 /// when the run is trivial enough that no bar is emitted). Blocks nested under a
-/// bar stay glyph-free so a collapsed turn shows one verdict, not two.
-pub(super) fn rollup_glyph(rollup: Rollup, t: &theme::DarudaTheme, cx: &gpui::App) -> AnyElement {
-    let (glyph, color) = match rollup {
-        // Amber "executing tool" accent so an in-progress run reads stronger
-        // than a settled glyph.
-        Rollup::Running => ("●", t.status_executing_tool_dark),
-        Rollup::Ok => ("✓", t.file_diff_stat_add),
-        // Partial = some failed, some succeeded → warning, not a hard failure.
-        Rollup::Partial => ("⚠", t.banner_warning_text),
-        Rollup::Failed => ("✗", t.banner_error_text),
-    };
-    // Blink the running dot on the shared 2-tick pulse so it reads as live;
-    // settled glyphs stay solid.
-    let opacity = if matches!(rollup, Rollup::Running) {
-        pulse_opacity(cx)
-    } else {
-        1.0
-    };
-    div()
-        .flex_none()
-        .opacity(opacity)
-        .text_color(color)
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(glyph))
-        .into_any_element()
+/// bar stay mark-free so a collapsed turn shows one verdict, not two.
+///
+/// The mark itself comes from [`status_icon`](super::status_icon), the table the
+/// plan region reads too, so a running run and a running step cannot disagree.
+pub(super) fn rollup_glyph(
+    rollup: Rollup,
+    t: &theme::DarudaTheme,
+    dim: f32,
+    cx: &gpui::App,
+) -> AnyElement {
+    super::status_icon::status_icon(rollup, t, dim, cx)
 }
 
 #[cfg(test)]
