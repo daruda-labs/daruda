@@ -180,8 +180,8 @@ fn plan_list(
                 .min_w_0()
                 .flex()
                 .flex_row()
-                // An icon is an `svg()` box with no baseline, so the row centres
-                // instead of sitting on one (the text-glyph era's alignment).
+                // An icon is an `svg()` box with no baseline to sit on, so the
+                // row centres.
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
                 // In-progress row uses the shared selection tint.

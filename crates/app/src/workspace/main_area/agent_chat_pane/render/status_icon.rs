@@ -1,30 +1,24 @@
 //! The one status vocabulary the agent chat draws.
 //!
 //! A run's rollup, a plan step and a tool call all answer the same question —
-//! how is this going, and how did it end — so they share one table rather than
-//! each picking its own mark. They used to disagree: a running run was a text
-//! `●`, a running plan step its own glyph, a finished tool call the word
-//! "Done", so one turn described itself three ways.
-//!
-//! [`StatusIcon`] is that shared vocabulary, and the three domain enums convert
-//! into it. None can pick a mark the others cannot; adding a state means adding
-//! it here, once.
+//! how is this going, how did it end — so [`StatusIcon`] is the single table
+//! all three convert into. None can pick a mark the others cannot, and adding
+//! a state means adding it here, once.
 
 use daruda_acp::{PlanStatus, ToolStatusView};
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
-use super::pulse_opacity;
+use super::{format_elapsed, pulse_opacity};
 use crate::ui::theme;
 use crate::ui::{Icon, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 
-// Material Symbols, daruda's own icon set (see `assets.rs`). One family for the
-// whole vocabulary, and the shape carries the state so colour is reinforcement
-// rather than the only channel (`DESIGN.md`) — which is also why a stopped step
-// (`block`, a ⊘) and a failed one (`error`, a `!`) are different marks and not
-// one mark in two colours. The outcome marks take the family's filled cut so
-// they hold their shape at `xsmall`; `radio-button-*` has no filled variant and
-// needs none — an unreached step *should* read as an empty ring.
+// Material Symbols, daruda's own set (see `assets.rs`). Shape carries the state
+// so colour only reinforces it (`DESIGN.md`): a stopped step (⊘) and a failed
+// one (!) are different marks, not one mark in two colours.
+// The outcome marks take the filled cut, which is what holds their shape at
+// `xsmall`; `radio-button-*` has none and needs none, since an unreached step
+// should read as an empty ring.
 const ICON_RUNNING: &str = "icons/ui/radio-button-checked.svg";
 const ICON_OK: &str = "icons/ui/check-circle.svg";
 const ICON_PENDING: &str = "icons/ui/radio-button-unchecked.svg";
@@ -145,7 +139,14 @@ pub(super) fn status_icon_with_age(
     cx: &App,
 ) -> AnyElement {
     let icon = icon.into();
-    mark(icon, icon.is_live().then_some(age).flatten(), t, dim, cx)
+    mark(icon, age.filter(|_| icon.is_live()), t, dim, cx)
+}
+
+/// Whether the mark blinks. A live state does — unless a counter beside it is
+/// already carrying the motion, in which case a second moving signal on one row
+/// is noise and the mark stays solid.
+fn should_blink(icon: StatusIcon, age: Option<std::time::Duration>) -> bool {
+    icon.is_live() && age.is_none()
 }
 
 fn mark(
@@ -156,8 +157,7 @@ fn mark(
     cx: &App,
 ) -> AnyElement {
     let color = icon.color(t, dim, cx);
-    // A counter already carries the motion, so the mark beside it stays solid.
-    let blink = icon.is_live() && age.is_none();
+    let blink = should_blink(icon, age);
     div()
         .flex_none()
         .flex()
@@ -171,20 +171,9 @@ fn mark(
                 .flex_none()
                 .text_color(color)
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(format_age(age)))
+                .child(SharedString::from(format_elapsed(age)))
         }))
         .into_any_element()
-}
-
-/// `"5s"` under a minute, `"1m05s"` at or over — the same shape the working
-/// indicator's run timer uses, so the two read as one unit of measure.
-fn format_age(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs < 60 {
-        format!("{secs}s")
-    } else {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    }
 }
 
 #[cfg(test)]
@@ -219,6 +208,20 @@ mod tests {
         ];
         let assets: std::collections::HashSet<_> = all.iter().map(|s| s.asset()).collect();
         assert_eq!(assets.len(), all.len(), "two states share one asset");
+    }
+
+    /// The rule `should_blink` exists for: `is_live()` alone would keep the
+    /// mark blinking next to its own counter.
+    #[test]
+    fn a_mark_with_a_counter_beside_it_stays_solid() {
+        let age = Some(std::time::Duration::from_secs(12));
+        assert!(should_blink(StatusIcon::Running, None), "live, no counter");
+        assert!(
+            !should_blink(StatusIcon::Running, age),
+            "live with a counter: the number carries the motion"
+        );
+        assert!(!should_blink(StatusIcon::Ok, None), "settled, no counter");
+        assert!(!should_blink(StatusIcon::Ok, age), "settled never blinks");
     }
 
     #[test]

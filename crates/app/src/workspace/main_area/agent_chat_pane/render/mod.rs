@@ -523,10 +523,23 @@ fn render_row(
     }
 }
 
+/// Human-readable elapsed time. `"5s"` under a minute, `"1m05s"` at or over.
+/// Shared so the run timer in the working indicator and a tool call's age in
+/// its badge are one unit of measure rather than two that happen to agree.
+pub(super) fn format_elapsed(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    }
+}
+
 /// The blink opacity for the shared 2-tick `StatusPulseClock` pulse:
 /// `1.0` on even half-ticks (bright), `STATUS_INDICATOR_PULSE_OPACITY_MIN`
-/// on odd half-ticks (dim). Used by [`rollup_glyph`] for the Running dot
-/// and by the plan in-progress glyph so both pulse in lockstep.
+/// on odd half-ticks (dim). Read by [`status_icon`](status_icon::status_icon)'s
+/// assembly, the one place a live mark blinks, so every surface pulses in
+/// lockstep.
 pub(super) fn pulse_opacity(cx: &gpui::App) -> f32 {
     let tick = cx
         .try_global::<StatusPulseClock>()

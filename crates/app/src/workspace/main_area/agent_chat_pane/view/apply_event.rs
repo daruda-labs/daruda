@@ -230,11 +230,15 @@ impl AgentChatView {
                     // just more expensive.
                     reconcile_scope = ReconcileScope::Tool(tool_id.to_string());
                     // First sighting starts the call's clock; later progress
-                    // updates for the same id must not restart it.
-                    self.activity
-                        .tool_started_at
-                        .entry(tool_id.to_string())
-                        .or_insert_with(std::time::Instant::now);
+                    // updates for the same id must not restart it. Skipped
+                    // while replaying for the same reason the post-turn stamp
+                    // above is: a replayed call did not start now.
+                    if !self.replay.is_loading() {
+                        self.activity
+                            .tool_started_at
+                            .entry(tool_id.to_string())
+                            .or_insert_with(std::time::Instant::now);
+                    }
                     // Bump the subagent (parent) whose child just produced this
                     // tool-call event, so its run span stays "active" across the
                     // gaps between the subagent's sequential child calls. Only

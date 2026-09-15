@@ -818,6 +818,7 @@ impl AgentChatView {
         self.phone_turn_state = None;
         self.queue.turn = Turn::Idle;
         self.activity.subagent_last_activity.clear();
+        self.activity.tool_started_at.clear();
         self.activity.span = ActivitySpan::Idle;
         self.activity.pending_completion = None;
         self.activity.cancel_in_flight = false;

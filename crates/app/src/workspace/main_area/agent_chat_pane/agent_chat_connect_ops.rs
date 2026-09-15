@@ -829,7 +829,7 @@ impl Workspace {
                             // Advance the activity span now that the event folded
                             // in. When this event drove the last busy→idle
                             // transition (the turn ended and no subagent is still
-                            // running), `reconcile_activity` returns the captured
+                            // running), `tick_activity` returns the captured
                             // outcome and the completion signals fire exactly once.
                             // A still-running subagent leaves the pane busy, so the
                             // firing defers to the pulse tick that catches the
@@ -837,7 +837,7 @@ impl Workspace {
                             // off this edge (they never write the status-file hooks
                             // the Terminal surface uses).
                             let edge = view
-                                .update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                                .update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
                             if let Some(outcome) = edge {
                                 ws.fire_activity_completion(pane_id, outcome, cx);
                             }
@@ -983,7 +983,7 @@ impl Workspace {
             )
         });
         self.relay_phone_ack_effect(pane_id, effect, cx);
-        let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+        let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
         if let Some(outcome) = edge {
             self.fire_activity_completion(pane_id, outcome, cx);
         } else if failed_to_start_prompt

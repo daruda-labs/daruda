@@ -1877,12 +1877,7 @@ impl Workspace {
         let mut completions = Vec::new();
         let mut post_turn_relays: Vec<(main_area::pane_tree::PaneId, String)> = Vec::new();
         for (pane_id, view) in &candidates {
-            let edge = view.update(cx, |v, _| v.reconcile_activity(tick_now));
-            // The working indicator is projected from the *clock*-dependent
-            // activity level, and a trailing subagent's window lapses with no
-            // event to rebuild the rows. Restore the projection here, where the
-            // level was just recomputed, or the row outlives its run.
-            view.update(cx, |v, cx| v.reproject_if_activity_changed(cx));
+            let edge = view.update(cx, |v, cx| v.tick_activity(tick_now, cx));
             // `reconcile_activity` just recomputed the busy level with `tick_now`
             // and stored it in `activity.span`; read that instead of calling
             // `is_busy()` again (a second O(items) `subagent_activity` scan with a

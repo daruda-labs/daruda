@@ -5,6 +5,7 @@
 use daruda_acp::ChatItem;
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 
+use super::super::format_elapsed;
 use crate::surface::strings as s;
 use crate::ui::StatusPulseClock;
 use crate::ui::theme;
@@ -16,9 +17,7 @@ use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 /// activity) every tick (`Workspace::notify_in_flight_agent_chats`), so callers
 /// advance without a per-frame animation. Shared by the working footer /
 /// indicator and the running tool-call badge.
-pub(in crate::workspace::main_area::agent_chat_pane::render) fn pulse_dots(
-    cx: &gpui::App,
-) -> String {
+fn pulse_dots(cx: &gpui::App) -> String {
     let tick = cx
         .try_global::<StatusPulseClock>()
         .map(|c| c.tick)
@@ -43,17 +42,6 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
 /// `overflow_hidden` + ellipsis, so no arbitrary character cap is imposed here.
 fn single_line_title(title: &str) -> String {
     title.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Human-readable elapsed time for the working indicator.
-/// Formats as `"5s"` under a minute, `"1m05s"` at or over a minute.
-fn format_elapsed(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs < 60 {
-        format!("{secs}s")
-    } else {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    }
 }
 
 /// The live activity label this turn: blocked on a permission prompt, running

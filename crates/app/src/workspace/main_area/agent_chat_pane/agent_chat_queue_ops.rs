@@ -102,7 +102,7 @@ impl Workspace {
                 // working-indicator elapsed anchor at send). A returned
                 // `Some` is unexpected on open but harmless to fire — the
                 // single completion firing point stays consistent.
-                let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
                 if let Some(outcome) = edge {
                     self.fire_activity_completion(pane_id, outcome, cx);
                 }
@@ -236,7 +236,7 @@ impl Workspace {
             // busy→idle edge and fires the stashed outcome (a live-turn Stop's
             // `Stopped`, or a trailing-subagent Stop's preserved completion) via
             // the single completion firing point.
-            let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+            let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
             if let Some(outcome) = edge {
                 self.fire_activity_completion(pane_id, outcome, cx);
             }
@@ -262,7 +262,7 @@ impl Workspace {
         match view.update(cx, |v, cx| v.handle_escape(cx)) {
             EscapeOutcome::Cancelled => {
                 // Same settle-edge firing as `cancel_agent_turn`.
-                let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
                 if let Some(outcome) = edge {
                     self.fire_activity_completion(pane_id, outcome, cx);
                 }

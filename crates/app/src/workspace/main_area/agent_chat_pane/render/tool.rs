@@ -126,9 +126,8 @@ pub(super) fn tool_card(
     let effective_status = effective_tool_status(tc, live_units);
     // The status reads as a mark from the shared vocabulary (`status_icon`), so
     // a group bar's verdict and its cards' agree. A live call carries its age
-    // beside the mark: the ticking number is the liveness signal the animated
-    // trailing dots used to be, and it answers "how long" as well. The word the
-    // badge used to spell stays reachable as the mark's tooltip.
+    // beside the mark — a number says "how long" as well as "still going" — and
+    // the localized word stays reachable as the mark's tooltip.
     let status_word = tool_status_badge(effective_status);
 
     // Header: a tool-kind icon + a short label — the agent's own tool name

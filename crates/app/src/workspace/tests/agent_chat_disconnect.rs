@@ -47,9 +47,9 @@ fn idle_agent_chat_eof_leaves_another_same_cwd_task_running(cx: &mut TestAppCont
             let idle = pane(ws, window, cx);
             let active = pane(ws, window, cx);
             let task = running_task(cx);
-            ws.agent_chat_view(active).unwrap().update(cx, |view, _| {
+            ws.agent_chat_view(active).unwrap().update(cx, |view, cx| {
                 view.set_turn_in_flight();
-                view.reconcile_activity(std::time::Instant::now());
+                view.tick_activity(std::time::Instant::now(), cx);
             });
 
             ws.agent_chat_stream_ended(idle, cx);
@@ -79,9 +79,9 @@ fn active_agent_chat_eof_completes_once_through_the_activity_edge(cx: &mut TestA
             let pane = pane(ws, window, cx);
             let view = ws.agent_chat_view(pane).cloned().unwrap();
             let task = running_task(cx);
-            view.update(cx, |view, _| {
+            view.update(cx, |view, cx| {
                 view.set_turn_in_flight();
-                view.reconcile_activity(std::time::Instant::now());
+                view.tick_activity(std::time::Instant::now(), cx);
             });
 
             ws.agent_chat_stream_ended(pane, cx);

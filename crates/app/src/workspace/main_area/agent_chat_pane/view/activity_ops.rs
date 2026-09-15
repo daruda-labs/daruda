@@ -101,13 +101,12 @@ impl AgentChatView {
     }
 
     /// Advance the activity span for `now`, returning the pending completion
-    /// outcome exactly on the busy→idle edge (else `None`). Drives the
-    /// working-indicator elapsed anchor; called from the send path, the
-    /// event-pump tail, the pulse tick, and the user-cancel path.
-    pub(in crate::workspace) fn reconcile_activity(
-        &mut self,
-        now: std::time::Instant,
-    ) -> Option<TurnOutcome> {
+    /// outcome exactly on the busy→idle edge (else `None`).
+    ///
+    /// Module-private: every caller outside `view/` goes through
+    /// [`Self::tick_activity`], which pairs this with the projection restore it
+    /// owes. Reachable here only for the capture seed, which reprojects itself.
+    pub(super) fn reconcile_activity(&mut self, now: std::time::Instant) -> Option<TurnOutcome> {
         let busy = self.queue.turn.is_in_flight()
             || subagent_activity(
                 &self.items,
@@ -133,6 +132,9 @@ impl AgentChatView {
                 // child is live — so clearing the timestamps cannot change
                 // `any_running`.
                 self.activity.subagent_last_activity.clear();
+                // Same bound, same reason: `settle_run_state` has made every
+                // call terminal by now, so no card is still owed a number.
+                self.activity.tool_started_at.clear();
                 // The adapter can't be the only source of "last active": it
                 // sends `updatedAt` only alongside a *changed* session title,
                 // so the value would freeze once the title settles.
@@ -144,20 +146,42 @@ impl AgentChatView {
         }
     }
 
-    /// Restore the row projection if the activity level has moved since it was
-    /// built. Cheap when nothing changed (one `activity_state()` call), so the
-    /// pulse can call it every tick.
+    /// Advance the activity span and restore anything derived from it — the one
+    /// entry point every production caller takes, so neither half can be done
+    /// without the other.
     ///
     /// The working indicator is the one projected row whose input is the clock
     /// rather than the model: a trailing subagent stays busy until its
-    /// quiescence window lapses, and no event announces that. Without this the
-    /// row outlives the run — while the footer's Stop button, which reads
-    /// `is_busy()` live, has already flipped back to Send.
-    pub(in crate::workspace) fn reproject_if_activity_changed(&mut self, cx: &mut Context<Self>) {
-        if self.rows_activity == self.activity_state() {
-            return;
+    /// quiescence window lapses, and no event announces that. Reconciling
+    /// without reprojecting leaves the row outliving its run — while the
+    /// footer's Stop button, which reads `is_busy()` live, has already flipped
+    /// back to Send.
+    pub(in crate::workspace) fn tick_activity(
+        &mut self,
+        now: std::time::Instant,
+        cx: &mut Context<Self>,
+    ) -> Option<TurnOutcome> {
+        let edge = self.reconcile_activity(now);
+        if self.rows_activity != self.settled_activity_state() {
+            self.reproject(cx);
         }
-        self.reproject(cx);
+        edge
+    }
+
+    /// [`Self::activity_state`] read off the span [`Self::reconcile_activity`]
+    /// just stored, rather than recomputed. O(1) where the live form is an
+    /// O(items) scan with its own `Instant::now()`, so the tick stays one scan
+    /// and one `now` — the same reason `pulse_agent_chats` reads the span back
+    /// instead of calling `is_busy()` a second time.
+    fn settled_activity_state(&self) -> ActivityState {
+        if self.has_pending_permission() {
+            return ActivityState::AwaitingPermission;
+        }
+        if self.activity.span.is_busy() {
+            ActivityState::Working
+        } else {
+            ActivityState::Idle
+        }
     }
 
     /// Elapsed time since the current activity span began (busy→…), or `None` when
