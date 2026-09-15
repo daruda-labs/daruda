@@ -120,7 +120,16 @@ impl AgentChatView {
                 // keeps the prior session's title and skips fresh-session setup.
                 // Compare before overwriting `session_id`.
                 let resumed = self.replay.resumed(&session_id);
+                // Whether this reply is what closed a replay gate — true for a
+                // real resume and for a load the agent downgraded alike, since
+                // both keep whatever the replay already put in `items`.
+                finished_restore = self.replay.is_loading();
                 self.replay = Replay::Live;
+                // A replay closes with this reply, not a `TurnEnded`, so its tail
+                // is still flagged live and nothing more is coming for it.
+                if finished_restore {
+                    self.settle_items();
+                }
                 // A resume's replayed `session/update`s already populated `items`
                 // by this point (see the comment above) — sync the baseline now
                 // so those replayed messages don't later look like a background
@@ -133,9 +142,8 @@ impl AgentChatView {
                 if resumed {
                     // Resume (`session/load`): the replayed `session/update`s
                     // already populated the conversation, plan, and title before
-                    // this reply — keep them. Let the tail run the single
-                    // coalesced catch-up.
-                    finished_restore = true;
+                    // this reply — keep them. The tail runs the single
+                    // coalesced catch-up off `finished_restore`.
                 } else {
                     // Fresh session (`session/new`): clear stale plan/title so
                     // they don't flash before the new agent sends its first
@@ -250,16 +258,27 @@ impl AgentChatView {
                 // The terminal signal (a `cancelled` `TurnEnded`, or a
                 // `TurnFailed` if the prompt errored as the cancel raced it) for a
                 // turn a Stop already settled locally — its `Stopped` fired at
-                // cancel time. Don't re-settle, re-complete, or push an error
-                // item: just close the cancel window and drain any re-prompt the
-                // user buffered while it was open (as a fresh turn). A buffered
+                // cancel time. Don't re-complete or push an error item; do settle
+                // what landed inside the window, then close it and drain any
+                // re-prompt the user buffered while it was open (as a fresh turn). A buffered
                 // re-prompt was never put on the wire (see `send_prompt_text`'s
                 // `cancel_in_flight` guard), so nothing raced this ack and a
                 // second Stop could still have cleared it.
                 self.activity.cancel_in_flight = false;
-                // No further chunk for this turn can arrive, so the marker Stop
-                // pushed can take its final position.
+                // No further chunk for this turn can arrive. Settle what landed
+                // inside the cancel window first: Stop's own settle ran before
+                // those chunks existed, and each one started a *fresh* streaming
+                // block (the previous was already finalized), so without this the
+                // stopped run keeps reading `Rollup::Running`. Then the marker
+                // Stop pushed can take its final position.
+                self.settle_items();
                 self.settle_stop_marker();
+                // Two effects the tail owes that settle: revisit the calls it
+                // just made terminal, and remeasure the rows whose streaming
+                // height it just fixed. Deliberately not the post-turn baseline —
+                // Stop already snapped it, and a chunk that arrived after is a
+                // follow-up the relay still reports.
+                turn_settled = true;
                 phone_turn_action = PhoneTurnAction::Clear;
                 self.pump_pending_prompt(cx);
             }
@@ -453,11 +472,12 @@ impl AgentChatView {
             // images above, so the same gate applies.
             self.reconcile_output_editors(&reconcile_scope, &mut access, cx);
         }
-        // A turn may finish without a final tool update. That settle changes
-        // Pending/InProgress calls to terminal, making their resource images
-        // eligible for the first time, so revisit them even though this event
-        // did not set `touched_tool`.
-        if turn_settled {
+        // A turn may finish without a final tool update, and a replay closes
+        // with no `TurnEnded` at all. Either settle changes Pending/InProgress
+        // calls to terminal, making their resource images eligible for the
+        // first time, so revisit them even though this event did not set
+        // `touched_tool`.
+        if turn_settled || finished_restore {
             self.reconcile_tool_images(&ReconcileScope::All, cx);
         }
         // Mermaid fences arrive in message text AND in tool `Text` output blocks
@@ -500,10 +520,11 @@ impl AgentChatView {
         }
         // Re-measure after a structural settle so no row keeps a stale streaming
         // height. Two triggers, two anchor policies:
-        // (a) a `session/load` replay just spliced many rows at once — force a
-        //     full `remeasure()` so the list has heights for all of them before
-        //     the paint. A cold restore anchors to the tail, so the proportional
-        //     re-anchor `remeasure()` performs is irrelevant here.
+        // (a) a replay gate just closed, typically having spliced many rows at
+        //     once — force a full `remeasure()` so the list has heights for all
+        //     of them before the paint. A cold restore anchors to the tail, so
+        //     the proportional re-anchor `remeasure()` performs is irrelevant
+        //     here, and a downgraded load with nothing spliced measures nothing.
         // (b) a turn just settled — its streamed rows may have changed height via
         //     the trailing async markdown reparse. Re-derive every row's height,
         //     but through the span API (`remeasure_items`, Absolute anchor) rather
@@ -532,6 +553,11 @@ impl AgentChatView {
     pub(in crate::workspace) fn abort_restore(&mut self, cx: &mut Context<Self>) {
         if self.replay.is_loading() {
             self.replay = Replay::Live;
+            // Same settle the `Connected` exit owes (see there), and the same
+            // revisit: no event follows a closed stream, so a call this settle
+            // just made terminal would otherwise wait for a fold toggle.
+            self.settle_items();
+            self.reconcile_tool_images(&ReconcileScope::All, cx);
             // Whatever arrived before the stream closed is now the baseline —
             // it was already delivered by the (aborted) replay, not a
             // background follow-up.

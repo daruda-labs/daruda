@@ -2,6 +2,7 @@ use super::super::fold::{FoldContext, FoldKey};
 use super::super::rows::RowKind;
 use crate::transcript::fold_mode::FoldPreset;
 
+mod settle;
 mod transitions;
 
 fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {

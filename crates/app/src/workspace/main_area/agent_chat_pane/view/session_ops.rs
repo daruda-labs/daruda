@@ -146,10 +146,15 @@ impl AgentChatView {
         self.snap_post_turn_baseline();
     }
 
-    /// Settle every still-live item without touching `turn`. [`Self::settle_turn`]
-    /// is this plus `turn = Idle`; [`Self::cancel_turn`] calls this alone so
-    /// the turn stays in-flight until its real `TurnEnded` drives the drain.
-    fn settle_items(&mut self) {
+    /// Settle every still-live item. [`Self::settle_turn`] is this plus
+    /// `turn = Idle`; the other callers are the ends of a run that no
+    /// `TurnEnded` closes — a `session/load` replay and the ack of a cancel —
+    /// which is why this is reachable from `apply_event`.
+    ///
+    /// Every such exit owes it: an item left flagged live makes its run read
+    /// `Rollup::Running` forever, and the pulse pump only repaints panes
+    /// `is_busy()` calls working, so the glyph gets a blink nothing drives.
+    pub(super) fn settle_items(&mut self) {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);

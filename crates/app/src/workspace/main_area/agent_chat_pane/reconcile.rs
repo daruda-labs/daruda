@@ -1142,6 +1142,160 @@ mod tests {
         });
     }
 
+    /// A tool call can land in the window between Stop and its ack — Stop's own
+    /// revisit already ran, and the call was live when it arrived. The ack is
+    /// what settles it, so the ack owes the revisit.
+    #[gpui::test]
+    fn a_cancel_ack_revisits_a_resource_link_that_landed_after_the_stop(cx: &mut TestAppContext) {
+        use agent_client_protocol::schema::v1::{
+            Content, ContentBlock, ResourceLink, SessionUpdate, ToolCall as WireToolCall,
+            ToolCallContent,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("late.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.set_turn_in_flight();
+            v.cancel_turn(cx);
+
+            // Already on the wire when Stop landed: a live call carrying a
+            // resource link, which Stop's revisit came too early to see.
+            v.apply_event(
+                daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                    WireToolCall::new("call_1", "Read").content(vec![ToolCallContent::Content(
+                        Content::new(ContentBlock::ResourceLink(ResourceLink::new(
+                            "late.png",
+                            image_path.to_string_lossy().into_owned(),
+                        ))),
+                    )]),
+                ))),
+                SYNTAX_THEME,
+                false,
+                cx,
+            );
+            assert!(
+                v.assets.resource_image_sources.is_empty(),
+                "a live call is not eligible yet"
+            );
+
+            v.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: false,
+                    stop_reason: "Cancelled".into(),
+                },
+                SYNTAX_THEME,
+                false,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(matches!(
+                v.assets.resource_images.lock().unwrap().get(KEY),
+                Some(Some(_))
+            ));
+        });
+    }
+
+    /// A `session/load` replay carries tool calls the prior process never
+    /// finished, and closes with `Connected` rather than a `TurnEnded`. That
+    /// exit settles them, which is the first moment their resource links are
+    /// eligible — so it owes the same revisit the turn-settle path does.
+    #[gpui::test]
+    fn a_finished_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("restored.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.begin_connect(Some("sess-1".into()), cx);
+            v.items = vec![tool_named(
+                "call_1",
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: image_path.to_string_lossy().into_owned(),
+                    name: "restored.png".into(),
+                    mime: None,
+                }],
+            )];
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            assert!(
+                v.assets.resource_image_sources.is_empty(),
+                "a call the replay left live is not eligible yet"
+            );
+
+            v.apply_event(
+                daruda_acp::AcpEvent::Connected {
+                    program: None,
+                    session_id: "sess-1".into(),
+                    modes: None,
+                    config_options: Vec::new(),
+                    capabilities: Default::default(),
+                    login_methods: Vec::new(),
+                },
+                SYNTAX_THEME,
+                false,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(matches!(
+                v.assets.resource_images.lock().unwrap().get(KEY),
+                Some(Some(_))
+            ));
+        });
+    }
+
+    /// An adapter that closes the stream mid-load leaves no event behind it, so
+    /// this exit is the last chance to revisit: after it only a fold toggle or a
+    /// theme swap would ever reach the call again.
+    #[gpui::test]
+    fn an_aborted_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("aborted.png");
+        write_test_png(&image_path);
+
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+        view.update(cx, |v, cx| {
+            v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+            v.fold.set_mode(all_tools_expanded());
+            v.begin_connect(Some("sess-1".into()), cx);
+            v.items = vec![tool_named(
+                "call_1",
+                vec![ToolOutputBlock::ResourceLink {
+                    uri: image_path.to_string_lossy().into_owned(),
+                    name: "aborted.png".into(),
+                    mime: None,
+                }],
+            )];
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            assert!(v.assets.resource_image_sources.is_empty());
+
+            v.abort_restore(cx);
+        });
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(matches!(
+                v.assets.resource_images.lock().unwrap().get(KEY),
+                Some(Some(_))
+            ));
+        });
+    }
+
     #[gpui::test]
     fn stop_revisits_a_resource_link_without_waiting_for_an_ack(cx: &mut TestAppContext) {
         let dir = tempfile::tempdir().unwrap();
