@@ -151,7 +151,7 @@ fn settle(id: ApprovalId, outcome: ApprovalOutcome, cx: &mut App) -> bool {
     };
     // Dead tokens would otherwise fill a bounded table and evict a live
     // card's.
-    crate::telegram::global::TelegramBridge::forget_approval(id, cx);
+    crate::remote_channel::forget_approval(id, cx);
     // The receiver may be gone (the tool call's connection dropped). Nothing
     // to report: the decision simply has no reader.
     let _ = tx.try_send(outcome);
@@ -184,11 +184,11 @@ fn spawn_timeout(id: ApprovalId, cx: &mut App) {
 /// caller block five minutes would report "nobody answered" about a question
 /// that was never asked. `ApprovalUnavailable` says the true thing.
 fn send_card(id: ApprovalId, summary: String, cx: &mut App) {
-    if crate::telegram::global::TelegramBridge::send_approval_card(id, summary, cx) {
+    if crate::remote_channel::send_approval_card(id, summary, cx) {
         return;
     }
     LogWriter::log(
-        ErrorReport::new("Approval card not sent: Telegram is off, unpaired, or absent")
+        ErrorReport::new("Approval card not sent: no remote channel can deliver it")
             .severity(ErrorSeverity::Warning)
             .at(file!(), line!())
             .dedup("approval.undeliverable")

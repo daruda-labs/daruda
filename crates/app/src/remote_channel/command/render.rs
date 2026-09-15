@@ -12,11 +12,13 @@ use crate::control::result::{
     FlowOriginKind, Health, Listing, PaneAnswer, SendDisposition, StopDisposition,
 };
 use crate::control::spec::{Ordinal, ParseError};
+use crate::remote_channel::bridge::InlineKeyboard;
 use crate::surface::strings as s;
-use crate::telegram::client::InlineKeyboard;
 
-/// Telegram's `sendMessage` text limit.
-const TELEGRAM_MESSAGE_MAX_BYTES: usize = 4096;
+/// Budget for one rendered reply, in bytes. Telegram's `sendMessage` limit is
+/// the widest of the three channels; Slack and Discord chunk what exceeds
+/// their own narrower section and content limits.
+const REPLY_MAX_BYTES: usize = 4096;
 
 /// Room kept for the trailing "and N more" line when a listing overflows.
 const OVERFLOW_RESERVE_BYTES: usize = 128;
@@ -227,7 +229,7 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
     }
 
     let mut text = s::control_listing_header();
-    let budget = TELEGRAM_MESSAGE_MAX_BYTES - OVERFLOW_RESERVE_BYTES;
+    let budget = REPLY_MAX_BYTES - OVERFLOW_RESERVE_BYTES;
     let mut shown = 0usize;
     for (ordinal, row) in &rows {
         let line = format!("\n{}", row_text(*ordinal, row));
@@ -295,7 +297,7 @@ fn state_glyph(summary: &ChatSummary) -> String {
 /// The title already arrives bounded and single-line — `ChatSummary` caps it at
 /// construction — so this only supplies the stand-in for a session that has
 /// not titled itself yet.
-pub(super) fn title_of(summary: &ChatSummary) -> String {
+pub(crate) fn title_of(summary: &ChatSummary) -> String {
     summary
         .title
         .clone()
@@ -348,7 +350,7 @@ fn plain(text: String) -> RenderedReply {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telegram::bridge::PaneRef;
+    use crate::remote_channel::bridge::PaneRef;
     use crate::telegram::command::tests::{listing_of, pane};
     #[test]
     fn a_long_listing_is_truncated_under_the_telegram_limit() {
@@ -362,7 +364,7 @@ mod tests {
             &state,
         );
         assert!(
-            rendered.text.len() <= TELEGRAM_MESSAGE_MAX_BYTES,
+            rendered.text.len() <= REPLY_MAX_BYTES,
             "rendered {} bytes",
             rendered.text.len()
         );

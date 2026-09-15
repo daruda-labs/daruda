@@ -9,31 +9,24 @@
 //! global and the bot token: they read different state, fail differently, and
 //! neither one's changes should conflict with the other's.
 
+use crate::remote_channel::dispatch::{
+    self,
+    target::{aim, compose_edit_body},
+};
 use gpui::App;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::super::bridge::{
-    BotPermissionOutcome, CallbackEdit, InboundAction, PermissionDecision, RouteResult, Routed,
-    Unaimed,
-};
+use super::super::bridge::{CallbackEdit, InboundAction, RouteResult};
 use super::super::client;
-use super::super::command;
 use super::super::keychain;
 use super::super::trace;
-use super::control::{
-    answer_only, log_unauthorized_inbound, persist_offset, render_outcome, report_target_gone,
-    run_command, select_target, send_command_reply,
-};
+use super::control::{answer_only, log_unauthorized_inbound, persist_offset, send_command_reply};
 use super::{IDLE_RECHECK, POLL_TIMEOUT_SECS, TelegramBridge};
-use crate::control::resolve as control_resolve;
-use crate::control::result::ControlError;
 use crate::platform::attention::is_app_active;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
-use crate::window_registry::WindowRegistry;
-use crate::workspace::Workspace;
 
 /// The inbound long-poll loop. Every iteration re-syncs `enabled` /
 /// `authorized_chat_id` from the live `SettingsStore` so a
@@ -145,165 +138,48 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 });
                 let action = aim(action, cx);
 
-                match (answer_callback_id, action) {
-                    // A permission button tap: apply the decision FIRST so the
-                    // feedback is accurate, then answer the callback (toast) and
-                    // rewrite the message (drop the buttons + append the outcome).
-                    (
-                        Some(callback_id),
-                        InboundAction::RespondPermission {
-                            pane,
-                            perm_id,
-                            decision,
-                        },
-                    ) => {
-                        let mut outcome = BotPermissionOutcome::Gone;
-                        dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                            outcome =
-                                ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx);
-                        });
-                        trace::delivery("permission", || {
-                            format!(
-                                "pane={} perm_id={perm_id} decision={decision:?} \
-                                 outcome={outcome:?}",
-                                trace::pane(pane)
-                            )
-                        });
-                        let label = permission_feedback(&decision, outcome);
-                        answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
-                    }
-                    // A listing button tap: point the target at that pane and
-                    // toast which one. The message keeps its buttons — tapping
-                    // another row is ordinary use, not a second decision.
-                    (Some(callback_id), InboundAction::SelectTarget { pane }) => {
-                        let label = cx.update(|cx| select_target(pane, cx));
-                        answer_only(cx, &token, callback_id, &label).await;
-                    }
-                    // An approval button tap. The card keeps its buttons: the
-                    // tool call may still be waiting, and a second tap is
-                    // ordinary use rather than a second decision.
-                    (Some(callback_id), InboundAction::ResolveApproval { id, choice }) => {
-                        // The label follows what *happened*, not what was
-                        // tapped: the card keeps its buttons while it is live,
-                        // so a second, contradictory tap must not be told it
-                        // took effect. Same rule as `permission_feedback`.
-                        let settled =
-                            cx.update(|cx| crate::control::approval::resolve(id, choice, cx));
-                        let label = match (settled, choice) {
-                            (false, _) => s::control_approval_already_answered(),
-                            (true, crate::control::approval::ApprovalChoice::Approved) => {
-                                s::control_approval_allowed()
-                            }
-                            (true, crate::control::approval::ApprovalChoice::Refused) => {
-                                s::control_approval_refused()
-                            }
-                        };
-                        trace::delivery("approval.tap", || {
-                            format!("id={id:?} choice={choice:?} settled={settled}")
-                        });
-                        answer_only(cx, &token, callback_id, &label).await;
-                    }
-                    // A tap on a superseded listing. Answered with its own
-                    // wording and *not* edited — `answer_and_edit` drops the
-                    // message's keyboard, which would strip the rows off a
-                    // listing the user is still reading.
-                    (Some(callback_id), InboundAction::StaleListing) => {
-                        answer_only(cx, &token, callback_id, &s::control_listing_stale()).await;
-                    }
-                    // A callback whose token is unknown / already consumed: still
-                    // tell the user it was already handled (never leave the tap
-                    // silent).
-                    (Some(callback_id), _) => {
-                        let label = s::telegram_permission_stale();
-                        answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
-                    }
-                    // A command: resolve, run, fold the outcome back into the
-                    // adapter's ordinal table, answer.
-                    (None, InboundAction::RunCommand { command }) => {
-                        let reply = run_command(command, cx);
-                        send_command_reply(cx, &token, reply).await;
-                    }
-                    // Never swallowed: a mistyped slash command that produced
-                    // silence is the defect this replaces.
-                    (None, InboundAction::ReportParseError { error }) => {
-                        let reply = command::render_parse_error(&error);
-                        send_command_reply(cx, &token, reply).await;
-                    }
-                    // Nowhere to send it, and `aim` already found the app had
-                    // no lane to offer either. It recorded the body it could
-                    // not place; what is left is telling the sender why.
-                    (None, InboundAction::NoTarget) => {
-                        let reply = cx
-                            .update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx));
-                        send_command_reply(cx, &token, reply).await;
-                    }
-                    // A plain message routed to a remembered pane. The pane
-                    // can be gone — a selection and a last-pinged target both
-                    // outlive the pane they name — so the delivery is checked
-                    // rather than assumed.
-                    (None, InboundAction::InjectPrompt { pane, text }) => {
-                        deliver_prompt(cx, &token, pane, text).await;
-                    }
-                    // A slash daruda does not own. Which vocabulary it belongs
-                    // to is the *pane's* to answer — it advertises its own
-                    // commands — and `route` is GPUI-free, so the question is
-                    // settled here and then rejoins the two paths that already
-                    // handle each outcome.
-                    (
-                        None,
-                        InboundAction::UnknownSlash {
-                            pane,
-                            name,
-                            text,
-                            suggestion,
-                        },
-                    ) => {
-                        // Defaults to the agent's: a window that is gone
-                        // answers nothing, and the delivery attempt below
-                        // reports `target_gone` far better than a typo answer
-                        // guessed from silence would.
-                        let mut agents = true;
-                        dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                            agents = ws.agent_takes_slash_command(pane.pane, &name, cx);
-                        });
-                        trace::delivery("slash.unowned", || {
-                            format!("pane={} name={name} to_agent={agents}", trace::pane(pane))
-                        });
-                        if agents {
-                            deliver_prompt(cx, &token, pane, text).await;
-                        } else {
-                            let reply = command::render_parse_error(
-                                &crate::control::spec::ParseError::Unknown {
-                                    input: name,
-                                    suggestion,
-                                },
+                if let InboundAction::Paired { chat_id } = action {
+                    cx.update(|cx| {
+                        if let Err(error) = cx.global_mut::<SettingsStore>().apply_patch(
+                            daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
+                        ) {
+                            crate::remote_channel::log_error(
+                                "Telegram pairing failed to persist",
+                                &error,
+                                "telegram.pair.persist",
                             );
-                            send_command_reply(cx, &token, reply).await;
                         }
+                    });
+                } else {
+                    if matches!(action, InboundAction::Ignore) && answer_callback_id.is_none() {
+                        log_unauthorized_inbound();
                     }
-                    // The same slash, and the same missing target. Having no
-                    // target says nothing about whose command the name is, so
-                    // the vocabularies are still asked — and only a name every
-                    // one of them rules out is answered as a typo. Otherwise
-                    // the missing target is the real reason it went nowhere.
-                    (None, InboundAction::UnclaimedSlash { name, suggestion }) => {
-                        let ours =
-                            cx.update(|cx| control_resolve::slash_claim(cx, &name).rules_out());
-                        trace::delivery("slash.unclaimed", || format!("name={name} ours={ours}"));
-                        let reply = if ours {
-                            command::render_parse_error(
-                                &crate::control::spec::ParseError::Unknown {
-                                    input: name,
-                                    suggestion,
-                                },
-                            )
-                        } else {
-                            cx.update(|cx| render_outcome(&Err(ControlError::NoTargetSelected), cx))
-                        };
-                        send_command_reply(cx, &token, reply).await;
+                    let effect = dispatch::handle(action, &dispatch::Target::Telegram, cx);
+                    match (answer_callback_id, effect) {
+                        (
+                            Some(callback_id),
+                            dispatch::Effect::Feedback {
+                                label,
+                                edit: dispatch::Edit::ConsumeButtons,
+                            },
+                        ) => {
+                            answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
+                        }
+                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
+                            answer_only(cx, &token, callback_id, &label).await;
+                        }
+                        // An unknown or already-consumed token. Answered *and*
+                        // edited: leaving the buttons on invites the user to keep
+                        // tapping a decision that can no longer land.
+                        (Some(callback_id), _) => {
+                            let label = s::telegram_permission_stale();
+                            answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
+                        }
+                        (None, dispatch::Effect::Reply(reply)) => {
+                            send_command_reply(cx, &token, reply).await
+                        }
+                        _ => {}
                     }
-                    // A message-origin action (pairing, ignore, unsupported).
-                    (None, action) => dispatch_action(action, cx),
                 }
 
                 // After acting, not before: a crash in between re-delivers
@@ -319,91 +195,6 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
         }
     })
     .detach();
-}
-
-/// Put `text` on `pane`, answering the sender when the pane is gone.
-///
-/// The pane can be: a selection and a last-pinged target both outlive the pane
-/// they name, so the delivery is checked rather than assumed. Shared by the
-/// plain-message path and by a slash the agent claimed — the two differ in how
-/// they were routed, not in how they are delivered.
-async fn deliver_prompt(
-    cx: &mut gpui::AsyncApp,
-    token: &str,
-    pane: crate::telegram::bridge::PaneRef,
-    text: String,
-) {
-    let mut delivered = false;
-    dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-        delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
-    });
-    trace::delivery("inject", || {
-        format!(
-            "pane={} delivered={delivered} text={}",
-            trace::pane(pane),
-            trace::preview(&text)
-        )
-    });
-    if !delivered {
-        let reply = cx.update(|cx| report_target_gone(pane, cx));
-        send_command_reply(cx, token, reply).await;
-    }
-}
-
-/// Apply one routed [`InboundAction`]'s side effect. Pure dispatch —
-/// no routing policy here, `bridge.rs` already decided what to do.
-fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
-    match action {
-        InboundAction::Ignore => log_unauthorized_inbound(),
-        InboundAction::Paired { chat_id } => {
-            trace::state("paired", || format!("chat_id={chat_id}"));
-            // `BridgeCore::route`'s `Paired` branch already updated the
-            // in-memory `authorized_chat_id` — this persists it so pairing
-            // survives a restart.
-            cx.update(|cx| {
-                let result = cx.global_mut::<SettingsStore>().apply_patch(
-                    daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
-                );
-                if let Err(e) = result {
-                    LogWriter::log(
-                        ErrorReport::new("Telegram pairing failed to persist")
-                            .severity(ErrorSeverity::Warning)
-                            .message(e)
-                            .at(file!(), line!())
-                            .dedup("telegram.pair.persist")
-                            .build(),
-                    );
-                }
-            });
-        }
-        InboundAction::InjectPrompt { .. } => {
-            // Handled inline in the poll loop, which is the only place that
-            // can await the "that chat is gone" answer.
-        }
-        InboundAction::UnknownSlash { .. } | InboundAction::UnclaimedSlash { .. } => {
-            // Same: settled in the poll loop, which can both read the
-            // advertised command lists and await whichever answer that
-            // settles on.
-        }
-        InboundAction::RespondPermission { .. }
-        | InboundAction::SelectTarget { .. }
-        | InboundAction::ResolveApproval { .. }
-        | InboundAction::StaleListing => {
-            // All three always arrive as callbacks and are handled inline in
-            // the poll loop, where their feedback can be accurate; they never
-            // reach this message-origin dispatch path.
-        }
-        InboundAction::Unsupported => {
-            // Nothing to do by construction — it reached `route` only so its
-            // id could advance the `getUpdates` offset.
-        }
-        InboundAction::RunCommand { .. }
-        | InboundAction::ReportParseError { .. }
-        | InboundAction::NoTarget => {
-            // Answered inline in the poll loop, which is the only place that
-            // can await the reply's send.
-        }
-    }
 }
 
 /// Answer a tapped callback with a toast, then rewrite the tapped message to
@@ -470,254 +261,5 @@ async fn answer_and_edit(
                 .dedup("telegram.edit_message")
                 .build(),
         );
-    }
-}
-
-/// The localized outcome label for a phone-tapped permission decision, shown
-/// both as the callback toast and appended to the rewritten message. Applied →
-/// the tapped direction (Allow/Reject); otherwise the reason it didn't apply.
-fn permission_feedback(decision: &PermissionDecision, outcome: BotPermissionOutcome) -> String {
-    match outcome {
-        BotPermissionOutcome::Applied => match decision {
-            PermissionDecision::Allow(_) => s::telegram_permission_allowed(),
-            PermissionDecision::Reject(_) => s::telegram_permission_rejected(),
-        },
-        BotPermissionOutcome::Stale => s::telegram_permission_stale(),
-        BotPermissionOutcome::Gone => s::telegram_permission_gone(),
-    }
-}
-
-/// Compose the rewritten message body: the original prompt text with the outcome
-/// appended on its own line, so the phone keeps the context of what was asked.
-/// Falls back to just the label when the original text is unavailable.
-fn compose_edit_body(original_text: &str, label: &str) -> String {
-    if original_text.is_empty() {
-        label.to_string()
-    } else {
-        format!("{original_text}\n\n— {label}")
-    }
-}
-
-/// Enter every open `Workspace` window and run `on_match` against the one
-/// whose persisted `WorkspaceUuid` equals `workspace` — the shared
-/// `WindowRegistry::for_each_workspace` + `ws.uuid() == workspace` scaffolding
-/// both [`InboundAction`] dispatch arms above need (a phone-relayed reply /
-/// permission decision names its target pane by `PaneRef { workspace, pane }`,
-/// but `PaneId` alone is only unique within one open window, so every window
-/// must be checked). `pane.pane` itself is *not* checked against anything
-/// here — the workspace-side handlers report a stale/gone pane id back to the
-/// caller (`inject_bot_reply` returns `false`, `respond_bot_permission`
-/// returns `Gone`), which then answers the phone rather than going quiet.
-fn dispatch_to_workspace(
-    cx: &mut gpui::AsyncApp,
-    workspace: daruda_store::project::WorkspaceUuid,
-    mut on_match: impl FnMut(&mut Workspace, &mut gpui::Context<Workspace>),
-) {
-    cx.update(|cx| {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            if ws.uuid() == workspace {
-                on_match(ws, cx);
-            }
-        });
-    });
-}
-
-/// Settle the target question `route` could not, and with it the only thing
-/// standing between a routed update and being acted on.
-///
-/// The bridge's selection and last-pinged pane are in-memory, so a restart
-/// leaves the phone unable to reach anything until it is re-aimed by hand —
-/// even though the lane it was talking to is right there, restored. This is
-/// the last link in the chain `plain_text_target` walks, resolved here rather
-/// than in `route` because only this layer can read a workspace.
-///
-/// The only way to obtain an [`InboundAction`] from a [`Routed`], which is
-/// what makes skipping this a type error rather than a comment. With a target
-/// found, both cases rejoin an arm that already existed — plain text is an
-/// `InjectPrompt`, an unowned slash an `UnknownSlash` for that pane to claim.
-/// Without one, both become their terminal answer, and the message body they
-/// were carrying is recorded as lost here rather than dropped by whichever
-/// arm happened to receive it.
-fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
-    let unaimed = match routed {
-        Routed::Ready(action) => return action,
-        Routed::NeedsTarget(unaimed) => unaimed,
-    };
-    match (cx.update(control_resolve::sole_active_agent_chat), unaimed) {
-        (Some(pane), Unaimed::Text { text }) => {
-            trace::delivery("target.fallback", || {
-                format!("pane={} kind=text", trace::pane(pane))
-            });
-            InboundAction::InjectPrompt { pane, text }
-        }
-        (
-            Some(pane),
-            Unaimed::Slash {
-                name,
-                text,
-                suggestion,
-            },
-        ) => {
-            trace::delivery("target.fallback", || {
-                format!("pane={} kind=slash name={name}", trace::pane(pane))
-            });
-            InboundAction::UnknownSlash {
-                pane,
-                name,
-                text,
-                suggestion,
-            }
-        }
-        (None, Unaimed::Text { text }) => {
-            trace::delivery("target.none", || {
-                format!("kind=text len={}", text.chars().count())
-            });
-            InboundAction::NoTarget
-        }
-        (
-            None,
-            Unaimed::Slash {
-                name,
-                text,
-                suggestion,
-            },
-        ) => {
-            trace::delivery("target.none", || {
-                format!("kind=slash name={name} len={}", text.chars().count())
-            });
-            InboundAction::UnclaimedSlash { name, suggestion }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpui::TestAppContext;
-
-    #[test]
-    fn compose_edit_body_appends_outcome_and_falls_back_when_empty() {
-        assert_eq!(
-            compose_edit_body("Allow write to /tmp/x?", "OK"),
-            "Allow write to /tmp/x?\n\n— OK"
-        );
-        // No original text available → just the label, no stray separator.
-        assert_eq!(compose_edit_body("", "OK"), "OK");
-    }
-
-    #[test]
-    fn permission_feedback_distinguishes_direction_and_reason() {
-        let allow = PermissionDecision::Allow("opt".into());
-        let reject = PermissionDecision::Reject("opt".into());
-        let applied_allow = permission_feedback(&allow, BotPermissionOutcome::Applied);
-        let applied_reject = permission_feedback(&reject, BotPermissionOutcome::Applied);
-        let stale = permission_feedback(&allow, BotPermissionOutcome::Stale);
-        let gone = permission_feedback(&allow, BotPermissionOutcome::Gone);
-
-        // Every outcome yields a distinct, non-empty label so the toast/edit is
-        // never blank and Allow reads differently from Reject.
-        for label in [&applied_allow, &applied_reject, &stale, &gone] {
-            assert!(!label.is_empty());
-        }
-        assert_ne!(applied_allow, applied_reject);
-        assert_ne!(applied_allow, stale);
-        assert_ne!(stale, gone);
-    }
-
-    /// The restart case the whole fallback exists for: the bridge knows of no
-    /// target, and the app's own active lane supplies one. Both cases rejoin
-    /// the arms that already had a pane, so `/usage` reaches the agent and
-    /// plain text reaches the same chat.
-    #[gpui::test]
-    async fn a_targetless_update_adopts_the_apps_own_lane(cx: &mut TestAppContext) {
-        use crate::test_support::workspace_with_agent_chat;
-
-        let fixture = workspace_with_agent_chat(cx);
-        let expected = fixture.pane_ref(cx);
-        let mut async_cx = cx.to_async();
-
-        assert_eq!(
-            aim(
-                Routed::NeedsTarget(Unaimed::Text {
-                    text: "ship it".into()
-                }),
-                &mut async_cx,
-            ),
-            InboundAction::InjectPrompt {
-                pane: expected,
-                text: "ship it".into()
-            }
-        );
-        assert_eq!(
-            aim(
-                Routed::NeedsTarget(Unaimed::Slash {
-                    name: "usage".into(),
-                    text: "/usage".into(),
-                    suggestion: Some("use"),
-                }),
-                &mut async_cx,
-            ),
-            InboundAction::UnknownSlash {
-                pane: expected,
-                name: "usage".into(),
-                text: "/usage".into(),
-                suggestion: Some("use"),
-            }
-        );
-    }
-
-    /// Ambiguity has to survive the aim step. Two windows each offering their
-    /// own lane resolve to no candidate, and the update must fall to its
-    /// terminal answer — picking one of the two would start a turn in
-    /// whichever the walk happened to see first.
-    #[gpui::test]
-    async fn an_ambiguous_app_falls_to_the_terminal_answer(cx: &mut TestAppContext) {
-        use crate::test_support::workspace_with_agent_chat;
-
-        let _windows = [workspace_with_agent_chat(cx), workspace_with_agent_chat(cx)];
-        let mut async_cx = cx.to_async();
-
-        assert_eq!(
-            aim(
-                Routed::NeedsTarget(Unaimed::Text {
-                    text: "ship it".into()
-                }),
-                &mut async_cx,
-            ),
-            InboundAction::NoTarget,
-            "two candidates is not a target"
-        );
-        assert_eq!(
-            aim(
-                Routed::NeedsTarget(Unaimed::Slash {
-                    name: "lst".into(),
-                    text: "/lst".into(),
-                    suggestion: Some("list"),
-                }),
-                &mut async_cx,
-            ),
-            InboundAction::UnclaimedSlash {
-                name: "lst".into(),
-                suggestion: Some("list"),
-            },
-            "the suggestion still reaches the layer that can use it"
-        );
-    }
-
-    /// An update that already names its pane is handed straight back — `aim`
-    /// resolves the target question, it does not revisit a settled one.
-    #[gpui::test]
-    async fn an_update_that_already_has_a_target_is_untouched(cx: &mut TestAppContext) {
-        use crate::test_support::workspace_with_agent_chat;
-
-        let fixture = workspace_with_agent_chat(cx);
-        let pane = fixture.pane_ref(cx);
-        let mut async_cx = cx.to_async();
-
-        let action = InboundAction::InjectPrompt {
-            pane,
-            text: "already aimed".into(),
-        };
-        assert_eq!(aim(Routed::Ready(action.clone()), &mut async_cx), action);
     }
 }

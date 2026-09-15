@@ -41,6 +41,7 @@ pub enum SettingsFieldId {
     ClaudeStatusEnabled,
     TelegramEnabled,
     TelegramAuthorizedChatId,
+    RemoteChannels,
     OrchestratorEnabled,
     OrchestratorAgentId,
     OrchestratorAccountId,
@@ -85,6 +86,7 @@ impl SettingsFieldId {
             Self::ClaudeStatusEnabled => "claude_status.enable",
             Self::TelegramEnabled => "telegram.enabled",
             Self::TelegramAuthorizedChatId => "telegram.authorized_chat_id",
+            Self::RemoteChannels => "remote.channels",
             Self::OrchestratorEnabled => "orchestrator.enabled",
             Self::OrchestratorAgentId => "orchestrator.agent_id",
             Self::OrchestratorAccountId => "orchestrator.account_id",
@@ -135,6 +137,7 @@ pub enum SettingsPatch {
     ClaudeStatusEnabled(bool),
     TelegramEnabled(bool),
     TelegramAuthorizedChatId(Option<i64>),
+    RemoteChannels(Vec<crate::remote::ChannelConfig>),
     OrchestratorEnabled(bool),
     /// `None` follows the catalog's first entry — see
     /// [`crate::OrchestratorConfig::agent_id`].
@@ -182,6 +185,7 @@ impl SettingsPatch {
             Self::ClaudeStatusEnabled(_) => SettingsFieldId::ClaudeStatusEnabled,
             Self::TelegramEnabled(_) => SettingsFieldId::TelegramEnabled,
             Self::TelegramAuthorizedChatId(_) => SettingsFieldId::TelegramAuthorizedChatId,
+            Self::RemoteChannels(_) => SettingsFieldId::RemoteChannels,
             Self::OrchestratorEnabled(_) => SettingsFieldId::OrchestratorEnabled,
             Self::OrchestratorAgentId(_) => SettingsFieldId::OrchestratorAgentId,
             Self::OrchestratorAccountId(_) => SettingsFieldId::OrchestratorAccountId,
@@ -236,6 +240,7 @@ impl SettingsPatch {
             Self::ClaudeStatusEnabled(value) => config.claude_status.enable = *value,
             Self::TelegramEnabled(value) => config.telegram.enabled = *value,
             Self::TelegramAuthorizedChatId(value) => config.telegram.authorized_chat_id = *value,
+            Self::RemoteChannels(value) => config.remote.channels = value.clone(),
             Self::OrchestratorEnabled(value) => config.orchestrator.enabled = *value,
             Self::OrchestratorAgentId(value) => config.orchestrator.agent_id = value.clone(),
             Self::OrchestratorAccountId(value) => config.orchestrator.account_id = *value,
@@ -245,6 +250,7 @@ impl SettingsPatch {
     /// Whether the addressed value differs between two config snapshots.
     pub fn field_changed_between(&self, left: &Config, right: &Config) -> bool {
         match self {
+            Self::RemoteChannels(_) => left.remote != right.remote,
             Self::GeneralLanguage(_) => left.general.language != right.general.language,
             Self::TerminalPreset(_) => left.theme.terminal_preset != right.theme.terminal_preset,
             Self::UiPreset(_) => left.theme.ui_preset != right.theme.ui_preset,

@@ -1676,3 +1676,27 @@ control:
     flow - Run or list flows
     brief - One-line summary
     daruda - Ask daruda in plain words
+remote_channel:
+  slack: "Slack"
+  discord: "Discord"
+  enabled: "Enabled"
+  only_when_away: "Only while away"
+  bot_token: "Bot token"
+  app_token: "App token"
+  token_placeholder: "Enter a new token"
+  token_saved: "Stored in keychain"
+  save_token: "Save token"
+  clear_token: "Remove token"
+  pair: "Pair"
+  unpair: "Unpair"
+  copy_pair: "Copy pairing command"
+  paired: "Paired: %{user} / %{conversation}"
+  stale_callback: "Already handled in the app"
+  pair_success: "Paired with daruda."
+  error: "Channel update failed: %{error}"
+  disabled: "Disabled"
+  missing_credentials: "Token required"
+  connecting: "Connecting"
+  connected: "Connected"
+  retrying: "Reconnecting"
+  failed: "Connection rejected: check bot permissions"

@@ -539,6 +539,7 @@ impl SettingsWindow {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_notifications(), cx))
+            .child(self.remote_channel_settings.clone())
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))

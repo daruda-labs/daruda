@@ -54,6 +54,11 @@ pub struct TelegramBridge {
 impl Global for TelegramBridge {}
 
 impl TelegramBridge {
+    pub(crate) fn command_state_mut(
+        &mut self,
+    ) -> &mut crate::remote_channel::command::CommandState {
+        self.core.command_state_mut()
+    }
     /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
         let (pane, permission) = (ping.pane, ping.permission.is_some());

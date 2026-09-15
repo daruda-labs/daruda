@@ -364,16 +364,21 @@ impl Workspace {
         // `relay_to_telegram` asks this too, but asking here first keeps a
         // disabled/unpaired bridge out of the presence trace below, where it
         // would read as a presence decision it never was.
+        let away = crate::app_presence::is_away(cx);
+        let remote_sent = crate::remote_channel::global::RemoteChannels::send_ping(
+            self.remote_ping(pane_id, header.clone(), tail.clone(), permission.clone()),
+            crate::remote_channel::global::Delivery::Presence { away },
+            cx,
+        );
         if self.telegram_bridge(cx).is_none() {
             trace::delivery("relay.gated", || {
                 format!("pane={pane_id} entry=presence reason=bridge")
             });
-            return false;
+            return remote_sent;
         }
         // Asked unconditionally, not short-circuited by the opt-out, so the
         // trace records what presence actually was even when it did not
         // decide — the alternative logs a sample from the last pump tick.
-        let away = crate::app_presence::is_away(cx);
         let send = away || !self.telegram.only_when_away;
         let state = crate::app_presence::snapshot(cx);
         let away_secs = state.away_secs(Instant::now());
@@ -401,9 +406,9 @@ impl Workspace {
             )
         });
         if send {
-            self.relay_to_telegram(pane_id, header, tail, permission, cx);
+            self.relay_telegram_only(pane_id, header, tail, permission, cx);
         }
-        send
+        send || remote_sent
     }
 
     /// Relay a ping to the Telegram bridge, if the bridge is configured to
@@ -423,6 +428,40 @@ impl Workspace {
         header: String,
         tail: TelegramTail,
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+        cx: &Context<Self>,
+    ) {
+        crate::remote_channel::global::RemoteChannels::send_ping(
+            self.remote_ping(pane_id, header.clone(), tail.clone(), permission.clone()),
+            crate::remote_channel::global::Delivery::Explicit,
+            cx,
+        );
+        self.relay_telegram_only(pane_id, header, tail, permission, cx);
+    }
+
+    fn remote_ping(
+        &self,
+        pane_id: PaneId,
+        header: String,
+        tail: TelegramTail,
+        permission: Option<crate::remote_channel::bridge::PermissionPromptRef>,
+    ) -> crate::remote_channel::bridge::BridgePing {
+        crate::remote_channel::bridge::BridgePing {
+            pane: crate::remote_channel::bridge::PaneRef {
+                workspace: self.uuid(),
+                pane: pane_id,
+            },
+            header,
+            tail,
+            permission,
+        }
+    }
+
+    fn relay_telegram_only(
+        &self,
+        pane_id: PaneId,
+        header: String,
+        tail: TelegramTail,
+        permission: Option<crate::remote_channel::bridge::PermissionPromptRef>,
         cx: &Context<Self>,
     ) {
         let Some(bridge) = self.telegram_bridge(cx) else {
@@ -480,6 +519,7 @@ impl Workspace {
     /// sent, so dropping it because the user is at the desktop would be
     /// backwards — the phone asked, the phone gets the answer.
     pub(in crate::workspace) fn relay_notice_to_telegram(&self, text: String, cx: &Context<Self>) {
+        crate::remote_channel::global::RemoteChannels::send_notice(text.clone(), cx);
         let Some(bridge) = self.telegram_bridge(cx) else {
             trace::delivery("relay.gated", || {
                 format!("entry=notice reason=bridge text={}", trace::digest(&text))

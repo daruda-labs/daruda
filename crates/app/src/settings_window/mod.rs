@@ -171,6 +171,7 @@ pub struct SettingsWindow {
     claude_status_enable: bool,
     // Notifications (Telegram)
     telegram_enabled: bool,
+    remote_channel_settings: Entity<crate::remote_channel::settings::ChannelSettings>,
     orchestrator_enabled: bool,
     /// Empty value = follow the catalog's first entry; see
     /// `sections::orchestrator`.
@@ -1484,6 +1485,8 @@ impl SettingsWindow {
             .or_default()
             .push(telegram_token_input.read(cx).focus_handle(cx));
         let telegram_token_configured = crate::telegram::keychain::read_token().is_some();
+        let remote_channel_settings =
+            cx.new(|cx| crate::remote_channel::settings::ChannelSettings::new(window, cx));
 
         let cursor_style_str: SharedString = match config.cursor.style {
             daruda_config::CursorStyle::Block => "block".into(),
@@ -1775,6 +1778,7 @@ impl SettingsWindow {
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,
             telegram_enabled: config.telegram.enabled,
+            remote_channel_settings,
             telegram_token_input,
             telegram_token_configured,
             telegram_authorized_chat_id: config.telegram.authorized_chat_id,
@@ -2630,6 +2634,10 @@ impl SettingsWindow {
             .user_arc()
             .telegram
             .authorized_chat_id;
+        config.remote = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .remote
+            .clone();
 
         Ok(config)
     }

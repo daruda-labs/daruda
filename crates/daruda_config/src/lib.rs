@@ -24,6 +24,7 @@ pub mod panels;
 pub mod ports;
 pub mod presence;
 pub mod project;
+pub mod remote;
 pub mod render;
 pub mod scrollback;
 pub mod session_host;
@@ -172,6 +173,7 @@ pub struct Config {
     pub update: UpdateConfig,
     pub presence: PresenceConfig,
     pub telegram: TelegramConfig,
+    pub remote: remote::RemoteConfig,
     pub orchestrator: OrchestratorConfig,
 }
 
@@ -216,6 +218,7 @@ impl Default for Config {
             update: Default::default(),
             presence: Default::default(),
             telegram: Default::default(),
+            remote: Default::default(),
             orchestrator: Default::default(),
         }
     }
@@ -736,6 +739,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         }
     });
 
+    if doc.contains_key("remote") || !config.remote.channels.is_empty() {
+        remote::patch_document(&mut doc, &config.remote);
+    }
+
     if doc.contains_key("agents") || config.agents != agent::default_agents() {
         replace_agents(&mut doc, &config.agents);
     }
@@ -932,6 +939,7 @@ fn patch_settings_document(
     patch: &SettingsPatch,
 ) {
     match patch {
+        SettingsPatch::RemoteChannels(_) => remote::patch_document(doc, &config.remote),
         SettingsPatch::GeneralLanguage(_) => patch_section(doc, "general", |t| {
             t.insert(
                 "language",

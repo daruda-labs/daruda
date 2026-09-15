@@ -8,17 +8,12 @@
 //!
 //! Everything here is `pub(super)`: the poll loop is the only caller.
 
-use gpui::App;
-
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::persistence;
 
 use super::TelegramBridge;
-use crate::control::result::{ControlOutcome, ControlResult};
-use crate::control::spec::ControlCommand;
 use crate::settings_store::SettingsStore;
-use crate::telegram::bridge::PaneRef;
 use crate::telegram::client;
 use crate::telegram::command;
 use crate::telegram::trace;
@@ -101,99 +96,6 @@ pub(super) fn persist_offset(cx: &mut gpui::AsyncApp) {
                 .build(),
         );
     }
-}
-
-/// Resolve, run, and render one command.
-///
-/// Three steps, each holding the bridge global for as long as it needs and no
-/// longer: resolution needs the ordinal table, execution needs the whole `App`
-/// to walk every window, and rendering needs the table again — now updated by
-/// whatever the execution produced.
-pub(super) fn run_command(
-    command: ControlCommand,
-    cx: &mut gpui::AsyncApp,
-) -> command::RenderedReply {
-    trace::delivery("command", || format!("{command:?}"));
-    let step = cx.update(|cx| {
-        let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
-        command::resolve_command(command, state)
-    });
-    let (outcome, addressed) = match step {
-        command::Resolution::Answer(outcome) => (outcome, None),
-        // Fill in the one target no listing can name, then run like any other.
-        command::Resolution::Ask(text) => (
-            cx.update(|cx| {
-                let (destination, connecting) = crate::orchestrator::destination(cx)?;
-                crate::control::exec::run(
-                    crate::control::spec::ResolvedCommand::AskOrchestrator {
-                        text,
-                        destination,
-                        connecting,
-                    },
-                    cx,
-                )
-            }),
-            None,
-        ),
-        // Same shape as `Ask`: pick the target the text did not name, then
-        // run like any other command.
-        command::Resolution::RunFlow(name) => (
-            cx.update(|cx| {
-                let lane = crate::control::exec::first_lane_offering(&name, cx)?;
-                crate::control::exec::run(
-                    crate::control::spec::ResolvedCommand::Flow(
-                        crate::control::spec::ResolvedFlowCommand::Run { name, lane },
-                    ),
-                    cx,
-                )
-            }),
-            None,
-        ),
-        command::Resolution::Run(resolved, addressed) => (
-            cx.update(|cx| crate::control::exec::run(resolved, cx)),
-            addressed,
-        ),
-    };
-    cx.update(|cx| {
-        let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
-        let absorbed = command::absorb(&outcome, addressed, state);
-        command::render(&outcome, absorbed, state)
-    })
-}
-
-/// Answer a message that named a pane which is no longer there, and stop
-/// remembering that pane. Without the second half, the *next* plain message
-/// resolves to the same dead target and is lost just as silently.
-pub(super) fn report_target_gone(pane: PaneRef, cx: &mut App) -> command::RenderedReply {
-    trace::state("target.forgotten", || format!("pane={}", trace::pane(pane)));
-    let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
-    state.forget(pane);
-    command::render(
-        &Err(crate::control::result::ControlError::TargetGone),
-        command::Absorbed::SelectionDropped,
-        state,
-    )
-}
-
-/// Render an outcome the executor never saw, against the live ordinal table.
-pub(super) fn render_outcome(outcome: &ControlOutcome, cx: &mut App) -> command::RenderedReply {
-    let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
-    command::render(outcome, command::Absorbed::Nothing, state)
-}
-
-/// Point the target at `pane` and produce the toast naming it. A tap is the
-/// same act as `/use <n>`, so it goes through the same render funnel.
-pub(super) fn select_target(pane: PaneRef, cx: &mut App) -> String {
-    trace::state("target.selected", || format!("pane={}", trace::pane(pane)));
-    let state = cx.global_mut::<TelegramBridge>().core.command_state_mut();
-    state.select(Some(pane));
-    let summary = state.summary_for(pane);
-    command::render(
-        &Ok(ControlResult::Selected { target: summary }),
-        command::Absorbed::Nothing,
-        state,
-    )
-    .text
 }
 
 /// Send a command reply. Deliberately does NOT call `record_sent`: that sets

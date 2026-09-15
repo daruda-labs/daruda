@@ -72,22 +72,7 @@ pub enum UpdateKind {
     Unsupported,
 }
 
-/// Inline keyboard rows attached to a `sendMessage` call, outermost first.
-/// Telegram lays each inner vector out horizontally, so a long list must be
-/// split into rows or it renders as one unreadable strip.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InlineKeyboard {
-    pub rows: Vec<Vec<(String, String)>>,
-}
-
-impl InlineKeyboard {
-    /// One horizontal row — what a permission prompt wants.
-    pub fn single_row(buttons: Vec<(String, String)>) -> Self {
-        Self {
-            rows: vec![buttons],
-        }
-    }
-}
+pub use crate::remote_channel::bridge::InlineKeyboard;
 
 /// The `reply_markup` payload for a keyboard. Split out so its shape is
 /// testable without an HTTP call.

@@ -6,40 +6,20 @@
 //!
 //! The vocabulary it decides in lives in [`super`]; this file is the rules.
 
-use std::collections::{HashMap, VecDeque};
-
 use uuid::Uuid;
 
-use super::{
-    BridgePing, CallbackEdit, InboundAction, OutboundMsg, PaneRef, PermissionDecision, RouteResult,
-    Routed, Unaimed,
-};
-use crate::telegram::client::{InlineKeyboard, Update, UpdateKind};
+use super::{BridgePing, CallbackEdit, InboundAction, OutboundMsg, PaneRef, RouteResult, Routed};
+use crate::remote_channel::bridge::RoutingCore;
+#[cfg(test)]
+use crate::remote_channel::bridge::core::APPROVAL_TOKEN_PREFIX;
+#[cfg(test)]
+use crate::remote_channel::bridge::core::{PENDING_PERMISSIONS_CAP, SENT_PINGS_CAP};
+#[cfg(test)]
+use crate::remote_channel::bridge::{InlineKeyboard, PermissionDecision, Unaimed};
+use crate::telegram::client::{Update, UpdateKind};
 
 #[cfg(test)]
 mod tests;
-
-/// Upper bound on `(message_id -> PaneRef)` entries in `sent_pings`.
-/// Oldest entries are evicted first; a reply-to lookup for an evicted
-/// message_id falls back to `last_pinged`.
-const SENT_PINGS_CAP: usize = 64;
-
-/// Upper bound on outstanding permission-callback tokens in
-/// `pending_permissions`. Tokens whose permission is resolved in-app
-/// (never tapped on the phone) are never consumed and would otherwise
-/// accumulate forever; oldest are evicted first, and an evicted token
-/// routes to `Ignore` on a later tap like any unknown one.
-const PENDING_PERMISSIONS_CAP: usize = 64;
-
-/// Callback-data prefix for an approval button. Distinct from the listing
-/// prefix and from a permission token (bare `Uuid::simple`, no `:`), so the
-/// three namespaces cannot collide structurally.
-const APPROVAL_TOKEN_PREFIX: &str = "apv";
-
-/// Approval tokens kept before the oldest is evicted. Two per card, and a
-/// card the user never answers times out on the app side — so this only
-/// bounds a pathological run of unanswered ones.
-const PENDING_APPROVALS_CAP: usize = 64;
 
 /// How long a generated `/pair` code stays valid. After this, `/pair`
 /// against it is rejected regardless of correctness and the pending
@@ -81,24 +61,7 @@ pub struct BridgeCore {
     authorized_chat_id: Option<i64>,
     pending_pair_code: Option<PendingPairCode>,
     update_offset: i64,
-    last_pinged: Option<PaneRef>,
-    sent_pings: HashMap<i64, PaneRef>,
-    sent_pings_order: VecDeque<i64>,
-    pending_permissions: HashMap<String, (PaneRef, u64, PermissionDecision)>,
-    pending_permissions_order: VecDeque<String>,
-    /// Approval tokens. Deliberately *not* consumed on a tap, unlike
-    /// `pending_permissions`: the card stays on screen, and tapping the same
-    /// button twice is ordinary use rather than a second decision. The
-    /// approval store discards the redundant answer.
-    pending_approvals: HashMap<
-        String,
-        (
-            crate::control::approval::ApprovalId,
-            crate::control::approval::ApprovalChoice,
-        ),
-    >,
-    pending_approvals_order: VecDeque<String>,
-    command_state: crate::telegram::command::CommandState,
+    pub(crate) routing: RoutingCore,
 }
 
 impl BridgeCore {
@@ -113,14 +76,7 @@ impl BridgeCore {
             authorized_chat_id,
             pending_pair_code: None,
             update_offset,
-            last_pinged: None,
-            sent_pings: HashMap::new(),
-            sent_pings_order: VecDeque::new(),
-            pending_permissions: HashMap::new(),
-            pending_permissions_order: VecDeque::new(),
-            pending_approvals: HashMap::new(),
-            pending_approvals_order: VecDeque::new(),
-            command_state: crate::telegram::command::CommandState::default(),
+            routing: RoutingCore::default(),
         }
     }
 
@@ -128,7 +84,7 @@ impl BridgeCore {
     /// loop reaches through this to resolve an ordinal against the listing the
     /// user actually saw, and to record the next one.
     pub fn command_state_mut(&mut self) -> &mut crate::telegram::command::CommandState {
-        &mut self.command_state
+        self.routing.command_state_mut()
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -322,50 +278,7 @@ impl BridgeCore {
             return Routed::Ready(InboundAction::Ignore);
         }
 
-        // Parsing sits behind the gate on purpose: a listing names projects,
-        // lanes, and session titles, so an unauthorized chat must not reach it.
-        // A name we do not own is held back rather than answered: the agent's
-        // slash namespace is open and ours is closed, so only the pane can say
-        // whether `/usage` is its command or a typo of `/use`.
-        let unknown = match crate::control::spec::parse(&text) {
-            Ok(command) => return Routed::Ready(InboundAction::RunCommand { command }),
-            Err(crate::control::spec::ParseError::NotACommand) => None,
-            Err(crate::control::spec::ParseError::Unknown { input, suggestion }) => {
-                Some((input, suggestion))
-            }
-            // A command we *do* own, used wrongly. Ours to answer.
-            Err(error) => return Routed::Ready(InboundAction::ReportParseError { error }),
-        };
-
-        let reply_to = reply_to_message_id
-            .and_then(|id| self.sent_pings.get(&id))
-            .copied();
-
-        match self
-            .command_state
-            .plain_text_target(reply_to, self.last_pinged)
-        {
-            Some(pane) => Routed::Ready(match unknown {
-                Some((name, suggestion)) => InboundAction::UnknownSlash {
-                    pane,
-                    name,
-                    text,
-                    suggestion,
-                },
-                None => InboundAction::InjectPrompt { pane, text },
-            }),
-            // Nothing here names a target, and this layer cannot ask the app
-            // for one. Handed on rather than answered — both the target and,
-            // for a slash, whose command it is are still open questions.
-            None => Routed::NeedsTarget(match unknown {
-                Some((name, suggestion)) => Unaimed::Slash {
-                    name,
-                    text,
-                    suggestion,
-                },
-                None => Unaimed::Text { text },
-            }),
-        }
+        self.routing.route_text(text, reply_to_message_id)
     }
 
     fn route_callback(&mut self, chat_id: i64, data: String) -> InboundAction {
@@ -373,159 +286,37 @@ impl BridgeCore {
             return InboundAction::Ignore;
         }
 
-        // Listing tokens are tried first and are never consumed — tapping the
-        // same row twice is ordinary use. Permission tokens below are.
-        if data.starts_with(crate::telegram::command::LISTING_TOKEN_PREFIX) {
-            return match self.command_state.resolve_token(&data) {
-                Some(pane) => InboundAction::SelectTarget { pane },
-                None => InboundAction::StaleListing,
-            };
-        }
-
-        if data.starts_with(APPROVAL_TOKEN_PREFIX) {
-            return match self.pending_approvals.get(&data) {
-                Some((id, choice)) => InboundAction::ResolveApproval {
-                    id: *id,
-                    choice: *choice,
-                },
-                None => InboundAction::Ignore,
-            };
-        }
-
-        match self.pending_permissions.remove(&data) {
-            Some((pane, perm_id, decision)) => InboundAction::RespondPermission {
-                pane,
-                perm_id,
-                decision,
-            },
-            None => InboundAction::Ignore,
-        }
+        self.routing.route_callback(data)
     }
 
-    /// Mint the two callback tokens one approval card needs and remember what
-    /// each means. Returns them in `(approve, refuse)` order.
     pub fn record_pending_approval(
         &mut self,
         id: crate::control::approval::ApprovalId,
     ) -> (String, String) {
-        use crate::control::approval::ApprovalChoice;
-        let approve = self.insert_pending_approval(id, ApprovalChoice::Approved);
-        let refuse = self.insert_pending_approval(id, ApprovalChoice::Refused);
-        (approve, refuse)
+        self.routing.record_pending_approval(id)
     }
 
     #[cfg(test)]
     pub fn pending_approval_token_count(&self) -> usize {
-        self.pending_approvals.len()
+        self.routing.pending_approval_token_count()
     }
 
-    /// Drop both of `id`'s tokens. Called when the request settles, so the
-    /// bounded table holds only cards that can still be answered.
     pub fn forget_pending_approval(&mut self, id: crate::control::approval::ApprovalId) {
-        self.pending_approvals.retain(|_, (held, _)| *held != id);
-        self.pending_approvals_order
-            .retain(|token| self.pending_approvals.contains_key(token));
+        self.routing.forget_pending_approval(id);
     }
 
-    fn insert_pending_approval(
-        &mut self,
-        id: crate::control::approval::ApprovalId,
-        choice: crate::control::approval::ApprovalChoice,
-    ) -> String {
-        // Random rather than derived from `id`: a card survives a restart in
-        // the user's chat history while this table does not, and a derived
-        // token would let a stale button resolve a *new* request that happens
-        // to reuse the number.
-        let token = format!(
-            "{APPROVAL_TOKEN_PREFIX}:{}",
-            uuid::Uuid::new_v4().as_simple()
-        );
-        self.pending_approvals.insert(token.clone(), (id, choice));
-        self.pending_approvals_order.push_back(token.clone());
-        if self.pending_approvals_order.len() > PENDING_APPROVALS_CAP
-            && let Some(oldest) = self.pending_approvals_order.pop_front()
-        {
-            self.pending_approvals.remove(&oldest);
-        }
-        token
-    }
-
-    /// Shapes a `BridgePing` into an `OutboundMsg` ready for
-    /// `client::send_message`. Requires `self.authorized_chat_id` to
-    /// be `Some` — the realistic caller already gates on
-    /// `enabled && authorized_chat_id.is_some()` before ever building
-    /// a ping; if called while unpaired anyway (should not happen in
-    /// practice) this falls back to `chat_id: 0`, a request Telegram
-    /// will reject, rather than panicking.
     pub fn build_ping(&mut self, ping: BridgePing) -> OutboundMsg {
-        debug_assert!(
-            self.authorized_chat_id.is_some(),
-            "build_ping called before pairing"
-        );
-
-        let keyboard = ping.permission.map(|prompt| {
-            let buttons: Vec<(String, String)> = prompt
-                .buttons
-                .into_iter()
-                .map(|(label, decision)| {
-                    let token = Uuid::new_v4().simple().to_string();
-                    self.insert_pending_permission(
-                        token.clone(),
-                        (ping.pane, prompt.perm_id, decision),
-                    );
-                    (label, token)
-                })
-                .collect();
-
-            InlineKeyboard::single_row(buttons)
-        });
-
+        debug_assert!(self.authorized_chat_id.is_some());
+        let prepared = self.routing.build_ping(ping);
         OutboundMsg {
             chat_id: self.authorized_chat_id.unwrap_or_default(),
-            header: ping.header,
-            tail: ping.tail,
-            keyboard,
+            header: prepared.header,
+            tail: prepared.tail,
+            keyboard: prepared.keyboard,
         }
     }
 
-    /// Registers one permission-callback token, enforcing the
-    /// `PENDING_PERMISSIONS_CAP` bound by evicting the oldest token
-    /// (from both the map and its companion order queue) once
-    /// exceeded — mirrors `record_sent`'s eviction shape. `build_ping`
-    /// calls this once per button in the permission-wait ping's
-    /// `PermissionPromptRef::buttons`.
-    fn insert_pending_permission(
-        &mut self,
-        token: String,
-        value: (PaneRef, u64, PermissionDecision),
-    ) {
-        self.pending_permissions.insert(token.clone(), value);
-        self.pending_permissions_order.push_back(token);
-
-        if self.pending_permissions_order.len() > PENDING_PERMISSIONS_CAP
-            && let Some(oldest) = self.pending_permissions_order.pop_front()
-        {
-            self.pending_permissions.remove(&oldest);
-        }
-    }
-
-    /// Records a successfully-sent ping's real Telegram `message_id`
-    /// (only known after `client::send_message` returns), so a later
-    /// reply-to can resolve back to `pane`. Separate from
-    /// `build_ping` because the message_id doesn't exist until
-    /// Telegram responds. Enforces the `SENT_PINGS_CAP` bound by
-    /// evicting the oldest entry once exceeded; `last_pinged` is left
-    /// untouched by eviction — it's a separate fallback path, not
-    /// derived from `sent_pings`.
     pub fn record_sent(&mut self, message_id: i64, pane: PaneRef) {
-        self.last_pinged = Some(pane);
-        self.sent_pings.insert(message_id, pane);
-        self.sent_pings_order.push_back(message_id);
-
-        if self.sent_pings_order.len() > SENT_PINGS_CAP
-            && let Some(oldest) = self.sent_pings_order.pop_front()
-        {
-            self.sent_pings.remove(&oldest);
-        }
+        self.routing.record_sent(message_id, pane);
     }
 }

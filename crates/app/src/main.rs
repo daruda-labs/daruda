@@ -24,6 +24,7 @@ mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;
 pub mod project;
+mod remote_channel;
 #[cfg(feature = "replay")]
 mod replay;
 #[cfg(feature = "screenshot")]
@@ -248,6 +249,7 @@ fn main() {
 
         watchers_lifecycle::spawn_all(cx);
         crate::telegram::global::install(cx);
+        crate::remote_channel::global::install(cx);
 
         // `--screenshot <path>`: capture the live window to a PNG, then quit.
         // `--screenshot-terminal-widen` swaps the restored-workspace capture

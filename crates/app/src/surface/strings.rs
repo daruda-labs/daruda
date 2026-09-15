@@ -6629,6 +6629,103 @@ pub fn flow_issue(kind: &daruda_flow::error::ValidationKind) -> String {
     .into_owned()
 }
 
+pub fn remote_slack() -> String {
+    rust_i18n::t!("remote_channel.slack").into_owned()
+}
+
+pub fn remote_discord() -> String {
+    rust_i18n::t!("remote_channel.discord").into_owned()
+}
+
+pub fn remote_enabled() -> String {
+    rust_i18n::t!("remote_channel.enabled").into_owned()
+}
+
+pub fn remote_only_when_away() -> String {
+    rust_i18n::t!("remote_channel.only_when_away").into_owned()
+}
+
+pub fn remote_bot_token() -> String {
+    rust_i18n::t!("remote_channel.bot_token").into_owned()
+}
+
+pub fn remote_app_token() -> String {
+    rust_i18n::t!("remote_channel.app_token").into_owned()
+}
+
+pub fn remote_token_placeholder() -> String {
+    rust_i18n::t!("remote_channel.token_placeholder").into_owned()
+}
+
+pub fn remote_token_saved() -> String {
+    rust_i18n::t!("remote_channel.token_saved").into_owned()
+}
+
+pub fn remote_save_token() -> String {
+    rust_i18n::t!("remote_channel.save_token").into_owned()
+}
+
+pub fn remote_clear_token() -> String {
+    rust_i18n::t!("remote_channel.clear_token").into_owned()
+}
+
+pub fn remote_pair() -> String {
+    rust_i18n::t!("remote_channel.pair").into_owned()
+}
+
+pub fn remote_unpair() -> String {
+    rust_i18n::t!("remote_channel.unpair").into_owned()
+}
+
+pub fn remote_copy_pair() -> String {
+    rust_i18n::t!("remote_channel.copy_pair").into_owned()
+}
+
+pub fn remote_stale_callback() -> String {
+    rust_i18n::t!("remote_channel.stale_callback").into_owned()
+}
+
+pub fn remote_pair_success() -> String {
+    rust_i18n::t!("remote_channel.pair_success").into_owned()
+}
+
+pub fn remote_disabled() -> String {
+    rust_i18n::t!("remote_channel.disabled").into_owned()
+}
+
+pub fn remote_missing_credentials() -> String {
+    rust_i18n::t!("remote_channel.missing_credentials").into_owned()
+}
+
+pub fn remote_connecting() -> String {
+    rust_i18n::t!("remote_channel.connecting").into_owned()
+}
+
+pub fn remote_connected() -> String {
+    rust_i18n::t!("remote_channel.connected").into_owned()
+}
+
+pub fn remote_retrying() -> String {
+    rust_i18n::t!("remote_channel.retrying").into_owned()
+}
+
+pub fn remote_failed() -> String {
+    rust_i18n::t!("remote_channel.failed").into_owned()
+}
+
+pub fn remote_paired(user: &str, conversation: &str) -> String {
+    rust_i18n::t!(
+        "remote_channel.paired",
+        user = user,
+        conversation = conversation
+    )
+    .into_owned()
+}
+
+pub fn remote_error(error: &str) -> String {
+    rust_i18n::t!("remote_channel.error", error = error).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

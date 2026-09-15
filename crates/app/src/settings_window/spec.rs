@@ -660,7 +660,9 @@ mod tests {
             | SettingsPatch::OrchestratorEnabled(_)
             | SettingsPatch::OrchestratorAgentId(_)
             | SettingsPatch::OrchestratorAccountId(_) => Coverage::Row,
-            SettingsPatch::AgentCatalog(_) | SettingsPatch::SessionHosts { .. } => Coverage::ByHand,
+            SettingsPatch::AgentCatalog(_)
+            | SettingsPatch::SessionHosts { .. }
+            | SettingsPatch::RemoteChannels(_) => Coverage::ByHand,
             // Neither is a *field* of this window: the status-bar item list is
             // toggled from the bar itself, and the Telegram chat id is owned by
             // pairing. The Notifications section does write the chat id (Unpair)

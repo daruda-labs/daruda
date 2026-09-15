@@ -270,7 +270,7 @@ fn pair_code_exact_match_pairs_and_authorizes_future_messages() {
     // authorized (falls through to Ignore here only because there's
     // no reply-to / last-pinged pane yet — proves the auth gate
     // passed).
-    bridge.last_pinged = Some(pane(1, 1));
+    bridge.routing.last_pinged = Some(pane(1, 1));
     let result = bridge.route(message(2, 555, "ping back", None));
     assert_eq!(
         result.action.ready(),
@@ -308,7 +308,7 @@ fn reply_to_found_in_sent_pings_wins_over_last_pinged() {
 
     bridge.record_sent(41, reply_target);
     bridge.record_sent(50, different_last);
-    assert_eq!(bridge.last_pinged, Some(different_last));
+    assert_eq!(bridge.routing.last_pinged, Some(different_last));
 
     let result = bridge.route(message(1, 1, "answer", Some(41)));
     assert_eq!(
@@ -422,7 +422,7 @@ fn the_three_token_namespaces_do_not_collide() {
     use crate::control::approval::ApprovalId;
     let mut bridge = BridgeCore::new(true, Some(42), 0);
     let target = pane(1, 3);
-    bridge.pending_permissions.insert(
+    bridge.routing.pending_permissions.insert(
         "abcdef0123456789".to_string(),
         (target, 55, PermissionDecision::Allow("opt_yes".to_string())),
     );
@@ -445,7 +445,7 @@ fn the_three_token_namespaces_do_not_collide() {
 fn callback_with_known_token_responds_and_consumes_it() {
     let mut bridge = BridgeCore::new(true, Some(1), 0);
     let target = pane(1, 3);
-    bridge.pending_permissions.insert(
+    bridge.routing.pending_permissions.insert(
         "tok-a".to_string(),
         (target, 55, PermissionDecision::Allow("opt_yes".to_string())),
     );
@@ -522,14 +522,14 @@ fn sent_pings_bound_evicts_oldest_entries() {
         bridge.record_sent(i, pane(1, i as u64));
     }
 
-    assert_eq!(bridge.sent_pings.len(), SENT_PINGS_CAP);
-    assert_eq!(bridge.sent_pings_order.len(), SENT_PINGS_CAP);
+    assert_eq!(bridge.routing.sent_pings.len(), SENT_PINGS_CAP);
+    assert_eq!(bridge.routing.sent_pings_order.len(), SENT_PINGS_CAP);
 
     // The oldest message_ids (0..extra) were evicted; a reply-to
     // against one of them now falls back to last_pinged instead of
     // resolving directly.
     let evicted_id = 0i64;
-    assert!(!bridge.sent_pings.contains_key(&evicted_id));
+    assert!(!bridge.routing.sent_pings.contains_key(&evicted_id));
     let result = bridge.route(message(1000, 1, "late reply", Some(evicted_id)));
     assert_eq!(
         result.action.ready(),
@@ -541,7 +541,7 @@ fn sent_pings_bound_evicts_oldest_entries() {
 
     // A still-present (recent) message_id still resolves directly.
     let surviving_id = (SENT_PINGS_CAP + extra - 1) as i64;
-    assert!(bridge.sent_pings.contains_key(&surviving_id));
+    assert!(bridge.routing.sent_pings.contains_key(&surviving_id));
 }
 
 #[test]
@@ -557,7 +557,7 @@ fn build_ping_plain_completion_has_no_keyboard() {
     assert_eq!(msg.chat_id, 1);
     assert_eq!(msg.header, "Turn finished");
     assert!(msg.keyboard.is_none());
-    assert!(bridge.pending_permissions.is_empty());
+    assert!(bridge.routing.pending_permissions.is_empty());
 }
 
 #[test]
@@ -588,11 +588,11 @@ fn build_ping_permission_registers_two_distinct_tokens() {
     assert_eq!(only_row(&keyboard)[1].0, "Reject");
     assert_ne!(only_row(&keyboard)[0].1, only_row(&keyboard)[1].1);
 
-    assert_eq!(bridge.pending_permissions.len(), 2);
+    assert_eq!(bridge.routing.pending_permissions.len(), 2);
     let allow_token = &only_row(&keyboard)[0].1;
     let reject_token = &only_row(&keyboard)[1].1;
     assert_eq!(
-        bridge.pending_permissions.get(allow_token),
+        bridge.routing.pending_permissions.get(allow_token),
         Some(&(
             pane(1, 1),
             7,
@@ -600,7 +600,7 @@ fn build_ping_permission_registers_two_distinct_tokens() {
         ))
     );
     assert_eq!(
-        bridge.pending_permissions.get(reject_token),
+        bridge.routing.pending_permissions.get(reject_token),
         Some(&(
             pane(1, 1),
             7,
@@ -663,11 +663,11 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
     let tokens: std::collections::HashSet<&String> =
         only_row(&keyboard).iter().map(|(_, t)| t).collect();
     assert_eq!(tokens.len(), 4, "every button gets its own distinct token");
-    assert_eq!(bridge.pending_permissions.len(), 4);
+    assert_eq!(bridge.routing.pending_permissions.len(), 4);
 
     let execpolicy_token = &only_row(&keyboard)[2].1;
     assert_eq!(
-        bridge.pending_permissions.get(execpolicy_token),
+        bridge.routing.pending_permissions.get(execpolicy_token),
         Some(&(
             pane(1, 1),
             9,
@@ -714,17 +714,30 @@ fn pending_permissions_bound_evicts_oldest_entries() {
         });
     }
 
-    assert_eq!(bridge.pending_permissions.len(), PENDING_PERMISSIONS_CAP);
     assert_eq!(
-        bridge.pending_permissions_order.len(),
+        bridge.routing.pending_permissions.len(),
+        PENDING_PERMISSIONS_CAP
+    );
+    assert_eq!(
+        bridge.routing.pending_permissions_order.len(),
         PENDING_PERMISSIONS_CAP
     );
 
     // The oldest tokens (from the very first ping) were evicted —
     // a callback tap against one of them is unresolvable, same as
     // any other unknown/consumed token.
-    assert!(!bridge.pending_permissions.contains_key(&first_allow_token));
-    assert!(!bridge.pending_permissions.contains_key(&first_reject_token));
+    assert!(
+        !bridge
+            .routing
+            .pending_permissions
+            .contains_key(&first_allow_token)
+    );
+    assert!(
+        !bridge
+            .routing
+            .pending_permissions
+            .contains_key(&first_reject_token)
+    );
 
     let result = bridge.route(callback(1, 1, "cbq-evicted", &first_allow_token));
     assert_eq!(result.action.ready(), InboundAction::Ignore);
