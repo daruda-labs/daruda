@@ -3855,6 +3855,21 @@ pub fn settings_accounts_system_reauthenticate() -> String {
 pub fn agent_chat_sign_in_again() -> String {
     rust_i18n::t!("agent_chat.sign_in_again").into_owned()
 }
+pub fn agent_chat_transport_closed() -> String {
+    rust_i18n::t!("agent_chat.transport_closed").into_owned()
+}
+pub fn agent_chat_adapter_install_failed() -> String {
+    rust_i18n::t!("agent_chat.adapter_install_failed").into_owned()
+}
+pub fn agent_chat_adapter_setup_required() -> String {
+    rust_i18n::t!("agent_chat.adapter_setup_required").into_owned()
+}
+pub fn agent_chat_adapter_integrity_failed() -> String {
+    rust_i18n::t!("agent_chat.adapter_integrity_failed").into_owned()
+}
+pub fn agent_chat_adapter_preparation_canceled() -> String {
+    rust_i18n::t!("agent_chat.adapter_preparation_canceled").into_owned()
+}
 /// Warning toast when a terminal pane's account config dir could not be
 /// prepared. A warning rather than a blocker: the account's env still gets
 /// injected, so only the mirrored extras are missing.

@@ -541,6 +541,11 @@ pub struct RunResult {
 /// event stream against a timer and cancel on expiry — that responsibility
 /// belongs to the implementor, not to the scheduler.
 pub trait NodeRunner {
+    /// Optional setup owned by the concrete runner, reused by all of its nodes.
+    fn prepare_agent(&self, _id: &str, _cancel: &CancelToken) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+
     fn run_agent<'a>(
         &'a self,
         ctx: &'a RunContext<'a>,
@@ -568,6 +573,10 @@ pub struct Runners {
 }
 
 impl NodeRunner for Runners {
+    fn prepare_agent(&self, id: &str, cancel: &CancelToken) -> Result<Vec<String>, String> {
+        self.agent.prepare_agent(id, cancel)
+    }
+
     fn run_agent<'a>(
         &'a self,
         ctx: &'a RunContext<'a>,

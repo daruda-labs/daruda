@@ -7,7 +7,8 @@
 
 use std::path::PathBuf;
 
-use daruda_acp::{NodeProgress, connect_agent_session_with_model};
+use daruda_acp::preparation::{PreparationCancellation, PreparationContext};
+use daruda_acp::{NodeProgress, connect_prepared_session};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use futures::StreamExt as _;
@@ -598,8 +599,14 @@ impl Workspace {
         // like a hang. The sender lives in the background task; when it finishes,
         // the sender drops and the drain ends.
         let (progress_tx, mut progress_rx) = unbounded::<NodeProgress>();
+        let cancellation = PreparationCancellation::default();
+        let cancel_on_drop = cancellation.cancel_on_drop();
+        let progress_cancellation = cancellation.clone();
         cx.spawn(async move |this, cx| {
             while let Some(progress) = progress_rx.next().await {
+                if progress_cancellation.is_canceled() {
+                    break;
+                }
                 let Some(phase) = runtime_prep_phase(progress) else {
                     continue;
                 };
@@ -633,6 +640,7 @@ impl Workspace {
         let retry_cwd = cwd.clone();
         let was_resume = resume.is_some();
         let pump = cx.spawn(async move |this, cx| {
+            let _cancel_preparation = cancel_on_drop;
             // Prep the managed account's config dir before anything spawns
             // (Claude mirrors shared MCP servers into it; Codex materializes
             // its home). The canonical sources can be multi-megabyte, so this
@@ -662,11 +670,28 @@ impl Workspace {
                 .background_executor()
                 .spawn(async move {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
+                    let canceled = || cancellation.is_canceled();
+                    let notice = |detail: &str| {
+                        daruda_store::observability::log_writer::LogWriter::log(
+                            ErrorReport::new("ACP adapter preparation notice")
+                                .severity(ErrorSeverity::Warning)
+                                .with_context("detail", detail)
+                                .at(file!(), line!())
+                                .build(),
+                        );
+                    };
+                    let context = PreparationContext::new(&canceled, &notice);
+                    let adapter = daruda_acp::launch_env::prepare_adapter(
+                        &launch_spec,
+                        &node_root,
+                        &mut progress,
+                        &context,
+                    )?;
+                    context.check()?;
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
-                    connect_agent_session_with_model(
-                        launch_spec,
-                        node_root,
+                    connect_prepared_session(
+                        adapter,
                         connect_cwd,
                         initial_model,
                         initial_modes,
@@ -674,7 +699,6 @@ impl Workspace {
                         resume.map(daruda_acp::SessionId::new),
                         &agent_id,
                         mcp_servers,
-                        &mut progress,
                     )
                 })
                 .await;
@@ -719,6 +743,7 @@ impl Workspace {
                         if was_resume
                             && !connected_seen
                             && let daruda_acp::AcpEvent::Error(failure) = &event
+                            && !matches!(failure, daruda_acp::AcpFailure::TransportClosed { .. })
                         {
                             let detail = failure.message().to_owned();
                             // SILENT-OK: workspace/window dropped before the resume retry could start
@@ -857,112 +882,34 @@ impl Workspace {
                             break;
                         }
                     }
-                    // The stream ended — either the command channel closed (an
-                    // intentional pane close dropped the handle) or the
-                    // connection task ended without emitting a terminal event.
-                    // Two independent safety nets fire here, both no-ops in the
-                    // common already-terminal (Connected then closed) case:
-                    //  - `abort_restore` releases a still-set replay gate so a
-                    //    resume's partial replay renders instead of the pane
-                    //    freezing mid-restore.
-                    //  - a synthetic `AcpEvent::Error` resolves a status that
-                    //    never reached `Connected`/`Error` — without this, a
-                    //    connection task that exits silently before emitting
-                    //    anything (its future dropped by an upstream bug
-                    //    rather than returning `Err`) strands the pane on
-                    //    "Connecting…" forever with no event left to move it
-                    //    and no retry affordance (that requires `Error`). Fed
-                    //    through `apply_event` (not a bespoke setter) so this
-                    //    gets the exact same handling as any other terminal
-                    //    error — turn settle, handle drop, pending-prompt
-                    //    clear — instead of a partial hand-rolled duplicate
-                    //    that would leave the turn/activity state stranded.
+                    // EOF without a terminal event can occur before connect or
+                    // while idle. Release replay and retire any still-live pane
+                    // through the same failure path as a pending-request EOF.
                     // SILENT-OK: view/window already gone at end-of-stream — nothing to release
                     let _ = this.update(cx, |ws, cx| {
-                        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
-                            let was_connecting = view.read(cx).is_still_connecting();
-                            view.update(cx, |v, cx| v.abort_restore(cx));
-                            if was_connecting {
-                                let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
-                                let telegram_first_response = view.update(cx, |v, cx| {
-                                    v.apply_event(
-                                        daruda_acp::AcpEvent::Error(
-                                            // Locally detected, not a protocol
-                                            // error — there is no code or
-                                            // `errorKind` behind it to classify.
-                                            daruda_acp::AcpFailure::unclassified(
-                                                s::agent_chat_error_stream_ended(),
-                                            ),
-                                        ),
-                                        &syntax_theme,
-                                        is_light,
-                                        cx,
-                                    )
-                                });
-                                ws.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
-                                // Connecting → Error clears the badge; dirty the
-                                // cached docks so it doesn't linger stale.
-                                ws.notify_status_docks(cx);
-                                if let Some(cwd) =
-                                    view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
-                                {
-                                    ws.apply_agent_chat_task_ended(
-                                        &cwd,
-                                        daruda_store::tasks::SessionEndReason::Error,
-                                        cx,
-                                    );
-                                }
-                            }
-                        }
-                    });
-                }
-                Err(err) if was_resume => {
-                    // A failed *resume* (`session/load`) retries once as a fresh
-                    // session so the pane stays usable. The persisted session id
-                    // is intentionally left untouched: a successful new session
-                    // overwrites it via the `Connected` persist trigger above,
-                    // and a transient error must never wipe a still-valid id.
-                    let message = format!("{err}");
-                    // SILENT-OK: workspace/window dropped before the resume retry could start
-                    let _ = this.update(cx, |ws, cx| {
-                        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
-                            view.update(cx, |v, cx| {
-                                // No load will happen now — release the replay
-                                // gate and return to a plain connecting state
-                                // before the fresh retry.
-                                v.begin_connect(None, cx);
-                            });
-                        }
-                        let report = ErrorReport::new(
-                            crate::surface::strings::error_acp_resume_failed_retrying(),
-                        )
-                        .severity(ErrorSeverity::Warning)
-                        .with_context("detail", message)
-                        .at(file!(), line!())
-                        .dedup("agent_chat.resume_fallback")
-                        .build();
-                        daruda_store::observability::log_writer::LogWriter::log(report);
-                        // Re-enter with no resume → `session/new`. This spawns a
-                        // fresh pump on the view; the current task then returns,
-                        // dropping this (now superseded) pump.
-                        ws.connect_agent_chat(pane_id, retry_cwd.clone(), None, cx);
+                        ws.agent_chat_stream_ended(pane_id, cx);
                     });
                 }
                 Err(err) => {
-                    // Connect-time failures classify like any other: a Node
-                    // runtime that would not provision is retryable, an
-                    // expired login is not.
+                    // No ACP request ran: a preparation failure is not evidence
+                    // of an invalid saved session. Keep its resume target intact.
                     let failure = err.into_failure();
-                    let remedy = failure.remedy();
-                    let message = failure.message().to_owned();
+                    let detail = failure.message().to_owned();
                     // workspace gone before the connect resolved — nothing left
                     // to surface the failure on.
                     // SILENT-OK: workspace/window dropped before connect resolved
                     let _ = this.update(cx, |ws, cx| {
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
-                            view.update(cx, |v, cx| {
-                                v.set_error(message.clone(), remedy, cx);
+                            let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
+                            let effect = view.update(cx, |v, cx| {
+                                v.apply_event(
+                                    daruda_acp::AcpEvent::Error(failure),
+                                    &syntax_theme,
+                                    is_light,
+                                    cx,
+                                )
                             });
+                            ws.relay_phone_ack_effect(pane_id, effect, cx);
                             // Connecting → Error clears the badge (maps to
                             // `None`); dirty the cached docks so the stale
                             // Connecting badge doesn't linger after the pulse
@@ -984,7 +931,7 @@ impl Workspace {
                         let report =
                             ErrorReport::new(crate::surface::strings::error_acp_connect_failed())
                                 .severity(ErrorSeverity::Error)
-                                .with_context("detail", message)
+                                .with_context("detail", detail)
                                 .at(file!(), line!())
                                 .dedup("agent_chat.connect")
                                 .build();
@@ -998,6 +945,59 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, _| v._event_pump = Some(pump));
         }
+    }
+
+    /// A live pane losing its stream is a connection failure, not necessarily
+    /// a task failure: an idle pane may share a cwd with another active task.
+    pub(in crate::workspace) fn agent_chat_stream_ended(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let needs_disconnect_error = view.read(cx).needs_disconnect_error();
+        let failed_to_start_prompt = {
+            let view = view.read(cx);
+            matches!(
+                view.status,
+                AgentSessionStatus::PreparingRuntime(_)
+                    | AgentSessionStatus::Connecting
+                    | AgentSessionStatus::Handshaking(_)
+            ) && !view.queue.pending_prompts.is_empty()
+        };
+        view.update(cx, |v, cx| v.abort_restore(cx));
+        if !needs_disconnect_error {
+            return;
+        }
+        let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
+        let effect = view.update(cx, |v, cx| {
+            v.apply_event(
+                daruda_acp::AcpEvent::Error(daruda_acp::AcpFailure::TransportClosed {
+                    message: s::agent_chat_error_stream_ended(),
+                }),
+                &syntax_theme,
+                is_light,
+                cx,
+            )
+        });
+        self.relay_phone_ack_effect(pane_id, effect, cx);
+        let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+        if let Some(outcome) = edge {
+            self.fire_activity_completion(pane_id, outcome, cx);
+        } else if failed_to_start_prompt
+            && let Some(cwd) = view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
+        {
+            // Startup can fail before a task's buffered prompt starts a turn;
+            // there is no activity completion edge in that case.
+            self.apply_agent_chat_task_ended(
+                &cwd,
+                daruda_store::tasks::SessionEndReason::Error,
+                cx,
+            );
+        }
+        self.notify_status_docks(cx);
     }
 
     /// Full local reset for `/clear`: wipe the conversation, tear down the ACP

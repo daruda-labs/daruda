@@ -2,7 +2,7 @@
 //!
 //! A failed ACP exchange arrives as a JSON-RPC error whose *code* and *data*
 //! say what went wrong; the host needs that to decide what to offer the user.
-//! [`classify`] reads both and never pattern-matches the human-readable
+//! [`AcpFailure::classify`] reads both and the SDK's EOF discriminator, never the human-readable
 //! message — the adapter documents `data.errorKind` as "a convention for ACP
 //! clients to dispatch on without having to pattern-match the human-readable
 //! message text", and message text is not stable across adapter releases.
@@ -25,7 +25,7 @@
 //! [`FailureKind::Other`] keeps an unknown value renderable instead of
 //! swallowing it.
 
-use agent_client_protocol::{Error as AcpProtocolError, ErrorCode};
+use agent_client_protocol::{Error as AcpProtocolError, ErrorCode, is_incoming_transport_closed};
 
 use crate::node::NodeError;
 
@@ -134,6 +134,13 @@ impl RuntimeKind {
 /// so the host never has to reach back into protocol types to render one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpFailure {
+    /// The adapter's transport closed, with or without a pending request.
+    TransportClosed { message: String },
+    /// Installing a supported npm adapter failed before ACP could start.
+    AdapterInstall {
+        kind: crate::preparation::PreparationKind,
+        message: String,
+    },
     /// `-32000` — the agent asked to be authenticated again.
     AuthRequired { message: String },
     /// `data.errorKind` named a category.
@@ -146,7 +153,7 @@ pub enum AcpFailure {
 }
 
 impl AcpFailure {
-    /// Classify a protocol error by code and `data.errorKind` only.
+    /// Classify by the SDK's transport discriminator, code, and `errorKind`.
     ///
     /// The message is taken from [`AcpProtocolError::message`] rather than its
     /// `Display`, which appends a pretty-printed copy of `data` — that is how
@@ -155,6 +162,9 @@ impl AcpFailure {
     #[must_use]
     pub fn classify(error: &AcpProtocolError) -> Self {
         let message = error.message.clone();
+        if is_incoming_transport_closed(error) {
+            return Self::TransportClosed { message };
+        }
         if matches!(error.code, ErrorCode::AuthRequired) {
             return Self::AuthRequired { message };
         }
@@ -169,6 +179,12 @@ impl AcpFailure {
     #[must_use]
     pub fn from_node_error(error: &NodeError) -> Self {
         let kind = match error {
+            NodeError::Canceled => {
+                return Self::AdapterInstall {
+                    kind: crate::preparation::PreparationKind::Canceled,
+                    message: error.to_string(),
+                };
+            }
             NodeError::UnsupportedPlatform(_) => RuntimeKind::UnsupportedPlatform,
             NodeError::Download(_) => RuntimeKind::Download,
             NodeError::Checksum { .. } => RuntimeKind::Checksum,
@@ -192,6 +208,14 @@ impl AcpFailure {
     #[must_use]
     pub fn remedy(&self) -> Remedy {
         match self {
+            Self::TransportClosed { .. } => Remedy::Retry,
+            Self::AdapterInstall { kind, .. } => {
+                if kind.retryable() {
+                    Remedy::Retry
+                } else {
+                    Remedy::NoneAvailable
+                }
+            }
             Self::AuthRequired { .. } => Remedy::Reauthenticate,
             Self::Categorized { kind, .. } => kind.remedy(),
             Self::Runtime { kind, .. } => kind.remedy(),
@@ -199,11 +223,13 @@ impl AcpFailure {
         }
     }
 
-    /// The user-facing text for this failure.
+    /// Original diagnostic detail. Hosts localize the structured failure kind.
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::AuthRequired { message }
+            Self::TransportClosed { message }
+            | Self::AdapterInstall { message, .. }
+            | Self::AuthRequired { message }
             | Self::Categorized { message, .. }
             | Self::Runtime { message, .. }
             | Self::Unclassified { message } => message,
@@ -226,6 +252,58 @@ fn error_kind(error: &AcpProtocolError) -> Option<FailureKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_remedies_distinguish_transient_and_permanent_failures() {
+        use crate::preparation::PreparationKind;
+        for kind in [
+            PreparationKind::Network,
+            PreparationKind::Timeout,
+            PreparationKind::Io,
+        ] {
+            assert_eq!(
+                AcpFailure::AdapterInstall {
+                    kind,
+                    message: "detail".into()
+                }
+                .remedy(),
+                Remedy::Retry
+            );
+        }
+        for kind in [
+            PreparationKind::Canceled,
+            PreparationKind::Configuration,
+            PreparationKind::Integrity,
+            PreparationKind::InvalidPackage,
+            PreparationKind::Process,
+        ] {
+            assert_ne!(
+                AcpFailure::AdapterInstall {
+                    kind,
+                    message: "detail".into()
+                }
+                .remedy(),
+                Remedy::Retry
+            );
+        }
+    }
+
+    #[test]
+    fn transport_eof_uses_the_sdk_discriminator_not_english_copy() {
+        let error = AcpProtocolError::internal_error().data(serde_json::json!({
+            "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON,
+            "method": "session/prompt"
+        }));
+        let failure = AcpFailure::classify(&error);
+        assert!(matches!(failure, AcpFailure::TransportClosed { .. }));
+        assert_eq!(failure.remedy(), Remedy::Retry);
+        assert_eq!(failure.message(), error.message);
+        let same_text = AcpProtocolError::new(-32603, "Incoming transport closed");
+        assert!(matches!(
+            AcpFailure::classify(&same_text),
+            AcpFailure::Unclassified { .. }
+        ));
+    }
 
     fn err(code: i32, message: &str, error_kind: Option<&str>) -> AcpProtocolError {
         let mut e = AcpProtocolError::new(code, message);

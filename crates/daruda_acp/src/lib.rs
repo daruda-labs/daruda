@@ -12,6 +12,7 @@
 pub mod adapter;
 pub mod connection;
 pub mod failure;
+mod launch_config;
 pub mod launch_env;
 pub mod login_method;
 pub mod mapping;
@@ -19,6 +20,10 @@ pub(crate) mod mode_tracker;
 pub mod model;
 pub mod native_subagents;
 pub mod node;
+mod npm_adapter;
+pub mod preparation;
+mod prepared;
+pub use prepared::PreparedAdapter;
 pub(crate) mod output_highlight;
 pub mod session;
 pub mod wire_log;
@@ -54,6 +59,7 @@ pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
 pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision,
-    connect_agent_session, connect_agent_session_with_model, connect_session, stdio_mcp_server,
+    connect_agent_session, connect_agent_session_with_model, connect_prepared_session,
+    connect_session, stdio_mcp_server,
 };
 pub use wire_log::{Replay, ReplayError, agent_id_from_path, replay_log};

@@ -149,7 +149,7 @@ fn every_distinct_agent_is_provisioned_before_the_first_node() {
             "`{id}` was prepared after a node had already run"
         );
         provisioned.borrow_mut().push(id.to_string());
-        Ok(())
+        Ok(Vec::new())
     });
 
     assert!(
@@ -160,6 +160,34 @@ fn every_distinct_agent_is_provisioned_before_the_first_node() {
     let mut prepared = provisioned.into_inner();
     prepared.sort();
     assert_eq!(prepared, vec!["claude", "codex"]);
+}
+
+#[test]
+fn cancellation_during_preparation_is_not_an_install_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let request = request_for(CHAIN, dir.path());
+    let runner = FakeRunner::new();
+    let cancel = CancelToken::default();
+    let report = execute_with(&request, &runner, &cancel, &|_, _| {
+        cancel.cancel();
+        Err("preparation canceled".to_owned())
+    });
+    assert!(matches!(report.outcome, RunOutcome::Canceled { .. }));
+    assert!(runner.calls().is_empty());
+}
+
+#[test]
+fn cached_fallback_notices_are_written_to_the_run_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let request = request_for(CHAIN, dir.path());
+    let report = execute_with(
+        &request,
+        &FakeRunner::new(),
+        &CancelToken::default(),
+        &|_, _| Ok(vec!["using verified cached adapter".to_owned()]),
+    );
+    let record = std::fs::read_to_string(report.run_dir.join(RUN_MD)).unwrap();
+    assert!(record.contains("using verified cached adapter"));
 }
 
 /// Two nodes naming the same agent must not provision twice.
@@ -175,7 +203,7 @@ fn one_agent_named_by_many_nodes_is_provisioned_once() {
         &CancelToken::default(),
         &|id, _| {
             provisioned.borrow_mut().push(id.to_string());
-            Ok(())
+            Ok(Vec::new())
         },
     );
 
@@ -203,7 +231,7 @@ fn a_selection_does_not_provision_an_agent_it_will_not_reach() {
         &CancelToken::default(),
         &|id, _| {
             provisioned.borrow_mut().push(id.to_string());
-            Ok(())
+            Ok(Vec::new())
         },
     );
 
@@ -248,7 +276,7 @@ fn a_resumed_selection_narrows_the_same_way_a_fresh_one_does() {
         &CancelToken::default(),
         &|id, _| {
             provisioned.borrow_mut().push(id.to_string());
-            Ok(())
+            Ok(Vec::new())
         },
     );
 
@@ -274,7 +302,7 @@ fn the_repair_agent_is_provisioned_even_when_no_node_names_one() {
         &CancelToken::default(),
         &|id, _| {
             provisioned.borrow_mut().push(id.to_string());
-            Ok(())
+            Ok(Vec::new())
         },
     );
 
@@ -300,7 +328,7 @@ fn a_flow_that_cannot_open_a_session_provisions_nothing() {
         &CancelToken::default(),
         &|id, _| {
             provisioned.borrow_mut().push(id.to_string());
-            Ok(())
+            Ok(Vec::new())
         },
     );
 

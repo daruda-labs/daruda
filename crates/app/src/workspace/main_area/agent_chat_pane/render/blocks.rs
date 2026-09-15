@@ -336,7 +336,11 @@ pub(super) fn failure_block(
         // button reads as a separate thing to press rather than as the last
         // line of the text above it.
         .gap(px(theme::GAP_LG))
-        .child(error_block(failure.message(), t, cx))
+        .child(error_block(
+            &super::super::agent_chat_helpers::failure_message(failure),
+            t,
+            cx,
+        ))
         .when_some(sign_in, |el, btn| {
             // Centred under the message. The row stretches to the column's
             // width (flex-column default), so `justify_center` has something to

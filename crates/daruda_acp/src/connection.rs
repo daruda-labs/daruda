@@ -94,6 +94,9 @@ pub enum AcpClientError {
     /// forwards the (user-facing) [`crate::node::NodeError`] message verbatim.
     #[error("{0}")]
     Runtime(#[from] crate::node::NodeError),
+    /// Package installation failed before the ACP process was started.
+    #[error("adapter package setup failed: {0}")]
+    AdapterInstall(#[from] crate::preparation::PreparationError),
 }
 
 impl AcpClientError {
@@ -109,6 +112,10 @@ impl AcpClientError {
         match self {
             Self::Protocol(failure) => failure,
             Self::Runtime(error) => crate::failure::AcpFailure::from_node_error(&error),
+            Self::AdapterInstall(error) => crate::failure::AcpFailure::AdapterInstall {
+                kind: error.kind,
+                message: error.detail,
+            },
             // Rendered through `Display` so the "invalid adapter command:"
             // prefix survives — the bare string has no other context.
             other @ Self::Command(_) => crate::failure::AcpFailure::unclassified(other.to_string()),

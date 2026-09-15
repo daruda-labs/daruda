@@ -41,7 +41,6 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
@@ -57,9 +56,7 @@ use agent_client_protocol::schema::v1::{
     SessionConfigOptionsCapabilities, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionModeRequest, StopReason, TextContent,
 };
-use agent_client_protocol::{
-    AcpAgent, Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification,
-};
+use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -417,8 +414,8 @@ pub fn connect_session(
     resume: Option<SessionId>,
     agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    connect_session_inner(
-        command,
+    connect_prepared_session(
+        command.into(),
         cwd,
         None,
         initial_modes,
@@ -435,8 +432,8 @@ pub fn connect_session(
 /// files, which keeps it session-scoped: nothing to clean up if the app dies,
 /// and a second session cannot inherit it.
 #[allow(clippy::too_many_arguments)]
-fn connect_session_inner(
-    command: AdapterCommand,
+pub fn connect_prepared_session(
+    prepared: crate::PreparedAdapter,
     cwd: PathBuf,
     initial_model: Option<String>,
     initial_modes: Vec<String>,
@@ -445,8 +442,8 @@ fn connect_session_inner(
     agent_id: &str,
     mcp_servers: Vec<McpServer>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let agent = AcpAgent::from_str(&command.0)
-        .map_err(|e| AcpClientError::Command(format!("{e:?}")))
+    let agent = prepared
+        .agent()
         .map(|agent| crate::wire_log::attach(agent, agent_id))?;
 
     let (command_tx, command_rx) = unbounded::<Command>();
@@ -460,6 +457,8 @@ fn connect_session_inner(
 
     let task_event_tx = event_tx.clone();
     smol::spawn(async move {
+        // Protect files even if the host drops its handle before ACP shuts down.
+        let _installation = prepared;
         if let Err(err) = run_connection(
             agent,
             cwd,
@@ -516,8 +515,22 @@ pub fn connect_agent_session(
     agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
-    connect_session(adapter, cwd, initial_modes, restore_mode, resume, agent_id)
+    let adapter = crate::launch_env::prepare_adapter(
+        &launch,
+        &node_install_dir,
+        progress,
+        &crate::preparation::PreparationContext::default(),
+    )?;
+    connect_prepared_session(
+        adapter,
+        cwd,
+        None,
+        initial_modes,
+        restore_mode,
+        resume,
+        agent_id,
+        Vec::new(),
+    )
 }
 
 /// [`connect_agent_session`] with one model to negotiate before the mode and
@@ -537,8 +550,13 @@ pub fn connect_agent_session_with_model(
     mcp_servers: Vec<McpServer>,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
-    connect_session_inner(
+    let adapter = crate::launch_env::prepare_adapter(
+        &launch,
+        &node_install_dir,
+        progress,
+        &crate::preparation::PreparationContext::default(),
+    )?;
+    connect_prepared_session(
         adapter,
         cwd,
         initial_model,
@@ -1310,6 +1328,7 @@ async fn run_turn(
         futures::select! {
             resp = response => match resp {
                 Ok(r) => break r.stop_reason,
+                Err(e) if agent_client_protocol::is_incoming_transport_closed(&e) => return Err(e),
                 Err(e) => {
                     // A `session/prompt` that returns a JSON-RPC error (e.g. the
                     // adapter hit a usage / session limit → `-32603`) is a
@@ -1321,13 +1340,8 @@ async fn run_turn(
                     // the one prompt-error path that must NOT propagate `?` and
                     // tear the whole session down.
                     //
-                    // A genuine connection death also surfaces here as an `Err`
-                    // (the library resolves the pending request with an internal
-                    // error when the transport closes); the connection's
-                    // background task then ends and `run_connection` returns,
-                    // emitting a terminal `Error` on top of this. Re-prompting a
-                    // dead connection just yields another immediate `TurnFailed`
-                    // — never a hang, since the request errors at once.
+                    // Transport EOF propagates separately: reconnecting, not
+                    // re-sending into the dead channel, is the only recovery.
                     let _ = event_tx.unbounded_send(AcpEvent::TurnFailed(AcpFailure::classify(&e)));
                     return Ok(handle_dropped);
                 }
@@ -1547,6 +1561,68 @@ fn resolve_resume(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
+        use agent_client_protocol::{Channel, RawJsonRpcMessage, TransportFrame};
+        use futures::SinkExt as _;
+        for close_method in ["initialize", "session/load", "session/prompt"] {
+            let (transport, mut peer) = Channel::duplex();
+            let (command_tx, command_rx) = unbounded();
+            command_tx
+                .unbounded_send(Command::Prompt("hello".into()))
+                .unwrap();
+            let (event_tx, mut events) = unbounded();
+            smol::block_on(async {
+                let peer_task = smol::spawn(async move {
+                    while let Some(TransportFrame::Single(RawJsonRpcMessage::Request(request))) =
+                        peer.rx.next().await
+                    {
+                        if request.method.as_ref() == close_method {
+                            return;
+                        }
+                        let response = match request.method.as_ref() {
+                            "initialize" => {
+                                serde_json::json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}})
+                            }
+                            "session/new" => serde_json::json!({"sessionId": "saved-session"}),
+                            method => panic!("unexpected request: {method}"),
+                        };
+                        peer.tx
+                            .send(TransportFrame::Single(RawJsonRpcMessage::response(
+                                request.id,
+                                Ok(response),
+                            )))
+                            .await
+                            .unwrap();
+                    }
+                });
+                let result = with_connect_timeout("EOF regression", Duration::from_secs(2), async {
+                    let resume = (close_method == "session/load").then(|| SessionId::from("saved-session"));
+                    run_connection(transport, PathBuf::from("."), None, Vec::new(), None, resume, Vec::new(), command_rx,
+                        event_tx, Arc::new(Mutex::new(HashMap::new())))
+                        .await.map_err(|error| match error {
+                            AcpClientError::Protocol(AcpFailure::TransportClosed { .. }) => {
+                                agent_client_protocol::Error::internal_error().data(serde_json::json!({
+                                    "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON
+                                }))
+                            }
+                            other => panic!("unexpected error: {other}"),
+                        })
+                }).await;
+                assert!(agent_client_protocol::is_incoming_transport_closed(
+                    &result.unwrap_err()
+                ));
+                peer_task.await;
+                while let Some(event) = events.next().await {
+                    assert!(!matches!(
+                        event,
+                        AcpEvent::TurnFailed(_) | AcpEvent::TurnEnded { .. }
+                    ));
+                }
+            });
+        }
+    }
 
     /// The field has always been in the schema and daruda never used it; this
     /// pins that a requested server actually rides out on `session/new`.

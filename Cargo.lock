@@ -1682,6 +1682,7 @@ dependencies = [
  "anyhow",
  "daruda_core",
  "futures",
+ "libc",
  "semver",
  "serde",
  "serde_json",

@@ -45,8 +45,8 @@ const RESOLVE_TREE: &str = "resolving the working tree";
 /// Blocking rather than `async`: the drive future is `!Send`, so no host
 /// executor can take it anyway, and the host runs this on a thread it owns.
 pub fn execute(request: &RunRequest, runner: &dyn NodeRunner, cancel: &CancelToken) -> RunReport {
-    execute_with(request, runner, cancel, &|_, launch| {
-        crate::runner::acp::provision(launch, &request.node_install_dir)
+    execute_with(request, runner, cancel, &|id, _| {
+        runner.prepare_agent(id, cancel)
     })
 }
 
@@ -54,7 +54,7 @@ pub fn execute(request: &RunRequest, runner: &dyn NodeRunner, cancel: &CancelTok
 /// the tests below can state *which* agents get prepared and *when* without
 /// performing it: the real one downloads a Node.js runtime on a cold cache,
 /// and a test that did that would be neither fast nor honest.
-type Provision<'a> = dyn Fn(&str, &LaunchSpec) -> Result<(), String> + 'a;
+type Provision<'a> = dyn Fn(&str, &LaunchSpec) -> Result<Vec<String>, String> + 'a;
 
 fn execute_with(
     request: &RunRequest,
@@ -206,7 +206,7 @@ fn execute_with(
     // Last of the setup steps, so a run that cannot be provisioned still
     // leaves the spec that says what it was going to do — and so a download
     // does not delay hiding the directory from git.
-    let mut report = match provision_agents(request, provision) {
+    let mut report = match provision_agents(request, provision, cancel, &mut setup_warnings) {
         Ok(()) => smol::block_on(run_flow(
             RunInputs {
                 loaded: &request.loaded,
@@ -283,20 +283,32 @@ fn execute_with(
 /// An id with no launch spec is left alone — `validate_request` already
 /// rejects it, and failing the whole run here would stop a flow over a repair
 /// that may never happen.
-fn provision_agents(request: &RunRequest, provision: &Provision<'_>) -> Result<(), RunOutcome> {
+fn provision_agents(
+    request: &RunRequest,
+    provision: &Provision<'_>,
+    cancel: &CancelToken,
+    notices: &mut Vec<String>,
+) -> Result<(), RunOutcome> {
     let mut prepared = HashSet::new();
     for id in request.selected_agents() {
+        if cancel.is_canceled() {
+            return Err(RunOutcome::Canceled { node: None });
+        }
         if !prepared.insert(id) {
             continue;
         }
         let Some(launch) = request.agents.get(id) else {
             continue;
         };
-        if let Err(message) = provision(id, launch) {
-            return Err(RunOutcome::Unprovisioned {
-                agent: id.to_string(),
-                message,
-            });
+        match provision(id, launch) {
+            Ok(warnings) => notices.extend(warnings),
+            Err(_) if cancel.is_canceled() => return Err(RunOutcome::Canceled { node: None }),
+            Err(message) => {
+                return Err(RunOutcome::Unprovisioned {
+                    agent: id.to_string(),
+                    message,
+                });
+            }
         }
     }
     Ok(())

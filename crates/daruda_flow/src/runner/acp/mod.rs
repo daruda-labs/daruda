@@ -4,12 +4,12 @@
 
 use crate::model::AgentSpec;
 use crate::runner::{
-    AskAnswer, AskRequest, CANCELED, NodeFailure, NodeRunner, Permission, RunContext, RunResult,
-    Waiting, canceled, sleep,
+    AskAnswer, AskRequest, CANCELED, CancelToken, NodeFailure, NodeRunner, Permission, RunContext,
+    RunResult, Waiting, canceled, sleep,
 };
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, LaunchSpec, PermissionDecision, PermissionOption,
-    PermissionOptionKind, UsageView, connect_agent_session,
+    PermissionOptionKind, PreparedAdapter, UsageView, connect_prepared_session,
 };
 use smol::stream::{Stream, StreamExt};
 mod another_turn;
@@ -43,7 +43,7 @@ struct Recording<'a> {
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// The stream ended without a verdict — the adapter died mid-turn, so there
@@ -61,17 +61,6 @@ const CANCEL_GRACE: Duration = Duration::from_secs(5);
 /// `daruda_acp` bounds its own handshake requests the same way.
 const SETTINGS_BUDGET: Duration = Duration::from_secs(30);
 
-/// Prepare whatever runtime `launch` needs, before any node opens a session.
-/// Routed through the very call [`connect_agent_session`] makes, so whether a
-/// runtime is needed at all is decided in one place; the per-node call then
-/// finds the check already satisfied instead of downloading inside a node's
-/// budget. The assembled command is discarded — only the preparation matters.
-pub fn provision(launch: &LaunchSpec, node_install_dir: &Path) -> Result<(), String> {
-    daruda_acp::launch_env::prepare_adapter_command(launch, node_install_dir, &mut |_| {})
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
 /// Runs agent nodes. Built with finished values — the catalog the host
 /// resolved and the directory a managed runtime installs into — so the
 /// runner never reads a `RunRequest`.
@@ -80,9 +69,41 @@ pub struct AcpRunner {
     node_install_dir: PathBuf,
     grace: Duration,
     settings_budget: Duration,
+    prepared: RefCell<HashMap<String, PreparedAdapter>>,
 }
 
 impl AcpRunner {
+    fn prepared_adapter(
+        &self,
+        id: &str,
+        cancel: &CancelToken,
+        notice: &dyn Fn(&str),
+    ) -> Result<PreparedAdapter, String> {
+        if cancel.is_canceled() {
+            return Err(CANCELED.to_owned());
+        }
+        if let Some(prepared) = self.prepared.borrow().get(id) {
+            return Ok(prepared.clone());
+        }
+        let launch = self
+            .agents
+            .get(id)
+            .ok_or_else(|| format!("`{id}` is not in this run's agent catalog"))?;
+        let canceled = || cancel.is_canceled();
+        let context = daruda_acp::preparation::PreparationContext::new(&canceled, notice);
+        let prepared = daruda_acp::launch_env::prepare_adapter(
+            launch,
+            &self.node_install_dir,
+            &mut |_| {},
+            &context,
+        )
+        .map_err(|error| error.to_string())?;
+        self.prepared
+            .borrow_mut()
+            .insert(id.to_owned(), prepared.clone());
+        Ok(prepared)
+    }
+
     /// `agents` is the run's resolved catalog, keyed by the `agent.id` a node
     /// names; `node_install_dir` is where a managed Node.js runtime lands.
     pub fn new(agents: HashMap<String, LaunchSpec>, node_install_dir: PathBuf) -> Self {
@@ -91,6 +112,7 @@ impl AcpRunner {
             node_install_dir,
             grace: CANCEL_GRACE,
             settings_budget: SETTINGS_BUDGET,
+            prepared: RefCell::new(HashMap::new()),
         }
     }
 
@@ -113,21 +135,22 @@ impl AcpRunner {
     /// session that turn ran in. Dropping the handle at the end ends the
     /// connection task, so nothing of this node survives into the next one.
     async fn one_turn(&self, ctx: &RunContext<'_>, agent: &AgentSpec, prompt: &str) -> RunResult {
-        let Some(launch) = self.agents.get(&agent.id) else {
-            return failed(format!("`{}` is not in this run's agent catalog", agent.id));
+        if ctx.cancel.is_canceled() {
+            return failed(CANCELED.to_owned());
+        }
+        let prepared = match self.prepared_adapter(&agent.id, ctx.cancel, &|_| {}) {
+            Ok(prepared) => prepared,
+            Err(error) => return failed(error),
         };
-        // A runtime download inside a node's turn would eat that node's
-        // budget, so the run provisions ahead of the first node and this
-        // callback only ever sees an already-satisfied check.
-        let connected = connect_agent_session(
-            launch.clone(),
-            self.node_install_dir.clone(),
+        let connected = connect_prepared_session(
+            prepared,
             ctx.cwd.to_path_buf(),
+            None,
             agent.mode.clone().into_iter().collect(),
             None,
             None,
             &agent.id,
-            &mut |_| {},
+            Vec::new(),
         );
         let (session, mut events) = match connected {
             Ok(session) => session,
@@ -588,6 +611,14 @@ fn failed(message: String) -> RunResult {
 }
 
 impl NodeRunner for AcpRunner {
+    fn prepare_agent(&self, id: &str, cancel: &CancelToken) -> Result<Vec<String>, String> {
+        let notices = RefCell::new(Vec::new());
+        self.prepared_adapter(id, cancel, &|notice| {
+            notices.borrow_mut().push(notice.to_owned())
+        })?;
+        Ok(notices.into_inner())
+    }
+
     fn run_agent<'a>(
         &'a self,
         ctx: &'a RunContext<'a>,

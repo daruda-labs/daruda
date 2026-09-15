@@ -1,176 +1,66 @@
-//! Final launch assembly for the ACP adapter — GPUI-free.
+//! Prepare a configured adapter without starting its ACP process.
 //!
-//! Turns a [`LaunchSpec`] into the [`AdapterCommand`] that actually gets
-//! spawned: provision a Node.js runtime when the command needs one (delegated
-//! to [`crate::node`]), then remove [`LaunchSpec::strip_env`] from the child's
-//! environment.
-//!
-//! The strip exists because an exported `ANTHROPIC_API_KEY` /
-//! `CLAUDE_CODE_OAUTH_TOKEN` in the app's own environment would silently beat
-//! the managed account's OAuth credentials. `env(1)`'s `-u` is the only
-//! portable way to *remove* a variable from a spawned process, so the strip
-//! materializes as either an [`ENV_BIN`] prefix on a bash-style command or
-//! explicit argv entries inside a JSON stdio config.
-//!
-//! **Ordering is load-bearing**: the strip runs *after* runtime selection,
-//! because an [`ENV_BIN`] prefix hides the `npx`/`node` launcher token from
-//! [`command_needs_node`] and would silently skip Node provisioning.
+//! Known npm adapters retain a concrete Node runtime and an installation lease.
+//! Custom launchers keep their execution path; environment stripping is shared.
 
-use std::path::{Path, PathBuf};
-
-use agent_client_protocol::AcpAgentConfig;
-use agent_client_protocol::schema::v1::McpServer;
-
-use crate::connection::{AdapterCommand, LaunchSpec};
-use crate::node::{NodeError, NodeProgress, command_needs_node, ensure_node};
-
-/// `env(1)`, the only portable way to *remove* a variable from a spawned
-/// process's environment. Absolute on both supported targets (macOS, Linux).
-const ENV_BIN: &str = "/usr/bin/env";
-
-/// `env(1)`'s remove-a-variable flag.
-const ENV_UNSET_FLAG: &str = "-u";
-
-/// Leading character marking an adapter command as a JSON launch config rather
-/// than a shell command line — the same discrimination `AcpAgent::from_str`
-/// makes to pick its parse.
-const JSON_LAUNCH_PREFIX: char = '{';
+use crate::PreparedAdapter;
+use crate::connection::{AcpClientError, AdapterCommand, LaunchSpec};
+use crate::node::{NodeProgress, command_needs_node, ensure_node_with_context};
+use crate::preparation::PreparationContext;
+use std::path::Path;
 
 /// The adapter launch for `launch`: a runtime is provisioned only when the
 /// command needs one, then [`LaunchSpec::strip_env`] is applied to whatever
 /// shape that produced — the one strip site, so no branch can skip it.
 ///
-/// The strip must run *after* runtime selection: the [`ENV_BIN`] prefix it
+/// The strip must run *after* runtime selection: the [`crate::launch_config::ENV_BIN`] prefix it
 /// emits hides the launcher token from [`command_needs_node`].
 pub fn prepare_adapter_command(
     launch: &LaunchSpec,
     install_root: &Path,
     progress: &mut dyn FnMut(NodeProgress),
-) -> Result<AdapterCommand, NodeError> {
-    let selected = if command_needs_node(&launch.command) {
-        ensure_node(install_root, progress)?.wrap_command(&launch.command, install_root)
-    } else {
-        AdapterCommand(launch.command.clone())
-    };
-    Ok(finalize_command(selected, &launch.strip_env))
-}
-
-/// The last rewrite before spawn: remove `strip_env`, and put a JSON command
-/// into the one shape `AcpAgent::from_str` accepts.
-///
-/// A bash-style command only gets an [`ENV_BIN`] prefix, and only when there is
-/// something to strip — an empty `strip_env` returns it byte-identical.
-///
-/// A JSON command is normalized **even with nothing to strip**: `from_str`
-/// deserializes JSON as [`AcpAgentConfig`] (object `env`, `deny_unknown_fields`),
-/// so the registry `distribution` shape daruda accepts — see
-/// [`parse_json_launch`] — has to be translated here or the adapter never
-/// launches. Unparseable JSON passes through so the SDK owns the error message.
-fn finalize_command(adapter: AdapterCommand, strip_env: &[String]) -> AdapterCommand {
-    let trimmed = adapter.0.trim_start();
-    if !trimmed.starts_with(JSON_LAUNCH_PREFIX) {
-        if strip_env.is_empty() {
-            return adapter;
-        }
-        return AdapterCommand(prefix_with_env_unsets(&adapter.0, strip_env));
-    }
-    let Some(config) = parse_json_launch(trimmed) else {
-        return adapter;
-    };
-    // The JSON form has no shell to hold an `/usr/bin/env` prefix, so the
-    // unsets have to be real argv entries. `env`'s own map only *sets* vars;
-    // removing an inherited one still needs `-u`.
-    let (spawn_command, spawn_args) = with_env_unsets_argv(
-        config.command().to_path_buf(),
-        config.arguments().to_vec(),
-        strip_env,
-    );
-    let normalized = AcpAgentConfig::new(spawn_command)
-        .args(spawn_args)
-        .envs(config.environment().clone());
-    // serde can't fail on this owned value.
-    AdapterCommand(serde_json::to_string(&normalized).expect("AcpAgentConfig serializes to JSON"))
-}
-
-/// The launch config a JSON adapter command describes, in the SDK's own shape.
-///
-/// Two forms are accepted. [`AcpAgentConfig`] itself (`env` as an object) is
-/// what the SDK emits and parses. The agent-registry `distribution` shape
-/// (`{"type":"stdio","name":..,"env":[{"name":..,"value":..}]}`) is what agent
-/// registries publish and what daruda documents in `[[agents]]`; it is an
-/// external format that does not track the Rust SDK, so daruda owns the
-/// translation rather than pushing the churn onto users' configs.
-///
-/// `None` for a non-stdio transport (HTTP/SSE — no local child spawns there)
-/// and for JSON matching neither form.
-fn parse_json_launch(json: &str) -> Option<AcpAgentConfig> {
-    if let Ok(config) = serde_json::from_str::<AcpAgentConfig>(json) {
-        return Some(config);
-    }
-    match serde_json::from_str::<McpServer>(json) {
-        Ok(McpServer::Stdio(stdio)) => Some(
-            AcpAgentConfig::new(stdio.command)
-                .args(stdio.args)
-                .envs(stdio.env.into_iter().map(|e| (e.name, e.value))),
-        ),
-        _ => None,
-    }
-}
-
-/// `-u NAME` pairs for `strip_env`, in order — [`ENV_BIN`]'s argv form of
-/// "remove this variable". Empty when nothing is stripped.
-fn env_unset_args(strip_env: &[String]) -> Vec<String> {
-    strip_env
-        .iter()
-        .flat_map(|name| [ENV_UNSET_FLAG.to_string(), name.clone()])
-        .collect()
-}
-
-/// Prefix a bash-style `command` with `/usr/bin/env -u NAME …`, or return it
-/// unchanged when `strip_env` is empty.
-///
-/// The `-u` flags go ahead of `command` — including its leading `NAME=value`
-/// assignments — because `env` stops option parsing at its first operand, so
-/// a `-u` placed after an assignment is taken as the utility to run. Var
-/// names need no quoting: `node`'s env-assignment parser only ever accepts
-/// `[A-Za-z_][A-Za-z0-9_]*`.
-fn prefix_with_env_unsets(command: &str, strip_env: &[String]) -> String {
-    if strip_env.is_empty() {
-        return command.to_string();
-    }
-    format!(
-        "{ENV_BIN} {} {command}",
-        env_unset_args(strip_env).join(" ")
+) -> Result<PreparedAdapter, AcpClientError> {
+    prepare_adapter(
+        launch,
+        install_root,
+        progress,
+        &PreparationContext::default(),
     )
 }
 
-/// The `(command, args)` to spawn so `launcher` runs with `strip_env`
-/// removed. Unchanged when `strip_env` is empty; otherwise [`ENV_BIN`] takes
-/// over as the executable and `launcher` moves into its argv.
-///
-/// The JSON stdio form has no shell to hold an `/usr/bin/env` prefix, so the
-/// unsets have to be real argv entries.
-fn with_env_unsets_argv(
-    launcher: PathBuf,
-    args: Vec<String>,
-    strip_env: &[String],
-) -> (PathBuf, Vec<String>) {
-    if strip_env.is_empty() {
-        return (launcher, args);
-    }
-    let mut argv = env_unset_args(strip_env);
-    argv.push(launcher.to_string_lossy().into_owned());
-    argv.extend(args);
-    (PathBuf::from(ENV_BIN), argv)
+/// Prepare once, then retain this value across all sessions in a flow run.
+pub fn prepare_adapter(
+    launch: &LaunchSpec,
+    install_root: &Path,
+    progress: &mut dyn FnMut(NodeProgress),
+    context: &PreparationContext<'_>,
+) -> Result<PreparedAdapter, AcpClientError> {
+    context.check()?;
+    let npm_adapter = crate::npm_adapter::NpmAdapter::parse(&launch.command);
+    let selected = if let Some(adapter) = npm_adapter {
+        adapter.prepare(install_root, &launch.strip_env, progress, context)?
+    } else if command_needs_node(&launch.command) {
+        ensure_node_with_context(install_root, progress, context)?
+            .wrap_command(&launch.command, install_root)
+            .into()
+    } else {
+        AdapterCommand(launch.command.clone()).into()
+    };
+    context.check()?;
+    Ok(selected.finalize(&launch.strip_env))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::connection::ADAPTER_NPM_PACKAGE;
+    use crate::launch_config::*;
     use crate::node::{NodeRuntime, node_platform};
     use agent_client_protocol::AcpAgent;
+    use agent_client_protocol::AcpAgentConfig;
+    use agent_client_protocol::schema::v1::McpServer;
     use agent_client_protocol::schema::v1::{EnvVariable, McpServerStdio};
+    use std::path::PathBuf;
     use std::str::FromStr;
 
     /// Fixed test `install_root`, distinct from `node_dir` (which itself
@@ -209,7 +99,9 @@ mod tests {
 
     /// [`prepare_adapter_command`] with a no-op progress sink.
     fn prepared(launch: &LaunchSpec, install_root: &Path) -> AdapterCommand {
-        prepare_adapter_command(launch, install_root, &mut |_| {}).expect("no runtime needed")
+        prepare_adapter_command(launch, install_root, &mut |_| {})
+            .expect("no runtime needed")
+            .command()
     }
 
     /// A JSON config config in the agent-registry `distribution` shape — the

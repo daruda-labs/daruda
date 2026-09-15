@@ -257,6 +257,16 @@ mod tests {
         assert!(!banner_offers_retry(&errored(Remedy::Retry), false));
     }
 
+    #[test]
+    fn transport_eof_offers_reconnect_not_reauthentication() {
+        let error = agent_client_protocol::Error::internal_error().data(serde_json::json!({
+            "reason": agent_client_protocol::INCOMING_TRANSPORT_CLOSED_REASON
+        }));
+        let status = errored(daruda_acp::AcpFailure::classify(&error).remedy());
+        assert!(banner_offers_retry(&status, true));
+        assert!(!banner_offers_reauth(&status));
+    }
+
     /// Every non-error status renders its own copy and never a retry button.
     #[test]
     fn banner_offers_no_retry_outside_the_error_status() {

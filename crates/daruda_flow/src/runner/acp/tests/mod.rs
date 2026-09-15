@@ -21,6 +21,27 @@ const SESSION: &str = "s1";
 const HARNESS_GUARD: Duration = Duration::from_secs(10);
 const NEVER_RETURNED: &str = "the runner never returned on its own";
 
+#[test]
+fn prepared_launch_is_reused_without_resolving_the_catalog_again() {
+    let root = tempfile::tempdir().unwrap();
+    let launch = LaunchSpec {
+        command: "sh fake-adapter".into(),
+        strip_env: Vec::new(),
+    };
+    let mut runner = AcpRunner::new(
+        HashMap::from([(AGENT.to_owned(), launch)]),
+        root.path().into(),
+    );
+    let cancel = CancelToken::default();
+    assert!(runner.prepare_agent(AGENT, &cancel).unwrap().is_empty());
+    runner.agents.clear();
+    let prepared = runner.prepared_adapter(AGENT, &cancel, &|_| {}).unwrap();
+    assert_eq!(prepared.command().0, "sh fake-adapter");
+    assert_eq!(runner.prepared.borrow().len(), 1);
+    cancel.cancel();
+    assert!(runner.prepared_adapter(AGENT, &cancel, &|_| {}).is_err());
+}
+
 /// A line-delimited JSON-RPC adapter, which is the whole of what ACP
 /// needs over stdio — so a shell script can stand in for a real agent.
 /// `pre_prompt` emits extra traffic before the turn's reply; `reply` is

@@ -37,6 +37,8 @@ use semver::Version;
 use sha2::{Digest, Sha256};
 
 use crate::connection::AdapterCommand;
+use crate::preparation::PreparationContext;
+use crate::preparation::process::output;
 
 /// Pinned Node.js version for the managed install. A single pinned version keeps
 /// the download URL and integrity check deterministic; bump it periodically to a
@@ -49,11 +51,18 @@ const MANAGED_NODE_VERSION: &str = "v24.11.0";
 /// one-time managed download.
 const MIN_NODE_VERSION: Version = Version::new(20, 0, 0);
 
+#[cfg(test)]
+mod cache_tests;
+pub(crate) mod resolved;
+
 /// Base URL for the official Node.js distribution.
 const NODE_DIST_BASE: &str = "https://nodejs.org/dist";
 
 /// Overall timeout for the (large) tarball / checksum downloads.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+const DOWNLOAD_IO_TIMEOUT: Duration = Duration::from_secs(5);
+const DOWNLOAD_CHUNK: usize = 64 * 1024;
+const INSTALL_POLL: Duration = Duration::from_millis(25);
 
 /// Serializes managed installs across concurrent lane connections so two panes
 /// starting at once download once, not twice (the second waiter re-checks the
@@ -295,6 +304,9 @@ pub enum NodeProgress {
 /// toast + status line by the host), so messages name the remedy.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
+    /// The host closed the pane or stopped the flow during preparation.
+    #[error("runtime preparation canceled")]
+    Canceled,
     /// The current OS/architecture has no managed Node.js build.
     #[error(
         "no managed Node.js build for this platform ({0}); install Node.js from https://nodejs.org and restart daruda"
@@ -328,7 +340,16 @@ pub fn ensure_node(
     install_root: &Path,
     progress: &mut dyn FnMut(NodeProgress),
 ) -> Result<NodeRuntime, NodeError> {
-    if detect_system_node() {
+    ensure_node_with_context(install_root, progress, &PreparationContext::default())
+}
+
+pub(crate) fn ensure_node_with_context(
+    install_root: &Path,
+    progress: &mut dyn FnMut(NodeProgress),
+    context: &PreparationContext<'_>,
+) -> Result<NodeRuntime, NodeError> {
+    checkpoint(context)?;
+    if detect_system_node_with_context(context) {
         progress(NodeProgress::UsingSystemNode);
         return Ok(NodeRuntime::System);
     }
@@ -337,11 +358,12 @@ pub fn ensure_node(
     let node_dir = managed_node_dir(install_root, os, arch);
 
     progress(NodeProgress::CheckingCache);
-    if managed_cache_valid(&node_dir) {
+    checkpoint(context)?;
+    if managed_cache_valid_with_context(&node_dir, context)? {
         return Ok(NodeRuntime::Managed { node_dir });
     }
 
-    install_managed(install_root, os, arch, progress)
+    install_managed_with_context(install_root, os, arch, progress, context)
 }
 
 /// `true` if a system `node` is on `PATH`, at least [`MIN_NODE_VERSION`], and
@@ -353,7 +375,12 @@ pub fn ensure_node(
 /// Code engine) — which then hangs silently under translation. Rejecting a
 /// mismatched system Node.js here routes to the managed download instead,
 /// which [`node_platform`] always builds for the real host arch.
+#[cfg(test)]
 fn detect_system_node() -> bool {
+    detect_system_node_with_context(&PreparationContext::default())
+}
+
+fn detect_system_node_with_context(context: &PreparationContext<'_>) -> bool {
     let Ok(node) = which::which("node") else {
         return false;
     };
@@ -361,34 +388,39 @@ fn detect_system_node() -> bool {
     if which::which("npx").is_err() {
         return false;
     }
-    let Ok(output) = std::process::Command::new(&node).arg("--version").output() else {
+    let Ok(version) = output(std::process::Command::new(&node).arg("--version"), context) else {
         return false;
     };
-    if !output.status.success() {
-        return false;
-    }
-    let version_ok = match parse_node_version(&String::from_utf8_lossy(&output.stdout)) {
+    let version_ok = match parse_node_version(&version) {
         Some(version) => version >= MIN_NODE_VERSION,
         None => false,
     };
-    version_ok && system_node_arch_matches_host(&node)
+    version_ok && system_node_arch_matches_host_with_context(&node, context)
 }
 
 /// `true` if `node`'s own `process.arch` matches the host's actual CPU
 /// architecture (per [`node_platform`]'s `(os, arch)` mapping). `false` on
 /// any probe failure — an architecture we can't confirm is treated as a
 /// mismatch, favoring the always-correct managed download over a guess.
+#[cfg(test)]
 fn system_node_arch_matches_host(node: &Path) -> bool {
+    system_node_arch_matches_host_with_context(node, &PreparationContext::default())
+}
+
+fn system_node_arch_matches_host_with_context(
+    node: &Path,
+    context: &PreparationContext<'_>,
+) -> bool {
     let Ok((_, expected_arch)) = node_platform() else {
         return false;
     };
-    let Ok(output) = std::process::Command::new(node)
-        .args(["-e", "process.stdout.write(process.arch)"])
-        .output()
-    else {
+    let Ok(arch) = output(
+        std::process::Command::new(node).args(["-e", "process.stdout.write(process.arch)"]),
+        context,
+    ) else {
         return false;
     };
-    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == expected_arch
+    arch.trim() == expected_arch
 }
 
 /// Parse `node --version` output (`v24.11.0\n`) into a [`Version`].
@@ -501,11 +533,24 @@ fn node_binary(node_dir: &Path) -> PathBuf {
 
 /// `true` if a managed install exists and its `node` runs. Cheap validity gate
 /// that also self-heals a truncated / corrupt extraction (it re-downloads).
+#[cfg(test)]
 fn managed_cache_valid(node_dir: &Path) -> bool {
+    managed_cache_valid_with_context(node_dir, &PreparationContext::default())
+        .expect("uncancelled cache probe")
+}
+
+fn managed_cache_valid_with_context(
+    node_dir: &Path,
+    context: &PreparationContext<'_>,
+) -> Result<bool, NodeError> {
     let node = node_binary(node_dir);
-    match std::process::Command::new(&node).arg("--version").output() {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
+    let result = output(std::process::Command::new(&node).arg("--version"), context);
+    checkpoint(context)?;
+    match result {
+        Err(error) if error.kind == crate::preparation::PreparationKind::Canceled => {
+            Err(NodeError::Canceled)
+        }
+        result => Ok(result.is_ok()),
     }
 }
 
@@ -513,17 +558,52 @@ fn managed_cache_valid(node_dir: &Path) -> bool {
 /// returning the [`NodeRuntime::Managed`]. Serialized by [`INSTALL_LOCK`]; the
 /// cache is re-checked after acquiring so a queued caller reuses a just-finished
 /// install instead of downloading again.
+#[cfg(test)]
 fn install_managed(
     install_root: &Path,
     os: &str,
     arch: &str,
     progress: &mut dyn FnMut(NodeProgress),
 ) -> Result<NodeRuntime, NodeError> {
-    let _guard = INSTALL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    install_managed_with_context(
+        install_root,
+        os,
+        arch,
+        progress,
+        &PreparationContext::default(),
+    )
+}
+
+fn checkpoint(context: &PreparationContext<'_>) -> Result<(), NodeError> {
+    context.check().map_err(|_| NodeError::Canceled)
+}
+
+fn install_managed_with_context(
+    install_root: &Path,
+    os: &str,
+    arch: &str,
+    progress: &mut dyn FnMut(NodeProgress),
+    context: &PreparationContext<'_>,
+) -> Result<NodeRuntime, NodeError> {
+    let started = std::time::Instant::now();
+    let _guard = loop {
+        checkpoint(context)?;
+        match INSTALL_LOCK.try_lock() {
+            Ok(guard) => break guard,
+            Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        if started.elapsed() >= DOWNLOAD_TIMEOUT {
+            return Err(NodeError::Download(
+                "waiting for the runtime install lock timed out".into(),
+            ));
+        }
+        std::thread::sleep(INSTALL_POLL);
+    };
 
     let node_dir = managed_node_dir(install_root, os, arch);
     progress(NodeProgress::CheckingCache);
-    if managed_cache_valid(&node_dir) {
+    if managed_cache_valid_with_context(&node_dir, context)? {
         return Ok(NodeRuntime::Managed { node_dir });
     }
 
@@ -532,10 +612,11 @@ fn install_managed(
     let shasums_url = format!("{NODE_DIST_BASE}/{MANAGED_NODE_VERSION}/SHASUMS256.txt");
 
     progress(NodeProgress::Downloading);
-    let archive = http_get_bytes(&archive_url)?;
+    let archive = http_get_bytes(&archive_url, context)?;
 
     progress(NodeProgress::Verifying);
-    let shasums = http_get_string(&shasums_url)?;
+    let shasums = String::from_utf8(http_get_bytes(&shasums_url, context)?)
+        .map_err(|error| NodeError::Download(error.to_string()))?;
     let expected = find_checksum(&shasums, &file_name)
         .ok_or_else(|| NodeError::Download(format!("no checksum listed for {file_name}")))?;
     let actual = sha256_hex(&archive);
@@ -561,11 +642,12 @@ fn install_managed(
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging)
         .map_err(|e| NodeError::Extract(format!("creating staging dir: {e}")))?;
-    let result = publish_managed(&archive, os, arch, &staging, &node_dir);
+    let result = publish_managed(&archive, os, arch, &staging, &node_dir, context);
     let _ = std::fs::remove_dir_all(&staging);
     result?;
 
-    if !managed_cache_valid(&node_dir) {
+    checkpoint(context)?;
+    if !managed_cache_valid_with_context(&node_dir, context)? {
         return Err(NodeError::Extract(
             "the extracted Node.js did not run".to_string(),
         ));
@@ -585,45 +667,62 @@ fn publish_managed(
     arch: &str,
     staging: &Path,
     node_dir: &Path,
+    context: &PreparationContext<'_>,
 ) -> Result<(), NodeError> {
-    extract_tar_gz(archive, staging)?;
-    let extracted = staging.join(managed_folder_name(os, arch));
-    if node_dir.exists() && !managed_cache_valid(node_dir) {
+    extract_tar_gz_with_context(archive, staging, context)?;
+    publish_extracted(
+        &staging.join(managed_folder_name(os, arch)),
+        node_dir,
+        context,
+    )
+}
+
+fn publish_extracted(
+    extracted: &Path,
+    node_dir: &Path,
+    context: &PreparationContext<'_>,
+) -> Result<(), NodeError> {
+    checkpoint(context)?;
+    if node_dir.exists() && !managed_cache_valid_with_context(node_dir, context)? {
+        checkpoint(context)?;
         let _ = std::fs::remove_dir_all(node_dir);
     }
-    match std::fs::rename(&extracted, node_dir) {
+    checkpoint(context)?;
+    match std::fs::rename(extracted, node_dir) {
         Ok(()) => Ok(()),
         // Another process published a valid install between our checks and the
         // rename — keep theirs rather than fail.
-        Err(_) if managed_cache_valid(node_dir) => Ok(()),
+        Err(_) if managed_cache_valid_with_context(node_dir, context)? => Ok(()),
         Err(e) => Err(NodeError::Extract(format!("publishing node: {e}"))),
     }
 }
 
 /// GET `url` and return the body bytes (no size cap — the tarball is tens of MB).
-fn http_get_bytes(url: &str) -> Result<Vec<u8>, NodeError> {
-    let agent = ureq::AgentBuilder::new().timeout(DOWNLOAD_TIMEOUT).build();
+fn http_get_bytes(url: &str, context: &PreparationContext<'_>) -> Result<Vec<u8>, NodeError> {
+    checkpoint(context)?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout(DOWNLOAD_TIMEOUT)
+        .timeout_connect(DOWNLOAD_IO_TIMEOUT)
+        .timeout_read(DOWNLOAD_IO_TIMEOUT)
+        .build();
     let response = agent
         .get(url)
         .call()
         .map_err(|e| NodeError::Download(e.to_string()))?;
     let mut buf = Vec::new();
-    response
-        .into_reader()
-        .read_to_end(&mut buf)
-        .map_err(|e| NodeError::Download(e.to_string()))?;
+    let mut reader = response.into_reader();
+    let mut chunk = [0; DOWNLOAD_CHUNK];
+    loop {
+        checkpoint(context)?;
+        let n = reader
+            .read(&mut chunk)
+            .map_err(|e| NodeError::Download(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
     Ok(buf)
-}
-
-/// GET `url` and return the body as a string (checksums file — small).
-fn http_get_string(url: &str) -> Result<String, NodeError> {
-    let agent = ureq::AgentBuilder::new().timeout(DOWNLOAD_TIMEOUT).build();
-    agent
-        .get(url)
-        .call()
-        .map_err(|e| NodeError::Download(e.to_string()))?
-        .into_string()
-        .map_err(|e| NodeError::Download(e.to_string()))
 }
 
 /// Find the checksum for `file_name` in a `SHASUMS256.txt` body (each line is
@@ -668,19 +767,30 @@ fn prepend_to_path(bin_dir: &Path) -> String {
 /// `tar`/`flate2` crate for the one extraction, mirroring the blocking git-CLI
 /// layer. The bytes are staged to a temp file (same filesystem as `dest`) since
 /// `tar` reads a path.
+#[cfg(test)]
 fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<(), NodeError> {
+    extract_tar_gz_with_context(bytes, dest, &PreparationContext::default())
+}
+
+fn extract_tar_gz_with_context(
+    bytes: &[u8],
+    dest: &Path,
+    context: &PreparationContext<'_>,
+) -> Result<(), NodeError> {
     let tmp = dest.join(format!(".node-download-{}.tar.gz", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| NodeError::Extract(format!("staging archive: {e}")))?;
-    let status = std::process::Command::new("tar")
-        .arg("-xzf")
-        .arg(&tmp)
-        .arg("-C")
-        .arg(dest)
-        .status();
+    let result = output(
+        std::process::Command::new("tar")
+            .arg("-xzf")
+            .arg(&tmp)
+            .arg("-C")
+            .arg(dest),
+        context,
+    );
     let _ = std::fs::remove_file(&tmp);
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(NodeError::Extract(format!("tar exited with {status}"))),
+    checkpoint(context)?;
+    match result {
+        Ok(_) => Ok(()),
         Err(e) => Err(NodeError::Extract(format!("running tar: {e}"))),
     }
 }
@@ -1083,6 +1193,7 @@ mod tests {
     fn min_version_gate_rejects_old_and_accepts_current() {
         assert!(parse_node_version("v18.20.0").unwrap() < MIN_NODE_VERSION);
         assert!(parse_node_version("v20.0.0").unwrap() >= MIN_NODE_VERSION);
+        assert!(parse_node_version("v22.0.0").unwrap() >= MIN_NODE_VERSION);
         assert!(parse_node_version("v24.11.0").unwrap() >= MIN_NODE_VERSION);
     }
 

@@ -87,6 +87,37 @@ newest Rust schema (`1.1.0+`) models them as `SessionConfigOption` (category
 reasoning-effort selection invisible to the client — so both sides must be current
 for the feature to work end to end.
 
+## Adapter preparation and lifetime
+
+- `launch_env::prepare_adapter` resolves a concrete runtime and returns a
+  `PreparedAdapter`; `connect_prepared_session` only starts ACP. A flow keeps
+  its prepared adapters for the whole run, so individual nodes do not resolve
+  versions or install packages again.
+- Supported Claude/Codex npm adapters run as `node <validated JS entry>`.
+  Unknown packages, remote launchers, and explicit executable overrides retain
+  their configured launch path.
+- Each new preparation resolves `@latest` or a version range. Only network
+  errors/timeouts may reuse the selector's last successfully installed version;
+  cancellation, integrity, and configuration errors never trigger fallback.
+  The host records fallback and cleanup notices in its log or flow report.
+- Installation locks are per package and shared across profiles/processes.
+  A prepared adapter and every connection using it hold a shared installation
+  lease. Cleanup retains three recent installations and one quarantined tree
+  per package, plus any installations still leased by a running session.
+- Node selection captures its actual executable, version, architecture, and
+  adjacent npm entry. The supported JS path requires Node 22+, independently
+  of the legacy launcher's Node 20 floor; it does not require npx.
+  Lookup and identity probes honor the launch environment and its removals,
+  including an explicit `PATH` override.
+- Managed npm installs ignore workspace-local `.npmrc` files. User/global npm
+  settings and explicit launch environment overrides still apply.
+  npm's download cache is temporary unless the launch explicitly supplies its
+  own `npm_config_cache`; user-owned caches are never garbage-collected here.
+- Preparation workers accept host cancellation. npm and archive extraction run
+  in their own process groups with bounded output; cancellation/timeouts stop
+  the tree before staging is removed. Managed HTTP reads check cancellation
+  between chunks and use bounded connection/read waits.
+
 ## Wire tap — reading a capture
 
 Every raw JSON-RPC line is tapped to a file in debug builds (`wire_log.rs`; the
