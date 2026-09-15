@@ -87,8 +87,6 @@ use command::picker_key::picker_keystroke;
 
 use daruda_terminal::TerminalConfig;
 
-use main_area::agent_chat_pane::telegram_ops::{ReleasePolicy, partition_deferred};
-
 // ----------------------------------------------------------------
 // Actions
 // ----------------------------------------------------------------
@@ -578,12 +576,6 @@ pub struct Workspace {
     /// `detect_accessed_entities` lost-wakeup, see
     /// `lane_switch_scroll_dead_rootcause`). Runtime-only; never serialized.
     pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
-    /// Presence-gated Telegram pings held back while the user is at this
-    /// window, keyed by the firing pane; drained by `flush_deferred_telegram`.
-    pub(in crate::workspace) deferred_telegram: std::collections::HashMap<
-        main_area::pane_tree::PaneId,
-        Vec<main_area::agent_chat_pane::telegram_ops::DeferredRelay>,
-    >,
     /// True while a repo-level git operation (commit / amend / push / pull /
     /// fetch / init) is running — [`GitLock::Repo`]. Prevents duplicate
     /// submissions when the user double-clicks Commit/Push. Written only by
@@ -1285,7 +1277,6 @@ impl Workspace {
             session_host_tombstones: config.session_host_tombstones.clone(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
-            deferred_telegram: std::collections::HashMap::new(),
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
@@ -1917,80 +1908,6 @@ impl Workspace {
             gpui::App::notify(cx, *id);
         }
         self.agent_pulse_prev = busy_ids;
-    }
-
-    /// Re-evaluate every pane's deferred Telegram queue against the current
-    /// presence signal. Runs on the periodic flush pump; each entry flushes
-    /// individually once its own quiet window clears (see `ready_to_deliver`)
-    /// rather than the whole map draining at once.
-    pub(crate) fn flush_deferred_telegram(&mut self, cx: &mut Context<Self>) {
-        if self.deferred_telegram.is_empty() {
-            return;
-        }
-        let quiet_secs = self.telegram.active_idle_secs;
-        if !self.telegram.defer_while_active || quiet_secs == 0 {
-            self.deliver_deferred_telegram(ReleasePolicy::ReleaseAll, cx);
-            return;
-        }
-        let idle_secs = crate::platform::attention::system_idle_seconds();
-        let policy = ReleasePolicy::for_presence(
-            crate::app_presence::snapshot(cx),
-            std::time::Instant::now(),
-            std::time::Duration::from_secs(self.telegram.away_grace_secs),
-            idle_secs,
-            quiet_secs,
-        );
-        self.deliver_deferred_telegram(policy, cx);
-    }
-
-    /// Split out so tests can drive delivery without controlling live OS
-    /// presence signals. For each pane's queue: drops permission pings whose
-    /// request is no longer the pane's live pending permission, delivers
-    /// entries `ready_to_deliver` clears, and re-queues the rest for a later
-    /// tick. Skips (and drops) panes that have since closed.
-    pub(in crate::workspace) fn deliver_deferred_telegram(
-        &mut self,
-        policy: ReleasePolicy,
-        cx: &mut Context<Self>,
-    ) {
-        let now = std::time::Instant::now();
-        let pending = std::mem::take(&mut self.deferred_telegram);
-        crate::telegram::trace::delivery("defer.flush", || {
-            format!(
-                "panes={} {} active_lane={}",
-                pending.len(),
-                policy.trace(crate::app_presence::snapshot(cx).away_secs(now)),
-                crate::telegram::trace::lane_ref(self.active_ref())
-            )
-        });
-        for (pane_id, queue) in pending {
-            let Some(view) = self.agent_chat_view(pane_id).cloned() else {
-                crate::telegram::trace::delivery("defer.pane_gone", || {
-                    format!("pane={pane_id} dropped={}", queue.len())
-                });
-                continue;
-            };
-            let held = queue.len();
-            let live_perms = view.read(cx).pending_permissions.clone();
-            let (ready, still_holding) = partition_deferred(queue, &live_perms, now, policy);
-            // `held - ready - holding` is the third outcome `partition_deferred`
-            // has and neither vector shows: a permission ping whose request was
-            // answered in-app, dropped rather than delivered.
-            crate::telegram::trace::delivery("defer.partition", || {
-                format!(
-                    "pane={pane_id} held={held} ready={} holding={} dropped={}",
-                    ready.len(),
-                    still_holding.len(),
-                    held - ready.len() - still_holding.len()
-                )
-            });
-            for entry in ready {
-                self.relay_to_telegram(pane_id, entry.header, entry.tail, entry.permission, cx);
-            }
-            if !still_holding.is_empty() {
-                self.deferred_telegram.insert(pane_id, still_holding);
-            }
-        }
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

@@ -22,6 +22,7 @@ pub mod notifications;
 pub mod orchestrator;
 pub mod panels;
 pub mod ports;
+pub mod presence;
 pub mod project;
 pub mod render;
 pub mod scrollback;
@@ -70,6 +71,7 @@ pub use notifications::NotificationsConfig;
 pub use orchestrator::OrchestratorConfig;
 pub use panels::PanelsConfig;
 pub use ports::PortsConfig;
+pub use presence::PresenceConfig;
 pub use project::{
     ProjectConfig, project_config_dir, project_config_dir_in, project_config_path,
     project_config_path_in, project_id,
@@ -168,6 +170,7 @@ pub struct Config {
     #[serde(default)]
     pub session_host_tombstones: Vec<SessionHostTombstone>,
     pub update: UpdateConfig,
+    pub presence: PresenceConfig,
     pub telegram: TelegramConfig,
     pub orchestrator: OrchestratorConfig,
 }
@@ -211,6 +214,7 @@ impl Default for Config {
             session_hosts: Vec::new(),
             session_host_tombstones: Vec::new(),
             update: Default::default(),
+            presence: Default::default(),
             telegram: Default::default(),
             orchestrator: Default::default(),
         }
@@ -228,7 +232,7 @@ impl Config {
     pub fn load_from(path: &std::path::Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(text) => {
-                let mut cfg: Self = toml::from_str(&text).unwrap_or_default();
+                let mut cfg = deserialize_config(&text).unwrap_or_default();
                 cfg.clamp();
                 cfg
             }
@@ -252,6 +256,7 @@ impl Config {
         self.render.clamp();
         self.agent.clamp();
         self.status_bar.clamp();
+        self.presence.clamp();
         // A missing `[[agents]]` is handled by the serde field default, and the
         // manual `Config::default()` (used on load errors) seeds the Claude
         // default directly (since a232e44). This guard exists for the remaining
@@ -514,7 +519,7 @@ fn apply_settings_patch_to_inner(
         remove_legacy_agent_keys_from(&mut doc, &config);
 
         let text = doc.to_string();
-        let mut written: Config = toml::from_str(&text).map_err(|e| {
+        let mut written = deserialize_config(&text).map_err(|e| {
             SettingsPatchApplyError::Persistence(format!(
                 "written config could not be reloaded: {e}"
             ))
@@ -695,20 +700,32 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         remove_legacy_agent_keys(t);
     });
 
+    patch_section(&mut doc, "presence", |t| {
+        t.insert(
+            "away_grace_secs",
+            toml_edit::value(config.presence.away_grace_secs as i64),
+        );
+        t.insert(
+            "away_idle_secs",
+            toml_edit::value(config.presence.away_idle_secs as i64),
+        );
+        t.insert(
+            "away_idle_foreground_secs",
+            toml_edit::value(config.presence.away_idle_foreground_secs as i64),
+        );
+    });
+
     patch_section(&mut doc, "telegram", |t| {
         t.insert("enabled", toml_edit::value(config.telegram.enabled));
         t.insert(
-            "defer_while_active",
-            toml_edit::value(config.telegram.defer_while_active),
+            "only_when_away",
+            toml_edit::value(config.telegram.only_when_away),
         );
-        t.insert(
-            "active_idle_secs",
-            toml_edit::value(config.telegram.active_idle_secs as i64),
-        );
-        t.insert(
-            "away_grace_secs",
-            toml_edit::value(config.telegram.away_grace_secs as i64),
-        );
+        // Superseded by `only_when_away` + the `[presence]` section; leaving
+        // them behind would let a stale value read as live configuration.
+        for legacy in ["defer_while_active", "active_idle_secs", "away_grace_secs"] {
+            t.remove(legacy);
+        }
         match config.telegram.authorized_chat_id {
             Some(id) => {
                 t.insert("authorized_chat_id", toml_edit::value(id));
@@ -842,11 +859,17 @@ fn read_config_text(path: &std::path::Path) -> Result<String, String> {
     }
 }
 
+fn deserialize_config(text: &str) -> Result<Config, toml::de::Error> {
+    let mut document = toml::from_str::<toml::Table>(text)?;
+    telegram::migrate_legacy_timing(&mut document);
+    document.try_into()
+}
+
 fn parse_config_text(text: &str) -> Result<Config, SettingsPatchApplyError> {
     let mut config = if text.trim().is_empty() {
         Config::default()
     } else {
-        toml::from_str::<Config>(text).map_err(|e| {
+        deserialize_config(text).map_err(|e| {
             SettingsPatchApplyError::Persistence(format!(
                 "existing config has invalid settings: {e}"
             ))

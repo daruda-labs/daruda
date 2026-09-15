@@ -6,12 +6,10 @@
 //! (permission wait) and `fire_activity_completion` (turn completion) tee points
 //! call into this file's `relay_*` methods; both are `impl Workspace` blocks.
 
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui::Context;
 
-use crate::platform::presence::Presence;
 use crate::surface::strings as s;
 use crate::telegram::bridge::BotPermissionOutcome;
 use crate::telegram::bridge::TelegramTail;
@@ -79,190 +77,6 @@ fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
     tail
 }
 
-/// Which relay a deferred entry represents. `Permission` carries the request id
-/// so a late-delivered ping can be dropped if that request was already resolved.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum DeferKind {
-    Completion,
-    PostTurn,
-    Permission { perm_id: u64 },
-}
-
-/// A composed Telegram ping held back because the user was present when it fired.
-/// `queued_at` anchors [`ready_to_deliver`]'s quiet-window check to *this ping's
-/// own* settle time rather than to whatever raw idle streak preceded it.
-#[derive(Clone)]
-pub(in crate::workspace) struct DeferredRelay {
-    pub kind: DeferKind,
-    pub header: String,
-    pub tail: TelegramTail,
-    pub permission: Option<crate::telegram::bridge::PermissionPromptRef>,
-    pub queued_at: std::time::Instant,
-}
-
-/// Cap on entries held per pane. `Completion` is deduped to at most one by
-/// [`push_deferred`], but `PostTurn`/`Permission` accumulate freely — without a
-/// bound, a pane that stays continuously present (never triggers a flush) could
-/// grow this Vec without limit. Oldest entries are evicted first, mirroring
-/// `BridgeCore`'s `SENT_PINGS_CAP` eviction in `telegram::bridge`.
-const MAX_DEFERRED_PER_PANE: usize = 20;
-
-/// Why a held ping may go out on this flush tick. These were one
-/// `app_active: bool`, which had to carry both "holding is switched off" and
-/// "nobody is at the app" — a conflation that let a single presence sample
-/// stand in for a decision it was never meant to make.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::workspace) enum ReleasePolicy {
-    /// Holding is off: the feature is disabled, or the quiet window is zero.
-    /// Setting it to zero therefore drains existing queues on the next flush
-    /// rather than leaving an always-ready but still-held foreground queue.
-    ReleaseAll,
-    /// Continuous absence has cleared the grace window.
-    /// `idle_secs` does not gate this — it is carried for the trace, where it
-    /// is the reading that says whether the user was still at the machine.
-    Away { idle_secs: f64 },
-    /// Absence is not confirmed; each ping waits out its own quiet window.
-    Present { idle_secs: f64, quiet_secs: u64 },
-}
-
-impl ReleasePolicy {
-    pub(in crate::workspace) fn for_presence(
-        presence: Presence,
-        now: Instant,
-        grace: Duration,
-        idle_secs: f64,
-        quiet_secs: u64,
-    ) -> Self {
-        if presence.away_for_at_least(grace, now) {
-            Self::Away { idle_secs }
-        } else {
-            Self::Present {
-                idle_secs,
-                quiet_secs,
-            }
-        }
-    }
-
-    /// Trace rendering. `app_active` / `idle_secs` stay in the line so older
-    /// readers still parse it; `policy` names which reason actually applied.
-    pub(in crate::workspace) fn trace(self, away_secs: Option<f64>) -> String {
-        match self {
-            Self::ReleaseAll => "policy=release_all app_active=none".to_string(),
-            Self::Away { idle_secs } => {
-                format!(
-                    "policy=away app_active=false idle_secs={idle_secs:.0} away_secs={away_secs:?}"
-                )
-            }
-            Self::Present {
-                idle_secs,
-                quiet_secs,
-            } => format!(
-                "policy=present app_active={} idle_secs={idle_secs:.0} \
-                 quiet_secs={quiet_secs} away_secs={away_secs:?}",
-                away_secs.is_none()
-            ),
-        }
-    }
-}
-
-/// Hold a presence-gated relay instead of sending now: the feature is on, the
-/// user has not been confirmed away, and the quiet window is positive.
-/// Whether a *held* ping is later actually delivered is decided per-entry by
-/// [`ready_to_deliver`] — this only gates whether it goes into the queue at
-/// all. Pure so it is unit-testable without a live `NSApplication`.
-pub(in crate::workspace) fn should_defer_relay(
-    enabled: bool,
-    confirmed_away: bool,
-    quiet_secs: u64,
-) -> bool {
-    enabled && !confirmed_away && quiet_secs > 0
-}
-
-/// Whether a held ping, queued at `queued_at`, is ready to actually go out now.
-/// An absent user delivers immediately regardless of age — there's no reason to
-/// keep waiting once they're gone. While they are still here, delivery requires
-/// BOTH: at least `quiet_secs` of real time since *this* ping was queued, AND
-/// at least `quiet_secs` of current system-input idleness — i.e. a full quiet
-/// window that starts at this ping's own settle time, not at whatever idle
-/// streak happened to precede it (a long turn the user watches without touching
-/// input must not itself burn down the window). Pure so it is unit-testable
-/// without a live `NSApplication`/HID query.
-pub(in crate::workspace) fn ready_to_deliver(
-    queued_at: std::time::Instant,
-    now: std::time::Instant,
-    policy: ReleasePolicy,
-) -> bool {
-    let ReleasePolicy::Present {
-        idle_secs,
-        quiet_secs,
-    } = policy
-    else {
-        return true;
-    };
-    let quiet_secs = quiet_secs as f64;
-    let elapsed_since_queued = now.saturating_duration_since(queued_at).as_secs_f64();
-    elapsed_since_queued >= quiet_secs && idle_secs >= quiet_secs
-}
-
-/// Append a deferred relay to a pane's pending queue, keeping at most one
-/// pending `Completion` (a newer completion supersedes an older one's "last
-/// response"); post-turn deltas and permissions accumulate, bounded by
-/// [`MAX_DEFERRED_PER_PANE`] (oldest evicted first).
-fn push_deferred(pane_id: PaneId, queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
-    if entry.kind == DeferKind::Completion {
-        let before = queue.len();
-        queue.retain(|e| e.kind != DeferKind::Completion);
-        let superseded = before - queue.len();
-        if superseded > 0 {
-            trace::state("defer.superseded", || {
-                format!("pane={pane_id} dropped={superseded}")
-            });
-        }
-    }
-    queue.push(entry);
-    let mut evicted = 0usize;
-    while queue.len() > MAX_DEFERRED_PER_PANE {
-        queue.remove(0);
-        evicted += 1;
-    }
-    if evicted > 0 {
-        trace::state("defer.evicted", || {
-            format!("pane={pane_id} dropped={evicted} cap={MAX_DEFERRED_PER_PANE}")
-        });
-    }
-    trace::state("defer.held", || {
-        format!("pane={pane_id} depth={}", queue.len())
-    });
-}
-
-/// Splits a pane's deferred queue into `(ready, still_holding)`: a permission
-/// ping whose `perm_id` is no longer outstanding (resolved or cancelled
-/// in-app) is dropped outright — never delivered, never re-queued. Of the
-/// rest, an entry moves to `ready` when [`ready_to_deliver`] says so; anything
-/// not yet ready is returned in `still_holding` for a later flush tick.
-pub(in crate::workspace) fn partition_deferred(
-    queue: Vec<DeferredRelay>,
-    live_perms: &HashSet<u64>,
-    now: std::time::Instant,
-    policy: ReleasePolicy,
-) -> (Vec<DeferredRelay>, Vec<DeferredRelay>) {
-    let mut ready = Vec::new();
-    let mut still_holding = Vec::new();
-    for entry in queue {
-        if let DeferKind::Permission { perm_id } = entry.kind
-            && !live_perms.contains(&perm_id)
-        {
-            continue;
-        }
-        if ready_to_deliver(entry.queued_at, now, policy) {
-            ready.push(entry);
-        } else {
-            still_holding.push(entry);
-        }
-    }
-    (ready, still_holding)
-}
-
 /// Build one Telegram button per permission choice, in the same order and with
 /// the same labels the in-app card uses (the same `daruda_acp::PermissionChoice`
 /// list). A richer option set (e.g. codex-acp's "Allow Once" / "Allow for
@@ -288,6 +102,25 @@ fn permission_buttons(
                 }
             };
             (o.name.clone(), decision)
+        })
+        .collect()
+}
+
+/// The pane's unresolved permission cards the phone has not been shown, in
+/// card order. Cloned rather than borrowed because relaying needs `&mut
+/// Workspace` while the view read is still live.
+fn untold_permissions(view: &super::view::AgentChatView) -> Vec<daruda_acp::PermissionItem> {
+    view.items
+        .iter()
+        .filter_map(|item| match item {
+            daruda_acp::ChatItem::Permission(p)
+                if p.resolved.is_none()
+                    && view.pending_permissions.contains(&p.id)
+                    && !view.permissions_told_to_phone.contains(&p.id) =>
+            {
+                Some(p.clone())
+            }
+            _ => None,
         })
         .collect()
 }
@@ -440,64 +273,125 @@ impl Workspace {
         let tail = permission_wait_tail(tool_title, raw_input_summary);
         let header = self.pane_title(pane_id, cx);
         let permission = Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons });
-        if is_telegram_first_response {
+        let told = if is_telegram_first_response {
             self.relay_to_telegram(pane_id, header, TelegramTail::Plain(tail), permission, cx);
+            true
         } else {
-            self.relay_or_defer_to_telegram(
+            self.relay_when_presence_allows(
                 pane_id,
-                DeferKind::Permission { perm_id },
                 header,
                 TelegramTail::Plain(tail),
                 permission,
                 cx,
-            );
+            )
+        };
+        if told {
+            self.mark_permission_told_to_phone(pane_id, perm_id, cx);
+        }
+    }
+
+    /// Record that the phone has been shown this permission, so the periodic
+    /// re-ask leaves it alone.
+    fn mark_permission_told_to_phone(&self, pane_id: PaneId, perm_id: u64, cx: &mut Context<Self>) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, _| {
+            v.permissions_told_to_phone.insert(perm_id);
+        });
+    }
+
+    /// Re-offer permission prompts the phone has never been shown, for every
+    /// pane whose request is still outstanding.
+    ///
+    /// This is not the deferral queue coming back. A completion ping reports a
+    /// past event, so holding one and flushing it later delivers something
+    /// stale; a permission request is a *live blocking state* — the agent is
+    /// stopped until someone answers. A request still outstanding when absence
+    /// is first detected is as true then as when it fired, so relaying it is a
+    /// fresh ping about the present, not a late one about the past. Nothing is
+    /// stored but the request id: the text is recomposed from the live card,
+    /// so a resolved request simply stops appearing.
+    ///
+    /// Level-triggered on the periodic pump, mirroring
+    /// [`Self::flush_telegram_first_response_fallbacks`].
+    pub(crate) fn relay_outstanding_permissions(&mut self, cx: &mut Context<Self>) {
+        let panes: Vec<PaneId> = self.every_agent_chat().map(|(id, _)| id).collect();
+        for pane_id in panes {
+            let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+                continue;
+            };
+            // Drop bookkeeping for requests that have since been answered, so
+            // the set cannot outgrow the outstanding ones.
+            let untold = view.update(cx, |v, _| {
+                v.permissions_told_to_phone
+                    .retain(|id| v.pending_permissions.contains(id));
+                untold_permissions(v)
+            });
+            for prompt in untold {
+                self.relay_permission_wait_to_telegram(
+                    pane_id,
+                    prompt.id,
+                    &prompt.options,
+                    prompt.tool_title.as_deref(),
+                    prompt.raw_input_summary.as_deref(),
+                    cx,
+                );
+            }
         }
     }
 
     /// Presence-gated entry point for the completion / permission / post-turn
-    /// relays. Until sustained absence is confirmed the composed ping is
-    /// held per-pane; the periodic flush (`Workspace::flush_deferred_telegram`)
-    /// later decides, per entry, when it's actually ready to go out (see
-    /// `ready_to_deliver`). Otherwise it is sent immediately. First-response
-    /// acks and first-response permission waits deliberately bypass this and
-    /// call `relay_to_telegram` directly.
-    pub(in crate::workspace) fn relay_or_defer_to_telegram(
+    /// relays. Asks `app_presence` whether the user is away and acts on the
+    /// answer immediately: sent, or dropped for good. Nothing is queued, so a
+    /// ping's send time is always its settle time — a later absence does not
+    /// resurrect a ping this call declined.
+    ///
+    /// First-response acks and first-response permission waits deliberately
+    /// bypass this and call [`Self::relay_to_telegram`] directly: the phone
+    /// asked for those, so presence is not what decides them.
+    ///
+    /// Returns whether the ping went out, so a caller tracking a live state
+    /// (an outstanding permission) knows whether the phone has been told.
+    pub(in crate::workspace) fn relay_when_presence_allows(
         &mut self,
         pane_id: PaneId,
-        kind: DeferKind,
         header: String,
         tail: TelegramTail,
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
         cx: &mut Context<Self>,
-    ) {
-        // Preserve `relay_to_telegram`'s drop-when-not-ready semantics: never
-        // stash (or send) a ping while disabled, unpaired, or before the
-        // bridge global is installed — the same gate, asked once.
+    ) -> bool {
+        // `relay_to_telegram` asks this too, but asking here first keeps a
+        // disabled/unpaired bridge out of the presence trace below, where it
+        // would read as a presence decision it never was.
         if self.telegram_bridge(cx).is_none() {
             trace::delivery("relay.gated", || {
-                format!("pane={pane_id} entry=defer kind={kind:?} reason=bridge")
+                format!("pane={pane_id} entry=presence reason=bridge")
             });
-            return;
+            return false;
         }
-        // Activation callbacks are queued, so a newly focused window can
-        // still have a stale absence until this observation.
-        crate::app_presence::observe(cx);
-        let now = Instant::now();
-        let presence = crate::app_presence::snapshot(cx);
-        let away_secs = presence.away_secs(now);
-        let confirmed_away =
-            presence.away_for_at_least(Duration::from_secs(self.telegram.away_grace_secs), now);
-        let defer = should_defer_relay(
-            self.telegram.defer_while_active,
-            confirmed_away,
-            self.telegram.active_idle_secs,
-        );
-        trace::delivery("relay.defer", || {
+        // Asked unconditionally, not short-circuited by the opt-out, so the
+        // trace records what presence actually was even when it did not
+        // decide — the alternative logs a sample from the last pump tick.
+        let away = crate::app_presence::is_away(cx);
+        let send = away || !self.telegram.only_when_away;
+        let state = crate::app_presence::snapshot(cx);
+        let away_secs = state.away_secs(Instant::now());
+        // `relay.send` belongs to `relay_to_telegram`; this line is the
+        // verdict that precedes it, and the only record of a drop. The rule is
+        // logged alongside the readings because it is read live from config —
+        // a log reader has no other way to recover what they were compared to.
+        let rule = crate::app_presence::rule(cx);
+        trace::delivery("relay.presence", || {
             format!(
-                "pane={pane_id} kind={kind:?} defer={defer} quiet_secs={} \
-                 away_secs={away_secs:?} away_grace_secs={} {} text={}",
-                self.telegram.active_idle_secs,
-                self.telegram.away_grace_secs,
+                "pane={pane_id} send={send} away={away} only_when_away={} \
+                 away_secs={away_secs:?} idle_secs={} away_grace_secs={} \
+                 away_idle_secs={} away_idle_foreground_secs={} {} text={}",
+                self.telegram.only_when_away,
+                trace::opt(state.idle().map(|i| i.as_secs())),
+                rule.grace.as_secs(),
+                rule.idle_bar.as_secs(),
+                rule.foreground_idle_bar.as_secs(),
                 trace::presence(
                     away_secs.is_none(),
                     self.lane_ref_for_pane(pane_id),
@@ -506,21 +400,10 @@ impl Workspace {
                 trace::tail_digest(&tail)
             )
         });
-        if defer {
-            push_deferred(
-                pane_id,
-                self.deferred_telegram.entry(pane_id).or_default(),
-                DeferredRelay {
-                    kind,
-                    header,
-                    tail,
-                    permission,
-                    queued_at: now,
-                },
-            );
-        } else {
+        if send {
             self.relay_to_telegram(pane_id, header, tail, permission, cx);
         }
+        send
     }
 
     /// Relay a ping to the Telegram bridge, if the bridge is configured to
@@ -593,10 +476,9 @@ impl Workspace {
     /// pane, because both go through [`Self::telegram_bridge`] — keeping the
     /// two callers of that gate together is what stops it being re-derived.
     ///
-    /// Not deferred by presence, unlike a ping. This answers a command the
-    /// phone sent, so holding it because the user is at the desktop would be
-    /// backwards — the same reasoning that keeps a command reply out of the
-    /// deferral queue.
+    /// Not presence-gated, unlike a ping. This answers a command the phone
+    /// sent, so dropping it because the user is at the desktop would be
+    /// backwards — the phone asked, the phone gets the answer.
     pub(in crate::workspace) fn relay_notice_to_telegram(&self, text: String, cx: &Context<Self>) {
         let Some(bridge) = self.telegram_bridge(cx) else {
             trace::delivery("relay.gated", || {
@@ -611,7 +493,8 @@ impl Workspace {
     /// `AgentChatView::send_prompt_text_for_telegram` reports
     /// [`PromptDispatch::Queued`], since a queued reply hasn't reached the
     /// agent yet and there is nothing to watch a first response for. Plain
-    /// tail (fixed i18n copy). Gated by `relay_to_telegram`.
+    /// tail (fixed i18n copy). Goes through [`Self::relay_to_telegram`], so
+    /// the bridge gate applies but presence does not.
     pub(in crate::workspace) fn relay_queued_notice_to_telegram(
         &self,
         pane_id: PaneId,
@@ -727,14 +610,7 @@ impl Workspace {
             s::agent_notification_telegram_background_update(),
             preview_for(&delta, &s::agent_notification_telegram_truncated_marker()),
         );
-        self.relay_or_defer_to_telegram(
-            pane_id,
-            DeferKind::PostTurn,
-            header,
-            TelegramTail::Markdown(body),
-            None,
-            cx,
-        );
+        self.relay_when_presence_allows(pane_id, header, TelegramTail::Markdown(body), None, cx);
     }
 
     /// The workspace's persisted identity — needed by cross-cutting

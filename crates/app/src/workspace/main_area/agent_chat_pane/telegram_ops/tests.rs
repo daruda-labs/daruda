@@ -22,120 +22,19 @@ fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::
     }
 }
 
-#[test]
-fn should_defer_only_when_enabled_and_the_user_is_not_confirmed_away() {
-    assert!(super::should_defer_relay(true, false, 60));
-    assert!(!super::should_defer_relay(true, true, 60));
-    assert!(!super::should_defer_relay(false, false, 60));
-    assert!(!super::should_defer_relay(true, false, 0));
-}
-
-/// `queued_at` no longer participates in the push-time decision; a fresh
-/// timestamp is enough for every test entry here.
-fn mk_relay(kind: super::DeferKind) -> super::DeferredRelay {
-    super::DeferredRelay {
-        kind,
-        header: String::new(),
-        tail: super::TelegramTail::Plain(String::new()),
-        permission: None,
-        queued_at: std::time::Instant::now(),
-    }
-}
-
-/// Any pane id — `push_deferred` only carries it into a trace line.
-const PANE: super::PaneId = 1;
-
-/// The user is gone; `idle_secs` is trace-only in this variant.
-const AWAY: super::ReleasePolicy = super::ReleasePolicy::Away { idle_secs: 0.0 };
-
-/// The user is here, idle for `idle_secs`, against a 60s quiet window.
-fn present(idle_secs: f64) -> super::ReleasePolicy {
-    super::ReleasePolicy::Present {
-        idle_secs,
-        quiet_secs: 60,
-    }
-}
-
-#[test]
-fn away_grace_holds_a_five_second_blur_and_releases_sustained_absence() {
-    use crate::platform::presence::Presence;
-    use std::time::{Duration, Instant};
-
-    let t0 = Instant::now();
-    let grace = Duration::from_secs(daruda_config::TelegramConfig::default().away_grace_secs);
-    let away = Presence::Here.observe(false, t0);
-    let returned = away.observe(true, t0 + Duration::from_secs(5));
-    let away_again = returned.observe(false, t0 + Duration::from_secs(10));
-    let live = std::collections::HashSet::new();
-
-    for (presence, elapsed, should_release) in [
-        (away, 0, false),
-        (away, 5, false),
-        (returned, 20, false),
-        (away_again, 20, false),
-        (away, 15, true),
-        (away, 20, true),
-    ] {
-        let now = t0 + Duration::from_secs(elapsed);
-        let confirmed_away = presence.away_for_at_least(grace, now);
-        assert_eq!(
-            super::should_defer_relay(true, confirmed_away, 60),
-            !should_release
-        );
-        let policy = super::ReleasePolicy::for_presence(presence, now, grace, 0.0, 60);
-        let mut relay = mk_relay(super::DeferKind::Completion);
-        // Old backlog still needs presence or input-idle confirmation.
-        relay.queued_at = t0 - Duration::from_secs(120);
-        let (ready, holding) = super::partition_deferred(vec![relay], &live, now, policy);
-        assert_eq!(ready.len(), usize::from(should_release));
-        assert_eq!(holding.len(), usize::from(!should_release));
-    }
-
-    let now = t0 + Duration::from_secs(5);
-    let policy = super::ReleasePolicy::for_presence(away, now, grace, 0.0, 60);
-    let trace = policy.trace(away.away_secs(now));
-    assert!(trace.contains("policy=present app_active=false"));
-    assert!(trace.contains("away_secs=Some(5.0)"));
-}
-
-#[test]
-fn zero_away_grace_restores_immediate_release_only_while_absent() {
-    use crate::platform::presence::Presence;
-    use std::time::{Duration, Instant};
-
-    let now = Instant::now();
-    for (presence, expected) in [
-        (Presence::Here, present(0.0)),
-        (Presence::Here.observe(false, now), AWAY),
-    ] {
-        assert_eq!(
-            super::ReleasePolicy::for_presence(presence, now, Duration::ZERO, 0.0, 60),
-            expected
-        );
-        assert_eq!(
-            super::should_defer_relay(true, presence.away_for_at_least(Duration::ZERO, now), 60),
-            presence == Presence::Here
-        );
-    }
-}
-
-#[test]
-fn push_deferred_keeps_one_completion_but_accumulates_others() {
-    use super::DeferKind;
-    let mut q = Vec::new();
-    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Completion));
-    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::PostTurn));
-    super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Completion));
-    assert_eq!(q.len(), 2);
-    assert_eq!(q[0].kind, DeferKind::PostTurn);
-    assert_eq!(q[1].kind, DeferKind::Completion);
-}
-
+/// A completion ping reports a past event, so the gate answers once and keeps
+/// nothing: it goes out now or never.
+///
+/// The declined cases are the logged 2026-09-15 incident — two completions
+/// settled at 15:25 while `app_active=true`, were held, and flushed together
+/// at 15:28 when a 15s blur alone read as absence. Here they never enter a
+/// queue, so there is nothing for a later blur to release. The last case is
+/// the one a blur-required rule would lose: away from a frontmost daruda.
 #[gpui::test]
-async fn relay_rechecks_presence_before_sending_and_shares_it_with_flush(
+async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
     cx: &mut gpui::TestAppContext,
 ) {
-    use crate::platform::presence::Presence;
+    use crate::platform::presence::AwaySignal;
     use std::time::{Duration, Instant};
 
     let mut outbound =
@@ -153,155 +52,110 @@ async fn relay_rechecks_presence_before_sending_and_shares_it_with_flush(
     cx.run_until_parked();
 
     workspace.update(cx, |ws, cx| {
-        let away = Presence::Away {
-            since: Instant::now() - Duration::from_secs(30),
-        };
-        crate::app_presence::seed_for_test(away, true, cx);
-        ws.relay_or_defer_to_telegram(
-            pane,
-            super::DeferKind::Completion,
-            "header".into(),
-            super::TelegramTail::Plain("held after return".into()),
-            None,
+        let blurred_at = Instant::now() - Duration::from_secs(30);
+
+        // At the daruda window: nothing leaves, and nothing is kept.
+        crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
+        ws.relay_post_turn_to_telegram(pane, "while present".into(), cx);
+        assert!(outbound.next().now_or_never().is_none());
+
+        // The incident's exact shape: blurred past the grace, but the machine
+        // was still being used (16s idle against the 60s bar).
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE.observe(false, Some(Duration::from_secs(16)), blurred_at),
+            false,
+            Some(Duration::from_secs(16)),
             cx,
         );
-        assert_eq!(crate::app_presence::snapshot(cx), Presence::Here);
-        ws.flush_deferred_telegram(cx);
-        assert_eq!(ws.deferred_telegram[&pane].len(), 1);
+        ws.relay_post_turn_to_telegram(pane, "while blurred but busy".into(), cx);
         assert!(outbound.next().now_or_never().is_none());
 
-        crate::app_presence::seed_for_test(Presence::Here, false, cx);
-        ws.relay_post_turn_to_telegram(pane, "held during grace".into(), cx);
-        assert_eq!(ws.deferred_telegram[&pane].len(), 2);
+        // Reading a long answer in daruda: silent, but under the stricter
+        // foreground bar, so still present.
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE.observe(true, Some(Duration::from_secs(60)), blurred_at),
+            true,
+            Some(Duration::from_secs(60)),
+            cx,
+        );
+        ws.relay_post_turn_to_telegram(pane, "while reading".into(), cx);
         assert!(outbound.next().now_or_never().is_none());
 
-        crate::app_presence::seed_for_test(away, false, cx);
-        ws.relay_post_turn_to_telegram(pane, "sent after grace".into(), cx);
-        let sent = expect_ping(outbound.next().now_or_never().flatten().unwrap());
-        assert_eq!(sent.pane.pane, pane);
-        ws.flush_deferred_telegram(cx);
-        assert!(ws.deferred_telegram.is_empty());
-        for _ in 0..2 {
-            assert_eq!(
-                expect_ping(outbound.next().now_or_never().flatten().unwrap())
-                    .pane
-                    .pane,
-                pane
-            );
-        }
+        // Blurred and quiet: the lower bar clears, so the ping goes out at once.
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE.observe(false, Some(Duration::from_secs(300)), blurred_at),
+            false,
+            Some(Duration::from_secs(300)),
+            cx,
+        );
+        ws.relay_post_turn_to_telegram(pane, "while away".into(), cx);
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .pane
+                .pane,
+            pane
+        );
+
+        // Walked away with daruda still frontmost — no blur will ever come,
+        // so the foreground bar is the only thing that can carry this case.
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE.observe(true, Some(Duration::from_secs(300)), blurred_at),
+            true,
+            Some(Duration::from_secs(300)),
+            cx,
+        );
+        ws.relay_post_turn_to_telegram(pane, "away from a frontmost daruda".into(), cx);
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .pane
+                .pane,
+            pane
+        );
+
+        // Returning to the window does not release what presence declined.
+        crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
         assert!(outbound.next().now_or_never().is_none());
     });
 }
 
-#[test]
-fn push_deferred_evicts_oldest_beyond_cap() {
-    use super::DeferKind;
-    let mut q = Vec::new();
-    let extra = 5;
-    for i in 0..(super::MAX_DEFERRED_PER_PANE + extra) as u64 {
-        super::push_deferred(PANE, &mut q, mk_relay(DeferKind::Permission { perm_id: i }));
-    }
-    assert_eq!(q.len(), super::MAX_DEFERRED_PER_PANE);
-    // The oldest entries (ids 0..extra) were evicted; the newest survive.
-    assert_eq!(
-        q[0].kind,
-        DeferKind::Permission {
-            perm_id: extra as u64
-        }
-    );
-    assert_eq!(
-        q.last().unwrap().kind,
-        DeferKind::Permission {
-            perm_id: (super::MAX_DEFERRED_PER_PANE + extra - 1) as u64
-        }
-    );
-}
+/// `only_when_away = false` is the opt-out: every ping goes to the phone,
+/// presence notwithstanding. Still one decision, still no queue.
+#[gpui::test]
+async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::platform::presence::AwaySignal;
 
-#[test]
-fn partition_deferred_filters_stale_permissions_and_holds_unready_entries() {
-    use super::DeferKind;
-    let now = std::time::Instant::now();
-    let q = vec![
-        mk_relay(DeferKind::Completion),
-        mk_relay(DeferKind::Permission { perm_id: 7 }),
-    ];
-    // Only id 9 is outstanding, so the ping for the resolved id 7 is dropped
-    // outright — not delivered, not held for later.
-    let live: std::collections::HashSet<u64> = [9].into_iter().collect();
-    // An absent user makes every non-stale entry immediately ready,
-    // isolating the staleness filter from the readiness check below.
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, AWAY);
-    assert_eq!(ready.len(), 1);
-    assert_eq!(ready[0].kind, DeferKind::Completion);
-    assert!(still_holding.is_empty());
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    config.telegram.only_when_away = false;
+    cx.update(crate::app_presence::init);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
 
-    let q = vec![
-        mk_relay(DeferKind::Permission { perm_id: 7 }),
-        mk_relay(DeferKind::Permission { perm_id: 8 }),
-        mk_relay(DeferKind::Permission { perm_id: 9 }),
-    ];
-    // 7 and 9 are still outstanding; 8 was answered → its ping is dropped,
-    // the other two both survive (a single live id could not express this).
-    let live: std::collections::HashSet<u64> = [7, 9].into_iter().collect();
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, AWAY);
-    assert_eq!(ready.len(), 2);
-    assert_eq!(ready[0].kind, DeferKind::Permission { perm_id: 7 });
-    assert_eq!(ready[1].kind, DeferKind::Permission { perm_id: 9 });
-    assert!(still_holding.is_empty());
-
-    // Still foregrounded, just queued (age 0), currently idle — not ready:
-    // the quiet window anchors to this entry's own `queued_at`, not to the
-    // (already-past-threshold) idle reading alone.
-    let q = vec![mk_relay(DeferKind::Completion)];
-    let live = std::collections::HashSet::new();
-    let (ready, still_holding) = super::partition_deferred(q, &live, now, present(90.0));
-    assert!(ready.is_empty());
-    assert_eq!(still_holding.len(), 1);
-}
-
-#[test]
-fn ready_to_deliver_covers_every_release_policy() {
-    let now = std::time::Instant::now();
-    // Just queued, and idle_secs is 0 (input this instant) — would fail every
-    // other condition, but neither an absent user nor holding-off waits.
-    assert!(super::ready_to_deliver(now, now, AWAY));
-    assert!(super::ready_to_deliver(
-        now,
-        now,
-        super::ReleasePolicy::ReleaseAll
-    ));
-
-    let queued_at = std::time::Instant::now();
-    let past_window = queued_at + std::time::Duration::from_secs(61);
-
-    // Enough real time has passed AND the user has been idle that whole
-    // time → ready.
-    assert!(super::ready_to_deliver(
-        queued_at,
-        past_window,
-        present(90.0)
-    ));
-    let already_quiet = past_window - std::time::Duration::from_secs(61);
-    assert!(super::ready_to_deliver(
-        already_quiet,
-        past_window,
-        present(60.0)
-    ));
-    // Enough real time has passed, but `idle_secs` shows recent input
-    // (the user came back and used the keyboard) → still held.
-    assert!(!super::ready_to_deliver(
-        queued_at,
-        past_window,
-        present(5.0)
-    ));
-    // Not enough real time has passed yet, even though `idle_secs` alone
-    // would clear the threshold — the ping's own quiet window hasn't
-    // elapsed, so a long turn's leftover idle streak can't fire it early.
-    assert!(!super::ready_to_deliver(
-        queued_at,
-        queued_at + std::time::Duration::from_secs(5),
-        present(90.0)
-    ));
+    workspace.update(cx, |ws, cx| {
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE,
+            true,
+            Some(std::time::Duration::ZERO),
+            cx,
+        );
+        ws.relay_post_turn_to_telegram(pane, "sent regardless".into(), cx);
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .pane
+                .pane,
+            pane
+        );
+    });
 }
 
 #[test]
@@ -835,104 +689,220 @@ async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
     });
 }
 
-/// `deliver_deferred_telegram` must tolerate a queued entry whose pane has
-/// since closed, filter stale permission pings through the live pane's
-/// `pending_permissions` outstanding-ids set, and still deliver the
-/// remaining live-pane entry.
+/// A permission request is a live blocking state, not a report of a past
+/// event: the agent stays stopped until someone answers. So when the gate
+/// declines one because the user was present, and the user then leaves, the
+/// periodic sweep offers it — the request is as true then as when it fired.
+/// Exactly once, and never after it has been answered.
 #[gpui::test]
-async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_and_sends_live_entry(
+async fn an_outstanding_permission_declined_while_present_is_offered_once_the_user_leaves(
     cx: &mut gpui::TestAppContext,
 ) {
+    use crate::platform::presence::AwaySignal;
+    use daruda_acp::{ChatItem, PermissionItem, PermissionResolution};
+    use std::time::{Duration, Instant};
+
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
     let mut config = daruda_config::Config::default();
     config.telegram.enabled = true;
     config.telegram.authorized_chat_id = Some(42);
+    cx.update(crate::app_presence::init);
     let (handle, workspace) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let live_pane = cx
-        .update_window(handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
         })
         .unwrap();
     cx.run_until_parked();
 
-    // A pane id well past anything the test ever allocated — stands in
-    // for "the pane closed after the ping was queued".
-    const CLOSED_PANE: super::PaneId = u64::MAX;
+    let options = vec![
+        choice("allow_once", "Allow", PermissionKindView::AllowOnce),
+        choice("reject_once", "Reject", PermissionKindView::RejectOnce),
+    ];
 
-    let mk = |kind, tail: &str| super::DeferredRelay {
-        kind,
-        header: "header".to_string(),
-        tail: super::TelegramTail::Plain(tail.to_string()),
-        permission: None,
-        queued_at: std::time::Instant::now(),
-    };
-
-    workspace.update(cx, |ws, _| {
-        ws.deferred_telegram
-            .entry(CLOSED_PANE)
-            .or_default()
-            .push(mk(super::DeferKind::Completion, "closed"));
-        ws.deferred_telegram
-            .entry(live_pane)
-            .or_default()
-            .push(mk(super::DeferKind::Completion, "completion"));
-        // Live pane, but a permission id that is not in the pane's
-        // `pending_permissions` set (empty — no permission was ever
-        // requested on this pane) — exercises the `partition_deferred`
-        // staleness filter path on a real view.
-        ws.deferred_telegram
-            .entry(live_pane)
-            .or_default()
-            .push(mk(super::DeferKind::Permission { perm_id: 42 }, "stale"));
-    });
-
-    // `app_active: false` mirrors "presence already dropped" — every
-    // non-stale entry is immediately ready regardless of age/idle.
     workspace.update(cx, |ws, cx| {
-        ws.deliver_deferred_telegram(AWAY, cx);
-    });
-    cx.run_until_parked();
+        let view = ws.agent_chat_view(pane).cloned().expect("view present");
+        view.update(cx, |v, _| {
+            v.items = vec![ChatItem::Permission(PermissionItem {
+                id: 7,
+                tool_title: Some("Write /tmp/x.rs".to_string()),
+                raw_input_summary: None,
+                options: options.clone(),
+                resolved: None,
+            })];
+            v.pending_permissions.insert(7);
+        });
 
-    workspace.read_with(cx, |ws, _| {
+        // Fires while the user is at the desk: declined, nothing queued.
+        crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
+        ws.relay_permission_wait_to_telegram(pane, 7, &options, Some("Write /tmp/x.rs"), None, cx);
+        assert!(outbound.next().now_or_never().is_none());
+        // A sweep while still present must not change that.
+        ws.relay_outstanding_permissions(cx);
+        assert!(outbound.next().now_or_never().is_none());
+
+        // The user leaves. The request is still outstanding, so it goes now.
+        crate::app_presence::seed_for_test(
+            AwaySignal::HERE.observe(
+                false,
+                Some(Duration::from_secs(300)),
+                Instant::now() - Duration::from_secs(30),
+            ),
+            false,
+            Some(Duration::from_secs(300)),
+            cx,
+        );
+        ws.relay_outstanding_permissions(cx);
+        let sent = expect_ping(outbound.next().now_or_never().flatten().unwrap());
+        assert_eq!(sent.pane.pane, pane);
+        assert_eq!(
+            sent.permission.as_ref().map(|p| p.perm_id),
+            Some(7),
+            "the offer carries the buttons for this request"
+        );
+
+        // Still outstanding, still away — but the phone already has it, so
+        // the sweep must not repeat every tick.
+        ws.relay_outstanding_permissions(cx);
+        assert!(outbound.next().now_or_never().is_none());
+    });
+
+    // Answered in-app: the request leaves `pending_permissions`, and with it
+    // every reason to mention it again.
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).cloned().expect("view present");
+        view.update(cx, |v, _| {
+            v.pending_permissions.remove(&7);
+            if let Some(ChatItem::Permission(p)) = v.items.first_mut() {
+                p.resolved = Some(PermissionResolution::Chosen("allow_once".to_string()));
+            }
+        });
+        ws.relay_outstanding_permissions(cx);
+        assert!(outbound.next().now_or_never().is_none());
+        // The bookkeeping entry went with it rather than accumulating.
         assert!(
-            ws.deferred_telegram.is_empty(),
-            "delivery should drain closed, stale, and sent entries from the held queue"
+            view.read(cx).permissions_told_to_phone.is_empty(),
+            "a resolved request must not leave its id behind"
         );
     });
+}
 
-    let sent = expect_ping(
-        outbound
-            .next()
-            .await
-            .expect("the live completion entry should be sent"),
-    );
-    assert_eq!(sent.pane.pane, live_pane);
-    assert_eq!(sent.header, "header");
-    assert_eq!(
-        sent.tail,
-        super::TelegramTail::Plain("completion".to_string())
-    );
-    assert!(sent.permission.is_none());
-    assert!(
-        outbound.next().now_or_never().is_none(),
-        "closed panes and stale permissions must not emit extra pings"
-    );
+#[gpui::test]
+async fn permission_delivery_history_tracks_recipient_and_connection(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::platform::presence::AwaySignal;
+    use daruda_acp::{ChatItem, PermissionItem};
+    use std::time::{Duration, Instant};
+
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    config.telegram.only_when_away = false;
+    cx.update(crate::app_presence::init);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let options = vec![choice("allow_once", "Allow", PermissionKindView::AllowOnce)];
+    let add_request = |view: &mut super::super::view::AgentChatView| {
+        view.items.push(ChatItem::Permission(PermissionItem {
+            id: 0,
+            tool_title: Some("Write /tmp/x.rs".into()),
+            raw_input_summary: None,
+            options: options.clone(),
+            resolved: None,
+        }));
+        view.pending_permissions.insert(0);
+    };
+
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).cloned().unwrap();
+        view.update(cx, |v, _| add_request(v));
+        ws.relay_outstanding_permissions(cx);
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .permission
+                .unwrap()
+                .perm_id,
+            0
+        );
+
+        // Ordinary reloads keep deduplication; re-pairing allows a fresh offer,
+        // including unpairing and pairing the same chat again.
+        for (recipient, should_send) in [
+            (Some(42), false),
+            (Some(84), true),
+            (None, false),
+            (Some(84), true),
+        ] {
+            config.telegram.authorized_chat_id = recipient;
+            ws.apply_config(&config, cx);
+            ws.relay_outstanding_permissions(cx);
+            assert_eq!(
+                outbound.next().now_or_never().flatten().is_some(),
+                should_send,
+                "recipient={recipient:?}"
+            );
+            ws.relay_outstanding_permissions(cx);
+            assert!(outbound.next().now_or_never().is_none());
+        }
+
+        config.telegram.only_when_away = true;
+        ws.apply_config(&config, cx);
+        for reconnect in [false, true] {
+            view.update(cx, |v, cx| {
+                if reconnect {
+                    v.retry_for_reconnect(Some("saved-session".into()), cx);
+                } else {
+                    v.reset_for_new_session(cx);
+                }
+            });
+            // A new connection reuses id 0 before any cleanup sweep. Its first
+            // offer is declined while present and must remain eligible later.
+            crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
+            ws.relay_permission_wait_to_telegram(
+                pane,
+                0,
+                &options,
+                Some("Write /tmp/x.rs"),
+                None,
+                cx,
+            );
+            view.update(cx, |v, _| add_request(v));
+            ws.relay_outstanding_permissions(cx);
+            assert!(outbound.next().now_or_never().is_none());
+
+            crate::app_presence::seed_for_test(
+                AwaySignal::HERE.observe(
+                    false,
+                    Some(Duration::from_secs(300)),
+                    Instant::now() - Duration::from_secs(30),
+                ),
+                false,
+                Some(Duration::from_secs(300)),
+                cx,
+            );
+            ws.relay_outstanding_permissions(cx);
+            let ping = expect_ping(
+                outbound
+                    .next()
+                    .now_or_never()
+                    .flatten()
+                    .expect("new connection's permission must be relayed"),
+            );
+            assert_eq!(ping.permission.unwrap().perm_id, 0);
+            ws.relay_outstanding_permissions(cx);
+            assert!(outbound.next().now_or_never().is_none());
+        }
+    });
 }
 
 /// A phone tap routes by permission id, not by position: with two

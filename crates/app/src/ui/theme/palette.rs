@@ -820,6 +820,10 @@ pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;
 /// "Thinking") and its inline one-line preview, so the two read as distinct
 /// rather than running together at the tight `AGENT_CHAT_MSG_GAP`.
 pub const AGENT_CHAT_SUMMARY_GAP: f32 = GAP_STANDARD;
+/// Gap (px) between a fold header's right-anchored trailing items — a count and
+/// the status mark beside it are two separate facts, and at the tight
+/// `AGENT_CHAT_MSG_GAP` they touch and read as one.
+pub const AGENT_CHAT_TRAILING_GAP: f32 = GAP_STANDARD;
 /// Agent chat message list gap (px).
 pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 /// Gap (px) between the tail window's boundary rule and the label it frames.

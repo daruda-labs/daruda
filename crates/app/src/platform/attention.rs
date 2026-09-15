@@ -41,7 +41,7 @@ pub fn is_app_active() -> bool {
 }
 
 /// Linux: no `Window` handle reaches most call sites (e.g. the periodic
-/// Telegram-defer pump), so this can't piggyback on gpui's own
+/// presence pump), so this can't piggyback on gpui's own
 /// `Window::is_window_active` the way a render-path call could — it stays a
 /// self-contained, zero-argument OS query like the macOS path, using EWMH's
 /// `_NET_ACTIVE_WINDOW` root property (the X11 analogue of "which app is
@@ -61,8 +61,12 @@ pub fn is_app_active() -> bool {
 /// Seconds since the last system-wide user input (keyboard/mouse). Lets
 /// presence gating tell "actively using the machine" from "away from
 /// keyboard" without installing an input event tap.
+///
+/// `None` means the platform could not answer, which is not the same fact as
+/// `Some(0.0)` ("input this instant") — a presence gate that conflates them
+/// reads an unavailable sensor as a user sitting right there.
 #[cfg(target_os = "macos")]
-pub fn system_idle_seconds() -> f64 {
+pub fn system_idle_seconds() -> Option<f64> {
     // kCGEventSourceStateHIDSystemState = 1; kCGAnyInputEventType = ~0.
     const HID_SYSTEM_STATE: u32 = 1;
     const ANY_INPUT_EVENT: u32 = u32::MAX;
@@ -70,7 +74,7 @@ pub fn system_idle_seconds() -> f64 {
     // over HID state. Both arguments are valid `CGEventSourceStateID` /
     // `CGEventType` values and it returns a plain `CFTimeInterval` (f64 seconds);
     // there is no ownership transfer to manage.
-    unsafe { CGEventSourceSecondsSinceLastEventType(HID_SYSTEM_STATE, ANY_INPUT_EVENT) }
+    Some(unsafe { CGEventSourceSecondsSinceLastEventType(HID_SYSTEM_STATE, ANY_INPUT_EVENT) })
 }
 
 #[cfg(target_os = "macos")]
@@ -80,23 +84,19 @@ unsafe extern "C" {
 }
 
 /// Linux: `XScreenSaverQueryInfo` via the X11 `screensaver` extension.
-/// `0.0` (never idle) when no X11 connection is reachable.
+/// `None` when no X11 connection is reachable (pure Wayland, no XWayland) or
+/// the extension refuses — the sensor is absent, not reading zero.
 #[cfg(target_os = "linux")]
-pub fn system_idle_seconds() -> f64 {
+pub fn system_idle_seconds() -> Option<f64> {
     use x11rb::protocol::screensaver::ConnectionExt as _;
 
-    let Some(state) = linux_x11::state() else {
-        return 0.0;
-    };
-    let Some(reply) = state
+    let state = linux_x11::state()?;
+    let reply = state
         .conn
         .screensaver_query_info(state.root)
         .ok()
-        .and_then(|cookie| cookie.reply().ok())
-    else {
-        return 0.0;
-    };
-    linux_x11::ms_to_seconds(reply.ms_since_user_input)
+        .and_then(|cookie| cookie.reply().ok())?;
+    Some(linux_x11::ms_to_seconds(reply.ms_since_user_input))
 }
 
 /// Apply a new attention request, replacing any prior pending request.

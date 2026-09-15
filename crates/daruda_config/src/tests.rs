@@ -1314,21 +1314,143 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     let mut cfg = Config::default();
     cfg.telegram.enabled = true;
     cfg.telegram.authorized_chat_id = Some(999888777);
-    cfg.telegram.defer_while_active = false;
-    cfg.telegram.active_idle_secs = 5;
-    cfg.telegram.away_grace_secs = 30;
+    cfg.telegram.only_when_away = false;
+    cfg.presence.away_grace_secs = 30;
+    cfg.presence.away_idle_secs = 5;
     crate::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert!(reloaded.telegram.enabled);
     assert_eq!(reloaded.telegram.authorized_chat_id, Some(999888777));
-    assert!(!reloaded.telegram.defer_while_active);
-    assert_eq!(reloaded.telegram.active_idle_secs, 5);
-    assert_eq!(reloaded.telegram.away_grace_secs, 30);
+    assert!(!reloaded.telegram.only_when_away);
+    assert_eq!(reloaded.presence.away_grace_secs, 30);
+    assert_eq!(reloaded.presence.away_idle_secs, 5);
 
-    cfg.telegram.away_grace_secs = 0;
+    cfg.presence.away_grace_secs = 0;
     crate::patch_config_file_to(&cfg, &path).unwrap();
-    assert_eq!(Config::load_from(&path).telegram.away_grace_secs, 0);
+    assert_eq!(Config::load_from(&path).presence.away_grace_secs, 0);
+}
+
+/// The absence thresholds moved out of `[telegram]` into `[presence]`. A
+/// config still carrying the old keys must not keep them beside the new ones,
+/// where a stale value would read as live configuration.
+#[test]
+fn patch_config_file_drops_the_superseded_telegram_timing_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[telegram]\nenabled = true\ndefer_while_active = true\nactive_idle_secs = 60\naway_grace_secs = 15\n",
+    )
+    .unwrap();
+
+    let mut cfg = Config::load_from(&path);
+    cfg.presence.away_idle_secs = 90;
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    // Assert against the parsed `[telegram]` table, not the raw text: the new
+    // `[presence]` section contains `away_grace_secs` as a substring, so a
+    // text scan cannot tell the retired key from its successor.
+    let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    let telegram = doc["telegram"].as_table().expect("[telegram] table");
+    for legacy in ["defer_while_active", "active_idle_secs", "away_grace_secs"] {
+        assert!(
+            !telegram.contains_key(legacy),
+            "[telegram].{legacy} should be gone:\n{doc}"
+        );
+    }
+    assert!(telegram.contains_key("only_when_away"));
+    assert_eq!(Config::load_from(&path).presence.away_idle_secs, 90);
+}
+
+/// The retired keys must be *migrated*, not merely stripped: they stop having
+/// any effect at load (`#[serde(default)]` ignores unknown fields), so a
+/// write-time removal alone would silently reset a customized install.
+#[test]
+fn loading_migrates_the_retired_telegram_timing_keys_into_their_new_homes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[telegram]\nenabled = true\ndefer_while_active = false\nactive_idle_secs = 90\naway_grace_secs = 30\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    assert!(
+        !cfg.telegram.only_when_away,
+        "defer_while_active = false meant send-always"
+    );
+    assert_eq!(cfg.presence.away_grace_secs, 30);
+    assert_eq!(cfg.presence.away_idle_secs, 90);
+
+    // Round-tripping keeps the migrated values and drops the old spellings.
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+    let reloaded = Config::load_from(&path);
+    assert!(!reloaded.telegram.only_when_away);
+    assert_eq!(reloaded.presence.away_grace_secs, 30);
+    assert_eq!(reloaded.presence.away_idle_secs, 90);
+}
+
+/// A config that states both spellings keeps the new one — the retired key
+/// must not override a setting the user wrote in its current form.
+#[test]
+fn a_new_presence_key_outranks_the_retired_telegram_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[telegram]\nonly_when_away = true\naway_grace_secs = 30\n[presence]\naway_grace_secs = 45\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    assert_eq!(cfg.presence.away_grace_secs, 45);
+    assert!(cfg.telegram.only_when_away);
+}
+
+#[test]
+fn explicit_presence_defaults_outrank_legacy_telegram_keys_across_save_paths() {
+    for source in [
+        "[telegram]\nenabled = true\nonly_when_away = true\ndefer_while_active = false\nactive_idle_secs = 90\naway_grace_secs = 30\n[presence]\naway_grace_secs = 15\naway_idle_secs = 60\n",
+        "telegram = { enabled = true, only_when_away = true, defer_while_active = false, active_idle_secs = 90, away_grace_secs = 30 }\npresence = { away_grace_secs = 15, away_idle_secs = 60 }\n",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, source).unwrap();
+        let assert_defaults = |cfg: &Config| {
+            assert!(cfg.telegram.only_when_away);
+            assert_eq!(cfg.presence.away_grace_secs, 15);
+            assert_eq!(cfg.presence.away_idle_secs, 60);
+        };
+
+        assert_defaults(&Config::load_from(&path));
+        let patched = apply_settings_patch_to(&SettingsPatch::TelegramEnabled(false), &path)
+            .expect("incremental settings save");
+        assert!(!patched.telegram.enabled);
+        assert_defaults(&patched);
+        assert_defaults(&Config::load_from(&path));
+
+        patch_config_file_to(&patched, &path).expect("full settings save");
+        assert_defaults(&Config::load_from(&path));
+    }
+}
+
+#[test]
+fn partial_presence_migration_fills_only_missing_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[telegram]\ndefer_while_active = false\nactive_idle_secs = 90\naway_grace_secs = 30\n[presence]\naway_idle_secs = 60\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    assert!(!cfg.telegram.only_when_away);
+    assert_eq!(cfg.presence.away_grace_secs, 30);
+    assert_eq!(cfg.presence.away_idle_secs, 60);
+    assert_eq!(cfg.presence.away_idle_foreground_secs, 300);
 }
 
 #[test]

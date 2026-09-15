@@ -18,7 +18,6 @@ use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
 use std::path::{Path, PathBuf};
 
-use super::telegram_ops::DeferKind;
 use super::transcript_defaults::TranscriptDefaults;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
@@ -526,14 +525,7 @@ impl Workspace {
             // `None` = the phone already has this turn's answer; the
             // first-response relay sent the very message this would report.
             if let Some((header, tail)) = self.telegram_completion_parts(pane_id, cx) {
-                self.relay_or_defer_to_telegram(
-                    pane_id,
-                    DeferKind::Completion,
-                    header,
-                    tail,
-                    None,
-                    cx,
-                );
+                self.relay_when_presence_allows(pane_id, header, tail, None, cx);
             }
         }
         // Every outcome, not just `Completed`: a turn that errored or was

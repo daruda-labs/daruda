@@ -815,6 +815,7 @@ impl AgentChatView {
         self.queue.paused_prompts.clear();
         self.queue.editing_prompt = None;
         self.pending_permissions.clear();
+        self.permissions_told_to_phone.clear();
         self.phone_turn_state = None;
         self.queue.turn = Turn::Idle;
         self.activity.subagent_last_activity.clear();

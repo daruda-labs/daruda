@@ -52,15 +52,9 @@ impl Workspace {
         let preferred_editor_changed = self.preferred_editor != config.editor.preferred;
         self.preferred_editor = config.editor.preferred.clone();
         self.notifications = config.notifications.clone();
-        let previous_telegram_chat_id = self.telegram.authorized_chat_id;
+        let telegram_recipient_changed =
+            self.telegram.authorized_chat_id != config.telegram.authorized_chat_id;
         self.telegram = config.telegram.clone();
-        // The bridge just went disabled/unpaired, or the target chat changed:
-        // clear held pings rather than deliver old-context messages later.
-        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some())
-            || self.telegram.authorized_chat_id != previous_telegram_chat_id
-        {
-            self.deferred_telegram.clear();
-        }
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
         self.agents = config.resolved_agents();
@@ -79,6 +73,9 @@ impl Workspace {
         // holds panes on different agents.
         for (_, view) in self.every_agent_chat() {
             view.update(cx, |view, cx| {
+                if telegram_recipient_changed {
+                    view.permissions_told_to_phone.clear();
+                }
                 let name = agent_names
                     .iter()
                     .find(|(id, _)| id == &view.agent_id)

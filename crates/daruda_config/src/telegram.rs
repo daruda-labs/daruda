@@ -16,21 +16,14 @@ pub struct TelegramConfig {
     /// during pairing. Not a secret — Telegram chat ids are opaque
     /// numeric identifiers, not credentials.
     pub authorized_chat_id: Option<i64>,
-    /// Hold agent pings (completion / permission / post-turn) instead of
-    /// pushing them to Telegram while the user is actively at the daruda
-    /// window; deferred pings are delivered once presence drops.
-    pub defer_while_active: bool,
-    /// The quiet window a held ping must clear before it is delivered: at
-    /// least this many real seconds must have passed since *that ping's own*
-    /// pane last settled, AND system input must have been idle for at least
-    /// this long, before it flushes. Anchored per-pane (not to whatever raw
-    /// idle streak preceded it) so a long turn the user watches without
-    /// touching input doesn't itself burn down the window — only quiet time
-    /// *after* the turn settles counts.
-    pub active_idle_secs: u64,
-    /// Continuous time out of the foreground before absence releases pings.
-    /// Zero allows immediate release on leaving the foreground.
-    pub away_grace_secs: u64,
+    /// Treat Telegram as the stand-in for being away: an agent ping goes to
+    /// the phone only when [`crate::PresenceConfig`] says the user is absent,
+    /// and is dropped otherwise (the desktop notification already covered the
+    /// present case). False sends every ping regardless of presence.
+    ///
+    /// The decision is made once, when the ping fires, and never revisited —
+    /// nothing is queued, so a ping's send time is its settle time.
+    pub only_when_away: bool,
 }
 
 impl Default for TelegramConfig {
@@ -38,9 +31,31 @@ impl Default for TelegramConfig {
         Self {
             enabled: false,
             authorized_chat_id: None,
-            defer_while_active: true,
-            active_idle_secs: 60,
-            away_grace_secs: 15,
+            only_when_away: true,
+        }
+    }
+}
+
+/// Migrate before defaults erase whether a new key was explicitly stated.
+/// `active_idle_secs` contributes only its idle threshold; its delivery
+/// quiet window has no successor.
+pub(crate) fn migrate_legacy_timing(document: &mut toml::Table) {
+    for (legacy, section, key) in [
+        ("defer_while_active", "telegram", "only_when_away"),
+        ("active_idle_secs", "presence", "away_idle_secs"),
+        ("away_grace_secs", "presence", "away_grace_secs"),
+    ] {
+        let value = document
+            .get_mut("telegram")
+            .and_then(toml::Value::as_table_mut)
+            .and_then(|telegram| telegram.remove(legacy));
+        if let Some(value) = value
+            && let Some(target) = document
+                .entry(section)
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+        {
+            target.entry(key).or_insert(value);
         }
     }
 }
@@ -73,11 +88,8 @@ authorized_chat_id = 123456789
     }
 
     #[test]
-    fn defaults_defer_while_active_on_with_1min_quiet_window() {
-        let cfg = TelegramConfig::default();
-        assert!(cfg.defer_while_active);
-        assert_eq!(cfg.active_idle_secs, 60);
-        assert_eq!(cfg.away_grace_secs, 15);
+    fn defaults_restrict_the_phone_to_absence() {
+        assert!(TelegramConfig::default().only_when_away);
     }
 
     #[test]
@@ -87,8 +99,6 @@ authorized_chat_id = 123456789
         assert!(cfg.enabled);
         // Unspecified fields fall back to their defaults via `#[serde(default)]`.
         assert_eq!(cfg.authorized_chat_id, None);
-        assert!(cfg.defer_while_active);
-        assert_eq!(cfg.active_idle_secs, 60);
-        assert_eq!(cfg.away_grace_secs, 15);
+        assert!(cfg.only_when_away);
     }
 }

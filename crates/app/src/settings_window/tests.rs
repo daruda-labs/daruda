@@ -39,8 +39,8 @@ fn build_window_with_config(
 }
 
 #[gpui::test]
-fn returning_to_settings_clears_tracked_absence_before_the_flush_pump(cx: &mut TestAppContext) {
-    use crate::platform::presence::Presence;
+fn returning_to_settings_clears_tracked_absence_on_the_activation_edge(cx: &mut TestAppContext) {
+    use crate::platform::presence::AwaySignal;
     use std::time::{Duration, Instant};
 
     cx.update(crate::app_presence::init);
@@ -50,16 +50,25 @@ fn returning_to_settings_clears_tracked_absence_before_the_flush_pump(cx: &mut T
     vcx.deactivate_window();
     vcx.update(|window, cx| {
         crate::app_presence::seed_for_test(
-            Presence::Away {
-                since: Instant::now() - Duration::from_secs(30),
-            },
+            AwaySignal::HERE.observe(
+                false,
+                Some(Duration::from_secs(300)),
+                Instant::now() - Duration::from_secs(30),
+            ),
             true,
+            Some(Duration::from_secs(300)),
             cx,
         );
         window.activate_window();
     });
     vcx.run_until_parked();
-    vcx.update(|_, cx| assert_eq!(crate::app_presence::snapshot(cx), Presence::Here));
+    vcx.update(|_, cx| {
+        assert!(
+            crate::app_presence::snapshot(cx)
+                .away_secs(Instant::now())
+                .is_none()
+        );
+    });
 }
 
 #[gpui::test]

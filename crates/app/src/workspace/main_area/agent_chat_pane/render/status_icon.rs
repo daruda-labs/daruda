@@ -17,7 +17,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::Rollup;
 // so colour only reinforces it (`DESIGN.md`): a stopped step (⊘) and a failed
 // one (!) are different marks, not one mark in two colours.
 // The outcome marks take the filled cut, which is what holds their shape at
-// `xsmall`; `radio-button-*` has none and needs none, since an unreached step
+// `small`; `radio-button-*` has none and needs none, since an unreached step
 // should read as an empty ring.
 const ICON_RUNNING: &str = "icons/ui/radio-button-checked.svg";
 const ICON_OK: &str = "icons/ui/check-circle.svg";
@@ -165,7 +165,7 @@ fn mark(
         .items_center()
         .gap(px(theme::GAP_SM))
         .when(blink, |el| el.opacity(pulse_opacity(cx)))
-        .child(Icon::empty().path(icon.asset()).xsmall().text_color(color))
+        .child(Icon::empty().path(icon.asset()).small().text_color(color))
         .children(age.map(|age| {
             div()
                 .flex_none()

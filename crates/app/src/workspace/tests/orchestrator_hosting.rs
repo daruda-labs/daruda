@@ -640,7 +640,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
             workspace.update(cx, |ws, cx| {
                 ws.telegram.enabled = true;
                 ws.telegram.authorized_chat_id = Some(42);
-                ws.telegram.defer_while_active = false;
+                ws.telegram.only_when_away = false;
                 let pane = ws
                     .seed_orchestrator_chat_pane_unrevealed_for_test(
                         ws.agents[0].id.clone(),

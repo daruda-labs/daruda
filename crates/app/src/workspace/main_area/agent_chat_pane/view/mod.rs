@@ -639,6 +639,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
     pub(in crate::workspace) pending_permissions: HashSet<u64>,
+    /// Permission ids relayed to the current phone for this connection.
+    /// Cleared on recipient change or session teardown; the periodic sweep
+    /// prunes resolved requests and relays outstanding ids absent here.
+    pub(in crate::workspace) permissions_told_to_phone: HashSet<u64>,
     /// The phone's side of the in-flight turn — see [`PhoneTurn`]. Armed the
     /// instant a Telegram-origin prompt dispatches, answered once a report
     /// goes out, and `None` when the turn is not the phone's, was consumed by
@@ -852,6 +856,7 @@ impl AgentChatView {
             briefing: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
+            permissions_told_to_phone: HashSet::new(),
             phone_turn_state: None,
             activity: ActivityTracker::default(),
             assets: AssetCache::default(),

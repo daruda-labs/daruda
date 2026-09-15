@@ -31,7 +31,7 @@ pub(crate) fn spawn_all(cx: &mut App) {
     spawn_claude_status(cx);
     spawn_needs_attention_demote(cx);
     spawn_status_pulse(cx);
-    spawn_deferred_telegram_flush(cx);
+    spawn_presence_and_telegram_pump(cx);
     spawn_panels_reload(cx);
 }
 
@@ -74,20 +74,22 @@ fn spawn_needs_attention_demote(cx: &mut App) {
     );
 }
 
-/// Re-check held Telegram pings and silent phone-triggered turns against their
-/// quiet windows; idle work is just cheap empty/pane checks, and the 15s cadence
-/// bounds notification delay.
-fn spawn_deferred_telegram_flush(cx: &mut App) {
+/// Keep the app-wide presence signal current, re-check silent phone-triggered
+/// turns against their fallback window, and re-offer permission prompts the
+/// phone was never shown. Idle work is a pair of cheap OS samples plus two
+/// per-pane emptiness checks.
+fn spawn_presence_and_telegram_pump(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(15),
         |cx: &mut App| {
             // Once per tick, not once per window: presence is one app-wide
             // fact and this is the level-triggered safety net behind the
-            // per-window activation edges.
+            // per-window activation edges, which a foreground change raised by
+            // another process does not always reach.
             crate::app_presence::observe(cx);
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-                ws.flush_deferred_telegram(cx);
                 ws.flush_telegram_first_response_fallbacks(cx);
+                ws.relay_outstanding_permissions(cx);
             });
         },
         cx,

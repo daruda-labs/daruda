@@ -363,8 +363,19 @@ impl<'a> FoldRow<'a> {
             Some(el) => row.child(el),
             None => row.child(div().flex_1()),
         };
-        for el in trailing {
-            row = row.child(el);
+        // Trailing items carry their own, wider gap: the row's is tuned for the
+        // chevron sitting close to its label, which leaves a count touching the
+        // mark beside it.
+        if !trailing.is_empty() {
+            row = row.child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
+                    .children(trailing),
+            );
         }
         let row = match chrome {
             Some(f) => f(row),
