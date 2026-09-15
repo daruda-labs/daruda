@@ -39,8 +39,9 @@ pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run
 pub use failure::{AcpFailure, FailureKind, Remedy, RuntimeKind};
 pub use login_method::{LoginMethod, LoginMethodKind, TerminalCommand, parse_login_methods};
 pub use mapping::{
-    SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
-    finalize_streaming, kind_of, permission_item, status_of, subagent_activity, touched_tool_id,
+    SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_plan_entries,
+    cancel_pending_tools, finalize_streaming, kind_of, permission_item, status_of,
+    subagent_activity, touched_tool_id,
 };
 pub use model::{
     ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,

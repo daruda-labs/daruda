@@ -8,7 +8,7 @@
 //! blink. Every path that ends a run has to settle its items.
 
 use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, TextContent};
-use daruda_acp::{AcpEvent, SessionUpdate, ToolCall};
+use daruda_acp::{AcpEvent, PlanEntryView, PlanPriority, PlanStatus, SessionUpdate, ToolCall};
 
 use super::super::AgentChatView;
 use super::make_test_view;
@@ -20,6 +20,20 @@ fn chunk(text: &str, message_id: &str) -> AcpEvent {
         ContentChunk::new(ContentBlock::Text(TextContent::new(text.to_string())))
             .message_id(message_id),
     )))
+}
+
+/// A plan the agent left mid-step, as a `PlanChanged` the pane folds in.
+fn plan_with_a_live_step() -> AcpEvent {
+    let entry = |content: &str, status| PlanEntryView {
+        content: content.to_string(),
+        priority: PlanPriority::Medium,
+        status,
+    };
+    AcpEvent::PlanChanged(vec![
+        entry("read the file", PlanStatus::Completed),
+        entry("edit the file", PlanStatus::InProgress),
+        entry("run the tests", PlanStatus::Pending),
+    ])
 }
 
 fn connected(session_id: &str) -> AcpEvent {
@@ -53,6 +67,14 @@ fn assert_settled(view: &AgentChatView, what: &str) {
         "{what}: an idle pane's run must not read Running ({:?})",
         view.items
     );
+    // The plan is a second live-flagged store behind the same pulse: an entry
+    // left `InProgress` drives the header dot and the row glyph exactly as a
+    // streaming item drives the rollup.
+    assert!(
+        !view.plan.iter().any(|e| e.status == PlanStatus::InProgress),
+        "{what}: an idle pane's plan must not read in-progress ({:?})",
+        view.plan
+    );
 }
 
 /// A `session/load` replays the prior conversation as `session/update`s and
@@ -76,6 +98,7 @@ fn a_finished_resume_settles_the_replayed_conversation(cx: &mut gpui::TestAppCon
             );
             view.apply_event(chunk("answer ", "m1"), "", false, cx);
             view.apply_event(chunk("done.", "m1"), "", false, cx);
+            view.apply_event(plan_with_a_live_step(), "", false, cx);
             view.apply_event(connected("sess-1"), "", false, cx);
 
             assert_settled(view, "finished resume");
@@ -200,6 +223,7 @@ fn every_turn_ending_exit_settles_its_items(cx: &mut gpui::TestAppContext) {
                     cx,
                 );
                 view.apply_event(chunk("mid-flight", "m1"), "", false, cx);
+                view.apply_event(plan_with_a_live_step(), "", false, cx);
 
                 drive(view, cx);
                 assert_settled(view, what);

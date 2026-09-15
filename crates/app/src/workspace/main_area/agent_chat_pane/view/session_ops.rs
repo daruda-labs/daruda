@@ -4,7 +4,8 @@
 //! settle/teardown core.
 
 use daruda_acp::{
-    ChatItem, PermissionDecision, PermissionKindView, cancel_pending_tools, finalize_streaming,
+    ChatItem, PermissionDecision, PermissionKindView, cancel_pending_plan_entries,
+    cancel_pending_tools, finalize_streaming,
 };
 use gpui::{Context, Window};
 
@@ -139,25 +140,28 @@ impl AgentChatView {
     /// share one settle sequence and can't drift. Idempotent.
     pub(super) fn settle_turn(&mut self) {
         self.queue.turn = Turn::Idle;
-        self.settle_items();
+        self.settle_run_state();
         // Everything the turn produced is delivered by the completion relay, so
         // reset the post-turn baseline to the current assistant-text count; only
         // messages that arrive *after* this settle count as a follow-up.
         self.snap_post_turn_baseline();
     }
 
-    /// Settle every still-live item. [`Self::settle_turn`] is this plus
-    /// `turn = Idle`; the other callers are the ends of a run that no
-    /// `TurnEnded` closes — a `session/load` replay and the ack of a cancel —
-    /// which is why this is reachable from `apply_event`.
+    /// Settle everything this run left flagged live — the transcript *and* the
+    /// plan beside it. [`Self::settle_turn`] is this plus `turn = Idle`; the
+    /// other callers are the ends of a run that no `TurnEnded` closes — a
+    /// `session/load` replay and the ack of a cancel — which is why this is
+    /// reachable from `apply_event`.
     ///
-    /// Every such exit owes it: an item left flagged live makes its run read
-    /// `Rollup::Running` forever, and the pulse pump only repaints panes
-    /// `is_busy()` calls working, so the glyph gets a blink nothing drives.
-    pub(super) fn settle_items(&mut self) {
+    /// Every such exit owes it, and owes it for every store: a value left
+    /// flagged live reads as running forever, while the pulse pump only repaints
+    /// panes `is_busy()` calls working — so the glyph gets a blink nothing
+    /// drives. One site, so a new store is added here rather than at each exit.
+    pub(super) fn settle_run_state(&mut self) {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);
+        cancel_pending_plan_entries(&mut self.plan);
     }
 
     /// Resolve the permission request `request_id` with the chosen option:
@@ -452,6 +456,19 @@ impl AgentChatView {
         let mut access = WindowAccess::Live(window);
         self.reconcile_all_embeds(&mut access, cx);
         self.reproject(cx);
+    }
+
+    /// Seed the plan region for a capture, expanded so its entries are on
+    /// screen (a settled seed would otherwise arrive collapsed).
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_plan(
+        &mut self,
+        plan: Vec<daruda_acp::PlanEntryView>,
+        cx: &mut Context<Self>,
+    ) {
+        self.plan = plan;
+        self.plan_collapsed = false;
+        cx.notify();
     }
 
     /// Seed a transcript captured while the foreground turn is still active.

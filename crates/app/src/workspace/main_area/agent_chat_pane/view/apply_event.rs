@@ -128,7 +128,7 @@ impl AgentChatView {
                 // A replay closes with this reply, not a `TurnEnded`, so its tail
                 // is still flagged live and nothing more is coming for it.
                 if finished_restore {
-                    self.settle_items();
+                    self.settle_run_state();
                 }
                 // A resume's replayed `session/update`s already populated `items`
                 // by this point (see the comment above) — sync the baseline now
@@ -271,7 +271,7 @@ impl AgentChatView {
                 // block (the previous was already finalized), so without this the
                 // stopped run keeps reading `Rollup::Running`. Then the marker
                 // Stop pushed can take its final position.
-                self.settle_items();
+                self.settle_run_state();
                 self.settle_stop_marker();
                 // Two effects the tail owes that settle: revisit the calls it
                 // just made terminal, and remeasure the rows whose streaming
@@ -556,7 +556,7 @@ impl AgentChatView {
             // Same settle the `Connected` exit owes (see there), and the same
             // revisit: no event follows a closed stream, so a call this settle
             // just made terminal would otherwise wait for a fold toggle.
-            self.settle_items();
+            self.settle_run_state();
             self.reconcile_tool_images(&ReconcileScope::All, cx);
             // Whatever arrived before the stream closed is now the baseline —
             // it was already delivered by the (aborted) replay, not a

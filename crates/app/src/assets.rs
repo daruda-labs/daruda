@@ -73,6 +73,8 @@ impl AssetSource for DarudaAssets {
             "icons/agents/vtcode.svg" => icon!("agents/vtcode.svg"),
 
             // ── UI controls ───────────────────────────────────────────────
+            "icons/ui/cancel.svg" => icon!("ui/cancel.svg"),
+            "icons/ui/check-circle.svg" => icon!("ui/check-circle.svg"),
             "icons/ui/check.svg" => icon!("ui/check.svg"),
             "icons/ui/chrome-reader-mode.svg" => icon!("ui/chrome-reader-mode.svg"),
             "icons/ui/code.svg" => icon!("ui/code.svg"),
@@ -86,6 +88,8 @@ impl AssetSource for DarudaAssets {
             "icons/ui/open-in-new.svg" => icon!("ui/open-in-new.svg"),
             "icons/ui/play-arrow.svg" => icon!("ui/play-arrow.svg"),
             "icons/ui/preview.svg" => icon!("ui/preview.svg"),
+            "icons/ui/radio-button-checked.svg" => icon!("ui/radio-button-checked.svg"),
+            "icons/ui/radio-button-unchecked.svg" => icon!("ui/radio-button-unchecked.svg"),
             "icons/ui/skip-next.svg" => icon!("ui/skip-next.svg"),
             "icons/ui/unfold-less.svg" => icon!("ui/unfold-less.svg"),
             "icons/ui/unfold-more.svg" => icon!("ui/unfold-more.svg"),
@@ -209,6 +213,8 @@ mod tests {
     use super::*;
 
     const UI_ICON_PATHS: &[&str] = &[
+        "icons/ui/cancel.svg",
+        "icons/ui/check-circle.svg",
         "icons/ui/check.svg",
         "icons/ui/chrome-reader-mode.svg",
         "icons/ui/code.svg",
@@ -222,6 +228,8 @@ mod tests {
         "icons/ui/open-in-new.svg",
         "icons/ui/play-arrow.svg",
         "icons/ui/preview.svg",
+        "icons/ui/radio-button-checked.svg",
+        "icons/ui/radio-button-unchecked.svg",
         "icons/ui/skip-next.svg",
         "icons/ui/unfold-less.svg",
         "icons/ui/unfold-more.svg",

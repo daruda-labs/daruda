@@ -584,7 +584,7 @@ impl Workspace {
         // The same bounded read `daruda_chat_read` answers with, so the two
         // tools cannot disagree about what the agent said.
         let said = self.control_read(pane_id, cx).ok().flatten();
-        // `Stopped` is not an answer. `settle_items` finalises whatever was
+        // `Stopped` is not an answer. `settle_run_state` finalises whatever was
         // streaming, so the transcript *will* have text — handing it back as
         // the reply would present a sentence somebody cut off as what the
         // agent said.
@@ -904,6 +904,28 @@ impl Workspace {
             None,
             |v, window, cx| {
                 v.seed_transcript(super::shot_transcript::sample_transcript(), window, cx)
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Open the seeded transcript with the plan region expanded beside it.
+    /// `stopped` picks the post-Stop plan, whose running step settled to
+    /// `Cancelled` — the pair is what shows whether the four status icons read
+    /// apart by shape.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_plan_for_shot(
+        &mut self,
+        stopped: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::sample_transcript(), window, cx);
+                v.seed_plan(super::shot_transcript::shot_plan(stopped), cx);
             },
             window,
             cx,

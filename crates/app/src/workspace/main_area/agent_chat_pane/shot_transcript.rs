@@ -9,7 +9,38 @@
 
 use std::path::PathBuf;
 
-use daruda_acp::{ChatItem, DiffView, MessagePhase, ToolCallItem, ToolKindView, ToolStatusView};
+use daruda_acp::{
+    ChatItem, DiffView, MessagePhase, PlanEntryView, PlanPriority, PlanStatus, ToolCallItem,
+    ToolKindView, ToolStatusView,
+};
+
+/// The plan the plan-region scenarios seed. `stopped` is the state this pane
+/// reaches after a Stop: `settle_run_state` turns the running step into
+/// `Cancelled`, so the pair differs in exactly the one entry whose icon is the
+/// thing under review.
+pub(super) fn shot_plan(stopped: bool) -> Vec<PlanEntryView> {
+    let entry = |content: &str, status| PlanEntryView {
+        content: content.to_string(),
+        priority: PlanPriority::Medium,
+        status,
+    };
+    let middle = if stopped {
+        PlanStatus::Cancelled
+    } else {
+        PlanStatus::InProgress
+    };
+    vec![
+        entry(
+            "Read the failing test and its fixture",
+            PlanStatus::Completed,
+        ),
+        entry("Rewrite the parser's escape handling", middle),
+        entry(
+            "Run the suite and update the snapshots",
+            PlanStatus::Pending,
+        ),
+    ]
+}
 
 #[cfg(test)]
 use super::agent_chat_ops::SHOT_GROUP_TAIL_WINDOW;

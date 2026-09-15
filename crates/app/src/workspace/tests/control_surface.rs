@@ -371,7 +371,7 @@ mod ask {
         });
     }
 
-    /// A turn somebody stopped is not an answer. `settle_items` finalises
+    /// A turn somebody stopped is not an answer. `settle_run_state` finalises
     /// whatever was streaming, so the transcript *does* hold text — reporting
     /// that as the reply would hand the caller a cut-off sentence as though
     /// the agent had meant it.

@@ -358,6 +358,11 @@ pub enum PlanStatus {
     Pending,
     InProgress,
     Completed,
+    /// The run ended before this step finished. Set host-side by
+    /// [`crate::cancel_pending_plan_entries`] — agents never emit it, so it has
+    /// no `PlanEntryStatus` mapping. Distinct from `Pending`, which the run
+    /// never reached: this is the step it was on when it stopped.
+    Cancelled,
 }
 
 /// Priority level of a plan entry (mirror of the protocol's

@@ -16,8 +16,8 @@ use agent_client_protocol::schema::v1::{
 
 use crate::adapter::{AcpAdapter, DefaultAdapter, MessagePhase};
 use crate::model::{
-    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
-    ToolKindView, ToolOutputBlock, ToolStatusView,
+    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, PlanEntryView,
+    PlanStatus, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 use crate::output_highlight::TextOutputKind;
 
@@ -220,6 +220,21 @@ pub fn cancel_pending_tools(items: &mut [ChatItem]) {
             )
         {
             tc.status = ToolStatusView::Cancelled;
+        }
+    }
+}
+
+/// Settle every still-running plan entry as [`PlanStatus::Cancelled`].
+///
+/// The plan is a second live-flagged store beside `items`, and the agent has no
+/// terminal signal for it: a run that is stopped (or that ends without a final
+/// all-`Completed` `PlanChanged`) leaves its current step `InProgress` forever,
+/// which the host renders as a pulsing dot. `Pending` entries are left alone —
+/// the run never reached them, which is already a settled fact.
+pub fn cancel_pending_plan_entries(plan: &mut [PlanEntryView]) {
+    for entry in plan.iter_mut() {
+        if entry.status == PlanStatus::InProgress {
+            entry.status = PlanStatus::Cancelled;
         }
     }
 }
@@ -2465,6 +2480,34 @@ mod tests {
             )),
             "every streamed block settles when the turn ends, not just the tail"
         );
+    }
+
+    /// Unlike a tool call, a `Pending` plan entry is already settled: the run
+    /// never reached it. Only the step it was *on* is a lie once the run ends.
+    #[test]
+    fn cancel_pending_plan_entries_settles_only_the_running_step() {
+        let entry = |content: &str, status| PlanEntryView {
+            content: content.to_string(),
+            priority: crate::model::PlanPriority::Medium,
+            status,
+        };
+        let mut plan = vec![
+            entry("done", PlanStatus::Completed),
+            entry("running", PlanStatus::InProgress),
+            entry("todo", PlanStatus::Pending),
+        ];
+        cancel_pending_plan_entries(&mut plan);
+        assert_eq!(plan[0].status, PlanStatus::Completed);
+        assert_eq!(plan[1].status, PlanStatus::Cancelled, "running → cancelled");
+        assert_eq!(
+            plan[2].status,
+            PlanStatus::Pending,
+            "never started, so settled"
+        );
+
+        // Idempotent: a second exit for the same run must not move anything.
+        cancel_pending_plan_entries(&mut plan);
+        assert_eq!(plan[1].status, PlanStatus::Cancelled);
     }
 
     #[test]

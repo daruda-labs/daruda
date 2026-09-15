@@ -8,9 +8,17 @@ use super::fold_header::{FoldHeader, FoldRow, FoldToggle, SummaryLine};
 use super::pulse_opacity;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, IconName, button_bare};
+use crate::ui::{ButtonVariants as _, Icon, IconName, Sizable as _, button_bare};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+// Material Symbols, daruda's own icon set (see `assets.rs`). One family for the
+// whole checklist so the four states read as one vocabulary; the shape carries
+// the state and the colour only reinforces it.
+const ICON_COMPLETED: &str = "icons/ui/check-circle.svg";
+const ICON_IN_PROGRESS: &str = "icons/ui/radio-button-checked.svg";
+const ICON_PENDING: &str = "icons/ui/radio-button-unchecked.svg";
+const ICON_CANCELLED: &str = "icons/ui/cancel.svg";
 
 /// `(completed, total)`; callers guard empty plans before colour logic.
 fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
@@ -21,31 +29,34 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
     (done, plan.len())
 }
 
-/// Filled status dot plus colour; completed reuses diff-add green because
-/// there is no dedicated success token.
-fn plan_status_glyph(
+/// Status icon plus colour. Shape distinguishes the four states on its own, so
+/// the colour is reinforcement rather than the only channel (`DESIGN.md`).
+fn plan_status_icon(
     status: PlanStatus,
     t: &theme::DarudaTheme,
     dim: f32,
     cx: &App,
 ) -> (&'static str, Hsla) {
+    let muted = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
     match status {
         // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
-        PlanStatus::Completed => ("●", t.file_diff_stat_add),
-        PlanStatus::InProgress => ("●", t.status_executing_tool_dark),
-        PlanStatus::Pending => (
-            "●",
-            theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
-        ),
+        PlanStatus::Completed => (ICON_COMPLETED, t.file_diff_stat_add),
+        PlanStatus::InProgress => (ICON_IN_PROGRESS, t.status_executing_tool_dark),
+        PlanStatus::Pending => (ICON_PENDING, muted),
+        // Stopped before it finished — muted like Pending (no error red): it
+        // neither failed nor completed, and the ✕ says which.
+        PlanStatus::Cancelled => (ICON_CANCELLED, muted),
     }
 }
 
-/// Content colour for one plan entry.
+/// Content colour for one plan entry. Settled work recedes; work that is still
+/// open — never started, or cut mid-step — stays at full strength.
 fn plan_entry_color(status: PlanStatus, dim: f32, cx: &App) -> Hsla {
     match status {
         PlanStatus::Completed => theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
-        PlanStatus::InProgress => theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
-        PlanStatus::Pending => theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
+        PlanStatus::InProgress | PlanStatus::Pending | PlanStatus::Cancelled => {
+            theme::dim_toward_gray(theme::agent_chat_fg(cx), dim)
+        }
     }
 }
 
@@ -197,7 +208,7 @@ fn plan_list(
         .px(px(theme::AGENT_CHAT_PAD_X))
         .pb(px(theme::AGENT_CHAT_PAD_Y));
     for entry in plan {
-        let (glyph, glyph_color) = plan_status_glyph(entry.status, t, dim, cx);
+        let (icon, icon_color) = plan_status_icon(entry.status, t, dim, cx);
         let in_progress = entry.status == PlanStatus::InProgress;
         list = list.child(
             div()
@@ -205,7 +216,9 @@ fn plan_list(
                 .min_w_0()
                 .flex()
                 .flex_row()
-                .items_baseline()
+                // An icon is an `svg()` box with no baseline, so the row centres
+                // instead of sitting on one (the text-glyph era's alignment).
+                .items_center()
                 .gap(px(theme::AGENT_CHAT_MSG_GAP))
                 // In-progress row uses the shared selection tint.
                 .when(in_progress, |row| {
@@ -215,11 +228,9 @@ fn plan_list(
                 .child(
                     div()
                         .flex_none()
-                        .text_color(glyph_color)
-                        .text_size(px(theme::agent_chat_font_size(cx)))
-                        // In-progress glyph pulses; settled glyphs stay solid.
+                        // In-progress icon pulses; settled ones stay solid.
                         .when(in_progress, |g| g.opacity(pulse_opacity(cx)))
-                        .child(SharedString::from(glyph)),
+                        .child(Icon::empty().path(icon).xsmall().text_color(icon_color)),
                 )
                 .child(
                     div()

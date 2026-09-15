@@ -58,6 +58,8 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
+const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
+const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
 /// CLI token for the tail window's boundary row, closed.
 const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
 /// CLI token for the same boundary row, open.
@@ -201,6 +203,14 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// The plan region mid-run: one step done, one running, one still to come.
+    /// Its four states are icons carrying meaning by shape, which a unit test
+    /// cannot judge — only a capture shows whether they read apart.
+    AgentChatPlan,
+    /// The same region after a Stop, where the running step became `Cancelled`.
+    /// Paired with [`Self::AgentChatPlan`] because the question is whether the
+    /// cut step is distinguishable from both the done one and the untouched one.
+    AgentChatPlanStopped,
     /// The tail window's boundary row with nothing floating over it. The pair
     /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
     /// the row exists to say — whether its two states are distinguishable —
@@ -284,6 +294,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
+            NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
+            NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
             NAME_AGENT_CHAT_TAIL => Some(Self::AgentChatTail),
             NAME_AGENT_CHAT_TAIL_OPEN => Some(Self::AgentChatTailOpen),
             NAME_AGENT_CHAT_GROUP_TAIL => Some(Self::AgentChatGroupTail),
@@ -466,6 +478,16 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatInterrupted => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatPlan => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_plan_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatPlanStopped => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_plan_for_shot(true, window, cx)
             });
         }
         ScreenshotScenario::AgentChatFold => {
