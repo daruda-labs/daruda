@@ -5112,32 +5112,36 @@ pub fn control_listing_header() -> String {
     rust_i18n::t!("control.listing_header").into_owned()
 }
 
-/// One `/list` row. `state` is the activity/health glyph with its trailing
-/// space (empty for a pane with no session), `agent` names the agent the pane
-/// runs, `ago` is the pre-formatted last-activity suffix (empty when unknown).
+/// One `/list` row. `agent` names the agent the pane runs, `detail` is the
+/// pre-formatted activity-and-title segment (empty when it has neither), and
+/// `ago` the last-activity suffix (empty when unknown).
 pub fn control_listing_row(
     ordinal: u32,
-    state: &str,
     name: &str,
     agent: &str,
-    title: &str,
+    detail: &str,
     ago: &str,
 ) -> String {
     rust_i18n::t!(
         "control.listing_row",
         ordinal = ordinal,
-        state = state,
         name = name,
         agent = agent,
-        title = title,
+        detail = detail,
         ago = ago
     )
     .into_owned()
 }
 
-/// Stand-in for a session that has not titled itself yet.
-pub fn control_listing_untitled() -> String {
-    rust_i18n::t!("control.listing_untitled").into_owned()
+/// What a row's dash introduces, separator included. Omitted entirely when
+/// there is nothing to introduce.
+pub fn control_listing_detail(detail: &str) -> String {
+    rust_i18n::t!("control.listing_detail", detail = detail).into_owned()
+}
+
+/// The activity glyph as it sits beside a session title.
+pub fn control_listing_state(state: &str) -> String {
+    rust_i18n::t!("control.listing_state", state = state).into_owned()
 }
 
 /// How a chosen target is named back to the user: its lane path plus its title.

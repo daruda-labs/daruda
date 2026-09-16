@@ -96,7 +96,7 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         } => plain(s::control_selected(
             &state
                 .label_for(summary.target)
-                .unwrap_or_else(|| title_of(summary)),
+                .unwrap_or_else(|| bare_label(summary)),
         )),
         ControlResult::Sent { disposition, .. } => plain(match disposition {
             SendDisposition::Delivered => s::control_sent_delivered(),
@@ -267,23 +267,38 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
 fn row_text(ordinal: u32, row: &ListingRow) -> String {
     s::control_listing_row(
         ordinal,
-        &state_glyph(&row.summary),
         &row.name,
         &row.summary.agent_name,
-        &title_of(&row.summary),
+        &detail_of(&row.summary),
         &ago_of(&row.summary),
     )
 }
 
-/// One glyph for the pane's condition, carrying the space that separates it
-/// from the row. Health wins over activity: a pane that cannot be talked to is
-/// not meaningfully idle.
+/// The segment a row's dash introduces: what the pane is doing, then what it
+/// is doing it to. Empty when it has neither to report — a dash with nothing
+/// after it reads as a truncation.
+fn detail_of(summary: &ChatSummary) -> String {
+    let badge = state_badge(summary);
+    let title = summary.title.as_deref().unwrap_or_default();
+    let parts: Vec<&str> = [badge.as_str(), title]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+    s::control_listing_detail(&parts.join(" "))
+}
+
+/// The pane's condition, bracketed. Health wins over activity: a pane that
+/// cannot be talked to is not meaningfully idle.
 ///
-/// A pane with no session yet draws nothing rather than a glyph of its own.
-/// After a restore that is most of the list, so marking it says nothing about
-/// any one row — the column earns its width by marking the panes that do have
-/// a session, and the empty ones read as the background they are.
-fn state_glyph(summary: &ChatSummary) -> String {
+/// Sits against the title rather than in a column of its own, because the two
+/// are read together — what a run is doing means little without what it is
+/// working on. A pane with no session yet draws nothing: after a restore that
+/// is most of the list, so a badge there marks nothing out, and the badge
+/// earns its place by naming the panes that do have one.
+fn state_badge(summary: &ChatSummary) -> String {
     let glyph = match summary.health {
         Health::Error => s::control_state_error(),
         Health::Unavailable => return String::new(),
@@ -293,17 +308,30 @@ fn state_glyph(summary: &ChatSummary) -> String {
             Activity::AwaitingPermission => s::control_state_awaiting_permission(),
         },
     };
-    format!("{glyph} ")
+    s::control_listing_state(&glyph)
 }
 
-/// The title already arrives bounded and single-line — `ChatSummary` caps it at
-/// construction — so this only supplies the stand-in for a session that has
-/// not titled itself yet.
-pub(crate) fn title_of(summary: &ChatSummary) -> String {
+/// The title's own segment of a row, its separator included. Empty for a
+/// session that has not titled itself: a row then ends at what it does know,
+/// rather than at a dash with a stand-in after it.
+///
+/// The title itself already arrives bounded and single-line — `ChatSummary`
+/// caps it at construction.
+pub(crate) fn title_suffix(summary: &ChatSummary) -> String {
+    summary
+        .title
+        .as_deref()
+        .map_or_else(String::new, s::control_listing_detail)
+}
+
+/// What to call a pane the current listing no longer holds a row for: its
+/// title, or the agent running it. This is the whole of the sentence that
+/// confirms a selection, so unlike a row it cannot fall back to nothing.
+fn bare_label(summary: &ChatSummary) -> String {
     summary
         .title
         .clone()
-        .unwrap_or_else(s::control_listing_untitled)
+        .unwrap_or_else(|| summary.agent_name.clone())
 }
 
 /// How long ago this pane last did anything, or nothing at all when the stamp
@@ -408,20 +436,21 @@ mod tests {
     fn a_row_names_its_agent_and_marks_only_a_pane_with_a_session() {
         use crate::control::result::{LaneGroup, ProjectGroup, WindowGroup};
 
-        let chat = |pane_id, agent: &str, name: &str, health, activity| ChatSummary {
-            target: PaneRef {
-                workspace: Default::default(),
-                pane: pane_id,
-            },
-            agent: agent.into(),
-            agent_name: name.into(),
-            is_active_lane: true,
-            activity,
-            health,
-            unread: false,
-            title: None,
-            last_activity: None,
-        };
+        let chat =
+            |pane_id, agent: &str, name: &str, health, activity, title: Option<&str>| ChatSummary {
+                target: PaneRef {
+                    workspace: Default::default(),
+                    pane: pane_id,
+                },
+                agent: agent.into(),
+                agent_name: name.into(),
+                is_active_lane: true,
+                activity,
+                health,
+                unread: false,
+                title: title.map(str::to_owned),
+                last_activity: None,
+            };
         let listing = Listing {
             windows: vec![WindowGroup {
                 index: 0,
@@ -430,8 +459,30 @@ mod tests {
                     lanes: vec![LaneGroup {
                         name: "main".into(),
                         chats: vec![
-                            chat(1, "codex-acp", "Codex", Health::Unavailable, Activity::Idle),
-                            chat(2, "claude", "Claude Code", Health::Ok, Activity::Working),
+                            chat(
+                                1,
+                                "codex-acp",
+                                "Codex",
+                                Health::Unavailable,
+                                Activity::Idle,
+                                None,
+                            ),
+                            chat(
+                                2,
+                                "claude",
+                                "Claude Code",
+                                Health::Ok,
+                                Activity::Working,
+                                None,
+                            ),
+                            chat(
+                                3,
+                                "claude",
+                                "Claude Code",
+                                Health::Ok,
+                                Activity::Idle,
+                                Some("notihub routing"),
+                            ),
                         ],
                     }],
                 }],
@@ -447,23 +498,27 @@ mod tests {
         )
         .text;
 
+        // Every pane here sits in the active worktree, and no row says so —
+        // that axis is still reported to an agent reading the JSON, it just
+        // no longer earns room on a phone screen. The three rows are the
+        // three shapes the dash segment takes: nothing to report, a badge
+        // with no title behind it, and both.
         let rows: Vec<&str> = text.lines().skip(1).collect();
-        assert!(
-            rows[0].starts_with("1. daruda/main (Codex) —"),
-            "a dormant row opens straight at its path: {}",
-            rows[0]
-        );
-        assert!(
-            rows[1].starts_with(&format!(
-                "2. {} daruda/main (Claude Code) —",
+        assert_eq!(rows[0], "1. daruda/main (Codex)");
+        assert_eq!(
+            rows[1],
+            format!(
+                "2. daruda/main (Claude Code) — [{}]",
                 s::control_state_working()
-            )),
-            "a working row carries its glyph: {}",
-            rows[1]
+            )
         );
-        // The active worktree is still reported to an agent reading the JSON;
-        // it just no longer earns a column on a phone screen.
-        assert!(!text.contains('▸'), "{text}");
+        assert_eq!(
+            rows[2],
+            format!(
+                "3. daruda/main (Claude Code) — [{}] notihub routing",
+                s::control_state_idle()
+            )
+        );
     }
 
     #[test]

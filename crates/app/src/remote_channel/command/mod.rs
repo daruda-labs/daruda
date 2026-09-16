@@ -96,7 +96,7 @@ impl CommandState {
         let row = self.rows.iter().find(|r| r.summary.target == target)?;
         Some(s::control_target_label(
             &row.name,
-            &render::title_of(&row.summary),
+            &render::title_suffix(&row.summary),
         ))
     }
 
