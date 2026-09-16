@@ -3787,3 +3787,54 @@ fn the_tally_counts_exactly_the_children_the_card_declines_to_render() {
         "the count the chip promises is the count the card withheld"
     );
 }
+
+#[test]
+fn prose_never_renders_outside_a_response_bar() {
+    // Every run that puts anything on screen earns a response bar and projects
+    // its blocks at indent 1, which is what lets `render_item` render prose
+    // inline with no speaker label of its own. The shapes below are the ones
+    // that could reach `base_indent = 0`; none emits an item row at all.
+    let shapes: Vec<(&str, Vec<ChatItem>)> = vec![
+        (
+            "only bodyless blocks, so the run renders nothing",
+            vec![ChatItem::UserText("u".into()), asst(""), think("")],
+        ),
+        (
+            "a sole reply",
+            vec![ChatItem::UserText("u".into()), asst("a")],
+        ),
+        ("a run with no user prompt before it", vec![asst("a")]),
+        (
+            "a failure as the run's only block",
+            vec![
+                ChatItem::UserText("u".into()),
+                ChatItem::Failure(daruda_acp::AcpFailure::unclassified("boom")),
+            ],
+        ),
+        (
+            "a permission as the run's only block",
+            vec![ChatItem::UserText("u".into()), perm(false)],
+        ),
+        (
+            "a stop marker, which owns a top-level row",
+            vec![ChatItem::UserText("u".into()), ChatItem::Interrupted],
+        ),
+    ];
+    for (name, items) in shapes {
+        let rows = project(
+            &items,
+            &FoldState::default(),
+            false,
+            &LiveSubagentUnits::of(&items),
+            StepWindow::uniform(TailWindow::All),
+            &DisplayFilter::default(),
+        );
+        assert!(
+            !rows.iter().any(|r| matches!(
+                r.kind,
+                RowKind::AgentItem(_) | RowKind::ConclusionItem(_)
+            ) && r.indent == 0),
+            "{name}: an item row at indent 0 would be prose with no bar above it"
+        );
+    }
+}

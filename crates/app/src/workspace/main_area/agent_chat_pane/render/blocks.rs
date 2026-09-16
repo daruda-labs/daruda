@@ -97,8 +97,8 @@ pub(super) fn pane_markdown(
 }
 
 /// The assistant prose body — drag-selectable rendered markdown with mermaid
-/// fences rasterized. Shared by the labeled [`assistant_block`] (trivial /
-/// top-level reply) and the header-less inline render used under a response bar.
+/// fences rasterized. Shared by the header-less inline render and by
+/// [`conclusion_block`], which wraps the same body in a bare chevron.
 pub(super) fn assistant_markdown(
     ix: usize,
     text: &str,
@@ -119,46 +119,13 @@ pub(super) fn assistant_markdown(
     .into_any_element()
 }
 
-/// Assistant response — left-aligned, foldable block (default expanded). The
-/// body renders as rendered, drag-selectable markdown via `crate::ui::markdown`
-/// (keyed by `ix` for stable selection identity); a still-streaming block shows
-/// its partial markdown fine (no per-message caret — the streaming signal lives
-/// on the input dock). Collapsed, the header shows the first non-empty line of
-/// `text`, dimmed and single-line ellipsized.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn assistant_block(
-    ix: usize,
-    key: FoldKey,
-    expanded: bool,
-    text: &str,
-    agent_label: &str,
-    markdown: MarkdownRender<'_>,
-    cx: &mut Context<AgentChatView>,
-) -> AnyElement {
-    let header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
-        div()
-            .flex_none()
-            .text_color(theme::dim_toward_gray(
-                theme::agent_chat_fg(cx),
-                markdown.dim,
-            ))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(agent_label.to_string()))
-            .into_any_element(),
-    );
-    FoldRow::block(("agent-chat-assistant", ix), key, expanded, header, |cx| {
-        assistant_markdown(ix, text, markdown, cx)
-    })
-    .render(markdown.dim, cx)
-}
-
 /// The turn's conclusion — the run's final assistant message rendered under a
-/// response bar. Same drag-selectable markdown body as [`assistant_block`] but
-/// with no speaker label and no rollup glyph (the response bar above already
-/// names the speaker and carries the run's verdict): just the bare disclosure
-/// chevron, so the conclusion folds to its first-line summary independently of
-/// the response's process fold.
+/// response bar. The [`assistant_markdown`] body with no speaker label and no
+/// rollup glyph (the response bar above already names the speaker and carries
+/// the run's verdict): just the bare disclosure chevron, so the conclusion folds
+/// to its first-line summary independently of the response's process fold. It is
+/// the only fold a reply that *is* its whole response has, since the bar cannot
+/// fold that reply.
 pub(super) fn conclusion_block(
     ix: usize,
     key: FoldKey,

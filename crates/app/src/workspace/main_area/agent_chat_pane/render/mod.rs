@@ -117,8 +117,8 @@ impl<'a> RenderAssets<'a> {
 }
 
 use blocks::{
-    MarkdownRender, assistant_block, assistant_markdown, conclusion_block, failure_block,
-    thinking_block, user_bubble,
+    MarkdownRender, assistant_markdown, conclusion_block, failure_block, thinking_block,
+    user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
@@ -790,7 +790,6 @@ fn render_agent_item(
         Some(item) => render_item(
             ix,
             item,
-            row.indent > 0,
             &this.items,
             &this.live_units,
             &this.filter_matches,
@@ -802,7 +801,6 @@ fn render_agent_item(
             this.tail_calls.value(),
             t,
             this.dim_amount,
-            agent_display_name(this),
             this.pane_id,
             this.window_handle,
             window,
@@ -821,7 +819,6 @@ fn render_agent_item(
 fn render_item(
     ix: usize,
     item: &ChatItem,
-    under_response: bool,
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
     filter_matches: &FilterMatchIndex,
@@ -836,7 +833,6 @@ fn render_item(
     call_window: TailWindow,
     t: &theme::DarudaTheme,
     dim: f32,
-    agent_label: &str,
     pane_id: PaneId,
     window_handle: AnyWindowHandle,
     window: &mut Window,
@@ -850,17 +846,10 @@ fn render_item(
     );
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),
-        // Under a response bar the speaker is already labeled with the agent
-        // name; render the prose inline with no redundant per-block header/fold.
-        // A trivial / top-level reply keeps the labeled, foldable block.
-        ChatItem::AssistantText { text, .. } if under_response => {
-            assistant_markdown(ix, text, markdown, cx)
-        }
-        ChatItem::AssistantText { text, .. } => {
-            let key = FoldKey::Assistant(ix);
-            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
-            assistant_block(ix, key, expanded, text, agent_label, markdown, cx)
-        }
+        // Prose reaching here is never the conclusion (that is
+        // `RowKind::ConclusionItem`), and its response bar already labels the
+        // speaker, so it renders inline with no per-block header or fold.
+        ChatItem::AssistantText { text, .. } => assistant_markdown(ix, text, markdown, cx),
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
