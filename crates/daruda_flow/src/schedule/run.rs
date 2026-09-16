@@ -4,7 +4,7 @@
 use super::{RunInputs, RunOutcome, RunReport, run_flow};
 use crate::error::{FlowIoError, IoSite};
 use crate::event::{FlowEvent, RunEnd, emit};
-use crate::lock::{LockError, RunLocks};
+use crate::lock::{LockError, RunLock};
 use crate::marker::{DEFAULT_KEEP_RUNS, sweep_old_runs, write_marker};
 use crate::model::Flow;
 use crate::request::RunRequest;
@@ -91,9 +91,8 @@ fn execute_with(
             );
         }
     };
-    let lock_dirs = [crate::lock::lock_dir_for(&request.lock_dir, &tree)];
-    let lock = match RunLocks::acquire(&lock_dirs, &run_id_of(&request.run_dir), &*request.is_alive)
-    {
+    let lock_dir = crate::lock::lock_dir_for(&request.lock_dir, &tree);
+    let lock = match RunLock::acquire(&lock_dir, &run_id_of(&request.run_dir), &*request.is_alive) {
         Ok(lock) => lock,
         // Neither refusal took the directory, so neither writes a marker
         // and neither releases: the run that is going owns both.
