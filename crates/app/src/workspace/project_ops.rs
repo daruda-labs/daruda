@@ -372,7 +372,7 @@ impl Workspace {
         // lanes we'll remove. Default-kind lanes are skipped —
         // they're not git-managed, so `fs::remove_dir_all` on
         // `project_path` is sufficient.
-        let removals: Vec<(PathBuf, PathBuf)> = project
+        let removals: Vec<(PathBuf, PathBuf, Option<PathBuf>)> = project
             .lanes
             .iter()
             .filter_map(|wt| {
@@ -382,7 +382,11 @@ impl Workspace {
                     ..
                 } = &wt.kind
                 {
-                    Some((repo_root.clone(), worktree_root.clone()))
+                    Some((
+                        repo_root.clone(),
+                        worktree_root.clone(),
+                        super::flow_paths::lane_lock_dir(&self.lock_root, worktree_root),
+                    ))
                 } else {
                     None
                 }
@@ -393,12 +397,14 @@ impl Workspace {
         cx.spawn(async move |_this, async_cx| {
             let executor = async_cx.background_executor().clone();
             let mut errors: Vec<(PathBuf, String)> = Vec::new();
-            for (repo, wt_root) in removals {
+            for (repo, wt_root, lock_dir) in removals {
                 let repo_clone = repo.clone();
                 let wt_clone = wt_root.clone();
                 let result = executor
                     .spawn(async move {
-                        crate::lane::git::remove_lane(&repo_clone, &wt_clone, false)
+                        crate::lane::git::remove_lane(&repo_clone, &wt_clone, false).inspect(
+                            |()| crate::workspace::flow_paths::forget_lane_lock(lock_dir),
+                        )
                     })
                     .await;
                 if let Err(e) = result {

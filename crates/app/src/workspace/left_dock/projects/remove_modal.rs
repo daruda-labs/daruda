@@ -112,6 +112,7 @@ impl RemoveWorktreeModal {
         let workspace = self.workspace.clone();
         let repo_root = self.plan.repo_root.clone();
         let path: PathBuf = self.plan.path.clone();
+        let lock_dir = self.plan.lock_dir.clone();
         let force = self.allow_force;
         let target_id = self.target_id;
         let active_project = workspace
@@ -136,6 +137,7 @@ impl RemoveWorktreeModal {
                     .spawn(async move {
                         crate::lane::git::remove_lane(&repo_root, &path, force)
                             .map_err(|e| e.to_string())?;
+                        crate::workspace::flow_paths::forget_lane_lock(lock_dir);
                         // Branch removal is best-effort *after* the
                         // lane is gone — failure here surfaces as
                         // an inline error but the lane is already
@@ -321,6 +323,7 @@ mod tests {
         let plan = RemoveWorktreePlan {
             path: PathBuf::from("/tmp/repo-feat"),
             repo_root: PathBuf::from("/tmp/repo"),
+            lock_dir: None,
         };
         let wh = cx.add_window(|window, cx| {
             RemoveWorktreeModal::new(

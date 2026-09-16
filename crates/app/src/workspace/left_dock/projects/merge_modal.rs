@@ -196,6 +196,9 @@ impl MergeModal {
         let source_branch = self.source_branch.clone();
         let source_path = self.source_path.clone();
         let source_repo_root = self.source_repo_root.clone();
+        let source_lock_dir = workspace.upgrade().and_then(|ws| {
+            crate::workspace::flow_paths::lane_lock_dir(&ws.read(cx).lock_root, &self.source_path)
+        });
         let target = &self.target_options[self.selected_idx];
         let target_path = target.wt_path.clone();
         let remove_after_merge = self.remove_after_merge;
@@ -300,6 +303,9 @@ impl MergeModal {
                             // Branch deletion is best-effort — if it fails the lane
                             // is already detached, so we surface the error without rolling back.
                             crate::lane::git::remove_lane(&source_repo_root, &source_path, false)
+                                .inspect(|()| {
+                                    crate::workspace::flow_paths::forget_lane_lock(source_lock_dir);
+                                })
                                 .and_then(|()| {
                                     crate::lane::git::delete_branch(
                                         &source_repo_root,

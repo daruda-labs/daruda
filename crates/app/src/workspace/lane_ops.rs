@@ -46,6 +46,9 @@ pub(in crate::workspace) struct CreateWorktreePlan {
 pub(in crate::workspace) struct RemoveWorktreePlan {
     pub path: std::path::PathBuf,
     pub repo_root: std::path::PathBuf,
+    /// Resolved here because `validate_remove_lane` runs while the
+    /// checkout still exists; see [`super::flow_paths::forget_lane_lock`].
+    pub lock_dir: Option<std::path::PathBuf>,
 }
 
 /// `"<project> / <lane>"`. One derivation because three surfaces show it —
@@ -269,6 +272,7 @@ impl Workspace {
         Ok(RemoveWorktreePlan {
             path: wt.path.clone(),
             repo_root,
+            lock_dir: super::flow_paths::lane_lock_dir(&self.lock_root, &wt.path),
         })
     }
 

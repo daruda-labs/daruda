@@ -153,6 +153,36 @@ pub(in crate::workspace) fn lane_lock_dir(lock_root: &Path, lane_cwd: &Path) -> 
     Some(daruda_flow::lock::lock_dir_for(lock_root, &tree))
 }
 
+/// Drop a removed lane's lock directory. A lane is a worktree the user
+/// creates and deletes, so the engine's "bounded by how many trees the
+/// user has" leftovers are really bounded by how many they have ever had —
+/// and they outlive the session, on disk, shared across profiles.
+///
+/// `dir` is resolved by the caller *before* the checkout goes: the lock is
+/// keyed to the resolved tree, and a path already deleted resolves to
+/// nothing. Dropping it for a removal that then fails costs nothing —
+/// removal refuses a held lock, and the next run makes the directory
+/// again.
+pub(in crate::workspace) fn forget_lane_lock(dir: Option<PathBuf>) {
+    let Some(dir) = dir else {
+        return;
+    };
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => daruda_store::observability::log_writer::LogWriter::log(
+            daruda_store::observability::error_report::ErrorReport::new(
+                crate::surface::strings::error_lane_flow_lock_cleanup_failed(),
+            )
+            .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+            .from_error(&e)
+            .at(file!(), line!())
+            .dedup("lane.lock.cleanup")
+            .build(),
+        ),
+    }
+}
+
 /// Where this lane's runnable flows come from.
 ///
 /// Named because the three paths are not interchangeable: `lane` is a lane
@@ -543,5 +573,31 @@ mod tests {
             s::flow_delete_confirm_body("deploy.yaml", &origin_label(FlowOrigin::Repo)),
             "the repository's copy fell back to the shared sentence"
         );
+    }
+
+    /// The leaf goes, its parents stay. The lock root mirrors whole tree
+    /// paths, so `…/flow-locks/Users/me/` is shared with every other lane
+    /// under it — taking it would strip locks off runs still going.
+    #[test]
+    fn forgetting_a_lane_takes_its_own_directory_and_no_ancestor() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let shared = root.path().join("Users/me");
+        let mine = shared.join("repo-feat");
+        let sibling = shared.join("repo-main");
+        for dir in [&mine, &sibling] {
+            std::fs::create_dir_all(dir).expect("mkdir");
+            std::fs::write(dir.join(".lock"), "pid: 1\n").expect("lock");
+        }
+
+        forget_lane_lock(Some(mine.clone()));
+
+        assert!(!mine.exists(), "the removed lane kept its directory");
+        assert!(sibling.join(".lock").is_file(), "a sibling lost its lock");
+        assert!(shared.is_dir(), "the shared ancestor went with it");
+
+        // Already gone is the ordinary case — two removals race, or the
+        // directory was never made because the lane never ran a flow.
+        forget_lane_lock(Some(mine));
+        forget_lane_lock(None);
     }
 }

@@ -5959,6 +5959,10 @@ macro_rules! error_string {
 
 error_string!(error_acp_connect_failed, "error.acp_connect_failed");
 error_string!(
+    error_lane_flow_lock_cleanup_failed,
+    "error.lane_flow_lock_cleanup_failed"
+);
+error_string!(
     error_acp_resume_failed_retrying,
     "error.acp_resume_failed_retrying"
 );
