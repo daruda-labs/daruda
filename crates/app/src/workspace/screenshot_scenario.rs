@@ -61,6 +61,8 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
+/// CLI token for a transcript of prose-only replies and their own folds.
+const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
 const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
 const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
@@ -210,6 +212,12 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// Prose-only replies — the `/usage` shape — with the first reply's own
+    /// fold shut and the second open. Such a turn renders one block, which the
+    /// response bar cannot fold (the conclusion escape keeps it on screen), so
+    /// the bare chevron is its only control and whether it reads as one is a
+    /// question only a capture answers.
+    AgentChatSoleReply,
     /// A tool card whose call is still running, its group open. The badge's
     /// live state is the one a settled seed cannot reach, and it is the only
     /// state that carries a number — which only a capture can judge.
@@ -312,6 +320,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
+            NAME_AGENT_CHAT_SOLE_REPLY => Some(Self::AgentChatSoleReply),
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
             NAME_AGENT_CHAT_PLAN_STOPPED => Some(Self::AgentChatPlanStopped),
@@ -528,6 +537,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatInterrupted => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatSoleReply => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_sole_reply_for_shot(window, cx)
             });
         }
         ScreenshotScenario::AgentChatRunningTool => {

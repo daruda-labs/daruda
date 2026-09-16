@@ -473,10 +473,11 @@ fn conclusion_under_a_response_is_a_separately_foldable_item() {
 }
 
 #[test]
-fn trivial_reply_is_not_a_conclusion_item() {
-    // A lone reply is the whole response: folding it would leave the turn
-    // showing nothing, so it renders as plain prose under the bar rather than
-    // earning the conclusion's bare-chevron fold.
+fn sole_reply_earns_the_conclusions_fold() {
+    // A lone reply is the whole response, and the response bar cannot fold it:
+    // the conclusion escape keeps it on screen through that fold. The bare
+    // chevron is the only control left, so it is the one the reply must get --
+    // without it a prose-only turn (`/usage`) has no fold at all.
     let items = [ChatItem::UserText("hi".into()), asst("hello")];
     let rows = project(
         &items,
@@ -486,11 +487,32 @@ fn trivial_reply_is_not_a_conclusion_item() {
         StepWindow::uniform(TailWindow::All),
         &DisplayFilter::default(),
     );
-    assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
     assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ConclusionItem(_)))
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::ConclusionItem(1)) && !r.hidden)
+    );
+    assert!(!rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
+}
+
+#[test]
+fn sole_reply_stays_visible_when_its_response_is_collapsed() {
+    // The conclusion escape is what makes the bar unable to fold it, so the
+    // bare chevron has to be a live second control rather than a duplicate of
+    // one that already works.
+    let items = [ChatItem::UserText("hi".into()), asst("hello")];
+    let mut fold = FoldState::default();
+    fold.toggle(FoldKey::Response(1), FoldContext::past(false));
+    let rows = project(
+        &items,
+        &fold,
+        false,
+        &LiveSubagentUnits::of(&items),
+        StepWindow::uniform(TailWindow::All),
+        &DisplayFilter::default(),
+    );
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::ConclusionItem(1)) && !r.hidden)
     );
 }
 

@@ -227,6 +227,32 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// A conversation of prose-only replies — the `/usage` shape: one prompt, one
+/// long answer, no tool call and no reasoning between them. Two turns, because
+/// the reply's own fold is the thing under review and one turn can only show it
+/// in one state.
+///
+/// Its run renders a single block, which is the case the response bar cannot
+/// fold: the conclusion escape keeps that block on screen through the bar. So
+/// the bare chevron is the only control the turn has, and whether it reads as
+/// one is a question only a capture answers.
+pub(in crate::workspace) fn sole_reply_transcript() -> Vec<ChatItem> {
+    vec![
+        ChatItem::UserText(USAGE_PROMPT.to_string()),
+        assistant(USAGE_REPLY, MessagePhase::Answer),
+        ChatItem::UserText(USAGE_REPROMPT.to_string()),
+        assistant(USAGE_REPLY, MessagePhase::Answer),
+    ]
+}
+
+/// The prompt behind [`sole_reply_transcript`]. A slash command, because that
+/// is the everyday source of a reply with no work under it.
+const USAGE_PROMPT: &str = "/usage";
+const USAGE_REPROMPT: &str = "/usage again, after the weekly reset";
+/// Long and structured enough that folding it is worth doing — the point of the
+/// capture is that a wall of text can be put away.
+const USAGE_REPLY: &str = "## Usage\n\n> Claude team subscription usage\n\n### Limits\n\n**5-hour limit** — **31%** · Resets Sep 16, 6:50 PM GMT+9\n\n**Weekly · all models** — **82%** · Resets Sep 17, 11:00 AM GMT+9\n\n**Weekly · Fable** — **14%** · Resets Sep 17, 10:59 AM GMT+9\n\n### This session\n\n| Cost | API time | Active |\n|:--|:--|:--|\n| $4.12 | 6m 31s | 48m |\n\n| Breakdown | Tokens |\n|:--|--:|\n| Input | 18,904 |\n| Output | 7,412 |\n| Cache read | 1,204,880 |\n| Cache write | 96,330 |";
+
 /// The seeded conversation cut by a Stop: the run loses its conclusion and is
 /// closed by the marker, then the user asks again. Shows the marker between two
 /// turns, which is the only place it ever appears.
@@ -473,6 +499,23 @@ mod tests {
                 .iter()
                 .any(|i| matches!(i, ChatItem::ToolCall(_))),
             "a tool run follows it, so it reads as a preamble and not a conclusion"
+        );
+    }
+
+    #[test]
+    fn the_sole_reply_seed_gives_each_turn_exactly_one_block() {
+        let items = sole_reply_transcript();
+        let replies = items
+            .iter()
+            .filter(|i| matches!(i, ChatItem::AssistantText { .. }))
+            .count();
+        assert_eq!(replies, 2, "one reply per turn, so both fold states show");
+        assert!(
+            !items
+                .iter()
+                .any(|i| matches!(i, ChatItem::ToolCall(_) | ChatItem::Thinking { .. })),
+            "a second block in a run would give the response bar something to fold, \
+             which is the case this seed exists to exclude"
         );
     }
 

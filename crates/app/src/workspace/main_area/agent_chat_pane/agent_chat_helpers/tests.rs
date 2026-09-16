@@ -794,11 +794,11 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
     );
 }
 
-/// A lone reply renders inline under its response bar, so it has no fold of
-/// its own — the bar is the only thing to collapse. Guards the
-/// inline-vs-block split in `collect_foldable_keys`.
+/// A lone reply is its response's conclusion, so it carries the bare-chevron
+/// fold and expand/collapse-all has to reach it: the bar alone cannot collapse
+/// it. Guards the inline-vs-block split in `collect_foldable_keys`.
 #[test]
-fn a_lone_reply_folds_only_at_its_bar() {
+fn a_lone_reply_folds_at_its_bar_and_its_own_chevron() {
     let items = [
         ChatItem::UserText("u".to_owned()),
         ChatItem::AssistantText {
@@ -808,7 +808,10 @@ fn a_lone_reply_folds_only_at_its_bar() {
             phase: Default::default(),
         },
     ];
-    assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Response(1)]);
+    assert_eq!(
+        collect_foldable_keys(&items),
+        vec![FoldKey::Response(1), FoldKey::Assistant(1)]
+    );
 }
 
 /// A consecutive tool-call run (≥ 2) contributes a `ToolGroup` key on top

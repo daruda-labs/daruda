@@ -897,6 +897,44 @@ impl Workspace {
         );
     }
 
+    /// Open the prose-only seed with the first reply's own fold shut and the
+    /// second left open, so one capture carries both states of the one control
+    /// such a turn has. The response bar cannot stand in for it: the conclusion
+    /// escape keeps a sole reply on screen through that fold.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_sole_reply_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold::FoldKey;
+        use super::rows::RowKind;
+
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::sole_reply_transcript(), window, cx)
+            },
+            window,
+            cx,
+        );
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            // The first conclusion, taken from the projection that just ran —
+            // which item it is belongs to the seed, not to a constant here.
+            let first = v.rows.iter().find_map(|r| match r.kind {
+                RowKind::ConclusionItem(ix) => Some(ix),
+                _ => None,
+            });
+            if let Some(ix) = first {
+                v.set_fold_for_shot(FoldKey::Assistant(ix), false, window, cx);
+            }
+        });
+    }
+
     /// Open the seeded transcript with the plan region expanded beside it.
     /// `stopped` picks the post-Stop plan, whose running step settled to
     /// `Cancelled` — the pair is what shows whether the four status icons read

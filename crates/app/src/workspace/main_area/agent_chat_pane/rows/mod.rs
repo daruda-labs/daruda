@@ -366,7 +366,6 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     base_indent: 1,
                     response_collapsed: collapsed,
                     last_prose,
-                    sole_block: blocks == 1,
                     filter_revealed,
                 },
                 &mut rows,
@@ -382,7 +381,6 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                     base_indent: 0,
                     response_collapsed: false,
                     last_prose,
-                    sole_block: blocks == 1,
                     filter_revealed,
                 },
                 &mut rows,
@@ -422,9 +420,6 @@ struct RunSpec {
     base_indent: u8,
     response_collapsed: bool,
     last_prose: Option<LastProse>,
-    /// The run renders exactly one block. Folding it would leave the turn
-    /// showing nothing, so its prose does not earn the conclusion's fold.
-    sole_block: bool,
     filter_revealed: bool,
 }
 
@@ -759,7 +754,6 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
         let base_indent = self.spec.base_indent;
         let response_collapsed = self.spec.response_collapsed;
         let last_prose = self.spec.last_prose;
-        let sole_block = self.spec.sole_block;
         if run.is_empty() {
             return;
         }
@@ -920,7 +914,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let pending_permission =
                     matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
                 let force_visible = is_last_prose || pending_permission;
-                let kind = if is_conclusion && base_indent > 0 && !sole_block {
+                let kind = if is_conclusion && base_indent > 0 {
                     RowKind::ConclusionItem(k)
                 } else {
                     RowKind::AgentItem(k)
