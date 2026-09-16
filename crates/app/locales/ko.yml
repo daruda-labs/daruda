@@ -1586,8 +1586,7 @@ orchestrator:
 # External control surface — the command replies sent back to a phone
 control:
   listing_header: "열려 있는 에이전트 대화"
-  listing_row: "%{ordinal}. %{marker}%{state} %{name} — %{title}%{ago}"
-  listing_active_marker: "▸ "
+  listing_row: "%{ordinal}. %{state}%{name} (%{agent}) — %{title}%{ago}"
   listing_untitled: "(제목 없음)"
   target_label: "%{name} — %{title}"
   lane_path: "%{project}/%{lane}"
@@ -1599,7 +1598,6 @@ control:
   state_working: "◐"
   state_awaiting_permission: "❗"
   state_error: "✕"
-  state_unavailable: "·"
   button_label: "%{ordinal}"
   selected: "대상: %{name}"
   selection_cleared: "대상을 해제했습니다."

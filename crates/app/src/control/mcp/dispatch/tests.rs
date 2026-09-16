@@ -441,7 +441,7 @@ async fn a_non_call_frame_falls_through_to_the_protocol_layer(cx: &mut TestAppCo
     // `tools::tests`'s to assert, and one owner means one place to update.
     assert_eq!(
         reply["result"]["tools"].as_array().expect("tools").len(),
-        ToolTable::all().describe().len(),
+        ToolTable::all(&[]).describe().len(),
     );
 }
 

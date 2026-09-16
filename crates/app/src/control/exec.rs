@@ -459,14 +459,14 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
 
 /// Do the thing, now that the user has said yes.
 async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOutcome {
-    let outcome = match cmd {
+    let created = match cmd {
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
                     ws.control_chat_new(lane.lane_ref(), agent.clone(), window, cx)
                 })
             })
-            .map(|target| ControlResult::ChatCreated { target }),
+            .map(|target| (target, None)),
         GatedCommand::LaneCreate {
             workspace,
             project,
@@ -474,32 +474,43 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
             base_ref,
             agent,
             prompt,
-        } => create_lane(workspace, project, name, base_ref, agent, prompt, cx).await,
+        } => create_lane(workspace, project, name, base_ref, agent, prompt, cx)
+            .await
+            .map(|(target, chat)| (chat, Some(target))),
     };
-    // The user approved this from the phone a moment ago, so the phone is
-    // told what came of it and pointed at the new chat — otherwise reaching
-    // it takes a fresh `/list` and a `/use`.
-    let created = match &outcome {
-        Ok(ControlResult::ChatCreated { target }) => Some(*target),
-        Ok(ControlResult::LaneCreated { chat, .. }) => Some(*chat),
-        _ => None,
-    };
-    if let Some(pane) = created {
-        cx.update(|cx| announce_chat(pane, cx));
-    }
-    outcome
+    let (chat, lane) = created?;
+    // Read back rather than echo the request: an agent id the catalog does
+    // not hold resolves to the default, so what opened is the only honest
+    // answer. Also what the phone is told — the user approved this a moment
+    // ago, and without the ping reaching the new chat takes a `/list` and a
+    // `/use`.
+    let label = cx.update(|cx| announce_chat(chat, cx));
+    let agent = label.map_or_else(String::new, |l| l.agent);
+    Ok(match lane {
+        Some(target) => ControlResult::LaneCreated {
+            target,
+            chat,
+            agent,
+        },
+        None => ControlResult::ChatCreated {
+            target: chat,
+            agent,
+        },
+    })
 }
 
-/// Best effort — see `remote_channel::announce_chat_created`. A pane that
-/// vanished in the same tick has no label, and then nothing to announce.
-fn announce_chat(pane: PaneRef, cx: &mut App) {
+/// Name the new chat for the phone and point the phone at it, handing the
+/// label back for the tool result. Announcing is best effort — see
+/// `remote_channel::announce_chat_created` — and a pane that vanished in the
+/// same tick has no label, so there is nothing to announce or report.
+fn announce_chat(pane: PaneRef, cx: &mut App) -> Option<crate::workspace::ChatLabel> {
     let label = in_pane_window(pane, cx, |ws, _window, cx| {
         ws.control_chat_label(pane.pane, cx)
             .ok_or(ControlError::TargetGone)
-    });
-    if let Ok((header, agent)) = label {
-        crate::remote_channel::announce_chat_created(pane, header, &agent, cx);
-    }
+    })
+    .ok()?;
+    crate::remote_channel::announce_chat_created(pane, label.path.clone(), &label.agent_name, cx);
+    Some(label)
 }
 
 /// Create a worktree, on whichever window holds the project.
@@ -515,7 +526,7 @@ async fn create_lane(
     agent: Option<String>,
     prompt: Option<String>,
     cx: &mut gpui::AsyncApp,
-) -> ControlOutcome {
+) -> Result<(LaneHandle, PaneRef), ControlError> {
     let rx = cx.update(|cx| {
         in_project_window(workspace, project, cx, |ws, window, cx| {
             Ok(ws.control_create_lane(
@@ -543,7 +554,7 @@ async fn create_lane(
             });
         });
     }
-    Ok(ControlResult::LaneCreated { target, chat })
+    Ok((target, chat))
 }
 
 fn count(rows: &[Row], pred: impl Fn(&ChatSummary) -> bool) -> u32 {

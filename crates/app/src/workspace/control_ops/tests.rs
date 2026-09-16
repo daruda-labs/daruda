@@ -27,14 +27,15 @@ fn every_activity_state_maps_to_its_own_control_variant() {
 }
 
 /// The phone introduces a new chat by where it is and what runs it. The
-/// label carries the agent's display name, not its catalog id — the name is
-/// workspace-private, and this accessor is the one way out.
+/// label carries both halves of the agent — the id a caller passes back and
+/// the name a person reads — and both are workspace-private, so this accessor
+/// is the one way out.
 #[gpui::test]
 async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.read_with(cx, |ws, cx| {
         let pane = fixture.pane();
-        let (path, agent) = ws
+        let label = ws
             .control_chat_label(pane, cx)
             .expect("the fixture's pane is live");
         // Oracles from the model and the fixture's config, not from the
@@ -43,17 +44,17 @@ async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext
         let project = ws.project_for(lane.project).expect("project").name.clone();
         let lane_name = ws.lane_for(lane).expect("lane").display_name();
         assert_eq!(
-            path,
+            label.path,
             crate::surface::strings::control_lane_path(&project, &lane_name)
         );
+        let default_agent = daruda_config::AgentDefinition::claude_default();
+        assert_eq!(label.agent, default_agent.id, "the id a caller passes back");
         assert_eq!(
-            agent,
-            daruda_config::AgentDefinition::claude_default().name,
-            "the fixture opens the default catalog agent, shown by display name"
+            label.agent_name, default_agent.name,
+            "the name a person reads"
         );
-        assert_eq!(
-            ws.control_chat_label(9_999, cx),
-            None,
+        assert!(
+            ws.control_chat_label(9_999, cx).is_none(),
             "a pane that is not there has no label"
         );
     });

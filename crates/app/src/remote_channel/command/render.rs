@@ -265,33 +265,35 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
 }
 
 fn row_text(ordinal: u32, row: &ListingRow) -> String {
-    let marker = if row.summary.is_active_lane {
-        s::control_listing_active_marker()
-    } else {
-        String::new()
-    };
     s::control_listing_row(
         ordinal,
-        &marker,
         &state_glyph(&row.summary),
         &row.name,
+        &row.summary.agent_name,
         &title_of(&row.summary),
         &ago_of(&row.summary),
     )
 }
 
-/// One glyph for the pane's condition. Health wins over activity: a pane that
-/// cannot be talked to is not meaningfully idle.
+/// One glyph for the pane's condition, carrying the space that separates it
+/// from the row. Health wins over activity: a pane that cannot be talked to is
+/// not meaningfully idle.
+///
+/// A pane with no session yet draws nothing rather than a glyph of its own.
+/// After a restore that is most of the list, so marking it says nothing about
+/// any one row — the column earns its width by marking the panes that do have
+/// a session, and the empty ones read as the background they are.
 fn state_glyph(summary: &ChatSummary) -> String {
-    match summary.health {
+    let glyph = match summary.health {
         Health::Error => s::control_state_error(),
-        Health::Unavailable => s::control_state_unavailable(),
+        Health::Unavailable => return String::new(),
         Health::Ok => match summary.activity {
             Activity::Idle => s::control_state_idle(),
             Activity::Working => s::control_state_working(),
             Activity::AwaitingPermission => s::control_state_awaiting_permission(),
         },
-    }
+    };
+    format!("{glyph} ")
 }
 
 /// The title already arrives bounded and single-line — `ChatSummary` caps it at
@@ -395,6 +397,73 @@ mod tests {
         let total: usize = keyboard.rows.iter().map(Vec::len).sum();
         assert_eq!(total, LISTING_BUTTON_MAX);
         assert!(keyboard.rows.iter().all(|r| r.len() <= BUTTONS_PER_ROW));
+    }
+
+    /// A row names the agent running the pane — the one thing that decides
+    /// which chat a person wants, and which no other field carries. The glyph
+    /// column is drawn only for a pane that has a session: after a restore a
+    /// dormant pane is most of the list, so marking it would say nothing
+    /// about any one row.
+    #[test]
+    fn a_row_names_its_agent_and_marks_only_a_pane_with_a_session() {
+        use crate::control::result::{LaneGroup, ProjectGroup, WindowGroup};
+
+        let chat = |pane_id, agent: &str, name: &str, health, activity| ChatSummary {
+            target: PaneRef {
+                workspace: Default::default(),
+                pane: pane_id,
+            },
+            agent: agent.into(),
+            agent_name: name.into(),
+            is_active_lane: true,
+            activity,
+            health,
+            unread: false,
+            title: None,
+            last_activity: None,
+        };
+        let listing = Listing {
+            windows: vec![WindowGroup {
+                index: 0,
+                projects: vec![ProjectGroup {
+                    name: "daruda".into(),
+                    lanes: vec![LaneGroup {
+                        name: "main".into(),
+                        chats: vec![
+                            chat(1, "codex-acp", "Codex", Health::Unavailable, Activity::Idle),
+                            chat(2, "claude", "Claude Code", Health::Ok, Activity::Working),
+                        ],
+                    }],
+                }],
+            }],
+            omitted: 0,
+        };
+        let mut state = CommandState::default();
+        state.record_listing(&listing);
+        let text = render(
+            &Ok(ControlResult::Listing(listing)),
+            Absorbed::Nothing,
+            &state,
+        )
+        .text;
+
+        let rows: Vec<&str> = text.lines().skip(1).collect();
+        assert!(
+            rows[0].starts_with("1. daruda/main (Codex) —"),
+            "a dormant row opens straight at its path: {}",
+            rows[0]
+        );
+        assert!(
+            rows[1].starts_with(&format!(
+                "2. {} daruda/main (Claude Code) —",
+                s::control_state_working()
+            )),
+            "a working row carries its glyph: {}",
+            rows[1]
+        );
+        // The active worktree is still reported to an agent reading the JSON;
+        // it just no longer earns a column on a phone screen.
+        assert!(!text.contains('▸'), "{text}");
     }
 
     #[test]

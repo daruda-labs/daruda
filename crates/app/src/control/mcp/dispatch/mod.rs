@@ -198,7 +198,16 @@ fn answer_frame(
     protected: Option<PaneRef>,
     cx: &mut App,
 ) -> Answer {
-    let tools = ToolTable::all();
+    // Read per frame rather than cached: the catalog is live config, and a
+    // `tools/list` after the user adds an agent must advertise it. `try_` for
+    // the reason `Workspace::telegram_bridge` uses it — a frame handler must
+    // not panic on a global that is merely not up yet; an empty catalog just
+    // advertises the `agent` argument without its choices.
+    let agents = cx
+        .try_global::<crate::settings_store::SettingsStore>()
+        .map(|s| s.user().resolved_agents())
+        .unwrap_or_default();
+    let tools = ToolTable::all(&agents);
     // Only `tools/call` needs the app; peeking for it keeps the rest of the
     // protocol in the one place that owns it.
     let Some(call) = ToolCall::parse(frame) else {
@@ -300,7 +309,7 @@ fn guard_immediate(
     // which is what actually binds the gate to the command shape — this only
     // catches it at the call site in a debug build.
     debug_assert_eq!(
-        ToolTable::all().gate(id),
+        ToolTable::all(&[]).gate(id),
         Gate::Open,
         "a gated tool must not reach the unapproved path"
     );

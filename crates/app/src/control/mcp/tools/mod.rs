@@ -58,28 +58,51 @@ pub(crate) struct Tool {
     pub required: &'static [&'static str],
 }
 
-pub(crate) struct ToolTable(&'static [Tool]);
+/// The vocabulary one run advertises: the static tool set, plus the agent
+/// catalog the `agent` arguments resolve against. The catalog belongs here
+/// rather than at the call: what `daruda_chat_new` will accept *is* part of
+/// what this table advertises, and a describe that took it separately could
+/// advertise choices the same table then refused.
+pub(crate) struct ToolTable<'a> {
+    tools: &'static [Tool],
+    agents: &'a [daruda_config::AgentDefinition],
+}
 
-impl ToolTable {
-    pub(crate) fn all() -> Self {
-        Self(TABLE)
+impl<'a> ToolTable<'a> {
+    pub(crate) fn all(agents: &'a [daruda_config::AgentDefinition]) -> Self {
+        Self {
+            tools: TABLE,
+            agents,
+        }
     }
 
     #[cfg(test)]
-    pub(crate) fn empty() -> Self {
-        Self(&[])
+    pub(crate) fn empty() -> ToolTable<'static> {
+        ToolTable {
+            tools: &[],
+            agents: &[],
+        }
     }
 
     pub(crate) fn describe(&self) -> Vec<serde_json::Value> {
-        self.0
+        self.tools
             .iter()
             .map(|t| {
+                let mut properties = (t.properties)();
+                // Keyed off the property rather than a per-tool flag: the rule
+                // is "whatever takes an agent gets the real ones", and a third
+                // tool growing the argument must not be able to miss it.
+                if let Some(slot) = properties.get_mut("agent")
+                    && !self.agents.is_empty()
+                {
+                    *slot = agent_property(self.agents);
+                }
                 serde_json::json!({
                     "name": t.name,
                     "description": t.description,
                     "inputSchema": {
                         "type": "object",
-                        "properties": (t.properties)(),
+                        "properties": properties,
                         "required": t.required,
                     },
                 })
@@ -93,14 +116,14 @@ impl ToolTable {
     /// Reads `self`, like `describe`: a table that advertised one set of tools
     /// and resolved another would be two vocabularies wearing one type.
     pub(crate) fn lookup(&self, name: &str) -> Option<ToolId> {
-        self.0.iter().find(|t| t.name == name).map(|t| t.id)
+        self.tools.iter().find(|t| t.name == name).map(|t| t.id)
     }
 
     /// Whether `id` has to clear the approval gate. Unknown ids fail closed —
     /// unreachable through [`Self::lookup`], but a gate that defaulted open
     /// would be the wrong way to be wrong.
     pub(crate) fn gate(&self, id: ToolId) -> Gate {
-        self.0
+        self.tools
             .iter()
             .find(|t| t.id == id)
             .map_or(Gate::NeedsApproval, |t| t.gate)
@@ -193,6 +216,26 @@ fn lane_create_properties() -> serde_json::Value {
             "type": "string",
             "description": "First prompt to send in the new pane, if any.",
         },
+    })
+}
+
+/// The `agent` argument, resolved against the catalog this daruda is running.
+/// Both halves are stated — the id is what the call takes, the name is what
+/// the person on the phone says — so a request for "codex" maps to the id
+/// without a guess.
+fn agent_property(agents: &[daruda_config::AgentDefinition]) -> serde_json::Value {
+    let listed = agents
+        .iter()
+        .map(|a| format!("{} ({})", a.name, a.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    serde_json::json!({
+        "type": "string",
+        "enum": agents.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        "description": format!(
+            "Agent to open under, as the id in parentheses: {listed}. \
+             Omit for the default.",
+        ),
     })
 }
 

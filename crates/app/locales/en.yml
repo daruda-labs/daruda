@@ -1587,8 +1587,7 @@ orchestrator:
 # External control surface — the command replies sent back to a phone
 control:
   listing_header: "Open agent chats"
-  listing_row: "%{ordinal}. %{marker}%{state} %{name} — %{title}%{ago}"
-  listing_active_marker: "▸ "
+  listing_row: "%{ordinal}. %{state}%{name} (%{agent}) — %{title}%{ago}"
   listing_untitled: "(untitled)"
   target_label: "%{name} — %{title}"
   lane_path: "%{project}/%{lane}"
@@ -1600,7 +1599,6 @@ control:
   state_working: "◐"
   state_awaiting_permission: "❗"
   state_error: "✕"
-  state_unavailable: "·"
   button_label: "%{ordinal}"
   selected: "Target: %{name}"
   selection_cleared: "Target cleared."

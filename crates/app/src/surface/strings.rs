@@ -5112,32 +5112,27 @@ pub fn control_listing_header() -> String {
     rust_i18n::t!("control.listing_header").into_owned()
 }
 
-/// One `/list` row. `marker` flags the active worktree, `state` is the
-/// activity/health glyph, `ago` is the pre-formatted last-activity suffix
-/// (empty when unknown).
+/// One `/list` row. `state` is the activity/health glyph with its trailing
+/// space (empty for a pane with no session), `agent` names the agent the pane
+/// runs, `ago` is the pre-formatted last-activity suffix (empty when unknown).
 pub fn control_listing_row(
     ordinal: u32,
-    marker: &str,
     state: &str,
     name: &str,
+    agent: &str,
     title: &str,
     ago: &str,
 ) -> String {
     rust_i18n::t!(
         "control.listing_row",
         ordinal = ordinal,
-        marker = marker,
         state = state,
         name = name,
+        agent = agent,
         title = title,
         ago = ago
     )
     .into_owned()
-}
-
-/// Prefix marking the row that sits in the active worktree.
-pub fn control_listing_active_marker() -> String {
-    rust_i18n::t!("control.listing_active_marker").into_owned()
 }
 
 /// Stand-in for a session that has not titled itself yet.
@@ -5193,10 +5188,6 @@ pub fn control_state_awaiting_permission() -> String {
 
 pub fn control_state_error() -> String {
     rust_i18n::t!("control.state_error").into_owned()
-}
-
-pub fn control_state_unavailable() -> String {
-    rust_i18n::t!("control.state_unavailable").into_owned()
 }
 
 /// Label on a `/list` row's inline button.

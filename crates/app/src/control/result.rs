@@ -37,6 +37,14 @@ pub(crate) enum Health {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ChatSummary {
     pub target: PaneRef,
+    /// Catalog id of the agent this pane runs — the same handle
+    /// `daruda_chat_new` takes, so a caller can open another chat under an
+    /// agent it read here rather than guessing the id from a display name.
+    pub agent: String,
+    /// Display name for [`Self::agent`]. Carried beside the id because an
+    /// adapter rendering for a person cannot reach the catalog to map one to
+    /// the other.
+    pub agent_name: String,
     pub is_active_lane: bool,
     pub activity: Activity,
     pub health: Health,
@@ -307,9 +315,15 @@ pub(crate) enum ControlResult {
     LaneCreated {
         target: LaneHandle,
         chat: PaneRef,
+        /// The agent the chat actually opened under. Reported because it need
+        /// not be the one asked for: an id the catalog does not hold resolves
+        /// to the default, and without this the caller cannot tell.
+        agent: String,
     },
     ChatCreated {
         target: PaneRef,
+        /// As [`Self::LaneCreated::agent`].
+        agent: String,
     },
     /// A prompt sent with the reply waited for. Distinct from `Sent`, which
     /// reports only that a prompt went out.
@@ -488,6 +502,8 @@ mod tests {
                 workspace: WorkspaceUuid::new(),
                 pane: 7,
             },
+            agent: "codex-acp".into(),
+            agent_name: "Codex".into(),
             is_active_lane: true,
             activity: Activity::AwaitingPermission,
             health: Health::Ok,
@@ -614,8 +630,12 @@ mod tests {
             ControlResult::LaneCreated {
                 target: sample_lane().target,
                 chat: target,
+                agent: "claude".into(),
             },
-            ControlResult::ChatCreated { target },
+            ControlResult::ChatCreated {
+                target,
+                agent: "codex-acp".into(),
+            },
             ControlResult::Answer {
                 target,
                 answer: PaneAnswer::Text {

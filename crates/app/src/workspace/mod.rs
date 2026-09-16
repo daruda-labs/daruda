@@ -24,7 +24,7 @@ mod control_ops;
 /// The external control surface's vocabulary answer — see [`SlashClaim`].
 /// Re-exported because `telegram::global`'s poll loop folds per-window answers
 /// and lives outside `crate::workspace`.
-pub(crate) use control_ops::SlashClaim;
+pub(crate) use control_ops::{ChatLabel, SlashClaim};
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;
 mod dnd_ops;

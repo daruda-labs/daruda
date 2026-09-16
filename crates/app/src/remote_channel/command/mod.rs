@@ -299,6 +299,8 @@ pub(crate) mod tests {
     fn summary(target: PaneRef) -> ChatSummary {
         ChatSummary {
             target,
+            agent: "claude".into(),
+            agent_name: "Claude Code".into(),
             is_active_lane: false,
             activity: Activity::Idle,
             health: Health::Ok,

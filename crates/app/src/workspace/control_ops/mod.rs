@@ -103,6 +103,17 @@ mod slash_claim_tests {
     }
 }
 
+/// What a newly opened chat is called, for the two surfaces that have to name
+/// it: the phone ping and the tool result.
+pub(crate) struct ChatLabel {
+    pub(crate) path: String,
+    /// The agent the pane actually resolved to — not what the caller asked
+    /// for. A request naming an id the catalog does not hold opens the
+    /// default agent, and reporting the request back would hide that.
+    pub(crate) agent: String,
+    pub(crate) agent_name: String,
+}
+
 impl Workspace {
     /// Every agent-chat pane in this window, paired with the lane it lives in.
     ///
@@ -125,6 +136,8 @@ impl Workspace {
                             workspace: uuid,
                             pane: pane_id,
                         },
+                        agent: v.agent_id.clone(),
+                        agent_name: v.agent_name.clone(),
                         is_active_lane: lane_ref == active,
                         activity: map_activity(v.activity_state()),
                         health: map_health(&v.status),
@@ -154,18 +167,23 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// How a chat the control surface just opened is introduced on the phone:
-    /// its worktree path and the display name of the agent running it. The
-    /// agent name is workspace-private, so this is where a caller outside the
-    /// workspace reads it. `None` when the pane is gone.
-    pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<(String, String)> {
+    /// How a chat the control surface just opened is named: its worktree path,
+    /// the agent id it actually resolved to, and that agent's display name.
+    /// Both halves of the agent, because they answer different questions — the
+    /// id is what a caller passes back, the name is what a person reads — and
+    /// both are workspace-private, so this is the one way out. `None` when the
+    /// pane is gone.
+    pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<ChatLabel> {
         let lane = self.lane_ref_for_pane(pane)?;
-        let agent = self.agent_chat_view(pane)?.read(cx).agent_name.clone();
-        let path = crate::surface::strings::control_lane_path(
-            &self.control_project_name(lane.project),
-            &self.control_lane_name(lane),
-        );
-        Some((path, agent))
+        let view = self.agent_chat_view(pane)?.read(cx);
+        Some(ChatLabel {
+            path: crate::surface::strings::control_lane_path(
+                &self.control_project_name(lane.project),
+                &self.control_lane_name(lane),
+            ),
+            agent: view.agent_id.clone(),
+            agent_name: view.agent_name.clone(),
+        })
     }
 
     /// This lane's position in its project's tab strip — the listing's sort

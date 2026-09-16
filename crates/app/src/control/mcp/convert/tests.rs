@@ -332,7 +332,7 @@ fn every_tools_schema_matches_what_the_converter_reads() {
 fn the_declared_gate_and_the_converted_command_agree() {
     use crate::control::mcp::tools::{Gate, ToolTable};
 
-    let table = ToolTable::all();
+    let table = ToolTable::all(&[]);
     for tool in crate::control::mcp::tools::table_for_test() {
         let properties = (tool.properties)();
         let full: Value = properties
