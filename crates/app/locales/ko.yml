@@ -569,6 +569,7 @@ modal:
   remove_lane_err_cannot_remove: "이 워크트리는 제거할 수 없습니다."
   remove_lane_err_not_found: "워크트리를 찾을 수 없습니다."
   remove_lane_err_not_git: "Git worktree가 아닙니다."
+  remove_lane_err_flow_elsewhere: "다른 daruda(프로세스 %{pid})가 이 worktree에서 flow를 실행 중입니다."
   remove_lane_err_flow_running: "이 워크트리에서 실행 중인 flow를 먼저 중지하세요."
   remove_lane_removing: "제거 중…"
   create_panel_tab_title: "새 패널 탭"

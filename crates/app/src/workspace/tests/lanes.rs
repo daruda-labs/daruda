@@ -1236,3 +1236,76 @@ fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
         assert_eq!(err, crate::surface::strings::remove_lane_err_flow_running());
     });
 }
+
+/// A run belonging to *another* daruda leaves nothing in `runs`, so the lock
+/// is the only thing that knows the tree is taken. Forcing the removal past
+/// it deletes a checkout that process is still writing to — and git cannot
+/// object, because the run's own artifacts sit under the `.gitignore` the
+/// engine writes.
+#[gpui::test]
+async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut TestAppContext) {
+    // A real directory: the lock is keyed to the resolved tree, and
+    // `canonicalize` has nothing to resolve for a path that is not there.
+    let repo = tempfile::tempdir().expect("tempdir");
+    let root = repo.path().to_path_buf();
+    let checkout = root.join("wt-feat");
+    std::fs::create_dir_all(&checkout).expect("checkout");
+
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    let target = ws.update(cx, |ws, _| {
+        let project_id = ws.active_ref().project;
+        let lane_id = ws.active_lanes().last().map(|l| l.id).unwrap_or(0) + 1;
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes.push(crate::lane::Lane::git(
+                lane_id,
+                checkout.clone(),
+                Some("feat".into()),
+                root.clone(),
+                checkout.clone(),
+                1,
+            ));
+        }
+        daruda_store::project::LaneRef {
+            project: project_id,
+            lane: lane_id,
+        }
+    });
+
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.validate_remove_lane(target).is_ok(),
+            "the lane is removable while nothing holds it"
+        );
+    });
+
+    // pid 1 is alive on every unix and is emphatically not this process.
+    let lock_dir = ws.read_with(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, &checkout)
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
+    std::fs::write(
+        lock_dir.join(".lock"),
+        "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+    )
+    .expect("plant a lock");
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.validate_remove_lane(target)
+                .expect_err("another process's run blocks removal"),
+            crate::surface::strings::remove_lane_err_flow_elsewhere(1),
+        );
+    });
+}

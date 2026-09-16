@@ -250,6 +250,18 @@ impl Workspace {
         if self.runs.is_running(target) {
             return Err(crate::surface::strings::remove_lane_err_flow_running());
         }
+        // `runs` only knows this process. Another daruda — a debug build
+        // beside a release one, which is why the lock root is deliberately
+        // profile-independent — leaves no trace here but the lock. Git's own
+        // dirty check is not the backstop: a run's artifacts sit under the
+        // `.gitignore` the engine writes, so `worktree remove` cannot see
+        // them, and the failure a modified file does cause is the one the
+        // remove modal answers by offering `--force`.
+        if let Some(holder) = self.lane_holder(&wt.path) {
+            return Err(crate::surface::strings::remove_lane_err_flow_elsewhere(
+                holder.pid,
+            ));
+        }
         let repo_root = match &wt.kind {
             daruda_store::project::LaneKind::Git { repo_root, .. } => repo_root.clone(),
             _ => return Err(crate::surface::strings::remove_lane_err_not_git()),

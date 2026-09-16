@@ -570,6 +570,7 @@ modal:
   remove_lane_err_cannot_remove: "This worktree cannot be removed."
   remove_lane_err_not_found: "Worktree not found."
   remove_lane_err_not_git: "Not a git worktree."
+  remove_lane_err_flow_elsewhere: "Another daruda (process %{pid}) is running a flow in this worktree."
   remove_lane_err_flow_running: "Stop the flow running in this worktree before removing it."
   remove_lane_removing: "Removing…"
   create_panel_tab_title: "New Panel Tab"
