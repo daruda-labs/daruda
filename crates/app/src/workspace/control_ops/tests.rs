@@ -37,17 +37,19 @@ async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext
         let (path, agent) = ws
             .control_chat_label(pane, cx)
             .expect("the fixture's pane is live");
+        // Oracles from the model and the fixture's config, not from the
+        // control accessors the label is built on.
         let lane = ws.lane_ref_for_pane(pane).expect("the pane sits in a lane");
+        let project = ws.project_for(lane.project).expect("project").name.clone();
+        let lane_name = ws.lane_for(lane).expect("lane").display_name();
         assert_eq!(
             path,
-            crate::surface::strings::control_lane_path(
-                &ws.control_project_name(lane.project),
-                &ws.control_lane_name(lane),
-            )
+            crate::surface::strings::control_lane_path(&project, &lane_name)
         );
         assert_eq!(
             agent,
-            ws.agent_chat_view(pane).expect("view").read(cx).agent_name
+            daruda_config::AgentDefinition::claude_default().name,
+            "the fixture opens the default catalog agent, shown by display name"
         );
         assert_eq!(
             ws.control_chat_label(9_999, cx),

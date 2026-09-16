@@ -102,12 +102,18 @@ impl RemoteChannels {
         if !cx.has_global::<Self>() {
             return false;
         }
+        // Same bar as `send_approval`: a live but unpaired channel must not
+        // be retargeted at a chat it was never told about.
         let ids: Vec<String> = {
             let bridge = cx.global::<Self>();
             bridge
                 .connections
                 .keys()
-                .filter(|id| bridge.live(id, cx).is_some())
+                .filter(|id| {
+                    bridge
+                        .live(id, cx)
+                        .is_some_and(|c| c.config.recipient.is_some() && c.credentials.is_some())
+                })
                 .cloned()
                 .collect()
         };
