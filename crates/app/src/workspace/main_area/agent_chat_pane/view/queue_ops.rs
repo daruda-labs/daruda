@@ -204,11 +204,20 @@ impl AgentChatView {
         PhoneAckEffect::None
     }
 
-    /// Drop the turn superseded by a stronger phone-visible signal (currently
-    /// a permission prompt) without emitting the generic fallback. Dropped,
-    /// not answered: no report went out, so the completion still owes one.
+    /// Drop the ledger once a Stop has ended the turn. Nothing further is
+    /// owed: the phone's `/stop` was answered on the spot, and a cancel-ack
+    /// reports nothing new.
     pub(super) fn clear_phone_turn(&mut self) {
         self.phone_turn_state = None;
+    }
+
+    /// A permission card went to the phone before this fold, so the wait is
+    /// answered without agent text — and the ledger stays open: the turn is
+    /// still the phone's, and its completion is still owed.
+    pub(super) fn answer_phone_turn_for_permission(&mut self) {
+        // Whether this call answered is moot: the card already went out, so
+        // no ack follows here either way.
+        self.answer_phone_turn_without_agent_text();
     }
 
     /// End the turn at the completion boundary, where its phone conversation

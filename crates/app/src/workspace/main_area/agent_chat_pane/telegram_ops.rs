@@ -244,10 +244,10 @@ impl Workspace {
     /// `daruda_acp::PermissionItem` fields the in-app card is built
     /// from — see [`permission_wait_tail`] — so the phone ping names the
     /// actual action awaiting approval instead of just "waiting for your
-    /// input". When this permission is the first visible response to a
-    /// phone-originated prompt, it bypasses active-window deferral so the phone
-    /// immediately gets the action buttons; later permission waits keep the
-    /// normal presence gate. Always a [`TelegramTail::Plain`] tail: none of
+    /// input". A permission wait during a phone-started turn bypasses
+    /// presence — the first visible response directly here, later ones
+    /// through the ledger check in [`Self::relay_when_presence_allows`].
+    /// Always a [`TelegramTail::Plain`] tail: none of
     /// `tool_title`, `raw_input_summary`, or the "waiting" label is
     /// agent-authored markdown — see [`TelegramTail`]'s doc comment for why
     /// that matters.
@@ -426,7 +426,10 @@ impl Workspace {
 
     /// Whether the pane's in-flight turn was started from the phone. Any
     /// ledger state counts, not just `Waiting`: an answered first response
-    /// does not make the rest of the turn unsolicited.
+    /// does not make the rest of the turn unsolicited. The ledger lives as
+    /// long as the activity span the phone started, so a desk prompt queued
+    /// behind it shares that span and its delivery — the span settles once,
+    /// and the phone hears how it ended.
     fn phone_turn_open(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
         self.agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).phone_turn().is_some())

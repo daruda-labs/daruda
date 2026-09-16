@@ -264,7 +264,7 @@ impl AgentChatView {
                 let item = permission_item(id, &request, &self.items);
                 self.items.push(item);
                 self.pending_permissions.insert(id);
-                phone_turn_action = PhoneTurnAction::Clear;
+                phone_turn_action = PhoneTurnAction::Answer;
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
                 if self.activity.cancel_in_flight =>
@@ -456,6 +456,7 @@ impl AgentChatView {
         match phone_turn_action {
             PhoneTurnAction::None => {}
             PhoneTurnAction::Clear => self.clear_phone_turn(),
+            PhoneTurnAction::Answer => self.answer_phone_turn_for_permission(),
             PhoneTurnAction::CheckUpdate => {
                 if let Some(outcome) = self.take_phone_first_response() {
                     telegram_first_response_effect = PhoneAckEffect::Relay(outcome);

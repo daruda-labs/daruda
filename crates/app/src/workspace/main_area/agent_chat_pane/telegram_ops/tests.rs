@@ -183,6 +183,78 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
     });
 }
 
+/// A permission card is the phone's first sign of life, not the end of its
+/// turn: folding the request answers the wait but keeps the ledger open, so
+/// the completion and any later permission wait still reach a present user.
+#[gpui::test]
+async fn a_permission_wait_keeps_the_phone_turn_open(cx: &mut gpui::TestAppContext) {
+    use crate::platform::presence::AwaySignal;
+    use agent_client_protocol::schema::v1::RequestPermissionRequest;
+    use daruda_acp::{PermissionOption, PermissionOptionKind, ToolCallUpdate};
+    use std::time::{Duration, Instant};
+
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    cx.update(crate::app_presence::init);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
+        let view = ws.agent_chat_view(pane).cloned().expect("view");
+        view.update(cx, |v, cx| {
+            v.start_phone_turn_for_test(Instant::now());
+            v.apply_event(
+                daruda_acp::session::AcpEvent::PermissionRequested {
+                    id: 1,
+                    request: Box::new(RequestPermissionRequest::new(
+                        "s1",
+                        ToolCallUpdate::new("t1", Default::default()),
+                        vec![PermissionOption::new(
+                            "allow",
+                            "Allow",
+                            PermissionOptionKind::AllowAlways,
+                        )],
+                    )),
+                },
+                "theme",
+                false,
+                cx,
+            );
+        });
+        let v = view.read(cx);
+        assert!(
+            v.phone_turn().is_some() && !v.is_phone_turn_waiting(),
+            "the card answered the wait without closing the turn"
+        );
+
+        assert!(
+            ws.relay_when_presence_allows(
+                pane,
+                "h".into(),
+                crate::telegram::bridge::TelegramTail::Plain("after the card".into()),
+                None,
+                cx,
+            ),
+            "a later relay in the same turn is still the phone's"
+        );
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .pane
+                .pane,
+            pane
+        );
+    });
+}
+
 /// `only_when_away = false` is the opt-out: every ping goes to the phone,
 /// presence notwithstanding. Still one decision, still no queue.
 #[gpui::test]

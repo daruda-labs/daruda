@@ -315,9 +315,13 @@ pub(in crate::workspace) enum PhoneAckEffect {
 enum PhoneTurnAction {
     #[default]
     None,
-    /// A permission card interrupted the turn, or a Stop's cancel-ack
-    /// landed — no relay is owed either way.
+    /// A Stop's cancel-ack landed — the turn is over and no relay is owed.
     Clear,
+    /// A permission card interrupted the turn. The card itself was relayed
+    /// as the phone's first sign of life (before this fold), so the wait is
+    /// answered — but the turn is still the phone's, and its completion is
+    /// still owed.
+    Answer,
     /// New conversation content arrived — check whether it resolves the
     /// armed watch.
     CheckUpdate,
