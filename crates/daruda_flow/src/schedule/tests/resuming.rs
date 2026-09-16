@@ -85,19 +85,33 @@ fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> Run
     // at all, and whether its stale lock may be reclaimed. A host that let
     // them disagree would offer a resume the lock then refuses.
     let dead = |_: u32| false;
-    let runs = run_dir.parent().expect("runs");
-    let dir = runs.parent().expect("cwd");
-    // Three levels, not two: `runs` sits at `<cwd>/.daruda/flow-runs`, so the
-    // working tree the lock is keyed to is one above the hidden directory.
-    let cwd = dir.parent().expect("the tree above the hidden directory");
-    let mut request = request_for(flow, dir);
-    let resumed = crate::resume::prepare(run_dir, Some(&super::lock_dir_for_cwd(cwd)), &dead)
-        .expect("a killed run is resumable");
+    // Three levels: the run sits at `<cwd>/.daruda/flow-runs/<run-id>`, so
+    // the working tree both halves run in — and the tree the lock is keyed
+    // to — is above the hidden directory, not inside it.
+    let cwd = run_dir
+        .parent()
+        .expect("runs")
+        .parent()
+        .expect("the hidden directory")
+        .parent()
+        .expect("cwd");
+    let mut request = request_for(flow, cwd);
+    let lock_dir = super::lock_dir_of(&request);
+    let resumed =
+        crate::resume::prepare(run_dir, Some(&lock_dir), &dead).expect("a killed run is resumable");
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
     request.resume = Some(resumed.replay);
     request.is_alive = Box::new(dead);
-    execute(&request, runner, &CancelToken::default())
+    let report = execute(&request, runner, &CancelToken::default());
+    // The stale lock was the resumed run's to reclaim. A run that took its
+    // lock somewhere else finishes just as happily and leaves pid 999999
+    // sitting here, which is how this drifted once already.
+    assert!(
+        !std::fs::read_to_string(lock_dir.join(".lock")).is_ok_and(|held| held.contains("999999")),
+        "the resumed run did not reclaim the first half's stale lock"
+    );
+    report
 }
 
 /// The point of the whole feature: what already ran does not run again.

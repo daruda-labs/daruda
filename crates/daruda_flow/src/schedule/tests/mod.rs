@@ -257,12 +257,6 @@ pub(super) fn lock_dir_of(request: &crate::request::RunRequest) -> std::path::Pa
     lock_dir_under(&request.lock_dir, &request.cwd)
 }
 
-/// The same answer from a working tree alone, for a caller holding the
-/// directory a run was made in rather than the request that made it.
-pub(super) fn lock_dir_for_cwd(cwd: &Path) -> std::path::PathBuf {
-    lock_dir_under(&test_lock_root(cwd), cwd)
-}
-
 fn lock_dir_under(root: &Path, cwd: &Path) -> std::path::PathBuf {
     let tree = crate::lock::CanonicalTree::resolve(cwd).expect("the tree resolves");
     crate::lock::lock_dir_for(root, &tree)

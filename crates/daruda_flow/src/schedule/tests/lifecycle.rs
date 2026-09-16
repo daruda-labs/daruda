@@ -188,7 +188,6 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
                     .and_then(crate::lock::read_holder)
                     .is_some(),
             ));
-            // The lock lives outside the tree and nowhere else.
         }
     }
 
