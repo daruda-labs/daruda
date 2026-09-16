@@ -38,7 +38,10 @@ fn rendering_keeps_text_literal_and_callback_values_intact() {
         "token".into(),
     )]);
     let blocks = blocks("file_name.txt <@U1>", Some(&keyboard), false);
-    assert_eq!(blocks[0]["text"]["type"], "plain_text");
+    assert_eq!(
+        blocks[0]["elements"][0]["elements"][0]["text"],
+        "file_name.txt <@U1>"
+    );
     assert_eq!(blocks[1]["elements"][0]["value"], "token");
 }
 
@@ -51,8 +54,21 @@ fn a_body_that_renders_to_nothing_still_delivers_its_header() {
     assert!(body_parts("", "").is_empty());
     assert_eq!(body_parts("done", "my_project"), vec!["done".to_string()]);
 
-    // Slack rejects an empty `plain_text`, so the empty body contributes no
-    // section at all and the header block is what ships.
+    // Slack rejects an empty text object, so the empty body contributes no
+    // block at all and the header block is what ships.
     assert!(blocks("", None, false).is_empty());
     assert_eq!(blocks("done", None, false).len(), 1);
+}
+
+/// The defect this guards: a `plain_text` section renders every `\n` as a
+/// space, so a listing arrived as one run-on line. Literal text ships as
+/// rich_text, which keeps the breaks and still parses no markup.
+#[test]
+fn literal_text_keeps_its_line_breaks() {
+    let body = "Open agent chats\n1. daruda/main\n2. under_score *star*";
+    let blocks = blocks(body, None, false);
+    assert_eq!(blocks[0]["type"], "rich_text");
+    let element = &blocks[0]["elements"][0]["elements"][0];
+    assert_eq!(element["type"], "text");
+    assert_eq!(element["text"], body);
 }

@@ -123,17 +123,15 @@ fn blocks(
     keyboard: Option<&crate::remote_channel::bridge::InlineKeyboard>,
     markdown: bool,
 ) -> Vec<Value> {
-    let text_is_empty = text.is_empty();
-    let text = if markdown {
-        json!({"type": "mrkdwn", "text": text, "verbatim": true})
-    } else {
-        json!({"type": "plain_text", "text": text, "emoji": false})
-    };
-    // Slack rejects an empty `plain_text`, so a body that rendered to nothing
-    // contributes no section at all — the header block still ships.
+    // Slack rejects an empty text object, so a body that rendered to nothing
+    // contributes no block at all — the header block still ships.
     let mut blocks = Vec::new();
-    if !text_is_empty {
-        blocks.push(json!({"type": "section", "text": text}));
+    if !text.is_empty() {
+        blocks.push(if markdown {
+            json!({"type": "section", "text": {"type": "mrkdwn", "text": text, "verbatim": true}})
+        } else {
+            literal_block(text)
+        });
     }
     if let Some(keyboard) = keyboard {
         for (row_index, row) in keyboard.rows.iter().enumerate() {
@@ -155,6 +153,14 @@ fn blocks(
         }
     }
     blocks
+}
+
+/// Literal text with its line breaks intact. A `plain_text` section renders
+/// every `\n` as a space; rich_text keeps the break and parses no markup, so
+/// a file name's `_` stays a `_`.
+fn literal_block(text: &str) -> Value {
+    json!({"type": "rich_text", "elements": [
+        {"type": "rich_text_section", "elements": [{"type": "text", "text": text}]}]})
 }
 
 /// One slot per outgoing message. A body that rendered to nothing keeps one
@@ -187,7 +193,7 @@ pub fn send(
                 .into_iter()
                 .next()
                 .unwrap_or_default();
-            message_blocks.insert(0, json!({"type":"section", "text":{"type":"plain_text", "text":header, "emoji":false}}));
+            message_blocks.insert(0, literal_block(&header));
             if text.is_empty() {
                 header
             } else {
