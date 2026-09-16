@@ -237,12 +237,10 @@ fn picker_rows(ws: &crate::workspace::Workspace) -> Vec<String> {
 /// A run directory that a killed process left: a journal, a spec, and no
 /// marker, with a lock naming a pid that is gone.
 ///
-/// MIGRATION(985e75dd → remove in 0.3): the lock goes only in the tree,
-/// which is the compatibility copy — with no marker it is the only
-/// evidence, so every test that reaches `Resumable` through this helper
-/// does it through the fallback. Plant it under the workspace's
-/// `lock_root` as well when the copy goes.
-fn killed_run_in(lane: &std::path::Path) -> std::path::PathBuf {
+/// The lock goes where the workspace's `lock_root` puts it — outside the
+/// tree, the only place anything reads — so a test reaching `Resumable`
+/// through this helper reaches it the way a real crash would.
+fn killed_run_in(lane: &std::path::Path, lock_root: &std::path::Path) -> std::path::PathBuf {
     let runs = crate::workspace::flow_paths::runs_dir(lane);
     let run_dir = runs.join("0000000000000001-00000001-0001");
     std::fs::create_dir_all(&run_dir).expect("mkdir");
@@ -258,8 +256,11 @@ fn killed_run_in(lane: &std::path::Path) -> std::path::PathBuf {
     .expect("journal");
     // pid 0 is never a live process, which is what makes this a crash
     // rather than a run still going.
+    let lock_dir =
+        crate::workspace::flow_paths::lane_lock_dir(lock_root, lane).expect("the lane resolves");
+    std::fs::create_dir_all(&lock_dir).expect("mkdir");
     std::fs::write(
-        runs.join(".lock"),
+        lock_dir.join(".lock"),
         "pid: 0\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
     )
     .expect("lock");

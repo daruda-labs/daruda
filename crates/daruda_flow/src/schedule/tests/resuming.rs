@@ -59,13 +59,16 @@ fn killed_after(
     runner: FakeRunner,
 ) -> std::path::PathBuf {
     let runner = runner.cancel_at(stop_at, 1);
-    let report = execute(&request_for(flow, dir), &runner, &CancelToken::default());
+    let request = request_for(flow, dir);
+    let lock_dir = super::lock_dir_of(&request);
+    let report = execute(&request, &runner, &CancelToken::default());
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
     // A lock naming this run, whose holder the resume will be told is gone.
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(
-        report.run_dir.parent().expect("runs dir").join(".lock"),
+        lock_dir.join(".lock"),
         format!(
             "pid: 999999\nrun_id: {}\nstarted_unix_secs: 1\n",
             report.run_dir.file_name().expect("name").to_string_lossy()
@@ -82,10 +85,14 @@ fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> Run
     // at all, and whether its stale lock may be reclaimed. A host that let
     // them disagree would offer a resume the lock then refuses.
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(run_dir, run_dir.parent(), &dead)
-        .expect("a killed run is resumable");
-    let dir = run_dir.parent().expect("runs").parent().expect("cwd");
+    let runs = run_dir.parent().expect("runs");
+    let dir = runs.parent().expect("cwd");
+    // Three levels, not two: `runs` sits at `<cwd>/.daruda/flow-runs`, so the
+    // working tree the lock is keyed to is one above the hidden directory.
+    let cwd = dir.parent().expect("the tree above the hidden directory");
     let mut request = request_for(flow, dir);
+    let resumed = crate::resume::prepare(run_dir, Some(&super::lock_dir_for_cwd(cwd)), &dead)
+        .expect("a killed run is resumable");
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.to_path_buf();
     request.resume = Some(resumed.replay);
@@ -210,11 +217,12 @@ fn a_resume_carries_the_spend_and_not_the_waiting() {
     let run_dir = killed_after(dir.path(), CHAIN_OF_THREE, "two", FakeRunner::new());
 
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(&run_dir, run_dir.parent(), &dead).expect("resumable");
+    let mut request = request_for(CHAIN_OF_THREE, dir.path());
+    let resumed = crate::resume::prepare(&run_dir, Some(&super::lock_dir_of(&request)), &dead)
+        .expect("resumable");
     let spent_before = resumed.replay.spent.node_runs;
     assert!(spent_before > 0, "the first half ran nothing");
 
-    let mut request = request_for(CHAIN_OF_THREE, dir.path());
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
     request.resume = Some(resumed.replay);
@@ -257,14 +265,15 @@ fn waiting_done_before_the_crash_does_not_extend_the_new_clock() {
     );
 
     let dead = |_: u32| false;
-    let resumed = crate::resume::prepare(&run_dir, run_dir.parent(), &dead).expect("resumable");
+    let mut request = request_for(CHAIN_OF_THREE, dir.path());
+    let resumed = crate::resume::prepare(&run_dir, Some(&super::lock_dir_of(&request)), &dead)
+        .expect("resumable");
     assert!(
         resumed.replay.spent.parked >= Duration::from_secs(30),
         "the first half's waiting did not read back: {:?}",
         resumed.replay.spent.parked
     );
 
-    let mut request = request_for(CHAIN_OF_THREE, dir.path());
     request.loaded = resumed.loaded;
     request.run_dir = run_dir.clone();
     request.resume = Some(resumed.replay);
@@ -422,8 +431,10 @@ nodes:
     for marker in ["DONE", "FAILED", "CANCELED"] {
         let _ = std::fs::remove_file(report.run_dir.join(marker));
     }
+    let lock_dir = super::lock_dir_of(&request);
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(
-        report.run_dir.parent().expect("runs dir").join(".lock"),
+        lock_dir.join(".lock"),
         format!(
             "pid: 999999\nrun_id: {}\nstarted_unix_secs: 1\n",
             report.run_dir.file_name().expect("name").to_string_lossy()

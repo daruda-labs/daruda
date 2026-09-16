@@ -216,11 +216,14 @@ nodes:
 #[gpui::test]
 async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
-    std::fs::create_dir_all(&runs).expect("create runs dir");
+    let lock_dir = ws.update(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, lane.path())
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("create the lock dir");
     // pid 1 is alive on every unix and is emphatically not this process.
     std::fs::write(
-        runs.join(".lock"),
+        lock_dir.join(".lock"),
         "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
     )
     .expect("plant a lock");
@@ -241,11 +244,10 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
 
 /// **The app finds a lock at its new home, with nothing at the old one.**
 ///
-/// Every other test here plants the compatibility copy inside the tree,
-/// which `lane_holder` reads only as a fallback — so all of them would
-/// still pass if the primary read were pointed at the wrong directory
-/// entirely. That fallback is due for deletion (MIGRATION 985e75dd → 0.3),
-/// and nothing covered what is left when it goes.
+/// The other tests here plant their lock through `killed_run_in`, which
+/// derives the same path this asserts. This one writes it by hand and
+/// checks the tree stays empty, so a wrong derivation cannot pass by
+/// agreeing with itself.
 #[gpui::test]
 async fn a_lock_at_its_new_home_is_found_with_nothing_left_inside_the_tree(
     cx: &mut TestAppContext,
@@ -721,7 +723,8 @@ async fn the_chosen_profile_reaches_the_request(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let run_dir = killed_run_in(lane.path());
+    let lock_root = ws.update(cx, |ws, _| ws.lock_root.clone());
+    let run_dir = killed_run_in(lane.path(), &lock_root);
     // The flow file says something else entirely by now.
     std::fs::write(&flow_path, "version: 1\nnodes: []\n").expect("rewrite");
 
@@ -752,7 +755,8 @@ async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContex
 #[gpui::test]
 async fn a_resume_request_uses_the_lane_that_owned_the_row(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let run_dir = killed_run_in(lane.path());
+    let lock_root = ws.update(cx, |ws, _| ws.lock_root.clone());
+    let run_dir = killed_run_in(lane.path(), &lock_root);
     let other = tempfile::tempdir().expect("tempdir");
 
     let (original, other_ref) = ws.update(cx, |ws, _cx| {
@@ -799,7 +803,8 @@ async fn a_resume_request_uses_the_lane_that_owned_the_row(cx: &mut TestAppConte
 #[gpui::test]
 async fn a_run_that_ended_on_purpose_is_not_continued(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let run_dir = killed_run_in(lane.path());
+    let lock_root = ws.update(cx, |ws, _| ws.lock_root.clone());
+    let run_dir = killed_run_in(lane.path(), &lock_root);
     std::fs::write(run_dir.join("DONE"), "").expect("marker");
 
     let refused = ws.update(cx, |ws, cx| {
@@ -827,7 +832,8 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
     cx: &mut TestAppContext,
 ) {
     let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let run_dir = killed_run_in(lane.path());
+    let lock_root = ws.update(cx, |ws, _| ws.lock_root.clone());
+    let run_dir = killed_run_in(lane.path(), &lock_root);
 
     let request = ws.update(cx, |ws, cx| {
         ws.build_resume_request(ws.active_ref(), &run_dir, cx)
@@ -835,10 +841,9 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
             .request
     });
 
-    // MIGRATION(985e75dd → remove in 0.3): the compatibility copy, which
-    // is where `killed_run_in` plants it. Read the new home when it goes.
-    let holder = daruda_flow::lock::read_holder(run_dir.parent().expect("runs dir"))
-        .expect("the killed run left its lock");
+    let lock_dir = crate::workspace::flow_paths::lane_lock_dir(&lock_root, lane.path())
+        .expect("the lane resolves");
+    let holder = daruda_flow::lock::read_holder(&lock_dir).expect("the killed run left its lock");
     assert!(
         !(request.is_alive)(holder.pid),
         "the request would find the lock held by a process the resume just called gone"
@@ -933,8 +938,13 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
     // reads to reach `Stopping`, seeded the same way its own test does.
     let runs = crate::workspace::flow_paths::runs_dir(lane.path());
     std::fs::create_dir_all(&runs).expect("runs dir");
+    let lock_dir = ws.update(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, lane.path())
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
     std::fs::write(
-        runs.join(".lock"),
+        lock_dir.join(".lock"),
         format!(
             "pid: {}\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
             std::process::id()
@@ -1079,12 +1089,15 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
 #[gpui::test]
 async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let runs = crate::workspace::flow_paths::runs_dir(lane.path());
-    std::fs::create_dir_all(&runs).expect("runs dir");
+    let lock_dir = ws.update(cx, |ws, _| {
+        crate::workspace::flow_paths::lane_lock_dir(&ws.lock_root, lane.path())
+            .expect("the lane resolves")
+    });
+    std::fs::create_dir_all(&lock_dir).expect("lock dir");
     // pid 1 is the init process on every platform this builds for, so it is
     // both alive and not us.
     std::fs::write(
-        runs.join(".lock"),
+        lock_dir.join(".lock"),
         "pid: 1\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
     )
     .expect("lock");

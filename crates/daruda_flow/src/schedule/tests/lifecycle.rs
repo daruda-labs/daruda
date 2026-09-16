@@ -63,17 +63,14 @@ fn a_failed_run_frees_the_lock_too() {
 #[test]
 fn a_run_that_loses_the_lock_writes_no_marker() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // The lock lives in the runs directory, beside the run dirs — the one
-    // place `.gitignore` covers, so it stays out of the user's `git status`.
-    let runs_dir = dir.path().join(".daruda/flow-runs");
-    std::fs::create_dir_all(&runs_dir).expect("mkdir");
-    let held = RunLock::acquire(&runs_dir, "other", &|_| true).expect("free");
+    // The lock lives outside the tree, so `git clean -fdx` inside the tree
+    // cannot take it while a run still holds it.
+    let request = request_for(CHAIN, dir.path());
+    let lock_dir = super::lock_dir_of(&request);
+    std::fs::create_dir_all(&lock_dir).expect("mkdir");
+    let held = RunLock::acquire(&lock_dir, "other", &|_| true).expect("free");
     let runner = FakeRunner::new();
-    let report = execute(
-        &request_for(CHAIN, dir.path()),
-        &runner,
-        &CancelToken::default(),
-    );
+    let report = execute(&request, &runner, &CancelToken::default());
     match &report.outcome {
         RunOutcome::LockHeld { holder } => assert_eq!(holder.run_id, "other"),
         other => panic!("expected LockHeld, got {other:?}"),
@@ -95,12 +92,10 @@ fn a_run_that_loses_the_lock_writes_no_marker() {
 #[test]
 fn a_run_whose_lock_was_stolen_leaves_the_new_holders_lock_alone() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let runner = LockStealer(FakeRunner::new());
-    let report = execute(
-        &request_for(CHAIN, dir.path()),
-        &runner,
-        &CancelToken::default(),
-    );
+    let request = request_for(CHAIN, dir.path());
+    let lock_dir = super::lock_dir_of(&request);
+    let runner = LockStealer(FakeRunner::new(), lock_dir.clone());
+    let report = execute(&request, &runner, &CancelToken::default());
     assert!(
         matches!(report.outcome, RunOutcome::Done),
         "{:?}",
@@ -108,10 +103,7 @@ fn a_run_whose_lock_was_stolen_leaves_the_new_holders_lock_alone() {
     );
     assert!(report.run_dir.join("DONE").is_file());
     assert!(
-        report
-            .run_dir
-            .parent()
-            .is_some_and(|runs| runs.join(".lock").is_file()),
+        lock_dir.join(".lock").is_file(),
         "the other run still holds the directory"
     );
     assert!(report.warnings().is_empty(), "{:?}", report.warnings());
@@ -122,12 +114,9 @@ fn a_run_whose_lock_was_stolen_leaves_the_new_holders_lock_alone() {
 #[test]
 fn a_run_whose_lock_vanished_reports_nothing_extra() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let runner = LockLoser(FakeRunner::new());
-    let report = execute(
-        &request_for(CHAIN, dir.path()),
-        &runner,
-        &CancelToken::default(),
-    );
+    let request = request_for(CHAIN, dir.path());
+    let runner = LockLoser(FakeRunner::new(), super::lock_dir_of(&request));
+    let report = execute(&request, &runner, &CancelToken::default());
     assert!(
         matches!(report.outcome, RunOutcome::Done),
         "{:?}",
@@ -199,6 +188,7 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
                     .and_then(crate::lock::read_holder)
                     .is_some(),
             ));
+            // The lock lives outside the tree and nowhere else.
         }
     }
 
@@ -239,7 +229,7 @@ fn execute_takes_the_lock_under_the_given_root_and_the_copy_inside_the_tree() {
         "the authoritative lock must sit under the given root for the whole run: {seen:?}"
     );
     assert!(
-        seen.iter().all(|(_, inside)| *inside),
-        "MIGRATION(985e75dd → remove in 0.3): the copy must be there too: {seen:?}"
+        seen.iter().all(|(_, inside)| !*inside),
+        "nothing is written inside the tree any more: {seen:?}"
     );
 }

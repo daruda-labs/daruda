@@ -224,7 +224,7 @@ pub(super) fn request_for_profile(
         // `nothing_the_engine_makes_sits_outside_the_directory_it_hides`
         // meaningful; whether the root is outside the tree at all is the
         // host's choice, tested there.
-        lock_dir: dir.join(REPO_DIR).join(TEST_LOCKS_DIR),
+        lock_dir: test_lock_root(dir),
         flow_dir: dir.to_path_buf(),
         agents: std::collections::HashMap::from([(
             "claude".to_string(),
@@ -243,21 +243,41 @@ pub(super) fn request_for_profile(
     }
 }
 
+/// The lock root [`request_for`] gives every request it builds for `cwd`.
+/// One derivation, so a test computing the lock's path cannot drift from
+/// the request that takes it.
+pub(super) fn test_lock_root(cwd: &Path) -> std::path::PathBuf {
+    cwd.join(REPO_DIR).join(TEST_LOCKS_DIR)
+}
+
+/// Where `execute` takes `request`'s lock: outside the tree, and the only
+/// place anything reads it. A test that writes one anywhere else passes
+/// whatever `release` did rather than what the engine saw.
+pub(super) fn lock_dir_of(request: &crate::request::RunRequest) -> std::path::PathBuf {
+    lock_dir_under(&request.lock_dir, &request.cwd)
+}
+
+/// The same answer from a working tree alone, for a caller holding the
+/// directory a run was made in rather than the request that made it.
+pub(super) fn lock_dir_for_cwd(cwd: &Path) -> std::path::PathBuf {
+    lock_dir_under(&test_lock_root(cwd), cwd)
+}
+
+fn lock_dir_under(root: &Path, cwd: &Path) -> std::path::PathBuf {
+    let tree = crate::lock::CanonicalTree::resolve(cwd).expect("the tree resolves");
+    crate::lock::lock_dir_for(root, &tree)
+}
+
 /// Replaces the lock mid-run with another run's, the way a mistaken
 /// reclaim would. Nothing else puts a foreign holder under a live run.
-struct LockStealer(FakeRunner);
+/// Carries the lock directory because `RunContext` does not name it.
+struct LockStealer(FakeRunner, std::path::PathBuf);
 
 /// Put a different run's lock in place, atomically enough for a test.
-///
-/// In the runs directory, where `execute` takes it — under `cwd` this would
-/// write a file the engine never reads, and the test would pass whatever
-/// `release` did.
-fn steal(run_dir: &Path) {
-    let Some(runs_dir) = run_dir.parent() else {
-        return;
-    };
+fn steal(lock_dir: &Path) {
+    let _ = std::fs::create_dir_all(lock_dir);
     let _ = std::fs::write(
-        runs_dir.join(".lock"),
+        lock_dir.join(".lock"),
         "pid: 999999\nrun_id: someone-else\nstarted_unix_secs: 1\n",
     );
 }
@@ -269,7 +289,7 @@ impl NodeRunner for LockStealer {
         agent: &'a crate::model::AgentSpec,
         prompt: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
-        steal(ctx.run_dir);
+        steal(&self.1);
         self.0.run_agent(ctx, agent, prompt)
     }
 
@@ -278,13 +298,13 @@ impl NodeRunner for LockStealer {
         ctx: &'a RunContext<'a>,
         run: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
-        steal(ctx.run_dir);
+        steal(&self.1);
         self.0.run_command(ctx, run)
     }
 }
 
 /// Removes the lock mid-run, the way a stray cleanup would.
-struct LockLoser(FakeRunner);
+struct LockLoser(FakeRunner, std::path::PathBuf);
 
 impl NodeRunner for LockLoser {
     fn run_agent<'a>(
@@ -293,10 +313,7 @@ impl NodeRunner for LockLoser {
         agent: &'a crate::model::AgentSpec,
         prompt: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
-        let _ = ctx
-            .run_dir
-            .parent()
-            .map(|d| std::fs::remove_file(d.join(".lock")));
+        let _ = std::fs::remove_file(self.1.join(".lock"));
         self.0.run_agent(ctx, agent, prompt)
     }
 
@@ -305,10 +322,7 @@ impl NodeRunner for LockLoser {
         ctx: &'a RunContext<'a>,
         run: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
-        let _ = ctx
-            .run_dir
-            .parent()
-            .map(|d| std::fs::remove_file(d.join(".lock")));
+        let _ = std::fs::remove_file(self.1.join(".lock"));
         self.0.run_command(ctx, run)
     }
 }

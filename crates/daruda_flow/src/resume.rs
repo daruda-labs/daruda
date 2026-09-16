@@ -226,30 +226,6 @@ mod tests {
         );
     }
 
-    /// A run an older build started wrote its lock only inside the tree.
-    /// `run_status` falls back to that copy so the upgrade does not make
-    /// such a run unresumable.
-    #[test]
-    /// MIGRATION(985e75dd → remove in 0.3): this test *is* the
-    /// compatibility fallback — the `lock_dir` it passes was never written,
-    /// so `Crashed` can only come from the copy in the tree. Delete it with
-    /// `lock::compat`, not before.
-    #[allow(clippy::doc_markdown)]
-    fn a_lock_left_inside_the_tree_by_an_older_build_still_answers() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let runs = dir.path().join(".daruda/flow-runs");
-        let run_dir = runs.join("01J");
-        std::fs::create_dir_all(&run_dir).expect("mkdir");
-        std::mem::forget(crate::lock::RunLock::acquire(&runs, "01J", &|_| true).expect("lock"));
-        // Where this build would have put it, and never did.
-        let lock_dir = dir.path().join("locks/never-written");
-
-        assert_eq!(
-            crate::marker::run_status(&run_dir, Some(&lock_dir), &|_| false),
-            RunStatus::Crashed
-        );
-    }
-
     /// A crash during setup leaves a lock and no journal. There is nothing
     /// to continue, and saying so is different from saying the run ended.
     #[test]

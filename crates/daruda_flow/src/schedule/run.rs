@@ -27,7 +27,6 @@ const WRITE_RECORD: &str = "recording what the run did";
 /// file lives inside the runs directory rather than at `.daruda/`, so that the
 /// visibility of the `task-*.md` files already living there is not silently
 /// changed.
-const MAKE_RUNS_DIR: &str = "making the runs directory";
 const GITIGNORE: &str = ".gitignore";
 const GITIGNORE_BODY: &str = "*\n";
 const WRITE_GITIGNORE: &str = "hiding the run directory from git";
@@ -92,31 +91,7 @@ fn execute_with(
             );
         }
     };
-    // MIGRATION(985e75dd → remove in 0.3): the legacy place too. Why, and
-    // where it is, belong to `lock::compat` — this is only the writer.
-    //
-    // `git clean -fdx` can still take this copy, leaving an older build
-    // able to start a second run here. The move closed that window for
-    // every build that knows the new place; this is the remainder, and it
-    // dies with the copy.
-    let legacy = crate::lock::compat::lock_dir(&request.run_dir);
-    let mut lock_dirs = vec![crate::lock::lock_dir_for(&request.lock_dir, &tree)];
-    lock_dirs.extend(legacy.map(Path::to_path_buf));
-    // Before the locks, because a lock is a file inside one. Making a
-    // directory claims nothing, so there is no race to lose here.
-    if let Some(legacy) = legacy
-        && let Err(source) = std::fs::create_dir_all(legacy)
-    {
-        return not_started(
-            request,
-            RunOutcome::Io(FlowIoError {
-                site: IoSite::Run,
-                doing: MAKE_RUNS_DIR,
-                path: legacy.to_path_buf(),
-                source,
-            }),
-        );
-    }
+    let lock_dirs = [crate::lock::lock_dir_for(&request.lock_dir, &tree)];
     let lock = match RunLocks::acquire(&lock_dirs, &run_id_of(&request.run_dir), &*request.is_alive)
     {
         Ok(lock) => lock,

@@ -467,14 +467,14 @@ fn run_ended_distinguishes_what_the_marker_folds_together() {
 #[test]
 fn a_run_that_loses_the_lock_narrates_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // The lock lives in the runs directory, beside the run dirs — the one
-    // place `.gitignore` covers, so it stays out of the user's `git status`.
-    let runs_dir = dir.path().join(".daruda/flow-runs");
-    std::fs::create_dir_all(&runs_dir).expect("mkdir");
-    let held = RunLock::acquire(&runs_dir, "other", &|_| true).expect("free");
     let (tx, rx) = smol::channel::unbounded();
     let mut request = request_for(CHAIN, dir.path());
     request.events = Some(tx);
+    // The lock lives outside the tree, so `git clean -fdx` inside the tree
+    // cannot take it while a run still holds it.
+    let lock_dir = super::lock_dir_of(&request);
+    std::fs::create_dir_all(&lock_dir).expect("mkdir");
+    let held = RunLock::acquire(&lock_dir, "other", &|_| true).expect("free");
 
     let runner = FakeRunner::new();
     let report = execute(&request, &runner, &CancelToken::default());
@@ -611,25 +611,23 @@ fn nothing_the_engine_makes_sits_outside_the_directory_it_hides() {
 /// The status a host asks for while a run is going. Every other status
 /// test builds its own directory layout; this one asks about a run that
 /// `execute` actually set up.
-///
-/// MIGRATION(985e75dd → remove in 0.3): reads the lock at
-/// `run_dir.parent()`, the compatibility copy — mid-run that is the only
-/// evidence, so this fails when `execute` stops writing it. Point it at
-/// the request's own `lock_dir` then.
 #[test]
 fn a_run_in_flight_reads_as_running_in_the_layout_execute_builds() {
     /// Asks the question mid-run, when there is no marker yet and the lock
     /// is the only evidence.
     struct Asker(
         FakeRunner,
+        std::path::PathBuf,
         std::cell::RefCell<Vec<crate::marker::RunStatus>>,
     );
 
     impl Asker {
         fn ask(&self, ctx: &RunContext<'_>) {
-            self.1.borrow_mut().push(crate::marker::run_status(
+            let tree = crate::lock::CanonicalTree::resolve(ctx.cwd).expect("the tree resolves");
+            let lock_dir = crate::lock::lock_dir_for(&self.1, &tree);
+            self.2.borrow_mut().push(crate::marker::run_status(
                 ctx.run_dir,
-                ctx.run_dir.parent(),
+                Some(&lock_dir),
                 &|_| true,
             ));
         }
@@ -657,15 +655,16 @@ fn a_run_in_flight_reads_as_running_in_the_layout_execute_builds() {
     }
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let asker = Asker(FakeRunner::new(), std::cell::RefCell::new(Vec::new()));
-    let report = execute(
-        &request_for(CHAIN, dir.path()),
-        &asker,
-        &CancelToken::default(),
+    let request = request_for(CHAIN, dir.path());
+    let asker = Asker(
+        FakeRunner::new(),
+        request.lock_dir.clone(),
+        std::cell::RefCell::new(Vec::new()),
     );
+    let report = execute(&request, &asker, &CancelToken::default());
     assert!(matches!(report.outcome, RunOutcome::Done));
 
-    let seen = asker.1.into_inner();
+    let seen = asker.2.into_inner();
     assert_eq!(
         seen,
         vec![crate::marker::RunStatus::Running; 3],

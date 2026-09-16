@@ -213,28 +213,6 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     out
 }
 
-/// The lock's old home, inside the working tree, so a build predating the
-/// move still excludes and is still excluded.
-///
-/// MIGRATION(985e75dd → remove in 0.3): `grep -r 985e75dd` finds the lot,
-/// tests included, and a test below fails once the version passes the
-/// release the copy was kept for. A module for one function because the
-/// engine derived that location twice and the two disagreed; the app's
-/// third derivation stays its own, since only it knows where it puts run
-/// directories.
-pub mod compat {
-    use std::path::Path;
-
-    /// Where the copy sits: the runs directory, the run directory's parent.
-    ///
-    /// `None` when there is no parent, rather than the guess the writer
-    /// used to make — a lock dropped in a working tree root is litter, and
-    /// the reader never looked there anyway.
-    pub fn lock_dir(run_dir: &Path) -> Option<&Path> {
-        run_dir.parent()
-    }
-}
-
 /// Every lock one run needs, held together and given back together.
 ///
 /// Acquired in sorted order. Fail-fast makes deadlock impossible — nothing
@@ -657,72 +635,6 @@ mod tests {
             at_root,
             lock_dir_for(root, &CanonicalTree::unchecked("/a".into()))
         );
-    }
-
-    /// **The compatibility copy has a deadline, and this is what keeps it.**
-    /// A version bump is something everybody does; a note about "one
-    /// release" is not. The exact patch, not the 0.2 line — this project
-    /// shipped v0.2.0 through v0.2.12 without a minor bump. Delete with
-    /// what it guards; to keep the copy longer, raise the constant.
-    #[test]
-    fn the_compatibility_copy_has_not_outlived_the_release_it_was_written_for() {
-        let version = env!("CARGO_PKG_VERSION");
-        assert!(
-            !past(version, LAST_RELEASE_WITH_THE_COPY),
-            "daruda is {version} — past {LAST_RELEASE_WITH_THE_COPY}, the \
-             release the in-tree lock copy was kept for. Delete \
-             `lock::compat` and everything `grep -r 985e75dd` finds, this \
-             test included.",
-        );
-    }
-
-    /// The last release allowed to write the in-tree copy.
-    const LAST_RELEASE_WITH_THE_COPY: &str = "0.2.13";
-
-    /// Whether `version` is later than `limit`, as numbers — `"0.2.9" >
-    /// "0.2.13"` lexically. An unparseable component reads as 0, so
-    /// `0.3.0-rc1` trips the deadline at the bump, which is when the
-    /// decision is being made.
-    fn past(version: &str, limit: &str) -> bool {
-        fn parts(v: &str) -> [u32; 3] {
-            let mut out = [0; 3];
-            for (slot, text) in out.iter_mut().zip(v.split('.')) {
-                *slot = text
-                    .split(|c: char| !c.is_ascii_digit())
-                    .next()
-                    .and_then(|digits| digits.parse().ok())
-                    .unwrap_or(0);
-            }
-            out
-        }
-        parts(version) > parts(limit)
-    }
-
-    /// The comparison the deadline rests on, including the two shapes a
-    /// string compare gets wrong.
-    #[test]
-    fn a_version_is_past_the_limit_only_when_it_is_numerically_later() {
-        assert!(!past("0.2.12", "0.2.13"));
-        assert!(!past("0.2.13", "0.2.13"));
-        assert!(past("0.2.14", "0.2.13"));
-        // Lexically "0.2.9" > "0.2.13" and "0.10.0" < "0.2.13".
-        assert!(!past("0.2.9", "0.2.13"));
-        assert!(past("0.10.0", "0.2.13"));
-        assert!(past("1.0.0", "0.2.13"));
-        // A pre-release trips it at the bump, not after it.
-        assert!(past("0.3.0-rc1", "0.2.13"));
-    }
-
-    /// The two engine callers ask one function, so a run directory with no
-    /// parent cannot mean two things — the writer used to guess the working
-    /// tree root here while the reader read nothing.
-    #[test]
-    fn a_run_directory_with_no_parent_has_no_copy_rather_than_a_guessed_one() {
-        assert_eq!(
-            compat::lock_dir(Path::new("/runs/01J")),
-            Some(Path::new("/runs"))
-        );
-        assert_eq!(compat::lock_dir(Path::new("/")), None);
     }
 
     /// The same tree always names the same directory — two processes have to

@@ -125,13 +125,7 @@ pub fn run_status(run_dir: &Path, lock_dir: Option<&Path>, is_alive: IsAlive<'_>
     // `None` is a caller that could not resolve the tree, so it does not
     // know where the lock is — said as an absent argument rather than as a
     // path with no lock in it, which would read the same as "free".
-    //
-    // MIGRATION(985e75dd → remove in 0.3): the second read is the
-    // compatibility copy, for a run an older build started — it wrote only
-    // there. Where that is belongs to `lock::compat`.
-    let holder = lock_dir
-        .and_then(crate::lock::read_holder)
-        .or_else(|| crate::lock::compat::lock_dir(run_dir).and_then(crate::lock::read_holder));
+    let holder = lock_dir.and_then(crate::lock::read_holder);
     // A lock naming a different run is evidence about that run, not this
     // one; an unreadable or absent one is no evidence at all. Either way
     // there is nothing here to call a crash without guessing.
