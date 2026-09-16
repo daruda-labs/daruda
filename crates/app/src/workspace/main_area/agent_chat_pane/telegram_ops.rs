@@ -349,7 +349,10 @@ impl Workspace {
     ///
     /// First-response acks and first-response permission waits deliberately
     /// bypass this and call [`Self::relay_to_telegram`] directly: the phone
-    /// asked for those, so presence is not what decides them.
+    /// asked for those, so presence is not what decides them. The same
+    /// reasoning covers the rest of a phone-started turn — while the pane's
+    /// [`PhoneTurn`] ledger is open, every relay here is solicited too, and
+    /// goes out the same way. Presence decides only the unsolicited.
     ///
     /// Returns whether the ping went out, so a caller tracking a live state
     /// (an outstanding permission) knows whether the phone has been told.
@@ -361,6 +364,16 @@ impl Workspace {
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
         cx: &mut Context<Self>,
     ) -> bool {
+        // The ledger closes at the completion tee, after the completion relay
+        // has run — so a completion and a second permission wait both land
+        // here with it still open, and a post-turn follow-up with it gone.
+        if self.phone_turn_open(pane_id, cx) {
+            trace::delivery("relay.solicited", || {
+                format!("pane={pane_id} text={}", trace::tail_digest(&tail))
+            });
+            self.relay_to_telegram(pane_id, header, tail, permission, cx);
+            return true;
+        }
         // `relay_to_telegram` asks this too, but asking here first keeps a
         // disabled/unpaired bridge out of the presence trace below, where it
         // would read as a presence decision it never was.
@@ -409,6 +422,14 @@ impl Workspace {
             self.relay_telegram_only(pane_id, header, tail, permission, cx);
         }
         send || remote_sent
+    }
+
+    /// Whether the pane's in-flight turn was started from the phone. Any
+    /// ledger state counts, not just `Waiting`: an answered first response
+    /// does not make the rest of the turn unsolicited.
+    fn phone_turn_open(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
+        self.agent_chat_view(pane_id)
+            .is_some_and(|view| view.read(cx).phone_turn().is_some())
     }
 
     /// Relay a ping to the Telegram bridge, if the bridge is configured to

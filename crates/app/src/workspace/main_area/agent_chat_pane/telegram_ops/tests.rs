@@ -118,6 +118,71 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
     });
 }
 
+/// A turn the phone started is solicited, so presence does not decide its
+/// relays: while the pane's `PhoneTurn` ledger is open, a completion or a
+/// second permission wait reaches the phone even with the user at the desk.
+/// Once the ledger closes, the same call is back under the presence rule —
+/// a post-turn follow-up is unsolicited and stays gated.
+#[gpui::test]
+async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppContext) {
+    use crate::platform::presence::AwaySignal;
+    use std::time::{Duration, Instant};
+
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    assert!(
+        config.telegram.only_when_away,
+        "the default gate must be on"
+    );
+    cx.update(crate::app_presence::init);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
+        let view = ws.agent_chat_view(pane).cloned().expect("view");
+        view.update(cx, |v, _| v.start_phone_turn_for_test(Instant::now()));
+
+        assert!(
+            ws.relay_when_presence_allows(
+                pane,
+                "h".into(),
+                crate::telegram::bridge::TelegramTail::Plain("in turn".into()),
+                None,
+                cx,
+            ),
+            "an open ledger reports the ping as sent"
+        );
+        assert_eq!(
+            expect_ping(outbound.next().now_or_never().flatten().unwrap())
+                .pane
+                .pane,
+            pane
+        );
+
+        ws.close_phone_turn(pane, cx);
+        assert!(
+            !ws.relay_when_presence_allows(
+                pane,
+                "h".into(),
+                crate::telegram::bridge::TelegramTail::Plain("after".into()),
+                None,
+                cx,
+            ),
+            "a closed ledger is back under presence"
+        );
+        assert!(outbound.next().now_or_never().is_none());
+    });
+}
+
 /// `only_when_away = false` is the opt-out: every ping goes to the phone,
 /// presence notwithstanding. Still one decision, still no queue.
 #[gpui::test]
