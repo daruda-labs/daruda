@@ -129,7 +129,14 @@ impl Workspace {
             // Offering "stop it" for a run we cannot reach would be a
             // button that does nothing.
             Some(holder) => {
-                self.report_flow_refusal(FlowSubmitError::LockHeld { pid: holder.pid }, cx);
+                let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
+                self.report_flow_refusal(
+                    FlowSubmitError::LockHeld {
+                        pid: holder.pid,
+                        lock_dir,
+                    },
+                    cx,
+                );
                 false
             }
             None => true,
@@ -695,7 +702,12 @@ impl Workspace {
                 String::new(),
             ),
             FlowSubmitError::RemoteLane { agent } => (s::flow_remote_lane(&agent), String::new()),
-            FlowSubmitError::LockHeld { pid } => (s::flow_lock_held(pid), String::new()),
+            FlowSubmitError::LockHeld { pid, lock_dir } => (
+                s::flow_lock_held(pid),
+                lock_dir.map_or_else(String::new, |dir| {
+                    s::flow_lock_held_detail(&dir.join(".lock").display().to_string())
+                }),
+            ),
             // The reason carries its own already-localized wording — the same
             // one an agent chat pane shows for the identical refusal.
             FlowSubmitError::AgentLaunchRefused { agent, reason } => (

@@ -1520,6 +1520,7 @@ flow:
   budget_wall_clock: "실행이 시간 제한에 걸렸습니다"
   budget_node_runs: "실행이 단계 수 제한에 걸렸습니다"
   budget_cost: "실행이 비용 제한에 걸렸습니다"
+  lock_held_detail: "해당 프로세스가 이미 없다면 직접 삭제하세요: %{path}"
   lock_held: "다른 실행(프로세스 %{pid})이 이미 이 worktree를 쓰고 있습니다"
   run_panicked: "실행이 예기치 않게 중단되었습니다"
   unprovisioned: "%{agent}을(를) 돌릴 런타임이 없습니다: %{message}"

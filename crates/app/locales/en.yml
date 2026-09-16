@@ -1521,6 +1521,7 @@ flow:
   budget_wall_clock: "The run hit its time limit"
   budget_node_runs: "The run hit its limit on how many steps it may take"
   budget_cost: "The run hit its cost limit"
+  lock_held_detail: "Clear it by hand if the process is gone: %{path}"
   lock_held: "Another run (process %{pid}) already has this worktree"
   run_panicked: "the run stopped unexpectedly"
   unprovisioned: "%{agent} has no runtime to run with: %{message}"

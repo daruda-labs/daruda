@@ -240,6 +240,27 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
         state.starts_with("Closed"),
         "offered to stop a run it cannot reach: {state}"
     );
+
+    // The refusal is the one a user has to undo by hand when the pid has
+    // been handed to something else, and the lock hangs under a mirrored
+    // path in the data directory that nothing else on screen names.
+    ws.read_with(cx, |ws, cx| {
+        let toasts = ws.error_toasts(cx);
+        let report = &toasts
+            .iter()
+            .last()
+            .expect("the refusal was reported")
+            .report;
+        let detail = report
+            .context
+            .get("detail")
+            .map(String::as_str)
+            .unwrap_or_default();
+        assert!(
+            detail.contains(&lock_dir.join(".lock").display().to_string()),
+            "the refusal does not say where the lock is: {detail:?}"
+        );
+    });
 }
 
 /// **The app finds a lock at its new home, with nothing at the old one.**

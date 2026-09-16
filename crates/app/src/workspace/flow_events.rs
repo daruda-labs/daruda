@@ -237,10 +237,21 @@ impl Workspace {
         self.invalidate_flow_history(lane_ref);
         let refusal = end_refusal(end);
         if let Some(message) = refusal.clone() {
+            // The wording stays short — the phone is told the same sentence
+            // below — so where to look goes in the detail instead.
+            let detail = match end {
+                RunEnd::LockHeld { .. } => self
+                    .lane_for(lane_ref)
+                    .map(|lane| lane.path.clone())
+                    .and_then(|cwd| super::flow_paths::lane_lock_dir(&self.lock_root, &cwd))
+                    .map(|dir| s::flow_lock_held_detail(&dir.join(".lock").display().to_string())),
+                _ => None,
+            };
             self.report_error(
                 ErrorReport::new(message)
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
+                    .with_context("detail", detail.unwrap_or_default())
                     .dedup("flow.run.ended")
                     .build(),
                 cx,

@@ -6454,6 +6454,9 @@ pub fn flow_agent_launch_refused(agent: &str) -> String {
 pub fn flow_session_host_unusable(agent: &str) -> String {
     rust_i18n::t!("flow.session_host_unusable", agent => agent).into_owned()
 }
+pub fn flow_lock_held_detail(path: &str) -> String {
+    rust_i18n::t!("flow.lock_held_detail", path => path).into_owned()
+}
 pub fn flow_lock_held(pid: u32) -> String {
     rust_i18n::t!("flow.lock_held", pid => pid).into_owned()
 }

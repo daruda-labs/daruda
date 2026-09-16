@@ -44,8 +44,14 @@ pub(in crate::workspace) enum FlowSubmitError {
     },
     Load(daruda_flow::FlowError),
     /// A live process — not this one — already holds the lane.
+    ///
+    /// Carries the lock's directory, not just the pid. Refusing a pid the
+    /// OS has since handed to something else is the one refusal a user has
+    /// to undo by hand, and the lock hangs under a mirrored path in the
+    /// data directory that nothing on screen would otherwise name.
     LockHeld {
         pid: u32,
+        lock_dir: Option<std::path::PathBuf>,
     },
     /// An agent the flow names resolved to a launch shape that cannot
     /// produce a command. Reported rather than dropped: omitting the agent
