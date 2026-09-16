@@ -26,6 +26,37 @@ fn every_activity_state_maps_to_its_own_control_variant() {
     );
 }
 
+/// The phone introduces a new chat by where it is and what runs it. The
+/// label carries the agent's display name, not its catalog id — the name is
+/// workspace-private, and this accessor is the one way out.
+#[gpui::test]
+async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    fixture.workspace.read_with(cx, |ws, cx| {
+        let pane = fixture.pane();
+        let (path, agent) = ws
+            .control_chat_label(pane, cx)
+            .expect("the fixture's pane is live");
+        let lane = ws.lane_ref_for_pane(pane).expect("the pane sits in a lane");
+        assert_eq!(
+            path,
+            crate::surface::strings::control_lane_path(
+                &ws.control_project_name(lane.project),
+                &ws.control_lane_name(lane),
+            )
+        );
+        assert_eq!(
+            agent,
+            ws.agent_chat_view(pane).expect("view").read(cx).agent_name
+        );
+        assert_eq!(
+            ws.control_chat_label(9_999, cx),
+            None,
+            "a pane that is not there has no label"
+        );
+    });
+}
+
 /// A worktree with no agent chat in it still exists and is still a place
 /// to open one — which is exactly why this is not derived from
 /// `control_snapshot`.

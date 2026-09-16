@@ -25,6 +25,31 @@ pub(crate) fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut
     global::RemoteChannels::forget_approval(id, cx);
 }
 
+/// Introduce a chat the phone approved opening, on every channel that can
+/// hear it, and make it their target. Best effort by design: the request has
+/// already succeeded, so a channel that went away between the tap and now
+/// costs a trace line, not an outcome.
+pub(crate) fn announce_chat_created(
+    pane: bridge::PaneRef,
+    header: String,
+    agent: &str,
+    cx: &mut gpui::App,
+) {
+    let tail = crate::surface::strings::control_chat_announced(agent);
+    let telegram = crate::telegram::global::TelegramBridge::announce_chat(
+        pane,
+        header.clone(),
+        tail.clone(),
+        cx,
+    );
+    let remote = global::RemoteChannels::announce_chat(pane, header, tail, cx);
+    if !telegram && !remote {
+        crate::telegram::trace::delivery("announce.dropped", || {
+            format!("pane={}", crate::telegram::trace::pane(pane))
+        });
+    }
+}
+
 /// Report one remote-channel failure. `#[track_caller]` puts the call site in
 /// the log instead of this helper, and `dedup` must be unique per site: a
 /// shared key merges a different failure into a live toast's repeat count.

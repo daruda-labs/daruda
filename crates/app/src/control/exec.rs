@@ -459,7 +459,7 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
 
 /// Do the thing, now that the user has said yes.
 async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOutcome {
-    match cmd {
+    let outcome = match cmd {
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -475,6 +475,30 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
             agent,
             prompt,
         } => create_lane(workspace, project, name, base_ref, agent, prompt, cx).await,
+    };
+    // The user approved this from the phone a moment ago, so the phone is
+    // told what came of it and pointed at the new chat — otherwise reaching
+    // it takes a fresh `/list` and a `/use`.
+    let created = match &outcome {
+        Ok(ControlResult::ChatCreated { target }) => Some(*target),
+        Ok(ControlResult::LaneCreated { chat, .. }) => Some(*chat),
+        _ => None,
+    };
+    if let Some(pane) = created {
+        cx.update(|cx| announce_chat(pane, cx));
+    }
+    outcome
+}
+
+/// Best effort — see `remote_channel::announce_chat_created`. A pane that
+/// vanished in the same tick has no label, and then nothing to announce.
+fn announce_chat(pane: PaneRef, cx: &mut App) {
+    let label = in_pane_window(pane, cx, |ws, _window, cx| {
+        ws.control_chat_label(pane.pane, cx)
+            .ok_or(ControlError::TargetGone)
+    });
+    if let Ok((header, agent)) = label {
+        crate::remote_channel::announce_chat_created(pane, header, &agent, cx);
     }
 }
 

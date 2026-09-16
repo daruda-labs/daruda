@@ -15,7 +15,7 @@ use gpui::{App, Global};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::bridge::{BridgeCore, BridgePing, Outbound, OutboundMsg, TelegramTail};
+use super::bridge::{BridgeCore, BridgePing, Outbound, OutboundMsg, PaneRef, TelegramTail};
 use super::client;
 use super::keychain;
 use super::trace;
@@ -58,6 +58,33 @@ impl TelegramBridge {
         &mut self,
     ) -> &mut crate::remote_channel::command::CommandState {
         self.core.command_state_mut()
+    }
+
+    /// Whether a message can actually go out: the feature is on and someone
+    /// has paired. The same conditions `Workspace::telegram_bridge` asks, kept
+    /// in one place so the two answers cannot drift apart.
+    fn deliverable(cx: &App) -> bool {
+        let cfg = SettingsStore::global(cx).user_arc();
+        cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
+    }
+
+    /// Introduce a chat the phone approved opening, and make it the phone's
+    /// target. A selection and not just a ping: the orchestrator's own
+    /// completion ping follows and would take `last_pinged` straight back.
+    /// `false` when nothing can be sent, so the caller can record the drop.
+    pub(crate) fn announce_chat(pane: PaneRef, header: String, tail: String, cx: &mut App) -> bool {
+        if !Self::deliverable(cx) || cx.try_global::<TelegramBridge>().is_none() {
+            return false;
+        }
+        let bridge = cx.global_mut::<TelegramBridge>();
+        bridge.command_state_mut().select(Some(pane));
+        bridge.send(BridgePing {
+            pane,
+            header,
+            tail: TelegramTail::Plain(tail),
+            permission: None,
+        });
+        true
     }
     /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
@@ -111,10 +138,7 @@ impl TelegramBridge {
         // waiting out the whole approval timeout for a question the user
         // never saw. Same three conditions `Workspace::telegram_bridge`
         // asks, for the same reason: they must not disagree.
-        let deliverable = {
-            let cfg = SettingsStore::global(cx).user_arc();
-            cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
-        };
+        let deliverable = Self::deliverable(cx);
         if !deliverable || cx.try_global::<TelegramBridge>().is_none() {
             trace::delivery("queue.approval.refused", || {
                 format!("id={id:?} deliverable={deliverable}")
@@ -525,6 +549,74 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    /// The announcement both points the phone at the new chat and tells it
+    /// so, as a ping attributed to that chat — a reply to it reaches the chat.
+    #[gpui::test]
+    fn announcing_a_chat_selects_it_and_pings_it(cx: &mut TestAppContext) {
+        use futures::{FutureExt as _, StreamExt as _};
+        cx.update(|cx| {
+            crate::settings_store::SettingsStore::init(cx);
+            cx.global_mut::<crate::settings_store::SettingsStore>()
+                .set_user_for_testing(daruda_config::Config {
+                    telegram: daruda_config::TelegramConfig {
+                        enabled: true,
+                        authorized_chat_id: Some(42),
+                        ..Default::default()
+                    },
+                    ..daruda_config::Config::default()
+                });
+            let mut outbound = install_for_test(true, Some(42), cx);
+            let pane = PaneRef {
+                workspace: Default::default(),
+                pane: 7,
+            };
+            assert!(TelegramBridge::announce_chat(
+                pane,
+                "daruda/main".into(),
+                "new tab".into(),
+                cx
+            ));
+            assert_eq!(
+                cx.global_mut::<TelegramBridge>()
+                    .command_state_mut()
+                    .selected(),
+                Some(pane)
+            );
+            match outbound.next().now_or_never().flatten() {
+                Some(Outbound::Ping(ping)) => assert_eq!(ping.pane, pane),
+                _ => panic!("the announcement is a pane-attributed ping"),
+            }
+        });
+    }
+
+    /// Unpaired, nothing goes out and nothing is selected — the caller hears
+    /// `false` and records the drop instead of the user hearing nothing.
+    #[gpui::test]
+    fn an_unpaired_bridge_refuses_to_announce(cx: &mut TestAppContext) {
+        use futures::{FutureExt as _, StreamExt as _};
+        cx.update(|cx| {
+            crate::settings_store::SettingsStore::init(cx);
+            let mut outbound = install_for_test(true, None, cx);
+            let pane = PaneRef {
+                workspace: Default::default(),
+                pane: 7,
+            };
+            assert!(!TelegramBridge::announce_chat(
+                pane,
+                "h".into(),
+                "t".into(),
+                cx
+            ));
+            assert_eq!(
+                cx.global_mut::<TelegramBridge>()
+                    .command_state_mut()
+                    .selected(),
+                None
+            );
+            assert!(outbound.next().now_or_never().is_none());
+        });
+    }
 
     #[test]
     fn plain_body_uses_the_tail_text_verbatim_for_either_variant() {

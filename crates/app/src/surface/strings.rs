@@ -5407,6 +5407,11 @@ pub fn control_lane_created() -> String {
 pub fn control_chat_created() -> String {
     rust_i18n::t!("control.chat_created").into_owned()
 }
+/// The ping that introduces a chat the phone approved opening; `agent` is
+/// the display name of the agent running it.
+pub fn control_chat_announced(agent: &str) -> String {
+    rust_i18n::t!("control.chat_announced", agent = agent).into_owned()
+}
 pub fn control_answer_none() -> String {
     rust_i18n::t!("control.answer_none").into_owned()
 }

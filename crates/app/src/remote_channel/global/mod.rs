@@ -1,6 +1,6 @@
 //! Foreground routing state, with one cancellable gateway worker per connection.
 
-use super::bridge::{ApprovalPrompt, BridgePing, Outbound, RoutingCore};
+use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
 use super::pairing::Pairing;
 use super::runtime::{self, Status, Worker, WorkerEvent};
 use super::transport::Credentials;
@@ -92,6 +92,41 @@ impl RemoteChannels {
             queued |= bridge.enqueue(connection, Outbound::Ping(ping.clone()));
         }
         queued
+    }
+
+    /// Introduce a chat the phone approved opening on every live connection,
+    /// and make it each one's target — see `TelegramBridge::announce_chat`
+    /// for why a selection and not just a ping. The ping is `Explicit`: the
+    /// user approved this a moment ago, so presence does not decide it.
+    pub fn announce_chat(pane: PaneRef, header: String, tail: String, cx: &mut App) -> bool {
+        if !cx.has_global::<Self>() {
+            return false;
+        }
+        let ids: Vec<String> = {
+            let bridge = cx.global::<Self>();
+            bridge
+                .connections
+                .keys()
+                .filter(|id| bridge.live(id, cx).is_some())
+                .cloned()
+                .collect()
+        };
+        let bridge = cx.global_mut::<Self>();
+        for id in ids {
+            if let Some(connection) = bridge.connections.get_mut(&id) {
+                connection.core.command_state_mut().select(Some(pane));
+            }
+        }
+        Self::send_ping(
+            BridgePing {
+                pane,
+                header,
+                tail: MessageTail::Plain(tail),
+                permission: None,
+            },
+            Delivery::Explicit,
+            cx,
+        )
     }
 
     pub fn send_notice(text: String, cx: &App) {

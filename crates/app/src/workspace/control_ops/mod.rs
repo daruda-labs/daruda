@@ -154,6 +154,20 @@ impl Workspace {
             .unwrap_or_default()
     }
 
+    /// How a chat the control surface just opened is introduced on the phone:
+    /// its worktree path and the display name of the agent running it. The
+    /// agent name is workspace-private, so this is where a caller outside the
+    /// workspace reads it. `None` when the pane is gone.
+    pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<(String, String)> {
+        let lane = self.lane_ref_for_pane(pane)?;
+        let agent = self.agent_chat_view(pane)?.read(cx).agent_name.clone();
+        let path = crate::surface::strings::control_lane_path(
+            &self.control_project_name(lane.project),
+            &self.control_lane_name(lane),
+        );
+        Some((path, agent))
+    }
+
     /// This lane's position in its project's tab strip — the listing's sort
     /// key, so ordinals follow the order the left dock shows.
     pub(crate) fn control_lane_tab_order(&self, target: LaneRef) -> u32 {

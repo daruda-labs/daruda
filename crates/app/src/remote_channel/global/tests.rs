@@ -201,3 +201,44 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
         );
     });
 }
+
+/// The announcement targets every live connection at once — `selected` on
+/// each, and an explicit ping the `only_when_away` connection receives too,
+/// because the user approved this a moment ago.
+#[gpui::test]
+fn announcing_a_chat_selects_it_on_every_connection_and_pings_all(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        let pane = ping().pane;
+        assert!(RemoteChannels::announce_chat(
+            pane,
+            "daruda/main".into(),
+            "new tab".into(),
+            cx
+        ));
+        let bridge = cx.global_mut::<RemoteChannels>();
+        for id in ["work", "personal"] {
+            assert_eq!(
+                bridge
+                    .connections
+                    .get_mut(id)
+                    .unwrap()
+                    .core
+                    .command_state_mut()
+                    .selected(),
+                Some(pane),
+                "{id}"
+            );
+        }
+        let mut pinged: Vec<String> = Vec::new();
+        while let Some(pending) = receiver.next().now_or_never().flatten() {
+            assert!(
+                matches!(pending.outbound, Outbound::Ping(ref p) if p.pane == pane),
+                "the announcement is a ping attributed to the new chat"
+            );
+            pinged.push(pending.id);
+        }
+        pinged.sort();
+        assert_eq!(pinged, ["personal", "work"]);
+    });
+}
