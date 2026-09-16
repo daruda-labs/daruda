@@ -73,6 +73,8 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-declarative-context-menu.sh
 ./scripts/lint-acp-air-gate.sh
 ./scripts/lint-comment-length.sh
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
+  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys
 cargo run -p gen_acp_presets -- --check
 ```
 
@@ -218,10 +220,18 @@ scripts/lint-fold-header.sh
 scripts/lint-declarative-context-menu.sh
 scripts/lint-acp-air-gate.sh
 scripts/lint-comment-length.sh
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
+  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys
 cargo run -p gen_acp_presets -- --check
 ```
 
-Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, and the package-scoped `cargo test` list above. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, the `cargo doc` link check, and the package-scoped `cargo test` list above.
+
+The doc-link gate covers four crates rather than all of them: clippy does not
+read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
+prose that explains the module. These four are clean today; the rest carry a
+backlog (126 broken links at the time of writing) and join the list a crate at
+a time as that is worked off. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 

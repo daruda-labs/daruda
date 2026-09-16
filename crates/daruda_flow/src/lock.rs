@@ -5,9 +5,9 @@
 //! The lock does not live in the tree it guards — an agent working there
 //! can delete it (`git clean -fdx` reaches ignored files). It hangs under a
 //! root the host names instead, one directory per tree
-//! ([`lock_dir_for`]). For one release a copy is also kept in the old
-//! in-tree place, so a build that only knows that place still excludes and
-//! is still excluded — [`compat`] owns that copy and says when it goes.
+//! ([`lock_dir_for`]), and nowhere else. A copy inside the tree carried
+//! the very window the move closed, so the reader and the writer name one
+//! place: whoever asks whether a tree is taken asks there.
 //!
 //! A live holder is never reclaimed, however old it is. Age cannot tell a
 //! long run apart from a lock whose pid the OS has handed to something
