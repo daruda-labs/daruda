@@ -581,9 +581,8 @@ pub(in crate::workspace) fn process_is_alive(pid: u32) -> bool {
 /// otherwise repository-wide, and every node in one repo would report the
 /// same list however different their directories.
 fn git_status(cwd: &Path) -> Option<String> {
-    let out = std::process::Command::new("git")
+    let out = crate::lane::git::git_command(cwd)
         .args(["status", "--porcelain", "--", "."])
-        .current_dir(cwd)
         .output()
         .ok()?;
     out.status

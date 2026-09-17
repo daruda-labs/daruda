@@ -11,7 +11,6 @@
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::{GitError, run_git};
 
@@ -219,9 +218,7 @@ pub fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, Git
 /// Unlike `git diff`, this exits with code 1 when differences are found (which is
 /// always the case for new files), so it uses a custom runner that accepts code 1.
 pub fn git_diff_untracked(wt_path: &Path, path: &Path) -> Result<String, GitError> {
-    use std::process::Command;
-    let output = Command::new("git")
-        .current_dir(wt_path)
+    let output = super::git_command(wt_path)
         .args(["diff", "--no-index", "/dev/null"])
         .arg(path)
         .output()
@@ -332,8 +329,7 @@ pub fn git_pull(repo_root: &Path) -> Result<(), GitError> {
 /// `git show :<path>` — retrieve the staged (index) content of a file as raw bytes.
 pub fn git_show_staged(repo_root: &Path, path: &Path) -> Result<Vec<u8>, GitError> {
     let arg = format!(":{}", path.to_string_lossy());
-    let output = Command::new("git")
-        .current_dir(repo_root)
+    let output = super::git_command(repo_root)
         .args(["show", &arg])
         .output()
         .map_err(GitError::Spawn)?;

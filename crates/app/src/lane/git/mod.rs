@@ -14,8 +14,10 @@
 //! [`status`]; this module retains the run-git plumbing, the repo
 //! probe, lane lifecycle, and the merge sub-module.
 
+mod command;
 mod status;
 
+pub(crate) use command::git_command;
 pub use status::*;
 
 use std::ffi::OsStr;
@@ -114,18 +116,8 @@ where
     // of an opaque spawn failure when git isn't installed.
     which::which("git").map_err(|_| GitError::NotFound)?;
 
-    let mut child = Command::new("git")
-        .current_dir(cwd)
+    let mut child = git_command(cwd)
         .args(args)
-        // Force English/untranslated output. A handful of call sites
-        // (e.g. `remove_lane`'s force-required detection) match specific
-        // substrings in git's stderr; under a translated system locale
-        // those checks silently miss, misclassifying a real failure as
-        // something else. `LANGUAGE` outranks `LC_ALL`/`LANG` in gettext's
-        // resolution order, so it must be cleared, not just overridden.
-        .env("LC_ALL", "C")
-        .env("LANG", "C")
-        .env_remove("LANGUAGE")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -469,8 +461,7 @@ pub enum MergeOutcome {
 /// Exit 1 → stdout is scanned for "CONFLICT" lines → `Conflicts(files)`.
 /// Any other exit code → `Err(GitError::Exit)`.
 pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome, GitError> {
-    let output = Command::new("git")
-        .current_dir(target_path)
+    let output = git_command(target_path)
         .args(["merge", "--no-ff", "--no-edit", source_branch])
         .output()
         .map_err(GitError::Spawn)?;
