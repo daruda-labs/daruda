@@ -311,17 +311,6 @@ fn view_header(
         .child(actions_row)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{RemotePrimaryAction, remote_primary_action};
-
-    #[test]
-    fn remote_primary_action_pulls_once_fetch_finds_remote_work() {
-        assert_eq!(remote_primary_action(0), RemotePrimaryAction::Fetch);
-        assert_eq!(remote_primary_action(1), RemotePrimaryAction::Pull);
-    }
-}
-
 // ----------------------------------------------------------------
 // Summary bar — file counts + Stage All / Unstage All toggle
 // ----------------------------------------------------------------
@@ -1010,4 +999,15 @@ fn non_git_placeholder(
             app_strings::git_not_a_repository(),
         ))
         .child(init_btn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RemotePrimaryAction, remote_primary_action};
+
+    #[test]
+    fn remote_primary_action_pulls_once_fetch_finds_remote_work() {
+        assert_eq!(remote_primary_action(0), RemotePrimaryAction::Fetch);
+        assert_eq!(remote_primary_action(1), RemotePrimaryAction::Pull);
+    }
 }
