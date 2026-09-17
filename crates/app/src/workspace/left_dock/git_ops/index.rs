@@ -41,24 +41,20 @@ impl Workspace {
         let wt_for_report = wt_top.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_add(&wt_top, &path),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_add_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("lane", redact_home(&wt_for_report))
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.stage")
-                            .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_add_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("lane", redact_home(&wt_for_report))
+                        .with_context("path", redact_home(&path_for_report))
+                        .dedup("git.stage")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -89,25 +85,20 @@ impl Workspace {
         let wt_for_report = wt_top.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_restore_staged(&wt_top, &path),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report =
-                            ErrorReport::new(app_strings::error_git_restore_staged_failed())
-                                .severity(ErrorSeverity::Error)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("lane", redact_home(&wt_for_report))
-                                .with_context("path", redact_home(&path_for_report))
-                                .dedup("git.unstage")
-                                .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_restore_staged_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("lane", redact_home(&wt_for_report))
+                        .with_context("path", redact_home(&path_for_report))
+                        .dedup("git.unstage")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -139,24 +130,20 @@ impl Workspace {
         let paths_count = paths.len();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_add_paths(&wt_top, &paths),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_add_paths_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("lane", redact_home(&wt_for_report))
-                            .with_context("count", paths_count.to_string())
-                            .dedup("git.stage_paths")
-                            .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_add_paths_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("lane", redact_home(&wt_for_report))
+                        .with_context("count", paths_count.to_string())
+                        .dedup("git.stage_paths")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -188,25 +175,21 @@ impl Workspace {
         let paths_count = paths.len();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_restore_staged_paths(&wt_top, &paths),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report =
-                            ErrorReport::new(app_strings::error_git_restore_staged_paths_failed())
-                                .severity(ErrorSeverity::Error)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("lane", redact_home(&wt_for_report))
-                                .with_context("count", paths_count.to_string())
-                                .dedup("git.unstage_paths")
-                                .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report =
+                        ErrorReport::new(app_strings::error_git_restore_staged_paths_failed())
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("lane", redact_home(&wt_for_report))
+                            .with_context("count", paths_count.to_string())
+                            .dedup("git.unstage_paths")
+                            .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -228,23 +211,19 @@ impl Workspace {
         let path_for_report = wt_top.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_add_all(&wt_top),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_add_all_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("path", redact_home(&path_for_report))
-                            .dedup("git.stage_all")
-                            .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_add_all_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&path_for_report))
+                        .dedup("git.stage_all")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -266,24 +245,20 @@ impl Workspace {
         let path_for_report = wt_top.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || crate::lane::git::git_restore_all_staged(&wt_top),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(target, cx);
-                    }
-                    Err(e) => {
-                        let report =
-                            ErrorReport::new(app_strings::error_git_restore_staged_all_failed())
-                                .severity(ErrorSeverity::Error)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("path", redact_home(&path_for_report))
-                                .dedup("git.unstage_all")
-                                .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report =
+                        ErrorReport::new(app_strings::error_git_restore_staged_all_failed())
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.unstage_all")
+                            .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -368,6 +343,7 @@ impl Workspace {
         let rel_for_report = wt_rel_path.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
+            target,
             cx,
             move || {
                 if is_untracked {
@@ -376,11 +352,8 @@ impl Workspace {
                     crate::lane::git::git_discard_working(&wt_path, &wt_rel_path)
                 }
             },
-            move |ws, result, cx| match result {
-                Ok(()) => {
-                    ws.refresh_git_status(target, cx);
-                }
-                Err(e) => {
+            move |ws, result, cx| {
+                if let Err(e) = result {
                     let title = if is_untracked {
                         app_strings::error_git_clean_failed()
                     } else {

@@ -28,6 +28,7 @@ impl Workspace {
         let path_for_report = path.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            target,
             cx,
             move || -> Result<Option<_>, crate::lane::git::GitError> {
                 crate::lane::git::git_init(&path)?;
@@ -63,7 +64,6 @@ impl Workspace {
                                 worktree_root,
                             });
                         }
-                        ws.refresh_git_status(target, cx);
                     }
                     Ok(None) => {
                         // Repo is on disk and usable — only the follow-up

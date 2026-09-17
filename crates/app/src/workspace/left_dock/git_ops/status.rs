@@ -96,6 +96,30 @@ impl Workspace {
         .detach();
     }
 
+    /// Re-read tracking for every lane of `project`. Remote-tracking refs and
+    /// branch tips live in the repository's common git dir, so one fetch or
+    /// push changes what every lane of that repo would report.
+    pub(in crate::workspace) fn refresh_tracking_across_repo(
+        &mut self,
+        project: daruda_store::project::ProjectId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(targets) = self.project_for(project).map(|p| {
+            p.lanes
+                .iter()
+                .map(|lane| LaneRef {
+                    project,
+                    lane: lane.id,
+                })
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        for target in targets {
+            self.refresh_tracking(target, cx);
+        }
+    }
+
     /// Kick off a background `git status` for `target` and update
     /// the lane's cached working-tree status. No-op for non-git lanes.
     ///

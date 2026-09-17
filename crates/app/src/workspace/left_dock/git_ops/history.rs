@@ -93,6 +93,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            active_ref,
             cx,
             move || crate::lane::git::git_commit(&repo_root, &message_bg),
             move |ws, result, cx| {
@@ -109,7 +110,6 @@ impl Workspace {
                         {
                             // Window closed during async commit — input no longer exists.
                         }
-                        ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new(app_strings::error_git_commit_failed())
@@ -326,6 +326,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            active_ref,
             cx,
             move || crate::lane::git::git_commit_amend(&repo_root, &message),
             move |ws, result, cx| {
@@ -345,7 +346,6 @@ impl Workspace {
                         // Amend succeeded → leave amend mode (restore the
                         // Commit labels). The box was just cleared above.
                         ws.set_commit_mode(CommitMode::Normal, cx);
-                        ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new(app_strings::error_git_commit_amend_failed())
@@ -412,9 +412,11 @@ impl Workspace {
             return;
         };
 
+        let active_ref = self.active;
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            active_ref,
             cx,
             move || crate::lane::git::git_push(&repo_root),
             move |ws, result, cx| {
@@ -445,21 +447,19 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            active_ref,
             cx,
             move || crate::lane::git::git_fetch(&repo_root),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => ws.refresh_git_status(active_ref, cx),
-                    Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_fetch_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("repo", redact_home(&repo_for_report))
-                            .dedup("git.fetch")
-                            .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_fetch_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("repo", redact_home(&repo_for_report))
+                        .dedup("git.fetch")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
@@ -475,23 +475,19 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
+            active_ref,
             cx,
             move || crate::lane::git::git_pull(&repo_root),
             move |ws, result, cx| {
-                match result {
-                    Ok(()) => {
-                        ws.refresh_git_status(active_ref, cx);
-                    }
-                    Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_pull_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("repo", redact_home(&repo_for_report))
-                            .dedup("git.pull")
-                            .build();
-                        ws.report_error(report, cx);
-                    }
+                if let Err(e) = result {
+                    let report = ErrorReport::new(app_strings::error_git_pull_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("repo", redact_home(&repo_for_report))
+                        .dedup("git.pull")
+                        .build();
+                    ws.report_error(report, cx);
                 }
                 cx.notify();
             },
