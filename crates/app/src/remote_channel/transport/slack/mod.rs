@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const API: &str = "https://slack.com/api";
+/// The one message subtype that is still a reply: a threaded reply the sender
+/// also copied to the channel ("Also send to #channel").
+const BROADCAST_SUBTYPE: &str = "thread_broadcast";
 const SECTION_LIMIT: usize = 3000;
 const BUTTON_LABEL_LIMIT: usize = 75;
 const BUTTONS_PER_ROW: usize = 25;
@@ -73,8 +76,15 @@ fn parse(envelope: &Value) -> Option<Incoming> {
     match envelope["type"].as_str()? {
         "events_api" => {
             let event = &payload["event"];
+            // Subtypes are how Slack marks a message that is *about* a message
+            // — an edit, a deletion, a join notice — and none of those are
+            // something to relay. `thread_broadcast` is the exception: it is an
+            // ordinary threaded reply the sender also copied to the channel,
+            // carrying the same `thread_ts` that names the ping it answers. A
+            // blanket filter drops it, and the sender hears nothing back.
+            let subtype = event["subtype"].as_str();
             if event["type"] != "message"
-                || event.get("subtype").is_some()
+                || !matches!(subtype, None | Some(BROADCAST_SUBTYPE))
                 || event.get("bot_id").is_some()
             {
                 return None;

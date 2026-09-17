@@ -18,6 +18,24 @@ fn message_fixture_preserves_thread_and_authorization_coordinates() {
     assert!(parse(&bot).is_none());
 }
 
+/// A threaded reply sent with "Also send to channel" is the same reply, and
+/// it names the same ping — but Slack tags it `thread_broadcast`, and the
+/// blanket subtype filter above was dropping it on the floor. Nobody heard it:
+/// not the pane it answered, not the sender.
+#[test]
+fn a_reply_broadcast_to_the_channel_is_still_a_reply() {
+    let value = json!({"type":"events_api", "payload":{"event_id":"Ev2", "team_id":"T1",
+        "event":{"type":"message", "subtype":"thread_broadcast", "user":"U1", "channel":"D1",
+                 "thread_ts":"1234.000001", "text":"ship it"}}});
+
+    let event = parse(&value).expect("a broadcast reply is a message like any other");
+    assert!(
+        matches!(event.kind, IncomingKind::Message { reply_to: Some(id), text }
+            if id == "1234.000001" && text == "ship it"),
+        "it must still name the ping it was a reply to"
+    );
+}
+
 #[test]
 fn callback_uses_the_clicking_user_and_opaque_button_value() {
     let event = parse(
