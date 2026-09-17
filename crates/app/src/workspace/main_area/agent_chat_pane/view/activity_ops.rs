@@ -10,7 +10,7 @@ use gpui::Context;
 use super::Turn;
 use super::{
     ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE,
-    TurnOutcome, post_turn_delta,
+    TurnOutcome,
 };
 
 impl AgentChatView {
@@ -41,53 +41,7 @@ impl AgentChatView {
     /// [`Self::activity_state`]: a pending permission changes the badge label
     /// but must not stop a still-live subagent badge from animating.
     pub(in crate::workspace) fn maybe_active(&self) -> bool {
-        self.queue.turn.is_in_flight()
-            || !self.activity.subagent_last_activity.is_empty()
-            || self.activity.post_turn_dirty_at.is_some()
-    }
-
-    /// On the pulse tick: if a post-turn follow-up has quiesced (no in-flight turn
-    /// and `POST_TURN_QUIESCENCE` elapsed since the last post-turn update), return
-    /// the new assistant text to relay and advance the marker. `None` otherwise.
-    pub(in crate::workspace) fn reconcile_post_turn(
-        &mut self,
-        now: std::time::Instant,
-        quiescence: std::time::Duration,
-    ) -> Option<String> {
-        if self.queue.turn.is_in_flight() {
-            return None;
-        }
-        let dirty_at = self.activity.post_turn_dirty_at?;
-        if now.saturating_duration_since(dirty_at) < quiescence {
-            return None;
-        }
-        self.activity.post_turn_dirty_at = None;
-        let (delta, new_count) =
-            post_turn_delta(&self.items, self.activity.post_turn_relayed_assistant_texts)?;
-        self.activity.post_turn_relayed_assistant_texts = new_count;
-        Some(delta)
-    }
-
-    /// Force-flush a not-yet-quiesced post-turn follow-up (called when a new prompt
-    /// is about to subsume it). `None` when nothing is pending.
-    pub(in crate::workspace) fn take_pending_post_turn(&mut self) -> Option<String> {
-        self.activity.post_turn_dirty_at.take()?;
-        let (delta, new_count) =
-            post_turn_delta(&self.items, self.activity.post_turn_relayed_assistant_texts)?;
-        self.activity.post_turn_relayed_assistant_texts = new_count;
-        Some(delta)
-    }
-
-    /// Sync the post-turn baseline to the current `AssistantText` count and
-    /// clear the dirty clock. Called wherever `items` is bulk-set to a known
-    /// baseline, so only messages arriving *after* count as a follow-up.
-    pub(super) fn snap_post_turn_baseline(&mut self) {
-        self.activity.post_turn_relayed_assistant_texts = self
-            .items
-            .iter()
-            .filter(|it| matches!(it, ChatItem::AssistantText { .. }))
-            .count();
-        self.activity.post_turn_dirty_at = None;
+        self.queue.turn.is_in_flight() || !self.activity.subagent_last_activity.is_empty()
     }
 
     pub(in crate::workspace) fn is_busy(&self) -> bool {

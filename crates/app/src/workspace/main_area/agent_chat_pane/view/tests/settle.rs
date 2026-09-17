@@ -233,3 +233,22 @@ fn every_turn_ending_exit_settles_its_items(cx: &mut gpui::TestAppContext) {
             .unwrap();
     }
 }
+
+/// Text that arrives once the turn is over is transcript, not an errand.
+///
+/// The pane keeps it and stays at rest: nothing is owed to a phone, so nothing
+/// holds the pulse open on a conversation the user already watched settle.
+#[gpui::test]
+async fn text_arriving_after_the_turn_ended_leaves_the_pane_at_rest(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.apply_event(chunk("background job finished", "m1"), "", false, cx);
+
+            assert!(
+                !view.maybe_active(),
+                "a settled pane must not be woken by text it merely received"
+            );
+        })
+        .unwrap();
+}

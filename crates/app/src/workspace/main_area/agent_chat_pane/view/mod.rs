@@ -46,34 +46,6 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// parent Task's own status completes early with no clean terminal signal.
 const SUBAGENT_QUIESCENCE: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// Idle gap after the last post-turn (background) update before its accumulated
-/// assistant text is relayed to Telegram as a follow-up. Long enough to coalesce
-/// the streamed chunks (~700ms observed), short enough to feel prompt.
-pub(in crate::workspace) const POST_TURN_QUIESCENCE: std::time::Duration =
-    std::time::Duration::from_millis(1500);
-
-/// Assistant-text items from index `relayed` onward, joined by a blank line,
-/// plus the new covered count. `None` when nothing new or whitespace-only.
-/// Counts items not chars — a follow-up is always a fresh `AssistantText` item.
-fn post_turn_delta(items: &[ChatItem], relayed: usize) -> Option<(String, usize)> {
-    let texts: Vec<&str> = items
-        .iter()
-        .filter_map(|it| match it {
-            ChatItem::AssistantText { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect();
-    if texts.len() <= relayed {
-        return None;
-    }
-    let delta = texts[relayed..].join("\n\n");
-    let delta = delta.trim();
-    if delta.is_empty() {
-        return None;
-    }
-    Some((delta.to_string(), texts.len()))
-}
-
 /// Debug gate for list-measurement tracing, cached from `DARUDA_DEBUG_AGENT_LIST`.
 /// Off by default; set the env var to capture the remeasure timeline when the
 /// intermittent oversized-gap bug recurs.
@@ -519,12 +491,6 @@ pub(in crate::workspace) struct ActivityTracker {
     /// What each settled run cost, keyed by the run's first item — the same key
     /// the run's fold uses, so a record and the bar above it name one thing.
     pub(in crate::workspace) turn_records: HashMap<usize, TurnRecord>,
-    /// Count of `AssistantText` items already delivered to Telegram. Baseline
-    /// for the post-turn delta, snapped at every `settle_turn`.
-    pub(in crate::workspace) post_turn_relayed_assistant_texts: usize,
-    /// Set to `now` whenever a post-turn update touches text/tools; cleared
-    /// when relayed. Drives the quiescence settle `reconcile_post_turn` checks.
-    pub(in crate::workspace) post_turn_dirty_at: Option<std::time::Instant>,
     /// True between a Stop and its `cancelled` `TurnEnded` ack. While set, a
     /// re-prompt buffers client-side instead of racing onto the wire ahead of
     /// the cancel; cleared by the first `TurnEnded`/`Error` after the Stop.

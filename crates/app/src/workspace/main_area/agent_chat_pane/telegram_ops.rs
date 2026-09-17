@@ -658,25 +658,6 @@ impl Workspace {
         }
     }
 
-    /// Relay a post-turn follow-up (agent text that arrived after the turn ended,
-    /// e.g. Claude's background-job completion report) to Telegram. Markdown tail
-    /// (agent-authored), truncated like the completion ping. Gated by
-    /// `relay_to_telegram`.
-    pub(in crate::workspace) fn relay_post_turn_to_telegram(
-        &mut self,
-        pane_id: PaneId,
-        delta: String,
-        cx: &mut Context<Self>,
-    ) {
-        let header = self.telegram_header(pane_id, cx);
-        let body = format!(
-            "{}\n{}",
-            s::agent_notification_telegram_background_update(),
-            preview_for(&delta, &s::agent_notification_telegram_truncated_marker()),
-        );
-        self.relay_when_presence_allows(pane_id, header, TelegramTail::Markdown(body), None, cx);
-    }
-
     /// The workspace's persisted identity — needed by cross-cutting
     /// App-level services (e.g. the Telegram bridge,
     /// `crate::telegram::global`) that route by `WorkspaceUuid` since

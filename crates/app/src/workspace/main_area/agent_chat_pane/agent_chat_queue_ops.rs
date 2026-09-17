@@ -88,11 +88,6 @@ impl Workspace {
             }
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
-                // Flush a not-yet-quiesced post-turn follow-up before this new
-                // turn subsumes it (else its delta would be lost/merged).
-                if let Some(delta) = view.update(cx, |v, _| v.take_pending_post_turn()) {
-                    self.relay_post_turn_to_telegram(pane_id, delta, cx);
-                }
                 let prompt_dispatch = if origin == PromptOrigin::Telegram {
                     view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
                 } else {

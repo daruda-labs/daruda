@@ -1292,7 +1292,6 @@ notification:
   telegram_reply_queued: "Received — queued behind the current turn…"
   telegram_queue_full: "Not sent — that chat already has too many prompts waiting."
   telegram_first_tool_ack: "Checking using a tool…"
-  telegram_background_update: "🔔 Background update"
   telegram_permission_allowed: "✅ Allowed"
   telegram_permission_rejected: "🚫 Rejected"
   telegram_permission_stale: "Already handled in the app"

@@ -159,10 +159,6 @@ impl AgentChatView {
     pub(super) fn settle_turn(&mut self) {
         self.queue.turn = Turn::Idle;
         self.settle_run_state();
-        // Everything the turn produced is delivered by the completion relay, so
-        // reset the post-turn baseline to the current assistant-text count; only
-        // messages that arrive *after* this settle count as a follow-up.
-        self.snap_post_turn_baseline();
     }
 
     /// Settle everything this run left flagged live — the transcript *and* the
@@ -877,10 +873,6 @@ impl AgentChatView {
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
-        // `teardown_transient_session_state` already cleared `items`, so this
-        // resets the baseline to 0 — a stray post-turn update queued before
-        // teardown can't relay stale text into the fresh session.
-        self.snap_post_turn_baseline();
         self.rebuild_rows(); // diff-splices list_state down to 0 rows
         // No resume target: a cleared conversation starts fresh.
         self.begin_connect(None, cx);

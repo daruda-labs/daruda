@@ -56,7 +56,13 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
 
         // At the daruda window: nothing leaves, and nothing is kept.
         crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
-        ws.relay_post_turn_to_telegram(pane, "while present".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("while present".into()),
+            None,
+            cx,
+        );
         assert!(outbound.next().now_or_never().is_none());
 
         // The incident's exact shape: blurred past the grace, but the machine
@@ -67,7 +73,13 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             Some(Duration::from_secs(16)),
             cx,
         );
-        ws.relay_post_turn_to_telegram(pane, "while blurred but busy".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("while blurred but busy".into()),
+            None,
+            cx,
+        );
         assert!(outbound.next().now_or_never().is_none());
 
         // Reading a long answer in daruda: silent, but under the stricter
@@ -78,7 +90,13 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             Some(Duration::from_secs(60)),
             cx,
         );
-        ws.relay_post_turn_to_telegram(pane, "while reading".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("while reading".into()),
+            None,
+            cx,
+        );
         assert!(outbound.next().now_or_never().is_none());
 
         // Blurred and quiet: the lower bar clears, so the ping goes out at once.
@@ -88,7 +106,13 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             Some(Duration::from_secs(300)),
             cx,
         );
-        ws.relay_post_turn_to_telegram(pane, "while away".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("while away".into()),
+            None,
+            cx,
+        );
         assert_eq!(
             expect_ping(outbound.next().now_or_never().flatten().unwrap())
                 .pane
@@ -104,7 +128,13 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             Some(Duration::from_secs(300)),
             cx,
         );
-        ws.relay_post_turn_to_telegram(pane, "away from a frontmost daruda".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("away from a frontmost daruda".into()),
+            None,
+            cx,
+        );
         assert_eq!(
             expect_ping(outbound.next().now_or_never().flatten().unwrap())
                 .pane
@@ -285,7 +315,13 @@ async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
             Some(std::time::Duration::ZERO),
             cx,
         );
-        ws.relay_post_turn_to_telegram(pane, "sent regardless".into(), cx);
+        ws.relay_when_presence_allows(
+            pane,
+            "chat".into(),
+            crate::telegram::bridge::TelegramTail::Markdown("sent regardless".into()),
+            None,
+            cx,
+        );
         assert_eq!(
             expect_ping(outbound.next().now_or_never().flatten().unwrap())
                 .pane

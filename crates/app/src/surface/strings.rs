@@ -5148,12 +5148,6 @@ pub fn agent_notification_telegram_first_tool_ack() -> String {
     rust_i18n::t!("notification.telegram_first_tool_ack").into_owned()
 }
 
-/// Prefix for a Telegram follow-up carrying a message the agent produced *after*
-/// its turn ended (a background job's completion report).
-pub fn agent_notification_telegram_background_update() -> String {
-    rust_i18n::t!("notification.telegram_background_update").into_owned()
-}
-
 /// Feedback shown on the phone (callback toast + rewritten message line) when a
 /// phone-tapped permission button resolves to Allow.
 pub fn telegram_permission_allowed() -> String {

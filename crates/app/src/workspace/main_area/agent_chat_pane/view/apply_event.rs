@@ -130,12 +130,6 @@ impl AgentChatView {
                 if finished_restore {
                     self.settle_run_state();
                 }
-                // A resume's replayed `session/update`s already populated `items`
-                // by this point (see the comment above) — sync the baseline now
-                // so those replayed messages don't later look like a background
-                // follow-up. A fresh session's `items` is still empty, so this is
-                // a no-op there.
-                self.snap_post_turn_baseline();
                 // Record the live session id so it persists — and so a later
                 // launch resumes this session instead of starting fresh.
                 self.session_id = Some(session_id);
@@ -211,17 +205,6 @@ impl AgentChatView {
                         ))
                         .build();
                     daruda_store::observability::log_writer::LogWriter::log(report);
-                }
-                // Post-turn (background) activity: an update that touches text or a
-                // tool while no turn is in flight and we're not replaying a load.
-                // Stamp the quiescence clock; the pulse tick relays the settled
-                // follow-up (Claude reports background completion here, with no
-                // TurnEnded to trigger the normal completion relay).
-                if (touched_text || touched_tool)
-                    && !self.queue.turn.is_in_flight()
-                    && !self.replay.is_loading()
-                {
-                    self.activity.post_turn_dirty_at = Some(std::time::Instant::now());
                 }
                 if let Some(tool_id) = touched_tool_id(&update) {
                     // Narrow the reconciles to the one call this update replaced.
@@ -423,10 +406,6 @@ impl AgentChatView {
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
                 self.replay = Replay::Live;
-                // Whatever replayed before the failure is now the baseline —
-                // it was already delivered by the replay itself, not a
-                // background follow-up.
-                self.snap_post_turn_baseline();
                 // A mid-turn failure must settle the turn like a Stop would —
                 // otherwise a streaming block stays `streaming: true` and an
                 // `InProgress` tool stays live, so the rollup glyph blinks
@@ -586,10 +565,6 @@ impl AgentChatView {
             // just made terminal would otherwise wait for a fold toggle.
             self.settle_run_state();
             self.reconcile_tool_images(&ReconcileScope::All, cx);
-            // Whatever arrived before the stream closed is now the baseline —
-            // it was already delivered by the (aborted) replay, not a
-            // background follow-up.
-            self.snap_post_turn_baseline();
             self.rebuild_rows();
             self.list_state.remeasure();
             cx.notify();
