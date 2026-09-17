@@ -14,6 +14,7 @@ use super::super::reconcile::ReconcileScope;
 use super::super::rows::{FilterMatchIndex, LiveSubagentUnits, RowKind, project_with_filter_index};
 use super::super::tool_hierarchy::ToolHierarchy;
 use super::super::window_access::WindowAccess;
+use super::list_sync::ListSync;
 use super::{
     ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, PhoneAckEffect,
     PhoneTurnAction, Replay, TurnOutcome, debug_list_trace_enabled,
@@ -518,9 +519,7 @@ impl AgentChatView {
         // Proportional re-anchor would shift the viewport on every chunk if the
         // user has scrolled back to read history.
         if touched_tool {
-            let n = self.rows.len();
-            self.list_state.remeasure_items(0..n);
-            self.trace_list_sync("tool-update", 0, n, n);
+            self.resync_all_row_heights("tool-update");
         }
         // Re-measure after a structural settle so no row keeps a stale streaming
         // height. Two triggers, two anchor policies:
@@ -537,14 +536,10 @@ impl AgentChatView {
         //     anchored row's height changes, whereas Absolute keeps it fixed.
         // Cheap: at most once per restore / turn.
         if finished_restore {
-            self.list_state.remeasure();
+            self.apply_list_sync(ListSync::EveryRow, "replay-closed");
         }
         if turn_settled {
-            // Span is all rows and the count is unchanged, so `to` and `prev_rows`
-            // both equal the current row count.
-            let n = self.rows.len();
-            self.list_state.remeasure_items(0..n);
-            self.trace_list_sync("turn-settled", 0, n, n);
+            self.resync_all_row_heights("turn-settled");
         }
         cx.notify();
         telegram_first_response_effect
@@ -563,7 +558,7 @@ impl AgentChatView {
             self.settle_run_state();
             self.reconcile_tool_images(&ReconcileScope::All, cx);
             self.rebuild_rows();
-            self.list_state.remeasure();
+            self.apply_list_sync(ListSync::EveryRow, "stream-eof");
             cx.notify();
         }
     }
@@ -622,14 +617,24 @@ impl AgentChatView {
             .zip(&self.rows)
             .position(|(a, b)| !a.same_slot(b))
         {
-            self.list_state.splice(at..old.len(), self.rows.len() - at);
-            self.trace_list_sync("splice-divergent", at, self.rows.len(), old.len());
+            self.apply_list_sync(
+                ListSync::Structure {
+                    from: at,
+                    old_len: old.len(),
+                },
+                "splice-divergent",
+            );
             return;
         }
         if old.len() != self.rows.len() {
             let at = old.len().min(self.rows.len());
-            self.list_state.splice(at..old.len(), self.rows.len() - at);
-            self.trace_list_sync("splice-count", at, self.rows.len(), old.len());
+            self.apply_list_sync(
+                ListSync::Structure {
+                    from: at,
+                    old_len: old.len(),
+                },
+                "splice-count",
+            );
             return;
         }
         // Same slots & count: only `hidden` flipped or item content grew.
@@ -660,12 +665,10 @@ impl AgentChatView {
                     .iter()
                     .rposition(|r| !matches!(r.kind, RowKind::WorkingIndicator))
                     .unwrap_or(n - 1);
-                self.list_state.remeasure_items(start..n);
-                self.trace_list_sync("tail-grow", start, n, old.len());
+                self.apply_list_sync(ListSync::Rows(start..n), "tail-grow");
             }
         } else {
-            self.list_state.remeasure_items(lo..hi + 1);
-            self.trace_list_sync("hidden-span", lo, hi + 1, old.len());
+            self.apply_list_sync(ListSync::Rows(lo..hi + 1), "hidden-span");
         }
     }
 
@@ -675,7 +678,7 @@ impl AgentChatView {
     /// intermittent oversized-gap bug (a row's height changes without a
     /// matching remeasure). `prev_rows` is the count *before* this sync, so a
     /// splice's count delta is visible in the trace.
-    fn trace_list_sync(&self, branch: &str, from: usize, to: usize, prev_rows: usize) {
+    pub(super) fn trace_list_sync(&self, branch: &str, from: usize, to: usize, prev_rows: usize) {
         if !debug_list_trace_enabled() {
             return;
         }

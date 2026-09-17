@@ -70,6 +70,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-file-size.sh
 ./scripts/lint-mark-dirty-direct-call.sh
 ./scripts/lint-fold-header.sh
+./scripts/lint-agent-list-sync.sh
 ./scripts/lint-declarative-context-menu.sh
 ./scripts/lint-acp-air-gate.sh
 ./scripts/lint-comment-length.sh
@@ -217,6 +218,7 @@ scripts/lint-env-literals.sh --self-test
 scripts/lint-file-size.sh
 scripts/lint-mark-dirty-direct-call.sh
 scripts/lint-fold-header.sh
+scripts/lint-agent-list-sync.sh
 scripts/lint-declarative-context-menu.sh
 scripts/lint-acp-air-gate.sh
 scripts/lint-comment-length.sh
@@ -231,7 +233,7 @@ The doc-link gate covers four crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
 prose that explains the module. These four are clean today; the rest carry a
 backlog (126 broken links at the time of writing) and join the list a crate at
-a time as that is worked off. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+a time as that is worked off. `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 

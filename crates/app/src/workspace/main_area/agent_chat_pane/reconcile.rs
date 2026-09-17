@@ -33,6 +33,7 @@ use super::output_editor::{
     create_output_editor, output_editor_key, output_editor_source, output_source_fingerprint,
 };
 use super::view::AgentChatView;
+use super::view::list_sync::ListSync;
 use super::window_access::WindowAccess;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
@@ -421,7 +422,7 @@ impl AgentChatView {
         // the touched call may sit mid-list (a `ToolCallUpdate` to an earlier
         // call), so `sync_list_after`'s tail-only remeasure isn't enough — do a
         // full one. Once per diff-bearing event.
-        self.list_state.remeasure();
+        self.apply_list_sync(ListSync::EveryRow, "diff-embed");
     }
 
     /// Build the read-only editor entity for every verbatim tool-output block
@@ -505,7 +506,7 @@ impl AgentChatView {
         // dropped), and the touched call may sit mid-list (a `ToolCallUpdate` to
         // an earlier call), so `sync_list_after`'s tail-only remeasure isn't
         // enough — do a full one. Once per output-bearing event.
-        self.list_state.remeasure();
+        self.apply_list_sync(ListSync::EveryRow, "output-embed");
     }
 
     /// Rasterize every ` ```mermaid ` fence in the conversation that does not
@@ -582,7 +583,7 @@ impl AgentChatView {
                         // cached height is stale — remeasure before repainting or
                         // it clips. Index is unknown here, so this is a full
                         // remeasure, but it's one-shot per landed raster.
-                        view.list_state.remeasure();
+                        view.apply_list_sync(ListSync::EveryRow, "mermaid-raster");
                         cx.notify();
                     }
                 });
@@ -763,7 +764,7 @@ impl AgentChatView {
                     // is stale — remeasure before repainting or it clips.
                     // Index is unknown here, so this is a full remeasure, but
                     // it's one-shot per landed decode.
-                    view.list_state.remeasure();
+                    view.apply_list_sync(ListSync::EveryRow, "tool-image");
                     cx.notify();
                 });
             })
@@ -809,7 +810,7 @@ impl AgentChatView {
                             .lock()
                             .unwrap()
                             .insert(key, cached);
-                        view.list_state.remeasure();
+                        view.apply_list_sync(ListSync::EveryRow, "resource-image");
                         cx.notify();
                     }
                     // Fill the next queued preview now that one of the bounded

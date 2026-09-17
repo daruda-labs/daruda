@@ -21,6 +21,7 @@ use super::super::rows::{RowKind, collect_foldable_keys};
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
+use super::list_sync::ListSync;
 use super::{ActivityOptionsTab, ActivitySpan, AgentChatView, Turn, TurnOutcome};
 // Only `seed_transcript` parks a pane out of `Idle`, and only a devtools build
 // has one.
@@ -112,7 +113,7 @@ impl AgentChatView {
         // cancelled, pending card → resolved), changing fold visibility and row
         // heights, so reproject and remeasure before notifying.
         self.rebuild_rows();
-        self.list_state.remeasure();
+        self.resync_all_row_heights("stop");
         cx.notify();
     }
 
@@ -212,7 +213,7 @@ impl AgentChatView {
         // immediately. It also renders shorter (buttons → outcome line), so
         // remeasure for the reflow (item count unchanged).
         self.rebuild_rows();
-        self.list_state.remeasure();
+        self.resync_all_row_heights("permission-resolved");
         cx.notify();
     }
 
@@ -294,15 +295,14 @@ impl AgentChatView {
             // expanding a card would otherwise shift the viewport. Re-derive the
             // same full span through the Absolute-anchored API instead, matching
             // `apply_event`'s tool-update / turn-settled remeasures.
-            let n = self.rows.len();
-            self.list_state.remeasure_items(0..n);
+            self.resync_all_row_heights("fold-toggle-wide");
         } else if let Some(item_ix) = item_ix
             && let Some(row_ix) = self
                 .rows
                 .iter()
                 .position(|r| matches!(r.kind, RowKind::AgentItem(ix) if ix == item_ix))
         {
-            self.list_state.remeasure_items(row_ix..row_ix + 1);
+            self.apply_list_sync(ListSync::Rows(row_ix..row_ix + 1), "fold-toggle-row");
         }
         cx.notify();
     }
@@ -327,7 +327,7 @@ impl AgentChatView {
         // raw-input disclosure) with no per-row hidden flip to key a targeted
         // remeasure off of — a full remeasure is the correct (if broader) fix
         // here, same as `respond_permission`'s reflow.
-        self.list_state.remeasure();
+        self.resync_all_row_heights("fold-all");
         cx.notify();
     }
 
@@ -348,7 +348,7 @@ impl AgentChatView {
     /// transcript-preference change ends in, since all of them feed `project`.
     pub(super) fn reproject(&mut self, cx: &mut Context<Self>) {
         self.rebuild_rows();
-        self.list_state.remeasure();
+        self.resync_all_row_heights("reproject");
         cx.notify();
     }
 
@@ -378,7 +378,7 @@ impl AgentChatView {
         // including a toggle that lands back on the configured value, which is
         // still a statement about this pane.
         self.content_width_chosen = true;
-        self.list_state.remeasure();
+        self.apply_list_sync(ListSync::EveryRow, "width-toggle");
         cx.notify();
         self.persist_pane_prefs(cx);
     }
@@ -424,7 +424,7 @@ impl AgentChatView {
         // A width change reflows every row, so the cached heights are stale —
         // the same invalidation the pane's own toggle does.
         if self.content_width != before.4 {
-            self.list_state.remeasure();
+            self.apply_list_sync(ListSync::EveryRow, "width-pref");
         }
         // A reseeded fold matrix moves every card's derived default, so the cards
         // it just opened owe the same embed pass a fold click does — see
