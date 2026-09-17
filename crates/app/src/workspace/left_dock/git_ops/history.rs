@@ -433,26 +433,33 @@ impl Workspace {
         );
     }
 
-    /// Fetch from all remotes.
+    /// Fetch from all remotes. What it moves lives entirely under `.git`
+    /// (the remote-tracking refs), which the file watcher skips by design, so
+    /// the refresh below is the only thing that can carry the new ahead/behind
+    /// into the header.
     pub(in crate::workspace) fn on_fetch(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
+        let active_ref = self.active;
         let repo_for_report = repo_root.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
             cx,
             move || crate::lane::git::git_fetch(&repo_root),
             move |ws, result, cx| {
-                if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_fetch_failed())
-                        .severity(ErrorSeverity::Error)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("repo", redact_home(&repo_for_report))
-                        .dedup("git.fetch")
-                        .build();
-                    ws.report_error(report, cx);
+                match result {
+                    Ok(()) => ws.refresh_git_status(active_ref, cx),
+                    Err(e) => {
+                        let report = ErrorReport::new(app_strings::error_git_fetch_failed())
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("repo", redact_home(&repo_for_report))
+                            .dedup("git.fetch")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
                 }
                 cx.notify();
             },
