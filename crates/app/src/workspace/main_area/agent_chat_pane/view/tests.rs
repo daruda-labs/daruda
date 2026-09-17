@@ -28,6 +28,7 @@ fn tool_call(
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: parent_tool_id.map(str::to_string),
         exit: None,
     })
@@ -395,6 +396,7 @@ fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
                     diffs: Vec::new(),
                     output: Vec::new(),
                     raw_input: None,
+                    locations: Vec::new(),
                     parent_tool_id: Some("parent".into()),
                     exit: None,
                 })
@@ -477,6 +479,7 @@ fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
                 daruda_acp::AcpEvent::TurnEnded {
                     completed_normally: false,
                     stop_reason: "Cancelled".into(),
+                    usage: None,
                 },
                 "",
                 false,
@@ -1228,6 +1231,7 @@ fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpu
                 daruda_acp::AcpEvent::TurnEnded {
                     completed_normally: true,
                     stop_reason: "EndTurn".into(),
+                    usage: None,
                 },
                 "",
                 false,
@@ -1613,6 +1617,7 @@ fn escape_clears_parked_queue_even_while_a_subagent_runs(cx: &mut gpui::TestAppC
                 diffs: Vec::new(),
                 output: Vec::new(),
                 raw_input: None,
+                locations: Vec::new(),
                 parent_tool_id: Some("parent".into()),
                 exit: None,
             }));
@@ -2345,6 +2350,7 @@ fn late_content_does_not_strand_the_stop_marker_above_it(cx: &mut gpui::TestAppC
                 daruda_acp::AcpEvent::TurnEnded {
                     completed_normally: false,
                     stop_reason: "Cancelled".into(),
+                    usage: None,
                 },
                 "",
                 false,

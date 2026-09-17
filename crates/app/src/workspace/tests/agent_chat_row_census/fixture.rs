@@ -189,6 +189,7 @@ fn tool(style: ToolStyle, seq: usize, tool_ix: usize) -> ChatItem {
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit,
     })

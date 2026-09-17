@@ -506,6 +506,7 @@ fn upsert_tool_call(
         diffs,
         output,
         raw_input: tool_call.raw_input.clone(),
+        locations: tool_call.locations.iter().map(|l| l.path.clone()).collect(),
         parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
         exit: adapter.command_exit(&tool_call.raw_output, &tool_call.meta),
     };
@@ -2456,6 +2457,7 @@ mod tests {
                 diffs: Vec::new(),
                 output: Vec::new(),
                 raw_input: None,
+                locations: Vec::new(),
                 parent_tool_id: None,
                 exit: None,
             }),
@@ -2522,6 +2524,7 @@ mod tests {
                 diffs: Vec::new(),
                 output: Vec::new(),
                 raw_input: None,
+                locations: Vec::new(),
                 parent_tool_id: None,
                 exit: None,
             })
@@ -2561,6 +2564,7 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: Some(parent.to_string()),
             exit: None,
         })
@@ -2900,6 +2904,7 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: Some(serde_json::json!({"command": "perl -0pi -e 's/clean/'"})),
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         })];

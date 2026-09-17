@@ -18,6 +18,7 @@ fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     })
@@ -3122,6 +3123,7 @@ fn kinded_tool(id: &str, kind: ToolKindView, status: ToolStatusView) -> ChatItem
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     })

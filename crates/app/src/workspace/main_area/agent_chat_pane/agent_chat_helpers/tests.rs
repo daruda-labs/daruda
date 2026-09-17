@@ -441,6 +441,7 @@ fn tool_call(id: &str, status: daruda_acp::ToolStatusView, diffs: usize) -> Tool
             .collect(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     }
@@ -659,6 +660,7 @@ fn chat_item_mermaid_texts_includes_tool_output_text() {
             },
         ],
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     };
@@ -697,6 +699,7 @@ fn chat_item_mermaid_texts_includes_subagent_prompt() {
             "subagent_type": "general-purpose",
             "prompt": "Draw the flow:\n```mermaid\nflowchart TD\n  A-->B\n```",
         })),
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     };
@@ -851,6 +854,7 @@ fn raw_input_disclosure_gate_and_fold_coverage() {
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: Some(serde_json::json!({ "pattern": "foo" })),
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     };
@@ -912,6 +916,7 @@ fn subagent_instructions_gate_excludes_generic_raw_input() {
             "run_in_background": false,
             "prompt": "Full instructions…",
         })),
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     };
@@ -949,6 +954,7 @@ fn suppresses_live_subagent_output_only_while_the_launch_is_live() {
             truncated_from: None,
         }],
         raw_input: Some(serde_json::json!({ "prompt": "Full instructions…" })),
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     };
@@ -1103,6 +1109,7 @@ fn a_rollup_ignores_the_calls_the_display_filter_removed() {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         })
@@ -1151,6 +1158,7 @@ fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         })

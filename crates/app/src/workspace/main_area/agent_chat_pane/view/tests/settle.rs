@@ -155,6 +155,7 @@ fn a_cancel_ack_settles_a_chunk_that_landed_after_the_stop(cx: &mut gpui::TestAp
                 AcpEvent::TurnEnded {
                     stop_reason: "Cancelled".into(),
                     completed_normally: false,
+                    usage: None,
                 },
                 "",
                 false,
@@ -183,6 +184,7 @@ fn every_turn_ending_exit_settles_its_items(cx: &mut gpui::TestAppContext) {
                 AcpEvent::TurnEnded {
                     stop_reason: "EndTurn".into(),
                     completed_normally: true,
+                    usage: None,
                 },
                 "",
                 false,

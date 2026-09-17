@@ -17,7 +17,7 @@ daruda_core = { path = "../daruda_core" }
 # host has to hardcode the login command instead of reading it. Marked UNSTABLE
 # upstream (may change with the schema), so the reader treats a missing/renamed
 # field as "no methods advertised" rather than an error.
-agent-client-protocol = { version = "2.0", features = ["unstable_auth_methods"] }
+agent-client-protocol = { version = "2.0", features = ["unstable_auth_methods", "unstable_end_turn_token_usage"] }
 anyhow = { workspace = true }
 futures = "0.3"
 libc = "0.2"

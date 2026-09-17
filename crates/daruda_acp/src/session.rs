@@ -236,6 +236,9 @@ pub enum AcpEvent {
     TurnEnded {
         stop_reason: String,
         completed_normally: bool,
+        /// What this turn cost, when the agent reported it. `None` for an agent
+        /// that omits it and for a turn torn down without a reply.
+        usage: Option<crate::model::TurnUsageView>,
     },
     /// A `session/prompt` returned a JSON-RPC error (e.g. the adapter hit a
     /// usage / session limit → `-32603`). This is a TURN-level failure, not a
@@ -1324,10 +1327,15 @@ async fn run_turn(
     futures::pin_mut!(response);
 
     let mut handle_dropped = false;
-    let stop_reason = loop {
+    // The usage rides out of the loop with the stop reason: it is only ever set
+    // on the one arm that breaks, so pairing them keeps that obvious.
+    let (stop_reason, turn_usage) = loop {
         futures::select! {
             resp = response => match resp {
-                Ok(r) => break r.stop_reason,
+                Ok(r) => {
+                    let usage = r.usage.as_ref().map(crate::model::TurnUsageView::from);
+                    break (r.stop_reason, usage);
+                }
                 Err(e) if agent_client_protocol::is_incoming_transport_closed(&e) => return Err(e),
                 Err(e) => {
                     // A `session/prompt` that returns a JSON-RPC error (e.g. the
@@ -1391,6 +1399,7 @@ async fn run_turn(
     let _ = event_tx.unbounded_send(AcpEvent::TurnEnded {
         completed_normally: turn_completed_normally(&stop_reason),
         stop_reason: format!("{stop_reason:?}"),
+        usage: turn_usage,
     });
     Ok(handle_dropped)
 }

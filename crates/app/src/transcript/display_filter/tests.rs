@@ -11,6 +11,7 @@ fn call(name: Option<&str>, kind: ToolKindView, status: ToolStatusView) -> ChatI
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     })

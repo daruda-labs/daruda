@@ -989,6 +989,7 @@ mod tests {
             diffs,
             output,
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         })
@@ -1126,6 +1127,7 @@ mod tests {
                 daruda_acp::AcpEvent::TurnEnded {
                     completed_normally: true,
                     stop_reason: "EndTurn".into(),
+                    usage: None,
                 },
                 SYNTAX_THEME,
                 false,
@@ -1188,6 +1190,7 @@ mod tests {
                 daruda_acp::AcpEvent::TurnEnded {
                     completed_normally: false,
                     stop_reason: "Cancelled".into(),
+                    usage: None,
                 },
                 SYNTAX_THEME,
                 false,
@@ -2040,6 +2043,7 @@ mod tests {
                     "subagent_type": "general-purpose",
                     "prompt": format!("Draw it:\n```mermaid\n{source}\n```"),
                 })),
+                locations: Vec::new(),
                 parent_tool_id: None,
                 exit: None,
             })];

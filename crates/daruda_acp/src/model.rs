@@ -100,6 +100,10 @@ pub struct ToolCallItem {
     /// through this field. `None` for a top-level call. The renderer nests
     /// children inside the parent card instead of listing them as siblings.
     pub parent_tool_id: Option<String>,
+    /// Files this call touched, as the agent reported them. Mapped but not yet
+    /// rendered: the title already names the file for most tools, and parsing it
+    /// back out is what this replaces once a surface needs the path as data.
+    pub locations: Vec<PathBuf>,
     /// Exit status of a shell-execution tool call, read from the agent's
     /// vendor side channel via [`crate::adapter::AcpAdapter::command_exit`].
     /// `None` when the adapter hasn't reported one (a non-shell tool, or a
@@ -445,6 +449,36 @@ pub struct SessionCapabilitiesView {
     // protocol field is not compiled in and the capability is unreachable.
 }
 
+/// What one turn cost, from the `session/prompt` reply.
+///
+/// Distinct from [`UsageView`], which is the *session's* running context fill:
+/// this is scoped to the turn that just ended, so a surface can say what a
+/// single answer took. Every field past the first two is optional because the
+/// agents disagree on which they report — one sends cache writes, another sends
+/// reasoning tokens, and neither sends the other's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TurnUsageView {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    pub thought_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
+}
+
+impl From<&agent_client_protocol::schema::v1::Usage> for TurnUsageView {
+    fn from(u: &agent_client_protocol::schema::v1::Usage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            total_tokens: u.total_tokens,
+            thought_tokens: u.thought_tokens,
+            cached_read_tokens: u.cached_read_tokens,
+            cached_write_tokens: u.cached_write_tokens,
+        }
+    }
+}
+
 /// Live token/context accounting from a `session/update` `UsageUpdate`
 /// notification. `used`/`size` describe the **current context-window fill**
 /// (distinct from the CLI's cumulative account usage shown in the Usage tab),
@@ -778,6 +812,7 @@ mod tests {
             diffs: vec![],
             output: vec![],
             raw_input,
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         }

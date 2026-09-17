@@ -12,6 +12,7 @@ fn call(id: &str, parent: Option<&str>, status: ToolStatusView, kind: ToolKindVi
         diffs: Vec::new(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: parent.map(str::to_owned),
         exit: None,
     })

@@ -88,6 +88,7 @@ fn turn(n: usize) -> Vec<ChatItem> {
                 truncated_from: None,
             }],
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         }));

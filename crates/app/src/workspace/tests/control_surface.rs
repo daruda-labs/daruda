@@ -268,6 +268,7 @@ mod ask {
                                 daruda_acp::AcpEvent::TurnEnded {
                                     stop_reason: "end_turn".into(),
                                     completed_normally,
+                                    usage: None,
                                 },
                                 "base16-ocean.dark",
                                 false,

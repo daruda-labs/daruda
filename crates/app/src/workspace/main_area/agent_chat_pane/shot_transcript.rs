@@ -314,6 +314,7 @@ pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
                 "subagent_type": "general-purpose",
                 "prompt": "Trace how a lane's last active session is persisted and restored.",
             })),
+            locations: Vec::new(),
             parent_tool_id: None,
             exit: None,
         }),
@@ -328,6 +329,7 @@ pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: Some(SUBAGENT_PARENT_ID.to_string()),
             exit: None,
         }));
@@ -385,6 +387,7 @@ fn tool_call(ix: usize, call: Call) -> ChatItem {
             .collect(),
         output: Vec::new(),
         raw_input: None,
+        locations: Vec::new(),
         parent_tool_id: None,
         exit: None,
     })

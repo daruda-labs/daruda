@@ -221,6 +221,7 @@ async fn other_events_raise_no_toast(cx: &mut TestAppContext) {
             &daruda_acp::AcpEvent::TurnEnded {
                 stop_reason: "EndTurn".to_string(),
                 completed_normally: true,
+                usage: None,
             },
             cx,
         );

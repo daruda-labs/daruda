@@ -247,6 +247,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                             diffs: Vec::new(),
                             output: Vec::new(),
                             raw_input: None,
+                            locations: Vec::new(),
                             parent_tool_id: None,
                             exit: None,
                         }),
@@ -2276,6 +2277,7 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            locations: Vec::new(),
             parent_tool_id: parent.map(str::to_string),
             exit: None,
         })
