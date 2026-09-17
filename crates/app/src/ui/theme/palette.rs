@@ -64,6 +64,10 @@ pub const OVERLAY_BLACK: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
 /// Alpha for the agent-chat tool-card tint — a gentle lift so the card sits
 /// one step above the pane background on any background color.
 pub const AGENT_CHAT_CARD_TINT_ALPHA: f32 = 0.05;
+/// Alpha for a hovered fold header's background. Below the card fill
+/// ([`AGENT_CHAT_CARD_TINT_ALPHA`]) on purpose: hover has to read as a
+/// transient pointer response, not as the row turning into a card.
+pub const AGENT_CHAT_HOVER_TINT_ALPHA: f32 = 0.03;
 /// Alpha for the agent-chat tool-card / code-block border — a hairline one
 /// step stronger than the fill tint, drawn from the same neutral overlay so
 /// the edge tracks the background instead of a fixed line color.

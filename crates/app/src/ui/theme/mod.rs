@@ -601,6 +601,9 @@ pub struct PaneSurfaceTokens {
     pub foreground_muted: gpui::Hsla,
     pub foreground_subtle: gpui::Hsla,
     pub tint: gpui::Hsla,
+    /// Fill a hovered control on this surface takes. Lighter than
+    /// [`Self::tint`]: hover is a pointer response, not a card.
+    pub hover_tint: gpui::Hsla,
     pub active_tint: gpui::Hsla,
     pub border_tint: gpui::Hsla,
     /// Resting edge for an interactive control on this surface — heavier than
@@ -636,6 +639,7 @@ impl PaneSurfaceTokens {
             foreground_muted: dim_toward_gray(self.foreground_muted, amount),
             foreground_subtle: dim_toward_gray(self.foreground_subtle, amount),
             tint: dim_toward_gray(self.tint, amount),
+            hover_tint: dim_toward_gray(self.hover_tint, amount),
             active_tint: dim_toward_gray(self.active_tint, amount),
             border_tint: dim_toward_gray(self.border_tint, amount),
             control_border: dim_toward_gray(self.control_border, amount),
@@ -658,6 +662,7 @@ impl PaneSurfaceTokens {
             foreground_muted: foreground.opacity(p::AGENT_CHAT_FG_MUTED_ALPHA),
             foreground_subtle: foreground.opacity(p::AGENT_CHAT_FG_SUBTLE_ALPHA),
             tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_TINT_ALPHA),
+            hover_tint: p::with_alpha(overlay, p::AGENT_CHAT_HOVER_TINT_ALPHA),
             active_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
             border_tint: p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA),
             control_border: p::with_alpha(overlay, control_alpha),
@@ -829,6 +834,13 @@ fn neutral_overlay_for(bg: gpui::Hsla) -> gpui::Hsla {
 /// inline-code tint in the vendored `text/node.rs`.
 pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
     PaneSurfaceTokens::agent_chat(cx).tint
+}
+
+/// Background-derived fill for a hovered fold header in the agent chat. Same
+/// neutral-overlay rule as [`agent_chat_tint`], one step lighter — the row has
+/// to answer the pointer without reading as a card.
+pub fn agent_chat_hover_tint(cx: &App) -> gpui::Hsla {
+    PaneSurfaceTokens::agent_chat(cx).hover_tint
 }
 
 /// Background-derived border for the agent-chat tool cards — the same neutral

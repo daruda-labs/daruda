@@ -459,8 +459,13 @@ fn disclosure_row(
     // identity — distinct yet stable across renders.
     let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
         .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
+    // Hover answers wherever the click lives, so the two are read off the same
+    // `target` — a row-wide wash where the row toggles, a chip behind the glyph
+    // where only the glyph does. Lighting the row for a chevron-only header
+    // would promise a hit area that is not there.
+    let hover = theme::dim_toward_gray(theme::agent_chat_hover_tint(cx), dim);
     let row = div()
-        .id((base, "row"))
+        .id((base.clone(), "row"))
         .w_full()
         .min_w_0()
         .flex()
@@ -471,13 +476,24 @@ fn disclosure_row(
     match target {
         ToggleTarget::Row => row
             .cursor_pointer()
+            .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+            .hover(|s| s.bg(hover))
             .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
             .child(chevron),
         // Bind the click to the chevron itself; the row carries no click
         // handler, so selectable header content stays freely selectable.
-        ToggleTarget::Chevron => row.child(
-            chevron.on_toggle(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx))),
-        ),
+        ToggleTarget::Chevron => {
+            row.child(
+                div()
+                    .id((base, "chevron-hit"))
+                    .flex_none()
+                    .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+                    .hover(|s| s.bg(hover))
+                    .child(chevron.on_toggle(
+                        cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)),
+                    )),
+            )
+        }
     }
 }
 
