@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acp_replay"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "serde_json",
 ]
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "async-signal"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52b5aaafa020cf5053a01f2a60e8ff5dccf550f0f77ec54a4e47285ac2bab485"
 dependencies = [
@@ -1656,7 +1656,7 @@ dependencies = [
 
 [[package]]
 name = "daruda"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -1722,7 +1722,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_acp"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -1743,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_agent"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "base64",
  "chrono",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_config"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "daruda_store",
  "dirs",
@@ -1777,11 +1777,11 @@ dependencies = [
 
 [[package]]
 name = "daruda_core"
-version = "0.2.14"
+version = "0.2.15"
 
 [[package]]
 name = "daruda_flow"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "daruda_acp",
  "daruda_core",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_store"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "chrono",
  "daruda_core",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_terminal"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "base64",
  "criterion",
@@ -1840,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_update"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "semver",
  "serde",
@@ -2710,7 +2710,7 @@ dependencies = [
 
 [[package]]
 name = "gen_acp_presets"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "serde",
  "serde_json",
@@ -2718,7 +2718,7 @@ dependencies = [
 
 [[package]]
 name = "gen_licenses"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "two-face",
 ]
@@ -2795,14 +2795,14 @@ dependencies = [
 
 [[package]]
 name = "ghostty_vt"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "ghostty_vt_sys",
 ]
 
 [[package]]
 name = "ghostty_vt_sys"
-version = "0.2.14"
+version = "0.2.15"
 
 [[package]]
 name = "gif"
@@ -8618,7 +8618,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visual_tests"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "daruda_terminal",
  "gpui",
@@ -8646,7 +8646,7 @@ dependencies = [
 
 [[package]]
 name = "vt_dump"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "ghostty_vt",
 ]
