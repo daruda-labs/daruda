@@ -136,9 +136,9 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         answer_callback_id.is_some()
                     )
                 });
-                let action = aim(action, cx);
+                let aimed = aim(action, cx);
 
-                if let InboundAction::Paired { chat_id } = action {
+                if let InboundAction::Paired { chat_id } = aimed.action {
                     cx.update(|cx| {
                         if let Err(error) = cx.global_mut::<SettingsStore>().apply_patch(
                             daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
@@ -151,10 +151,11 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         }
                     });
                 } else {
-                    if matches!(action, InboundAction::Ignore) && answer_callback_id.is_none() {
+                    if matches!(aimed.action, InboundAction::Ignore) && answer_callback_id.is_none()
+                    {
                         log_unauthorized_inbound();
                     }
-                    let effect = dispatch::handle(action, &dispatch::Target::Telegram, cx);
+                    let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx);
                     match (answer_callback_id, effect) {
                         (
                             Some(callback_id),

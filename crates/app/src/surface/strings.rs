@@ -5478,6 +5478,13 @@ pub fn control_chat_created() -> String {
 pub fn control_chat_announced(agent: &str) -> String {
     rust_i18n::t!("control.chat_announced", agent = agent).into_owned()
 }
+/// Told to a sender whose message named no chat and whose bridge remembered
+/// none, so the app's own focused lane took it: which chat that was, and how
+/// to pick another. `name` is the lane's path, `agent` the display name of
+/// the agent running it.
+pub fn control_target_lent(name: &str, agent: &str) -> String {
+    rust_i18n::t!("control.target_lent", name = name, agent = agent).into_owned()
+}
 pub fn control_answer_none() -> String {
     rust_i18n::t!("control.answer_none").into_owned()
 }

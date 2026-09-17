@@ -1664,6 +1664,7 @@ control:
   lane_created: "Worktree created."
   chat_created: "Chat opened."
   chat_announced: "A new %{agent} tab is open. Messages you send now go to it. /use - to go back to the orchestrator."
+  target_lent: "No chat was picked, so this went to %{name} (%{agent}). Send /list to pick another."
   transcript_empty: "That chat has not said anything yet."
   flow_stopped: "Stopped it."
   answer_none: "It finished without saying anything."

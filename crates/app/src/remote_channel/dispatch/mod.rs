@@ -10,6 +10,7 @@ use gpui::App;
 
 mod command;
 pub(crate) mod target;
+pub(crate) use target::Aimed;
 use target::{dispatch_to_workspace, permission_feedback};
 
 pub enum Target {
@@ -59,7 +60,8 @@ pub enum Edit {
     ConsumeButtons,
 }
 
-pub fn handle(action: InboundAction, target: &Target, cx: &mut gpui::AsyncApp) -> Effect {
+pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect {
+    let Aimed { action, adopted } = aimed;
     match action {
         InboundAction::RunCommand { command: requested } => {
             command::run_command(requested, target, cx).map_or(Effect::None, Effect::Reply)
@@ -70,7 +72,9 @@ pub fn handle(action: InboundAction, target: &Target, cx: &mut gpui::AsyncApp) -
         InboundAction::NoTarget => cx
             .update(|cx| command::render_outcome(&Err(ControlError::NoTargetSelected), target, cx))
             .map_or(Effect::None, Effect::Reply),
-        InboundAction::InjectPrompt { pane, text } => deliver_prompt(pane, text, target, cx),
+        InboundAction::InjectPrompt { pane, text } => {
+            deliver_prompt(pane, text, adopted, target, cx)
+        }
         InboundAction::UnknownSlash {
             pane,
             name,
@@ -82,7 +86,7 @@ pub fn handle(action: InboundAction, target: &Target, cx: &mut gpui::AsyncApp) -
                 agents = ws.agent_takes_slash_command(pane.pane, &name, cx);
             });
             if agents {
-                deliver_prompt(pane, text, target, cx)
+                deliver_prompt(pane, text, adopted, target, cx)
             } else {
                 Effect::Reply(commands::render_parse_error(&ParseError::Unknown {
                     input: name,
@@ -150,27 +154,103 @@ pub fn handle(action: InboundAction, target: &Target, cx: &mut gpui::AsyncApp) -
     }
 }
 
-fn deliver_prompt(pane: PaneRef, text: String, target: &Target, cx: &mut gpui::AsyncApp) -> Effect {
+/// Put a phone-sent prompt on its pane, and answer for it when the sender
+/// cannot see what happened.
+///
+/// Two of those cases. The pane is gone, so nothing was delivered; or it was
+/// delivered to a chat `aim` lent rather than one the sender picked, which is
+/// silent in exactly the way that starts a turn on the wrong agent.
+fn deliver_prompt(
+    pane: PaneRef,
+    text: String,
+    adopted: Option<PaneRef>,
+    target: &Target,
+    cx: &mut gpui::AsyncApp,
+) -> Effect {
     let mut delivered = false;
     dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
         delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
     });
-    if delivered {
-        Effect::None
-    } else {
-        cx.update(|cx| command::report_target_gone(pane, target, cx))
-            .map_or(Effect::None, Effect::Reply)
+    if !delivered {
+        return cx
+            .update(|cx| command::report_target_gone(pane, target, cx))
+            .map_or(Effect::None, Effect::Reply);
     }
+    adopted
+        .and_then(|lent| target::lent_target_reply(lent, cx))
+        .map_or(Effect::None, Effect::Reply)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::remote_channel::bridge::{InboundAction, PaneRef};
+    use crate::remote_channel::bridge::{InboundAction, PaneRef, Routed, Unaimed};
+
+    /// A message that named no chat, on a bridge that remembered none, still
+    /// reaches an agent — `aim` lends it the app's own lane. The sender is told
+    /// which one, because from the phone a lent lane and the one they were
+    /// talking to look exactly alike, and only one of them is what they meant.
+    #[gpui::test]
+    async fn a_lent_target_is_reported_back_to_the_sender(cx: &mut gpui::TestAppContext) {
+        let fixture = crate::test_support::workspace_with_agent_chat(cx);
+        let pane = fixture.pane();
+        let expected = fixture
+            .workspace
+            .read_with(cx, |ws, cx| ws.control_chat_label(pane, cx))
+            .expect("the fixture's pane has a label");
+        let mut async_cx = cx.to_async();
+
+        let aimed = super::target::aim(
+            Routed::NeedsTarget(Unaimed::Text {
+                text: "ship it".into(),
+            }),
+            &mut async_cx,
+        );
+        let effect = super::handle(aimed, &super::Target::Telegram, &mut async_cx);
+
+        match effect {
+            super::Effect::Reply(reply) => assert_eq!(
+                reply.text,
+                crate::surface::strings::control_target_lent(&expected.path, &expected.agent_name),
+            ),
+            _ => panic!("a lent target must be reported, not silently used"),
+        }
+    }
+
+    /// The other half, and the reason the notice is worth having: a message
+    /// that named its own chat is delivered without a word. Told every time,
+    /// the notice would be chatter the sender learns to scroll past — which is
+    /// the one thing it cannot afford to become.
+    #[gpui::test]
+    async fn a_target_the_sender_named_is_delivered_in_silence(cx: &mut gpui::TestAppContext) {
+        let fixture = crate::test_support::workspace_with_agent_chat(cx);
+        let pane = fixture.pane_ref(cx);
+        let mut async_cx = cx.to_async();
+
+        let effect = super::handle(
+            super::Aimed {
+                action: InboundAction::InjectPrompt {
+                    pane,
+                    text: "ship it".into(),
+                },
+                adopted: None,
+            },
+            &super::Target::Telegram,
+            &mut async_cx,
+        );
+
+        assert!(
+            matches!(effect, super::Effect::None),
+            "a chat the sender picked needs no answer about where the message went"
+        );
+    }
 
     #[gpui::test]
     async fn unsupported_actions_do_not_require_connection_state(cx: &mut gpui::TestAppContext) {
         let effect = super::handle(
-            InboundAction::Unsupported,
+            super::Aimed {
+                action: InboundAction::Unsupported,
+                adopted: None,
+            },
             &super::Target::Remote("missing".into()),
             &mut cx.to_async(),
         );
@@ -203,7 +283,10 @@ mod tests {
             },
         ] {
             let effect = super::handle(
-                action,
+                super::Aimed {
+                    action,
+                    adopted: None,
+                },
                 &super::Target::Remote("missing".into()),
                 &mut cx.to_async(),
             );

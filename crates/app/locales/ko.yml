@@ -1663,6 +1663,7 @@ control:
   lane_created: "워크트리를 만들었습니다."
   chat_created: "대화를 열었습니다."
   chat_announced: "새 %{agent} 탭이 열렸습니다. 이제 메시지를 보내면 이 탭으로 갑니다. 오케스트레이터로 돌아가려면 /use -"
+  target_lent: "지정된 대화가 없어 %{name}(%{agent})로 보냈습니다. 다른 대화를 고르려면 /list."
   transcript_empty: "그 대화는 아직 아무 말도 하지 않았습니다."
   flow_stopped: "중지했습니다."
   answer_none: "아무 말 없이 끝냈습니다."

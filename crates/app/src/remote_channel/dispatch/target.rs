@@ -1,6 +1,6 @@
 use crate::control::resolve as control_resolve;
 use crate::remote_channel::bridge::{
-    BotPermissionOutcome, InboundAction, PermissionDecision, Routed, Unaimed,
+    BotPermissionOutcome, InboundAction, PaneRef, PermissionDecision, Routed, Unaimed,
 };
 use crate::surface::strings as s;
 use crate::telegram::trace;
@@ -59,6 +59,64 @@ pub(crate) fn dispatch_to_workspace(
     });
 }
 
+/// What [`aim`] settled: the action to carry out, and whether the target in
+/// it was the message's own or one this layer had to supply.
+///
+/// The second half is not a detail of how the answer was reached. A message
+/// the bridge could route and a message that borrowed the app's focused lane
+/// look identical from the phone, and only one of them went where the sender
+/// meant — so the difference has to survive as far as the layer that can say
+/// so out loud.
+pub(crate) struct Aimed {
+    pub action: InboundAction,
+    /// The pane [`aim`] supplied because nothing named one. `None` when the
+    /// message, the selection, or a prior ping already did.
+    pub adopted: Option<PaneRef>,
+}
+
+impl Aimed {
+    /// An action that already named its own target.
+    fn named(action: InboundAction) -> Self {
+        Self {
+            action,
+            adopted: None,
+        }
+    }
+
+    /// An action aimed at `pane` only because the app offered it.
+    fn borrowed(pane: PaneRef, action: InboundAction) -> Self {
+        Self {
+            action,
+            adopted: Some(pane),
+        }
+    }
+}
+
+/// Name the chat [`aim`] lent a message, for the answer that tells the sender
+/// where it went.
+///
+/// Read from the pane rather than the ordinal table on purpose: a sender who
+/// never ran `/list` has no table, and "no chat was picked" is exactly the
+/// state this reports. `None` once the pane is gone, which the caller is
+/// already answering with a target-gone reply of its own.
+pub(crate) fn lent_target_reply(
+    pane: PaneRef,
+    cx: &mut gpui::AsyncApp,
+) -> Option<crate::remote_channel::command::RenderedReply> {
+    let mut label = None;
+    dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
+        label = ws.control_chat_label(pane.pane, cx);
+    });
+    let label = label?;
+    trace::delivery("target.lent", || {
+        format!("pane={} agent={}", trace::pane(pane), label.agent)
+    });
+    Some(crate::remote_channel::command::RenderedReply {
+        text: s::control_target_lent(&label.path, &label.agent_name),
+        keyboard: None,
+    })
+}
+
 /// Settle the target question `route` could not, and with it the only thing
 /// standing between a routed update and being acted on.
 ///
@@ -68,16 +126,17 @@ pub(crate) fn dispatch_to_workspace(
 /// the last link in the chain `plain_text_target` walks, resolved here rather
 /// than in `route` because only this layer can read a workspace.
 ///
-/// The only way to obtain an [`InboundAction`] from a [`Routed`], which is
-/// what makes skipping this a type error rather than a comment. With a target
-/// found, both cases rejoin an arm that already existed — plain text is an
-/// `InjectPrompt`, an unowned slash an `UnknownSlash` for that pane to claim.
-/// Without one, both become their terminal answer, and the message body they
-/// were carrying is recorded as lost here rather than dropped by whichever
-/// arm happened to receive it.
-pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
+/// The only way to obtain an [`Aimed`] from a [`Routed`], which is what makes
+/// skipping this a type error rather than a comment. With a target found,
+/// both cases rejoin an arm that already existed — plain text is an
+/// `InjectPrompt`, an unowned slash an `UnknownSlash` for that pane to claim
+/// — and the pane travels out as `adopted`, because a lane this layer picked
+/// is not one the sender did. Without one, both become their terminal answer,
+/// and the message body they were carrying is recorded as lost here rather
+/// than dropped by whichever arm happened to receive it.
+pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> Aimed {
     let unaimed = match routed {
-        Routed::Ready(action) => return action,
+        Routed::Ready(action) => return Aimed::named(action),
         Routed::NeedsTarget(unaimed) => unaimed,
     };
     match (cx.update(control_resolve::sole_active_agent_chat), unaimed) {
@@ -85,7 +144,7 @@ pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
             trace::delivery("target.fallback", || {
                 format!("pane={} kind=text", trace::pane(pane))
             });
-            InboundAction::InjectPrompt { pane, text }
+            Aimed::borrowed(pane, InboundAction::InjectPrompt { pane, text })
         }
         (
             Some(pane),
@@ -98,18 +157,21 @@ pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
             trace::delivery("target.fallback", || {
                 format!("pane={} kind=slash name={name}", trace::pane(pane))
             });
-            InboundAction::UnknownSlash {
+            Aimed::borrowed(
                 pane,
-                name,
-                text,
-                suggestion,
-            }
+                InboundAction::UnknownSlash {
+                    pane,
+                    name,
+                    text,
+                    suggestion,
+                },
+            )
         }
         (None, Unaimed::Text { text }) => {
             trace::delivery("target.none", || {
                 format!("kind=text len={}", text.chars().count())
             });
-            InboundAction::NoTarget
+            Aimed::named(InboundAction::NoTarget)
         }
         (
             None,
@@ -122,7 +184,7 @@ pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> InboundAction {
             trace::delivery("target.none", || {
                 format!("kind=slash name={name} len={}", text.chars().count())
             });
-            InboundAction::UnclaimedSlash { name, suggestion }
+            Aimed::named(InboundAction::UnclaimedSlash { name, suggestion })
         }
     }
 }
@@ -179,7 +241,8 @@ mod tests {
                     text: "ship it".into()
                 }),
                 &mut async_cx,
-            ),
+            )
+            .action,
             InboundAction::InjectPrompt {
                 pane: expected,
                 text: "ship it".into()
@@ -193,7 +256,8 @@ mod tests {
                     suggestion: Some("use"),
                 }),
                 &mut async_cx,
-            ),
+            )
+            .action,
             InboundAction::UnknownSlash {
                 pane: expected,
                 name: "usage".into(),
@@ -220,7 +284,8 @@ mod tests {
                     text: "ship it".into()
                 }),
                 &mut async_cx,
-            ),
+            )
+            .action,
             InboundAction::NoTarget,
             "two candidates is not a target"
         );
@@ -232,7 +297,8 @@ mod tests {
                     suggestion: Some("list"),
                 }),
                 &mut async_cx,
-            ),
+            )
+            .action,
             InboundAction::UnclaimedSlash {
                 name: "lst".into(),
                 suggestion: Some("list"),
@@ -255,6 +321,9 @@ mod tests {
             pane,
             text: "already aimed".into(),
         };
-        assert_eq!(aim(Routed::Ready(action.clone()), &mut async_cx), action);
+        assert_eq!(
+            aim(Routed::Ready(action.clone()), &mut async_cx).action,
+            action
+        );
     }
 }
