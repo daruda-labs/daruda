@@ -30,6 +30,24 @@ use super::AgentSessionStatus;
 use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
+/// Fixed turn facts the capture seed files, so the answer row's trailing slot
+/// reads the same in every shot rather than drifting with the machine.
+#[cfg(feature = "devtools")]
+const SHOT_TURN_SECS: u64 = 72;
+#[cfg(feature = "devtools")]
+const SHOT_TURN_OUTPUT_TOKENS: u64 = 14_313;
+/// A fixed wall clock for the capture seed. `Local::now()` would put a
+/// different minute in every shot, which is the opposite of what a
+/// pixel-comparable capture needs.
+#[cfg(feature = "devtools")]
+fn shot_turn_finished_at() -> chrono::DateTime<chrono::Local> {
+    use chrono::TimeZone as _;
+    chrono::Local
+        .with_ymd_and_hms(2026, 1, 2, 11, 16, 0)
+        .single()
+        .unwrap_or_else(chrono::Local::now)
+}
+
 impl AgentChatView {
     /// Stop the active turn: send `session/cancel` *and* end the turn locally
     /// right now, without waiting for the agent's stop reason. `cancel` is
@@ -446,6 +464,19 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) {
         self.items = items;
+        // The seed stands in for a turn that already settled, so give it the
+        // record a settled turn would have. Without one the answer row renders
+        // bare and a capture cannot judge the facts it is supposed to carry.
+        if let Some(run_start) = Self::run_start_of(&self.items) {
+            self.activity.turn_records.insert(
+                run_start,
+                super::TurnRecord {
+                    worked_for: std::time::Duration::from_secs(SHOT_TURN_SECS),
+                    finished_at: shot_turn_finished_at(),
+                    output_tokens: Some(SHOT_TURN_OUTPUT_TOKENS),
+                },
+            );
+        }
         // A seeded pane stands in for a session it does not have. Parking it out
         // of `Idle` here is what keeps `maybe_connect_agent_chat` from spawning
         // a real adapter behind it on first focus. `handle` stays `None`, which
@@ -822,6 +853,11 @@ impl AgentChatView {
         self.activity.tool_started_at.clear();
         self.activity.span = ActivitySpan::Idle;
         self.activity.pending_completion = None;
+        // The records are keyed by item index with no session identity, so they
+        // must not outlive the transcript they index — `/clear` restarts at 0
+        // and a reconnect replays the history, either of which would otherwise
+        // hang the previous conversation's numbers on the new rows.
+        self.activity.turn_records.clear();
         self.activity.cancel_in_flight = false;
         self.session_usage = None;
         self.assets.clear();

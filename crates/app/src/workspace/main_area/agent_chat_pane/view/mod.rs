@@ -211,6 +211,22 @@ impl ActivitySpan {
     }
 }
 
+/// What one settled turn cost, keyed by the run it belongs to.
+///
+/// The three values come from three places and none of them survives on its
+/// own: the duration lives only while the span is `Busy`, the wall clock has no
+/// source at all (the pane measures with a monotonic clock, which cannot name a
+/// time of day), and the token count arrives on the turn's reply. They are
+/// recorded together at the busy→idle settle edge — the one point that answers
+/// "when did this finish" for everything else in the pane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::workspace) struct TurnRecord {
+    pub(in crate::workspace) worked_for: std::time::Duration,
+    pub(in crate::workspace) finished_at: chrono::DateTime<chrono::Local>,
+    /// `None` for an agent that reports no usage.
+    pub(in crate::workspace) output_tokens: Option<u64>,
+}
+
 /// Terminal outcome of an activity span, captured when the turn/session ends
 /// but fired (notification + backing-task done) only when the pane actually
 /// settles busy→idle (which may trail `end_turn` while subagents finish).
@@ -500,6 +516,9 @@ pub(in crate::workspace) struct ActivityTracker {
     /// actually settles busy→idle (may trail `end_turn` while subagents
     /// finish), so the completion signal fires at the true settle point.
     pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
+    /// What each settled run cost, keyed by the run's first item — the same key
+    /// the run's fold uses, so a record and the bar above it name one thing.
+    pub(in crate::workspace) turn_records: HashMap<usize, TurnRecord>,
     /// Count of `AssistantText` items already delivered to Telegram. Baseline
     /// for the post-turn delta, snapped at every `settle_turn`.
     pub(in crate::workspace) post_turn_relayed_assistant_texts: usize,

@@ -297,8 +297,20 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::TurnEnded {
-                completed_normally, ..
+                completed_normally,
+                usage,
+                ..
             } => {
+                // Filed here, off the turn's own clock — not at the pane's
+                // busy→idle settle edge. The settle edge is right for the
+                // *completion* side effects (Pitfall 11: it trails `end_turn`
+                // while background subagents finish), but it is the wrong ruler
+                // for "how long did this answer take": a queued batch drains
+                // without ever going idle between turns, so every turn but the
+                // last would get no record and the last would report the whole
+                // batch. `Turn::InFlight` carries the per-turn start, which is
+                // exactly the span being reported.
+                self.record_turn(usage.map(|u| u.output_tokens));
                 // Settle the turn: finalize streaming, cancel any tool the agent
                 // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
                 // still-pending permission so no card keeps live buttons.

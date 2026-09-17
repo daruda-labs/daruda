@@ -1561,10 +1561,24 @@ fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext
                 "sanity: override collapsed the block while active"
             );
             view.fold.set_mode(FoldPreset::Expanded.mode());
+            view.activity.turn_records.insert(
+                1,
+                super::TurnRecord {
+                    worked_for: std::time::Duration::from_secs(9),
+                    finished_at: chrono::Local::now(),
+                    output_tokens: Some(42),
+                },
+            );
 
             view.reset_for_new_session(cx);
 
             assert!(view.items.is_empty(), "reset clears the conversation items");
+            assert!(
+                view.activity.turn_records.is_empty(),
+                "turn records are keyed by item index with no session identity, \
+                 so one left behind would label the next conversation's rows"
+            );
+
             assert!(
                 view.rows.is_empty(),
                 "reset splices the projected rows to 0"

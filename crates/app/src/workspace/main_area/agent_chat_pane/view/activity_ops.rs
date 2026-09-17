@@ -7,6 +7,7 @@ use daruda_acp::{ChatItem, subagent_activity};
 
 use gpui::Context;
 
+use super::Turn;
 use super::{
     ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE,
     TurnOutcome, post_turn_delta,
@@ -240,6 +241,82 @@ impl AgentChatView {
             ActivityState::Working
         } else {
             ActivityState::Idle
+        }
+    }
+}
+
+impl AgentChatView {
+    /// File what the turn that just ended cost, under the run it belongs to.
+    ///
+    /// Keyed by the run's first item so the record and the response bar above it
+    /// name one thing. A run that put nothing on screen gets no key and no
+    /// record — there is no row for it to label.
+    pub(super) fn record_turn(&mut self, output_tokens: Option<u64>) {
+        let Some(run_start) = Self::run_start_of(&self.items) else {
+            return;
+        };
+        let worked_for = match self.queue.turn {
+            Turn::InFlight { started_at, .. } => started_at.elapsed(),
+            Turn::Idle => return,
+        };
+        self.activity.turn_records.insert(
+            run_start,
+            super::TurnRecord {
+                worked_for,
+                finished_at: chrono::Local::now(),
+                output_tokens,
+            },
+        );
+    }
+
+    /// Where the transcript's last agent run begins — the item after the last
+    /// user prompt. `None` when nothing follows it, which is the empty-reply
+    /// case that projects no response bar either.
+    ///
+    /// Pure and free-standing so the keying rule is assertable without a window.
+    pub(in crate::workspace) fn run_start_of(items: &[ChatItem]) -> Option<usize> {
+        let after_prompt = items
+            .iter()
+            .rposition(|item| matches!(item, ChatItem::UserText(_)))
+            .map_or(0, |ix| ix + 1);
+        (after_prompt < items.len()).then_some(after_prompt)
+    }
+}
+
+#[cfg(test)]
+mod turn_record_tests {
+    use super::*;
+
+    fn asst(text: &str) -> ChatItem {
+        ChatItem::AssistantText {
+            text: text.to_owned(),
+            streaming: false,
+            message_id: None,
+            phase: Default::default(),
+        }
+    }
+
+    /// The record is keyed by the run's first item — the same index the run's
+    /// fold uses — so a later turn files under its own key instead of
+    /// overwriting the previous one.
+    #[test]
+    fn a_runs_key_is_the_item_after_its_prompt() {
+        let cases: [(Vec<ChatItem>, Option<usize>); 4] = [
+            (vec![], None),
+            (vec![ChatItem::UserText("q".into())], None),
+            (vec![ChatItem::UserText("q".into()), asst("a")], Some(1)),
+            (
+                vec![
+                    ChatItem::UserText("q1".into()),
+                    asst("a1"),
+                    ChatItem::UserText("q2".into()),
+                    asst("a2"),
+                ],
+                Some(3),
+            ),
+        ];
+        for (items, expected) in cases {
+            assert_eq!(super::super::AgentChatView::run_start_of(&items), expected);
         }
     }
 }
