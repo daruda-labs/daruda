@@ -6,14 +6,24 @@ pub(in crate::workspace) mod tail;
 
 use std::collections::HashSet;
 
-use daruda_acp::{ChatItem, ToolCallItem, ToolStatusView};
+use daruda_acp::{ChatItem, ToolCallItem};
 
-use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at, is_active};
+use super::agent_chat_helpers::{TurnBoundary, fold_context_at};
 use super::fold::{FoldContext, FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
+use super::transcript_structure::{TranscriptStructure, is_active, response_run};
+// Re-exported so the many callers that reach these through `rows` keep one
+// path; `tool_status` is the definition site and what breaks the cycle with
+// `agent_chat_helpers`.
+pub(in crate::workspace) use super::tool_status::{
+    LiveSubagentUnits, effective_tool_status, tool_or_subtree_live,
+};
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::tool_category::{ToolCategory, tally_categories};
 use tail::{StepWindow, TailWindow};
+
+pub(in crate::workspace) mod foldable_keys;
+pub(in crate::workspace) use foldable_keys::collect_foldable_keys;
 
 /// What the display filter dropped from one run and the reveal can put back.
 ///
@@ -331,7 +341,7 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
             i += 1;
         }
 
-        let run = agent_run(items, i);
+        let run = response_run(items, i);
         i = run.end;
 
         let tools = run
@@ -365,7 +375,10 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                         // fault rather than as a summary — so the turn bar falls
                         // back to previewing the prose, as it does for a turn
                         // that called nothing at all.
-                        categories: if top_level_tool_runs(items, run.clone(), hierarchy) > 1 {
+                        categories: if TranscriptStructure::new(items, hierarchy)
+                            .top_level_tool_runs(run.clone())
+                            > 1
+                        {
                             tally_categories(run.clone().filter_map(|k| match &items[k] {
                                 ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc) => {
                                     Some(tc)
@@ -436,6 +449,14 @@ struct ProjectionContext<'a> {
     live_units: &'a LiveSubagentUnits,
     tail: StepWindow,
     filter: &'a FilterMatchIndex,
+}
+
+impl<'a> ProjectionContext<'a> {
+    /// The boundary rules over this pass's items and hierarchy. Two borrows —
+    /// the hierarchy is built once per pass, never per query.
+    fn structure(&self) -> TranscriptStructure<'a> {
+        TranscriptStructure::new(self.items, self.hierarchy)
+    }
 }
 
 struct RunSpec {
@@ -643,11 +664,11 @@ impl UnitWindow {
         let mut units: Vec<(usize, bool)> = Vec::new();
         let mut k = run.start;
         while k < run.end {
-            if !top_level_tool(items, k, context.hierarchy) {
+            if !context.structure().top_level_tool(k) {
                 k += 1;
                 continue;
             }
-            let span = k..tool_run_end(items, k, run.end, context.hierarchy);
+            let span = context.structure().tool_run(k, run.end);
             k = span.end;
             units.push((
                 span.end,
@@ -697,55 +718,6 @@ impl GroupWindow {
             Self::Divided { cut, revealed } => !revealed && cut.covers(ix),
         }
     }
-}
-
-/// End of the maximal stretch of consecutive top-level tool calls beginning at
-/// `start`. The row walk and the window's tally both advance by this, so they
-/// cannot disagree about where a run ends. A nested child renders inside its
-/// parent's card, so it breaks a run rather than joining it.
-fn tool_run_end(
-    items: &[ChatItem],
-    start: usize,
-    limit: usize,
-    hierarchy: &ToolHierarchy<'_>,
-) -> usize {
-    let mut k = start + 1;
-    while k < limit && top_level_tool(items, k, hierarchy) {
-        k += 1;
-    }
-    k
-}
-
-/// How many separate top-level tool runs the response holds. One run means the
-/// group bar below carries the whole tally, which is what the turn bar checks
-/// before deciding whether repeating it would say anything.
-fn top_level_tool_runs(
-    items: &[ChatItem],
-    run: std::ops::Range<usize>,
-    hierarchy: &ToolHierarchy<'_>,
-) -> usize {
-    let limit = run.end;
-    let mut runs = 0;
-    let mut k = run.start;
-    while k < limit {
-        if top_level_tool(items, k, hierarchy) {
-            runs += 1;
-            k = tool_run_end(items, k, limit, hierarchy);
-        } else {
-            k += 1;
-        }
-    }
-    runs
-}
-
-/// Whether this call earns a row of its own.
-///
-/// A *row* boundary, not a narrowing one: both axes still reach inside the card
-/// a nested child renders in — [`subagent::SubagentChildren`] applies them
-/// there. What must never happen is a child climbing out into the list, which
-/// `no_axis_gives_a_card_child_a_row_of_its_own` pins.
-fn top_level_tool(items: &[ChatItem], ix: usize, hierarchy: &ToolHierarchy<'_>) -> bool {
-    matches!(&items[ix], ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc))
 }
 
 /// Blocks the filter took from inside the run's tool cards. A nested child
@@ -844,13 +816,13 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             // window's range decides the fold and the boundary's state gates it.
             let covered = k < window.window_start;
             let folded = response_collapsed || (!tail_revealed && covered);
-            if top_level_tool(items, k, hierarchy) {
+            if TranscriptStructure::new(items, hierarchy).top_level_tool(k) {
                 // Every run earns a header, one call included: a turn's shape
                 // must not change with how many calls happened to land next to
                 // each other, and the bar is where the run's fold and its
                 // summary live. A run always holds at least the call that
                 // started it, so there is no shorter case to branch on.
-                let grun = k..tool_run_end(items, k, run.end, hierarchy);
+                let grun = TranscriptStructure::new(items, hierarchy).tool_run(k, run.end);
                 k = grun.end;
                 let group = GroupFilter::of(grun.clone(), items, filter);
                 let group_live = run_is_live(items, grun.clone(), live_units);
@@ -997,55 +969,6 @@ pub(super) fn is_bodyless(item: &ChatItem) -> bool {
     )
 }
 
-/// Tool ids with a live descendant, built by walking upward from live calls.
-#[derive(Default)]
-pub(in crate::workspace) struct LiveSubagentUnits {
-    ids: HashSet<String>,
-}
-
-impl LiveSubagentUnits {
-    /// The running calls that declare a parent — the only ones with ancestors
-    /// to mark. Empty means there is nothing to walk, which is the common idle
-    /// case (every codex session, every Task-less claude session).
-    fn nested_live(items: &[ChatItem]) -> impl Iterator<Item = &str> {
-        items.iter().filter_map(|it| match it {
-            ChatItem::ToolCall(tc) if tc.status.is_live() && tc.parent_tool_id.is_some() => {
-                Some(tc.id.as_str())
-            }
-            _ => None,
-        })
-    }
-
-    pub(in crate::workspace) fn build<'a>(
-        hierarchy: &ToolHierarchy<'a>,
-        items: &'a [ChatItem],
-    ) -> Self {
-        if Self::nested_live(items).next().is_none() {
-            return Self::default();
-        }
-        let mut ids = HashSet::new();
-        for id in Self::nested_live(items) {
-            ids.extend(hierarchy.ancestors(id).map(str::to_owned));
-        }
-        Self { ids }
-    }
-
-    /// Test convenience: derive the hierarchy for this one call. Production
-    /// shares a single hierarchy across the whole projection pass. Keeps the
-    /// idle early-out ahead of the build so the cheap case stays cheap here too.
-    #[cfg(test)]
-    pub(in crate::workspace) fn of(items: &[ChatItem]) -> Self {
-        if Self::nested_live(items).next().is_none() {
-            return Self::default();
-        }
-        Self::build(&ToolHierarchy::build(items), items)
-    }
-
-    pub(in crate::workspace) fn contains(&self, tool_id: &str) -> bool {
-        self.ids.contains(tool_id)
-    }
-}
-
 /// Whether any call in `run` is live — the run-wide reading of
 /// [`tool_or_subtree_live`].
 ///
@@ -1062,26 +985,6 @@ fn run_is_live(
     run.into_iter().any(
         |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
     )
-}
-
-/// Whether a tool or one of its flattened descendants is live.
-pub(in crate::workspace) fn tool_or_subtree_live(
-    tc: &ToolCallItem,
-    live_units: &LiveSubagentUnits,
-) -> bool {
-    tc.status.is_live() || live_units.contains(&tc.id)
-}
-
-/// Subtree-aware status used by badges, filters, and rollups.
-pub(in crate::workspace) fn effective_tool_status(
-    tc: &ToolCallItem,
-    live_units: &LiveSubagentUnits,
-) -> ToolStatusView {
-    if !tc.status.is_live() && live_units.contains(&tc.id) {
-        ToolStatusView::InProgress
-    } else {
-        tc.status
-    }
 }
 
 fn tool_id(item: &ChatItem) -> String {

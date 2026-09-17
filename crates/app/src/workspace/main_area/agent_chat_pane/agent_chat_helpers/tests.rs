@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::main_area::agent_chat_pane::rows::collect_foldable_keys;
 use daruda_acp::{ChatItem, ModeStateView, SessionModeView, ToolCallItem};
 
 fn asst(text: &str) -> ChatItem {
@@ -1108,14 +1109,14 @@ fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
         asst("a2"),
     ];
     // From the first anchor's reply through the tool call, stopping at `q2`.
-    assert_eq!(agent_run(&items, 1), 1..3);
+    assert_eq!(response_run(&items, 1), 1..3);
     // The last turn runs to the end of the conversation.
-    assert_eq!(agent_run(&items, 4), 4..5);
+    assert_eq!(response_run(&items, 4), 4..5);
 
     // `anchor + 1 == items.len()` — the in-flight first turn. Must be an empty
     // range rather than a panic or an inverted one.
     let items = [ChatItem::UserText("q".to_owned())];
-    let run = agent_run(&items, 1);
+    let run = response_run(&items, 1);
     assert!(run.is_empty(), "{run:?} should be empty");
     assert_eq!(run, 1..1);
 
@@ -1126,10 +1127,10 @@ fn agent_run_covers_next_user_empty_and_out_of_bounds_cases() {
         ChatItem::UserText("q2".to_owned()),
         asst("a"),
     ];
-    assert_eq!(agent_run(&items, 1), 1..1);
+    assert_eq!(response_run(&items, 1), 1..1);
 
     let items = [asst("only")];
-    assert_eq!(agent_run(&items, 9), 1..1);
+    assert_eq!(response_run(&items, 9), 1..1);
 }
 
 /// A stop marker closes the run it cut, exactly like the next prompt does —
@@ -1144,13 +1145,17 @@ fn agent_run_stops_at_a_stop_marker() {
         ChatItem::UserText("again".to_owned()),
         asst("done"),
     ];
-    assert_eq!(agent_run(&items, 1), 1..2, "the cut run ends at the marker");
     assert_eq!(
-        agent_run(&items, 2),
+        response_run(&items, 1),
+        1..2,
+        "the cut run ends at the marker"
+    );
+    assert_eq!(
+        response_run(&items, 2),
         2..2,
         "a run starting on the marker is empty, not the whole tail"
     );
-    assert_eq!(agent_run(&items, 4), 4..5, "the next turn is unaffected");
+    assert_eq!(response_run(&items, 4), 4..5, "the next turn is unaffected");
 }
 
 /// A header glyph sits on a disclosure, so it must summarize what expanding

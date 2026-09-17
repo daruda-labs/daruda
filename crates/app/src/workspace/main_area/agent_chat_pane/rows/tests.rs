@@ -2461,7 +2461,7 @@ fn a_response_whose_every_covered_run_is_live_keeps_its_tail_row() {
 
 #[test]
 fn expand_all_leaves_the_tail_and_filter_chips_in_charge() {
-    use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::collect_foldable_keys;
+    use super::collect_foldable_keys;
     let items = turn_of_cycles(6);
     let mut fold = FoldState::default();
     fold.set_all(collect_foldable_keys(&items), true);

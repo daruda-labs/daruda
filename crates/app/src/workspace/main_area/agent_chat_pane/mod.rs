@@ -39,7 +39,9 @@ pub(in crate::workspace) mod telegram_ops;
 /// Parent/child structure of a conversation's tool calls — the one place the
 /// nesting rules live.
 pub(in crate::workspace) mod tool_hierarchy;
+pub(in crate::workspace) mod tool_status;
 /// The `[agent]` transcript defaults a pane follows until the user chooses.
 pub(in crate::workspace) mod transcript_defaults;
+pub(in crate::workspace) mod transcript_structure;
 pub(in crate::workspace) mod view;
 pub(in crate::workspace) mod window_access;

@@ -10,15 +10,14 @@ use daruda_acp::{
 use gpui::{Context, Window};
 
 use super::super::agent_chat_helpers::{
-    cancel_pending_permission, collect_foldable_keys, fold_context, fold_key_item_index,
-    permission_card_mut,
+    cancel_pending_permission, fold_context, fold_key_item_index, permission_card_mut,
 };
 use super::super::agent_chat_ops::model_select;
 use super::super::fold::FoldKey;
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
-use super::super::rows::RowKind;
 use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
+use super::super::rows::{RowKind, collect_foldable_keys};
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;

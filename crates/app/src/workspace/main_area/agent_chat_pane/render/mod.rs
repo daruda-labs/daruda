@@ -132,13 +132,14 @@ use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{Icon, IconName, Sizable as _, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at,
+    DiffStat, Rollup, TurnBoundary, fold_context_at,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, FilteredAway, LiveSubagentUnits, RenderRow, RowKind,
 };
+use crate::workspace::main_area::agent_chat_pane::transcript_structure::response_run;
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AssetCache, ChatContentWidth, TurnRecord,
 };
@@ -588,7 +589,7 @@ fn response_bar(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let run = agent_run(&this.items, run_start);
+    let run = response_run(&this.items, run_start);
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
     // leading block (a streaming placeholder that has not filled yet) falls

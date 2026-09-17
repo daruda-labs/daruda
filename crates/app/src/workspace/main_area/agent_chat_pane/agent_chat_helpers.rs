@@ -14,9 +14,13 @@ use daruda_acp::DiffView;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AppContext as _, Context, Entity};
 
-use super::fold::{FoldContext, FoldKey, FoldState};
-use super::rows::{LiveSubagentUnits, RowKind, effective_tool_status, project};
+use super::fold::{FoldContext, FoldKey};
 use super::tool_hierarchy::ToolHierarchy;
+use super::tool_status::{LiveSubagentUnits, effective_tool_status};
+// Re-exported so the callers and tests that reach these through this module
+// keep one path; `transcript_structure` is where the rules live.
+use super::transcript_structure::{TranscriptStructure, run_active};
+pub(in crate::workspace) use super::transcript_structure::{is_active, response_run};
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
@@ -83,70 +87,6 @@ pub(in crate::workspace) fn tool_fold_key(tc: &daruda_acp::ToolCallItem) -> Fold
     } else {
         FoldKey::Tool(tc.id.clone())
     }
-}
-
-/// Fold keys controlled by expand-all and collapse-all. Tail and filter reveals
-/// are excluded because their chips own those states.
-pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]) -> Vec<FoldKey> {
-    let mut keys: Vec<FoldKey> = Vec::new();
-    // Defaults preserve the structural header set while avoiding pane state.
-    let rows = project(
-        items,
-        &FoldState::default(),
-        false,
-        &super::rows::LiveSubagentUnits::default(),
-        super::rows::tail::StepWindow::default(),
-        &crate::transcript::display_filter::DisplayFilter::default(),
-    );
-    // Inline assistant prose has no independent fold control.
-    let inline_assistant: std::collections::HashSet<usize> = rows
-        .iter()
-        .filter_map(|row| match row.kind {
-            RowKind::AgentItem(ix) if row.indent > 0 => Some(ix),
-            _ => None,
-        })
-        .collect();
-    for row in &rows {
-        match &row.kind {
-            RowKind::ResponseHeader { run_start, .. } => keys.push(FoldKey::Response(*run_start)),
-            RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
-            RowKind::ThinkingGroupHeader { first_ix, .. } => {
-                keys.push(FoldKey::ThinkingGroup(*first_ix))
-            }
-            RowKind::TailMore { .. } | RowKind::ToolGroupTailMore { .. } => {}
-            RowKind::User(_)
-            | RowKind::Interrupted(_)
-            | RowKind::AgentItem(_)
-            | RowKind::ConclusionItem(_)
-            | RowKind::WorkingIndicator => {}
-        }
-    }
-    for (ix, item) in items.iter().enumerate() {
-        match item {
-            daruda_acp::ChatItem::AssistantText { .. } if inline_assistant.contains(&ix) => {}
-            daruda_acp::ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
-            daruda_acp::ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
-            daruda_acp::ChatItem::ToolCall(tc) => {
-                keys.push(tool_fold_key(tc));
-                for di in 0..tc.diffs.len() {
-                    keys.push(FoldKey::Diff(diff_editor_key(&tc.id, di)));
-                }
-                // Mirror the renderer's raw-input gate (generic tool, no diffs,
-                // has args) so expand/collapse-all covers the disclosure. The
-                // "Instructions" section (`renders_subagent_instructions`) has
-                // no fold key of its own — it is always visible once shown, not
-                // a disclosure — so it contributes nothing here.
-                if renders_raw_input(tc) {
-                    keys.push(FoldKey::ToolRawInput(tc.id.clone()));
-                }
-            }
-            daruda_acp::ChatItem::UserText(_)
-            | daruda_acp::ChatItem::Permission(_)
-            | daruda_acp::ChatItem::Failure(_)
-            | daruda_acp::ChatItem::Interrupted => {}
-        }
-    }
-    keys
 }
 
 /// Whether a tool card renders its raw-input (JSON args) disclosure: a generic
@@ -245,33 +185,6 @@ pub(in crate::workspace) fn diff_theme_fingerprint(
         c.to_bits().hash(&mut hasher);
     }
     hasher.finish()
-}
-
-/// The agent run starting at `start`: every item up to (not including) the next
-/// user message, or the end of the conversation. Single source for "where does
-/// this response end" — [`crate::workspace::main_area::agent_chat_pane::rows`]
-/// walks turns with it and the response bar recomputes its own run from the
-/// anchor with it (the projected header carries only the anchor index). An empty
-/// range when `start` is past the end, so a prompt with no reply yet is not a
-/// special case.
-pub(in crate::workspace) fn agent_run(
-    items: &[daruda_acp::ChatItem],
-    start: usize,
-) -> std::ops::Range<usize> {
-    let end = items
-        .iter()
-        .skip(start)
-        .position(|item| {
-            matches!(
-                item,
-                // A stop marker closes the run it cut, so the response bar
-                // summarizes what actually ran and the marker stays a
-                // top-level row instead of folding away with the response.
-                daruda_acp::ChatItem::UserText(_) | daruda_acp::ChatItem::Interrupted
-            )
-        })
-        .map_or(items.len(), |offset| start + offset);
-    start.min(end)..end
 }
 
 /// The outcome a fold header's rollup glyph summarizes over the run it stands
@@ -701,26 +614,6 @@ pub(in crate::workspace) fn create_diff_editor(
     }
 }
 
-/// Whether a chat block is currently streaming / in progress — the `active`
-/// input the fold derivation reads. A streaming text or thinking block, or a
-/// tool call still `InProgress`, is active; everything else (settled text,
-/// finished/failed tool calls, user / permission / error items) is not. Shared
-/// by [`AgentChatView::toggle_fold`] and the renderer so both derive the same
-/// effective fold state.
-pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
-    use daruda_acp::ChatItem;
-    match item {
-        ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } => {
-            *streaming
-        }
-        ChatItem::ToolCall(tc) => tc.status.is_live(),
-        ChatItem::UserText(_)
-        | ChatItem::Permission(_)
-        | ChatItem::Failure(_)
-        | ChatItem::Interrupted => false,
-    }
-}
-
 /// True when `items` holds conversation content that a session teardown would
 /// destroy. [`ChatItem::Failure`](daruda_acp::ChatItem::Failure) does not count:
 /// it is a session-failure notice, not the user's transcript, so a pane whose
@@ -843,9 +736,7 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         // [`agent_run`] rather than rescanned here: a stop marker closes the
         // run it cut, and a scan that stopped only at the next prompt read the
         // turn after a Stop as part of this one.
-        FoldKey::Response(_) => items
-            .get(agent_run(items, ix))
-            .is_some_and(|run| run.iter().any(is_active)),
+        FoldKey::Response(_) => run_active(items, response_run(items, ix)),
         // A nested child renders inside its parent's card rather than joining
         // the run, so a group's liveness must not read one — otherwise a call
         // that belongs to an inner card holds the group force-expanded.
@@ -855,15 +746,14 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         // about `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys,
         // leaving projection and the click path, neither of which repaints.
         FoldKey::ToolGroup(_) => {
+            // Built here rather than passed in because no paint-path caller
+            // reaches this arm: `render` and `reconcile` ask only about
+            // `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys, and
+            // projection answers its own group bars from the run it already
+            // walked. That leaves the click path, which does not repaint.
             let hierarchy = ToolHierarchy::build(items);
-            items.get(ix..).is_some_and(|rest| {
-                rest.iter()
-                    .take_while(|item| match item {
-                        ChatItem::ToolCall(tc) => !hierarchy.is_nested_child(tc),
-                        _ => false,
-                    })
-                    .any(is_active)
-            })
+            let structure = TranscriptStructure::new(items, &hierarchy);
+            run_active(items, structure.tool_run(ix, items.len()))
         }
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
@@ -897,7 +787,10 @@ pub(in crate::workspace) fn fold_key_item_index(
 ) -> Option<usize> {
     // Built only for the keys that ask a hierarchy question; nested subagent
     // children render inside their parent's card and earn no row of their own.
-    let owner = |id: &str| ToolHierarchy::build(items).owning_row_index(id);
+    let owner = |id: &str| {
+        let hierarchy = ToolHierarchy::build(items);
+        TranscriptStructure::new(items, &hierarchy).owning_item(id)
+    };
     match key {
         FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
         // `SubagentTail` belongs with these: its reveal changes which child
