@@ -212,9 +212,8 @@ impl AgentChatView {
                     // but reports no id) the scope stays `All` — always correct,
                     // just more expensive.
                     reconcile_scope = ReconcileScope::Tool(tool_id.to_string());
-                    // Both wall-clock stamps below are skipped while replaying,
-                    // for the same reason the post-turn stamp above is: a
-                    // replayed event did not happen now. Stamping them would
+                    // Both wall-clock stamps below are skipped while replaying:
+                    // a replayed event did not happen now. Stamping them would
                     // read the restored conversation as busy — and the pump's
                     // `tick_activity` would then reproject mid-load, which is
                     // exactly what the replay gate coalesces away.
@@ -272,9 +271,7 @@ impl AgentChatView {
                 self.settle_stop_marker();
                 // Two effects the tail owes that settle: revisit the calls it
                 // just made terminal, and remeasure the rows whose streaming
-                // height it just fixed. Deliberately not the post-turn baseline —
-                // Stop already snapped it, and a chunk that arrived after is a
-                // follow-up the relay still reports.
+                // height it just fixed.
                 turn_settled = true;
                 phone_turn_action = PhoneTurnAction::Clear;
                 self.pump_pending_prompt(cx);

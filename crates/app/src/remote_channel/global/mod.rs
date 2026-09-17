@@ -49,10 +49,12 @@ impl Connection {
     /// anything be delivered", and `prepare` at the last step before the wire.
     /// The third is what a ping queued while the worker was still connecting
     /// meets once the claim comes back held elsewhere.
+    ///
+    /// `credentials` doubles as the claim's own gate: the worker publishes
+    /// them only after taking the bot, so a connection that has never held it
+    /// cannot send on the strength of its starting status.
     pub(crate) fn can_send(&self) -> bool {
-        self.credentials.is_some()
-            && self.config.recipient.is_some()
-            && self.status != Status::HeldElsewhere
+        self.credentials.is_some() && self.config.recipient.is_some() && self.status.holds_claim()
     }
 }
 

@@ -27,10 +27,14 @@ const OWNER_ONLY_DIR: u32 = 0o700;
 
 /// What asking for a credential's claim answered.
 pub(crate) enum Claim {
-    /// Ours, until this is dropped. The lock is the whole payload — nothing
-    /// reads it, the OS releases it — so it is named like every other
-    /// drop-guard field in this crate.
-    Ours { _lock: CredentialLock },
+    /// Ours, until this is dropped. The lock itself is a drop guard — nothing
+    /// reads it, the OS releases it — so it is named like every other such
+    /// field in this crate. `digest` is what the claim is *for*: a claim
+    /// cannot answer "still the right bot?" without it.
+    Ours {
+        _lock: CredentialLock,
+        digest: String,
+    },
     /// Another daruda holds it.
     Theirs,
     /// The lock itself could not be taken.
@@ -45,6 +49,23 @@ impl Claim {
     pub(crate) fn serves(&self) -> bool {
         !matches!(self, Self::Theirs)
     }
+
+    /// Whether this is a live claim on `credential` specifically. A claim held
+    /// for a bot the caller no longer talks to is worth nothing to it.
+    pub(crate) fn holds(&self, credential: &str) -> bool {
+        matches!(self, Self::Ours { digest, .. } if *digest == digest_of(credential))
+    }
+
+    /// How this state reads in a trace line. `serves()` alone cannot tell
+    /// "we hold the bot" from "we could not lock at all", and those two want
+    /// very different follow-up questions.
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Ours { .. } => "ours",
+            Self::Theirs => "theirs",
+            Self::Unavailable => "unavailable",
+        }
+    }
 }
 
 /// A held claim. The OS releases it with the file this holds open.
@@ -57,22 +78,33 @@ pub(crate) struct CredentialLock {
 /// [`Claim::Unavailable`] is deliberately distinct from [`Claim::Theirs`]: it
 /// means the lock could not be taken at all, and the caller connects anyway.
 /// Losing the bridge to an unwritable config directory is a worse failure than
-/// the duplication the lock exists to prevent — and unlike a held lock, there
-/// is no other daruda serving the user in the meantime.
+/// the duplication the lock exists to prevent.
+///
+/// That trade only holds while it is visible, and it is the one case where the
+/// guarantee is genuinely off: the lock root is shared, so whatever made it
+/// unusable makes it unusable for every instance, and they all fail open
+/// together. Hence a log line on each way it can happen — the state itself
+/// cannot be inferred from behaviour, since a bridge failing open looks
+/// exactly like one holding the bot.
 pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
     use fs4::fs_std::FileExt;
 
-    let Ok(()) = create_owner_only_dir(dir) else {
+    if let Err(error) = create_owner_only_dir(dir) {
+        unavailable(&error, "remote.lock.dir");
         return Claim::Unavailable;
-    };
-    let Ok(file) = std::fs::OpenOptions::new()
+    }
+    let file = match std::fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
         .open(dir.join(lock_file_name(credential)))
-    else {
-        return Claim::Unavailable;
+    {
+        Ok(file) => file,
+        Err(error) => {
+            unavailable(&error, "remote.lock.open");
+            return Claim::Unavailable;
+        }
     };
     // `try_lock_exclusive` answers with a *bool*, not by erroring — the same
     // shape `control::mcp::socket` reads, and for the same reason: treating
@@ -80,21 +112,43 @@ pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
     match FileExt::try_lock_exclusive(&file) {
         Ok(true) => Claim::Ours {
             _lock: CredentialLock { _file: file },
+            digest: digest_of(credential),
         },
         Ok(false) => Claim::Theirs,
-        Err(_) => Claim::Unavailable,
+        Err(error) => {
+            unavailable(&error, "remote.lock.flock");
+            Claim::Unavailable
+        }
     }
 }
 
-/// The file one credential locks on. A SHA-256 prefix, never the credential:
-/// this name sits in a directory shared by every profile and outlives the
-/// session that wrote it.
-fn lock_file_name(credential: &str) -> String {
+/// Report a bot lock this machine could not take at all, so the one state in
+/// which two darudas can still collide is in the log rather than inferred.
+#[track_caller]
+fn unavailable(error: &std::io::Error, dedup: &str) {
+    crate::remote_channel::log_error(
+        "Bot lock unavailable: a second daruda on this bot cannot be excluded",
+        error,
+        dedup,
+    );
+}
+
+/// What one credential is known by here. A SHA-256 prefix, never the
+/// credential: this goes into a file name, in a directory shared by every
+/// profile, that outlives the session that wrote it.
+fn digest_of(credential: &str) -> String {
     use sha2::{Digest as _, Sha256};
 
     let digest = Sha256::digest(credential.as_bytes());
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("bot-{}.lock", &hex[..DIGEST_CHARS])
+    digest
+        .iter()
+        .take(DIGEST_CHARS / 2)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn lock_file_name(credential: &str) -> String {
+    format!("bot-{}.lock", digest_of(credential))
 }
 
 fn create_owner_only_dir(dir: &Path) -> std::io::Result<()> {

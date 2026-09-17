@@ -52,6 +52,29 @@ fn ping() -> BridgePing {
     }
 }
 
+/// A worker that gave up holds no claim either, and the bot it let go is the
+/// next daruda's to take. Reading "not explicitly held elsewhere" as
+/// permission to send would leave a dead connection speaking into a bot
+/// someone else is now serving.
+#[gpui::test]
+fn a_channel_whose_worker_gave_up_sends_nothing(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        cx.global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("personal")
+            .expect("the always-relaying channel")
+            .status = Status::Failed;
+
+        assert!(!RemoteChannels::send_ping(
+            ping(),
+            Delivery::Presence { away: false },
+            cx
+        ));
+        assert!(receiver.next().now_or_never().is_none());
+    });
+}
+
 /// A bot another daruda is serving is not this one's to speak into: two
 /// instances both sending would double every ping, and each would remember
 /// only its own as the chat a plain reply belongs to.

@@ -445,8 +445,8 @@ impl Workspace {
     }
 
     /// Send a prompt to one pane. Delegates to the existing Telegram-origin
-    /// prompt path so slash classification and post-turn flush stay on their
-    /// single funnel; only the disposition is surfaced instead of relayed.
+    /// prompt path so slash classification stays on its single funnel; only
+    /// the disposition is surfaced instead of relayed.
     ///
     /// The `None` arm is not a connection failure. Having already excluded a
     /// missing pane, the only way that funnel declines to dispatch is a local

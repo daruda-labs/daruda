@@ -61,7 +61,7 @@ impl Workspace {
     }
 
     /// Telegram-specific submit shim. It uses the same Workspace funnel as the
-    /// bottom-dock composer (slash handling, post-turn flush, activity reconcile)
+    /// bottom-dock composer (slash handling, activity reconcile)
     /// but preserves the dispatch result so `inject_bot_reply` knows whether the
     /// reply reached the agent now or only entered the pane queue.
     pub(in crate::workspace) fn send_agent_prompt_text_from_telegram(

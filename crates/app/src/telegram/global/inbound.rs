@@ -210,36 +210,14 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
     .detach();
 }
 
-/// Take or renew this daruda's claim on the bot, answering whether it may
-/// serve. Only re-asks while the claim is not already ours, so a held lock
-/// costs nothing per iteration.
+/// Take or renew this daruda's claim on the bot. See
+/// [`TelegramBridge::reclaim`] for why it is keyed on the token.
 fn claim_bot(lock_root: &std::path::Path, token: &str, cx: &mut gpui::AsyncApp) -> bool {
-    use crate::remote_channel::lock::{self, Claim};
-
-    cx.update(|cx| {
-        let bridge = cx.global_mut::<TelegramBridge>();
-        if matches!(bridge.claim, Claim::Ours { .. }) {
-            return true;
-        }
-        bridge.claim = lock::claim(lock_root, token);
-        let serving = bridge.claim.serves();
-        trace::state("bot.claim", || format!("serving={serving}"));
-        serving
-    })
+    cx.update(|cx| cx.global_mut::<TelegramBridge>().reclaim(lock_root, token))
 }
 
-/// Drop the claim, so the bot is free for whichever daruda is still
-/// configured for it.
 fn release_bot(cx: &mut gpui::AsyncApp) {
-    use crate::remote_channel::lock::Claim;
-
-    cx.update(|cx| {
-        let bridge = cx.global_mut::<TelegramBridge>();
-        if matches!(bridge.claim, Claim::Ours { .. }) {
-            trace::state("bot.claim", || "serving=released".to_string());
-        }
-        bridge.claim = Claim::Unavailable;
-    });
+    cx.update(|cx| cx.global_mut::<TelegramBridge>().release_claim());
 }
 
 /// Answer a tapped callback with a toast, then rewrite the tapped message to

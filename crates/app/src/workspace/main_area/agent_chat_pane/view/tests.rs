@@ -56,9 +56,9 @@ fn permission_card(id: u64) -> daruda_acp::ChatItem {
 }
 
 /// Build a minimal, offline `AgentChatView` (no cwd → `Idle` status, no
-/// adapter spawned) as its own window root, so the post-turn marker
-/// methods (`&mut self` + `Instant`/`Duration`, no `Workspace`) can be
-/// driven directly. Lighter than `workspace/tests/agent_chat.rs`'s
+/// adapter spawned) as its own window root, so the activity methods
+/// (`&mut self` + `Instant`/`Duration`, no `Workspace`) can be driven
+/// directly. Lighter than `workspace/tests/agent_chat.rs`'s
 /// `make_activity_view` (which goes through a full `Workspace` +
 /// `create_agent_chat_pane`): `AgentChatView::new` only needs a
 /// `Context<Self>`, not a `Workspace` at all.

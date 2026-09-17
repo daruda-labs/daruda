@@ -6796,8 +6796,14 @@ pub fn remote_retrying() -> String {
 
 /// Status shown when another running daruda holds this bot's claim, so this
 /// one neither polls it nor sends through it.
+/// Shown under the Telegram heading in Settings when another running daruda
+/// holds the bot, so an otherwise "enabled and paired" relay that sends
+/// nothing has a reason on screen.
+pub fn settings_telegram_held_elsewhere() -> String {
+    rust_i18n::t!("settings.telegram_held_elsewhere").into_owned()
+}
 pub fn remote_held_elsewhere() -> String {
-    rust_i18n::t!("remote.held_elsewhere").into_owned()
+    rust_i18n::t!("remote_channel.held_elsewhere").into_owned()
 }
 pub fn remote_failed() -> String {
     rust_i18n::t!("remote_channel.failed").into_owned()

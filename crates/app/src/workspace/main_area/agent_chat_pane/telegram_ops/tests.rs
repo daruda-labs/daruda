@@ -151,8 +151,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
 /// A turn the phone started is solicited, so presence does not decide its
 /// relays: while the pane's `PhoneTurn` ledger is open, a completion or a
 /// second permission wait reaches the phone even with the user at the desk.
-/// Once the ledger closes, the same call is back under the presence rule —
-/// a post-turn follow-up is unsolicited and stays gated.
+/// Once the ledger closes, the same call is back under the presence rule.
 #[gpui::test]
 async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppContext) {
     use crate::platform::presence::AwaySignal;

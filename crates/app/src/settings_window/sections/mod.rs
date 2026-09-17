@@ -533,6 +533,10 @@ impl SettingsWindow {
         let token_configured = self.telegram_token_configured;
         let authorized_chat_id = self.telegram_authorized_chat_id;
         let pair_code = self.telegram_pair_code.clone();
+        // Read live rather than mirrored into a field: which daruda holds the
+        // bot is not a setting, and the answer is only interesting while this
+        // section is on screen.
+        let held_elsewhere = crate::telegram::global::TelegramBridge::bot_held_elsewhere(cx);
 
         div()
             .flex()
@@ -546,6 +550,12 @@ impl SettingsWindow {
                     .text_color(body_color)
                     .child(s::settings_telegram_heading()),
             )
+            .when(held_elsewhere, |body| {
+                body.child(crate::ui::alert::warning(
+                    "settings-telegram-held-elsewhere",
+                    s::settings_telegram_held_elsewhere(),
+                ))
+            })
             .child(checkbox_row(
                 checkbox(
                     "settings-telegram-enabled",

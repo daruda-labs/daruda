@@ -28,6 +28,20 @@ pub enum Status {
     HeldElsewhere,
 }
 
+impl Status {
+    /// Whether reaching this state required the bot's claim, and still implies
+    /// holding it. Asked as a positive fact rather than "not `HeldElsewhere`":
+    /// a worker that gave up, or never started, holds nothing either, and an
+    /// exception list would have to remember every future state.
+    ///
+    /// The worker emits `Connecting` only just after taking the claim and does
+    /// not let go until its retry wait is over, so these three — and only
+    /// these — are states in which this process is serving the bot.
+    pub(crate) fn holds_claim(self) -> bool {
+        matches!(self, Self::Connecting | Self::Connected | Self::Retrying)
+    }
+}
+
 pub struct WorkerEvent {
     pub id: String,
     pub generation: uuid::Uuid,
@@ -90,13 +104,10 @@ pub fn start(
                         continue;
                     }
                 };
-                if !emit(WorkerPayload::Credentials(credentials.clone())) {
-                    return;
-                }
-                // Held for as long as this iteration's session: one daruda per
-                // bot, or Slack splits the user's replies between whichever
-                // sockets happen to be open. Asked here rather than once at
-                // startup so the claim is picked up when the holder quits.
+                // One daruda per bot, or Slack splits the user's replies
+                // between whichever sockets happen to be open. Asked every
+                // iteration rather than once at startup, so the claim is
+                // picked up when the holder quits.
                 let claim = lock::claim(&lock_root, &credentials.bot);
                 if !claim.serves() {
                     if !emit(WorkerPayload::Status(Status::HeldElsewhere)) {
@@ -105,7 +116,11 @@ pub fn start(
                     wait(&cancelled);
                     continue;
                 }
-                if !emit(WorkerPayload::Status(Status::Connecting)) {
+                // Published after the claim, never before: the foreground
+                // reads their presence as proof this process holds the bot.
+                if !emit(WorkerPayload::Credentials(credentials.clone()))
+                    || !emit(WorkerPayload::Status(Status::Connecting))
+                {
                     return;
                 }
                 let publish = |incoming: Incoming| {
@@ -126,9 +141,6 @@ pub fn start(
                         gateway.session(&credentials, &cancelled, publish, ready)
                     }
                 };
-                // Explicit: the claim is what the session ran under, and the
-                // next iteration must ask for it again rather than inherit it.
-                drop(claim);
                 if cancelled.load(Ordering::Relaxed) {
                     return;
                 }
@@ -155,7 +167,11 @@ pub fn start(
                 if !emit(WorkerPayload::Status(Status::Retrying)) {
                     return;
                 }
+                // Held across the wait, not just the session: `Retrying` still
+                // sends over HTTP, and a bot let go here is one another daruda
+                // can take while this one keeps talking into it.
                 wait(&cancelled);
+                drop(claim);
             }
         })?;
     Ok(Worker { stop })

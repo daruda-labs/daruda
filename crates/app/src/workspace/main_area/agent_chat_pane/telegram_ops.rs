@@ -135,7 +135,7 @@ impl Workspace {
 
     /// The header line(s) for a pane's Telegram pings: project name + agent name
     /// when the pane's view is live, else the pane title. Shared by the
-    /// completion, ack, and post-turn relays so they all read identically.
+    /// completion and ack relays so they all read identically.
     pub(in crate::workspace) fn telegram_header(
         &self,
         pane_id: PaneId,
@@ -341,9 +341,9 @@ impl Workspace {
         }
     }
 
-    /// Presence-gated entry point for the completion / permission / post-turn
-    /// relays. Asks `app_presence` whether the user is away and acts on the
-    /// answer immediately: sent, or dropped for good. Nothing is queued, so a
+    /// Presence-gated entry point for the completion and permission relays.
+    /// Asks `app_presence` whether the user is away and acts on the answer
+    /// immediately: sent, or dropped for good. Nothing is queued, so a
     /// ping's send time is always its settle time — a later absence does not
     /// resurrect a ping this call declined.
     ///
@@ -366,7 +366,7 @@ impl Workspace {
     ) -> bool {
         // The ledger closes at the completion tee, after the completion relay
         // has run — so a completion and a second permission wait both land
-        // here with it still open, and a post-turn follow-up with it gone.
+        // here with it still open.
         if self.phone_turn_open(pane_id, cx) {
             trace::delivery("relay.solicited", || {
                 format!("pane={pane_id} text={}", trace::tail_digest(&tail))

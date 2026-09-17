@@ -854,6 +854,7 @@ settings:
   telegram_token_placeholder: "Paste token from @BotFather"
   telegram_save_token: "Save Token"
   telegram_token_configured: "● Token configured"
+  telegram_held_elsewhere: "Another daruda is using this bot — this window sends and receives nothing until it quits"
   telegram_clear_token: "Clear"
   telegram_not_paired: "Not paired"
   telegram_paired: "Paired (chat ID: %{chat_id})"

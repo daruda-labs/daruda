@@ -199,6 +199,57 @@ impl TelegramBridge {
         true
     }
 
+    /// Take or renew this daruda's claim on the bot `token` names, answering
+    /// whether it may serve.
+    ///
+    /// Keyed on the credential, not on "do we hold something": re-pairing to a
+    /// different bot must let the old lock go and take the new one, or this
+    /// instance polls the new bot with nothing excluding a second daruda from
+    /// it. Dropping first is load-bearing rather than tidy — `flock` is per
+    /// open file description, so asking again while our own descriptor still
+    /// holds the lock answers `Theirs` about ourselves.
+    pub(crate) fn reclaim(&mut self, lock_root: &std::path::Path, token: &str) -> bool {
+        if self.claim.holds(token) {
+            return true;
+        }
+        self.release_claim();
+        self.claim = crate::remote_channel::lock::claim(lock_root, token);
+        trace::state("bot.claim", || format!("state={}", self.claim.label()));
+        if matches!(self.claim, Claim::Theirs) {
+            // The Settings row says this too, but only while Settings is open;
+            // a relay that goes quiet for a whole session needs a line someone
+            // can find afterwards.
+            LogWriter::log(
+                ErrorReport::new("Telegram bot held by another daruda")
+                    .severity(ErrorSeverity::Warning)
+                    .message(
+                        "Another running daruda holds this bot, so this one neither polls it \
+                         nor sends through it. Quit the other instance to take it over.",
+                    )
+                    .at(file!(), line!())
+                    .dedup("telegram.bot_held_elsewhere")
+                    .build(),
+            );
+        }
+        self.claim.serves()
+    }
+
+    /// Whether another daruda is the one serving the bot, for the Settings row
+    /// that would otherwise read "enabled, paired" over a silent relay.
+    pub(crate) fn bot_held_elsewhere(cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|bridge| matches!(bridge.claim, Claim::Theirs))
+    }
+
+    /// Let the bot go, so it is free for whichever daruda is still configured
+    /// for it.
+    pub(crate) fn release_claim(&mut self) {
+        if matches!(self.claim, Claim::Ours { .. }) {
+            trace::state("bot.claim", || "state=released".to_string());
+        }
+        self.claim = Claim::Unavailable;
+    }
+
     /// Drop an approval's callback tokens once it has been decided.
     ///
     /// Settle-time cleanup, not tap-time: while a card is live, tapping twice
@@ -598,6 +649,35 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    /// Re-pairing to a different bot has to move the claim with it. Holding the
+    /// old lock while polling the new token is the original defect, reached this
+    /// time through an ordinary Settings action rather than a second process.
+    #[gpui::test]
+    async fn re_pairing_to_another_bot_moves_the_claim(cx: &mut gpui::TestAppContext) {
+        use crate::remote_channel::lock::{self, Claim};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        cx.update(|cx| {
+            let _outbound = install_for_test(true, Some(42), cx);
+            let bridge = cx.global_mut::<TelegramBridge>();
+
+            assert!(bridge.reclaim(dir.path(), "bot-one"));
+            assert!(
+                bridge.reclaim(dir.path(), "bot-one"),
+                "asking again for the bot we already hold must not disturb it"
+            );
+
+            assert!(
+                bridge.reclaim(dir.path(), "bot-two"),
+                "the newly paired bot is free, so it is ours"
+            );
+            assert!(
+                matches!(lock::claim(dir.path(), "bot-one"), Claim::Ours { .. }),
+                "and the bot we left is free for whoever is still configured for it"
+            );
+        });
+    }
 
     /// A bot another daruda is serving is not this one's to speak into: the phone
     /// already has a daruda answering it, and a second sender doubles every ping
