@@ -839,24 +839,32 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
             items.get(ix).map(is_active).unwrap_or(false)
         }
         // Keyed by the response's own first item (`rows::project` passes
-        // `run.start`), so the scan starts at `ix` — not after it. An `ix` that
-        // is itself a `UserText` yields an empty run, which reads inactive.
-        FoldKey::Response(_) => {
-            let end = items
-                .iter()
-                .skip(ix)
-                .position(|it| matches!(it, ChatItem::UserText(_)))
-                .map(|off| ix + off)
-                .unwrap_or(items.len());
-            items
-                .get(ix..end)
-                .is_some_and(|run| run.iter().any(is_active))
+        // `run.start`), so the run includes that item. Asked through
+        // [`agent_run`] rather than rescanned here: a stop marker closes the
+        // run it cut, and a scan that stopped only at the next prompt read the
+        // turn after a Stop as part of this one.
+        FoldKey::Response(_) => items
+            .get(agent_run(items, ix))
+            .is_some_and(|run| run.iter().any(is_active)),
+        // A nested child renders inside its parent's card rather than joining
+        // the run, so a group's liveness must not read one — otherwise a call
+        // that belongs to an inner card holds the group force-expanded.
+        //
+        // The hierarchy is built here rather than passed in because no
+        // paint-path caller reaches this arm: `render` and `reconcile` ask only
+        // about `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys,
+        // leaving projection and the click path, neither of which repaints.
+        FoldKey::ToolGroup(_) => {
+            let hierarchy = ToolHierarchy::build(items);
+            items.get(ix..).is_some_and(|rest| {
+                rest.iter()
+                    .take_while(|item| match item {
+                        ChatItem::ToolCall(tc) => !hierarchy.is_nested_child(tc),
+                        _ => false,
+                    })
+                    .any(is_active)
+            })
         }
-        FoldKey::ToolGroup(_) => items.get(ix..).is_some_and(|rest| {
-            rest.iter()
-                .take_while(|item| matches!(item, ChatItem::ToolCall(_)))
-                .any(is_active)
-        }),
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
                 .take_while(|item| matches!(item, ChatItem::Thinking { .. }))

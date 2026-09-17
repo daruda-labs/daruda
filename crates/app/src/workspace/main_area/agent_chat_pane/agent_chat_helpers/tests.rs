@@ -542,6 +542,68 @@ fn a_response_is_active_when_only_its_first_item_is() {
     assert!(fold_active(&FoldKey::Response(1), &items));
 }
 
+/// A stop marker closes the run it cut, so the response's liveness scan has to
+/// stop there too. Scanning on to the next prompt let the turn *after* a Stop
+/// decide whether the stopped one reads as still running.
+#[test]
+fn a_response_stops_being_scanned_at_the_marker_that_cut_it() {
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::AssistantText {
+            text: "cut".to_owned(),
+            streaming: false,
+            message_id: None,
+            phase: Default::default(),
+        },
+        ChatItem::Interrupted,
+        ChatItem::AssistantText {
+            text: "next".to_owned(),
+            streaming: true,
+            message_id: None,
+            phase: Default::default(),
+        },
+    ];
+    assert!(!fold_active(&FoldKey::Response(1), &items));
+}
+
+/// A nested child renders inside its parent's card, so it is not a member of
+/// the group's run — and a run of settled top-level calls must read settled
+/// even while such a child is still going.
+#[test]
+fn a_group_ignores_a_nested_child_when_judging_its_own_liveness() {
+    use daruda_acp::ToolStatusView::{Completed, InProgress};
+    let mut child = tool_call("t-child", InProgress, 0);
+    child.parent_tool_id = Some("t-parent".to_owned());
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::ToolCall(tool_call("t-parent", Completed, 0)),
+        ChatItem::ToolCall(child),
+    ];
+    assert!(!fold_active(
+        &FoldKey::ToolGroup("t-parent".to_owned()),
+        &items
+    ));
+}
+
+/// A `parent_tool_id` naming a call `items` never carried leaves the child
+/// top-level, so it stays a member of the run — the boundary rule is presence
+/// of the parent, not merely having named one.
+#[test]
+fn a_dangling_parent_keeps_a_call_in_the_group_run() {
+    use daruda_acp::ToolStatusView::{Completed, InProgress};
+    let mut orphan = tool_call("t-orphan", InProgress, 0);
+    orphan.parent_tool_id = Some("gone".to_owned());
+    let items = [
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::ToolCall(tool_call("t-first", Completed, 0)),
+        ChatItem::ToolCall(orphan),
+    ];
+    assert!(fold_active(
+        &FoldKey::ToolGroup("t-first".to_owned()),
+        &items
+    ));
+}
+
 #[test]
 fn fold_active_resolves_per_key() {
     use daruda_acp::ToolStatusView::{Completed, InProgress};

@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use daruda_acp::{ChatItem, ToolCallItem, ToolStatusView};
 
-use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at};
-use super::fold::{FoldKey, FoldState};
+use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at, is_active};
+use super::fold::{FoldContext, FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::tool_category::{ToolCategory, tally_categories};
@@ -860,9 +860,14 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     // A run of one: collapsing would leave the bar standing over
                     // nothing, so its default keeps the call on screen. The bar
                     // and its fold still exist — a deliberate fold still shuts it.
+                    // Liveness is read off the run this walk already resolved,
+                    // hierarchy and all. `fold_context_at` would rescan from
+                    // `grun.start` without that hierarchy, so a nested child
+                    // running inside one of these cards would read as a member.
+                    let group_active = grun.clone().any(|k| is_active(&items[k]));
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
-                        fold_context_at(&group_key, grun.start, items, boundary),
+                        FoldContext::new(boundary.at(grun.start), group_active),
                     ) && (grun.len() > 1 || fold.is_overridden(&group_key));
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
                     let group_tail_revealed = fold.is_expanded(
