@@ -48,6 +48,7 @@ common:
 # clock; see `surface::timestamp`.
 timestamp:
   date_and_time: "%b %-d, %Y, %-I:%M %p"
+  time_only: "%-I:%M %p"
   month_day_and_time: "%b %-d, %-I:%M %p"
 
 # Command palette and quick switchers
@@ -400,7 +401,24 @@ agent_chat:
   permission_title: "Permission required"
   permission_resolved_prefix: "Selected:"
   permission_cancelled: "Cancelled."
-  tool_group_count: "%{count} tool calls"
+  elapsed_seconds: "%{secs}s"
+  elapsed_minutes: "%{mins}m%{secs}s"
+  group_read: "%{count} files read"
+  group_edit: "%{count} files edited"
+  group_search: "%{count} searches"
+  group_run: "%{count} commands run"
+  group_other: "%{count} other calls"
+  group_separator: " · "
+  group_read_one: "1 file read"
+  group_edit_one: "1 file edited"
+  group_search_one: "1 search"
+  group_run_one: "1 command run"
+  group_other_one: "1 other call"
+  turn_running: "Working · %{span}"
+  turn_worked: "Worked for %{span}"
+  turn_output: "%{count} out"
+  turn_separator: " · "
+  thinking_group_count_one: "1 thought"
   thinking_group_count: "%{count} thoughts"
   filtered_show_one: "Show 1 filtered item"
   filtered_show: "Show %{count} filtered items"

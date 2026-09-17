@@ -21,6 +21,9 @@ enum Shape {
     DateAndTime,
     /// Month, day and time, for one whose year the surrounding UI implies.
     MonthDayAndTime,
+    /// Time alone, for one whose day the surrounding UI implies — a stamp on a
+    /// row in a conversation the user is watching happen.
+    TimeOnly,
 }
 
 impl Shape {
@@ -28,6 +31,7 @@ impl Shape {
         match self {
             Self::DateAndTime => super::strings::timestamp_date_and_time(),
             Self::MonthDayAndTime => super::strings::timestamp_month_day_and_time(),
+            Self::TimeOnly => super::strings::timestamp_time_only(),
         }
     }
 }
@@ -55,6 +59,13 @@ pub fn local_month_day_time<T: TimeZone>(when: DateTime<T>) -> String {
 
 /// Render an instant in `tz`. The zone is explicit so the tests can pin one
 /// instead of inheriting whatever the build machine is set to.
+/// Time of day in the local zone, for a stamp whose date the surrounding UI
+/// already implies. The clock convention travels with the locale — en runs on a
+/// 12-hour clock, ko on 24 — so a call site must not assemble one by hand.
+pub fn local_time<T: TimeZone>(when: DateTime<T>) -> String {
+    in_zone(when, &Local, Shape::TimeOnly)
+}
+
 fn in_zone<T, Z>(when: DateTime<T>, tz: &Z, format: Shape) -> String
 where
     T: TimeZone,

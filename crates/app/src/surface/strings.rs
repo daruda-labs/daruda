@@ -2086,6 +2086,12 @@ pub fn timestamp_month_day_and_time() -> String {
     rust_i18n::t!("timestamp.month_day_and_time").into_owned()
 }
 
+/// `chrono` pattern for a time of day alone — a stamp whose date the
+/// surrounding UI already implies.
+pub fn timestamp_time_only() -> String {
+    rust_i18n::t!("timestamp.time_only").into_owned()
+}
+
 /// Inline label on the context meter. `used`/`size` are pre-formatted token
 /// counts; the separator between them is the locale's business.
 pub fn agent_chat_context_meter(used: &str, size: &str) -> String {
@@ -2174,15 +2180,83 @@ pub fn agent_chat_raw_input_label() -> String {
     rust_i18n::t!("agent_chat.raw_input_label").into_owned()
 }
 
-/// Collapsed tool-group header summary, e.g. "3 tool calls".
-pub fn agent_chat_tool_group_count(count: usize) -> String {
-    rust_i18n::t!("agent_chat.tool_group_count", count = count).into_owned()
+/// How long the live turn has been going, e.g. "Working · 9s". Present tense
+/// on purpose: this is the bar of a turn still running, while the settled
+/// phrasing belongs to the answer row below it.
+pub fn agent_chat_turn_running(span: String) -> String {
+    rust_i18n::t!("agent_chat.turn_running", span = span).into_owned()
 }
 
-/// Collapsed thinking-group header title, e.g. "3 thoughts". The group
-/// threshold is 2, so a count of 1 is unreachable and needs no singular form.
+/// How long the turn worked, e.g. "Worked for 3s". `span` arrives already
+/// formatted by the shared elapsed formatter, so this only supplies the phrase
+/// around it.
+pub fn agent_chat_turn_worked(span: String) -> String {
+    rust_i18n::t!("agent_chat.turn_worked", span = span).into_owned()
+}
+
+/// The turn's output-token count, e.g. "1.5k out". `count` is pre-abbreviated:
+/// the row is a trailing badge, so a six-digit number would push the rest of
+/// the header off the line.
+pub fn agent_chat_turn_output(count: String) -> String {
+    rust_i18n::t!("agent_chat.turn_output", count = count).into_owned()
+}
+
+/// Separator between the answer row's trailing facts.
+pub fn agent_chat_turn_separator() -> String {
+    rust_i18n::t!("agent_chat.turn_separator").into_owned()
+}
+
+/// Elapsed run time under a minute, e.g. "5s". The unit is part of the
+/// translation: a bare number with a hardcoded `s` reads as English in every
+/// locale, and this label sits beside translated text.
+pub fn agent_chat_elapsed_seconds(secs: u64) -> String {
+    rust_i18n::t!("agent_chat.elapsed_seconds", secs = secs).into_owned()
+}
+
+/// Elapsed run time at or over a minute, e.g. "1m05s". `secs` arrives
+/// zero-padded: this labels a badge that ticks, so the width has to hold still
+/// as the seconds roll over.
+pub fn agent_chat_elapsed_minutes(mins: u64, secs: String) -> String {
+    rust_i18n::t!("agent_chat.elapsed_minutes", mins = mins, secs = secs).into_owned()
+}
+
+/// One category segment of a tool-group header, e.g. "3 files read". The group
+/// is a run of adjacent calls, so several of these sit side by side when the
+/// agent mixed kinds — which the wire logs show it does about half the time on
+/// one agent, up to four categories in a single group.
+///
+/// A segment of one is common — a group of three mixed kinds is three ones — so
+/// each category carries a singular form rather than printing "1 files read".
+pub fn agent_chat_group_category(category: &str, count: usize) -> String {
+    let one = count == 1;
+    match (category, one) {
+        ("read", true) => rust_i18n::t!("agent_chat.group_read_one"),
+        ("read", false) => rust_i18n::t!("agent_chat.group_read", count = count),
+        ("edit", true) => rust_i18n::t!("agent_chat.group_edit_one"),
+        ("edit", false) => rust_i18n::t!("agent_chat.group_edit", count = count),
+        ("search", true) => rust_i18n::t!("agent_chat.group_search_one"),
+        ("search", false) => rust_i18n::t!("agent_chat.group_search", count = count),
+        ("run", true) => rust_i18n::t!("agent_chat.group_run_one"),
+        ("run", false) => rust_i18n::t!("agent_chat.group_run", count = count),
+        (_, true) => rust_i18n::t!("agent_chat.group_other_one"),
+        (_, false) => rust_i18n::t!("agent_chat.group_other", count = count),
+    }
+    .into_owned()
+}
+
+/// Separator between a tool-group header's category segments.
+pub fn agent_chat_group_separator() -> String {
+    rust_i18n::t!("agent_chat.group_separator").into_owned()
+}
+
+/// Collapsed thinking-group header title, e.g. "3 thoughts". Every run earns a
+/// header, so a count of one is reachable and carries its own form.
 pub fn agent_chat_thinking_group_count(count: usize) -> String {
-    rust_i18n::t!("agent_chat.thinking_group_count", count = count).into_owned()
+    if count == 1 {
+        rust_i18n::t!("agent_chat.thinking_group_count_one").into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.thinking_group_count", count = count).into_owned()
+    }
 }
 
 /// Collapsed label for the filter's per-run disclosure: how many blocks the

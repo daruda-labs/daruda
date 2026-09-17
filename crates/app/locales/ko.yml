@@ -47,6 +47,7 @@ common:
 # 벽시계 시각 표기 (`chrono` 패턴). 한국어는 24시간제. `surface::timestamp` 참고.
 timestamp:
   date_and_time: "%Y년 %-m월 %-d일 %H:%M"
+  time_only: "%H:%M"
   month_day_and_time: "%-m월 %-d일 %H:%M"
 
 # Command palette and quick switchers
@@ -399,7 +400,24 @@ agent_chat:
   permission_title: "권한 필요"
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."
-  tool_group_count: "툴 %{count}개"
+  elapsed_seconds: "%{secs}초"
+  elapsed_minutes: "%{mins}분 %{secs}초"
+  group_read: "파일 %{count}개 읽음"
+  group_edit: "파일 %{count}개 편집"
+  group_search: "검색 %{count}개"
+  group_run: "명령 %{count}개 실행"
+  group_other: "기타 %{count}개"
+  group_separator: " · "
+  group_read_one: "파일 1개 읽음"
+  group_edit_one: "파일 1개 편집"
+  group_search_one: "검색 1개"
+  group_run_one: "명령 1개 실행"
+  group_other_one: "기타 1개"
+  turn_running: "작업 중 · %{span}"
+  turn_worked: "%{span} 작업"
+  turn_output: "출력 %{count}"
+  turn_separator: " · "
+  thinking_group_count_one: "생각 1개"
   thinking_group_count: "생각 %{count}개"
   filtered_show_one: "필터로 가린 1개 보기"
   filtered_show: "필터로 가린 %{count}개 보기"
