@@ -69,9 +69,8 @@ impl AgentChatView {
         // a second Stop can still clear it. A trailing-subagent Stop (turn already
         // idle) neither stashes nor opens the window: the foreground turn's
         // already-captured outcome is preserved and fires when the tools settle.
-        if self.queue.turn.is_in_flight() {
+        if self.queue.turn.cancel() {
             self.activity.pending_completion = Some(TurnOutcome::Stopped);
-            self.activity.cancel_in_flight = true;
             // Mark where the run was cut — the adapter's live path drops the
             // SDK's own interrupt entry while its replay lets it through, so
             // without this push a stop is invisible until restore. See
@@ -157,7 +156,7 @@ impl AgentChatView {
     /// (no rows/notify) so the three call paths (Stop, `TurnEnded`, `Error`)
     /// share one settle sequence and can't drift. Idempotent.
     pub(super) fn settle_turn(&mut self) {
-        self.queue.turn = Turn::Idle;
+        self.queue.turn.finish();
         self.settle_run_state();
     }
 
@@ -532,7 +531,7 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) {
         let now = std::time::Instant::now();
-        self.queue.turn = Turn::InFlight { started_at: now };
+        self.queue.turn.start(now);
         let _ = self.reconcile_activity(now);
         self.seed_transcript(items, window, cx);
     }
@@ -853,7 +852,6 @@ impl AgentChatView {
         // and a reconnect replays the history, either of which would otherwise
         // hang the previous conversation's numbers on the new rows.
         self.activity.turn_records.clear();
-        self.activity.cancel_in_flight = false;
         self.session_usage = None;
         self.assets.clear();
         self.fold.clear_overrides();

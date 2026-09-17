@@ -101,12 +101,12 @@ if ! grep -qE '^enum Turn \{' "$VIEW_DIR/mod.rs"; then
 fi
 
 HITS_A=$(
-    grep -rEn '\.turn\b|Turn::(InFlight|Idle)\b' "$SCAN_DIR" \
+    grep -rEn '\.turn\b|Turn::(InFlight|Idle|AwaitingCancelAck)\b' "$SCAN_DIR" \
         --include='*.rs' \
         | grep -vE '/agent_chat_pane/view/' \
         | grep -vE '/tests?\.rs:|/tests/' \
         | sed -E 's#//.*##' \
-        | grep -E '\.turn\b|Turn::(InFlight|Idle)\b' \
+        | grep -E '\.turn\b|Turn::(InFlight|Idle|AwaitingCancelAck)\b' \
         || true
 )
 

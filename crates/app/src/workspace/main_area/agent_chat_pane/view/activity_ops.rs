@@ -7,7 +7,6 @@ use daruda_acp::{ChatItem, subagent_activity};
 
 use gpui::Context;
 
-use super::Turn;
 use super::{
     ActivitySpan, ActivityState, AgentChatView, AgentSessionStatus, SUBAGENT_QUIESCENCE,
     TurnOutcome,
@@ -209,10 +208,10 @@ impl AgentChatView {
         let Some(run_start) = Self::run_start_of(&self.items) else {
             return;
         };
-        let worked_for = match self.queue.turn {
-            Turn::InFlight { started_at, .. } => started_at.elapsed(),
-            Turn::Idle => return,
+        let Some(started_at) = self.queue.turn.started_at() else {
+            return;
         };
+        let worked_for = started_at.elapsed();
         self.activity.turn_records.insert(
             run_start,
             super::TurnRecord {

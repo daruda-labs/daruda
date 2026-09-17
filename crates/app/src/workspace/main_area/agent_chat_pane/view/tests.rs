@@ -449,7 +449,7 @@ fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
             view.set_turn_in_flight();
             view.cancel_turn(cx);
             assert!(
-                view.activity.cancel_in_flight,
+                view.turn_awaiting_cancel_ack(),
                 "the cancel window stays open until the ack"
             );
 
@@ -486,7 +486,7 @@ fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
                 cx,
             );
             assert!(
-                !view.activity.cancel_in_flight,
+                !view.turn_awaiting_cancel_ack(),
                 "the ack closes the cancel window"
             );
             assert!(view.turn_is_idle(), "nothing left to run after both Stops");

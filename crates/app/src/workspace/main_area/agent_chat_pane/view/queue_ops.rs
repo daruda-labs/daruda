@@ -12,7 +12,7 @@ use super::super::fold::FoldKey;
 use super::super::telegram_ops::PhoneTurn;
 use super::{
     AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, PhoneAckEffect,
-    PromptDispatch, PromptId, PromptOrigin, QueuedPrompt, Turn,
+    PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
 };
 
 impl AgentChatView {
@@ -20,21 +20,25 @@ impl AgentChatView {
     /// does) — `Turn` is module-private, so tests drive it through this.
     #[cfg(test)]
     pub(in crate::workspace) fn set_turn_in_flight(&mut self) {
-        self.queue.turn = Turn::InFlight {
-            started_at: std::time::Instant::now(),
-        };
+        self.queue.turn.start(std::time::Instant::now());
     }
 
     /// Test-only hook: return the turn to idle (as `settle_turn` does).
     #[cfg(test)]
     pub(in crate::workspace) fn set_turn_idle(&mut self) {
-        self.queue.turn = Turn::Idle;
+        self.queue.turn.finish();
     }
 
     /// Test-only hook: whether the turn is idle (no prompt in flight).
     #[cfg(test)]
     pub(in crate::workspace) fn turn_is_idle(&self) -> bool {
         !self.queue.turn.is_in_flight()
+    }
+
+    /// Test-only hook: whether a Stop's cancel window is still open.
+    #[cfg(test)]
+    pub(in crate::workspace) fn turn_awaiting_cancel_ack(&self) -> bool {
+        self.queue.turn.awaiting_cancel_ack()
     }
 
     /// Test-only hook: run the model half of the queued-prompt drain without a
@@ -125,8 +129,7 @@ impl AgentChatView {
         }
         let ready = matches!(self.status, AgentSessionStatus::Connected)
             && self.handle.is_some()
-            && !self.queue.turn.is_in_flight()
-            && !self.activity.cancel_in_flight;
+            && self.queue.turn.can_dispatch();
         let dispatch = if ready {
             // Connected and idle: send now, mark the turn in flight, and echo.
             // What goes on the wire and what the transcript shows are not the
@@ -136,9 +139,7 @@ impl AgentChatView {
             if let Some(handle) = &self.handle {
                 handle.send_prompt(wire);
             }
-            self.queue.turn = Turn::InFlight {
-                started_at: std::time::Instant::now(),
-            };
+            self.queue.turn.start(std::time::Instant::now());
             self.echo_prompt(text, cx);
             self.arm_phone_turn_if(origin);
             PromptDispatch::SentNow
@@ -417,10 +418,7 @@ impl AgentChatView {
     /// Move the next queued prompt into the active-turn model and return the
     /// text that should be sent over ACP. No-op while a turn or cancel is active.
     fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<String> {
-        if self.queue.turn.is_in_flight()
-            || self.activity.cancel_in_flight
-            || self.queue.pending_prompts.is_empty()
-        {
+        if !self.queue.turn.can_dispatch() || self.queue.pending_prompts.is_empty() {
             return None;
         }
         let qp = self.queue.pending_prompts.remove(0);
@@ -430,9 +428,7 @@ impl AgentChatView {
         if self.queue.editing_prompt == Some(qp.id) {
             self.queue.editing_prompt = None;
         }
-        self.queue.turn = Turn::InFlight {
-            started_at: std::time::Instant::now(),
-        };
+        self.queue.turn.start(std::time::Instant::now());
         let text = qp.text;
         self.echo_prompt(text.clone(), cx);
         self.arm_phone_turn_if(qp.origin);

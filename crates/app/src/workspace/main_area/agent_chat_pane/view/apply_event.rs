@@ -154,7 +154,7 @@ impl AgentChatView {
                     // state / captured outcome can't leak into the fresh one.
                     self.activity.span = ActivitySpan::Idle;
                     self.activity.pending_completion = None;
-                    self.activity.cancel_in_flight = false;
+                    self.queue.turn.acknowledge_cancel();
                     // A fresh session gets its own chance to report a dropped-
                     // output mismatch instead of inheriting the prior session's
                     // silence.
@@ -250,7 +250,7 @@ impl AgentChatView {
                 phone_turn_action = PhoneTurnAction::Answer;
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
-                if self.activity.cancel_in_flight =>
+                if self.queue.turn.awaiting_cancel_ack() =>
             {
                 // The terminal signal (a `cancelled` `TurnEnded`, or a
                 // `TurnFailed` if the prompt errored as the cancel raced it) for a
@@ -261,7 +261,7 @@ impl AgentChatView {
                 // re-prompt was never put on the wire (see `send_prompt_text`'s
                 // `cancel_in_flight` guard), so nothing raced this ack and a
                 // second Stop could still have cleared it.
-                self.activity.cancel_in_flight = false;
+                self.queue.turn.acknowledge_cancel();
                 // No further chunk for this turn can arrive. Settle what landed
                 // inside the cancel window first: Stop's own settle ran before
                 // those chunks existed, and each one started a *fresh* streaming
@@ -400,7 +400,7 @@ impl AgentChatView {
                 // A session-level error terminates every outstanding turn,
                 // including any cancel we were still awaiting an ack for — close
                 // the cancel window so a post-reconnect turn isn't misread.
-                self.activity.cancel_in_flight = false;
+                self.queue.turn.acknowledge_cancel();
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
                 self.replay = Replay::Live;

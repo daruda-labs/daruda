@@ -114,12 +114,74 @@ enum Turn {
     InFlight {
         started_at: std::time::Instant,
     },
+    /// A Stop settled the turn locally and the agent still owes one `cancelled`
+    /// `TurnEnded` for it. A prompt typed here buffers client-side rather than
+    /// racing onto the wire, so a stale ack cannot be misattributed to the turn
+    /// the user re-prompted.
+    AwaitingCancelAck,
 }
 
 impl Turn {
     /// True while a prompt turn is on the wire (Send ↔ Stop affordance, badge).
+    /// A cancelled turn is *not* in flight: Stop settles it immediately so a
+    /// hung agent that never acks cannot leave the pane pulsing.
     fn is_in_flight(&self) -> bool {
         matches!(self, Turn::InFlight { .. })
+    }
+
+    /// Whether a prompt may go on the wire — nothing in flight *and* no ack
+    /// owed. One question rather than two fields a call site has to remember to
+    /// ask in full.
+    fn can_dispatch(&self) -> bool {
+        matches!(self, Turn::Idle)
+    }
+
+    /// True between a Stop and the terminal signal that closes its window.
+    fn awaiting_cancel_ack(&self) -> bool {
+        matches!(self, Turn::AwaitingCancelAck)
+    }
+
+    /// When the in-flight turn started, for the per-turn record. `None` for a
+    /// turn that never ran on this clock — a restored one, or one a Stop cut.
+    fn started_at(&self) -> Option<std::time::Instant> {
+        match self {
+            Turn::InFlight { started_at } => Some(*started_at),
+            Turn::Idle | Turn::AwaitingCancelAck => None,
+        }
+    }
+
+    /// A prompt went out. `now` is passed in so a test can pin the clock.
+    fn start(&mut self, now: std::time::Instant) {
+        *self = Turn::InFlight { started_at: now };
+    }
+
+    /// The turn ended on its own terms. Leaves an open cancel window alone: the
+    /// ack it waits for has not landed, and `cancel_turn` settles *before* it
+    /// arrives, so clearing here would reopen the race this state exists for.
+    fn finish(&mut self) {
+        if !self.awaiting_cancel_ack() {
+            *self = Turn::Idle;
+        }
+    }
+
+    /// A Stop cut the turn. Answers whether there was one to cut, which is what
+    /// decides whether an ack is owed and a stop marker earned — an Escape that
+    /// only cancels a trailing subagent cuts no turn.
+    fn cancel(&mut self) -> bool {
+        let was_in_flight = self.is_in_flight();
+        if was_in_flight {
+            *self = Turn::AwaitingCancelAck;
+        }
+        was_in_flight
+    }
+
+    /// The ack landed, or the session that owed it is gone. A no-op on a turn
+    /// that is not waiting for one, so a fresh-session reset cannot settle a
+    /// live turn behind the caller's back.
+    fn acknowledge_cancel(&mut self) {
+        if self.awaiting_cancel_ack() {
+            *self = Turn::Idle;
+        }
     }
 }
 
@@ -491,10 +553,6 @@ pub(in crate::workspace) struct ActivityTracker {
     /// What each settled run cost, keyed by the run's first item — the same key
     /// the run's fold uses, so a record and the bar above it name one thing.
     pub(in crate::workspace) turn_records: HashMap<usize, TurnRecord>,
-    /// True between a Stop and its `cancelled` `TurnEnded` ack. While set, a
-    /// re-prompt buffers client-side instead of racing onto the wire ahead of
-    /// the cancel; cleared by the first `TurnEnded`/`Error` after the Stop.
-    pub(in crate::workspace) cancel_in_flight: bool,
 }
 
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
@@ -1049,6 +1107,60 @@ impl Render for AgentChatView {
         #[cfg(test)]
         self.render_count.set(self.render_count.get() + 1);
         super::render::render(self, cx)
+    }
+}
+
+#[cfg(test)]
+mod turn_tests {
+    use super::Turn;
+    use std::time::Instant;
+
+    /// The four transitions, and the one an open cancel window must survive:
+    /// Stop settles the turn *before* the ack arrives, so a `finish` in between
+    /// must not close the window the ack is owed against.
+    #[test]
+    fn the_cancel_window_outlives_a_settle_and_closes_only_on_its_ack() {
+        let mut turn = Turn::default();
+        assert!(turn.can_dispatch(), "an idle turn takes a prompt");
+
+        turn.start(Instant::now());
+        assert!(turn.is_in_flight());
+        assert!(!turn.can_dispatch(), "one turn at a time");
+        assert!(turn.started_at().is_some());
+
+        assert!(turn.cancel(), "there was a turn to cut");
+        assert!(turn.awaiting_cancel_ack());
+        assert!(
+            !turn.is_in_flight(),
+            "Stop settles locally so a hung agent cannot pulse forever"
+        );
+        assert!(!turn.can_dispatch(), "a re-prompt buffers until the ack");
+        assert!(turn.started_at().is_none(), "a cut turn records no span");
+
+        turn.finish();
+        assert!(turn.awaiting_cancel_ack(), "the window survives the settle");
+
+        turn.acknowledge_cancel();
+        assert!(turn.can_dispatch(), "the ack reopens the wire");
+    }
+
+    /// An Escape that only cancels a trailing subagent cuts no turn, so it owes
+    /// no ack and earns no stop marker.
+    #[test]
+    fn cancelling_an_idle_turn_opens_no_window() {
+        let mut turn = Turn::Idle;
+        assert!(!turn.cancel());
+        assert!(turn.can_dispatch());
+    }
+
+    /// A fresh-session reset acknowledges a window that may not be open; doing
+    /// so must not settle a turn that is actually running.
+    #[test]
+    fn acknowledging_without_a_window_leaves_a_live_turn_alone() {
+        let mut turn = Turn::Idle;
+        turn.start(Instant::now());
+        turn.acknowledge_cancel();
+        assert!(turn.is_in_flight(), "no window was open to close");
     }
 }
 
