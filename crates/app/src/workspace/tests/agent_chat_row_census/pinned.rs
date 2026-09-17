@@ -19,27 +19,31 @@ use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, proj
 /// than one titled row per work step, so `AUTO` and `EXPANDED` cost more rows
 /// than the step layer did — that is the shape being bought. `SUMMARY` is
 /// untouched: a folded response still costs its bar and its conclusion.
-const CODEX_AUTO: [usize; 3] = [155, 3, 33];
-const CODEX_TAIL: [usize; 3] = [18, 3, 19];
+const CODEX_AUTO: [usize; 3] = [167, 4, 37];
+const CODEX_TAIL: [usize; 3] = [20, 4, 22];
 const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
-const CODEX_EXPANDED: [usize; 3] = [377, 3, 57];
+/// Every run earns a bar, one call included, and a run of one keeps its call
+/// visible under it — so a lone call now costs its bar on top of its own row.
+/// That is what lifted `AUTO`, `TAIL`, `SETTLED` and the two `EXPANDED` ceilings
+/// below; a group of two or more is unchanged.
+const CODEX_EXPANDED: [usize; 3] = [420, 4, 71];
 /// The ceiling with the step axis engaged. Codex's cut is the response-level
 /// one: its runs are short, so most of what goes is whole steps.
-const CODEX_EXPANDED_TAIL: [usize; 3] = [40, 3, 26];
-const CODEX_SETTLED: [usize; 3] = [3, 2, 33];
+const CODEX_EXPANDED_TAIL: [usize; 3] = [42, 4, 35];
+const CODEX_SETTLED: [usize; 3] = [3, 2, 37];
 
 /// Claude rows per turn under each projection mode. Turn 0 is the one turn
 /// with no tools and a single block; it costs one row for the response bar
 /// that carries the filter's reveal chip.
-const CLAUDE_AUTO: [usize; 3] = [3, 9, 47];
-const CLAUDE_TAIL: [usize; 3] = [3, 9, 14];
+const CLAUDE_AUTO: [usize; 3] = [3, 9, 55];
+const CLAUDE_TAIL: [usize; 3] = [3, 9, 17];
 const CLAUDE_SUMMARY: [usize; 3] = [3, 3, 3];
-const CLAUDE_EXPANDED: [usize; 3] = [3, 70, 79];
+const CLAUDE_EXPANDED: [usize; 3] = [3, 70, 87];
 /// The same ceiling with the step axis engaged — the numbers the in-group
 /// window is measured by. Turn 1 is the shape that motivated it; see
 /// [`the_step_window_reaches_inside_a_long_tool_group`].
-const CLAUDE_EXPANDED_TAIL: [usize; 3] = [3, 27, 19];
-const CLAUDE_SETTLED: [usize; 3] = [3, 3, 47];
+const CLAUDE_EXPANDED_TAIL: [usize; 3] = [3, 27, 22];
+const CLAUDE_SETTLED: [usize; 3] = [3, 3, 55];
 const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 2, 2];
 
 /// Project through the fresh-pane defaults without a named test lens.

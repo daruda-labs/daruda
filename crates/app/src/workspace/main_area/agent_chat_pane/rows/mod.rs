@@ -12,11 +12,8 @@ use super::agent_chat_helpers::{TurnBoundary, agent_run, fold_context_at};
 use super::fold::{FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
 use crate::transcript::display_filter::DisplayFilter;
+use crate::transcript::tool_category::{ToolCategory, tally_categories};
 use tail::{StepWindow, TailWindow};
-
-/// Minimum consecutive same-kind items that earn a group header. Governs tool
-/// runs and thinking runs alike, so the two thresholds cannot drift apart.
-const RUN_GROUP_MIN: usize = 2;
 
 /// What the display filter dropped from one run and the reveal can put back.
 ///
@@ -84,6 +81,19 @@ pub(in crate::workspace) enum RowKind {
         /// than the user turn: a restored pane can open with a run whose user
         /// turn was dropped on replay, and that run needs a bar too.
         run_start: usize,
+        /// What the turn did, by tool category, most-numerous first.
+        ///
+        /// Computed here rather than in the renderer because the hierarchy that
+        /// decides which calls are top-level already exists at this point;
+        /// rebuilding it per frame for every bar on screen would put an
+        /// items-sized walk on the paint path.
+        ///
+        /// Filter-blind and nesting-aware, which is the opposite of a group
+        /// bar's rule: this bar summarizes the turn rather than disclosing a
+        /// fixed set of rows, so a narrowed turn must still show what it did —
+        /// and a subagent's inner calls are already counted inside the card
+        /// that spawned them.
+        categories: Vec<(ToolCategory, usize)>,
         collapsed: bool,
         /// What the display filter took out of this response. The bar is the
         /// run's one header, so the reveal control rides here rather than on a
@@ -349,6 +359,22 @@ pub(in crate::workspace) fn project_with_filter_index<'a>(
                 RenderRow::at(
                     RowKind::ResponseHeader {
                         run_start: run.start,
+                        // Only when the turn has more than one tool run. With a
+                        // single run the bar directly below says the same thing,
+                        // and two bars repeating one tally reads as a rendering
+                        // fault rather than as a summary — so the turn bar falls
+                        // back to previewing the prose, as it does for a turn
+                        // that called nothing at all.
+                        categories: if top_level_tool_runs(items, run.clone(), hierarchy) > 1 {
+                            tally_categories(run.clone().filter_map(|k| match &items[k] {
+                                ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc) => {
+                                    Some(tc)
+                                }
+                                _ => None,
+                            }))
+                        } else {
+                            Vec::new()
+                        },
                         collapsed,
                         // Back-patched once the run walk knows what it dropped.
                         filtered: FilteredAway::default(),
@@ -690,6 +716,28 @@ fn tool_run_end(
     k
 }
 
+/// How many separate top-level tool runs the response holds. One run means the
+/// group bar below carries the whole tally, which is what the turn bar checks
+/// before deciding whether repeating it would say anything.
+fn top_level_tool_runs(
+    items: &[ChatItem],
+    run: std::ops::Range<usize>,
+    hierarchy: &ToolHierarchy<'_>,
+) -> usize {
+    let limit = run.end;
+    let mut runs = 0;
+    let mut k = run.start;
+    while k < limit {
+        if top_level_tool(items, k, hierarchy) {
+            runs += 1;
+            k = tool_run_end(items, k, limit, hierarchy);
+        } else {
+            k += 1;
+        }
+    }
+    runs
+}
+
 /// Whether this call earns a row of its own.
 ///
 /// A *row* boundary, not a narrowing one: both axes still reach inside the card
@@ -797,17 +845,25 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
             let covered = k < window.window_start;
             let folded = response_collapsed || (!tail_revealed && covered);
             if top_level_tool(items, k, hierarchy) {
+                // Every run earns a header, one call included: a turn's shape
+                // must not change with how many calls happened to land next to
+                // each other, and the bar is where the run's fold and its
+                // summary live. A run always holds at least the call that
+                // started it, so there is no shorter case to branch on.
                 let grun = k..tool_run_end(items, k, run.end, hierarchy);
                 k = grun.end;
                 let group = GroupFilter::of(grun.clone(), items, filter);
                 let group_live = run_is_live(items, grun.clone(), live_units);
-                if grun.len() >= RUN_GROUP_MIN {
+                {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
+                    // A run of one: collapsing would leave the bar standing over
+                    // nothing, so its default keeps the call on screen. The bar
+                    // and its fold still exist — a deliberate fold still shuts it.
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         fold_context_at(&group_key, grun.start, items, boundary),
-                    );
+                    ) && (grun.len() > 1 || fold.is_overridden(&group_key));
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
                     let group_tail_revealed = fold.is_expanded(
                         &group_tail_key,
@@ -850,13 +906,6 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                             revealed: group_tail_revealed,
                         },
                     );
-                } else {
-                    out.push(
-                        RowKind::AgentItem(grun.start),
-                        folded && !group_live,
-                        group.hides_the_header(),
-                        base_indent,
-                    );
                 }
             } else if matches!(&items[k], ChatItem::Thinking { .. }) {
                 let gstart = k;
@@ -870,7 +919,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     k += 1;
                 }
                 let grun = gstart..k;
-                if grun.len() >= RUN_GROUP_MIN {
+                {
                     let group_key = FoldKey::ThinkingGroup(gstart);
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
@@ -894,13 +943,6 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         base_indent,
                         group,
                         GroupWindow::Undivided,
-                    );
-                } else {
-                    out.push(
-                        RowKind::AgentItem(gstart),
-                        folded,
-                        !filter.matches(&items[gstart]),
-                        base_indent,
                     );
                 }
             } else {

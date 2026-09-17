@@ -88,7 +88,7 @@ fn turn_with_tools_nests_response_and_group() {
             ("item", false),  // the prose is a plain paragraph
             ("group", false), // the calls behind it are one group
             ("grouptail", true),
-            ("item", true),
+            ("item", true), // three settled members, folded under their bar
             ("item", true),
             ("item", true),
             ("item", false), // the conclusion
@@ -144,21 +144,21 @@ fn past_turn_collapses_current_expands() {
     assert_eq!(
         kinds(&rows),
         vec![
-            ("user", false),     // first
-            ("response", false), // header always shown
+            ("user", false),
+            ("response", false),
             ("tail", true),
-            ("item", false), // a1 = conclusion, stays visible
+            ("item", false),
             ("group", true),
             ("grouptail", true),
             ("item", true),
             ("item", true),
-            ("user", false), // second
+            ("user", false),
             ("response", false),
             ("tail", true),
-            ("item", false),  // a2 = conclusion, never folded away
-            ("group", false), // the open response shows its group bar
+            ("item", false),
+            ("group", false),
             ("grouptail", true),
-            ("item", true), // whose settled members stay folded
+            ("item", true),
             ("item", true),
         ]
     );
@@ -238,16 +238,16 @@ fn expanded_mode_opens_past_responses_and_the_newest_settled_groups() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("item", false),  // a1
-            ("group", false), // the past response is open, its group is not
+            ("item", false),
+            ("group", false),
             ("grouptail", true),
             ("item", true),
             ("item", true),
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("item", false),  // a2
-            ("group", false), // the newest turn goes one level deeper
+            ("item", false),
+            ("group", false),
             ("grouptail", true),
             ("item", false),
             ("item", false),
@@ -294,8 +294,8 @@ fn working_indicator_fills_gap_after_tool_group_settles() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("item", false),  // assistant prose = conclusion, never folded away
-            ("group", false), // the tool group's bar
+            ("item", false),
+            ("group", false),
             ("grouptail", true),
             ("item", true), // settled members collapsed
             ("item", true),
@@ -789,16 +789,17 @@ fn subagent_child_tool_calls_get_no_row() {
     );
     assert!(
         rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
-        "the parent tool call still renders as a row"
+        "the parent tool call still renders as a row (under its own group bar)"
     );
     assert!(
         !rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(2))),
         "the subagent child earns no row of its own"
     );
     assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. })),
+        rows.iter()
+            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+            .count()
+            == 1,
         "a parent + its child are not a sibling tool group"
     );
 }
@@ -836,11 +837,12 @@ fn multiple_subagent_children_all_skip_and_parent_stays_single() {
             .any(|r| matches!(r.kind, RowKind::AgentItem(2) | RowKind::AgentItem(3))),
         "both subagent children are skipped from the main flow"
     );
-    assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. })),
-        "a parent + its children are not a sibling tool group"
+    assert_eq!(
+        rows.iter()
+            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+            .count(),
+        1,
+        "the parent is one run of one; its children are not siblings in it"
     );
 }
 
@@ -1195,7 +1197,7 @@ fn collapsed_response_hides_a_settled_tool_group() {
 }
 
 #[test]
-fn lone_tool_call_is_not_grouped() {
+fn a_lone_tool_call_gets_its_own_group() {
     let items = [asst("x"), tool("a", ToolStatusView::Completed), asst("y")];
     let rows = project(
         &items,
@@ -1210,15 +1212,16 @@ fn lone_tool_call_is_not_grouped() {
         vec![
             ("response", false),
             ("tail", true),
-            ("item", false), // "x"
-            ("item", false), // the tool call — a plain item, not a group
-            ("item", false), // "y" = conclusion, never folded away
+            ("item", false),     // "x"
+            ("group", false),    // one call is still a run, so it earns a bar
+            ("grouptail", true), // nothing behind the bar
+            ("item", false),     // the call stays — a bar over nothing is worse
+            ("item", false),     // "y" = conclusion, never folded away
         ],
-        "a single tool call renders as a plain item, no group header"
+        "one call earns the bar that carries its fold, like any other run"
     );
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
     );
 }
@@ -1290,6 +1293,7 @@ fn every_row_kind_declares_a_distinct_slot() {
     let kinds = vec![
         RowKind::User(0),
         RowKind::ResponseHeader {
+            categories: Vec::new(),
             run_start: 1,
             collapsed: false,
             filtered: FilteredAway::default(),
@@ -1432,6 +1436,8 @@ fn leading_run_without_a_user_anchor_still_gets_a_bar() {
             ("response", false),
             ("tail", true),
             ("item", false),
+            ("group", false),
+            ("grouptail", true),
             ("item", false)
         ]
     );
@@ -1493,9 +1499,14 @@ fn prose_in_front_of_a_run_stays_a_row_of_its_own() {
     );
     assert!(
         rows.iter()
-            .filter(|r| matches!(r.kind, RowKind::AgentItem(1) | RowKind::AgentItem(2)))
+            .filter(|r| matches!(r.kind, RowKind::AgentItem(2)))
             .all(|r| !r.hidden),
-        "the thought and the prose are plain rows the response's own fold governs"
+        "the prose stays a plain row the response's own fold governs"
+    );
+    assert_eq!(
+        think_group_spans(&rows),
+        vec![(1, 1)],
+        "the lone thought earns a bar of its own and folds under it"
     );
     let group = rows
         .iter()
@@ -1509,10 +1520,10 @@ fn prose_in_front_of_a_run_stays_a_row_of_its_own() {
     assert_eq!(group, (3, 2), "the group starts at the first call");
     let indents: Vec<u8> = rows
         .iter()
-        .filter(|r| matches!(r.kind, RowKind::AgentItem(1) | RowKind::AgentItem(2)))
+        .filter(|r| matches!(r.kind, RowKind::AgentItem(2)))
         .map(|r| r.indent)
         .collect();
-    assert_eq!(indents, vec![1, 1], "no wrapper indents the prose");
+    assert_eq!(indents, vec![1], "no wrapper indents the prose");
     assert!(
         rows.iter()
             .any(|r| matches!(r.kind, RowKind::ConclusionItem(5)) && !r.hidden)
@@ -1580,10 +1591,11 @@ fn a_response_without_tools_gets_no_group() {
     );
 }
 
-/// `RUN_GROUP_MIN` is the whole rule: one call is already one row, two earn a
-/// bar that says how many are behind it.
+/// `RUN_GROUP_MIN` is the whole rule, and it is one: every run gets the bar
+/// that carries its fold and its summary, so a turn's shape does not change
+/// with how many calls happened to land next to each other.
 #[test]
-fn a_run_earns_a_group_at_two_calls_not_one() {
+fn every_run_earns_a_group_however_short() {
     use ToolStatusView::Completed;
     let groups = |items: &[ChatItem]| {
         project(
@@ -1604,7 +1616,7 @@ fn a_run_earns_a_group_at_two_calls_not_one() {
             tool("a", Completed),
             asst("done"),
         ]),
-        0
+        1
     );
     assert_eq!(
         groups(&[
@@ -1625,7 +1637,7 @@ fn a_run_earns_a_group_at_two_calls_not_one() {
 /// captures (`acp-wire-codex-acp.log`, `acp-wire-claude.log`) hold zero nested
 /// tool calls, so this split is unexercised in practice.
 #[test]
-fn a_nested_child_between_two_calls_leaves_them_two_ungrouped_runs() {
+fn a_nested_child_between_two_calls_leaves_them_two_separate_groups() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -1643,8 +1655,12 @@ fn a_nested_child_between_two_calls_leaves_them_two_ungrouped_runs() {
             ("user", false),
             ("response", false),
             ("tail", true),
-            ("item", false), // a
-            ("item", false), // b, with no group bar over either
+            ("group", false), // a — its own run
+            ("grouptail", true),
+            ("item", false),
+            ("group", false), // b — the nested child split them, so two bars
+            ("grouptail", true),
+            ("item", false),
         ]
     );
 
@@ -2160,10 +2176,10 @@ fn a_collapsed_group_hides_its_own_boundary() {
     );
 }
 
-/// A single call is not a group, so it has no boundary of its own — the
-/// response's window is the only one that can cover it.
+/// A one-call group has a boundary like any other, but it covers nothing — the
+/// row exists for slot stability and stays off screen.
 #[test]
-fn an_ungrouped_call_gets_no_group_boundary() {
+fn a_one_call_groups_boundary_withholds_nothing() {
     let items = [
         ChatItem::UserText("q".into()),
         asst("working"),
@@ -2171,11 +2187,18 @@ fn an_ungrouped_call_gets_no_group_boundary() {
         asst("done"),
     ];
     let rows = project_open_group(&items, StepWindow::uniform(TailWindow::Last(1)));
-    assert!(
-        !rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
-    );
+    let boundary = rows
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::ToolGroupTailMore { .. }))
+        .expect("the group has a boundary row");
+    assert!(boundary.hidden, "nothing is behind it, so it does not show");
+    assert!(matches!(
+        boundary.kind,
+        RowKind::ToolGroupTailMore {
+            hidden_calls: 0,
+            ..
+        }
+    ));
 }
 
 /// The group's window hides the calls it covers, and the group's own boundary
@@ -3049,6 +3072,7 @@ fn the_bar_keeps_its_slot_as_its_tally_changes() {
         RenderRow::at(
             RowKind::ResponseHeader {
                 run_start,
+                categories: Vec::new(),
                 collapsed,
                 filtered,
             },
@@ -3200,7 +3224,7 @@ fn an_empty_message_is_never_the_conclusion() {
     assert_eq!(
         visible_items,
         vec![1, 2],
-        "the real reply and the call it introduced"
+        "the real reply and the call it introduced, which its bar keeps visible"
     );
     assert!(
         !rows
@@ -3326,20 +3350,17 @@ fn a_thinking_run_gets_one_group_header_and_indents_its_members() {
     }
 }
 
+/// Every run earns a header, however short — a lone thought that rendered bare
+/// while a pair sat under a bar read as two different kinds of step.
 #[test]
-fn a_lone_thought_is_not_grouped() {
+fn a_lone_thought_earns_its_own_group() {
     let items = [
         ChatItem::UserText("q".into()),
         think("just one"),
         asst("done"),
     ];
     let rows = project_all(&items);
-    assert!(think_group_headers(&rows).is_empty());
-    assert!(
-        rows.iter()
-            .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && !r.hidden),
-        "the thought keeps its own plain row"
-    );
+    assert_eq!(think_group_spans(&rows), vec![(1, 1)]);
 }
 
 #[test]
@@ -3395,15 +3416,16 @@ fn an_empty_thought_inside_a_run_splits_it_rather_than_being_skipped_through() {
     let rows = project_all(&items);
     assert_eq!(
         think_group_spans(&rows),
-        vec![(3, 2)],
-        "b + c earn the only group; a is left alone below RUN_GROUP_MIN"
+        vec![(1, 1), (3, 2)],
+        "the empty thought splits the run in two; each side earns its own bar"
     );
     assert_eq!(
         kinds(&rows),
         vec![
             ("user", false),
             ("response", false),
-            ("item", false),       // a, a lone thought with no bar of its own
+            ("thinkgroup", false), // a, alone but still a run
+            ("item", true),
             ("thinkgroup", false), // b + c
             ("item", true),
             ("item", true),
@@ -3839,4 +3861,113 @@ fn prose_never_renders_outside_a_response_bar() {
             "{name}: an item row at indent 0 would be prose with no bar above it"
         );
     }
+}
+
+/// The turn bar counts by a different rule than a group bar: it summarizes the
+/// turn rather than disclosing rows, so a subagent's inner calls — already
+/// counted inside the card that spawned them — must not be counted twice.
+#[test]
+fn the_turn_tally_drops_a_subagents_inner_calls() {
+    use ToolStatusView::Completed;
+    let mut child = tool("child", Completed);
+    if let ChatItem::ToolCall(tc) = &mut child {
+        tc.parent_tool_id = Some("parent".to_owned());
+    }
+    // Two runs, so the bar carries a tally at all (a one-run turn withholds it
+    // — see `the_turn_tally_is_withheld_when_one_bar_below_already_says_it`).
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("parent", Completed),
+        child,
+        asst("between"),
+        tool("later", Completed),
+        asst("done"),
+    ];
+    let rows = project_all(&items);
+    let tally = rows
+        .iter()
+        .find_map(|r| match &r.kind {
+            RowKind::ResponseHeader { categories, .. } => Some(categories.clone()),
+            _ => None,
+        })
+        .expect("the turn has a bar");
+    assert_eq!(
+        tally.iter().map(|(_, n)| *n).sum::<usize>(),
+        2,
+        "the two top-level calls; the nested child is counted inside its card"
+    );
+}
+
+/// And it stays filter-blind, unlike a group bar: a fully narrowed turn must
+/// still show a trace of the work it did.
+#[test]
+fn the_turn_tally_ignores_what_the_filter_hides() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", Completed),
+        asst("between"),
+        tool("b", Completed),
+        asst("done"),
+    ];
+    let hide_tools = DisplayFilter::default().toggled(FilterFacet::Tools);
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        StepWindow::uniform(TailWindow::All),
+        &hide_tools,
+    );
+    let tally = rows
+        .iter()
+        .find_map(|r| match &r.kind {
+            RowKind::ResponseHeader { categories, .. } => Some(categories.clone()),
+            _ => None,
+        })
+        .expect("the turn has a bar");
+    assert_eq!(tally.iter().map(|(_, n)| *n).sum::<usize>(), 2);
+}
+
+/// A turn whose work is one run gets no tally on its bar: the group bar
+/// directly below says the same thing, and two bars repeating one summary read
+/// as a fault rather than as a hierarchy. Two runs and the turn bar earns it
+/// back, because no single bar below covers both.
+#[test]
+fn the_turn_tally_is_withheld_when_one_bar_below_already_says_it() {
+    use ToolStatusView::Completed;
+    let tally_of = |items: &[ChatItem]| {
+        project_all(items)
+            .iter()
+            .find_map(|r| match &r.kind {
+                RowKind::ResponseHeader { categories, .. } => Some(categories.clone()),
+                _ => None,
+            })
+            .expect("the turn has a bar")
+    };
+    let mut child = tool("child", Completed);
+    if let ChatItem::ToolCall(tc) = &mut child {
+        tc.parent_tool_id = Some("parent".to_owned());
+    }
+    assert!(
+        tally_of(&[
+            ChatItem::UserText("q".into()),
+            tool("parent", Completed),
+            child,
+            asst("done"),
+        ])
+        .is_empty(),
+        "one run — a subagent's children are nested, not a second run"
+    );
+    assert!(
+        !tally_of(&[
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            asst("between"),
+            tool("b", Completed),
+            asst("done"),
+        ])
+        .is_empty(),
+        "prose split them into two runs, so the bar summarizes across both"
+    );
 }

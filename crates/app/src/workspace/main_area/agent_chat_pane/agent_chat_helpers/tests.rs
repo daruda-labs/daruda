@@ -789,6 +789,8 @@ fn visible_fold_keys_cover_text_tools_and_diffs() {
         keys,
         vec![
             FoldKey::Response(1),
+            FoldKey::ThinkingGroup(2),
+            FoldKey::ToolGroup("c1".to_owned()),
             FoldKey::Thinking(2),
             FoldKey::Tool("c1".to_owned()),
             FoldKey::Diff("c1#0".to_owned()),

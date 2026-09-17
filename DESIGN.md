@@ -469,7 +469,8 @@ pane-bg:           terminal background, verbatim
 pane-fg:           terminal foreground, lifted toward white by 0.24·(1 − bg.l)
 pane-fg-muted:     pane-fg at 62% over pane-bg   # secondary labels, chip text
 pane-fg-subtle:    pane-fg at 50% over pane-bg   # metadata, working indicator
-pane-tint:         neutral overlay at 5%         # hover fill
+pane-tint:         neutral overlay at 5%         # card fill — tool cards, code blocks
+pane-hover-tint:   neutral overlay at 3%         # hover fill on a fold header
 pane-active-tint:  neutral overlay at 12%        # selected fill
 pane-border-tint:  neutral overlay at 12%        # card edges — tool cards, code blocks
 pane-control-edge: neutral overlay at 34% / 42%  # resting edge of an interactive control
@@ -681,7 +682,9 @@ view control above the conversation in the visual hierarchy. The vocabulary now 
 structure; a chip is a view setting.**
 
 The chip sits left of the run's own counts so the numbers that are always there
-keep the right edge, and a collapsed bar carries no chip at all — it would
+keep the right edge — the bar's stretch slot now names the categories the turn
+worked in, so the counts it used to carry on the right are gone — and a
+collapsed bar carries no chip at all, since it would
 promise a reveal its own fold swallows. The copy rule is unchanged and holds for
 the same reason: **a revealed control names no count.** The rows are on screen,
 so a number restates them, and `Hide 12 filtered rows` parses as a description of
@@ -722,8 +725,10 @@ Three rules follow from it:
   the number the Activity Bar's `Recent steps` chip is set to — the anchor the
   word "earlier" is relative to and which the row never used to state.
 - **A row the boundary revealed carries no mark of its own.** It was tried: a
-  `1px` left rail, on the reasoning that a reader wants to know which rows came
-  from outside the kept range. The rail's width comes out of the row's own box,
+  `1px` left rail marking *only* the released rows, on the reasoning that a
+  reader wants to know which came from outside the kept range. (The turn's own
+  rail is a different thing and does ship — it reserves its width on every
+  nested row, which is exactly the fix this paragraph names.) The rail's width comes out of the row's own box,
   so marking only the covered rows gave one list *two* left edges — a reveal
   stepped each returning row a rail-width further in than the kept row beside
   it. Reserving the width on every row of the list fixes the alignment and
@@ -736,6 +741,24 @@ Three rules follow from it:
   two labels — and the rows it reveals render exactly as the kept ones do. The
   one case with no other explanation is a *live* covered step, which stays
   surfaced through a shut boundary; it reads as the running step it is.
+
+**The transcript carries one rule per turn.** Every row nested under a turn's bar
+draws a `1px` `pane-border-tint` rule at a fixed x — one line for the whole turn,
+not one per level; depth is already carried by the indent, and a second line a
+pad-unit in reads as noise. The rule owns each row's bottom padding so it spans
+the gap to the next row: the list is virtualized and lays every row out
+separately, so a rule that stopped at the content would come out dashed. A turn
+break is a margin, which no rule crosses, so the rail ends where the turn does.
+
+**A bar says what its run did; the answer says what it cost.** A turn bar names
+the categories its tools fell into, most-numerous first, one icon per segment —
+except when the turn holds a single run, where the group bar directly below says
+the same thing and repeating it reads as a fault. A turn that called nothing
+previews its opening prose instead. The answer row carries the other half at its
+right edge: how long the turn worked, when it finished, and what it emitted.
+While a turn is still running its bar carries the elapsed time instead, left of
+the rollup glyph so the glyph keeps the right edge and the bar does not shift as
+the timer appears and goes.
 
 The boundary is the one row in the transcript that is not a `FoldRow`; both
 shapes live in `render/fold_header.rs` so the chevron stays in one file

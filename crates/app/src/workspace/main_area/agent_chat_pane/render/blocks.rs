@@ -126,21 +126,23 @@ pub(super) fn assistant_markdown(
 /// to its first-line summary independently of the response's process fold. It is
 /// the only fold a reply that *is* its whole response has, since the bar cannot
 /// fold that reply.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn conclusion_block(
     ix: usize,
     key: FoldKey,
     expanded: bool,
     text: &str,
+    stats: Option<AnyElement>,
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    FoldRow::block(
-        ("agent-chat-conclusion", ix),
-        key,
-        expanded,
-        FoldHeader::with_summary(|| SummaryLine::from_markdown(text)),
-        |cx| assistant_markdown(ix, text, markdown, cx),
-    )
+    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text));
+    if let Some(stats) = stats {
+        header = header.trailing(stats);
+    }
+    FoldRow::block(("agent-chat-conclusion", ix), key, expanded, header, |cx| {
+        assistant_markdown(ix, text, markdown, cx)
+    })
     .render(markdown.dim, cx)
 }
 

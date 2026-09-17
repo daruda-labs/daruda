@@ -124,6 +124,33 @@ pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
         .unwrap_or_else(|| category_for_kind(tc.kind))
 }
 
+/// What a set of tool calls did, by category, most-numerous first.
+///
+/// Two callers with two ranges: a *group* bar passes its own adjacent calls,
+/// filter-aware, because expanding it is what puts those rows on screen; a
+/// *turn* bar passes the run's top-level calls, filter-blind, because it
+/// summarizes rather than discloses. Either way the members are mixed in
+/// practice — measured at up to four categories in one group — so this returns
+/// the whole tally rather than picking a representative.
+///
+/// Ties break by [`ToolCategory::index`] so a header does not reorder itself
+/// between renders of the same group.
+pub(crate) fn tally_categories<'a>(
+    calls: impl IntoIterator<Item = &'a ToolCallItem>,
+) -> Vec<(ToolCategory, usize)> {
+    let mut counts = [0usize; ToolCategory::ALL.len()];
+    for tc in calls {
+        counts[classify_tool(tc).index()] += 1;
+    }
+    let mut tally: Vec<(ToolCategory, usize)> = ToolCategory::ALL
+        .into_iter()
+        .filter(|c| counts[c.index()] > 0)
+        .map(|c| (c, counts[c.index()]))
+        .collect();
+    tally.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.index().cmp(&b.0.index())));
+    tally
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +201,78 @@ mod tests {
             new_text: "changed".into(),
         });
         assert_eq!(classify_tool(&tc), ToolCategory::Edit);
+    }
+
+    #[test]
+    fn a_tally_orders_by_count_then_by_category() {
+        // The shape the wire logs actually produce: one adjacency group holding
+        // several categories at once, up to four.
+        let calls = [
+            tool(Some("Bash"), ToolKindView::Execute),
+            tool(Some("Read"), ToolKindView::Read),
+            tool(Some("Bash"), ToolKindView::Execute),
+            tool(Some("Grep"), ToolKindView::Search),
+            tool(Some("Bash"), ToolKindView::Execute),
+            tool(None, ToolKindView::Fetch),
+        ];
+        assert_eq!(
+            tally_categories(calls.iter()),
+            vec![
+                (ToolCategory::Run, 3),
+                (ToolCategory::Read, 1),
+                (ToolCategory::Search, 1),
+                (ToolCategory::Other, 1),
+            ],
+            "count descending, then declaration order so ties do not shuffle"
+        );
+    }
+
+    #[test]
+    fn a_single_category_tallies_as_one_entry() {
+        let calls = [
+            tool(Some("Read"), ToolKindView::Read),
+            tool(Some("Read"), ToolKindView::Read),
+        ];
+        assert_eq!(
+            tally_categories(calls.iter()),
+            vec![(ToolCategory::Read, 2)]
+        );
+    }
+
+    /// A segment of one is the common case in a mixed group, so every category
+    /// needs a singular form — "1 files read" is the shape this guards against.
+    #[test]
+    fn every_category_has_both_a_singular_and_a_plural_form() {
+        for locale in ["en", "ko"] {
+            for category in ToolCategory::ALL {
+                let one_key = format!("agent_chat.group_{}_one", category.token());
+                let many_key = format!("agent_chat.group_{}", category.token());
+                let one = rust_i18n::t!(&one_key, locale = locale);
+                let many = rust_i18n::t!(&many_key, count = 3, locale = locale);
+                assert!(
+                    !one.contains("group_") && !many.contains("group_"),
+                    "{locale}/{} is missing a form (t! echoes the key when unresolved)",
+                    category.token()
+                );
+                assert_ne!(one, many, "{locale}/{}", category.token());
+            }
+        }
+        // Pinned, because the defect this guards is a *wording* one: the plural
+        // form printed for a count of one ("1 files read").
+        for (category, expected) in [
+            ("read", "1 file read"),
+            ("edit", "1 file edited"),
+            ("search", "1 search"),
+            ("run", "1 command run"),
+            ("other", "1 other call"),
+        ] {
+            let key = format!("agent_chat.group_{category}_one");
+            assert_eq!(rust_i18n::t!(&key, locale = "en"), expected);
+        }
+    }
+
+    #[test]
+    fn an_empty_group_tallies_to_nothing() {
+        assert!(tally_categories(std::iter::empty()).is_empty());
     }
 }

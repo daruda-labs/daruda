@@ -130,7 +130,7 @@ use tool::{CardContext, permission_card, tool_card};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{IconName, StatusPulseClock, button_bare};
+use crate::ui::{Icon, IconName, Sizable as _, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, TurnBoundary, agent_run, fold_context_at,
 };
@@ -140,7 +140,7 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, FilteredAway, LiveSubagentUnits, RenderRow, RowKind,
 };
 use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AssetCache, ChatContentWidth,
+    AgentChatView, AssetCache, ChatContentWidth, TurnRecord,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -411,11 +411,13 @@ fn render_row(
         RowKind::Interrupted(_) => interrupted_row(this.dim_amount, cx),
         RowKind::ResponseHeader {
             run_start,
+            categories,
             collapsed,
             filtered,
         } => response_bar(
             this,
             *run_start,
+            categories,
             *collapsed,
             *filtered,
             row.filter_revealed,
@@ -478,6 +480,7 @@ fn render_row(
                     key,
                     expanded,
                     text,
+                    turn_stats_element(this, *i, cx),
                     MarkdownRender::new(
                         &this.assets.mermaid_images,
                         this.dim_amount,
@@ -499,18 +502,32 @@ fn render_row(
     // A new turn (a `User` row past the first) gets extra top space so
     // consecutive turns read as distinct exchanges.
     let turn_break = ix != visible.first && matches!(row.kind, RowKind::User(_));
+    // The turn's rail. One rule at a fixed x for every nested row, not one per
+    // level: a second line a pad-unit in reads as noise rather than as depth,
+    // and depth is already carried by the indent. It owns the row's bottom
+    // padding so the rule spans the gap to the next row — the list virtualizes
+    // each row separately, so a rule that stopped at the content would come out
+    // dashed. Turn breaks use a margin, which no rule crosses, so the rail ends
+    // where the turn does.
+    let rail = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), this.dim_amount);
+    let body = div()
+        .w_full()
+        .min_w_0()
+        .pb(px(bottom))
+        // Nest one content-pad unit per level (group members sit under their bar).
+        .when(row.indent > 0, |d| {
+            d.border_l_1()
+                .border_color(rail)
+                .pl(px(theme::AGENT_CHAT_PAD_X * row.indent as f32))
+        })
+        .child(inner);
     let row_el = div()
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
         .when(ix == visible.first, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
         .when(turn_break, |d| d.mt(px(theme::AGENT_CHAT_TURN_GAP)))
-        .pb(px(bottom))
-        // Nest one content-pad unit per level (group members sit under their bar).
-        .when(row.indent > 0, |d| {
-            d.pl(px(theme::AGENT_CHAT_PAD_X * (row.indent as f32 + 1.0)))
-        })
-        .child(inner);
+        .child(body);
     match this.content_width {
         ChatContentWidth::Full => row_el.into_any_element(),
         ChatContentWidth::Reading => div()
@@ -526,12 +543,16 @@ fn render_row(
 /// Human-readable elapsed time. `"5s"` under a minute, `"1m05s"` at or over.
 /// Shared so the run timer in the working indicator and a tool call's age in
 /// its badge are one unit of measure rather than two that happen to agree.
+///
+/// The arithmetic stays here and the units come from the locale: the seconds
+/// are zero-padded before translation because the badge ticks, and a width that
+/// changes as the digit rolls over shifts everything beside it.
 fn format_elapsed(d: std::time::Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
-        format!("{secs}s")
+        s::agent_chat_elapsed_seconds(secs)
     } else {
-        format!("{}m{:02}s", secs / 60, secs % 60)
+        s::agent_chat_elapsed_minutes(secs / 60, format!("{:02}", secs % 60))
     }
 }
 
@@ -556,9 +577,11 @@ pub(super) fn pulse_opacity(cx: &gpui::App) -> f32 {
 /// The whole row toggles `FoldKey::Response`; the agent label leads, the
 /// response's first line fills the row when collapsed, and the tool count plus
 /// the status-rollup glyph sit at the right edge.
+#[allow(clippy::too_many_arguments)]
 fn response_bar(
     this: &AgentChatView,
     run_start: usize,
+    categories: &[(crate::transcript::tool_category::ToolCategory, usize)],
     collapsed: bool,
     filtered: FilteredAway,
     filter_revealed: bool,
@@ -566,23 +589,33 @@ fn response_bar(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let run = agent_run(&this.items, run_start);
-    let tools = run_tools(&this.items, run.clone());
     // The response's opening prose — the first item that yields a preview, so a
     // turn that opened with reasoning still previews something and an empty
     // leading block (a streaming placeholder that has not filled yet) falls
     // through to the next rather than blanking the summary.
-    let summary_run = run.clone();
-    let items = &this.items;
-    let mut header = FoldHeader::with_summary(move || {
-        summary_run
-            .filter_map(|k| match items.get(k) {
-                Some(ChatItem::AssistantText { text, .. } | ChatItem::Thinking { text, .. }) => {
-                    SummaryLine::from_markdown(text)
-                }
-                _ => None,
-            })
-            .next()
-    })
+    // The bar says what the turn *did*, in both fold states — it is the turn's
+    // own identity, not a preview of what the fold hides.
+    //
+    // A turn that called no tool has no such tally, and an empty slot says less
+    // than the old preview did. There, what the agent said *is* what it did, so
+    // the bar falls back to the opening prose — collapsed-only, as a preview of
+    // hidden content rather than an identity.
+    let mut header = if categories.is_empty() {
+        let summary_run = run.clone();
+        let items = &this.items;
+        FoldHeader::with_summary(move || {
+            summary_run
+                .filter_map(|k| match items.get(k) {
+                    Some(
+                        ChatItem::AssistantText { text, .. } | ChatItem::Thinking { text, .. },
+                    ) => SummaryLine::from_markdown(text),
+                    _ => None,
+                })
+                .next()
+        })
+    } else {
+        FoldHeader::with_title(category_segments(this, categories, cx))
+    }
     .leading(agent_label(this, cx).into_any_element());
     // The filter's reveal sits left of the run's own counts, so the numbers that
     // are always there keep the right edge and do not shift when it appears.
@@ -596,13 +629,17 @@ fn response_bar(
             cx,
         ));
     }
-    // Trailing content is fold-state-independent (see `FoldHeader::trailing`), so
-    // the count reads the same expanded or collapsed — and, unlike a group bar's,
-    // the same filtered or not. A group that loses every call to the filter stops
-    // rendering, but this bar always renders, so a filter-aware count here would
-    // leave the turn showing no trace of work it did.
-    if tools > 0 {
-        header = header.trailing(count_label(s::agent_chat_tool_group_count(tools), this, cx));
+    // Sits left of the rollup so the glyph keeps the right edge and the bar does
+    // not shift as the timer appears and goes.
+    if let Some(elapsed) = running_elapsed(
+        AgentChatView::run_start_of(&this.items) == Some(run_start),
+        this.activity_elapsed(),
+    ) {
+        header = header.trailing(trailing_label(
+            s::agent_chat_turn_running(format_elapsed(elapsed)),
+            this,
+            cx,
+        ));
     }
     let header = header.trailing(rollup_glyph(
         Rollup::of_kept_run(&this.items, run, &this.live_units, |item| {
@@ -633,30 +670,197 @@ fn agent_label(this: &AgentChatView, cx: &Context<AgentChatView>) -> impl IntoEl
         .child(SharedString::from(agent_display_name(this).to_string()))
 }
 
-/// Every tool call the run made, whatever the display filter hides.
+/// How long the turn on the bar has been running, when it is the one still
+/// going. `None` for a settled turn: its length already sits on the answer row
+/// below, and saying it twice in one turn is what this split avoids — the bar
+/// answers "what is happening now", the answer row "how long that took".
 ///
-/// The response bar summarizes the turn rather than disclosing a fixed set of
-/// rows, so its number describes what happened. [`kept_tools`] is the other
-/// half of that split: a group bar *is* the disclosure over its calls, so its
-/// number has to be what expanding it puts on screen.
-fn run_tools(items: &[ChatItem], run: std::ops::Range<usize>) -> usize {
-    run.filter(|&k| matches!(items.get(k), Some(ChatItem::ToolCall(_))))
-        .count()
+/// Only the transcript's last run can be live, so a bar whose run is not the
+/// last one never carries this however busy the pane is.
+fn running_elapsed(
+    is_last_run: bool,
+    elapsed: Option<std::time::Duration>,
+) -> Option<std::time::Duration> {
+    is_last_run.then_some(elapsed).flatten()
+}
+
+/// A right-anchored label in a fold header's trailing slot. One place so the
+/// bar's live timer and the answer row's facts cannot drift on colour or size.
+fn trailing_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>) -> AnyElement {
+    div()
+        .flex_none()
+        .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(SharedString::from(label))
+        .into_any_element()
+}
+
+/// The answer row's trailing facts, when the run that owns this conclusion has
+/// a record. Keyed by the run's start so the lookup matches where the record
+/// was filed; a restored transcript has none and the row renders bare.
+fn turn_stats_element(
+    this: &AgentChatView,
+    conclusion_ix: usize,
+    cx: &Context<AgentChatView>,
+) -> Option<AnyElement> {
+    // The run that *contains* this conclusion, not one starting at it: the key
+    // is the item after the prompt, so the lookup takes the prefix up to and
+    // including the conclusion and asks where that prompt's run began.
+    let run_start = AgentChatView::run_start_of(this.items.get(..=conclusion_ix)?)?;
+    let record = this.activity.turn_records.get(&run_start)?;
+    Some(trailing_label(turn_stats_label(record), this, cx))
+}
+
+/// The answer row's trailing facts: how long the turn worked, when it finished,
+/// and what it emitted. Absent facts are omitted rather than shown as a dash — a
+/// restored session has no record, and an agent may report no usage.
+///
+/// This is what gives the row a reason to exist: it carries no label, so
+/// without these it is a bare chevron on an empty line. It mirrors the response
+/// bar's own trailing counts one level up.
+fn turn_stats_label(record: &TurnRecord) -> String {
+    let mut parts = vec![s::agent_chat_turn_worked(format_elapsed(record.worked_for))];
+    // Through `timestamp`, not assembled here: that module is where a wall
+    // clock becomes text, and it is what keeps ko on a 24-hour clock in this
+    // row as it is everywhere else.
+    parts.push(crate::surface::timestamp::local_time(record.finished_at));
+    if let Some(out) = record.output_tokens {
+        parts.push(s::agent_chat_turn_output(abbreviate_tokens(out)));
+    }
+    parts.join(&s::agent_chat_turn_separator())
+}
+
+/// Token counts shortened for a trailing badge: `842`, `1.5k`, `1.6M`. The row
+/// is a fixed slot beside the chevron, so the full figure would push the header
+/// off the line.
+fn abbreviate_tokens(n: u64) -> String {
+    // Branch on the *rounded* magnitude: 999_999 is under a million but rounds
+    // to "1000.0k", six characters in a slot sized for four.
+    match n {
+        n if n < 1_000 => n.to_string(),
+        n if n < 999_950 => format!("{:.1}k", n as f64 / 1_000.0),
+        n if n < 999_950_000 => format!("{:.1}M", n as f64 / 1_000_000.0),
+        n => format!("{:.1}B", n as f64 / 1_000_000_000.0),
+    }
+}
+
+/// A tool group's title: one icon-and-count segment per category it holds,
+/// most-numerous first. An over-long title is cut by layout rather than trimmed
+/// to the first N categories — a header that dropped a category silently would
+/// under-report what the group did. See [`category_segments`] for why the cut is
+/// a clip and not an ellipsis.
+fn group_category_title(
+    this: &AgentChatView,
+    run: std::ops::Range<usize>,
+    filter_revealed: bool,
+    cx: &Context<AgentChatView>,
+) -> AnyElement {
+    let tally = crate::transcript::tool_category::tally_categories(kept_tool_calls(
+        this,
+        run,
+        filter_revealed,
+    ));
+    category_segments(this, &tally, cx)
+}
+
+/// A tally rendered as one icon-and-count segment per category, separated and
+/// most-numerous first. Shared by the two bars that carry one — they differ in
+/// *what* they count (a group's own calls, filter-aware; a turn's top-level
+/// calls, filter-blind) but not in how it reads.
+fn category_segments(
+    this: &AgentChatView,
+    tally: &[(crate::transcript::tool_category::ToolCategory, usize)],
+    cx: &Context<AgentChatView>,
+) -> AnyElement {
+    let fg = this.dim(theme::agent_chat_fg_muted(cx));
+    let font_size = px(theme::agent_chat_font_size(cx));
+    // The segments are fixed-size, so the row has to be the thing that yields:
+    // without `min_w_0` a flex row sizes to its content and runs out under the
+    // trailing badges instead of clipping at the slot's edge.
+    //
+    // It clips rather than ellipsizing — a row of elements has no text to put a
+    // `…` on — so the gap has to be reserved by an outer box. gpui masks at the
+    // *border* box (`Style::overflow_mask`), inset only for a coloured border
+    // and never for padding, so padding on the clipping box itself would be
+    // overflowed straight through and the cut would land flush against the
+    // badge beside it.
+    let mut row = div()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .flex()
+        .flex_row()
+        .items_center();
+    for (ix, (category, count)) in tally.iter().copied().enumerate() {
+        if ix > 0 {
+            row = row.child(
+                div()
+                    .flex_none()
+                    .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
+                    .text_size(font_size)
+                    .child(SharedString::from(s::agent_chat_group_separator())),
+            );
+        }
+        row = row.child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::GAP_SM))
+                .text_color(fg)
+                .text_size(font_size)
+                .child(Icon::new(category_icon(category)).xsmall().text_color(fg))
+                .child(SharedString::from(s::agent_chat_group_category(
+                    category.token(),
+                    count,
+                ))),
+        );
+    }
+    div()
+        .w_full()
+        .min_w_0()
+        .pr(px(theme::AGENT_CHAT_TRAILING_GAP))
+        .child(row)
+        .into_any_element()
+}
+
+/// The glyph for one tool category. Reuses the per-call kind mapping through a
+/// representative kind, so a category and the cards under it never disagree.
+fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> IconName {
+    use crate::transcript::tool_category::ToolCategory;
+    tool::tool_kind_icon(match category {
+        ToolCategory::Read => daruda_acp::ToolKindView::Read,
+        ToolCategory::Edit => daruda_acp::ToolKindView::Edit,
+        ToolCategory::Search => daruda_acp::ToolKindView::Search,
+        ToolCategory::Run => daruda_acp::ToolKindView::Execute,
+        ToolCategory::Other => daruda_acp::ToolKindView::Other,
+    })
 }
 
 /// Tool calls in `run` that the current projection displays — filter matches
-/// normally, or the whole run while the filtered-row disclosure is open. The
-/// count a group bar prints, because expanding it is what puts those rows on
-/// screen; see [`run_tools`] for the response bar's different rule.
-fn kept_tools(this: &AgentChatView, run: std::ops::Range<usize>, filter_revealed: bool) -> usize {
-    run.filter(|&k| {
-        matches!(this.items.get(k), Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc))
+/// normally, or the whole run while the filtered-row disclosure is open. What a
+/// group bar describes, because expanding it is what puts those rows on screen.
+///
+/// The turn bar counts by a different rule and does not come through here: it
+/// summarizes the turn rather than disclosing rows, so it stays filter-blind
+/// and drops a subagent's inner calls (already counted inside their card). That
+/// tally is taken in the projection, where the hierarchy already exists.
+fn kept_tool_calls(
+    this: &AgentChatView,
+    run: std::ops::Range<usize>,
+    filter_revealed: bool,
+) -> impl Iterator<Item = &daruda_acp::ToolCallItem> {
+    run.filter_map(move |k| match this.items.get(k) {
+        Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc) => {
+            Some(tc)
+        }
+        _ => None,
     })
-    .count()
 }
 
 /// Thinking items in `run` that the current projection displays. Mirrors
-/// [`kept_tools`]: the number on a disclosure has to be what expanding it puts
+/// [`kept_tool_calls`]: the number on a disclosure has to be what expanding it
 /// on screen.
 fn kept_thoughts(
     this: &AgentChatView,
@@ -669,19 +873,9 @@ fn kept_thoughts(
     .count()
 }
 
-/// A right-anchored count in a fold header's trailing slot.
-fn count_label(label: String, this: &AgentChatView, cx: &Context<AgentChatView>) -> AnyElement {
-    div()
-        .flex_none()
-        .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(label))
-        .into_any_element()
-}
-
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
-/// the group's fold (`FoldKey::ToolGroup`); shows a chevron, the "N tool calls"
-/// count, and a status-rollup glyph.
+/// the group's fold (`FoldKey::ToolGroup`); shows a chevron, one segment per
+/// category the group holds, and a status-rollup glyph.
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
@@ -694,17 +888,13 @@ fn tool_group_bar(
     let rollup = Rollup::of_kept_run(&this.items, run.clone(), &this.live_units, |item| {
         filter_revealed || this.filter_matches.matches(item)
     });
-    // The count is the group's own identity, not a preview of folded content, so
-    // it shows in both states — hence `plain` rather than a markdown summary.
-    // `count` is the group's structural span; what the row offers is the part of
-    // it the display filter keeps.
-    let label = s::agent_chat_tool_group_count(kept_tools(this, run, filter_revealed));
-    let header = FoldHeader::with_title(group_title(label, this, cx)).trailing(rollup_glyph(
-        rollup,
-        t,
-        this.dim_amount,
-        cx,
-    ));
+    // The title is the group's own identity, not a preview of folded content, so
+    // it shows in both states. It names each *category* the group holds rather
+    // than a bare call count: the group is a run of adjacent calls, so its
+    // members are mixed in practice, and "5 tool calls" says nothing about what
+    // happened. What it counts is the part of the span the display filter keeps.
+    let header = FoldHeader::with_title(group_category_title(this, run, filter_revealed, cx))
+        .trailing(rollup_glyph(rollup, t, this.dim_amount, cx));
     // Borderless section bar, same as the response bar.
     FoldRow::section(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),
@@ -910,51 +1100,86 @@ mod tests {
         }
     }
 
+    /// The unit travels with the locale rather than being spelled into the
+    /// number. Asserted per locale through `t!`'s explicit-locale form: the
+    /// ambient locale is process-global, so setting it here would leak into
+    /// every other test running beside this one.
+    #[test]
+    fn elapsed_units_are_localized() {
+        for (locale, under, over) in [("en", "5s", "1m05s"), ("ko", "5초", "1분 05초")] {
+            assert_eq!(
+                rust_i18n::t!("agent_chat.elapsed_seconds", secs = 5, locale = locale),
+                under
+            );
+            // The seconds arrive already padded — the badge ticks, so its width
+            // must not move as the digit rolls over.
+            assert_eq!(
+                rust_i18n::t!(
+                    "agent_chat.elapsed_minutes",
+                    mins = 1,
+                    secs = "05",
+                    locale = locale
+                ),
+                over
+            );
+        }
+    }
+
+    /// The badge sits in a fixed slot beside the chevron, so the count is
+    /// abbreviated rather than printed in full.
+    #[test]
+    fn token_counts_abbreviate_at_each_magnitude() {
+        for (n, expected) in [
+            (0, "0"),
+            (842, "842"),
+            (999, "999"),
+            (1_000, "1.0k"),
+            (14_313, "14.3k"),
+            (1_602_356, "1.6M"),
+            (999_999, "1.0M"),
+            (999_999_999, "1.0B"),
+        ] {
+            assert_eq!(abbreviate_tokens(n), expected);
+        }
+    }
+
+    /// Absent facts drop out rather than rendering as a placeholder: a restored
+    /// transcript carries no record, and an agent may report no usage at all.
+    #[test]
+    fn a_turn_without_usage_omits_only_that_fact() {
+        let at = chrono::Local::now();
+        let with = TurnRecord {
+            worked_for: std::time::Duration::from_secs(3),
+            finished_at: at,
+            output_tokens: Some(1_450),
+        };
+        let without = TurnRecord {
+            output_tokens: None,
+            ..with
+        };
+        let labelled = turn_stats_label(&with);
+        let bare = turn_stats_label(&without);
+        assert!(labelled.contains("1.4k"), "{labelled}");
+        assert!(!bare.contains("1.4k"), "{bare}");
+        assert!(
+            bare.len() < labelled.len() && labelled.starts_with(&bare),
+            "the surviving facts keep their order and spelling: {bare} / {labelled}"
+        );
+    }
+
+    /// The bar times the turn only while it is the live one. A settled turn's
+    /// length lives on its answer row, and an earlier turn is never live.
+    #[test]
+    fn only_the_live_last_run_carries_an_elapsed_on_its_bar() {
+        let busy = Some(std::time::Duration::from_secs(9));
+        assert_eq!(running_elapsed(true, busy), busy, "the live last run");
+        assert_eq!(running_elapsed(true, None), None, "settled: the row has it");
+        assert_eq!(running_elapsed(false, busy), None, "an earlier turn");
+        assert_eq!(running_elapsed(false, None), None);
+    }
+
     fn row(kind: RowKind, hidden: bool) -> RenderRow {
         RenderRow::at(kind, hidden, 0)
-    }
-
-    fn tool(id: &str) -> ChatItem {
-        ChatItem::ToolCall(daruda_acp::ToolCallItem {
-            id: id.to_owned(),
-            title: "Tool".into(),
-            kind: daruda_acp::ToolKindView::Read,
-            tool_name: None,
-            status: daruda_acp::ToolStatusView::Completed,
-            diffs: Vec::new(),
-            output: Vec::new(),
-            raw_input: None,
-            locations: Vec::new(),
-            parent_tool_id: None,
-            exit: None,
-        })
-    }
-
-    /// The response bar summarizes the turn, so its count says what the turn
-    /// did. The bar renders whatever the filter hides, so a count that shrank
-    /// with the filter would leave a fully narrowed turn showing no trace of
-    /// its work — `kept_tools` is the disclosure half of that split.
-    #[test]
-    fn the_runs_tool_count_ignores_what_the_filter_hides() {
-        let items = [
-            ChatItem::AssistantText {
-                text: "looking".into(),
-                streaming: false,
-                message_id: None,
-                phase: daruda_acp::MessagePhase::Answer,
-            },
-            tool("a"),
-            tool("b"),
-            ChatItem::Thinking {
-                text: "hm".into(),
-                streaming: false,
-                message_id: None,
-            },
-            tool("c"),
-        ];
-        assert_eq!(run_tools(&items, 0..items.len()), 3);
-        // Scoped to the run it is given, not the whole transcript.
-        assert_eq!(run_tools(&items, 0..2), 1);
     }
 
     /// A run can open with a hidden row — a tail boundary covering nothing, a
