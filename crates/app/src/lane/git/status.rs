@@ -1,12 +1,13 @@
 //! `git status` / `git diff` / staging / commit / push / fetch / pull
-//! wrappers, plus the parsing logic for the porcelain branch line.
+//! wrappers, plus the two read axes: [`git_tracking`] reads refs,
+//! [`git_worktree_status`] walks the working tree.
 //!
 //! Every function shells out via [`super::run_git`] on
 //! `background_executor` and returns owned data — no GPUI types.
 //!
 //! Submodule wiring: `git/mod.rs` declares `mod status;` +
 //! `pub use status::*;` so external callers write
-//! `crate::lane::git::git_status(...)`. The `run_git` /
+//! `crate::lane::git::git_worktree_status(...)`. The `run_git` /
 //! `GitError` symbols used here are `pub(super)` in `mod.rs`.
 
 use std::ffi::OsStr;
@@ -29,13 +30,11 @@ pub struct GitFileEntry {
     pub original_path: Option<PathBuf>,
 }
 
-/// Staged + unstaged file sets from `git status --porcelain=v1 --branch`.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct GitStatusData {
-    /// Files with a staged change (X != ' ' && X != '?' && X != '!').
-    pub staged: Vec<GitFileEntry>,
-    /// Files with an unstaged change or untracked status.
-    pub unstaged: Vec<GitFileEntry>,
+/// Refs-only view of the checked-out branch and its upstream, sourced
+/// from `git for-each-ref`. Never walks the working tree, so it is cheap
+/// enough to re-read every time a ref moves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitTracking {
     /// Current branch name; `None` for detached HEAD.
     pub branch: Option<String>,
     /// Configured upstream ref (e.g. `origin/main`); `None` when no upstream
@@ -45,6 +44,16 @@ pub struct GitStatusData {
     pub ahead: u32,
     /// Number of commits the local branch is behind `upstream`.
     pub behind: u32,
+}
+
+/// Working-tree view: staged + unstaged file sets from
+/// `git status --porcelain=v1`, plus per-file diffstat.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GitWorktreeStatus {
+    /// Files with a staged change (X != ' ' && X != '?' && X != '!').
+    pub staged: Vec<GitFileEntry>,
+    /// Files with an unstaged change or untracked status.
+    pub unstaged: Vec<GitFileEntry>,
     /// `(added, removed)` per tracked file path, sourced from
     /// `git diff HEAD --numstat`. Untracked files are absent (no HEAD
     /// baseline to compare against). Empty when the repo has no
@@ -52,69 +61,61 @@ pub struct GitStatusData {
     pub diffstat: std::collections::HashMap<PathBuf, (u32, u32)>,
 }
 
-/// Parse the body of a `## ...` branch header line emitted by
-/// `git status --branch`. Examples handled:
-/// - `main` → branch="main"
-/// - `main...origin/main` → upstream="origin/main"
-/// - `main...origin/main [ahead 3]` → ahead=3
-/// - `main...origin/main [ahead 1, behind 2]` → ahead=1, behind=2
-/// - `main...origin/main [gone]` → upstream still recorded; ahead/behind 0
-/// - `HEAD (no branch)` → detached HEAD, branch=None
-/// - `No commits yet on main` → branch="main"
-fn parse_branch_line_body(s: &str) -> (Option<String>, Option<String>, u32, u32) {
-    if s == "HEAD (no branch)" {
-        return (None, None, 0, 0);
-    }
-    let head_with_track = s.strip_prefix("No commits yet on ").unwrap_or(s);
-
-    // `[ahead N, behind M]` / `[gone]` lives at the very end if present.
-    let (head, tracking) = match head_with_track.rfind(" [") {
-        Some(i) if head_with_track.ends_with(']') => (
-            &head_with_track[..i],
-            Some(&head_with_track[i + 2..head_with_track.len() - 1]),
-        ),
-        _ => (head_with_track, None),
+/// `%(upstream:track)` and `git status --branch` share one suffix
+/// grammar: `[ahead N, behind M]`, `[gone]`, or absent.
+fn parse_tracking_counts(track: &str) -> (u32, u32) {
+    let Some(inner) = track
+        .trim()
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+    else {
+        return (0, 0);
     };
-
-    let (branch, upstream) = match head.find("...") {
-        Some(i) => (Some(head[..i].to_string()), Some(head[i + 3..].to_string())),
-        None => (Some(head.to_string()), None),
-    };
-
     let (mut ahead, mut behind) = (0u32, 0u32);
-    if let Some(t) = tracking {
-        for part in t.split(", ") {
-            if let Some(n) = part.strip_prefix("ahead ") {
-                ahead = n.parse().unwrap_or(0);
-            } else if let Some(n) = part.strip_prefix("behind ") {
-                behind = n.parse().unwrap_or(0);
-            }
-            // `gone` / unknown — leave both at 0; upstream string is still kept.
+    for part in inner.split(", ") {
+        if let Some(n) = part.strip_prefix("ahead ") {
+            ahead = n.parse().unwrap_or(0);
+        } else if let Some(n) = part.strip_prefix("behind ") {
+            behind = n.parse().unwrap_or(0);
         }
+        // `gone` / unknown — leave both at 0; the upstream string is still kept.
     }
-
-    (branch, upstream, ahead, behind)
+    (ahead, behind)
 }
 
-/// Parse the output of `git status --porcelain=v1` into a `GitStatusData`.
+/// Pick the row `%(HEAD)` marked as checked out and read its tracking
+/// fields. `for-each-ref` resolves `%(HEAD)` against the worktree it runs
+/// in, so a linked worktree reports its own branch. No marked row means
+/// HEAD points at no ref here — detached, or a branch not yet born.
+pub(crate) fn parse_tracking_output(output: &str) -> GitTracking {
+    for line in output.lines() {
+        let mut fields = line.split('\0');
+        if fields.next().unwrap_or("").trim() != "*" {
+            continue;
+        }
+        let branch = fields.next().unwrap_or("").trim();
+        let upstream = fields.next().unwrap_or("").trim();
+        let (ahead, behind) = parse_tracking_counts(fields.next().unwrap_or(""));
+        return GitTracking {
+            branch: (!branch.is_empty()).then(|| branch.to_string()),
+            upstream: (!upstream.is_empty()).then(|| upstream.to_string()),
+            ahead,
+            behind,
+        };
+    }
+    GitTracking::default()
+}
+
+/// Parse the output of `git status --porcelain=v1` into a `GitWorktreeStatus`.
 ///
 /// Extracted so the logic can be unit-tested without a real git repo.
 /// Conflict entries (where x or y is `'U'`, or both are `'D'` / `'A'`)
 /// are placed only in `unstaged` — they are unresolvable as staged changes
 /// and must be resolved before committing.
-pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
-    let mut data = GitStatusData::default();
+pub(crate) fn parse_git_status_output(output: &str) -> GitWorktreeStatus {
+    let mut data = GitWorktreeStatus::default();
     for line in output.lines() {
         let line = line.trim_end();
-        // `## ...` branch header — emitted by `git status --branch`.
-        if let Some(rest) = line.strip_prefix("## ") {
-            let (branch, upstream, ahead, behind) = parse_branch_line_body(rest);
-            data.branch = branch;
-            data.upstream = upstream;
-            data.ahead = ahead;
-            data.behind = behind;
-            continue;
-        }
         if line.len() < 4 {
             continue;
         }
@@ -150,18 +151,39 @@ pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
     data
 }
 
-/// `git status --porcelain=v1 --branch` for the lane rooted at `path`,
-/// plus a follow-up `git diff HEAD --numstat` to populate per-file
-/// diffstat. The `--branch` flag prepends a `## branch...upstream [ahead
-/// N, behind M]` header line that the parser turns into branch /
-/// upstream / ahead / behind fields. Renamed entries in the `XY PATH ->
-/// PATH` form show the destination.
+/// Format for [`git_tracking`]: HEAD marker, branch, upstream, and the
+/// `[ahead N, behind M]` suffix, NUL-separated so no field can contain
+/// the delimiter.
+const TRACKING_FORMAT: &str =
+    "--format=%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track)";
+
+/// Branch, upstream and divergence for the lane rooted at `path`, read
+/// from refs alone. This is the axis a fetch or push moves, and it is
+/// roughly twenty times cheaper than [`git_worktree_status`].
+pub fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
+    let raw = run_git(path, ["for-each-ref", TRACKING_FORMAT, "refs/heads"])?;
+    let mut tracking = parse_tracking_output(&raw);
+    if tracking.branch.is_none() {
+        // No row carried the HEAD marker. An unborn branch (a fresh
+        // `git init`, whose ref does not exist yet) still has a name;
+        // a detached HEAD does not, and `symbolic-ref -q` fails there.
+        if let Ok(name) = run_git(path, ["symbolic-ref", "-q", "--short", "HEAD"]) {
+            let name = name.trim();
+            tracking.branch = (!name.is_empty()).then(|| name.to_string());
+        }
+    }
+    Ok(tracking)
+}
+
+/// `git status --porcelain=v1` for the lane rooted at `path`, plus a
+/// follow-up `git diff HEAD --numstat` to populate per-file diffstat.
+/// Renamed entries in the `XY PATH -> PATH` form show the destination.
 ///
 /// The diffstat call is non-fatal — a fresh `git init` repo has no HEAD,
 /// so the call errors and `diffstat` stays empty (dock simply omits
 /// the `+N −M` column for that lane until the first commit lands).
-pub fn git_status(path: &Path) -> Result<GitStatusData, GitError> {
-    let raw = run_git(path, ["status", "--porcelain=v1", "--branch"])?;
+pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
+    let raw = run_git(path, ["status", "--porcelain=v1"])?;
     let mut data = parse_git_status_output(&raw);
     if let Ok(stats) = git_diff_numstat(path) {
         for (added, removed, p) in stats {

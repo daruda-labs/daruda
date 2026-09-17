@@ -53,23 +53,28 @@ pub(in crate::workspace) fn git_badge_for(
         project: project_id,
         lane: id,
     };
-    let status = snap.git_status_cache.get(&target)?;
+    // The badge spans both axes: the counts come from the working tree,
+    // the arrows from the refs. Either side alone can make a badge.
+    let status = snap.git_worktree_cache.get(&target);
+    let tracking = snap.git_tracking_cache.get(&target);
     // Unstaged entries are identified by the y column, not x.
-    let modified = status.staged.len()
-        + status
-            .unstaged
-            .iter()
-            .filter(|e| e.y != ' ' && e.y != '?')
-            .count();
-    let untracked = status.unstaged.iter().filter(|e| e.x == '?').count();
+    let modified = status.map_or(0, |s| {
+        s.staged.len()
+            + s.unstaged
+                .iter()
+                .filter(|e| e.y != ' ' && e.y != '?')
+                .count()
+    });
+    let untracked = status.map_or(0, |s| s.unstaged.iter().filter(|e| e.x == '?').count());
     let total = (modified + untracked) as u32;
-    if total == 0 && status.ahead == 0 && status.behind == 0 {
+    let (ahead, behind) = tracking.map_or((0, 0), |t| (t.ahead, t.behind));
+    if total == 0 && ahead == 0 && behind == 0 {
         return None;
     }
     Some(GitBadgeData {
         total,
-        ahead: status.ahead,
-        behind: status.behind,
+        ahead,
+        behind,
     })
 }
 
@@ -814,7 +819,7 @@ pub(in crate::workspace) fn worktree_row(
     };
     let wt_base_ref: Option<String> = wt.base_ref.clone();
     let wt_is_dirty = snap
-        .git_status_cache
+        .git_worktree_cache
         .get(&daruda_store::project::LaneRef {
             project: project_id,
             lane: wt.id,

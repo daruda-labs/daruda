@@ -84,15 +84,26 @@ impl Workspace {
                 groups
             },
             active: self.active,
-            git_status_cache: self
+            git_worktree_cache: self
                 .lane_scoped
                 .iter()
                 .filter_map(|(target, state)| {
                     state
                         .git
-                        .status
+                        .worktree
                         .as_ref()
                         .map(|status| (*target, status.clone()))
+                })
+                .collect(),
+            git_tracking_cache: self
+                .lane_scoped
+                .iter()
+                .filter_map(|(target, state)| {
+                    state
+                        .git
+                        .tracking
+                        .as_ref()
+                        .map(|tracking| (*target, tracking.clone()))
                 })
                 .collect(),
             git_stage_in_flight: self.git_lock_held(GitLock::Index),

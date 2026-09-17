@@ -63,7 +63,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         })
         .unwrap_or_else(|| app_strings::git_detached_label().to_string());
 
-    let status = snap.git_status_cache.get(&snap.active);
+    let status = snap.git_worktree_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
 
     // `key_context("GitChanges")` + `track_focus(...)` route arrow / Space /
@@ -211,9 +211,9 @@ fn view_header(
     let active_ref = snap.active;
 
     let (ahead, behind) = snap
-        .git_status_cache
+        .git_tracking_cache
         .get(&snap.active)
-        .map(|s| (s.ahead, s.behind))
+        .map(|t| (t.ahead, t.behind))
         .unwrap_or((0, 0));
 
     let refresh_icon = button_bare("git-refresh")
@@ -592,7 +592,7 @@ fn unified_file_row(
     // repos with no HEAD have no entry — render the row without a
     // diffstat tail in that case.
     let diffstat = snap
-        .git_status_cache
+        .git_worktree_cache
         .get(&snap.active)
         .and_then(|s| s.diffstat.get(&entry.path))
         .copied();

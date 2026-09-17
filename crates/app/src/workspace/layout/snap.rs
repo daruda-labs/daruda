@@ -94,8 +94,15 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// tree via the shared `tab_order` pool.
     pub groups: Vec<GroupSnapshot>,
     pub active: daruda_store::project::LaneRef,
-    pub git_status_cache:
-        std::collections::HashMap<daruda_store::project::LaneRef, crate::lane::git::GitStatusData>,
+    /// Per-lane working-tree status. Separate from `git_tracking_cache`
+    /// because the two axes are refreshed by different events.
+    pub git_worktree_cache: std::collections::HashMap<
+        daruda_store::project::LaneRef,
+        crate::lane::git::GitWorktreeStatus,
+    >,
+    /// Per-lane branch / upstream / ahead / behind.
+    pub git_tracking_cache:
+        std::collections::HashMap<daruda_store::project::LaneRef, crate::lane::git::GitTracking>,
     pub git_stage_in_flight: bool,
     /// Mirrors `Workspace::git_op_in_flight` — true while a Fetch / Push /
     /// Commit / Amend is running. Drives `loading + disabled` on the Fetch
@@ -518,7 +525,8 @@ mod tests {
             projects: Vec::new(),
             groups: Vec::new(),
             active: daruda_store::project::LaneRef::default(),
-            git_status_cache: std::collections::HashMap::new(),
+            git_worktree_cache: std::collections::HashMap::new(),
+            git_tracking_cache: std::collections::HashMap::new(),
             git_stage_in_flight: false,
             git_op_in_flight: false,
             git_collapsed_dirs: std::collections::HashSet::new(),

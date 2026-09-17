@@ -299,8 +299,9 @@ async fn watcher_event_updates_tree_invalidates_cache_and_collapses_git_refresh(
             },
             cx,
         );
-        assert!(
-            ws.lane_scoped[&ws.active_ref()].git.fetch_in_flight,
+        assert_ne!(
+            ws.lane_scoped[&ws.active_ref()].git.worktree_refresh,
+            crate::workspace::lane_scoped::RefreshSlot::Idle,
             "watcher event must kick git status refresh"
         );
     });
@@ -328,14 +329,22 @@ async fn watcher_event_updates_tree_invalidates_cache_and_collapses_git_refresh(
         ws.refresh_git_status(target, cx);
         ws.refresh_git_status(target, cx);
         ws.refresh_git_status(target, cx);
-        assert!(ws.lane_scoped[&target].git.fetch_in_flight);
-        assert!(ws.lane_scoped[&target].git.fetch_pending_repeat);
+        assert_eq!(
+            ws.lane_scoped[&target].git.worktree_refresh,
+            crate::workspace::lane_scoped::RefreshSlot::Running { repeat: true }
+        );
     });
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         let target = ws.active_ref();
-        assert!(!ws.lane_scoped[&target].git.fetch_in_flight);
-        assert!(!ws.lane_scoped[&target].git.fetch_pending_repeat);
+        assert_eq!(
+            ws.lane_scoped[&target].git.worktree_refresh,
+            crate::workspace::lane_scoped::RefreshSlot::Idle
+        );
+        assert_eq!(
+            ws.lane_scoped[&target].git.tracking_refresh,
+            crate::workspace::lane_scoped::RefreshSlot::Idle
+        );
     });
 }
 
@@ -1610,7 +1619,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     // Re-opening lands in the dedupe branch. Move the cache out from under the
     // pane first, so only a re-stamp there can bring it back in line.
     ws.update(cx, |ws, _cx| {
-        ws.lane_scoped_mut(id).git.status = Some(crate::lane::git::GitStatusData::default());
+        ws.lane_scoped_mut(id).git.worktree = Some(crate::lane::git::GitWorktreeStatus::default());
     });
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {

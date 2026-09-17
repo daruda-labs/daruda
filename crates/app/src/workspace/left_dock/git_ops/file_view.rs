@@ -178,7 +178,7 @@ impl Workspace {
             return by_abs;
         };
         let repo_root = self.git_repo_root_for(target);
-        for (rel, status) in build_status_index(self.lane_git(target)) {
+        for (rel, status) in build_status_index(self.lane_git_worktree(target)) {
             if let Some(repo) = repo_root.as_ref() {
                 by_abs.insert(repo.join(&rel), status);
             }

@@ -122,7 +122,7 @@ pub(in crate::workspace) struct GitDirHeaderRow {
 /// out — one pass over the change set, shared by the renderer and the keyboard
 /// cursor so the two can never disagree about order.
 pub(in crate::workspace) fn build_rows(
-    status: &crate::lane::git::GitStatusData,
+    status: &crate::lane::git::GitWorktreeStatus,
     collapsed: &std::collections::HashSet<String>,
     wt_paths: &LanePaths<'_>,
 ) -> Vec<GitChangesRow> {
@@ -164,7 +164,7 @@ pub(in crate::workspace) fn build_rows(
 /// truth for the keyboard cursor's navigation order — it reads the same
 /// [`build_rows`] the renderer does, so the two cannot disagree about order.
 pub(in crate::workspace) fn ordered_visible_paths(
-    status: &crate::lane::git::GitStatusData,
+    status: &crate::lane::git::GitWorktreeStatus,
     collapsed: &std::collections::HashSet<String>,
     wt_paths: &LanePaths<'_>,
 ) -> Vec<PathBuf> {
@@ -251,7 +251,7 @@ pub(super) fn discard_disabled(is_staged: bool, has_unstaged: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lane::git::{GitFileEntry, GitStatusData};
+    use crate::lane::git::{GitFileEntry, GitWorktreeStatus};
     use std::collections::HashSet;
     use std::path::Path;
 
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn ordered_visible_paths_alphabetical_across_groups() {
         let root = Path::new("/repo");
-        let status = GitStatusData {
+        let status = GitWorktreeStatus {
             staged: vec![entry('M', ' ', "src/lib.rs")],
             unstaged: vec![
                 entry(' ', 'M', "Cargo.toml"),
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn ordered_visible_paths_skips_collapsed_dirs() {
         let root = Path::new("/repo");
-        let status = GitStatusData {
+        let status = GitWorktreeStatus {
             staged: vec![],
             unstaged: vec![
                 entry(' ', 'M', "Cargo.toml"),
@@ -331,7 +331,7 @@ mod tests {
         // A file with both staged + unstaged changes (`MM`) appears
         // once in the visible list.
         let root = Path::new("/repo");
-        let status = GitStatusData {
+        let status = GitWorktreeStatus {
             staged: vec![entry('M', 'M', "file.rs")],
             unstaged: vec![entry('M', 'M', "file.rs")],
             ..Default::default()
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn ordered_visible_paths_empty_when_no_changes() {
         let root = Path::new("/repo");
-        let status = GitStatusData::default();
+        let status = GitWorktreeStatus::default();
         let collapsed: HashSet<String> = HashSet::new();
         let paths = ordered_visible_paths(&status, &collapsed, &paths_for(root));
         assert!(paths.is_empty());

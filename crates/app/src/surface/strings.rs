@@ -6090,6 +6090,7 @@ error_string!(
     "error.git_restore_staged_paths_failed"
 );
 error_string!(error_git_status_failed, "error.git_status_failed");
+error_string!(error_git_tracking_failed, "error.git_tracking_failed");
 error_string!(error_lane_path_not_found, "error.lane_path_not_found");
 error_string!(error_lane_create_busy, "error.lane_create_busy");
 error_string!(error_lane_create_failed, "error.lane_create_failed");

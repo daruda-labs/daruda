@@ -3,18 +3,20 @@ use gpui::{AppContext, TestAppContext};
 
 use crate::files::tree::FileTree;
 use crate::lane::Lane;
-use crate::lane::git::GitStatusData;
+use crate::lane::git::{GitTracking, GitWorktreeStatus};
 use crate::workspace::Workspace;
 use crate::workspace::tests::build_workspace_with;
 
 fn seed_git_state(ws: &mut Workspace, target: LaneRef) {
     let git = &mut ws.lane_scoped_mut(target).git;
-    git.status = Some(GitStatusData {
+    git.tracking = Some(GitTracking {
         branch: Some("retained-branch".into()),
         ..Default::default()
     });
-    git.fetch_in_flight = true;
-    git.fetch_pending_repeat = true;
+    git.worktree = Some(GitWorktreeStatus::default());
+    git.tracking_refresh.claim();
+    git.tracking_refresh.claim();
+    git.worktree_refresh.claim();
     git.collapsed_dirs.insert("src".into());
     git.cursor = Some("src/main.rs".into());
 }
@@ -60,11 +62,18 @@ fn assert_history_state_retained(ws: &mut Workspace, target: LaneRef) {
 fn assert_git_state_retained(ws: &Workspace, target: LaneRef) {
     let git = &ws.lane_scoped[&target].git;
     assert_eq!(
-        ws.lane_git(target).unwrap().branch.as_deref(),
+        git.tracking.as_ref().unwrap().branch.as_deref(),
         Some("retained-branch")
     );
-    assert!(git.fetch_in_flight);
-    assert!(git.fetch_pending_repeat);
+    assert!(ws.lane_git_worktree(target).is_some());
+    assert_eq!(
+        git.tracking_refresh,
+        crate::workspace::lane_scoped::RefreshSlot::Running { repeat: true }
+    );
+    assert_eq!(
+        git.worktree_refresh,
+        crate::workspace::lane_scoped::RefreshSlot::Running { repeat: false }
+    );
     assert!(git.collapsed_dirs.contains("src"));
     assert_eq!(
         git.cursor.as_deref(),

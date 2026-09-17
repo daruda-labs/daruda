@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::{Entry, EntryId, EntryKind, FileTree};
-use crate::lane::git::GitStatusData;
+use crate::lane::git::GitWorktreeStatus;
 
 // ----------------------------------------------------------------
 // VisibleEntry — flattened row for `uniform_list`
@@ -42,7 +42,7 @@ pub(in crate::workspace) struct VisibleEntry {
 }
 
 // ----------------------------------------------------------------
-// status_index — flatten GitStatusData into a path → char HashMap
+// status_index — flatten GitWorktreeStatus into a path → char HashMap
 // ----------------------------------------------------------------
 
 /// Build a lane-relative `path → status char` index. `None`
@@ -50,7 +50,7 @@ pub(in crate::workspace) struct VisibleEntry {
 ///
 /// Staged status wins over unstaged when a path appears in both.
 pub(in crate::workspace) fn build_status_index(
-    status: Option<&GitStatusData>,
+    status: Option<&GitWorktreeStatus>,
 ) -> HashMap<PathBuf, char> {
     let mut idx: HashMap<PathBuf, char> = HashMap::new();
     let Some(s) = status else { return idx };

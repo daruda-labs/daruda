@@ -81,7 +81,11 @@ fn fetch_refreshes_the_tracking_indicator(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
-        let status = ws.lane_git(id).expect("a git lane has a status");
+        let status = ws.lane_scoped[&id]
+            .git
+            .tracking
+            .as_ref()
+            .expect("a git lane has tracking info");
         assert_eq!(status.upstream.as_deref(), Some("origin/main"));
         assert_eq!(
             status.behind, 0,
@@ -94,7 +98,12 @@ fn fetch_refreshes_the_tracking_indicator(cx: &mut TestAppContext) {
 
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.lane_git(id).expect("a git lane has a status").behind,
+            ws.lane_scoped[&id]
+                .git
+                .tracking
+                .as_ref()
+                .expect("a git lane has tracking info")
+                .behind,
             1,
             "a successful fetch must leave the header showing what it found"
         );

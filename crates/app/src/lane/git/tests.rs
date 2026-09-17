@@ -114,53 +114,65 @@ fn numstat_parses_text_binary_and_empty_input() {
 }
 
 // ----------------------------------------------------------------
-// Branch line (`## ...`) parsing — `git status --branch` header
+// Tracking parsing — `git for-each-ref %(upstream:track)` rows
 // ----------------------------------------------------------------
 
+/// One row per branch, NUL-separated fields, `*` on the checked-out one.
+fn ref_row(head: bool, branch: &str, upstream: &str, track: &str) -> String {
+    format!(
+        "{}\0{branch}\0{upstream}\0{track}\n",
+        if head { "*" } else { " " }
+    )
+}
+
 #[test]
-fn branch_line_parses_upstream_divergence_and_special_states() {
-    let data = parse_git_status_output("## main\n");
+fn tracking_output_parses_upstream_divergence_and_special_states() {
+    let data = parse_tracking_output(&ref_row(true, "main", "", ""));
     assert_eq!(data.branch.as_deref(), Some("main"));
     assert!(data.upstream.is_none());
     assert_eq!(data.ahead, 0);
     assert_eq!(data.behind, 0);
 
-    let data = parse_git_status_output("## main...origin/main\n");
-    assert_eq!(data.branch.as_deref(), Some("main"));
+    let data = parse_tracking_output(&ref_row(true, "main", "origin/main", ""));
     assert_eq!(data.upstream.as_deref(), Some("origin/main"));
-    assert_eq!(data.ahead, 0);
-    assert_eq!(data.behind, 0);
+    assert_eq!((data.ahead, data.behind), (0, 0));
 
-    let data = parse_git_status_output("## main...origin/main [ahead 3]\n");
-    assert_eq!(data.ahead, 3);
-    assert_eq!(data.behind, 0);
+    let data = parse_tracking_output(&ref_row(true, "main", "origin/main", "[ahead 3]"));
+    assert_eq!((data.ahead, data.behind), (3, 0));
 
-    let data = parse_git_status_output("## main...origin/main [behind 2]\n");
-    assert_eq!(data.ahead, 0);
-    assert_eq!(data.behind, 2);
+    let data = parse_tracking_output(&ref_row(true, "main", "origin/main", "[behind 2]"));
+    assert_eq!((data.ahead, data.behind), (0, 2));
 
-    let data = parse_git_status_output("## main...origin/main [ahead 1, behind 2]\n");
-    assert_eq!(data.ahead, 1);
-    assert_eq!(data.behind, 2);
+    let data = parse_tracking_output(&ref_row(true, "main", "origin/main", "[ahead 1, behind 2]"));
+    assert_eq!((data.ahead, data.behind), (1, 2));
 
     // Upstream was deleted on the remote; keep the upstream string visible.
-    let data = parse_git_status_output("## main...origin/main [gone]\n");
+    let data = parse_tracking_output(&ref_row(true, "main", "origin/main", "[gone]"));
     assert_eq!(data.upstream.as_deref(), Some("origin/main"));
-    assert_eq!(data.ahead, 0);
-    assert_eq!(data.behind, 0);
+    assert_eq!((data.ahead, data.behind), (0, 0));
+}
 
-    let data = parse_git_status_output("## HEAD (no branch)\n");
+#[test]
+fn tracking_output_picks_the_checked_out_row_and_survives_having_none() {
+    // A linked worktree reports its own branch as HEAD while the other
+    // rows — including one with divergence — must not be read instead.
+    let rows = ref_row(false, "main", "origin/main", "[behind 9]")
+        + &ref_row(true, "side", "origin/side", "[ahead 1]");
+    let data = parse_tracking_output(&rows);
+    assert_eq!(data.branch.as_deref(), Some("side"));
+    assert_eq!((data.ahead, data.behind), (1, 0));
+
+    // Detached HEAD marks no row at all.
+    let data = parse_tracking_output(&ref_row(false, "main", "origin/main", "[ahead 1]"));
     assert!(data.branch.is_none());
     assert!(data.upstream.is_none());
+    assert_eq!((data.ahead, data.behind), (0, 0));
 
-    let data = parse_git_status_output("## No commits yet on main\n");
-    assert_eq!(data.branch.as_deref(), Some("main"));
-    assert!(data.upstream.is_none());
-
-    let data = parse_git_status_output("## main...origin/main [ahead 2]\n M file.rs\n?? new.rs\n");
-    assert_eq!(data.branch.as_deref(), Some("main"));
-    assert_eq!(data.ahead, 2);
-    assert_eq!(data.unstaged.len(), 2);
+    // An unborn branch lists no refs whatsoever.
+    assert_eq!(
+        parse_tracking_output(""),
+        crate::lane::git::GitTracking::default()
+    );
 }
 
 // ----------------------------------------------------------------
@@ -585,12 +597,12 @@ fn git_add_stages_file() {
     std::fs::write(&file, "hello").unwrap();
 
     // File is untracked — not in staged before add.
-    let before = git_status(&dir).unwrap();
+    let before = git_worktree_status(&dir).unwrap();
     assert!(before.staged.is_empty(), "nothing staged before git_add");
 
     git_add(&dir, std::path::Path::new("hello.txt")).unwrap();
 
-    let after = git_status(&dir).unwrap();
+    let after = git_worktree_status(&dir).unwrap();
     assert_eq!(after.staged.len(), 1, "one staged entry after git_add");
     assert_eq!(after.staged[0].x, 'A');
     teardown(&dir);
@@ -610,7 +622,7 @@ fn git_add_all_stages_all_files() {
 
     git_add_all(&dir).unwrap();
 
-    let status = git_status(&dir).unwrap();
+    let status = git_worktree_status(&dir).unwrap();
     assert_eq!(status.staged.len(), 2, "both files staged after add --all");
     teardown(&dir);
 }
@@ -628,12 +640,12 @@ fn git_restore_staged_unstages_file() {
     std::fs::write(dir.join(rel), "data").unwrap();
     git_add(&dir, rel).unwrap();
 
-    let after_add = git_status(&dir).unwrap();
+    let after_add = git_worktree_status(&dir).unwrap();
     assert_eq!(after_add.staged.len(), 1, "file staged after add");
 
     git_restore_staged(&dir, rel).unwrap();
 
-    let after_restore = git_status(&dir).unwrap();
+    let after_restore = git_worktree_status(&dir).unwrap();
     assert!(
         after_restore.staged.is_empty(),
         "nothing staged after restore --staged"
@@ -728,7 +740,7 @@ fn git_merge_abort_restores_clean_state() {
         Ok(MergeOutcome::Conflicts(_)) => {
             // Abort must succeed and leave the tree clean.
             git_merge_abort(&dir).unwrap();
-            let status = git_status(&dir).unwrap();
+            let status = git_worktree_status(&dir).unwrap();
             assert!(
                 status.unstaged.iter().all(|e| e.x != 'U' && e.y != 'U'),
                 "no conflict markers should remain after abort"

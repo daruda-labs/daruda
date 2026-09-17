@@ -176,7 +176,7 @@ impl MergeModal {
         let target_is_dirty = if let Some(ws) = self.workspace.upgrade() {
             let target_ref = self.target_ref();
             ws.read(cx)
-                .lane_git(target_ref)
+                .lane_git_worktree(target_ref)
                 .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty())
         } else {
             false

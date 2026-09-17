@@ -49,7 +49,7 @@ impl Workspace {
         }
 
         let staged_count = self
-            .lane_git(self.active)
+            .lane_git_worktree(self.active)
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let first_line = message.lines().next().unwrap_or("").to_string();

@@ -12,7 +12,7 @@ impl Workspace {
     /// Defers to `ordered_visible_paths` so render-order changes apply to
     /// `↑↓` nav too.
     fn git_changes_visible_paths(&self) -> Vec<PathBuf> {
-        let Some(s) = self.lane_git(self.active) else {
+        let Some(s) = self.lane_git_worktree(self.active) else {
             return Vec::new();
         };
         let Some(wt) = self.active_lane() else {
@@ -87,7 +87,7 @@ impl Workspace {
         else {
             return;
         };
-        let Some(s) = self.lane_git(active_ref) else {
+        let Some(s) = self.lane_git_worktree(active_ref) else {
             return;
         };
         let is_staged = s.staged.iter().any(|e| e.path == cursor);
@@ -113,7 +113,7 @@ impl Workspace {
         else {
             return;
         };
-        let Some(s) = self.lane_git(active_ref) else {
+        let Some(s) = self.lane_git_worktree(active_ref) else {
             return;
         };
         let staged_entry = s.staged.iter().find(|e| e.path == cursor);

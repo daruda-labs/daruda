@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::files::tree::LoadedEntry;
-use crate::lane::git::{GitFileEntry, GitStatusData};
+use crate::lane::git::{GitFileEntry, GitWorktreeStatus};
 
 fn loaded(name: &str, kind: EntryKind) -> LoadedEntry {
     LoadedEntry {
@@ -20,7 +20,7 @@ fn build_status_index_empty_when_status_none() {
 
 #[test]
 fn build_status_index_staged_overrides_unstaged() {
-    let status = GitStatusData {
+    let status = GitWorktreeStatus {
         staged: vec![GitFileEntry {
             x: 'M',
             y: ' ',

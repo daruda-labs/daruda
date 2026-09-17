@@ -793,11 +793,11 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub(in crate::workspace) fn lane_git(
+    pub(in crate::workspace) fn lane_git_worktree(
         &self,
         target: daruda_store::project::LaneRef,
-    ) -> Option<&crate::lane::git::GitStatusData> {
-        self.lane_scoped.get(&target)?.git.status.as_ref()
+    ) -> Option<&crate::lane::git::GitWorktreeStatus> {
+        self.lane_scoped.get(&target)?.git.worktree.as_ref()
     }
 
     pub(in crate::workspace) fn lane_scoped_mut(

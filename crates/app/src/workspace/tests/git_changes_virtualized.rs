@@ -69,8 +69,7 @@ fn dock_showing_changes(
         })
         .unwrap();
     ws.update(cx, |ws, _| {
-        ws.lane_scoped_mut(active).git.status = Some(crate::lane::git::GitStatusData {
-            branch: Some("main".into()),
+        ws.lane_scoped_mut(active).git.worktree = Some(crate::lane::git::GitWorktreeStatus {
             unstaged: files,
             ..Default::default()
         });
@@ -155,8 +154,7 @@ fn rows_built_for(cx: &mut TestAppContext, n: usize) -> usize {
         })
         .unwrap();
     ws.update(cx, |ws, _| {
-        ws.lane_scoped_mut(active).git.status = Some(crate::lane::git::GitStatusData {
-            branch: Some("main".into()),
+        ws.lane_scoped_mut(active).git.worktree = Some(crate::lane::git::GitWorktreeStatus {
             unstaged: changed_files(n),
             ..Default::default()
         });
